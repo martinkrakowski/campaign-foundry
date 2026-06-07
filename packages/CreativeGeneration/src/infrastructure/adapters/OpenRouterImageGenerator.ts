@@ -70,8 +70,10 @@ export class OpenRouterImageGenerator implements ImageGeneratorPort {
           "content-type": "application/json",
         },
         body: JSON.stringify({
+          // Image-only output (Grok Imagine, Flux, etc.). Text+image models like
+          // Gemini/Nano Banana would instead use ["image", "text"].
           model: this.model,
-          modalities: ["image", "text"],
+          modalities: ["image"],
           image_config: { aspect_ratio: ASPECT_RATIO[ratio.value] ?? "1:1" },
           messages: [{ role: "user", content: this.buildPrompt(product, context) }],
         }),
