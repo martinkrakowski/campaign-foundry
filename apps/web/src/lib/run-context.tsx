@@ -25,6 +25,8 @@ export interface Asset {
   logoApplied: boolean;
   /** The creative treatment id (e.g. "default", "bold-bottom", "subtle-top"). */
   treatment: string;
+  /** Background provenance: Imagen, the procedural fallback, or a reused asset. */
+  backgroundSource: "imagen" | "procedural" | "reused";
 }
 
 export type LogLevel = "info" | "warn" | "error";

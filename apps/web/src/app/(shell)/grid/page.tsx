@@ -124,6 +124,29 @@ function ComplianceBadge({ asset }: { asset: Asset }) {
   );
 }
 
+const SOURCE_BADGE: Record<Asset["backgroundSource"], { label: string; cls: string }> = {
+  imagen: { label: "IMAGEN", cls: "border-info/50 bg-info/20 text-info" },
+  procedural: { label: "FALLBACK", cls: "border-warning/50 bg-warning/20 text-warning" },
+  reused: { label: "REUSED", cls: "border-success/50 bg-success/20 text-success" },
+};
+
+/** Background provenance — makes the graceful GenAI fallback visible in review. */
+function SourceBadge({ source }: { source: Asset["backgroundSource"] }) {
+  const { label, cls } = SOURCE_BADGE[source];
+  return (
+    <span
+      className={cn("rounded border px-1.5 py-0.5 text-[10px]", cls)}
+      title={
+        source === "procedural"
+          ? "Background: procedural (Imagen unavailable — graceful fallback)"
+          : `Background: ${source}`
+      }
+    >
+      {label}
+    </span>
+  );
+}
+
 function Artboard({
   asset,
   version,
@@ -154,6 +177,7 @@ function Artboard({
         <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-text-primary">
           {asset.treatment}
         </span>
+        <SourceBadge source={asset.backgroundSource} />
         <ComplianceBadge asset={asset} />
       </div>
 
@@ -282,6 +306,7 @@ function PreviewModal({
         <span className="text-text-primary">
           {asset.productId} · {asset.aspectRatio} · {asset.treatment}
         </span>
+        <SourceBadge source={asset.backgroundSource} />
         <ComplianceBadge asset={asset} />
       </div>
     </div>
