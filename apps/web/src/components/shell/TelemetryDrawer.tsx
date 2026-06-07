@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useRun, type LogLevel } from "@/lib/run-context";
 import { cn } from "@/lib/cn";
 
@@ -25,12 +26,29 @@ interface TelemetryDrawerProps {
  */
 export function TelemetryDrawer({ open, onClose }: TelemetryDrawerProps) {
   const { log } = useRun();
+  const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const copyLog = async () => {
+    if (!navigator.clipboard) return;
+    const text = log
+      .map((e) => `${formatTime(e.timestamp)} [${e.stage}] ${e.message}`)
+      .join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // clipboard unavailable (e.g. insecure context) — skip silently.
+    }
+  };
 
   return (
     <div
       className={cn(
         "absolute bottom-24 left-1/2 z-10 flex w-full max-w-[800px] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl transition-all duration-300",
-        open ? "h-48 opacity-100" : "h-0 opacity-0",
+        open ? "opacity-100" : "h-0 opacity-0",
+        open && (expanded ? "top-2" : "h-48"),
       )}
       aria-hidden={!open}
     >
@@ -38,11 +56,36 @@ export function TelemetryDrawer({ open, onClose }: TelemetryDrawerProps) {
         <span className="font-mono text-[11px] uppercase tracking-wider text-text-muted">
           System Telemetry Stream
         </span>
-        <button type="button" onClick={onClose} className="text-text-muted hover:text-white" aria-label="Close telemetry">
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={copyLog}
+            disabled={log.length === 0}
+            className="font-mono text-[10px] uppercase tracking-wider text-text-muted transition-colors hover:text-white disabled:opacity-40"
+            aria-label="Copy telemetry to clipboard"
+          >
+            {copied ? "Copied ✓" : "Copy"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="text-text-muted hover:text-white"
+            aria-label={expanded ? "Collapse telemetry" : "Expand telemetry"}
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              {expanded ? (
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+              )}
+            </svg>
+          </button>
+          <button type="button" onClick={onClose} className="text-text-muted hover:text-white" aria-label="Close telemetry">
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto bg-black p-4 font-mono text-[11px] leading-5">
         {log.length === 0 ? (
