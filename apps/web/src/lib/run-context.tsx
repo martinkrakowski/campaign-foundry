@@ -101,6 +101,9 @@ interface RunContextValue {
    * keeps serving the previous render.
    */
   assetVersion: number;
+  /** Selected primary image model id (null = Auto / default chain). Sent with execute. */
+  selectedModel: string | null;
+  setSelectedModel: (model: string | null) => void;
 }
 
 const EMPTY_LOG: LogEntry[] = [];
@@ -114,6 +117,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [assetVersion, setAssetVersion] = useState(0);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
 
   // Hydrate from the last persisted run so views aren't empty on first load.
   useEffect(() => {
@@ -139,7 +143,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API}/campaigns/generate`, {
+      const url = selectedModel
+        ? `${API}/campaigns/generate?model=${encodeURIComponent(selectedModel)}`
+        : `${API}/campaigns/generate`;
+      const res = await fetch(url, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(brief),
@@ -168,7 +175,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, [brief]);
+  }, [brief, selectedModel]);
 
   const decide = useCallback((key: string, decision: Decision) => {
     setDecisions((prev) => {
@@ -193,8 +200,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
       decide,
       execute,
       assetVersion,
+      selectedModel,
+      setSelectedModel,
     }),
-    [brief, result, loading, error, decisions, decide, execute, assetVersion],
+    [brief, result, loading, error, decisions, decide, execute, assetVersion, selectedModel],
   );
 
   return <RunContext.Provider value={value}>{children}</RunContext.Provider>;
