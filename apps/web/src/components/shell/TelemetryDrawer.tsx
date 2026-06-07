@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRun, type LogLevel } from "@/lib/run-context";
 import { cn } from "@/lib/cn";
 
@@ -28,6 +28,15 @@ export function TelemetryDrawer({ open, onClose }: TelemetryDrawerProps) {
   const { log } = useRun();
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear any pending "Copied" reset on unmount (avoids a setState-after-unmount).
+  useEffect(
+    () => () => {
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    },
+    [],
+  );
 
   const copyLog = async () => {
     if (!navigator.clipboard) return;
@@ -37,7 +46,9 @@ export function TelemetryDrawer({ open, onClose }: TelemetryDrawerProps) {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      // Reset the prior timer so rapid clicks don't flip "Copied" back early.
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopied(false), 1500);
     } catch {
       // clipboard unavailable (e.g. insecure context) — skip silently.
     }
