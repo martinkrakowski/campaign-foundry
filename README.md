@@ -163,11 +163,17 @@ output/
    reviewer can clone and run immediately. On any API error the run falls back to
    procedural — swapping generators is just an env var, no domain change.
 3. **Deterministic layer stacking.** Compositing follows a fixed Z-order —
-   background → dark contrast gradient (WCAG legibility) → centred message → logo
-   top-right — so output is reproducible and on-brand every run.
+   background → dark contrast gradient (WCAG legibility) → **brand-colour accent
+   footer** → centred message → logo top-right — so output is reproducible and
+   on-brand every run.
 4. **Compliance as a non-throwing circuit breaker.** Checks always return a
    `ComplianceResult`; the *use case* owns the halt decision. The legal gate halts
    the run early; the visual check annotates each asset's `complianceScore`.
+   The brand-colour accent footer (decision 3) is what makes this honest: it gives
+   every creative a deliberate ~5% brand-colour density — clearing the density gate
+   in **both** the Imagen and procedural paths — while the gate stays meaningful, as
+   a creative that lost its brand presence would still fall below threshold. Without
+   it, photographic GenAI backgrounds carry no brand colour and every asset fails.
 5. **Human-in-the-loop approval.** A review surface for approve/reject before
    launch — directly targeting the "slow approval cycles" pain point in the brief.
 6. **Modular monolith.** In-process contexts, one repo, one command to run — with
