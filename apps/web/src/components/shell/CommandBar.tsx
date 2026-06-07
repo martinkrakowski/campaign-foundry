@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useRun } from "@/lib/run-context";
+import { ASPECT_RATIOS } from "@/lib/aspect-ratios";
 
 interface CommandBarProps {
   onToggleTelemetry: () => void;
@@ -12,9 +13,11 @@ interface CommandBarProps {
 export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
   const { execute, loading, error, hasRun, halted, brief } = useRun();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const barRef = useRef<HTMLDivElement>(null);
 
-  // What a run will (re)generate: products × aspect ratios (3) × treatments.
-  const expectedCount = brief.products.length * 3 * (brief.treatments?.length ?? 1);
+  // What a run will (re)generate: products × aspect ratios × treatments.
+  const expectedCount =
+    brief.products.length * ASPECT_RATIOS.length * (brief.treatments?.length ?? 1);
 
   const status = loading
     ? "Orchestrating…"
@@ -29,7 +32,11 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
   const statusColor = error || halted ? "text-error" : hasRun && !loading ? "text-success" : "text-text-primary";
 
   return (
-    <div className="absolute bottom-6 left-1/2 z-20 flex w-full max-w-[800px] -translate-x-1/2 flex-col rounded-xl border border-border bg-surface p-2 shadow-2xl">
+    <div
+      ref={barRef}
+      tabIndex={-1}
+      className="absolute bottom-6 left-1/2 z-20 flex w-full max-w-[800px] -translate-x-1/2 flex-col rounded-xl border border-border bg-surface p-2 shadow-2xl outline-none"
+    >
       <div className="flex items-center justify-between border-b border-border px-2 pb-4 pt-1">
         <span className="font-mono text-[11px] uppercase tracking-widest text-text-muted">
           Pipeline Orchestrator
@@ -72,6 +79,7 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
           <ConfirmRunDialog
             count={expectedCount}
             regenerate={hasRun}
+            restoreFocusRef={barRef}
             onConfirm={() => {
               setConfirmOpen(false);
               void execute();
@@ -93,11 +101,13 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
 function ConfirmRunDialog({
   count,
   regenerate,
+  restoreFocusRef,
   onConfirm,
   onClose,
 }: {
   count: number;
   regenerate: boolean;
+  restoreFocusRef?: RefObject<HTMLElement | null>;
   onConfirm: () => void;
   onClose: () => void;
 }) {
@@ -130,9 +140,17 @@ function ConfirmRunDialog({
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
-      previouslyFocused?.focus?.();
+      // Restore focus to the trigger only if it's still focusable. Confirming
+      // disables the Execute button (loading), so focusing it would silently drop
+      // focus to <body>; fall back to a stable container in that case.
+      const prev = previouslyFocused;
+      if (prev && prev.isConnected && !(prev as HTMLButtonElement).disabled) {
+        prev.focus();
+      } else {
+        restoreFocusRef?.current?.focus();
+      }
     };
-  }, [onClose]);
+  }, [onClose, restoreFocusRef]);
 
   return (
     <div
