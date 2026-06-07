@@ -16,13 +16,15 @@ const BUNDLED_FONTS: ReadonlyArray<readonly [file: string, family: string]> = [
 ];
 
 let registered = false;
+let warned = false;
 
 /**
- * Register the bundled fonts with the canvas engine exactly once. Searches the
- * cwd upward (the CLI runs from the repo root, Nitro from apps/api) for the
- * assets/fonts directory, mirroring the .env loader. If it can't be found the
- * call is a no-op, so copy still renders via a generic fallback rather than
- * crashing the run.
+ * Register the bundled fonts with the canvas engine, once. Searches the cwd
+ * upward (the CLI runs from the repo root, Nitro from apps/api) for an
+ * assets/fonts directory that actually contains the fonts, mirroring the .env
+ * loader — an empty or partial directory is skipped so it can't shadow a real
+ * one further up. If none are found, copy still renders via a generic fallback
+ * (with one warning) rather than crashing the run.
  */
 export function registerBundledFonts(): void {
   if (registered) return;
@@ -30,11 +32,24 @@ export function registerBundledFonts(): void {
   for (const dir of [process.cwd(), resolve(process.cwd(), ".."), resolve(process.cwd(), "../..")]) {
     const fontsDir = resolve(dir, "assets/fonts");
     if (!existsSync(fontsDir)) continue;
+    let registeredAny = false;
     for (const [file, family] of BUNDLED_FONTS) {
       const path = resolve(fontsDir, file);
-      if (existsSync(path)) GlobalFonts.registerFromPath(path, family);
+      if (existsSync(path) && GlobalFonts.registerFromPath(path, family)) {
+        registeredAny = true; // null return = registration failed, so check it
+      }
     }
-    registered = true;
-    return; // first matching directory wins
+    if (registeredAny) {
+      registered = true;
+      return; // first directory with real fonts wins
+    }
+  }
+
+  if (!warned) {
+    warned = true;
+    console.warn(
+      "[fonts] No bundled fonts found under assets/fonts (searched cwd upward); " +
+        "headline copy will fall back to a system sans-serif.",
+    );
   }
 }
