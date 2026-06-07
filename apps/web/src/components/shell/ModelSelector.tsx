@@ -20,7 +20,7 @@ export function ModelSelector() {
         className="flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-3 py-1 font-mono text-[11px] text-text-primary transition-colors hover:border-border-hover"
       >
         <span className="text-brand-primary" aria-hidden>◆</span>
-        <span className="text-text-muted">Model:</span> {labelFor(selectedModel)}
+        <span className="hidden text-text-muted sm:inline">Model:</span> {labelFor(selectedModel)}
       </button>
       {open && (
         <ModelModal

@@ -4,14 +4,28 @@ import Link from "next/link";
 import { Accordion } from "./Accordion";
 import { useRun } from "@/lib/run-context";
 
-/** Floating left panel: the campaign brief (read-only) and the project asset bin. */
+/**
+ * Floating left panel: the campaign brief (read-only) and the project asset bin.
+ * Hidden below `lg` — on smaller screens its contents surface in the mobile menu.
+ */
 export function Sidebar() {
+  return (
+    <aside className="relative z-10 hidden h-full w-[320px] shrink-0 flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl lg:flex">
+      <SidebarContent />
+    </aside>
+  );
+}
+
+/**
+ * The brief + project-bin panel body, without the desktop `<aside>` chrome — shared
+ * by the desktop Sidebar and the mobile fullscreen menu so both stay in sync.
+ */
+export function SidebarContent() {
   const { brief } = useRun();
   const aspectsLabel = "1:1, 9:16, 16:9";
 
   return (
-    <aside className="relative z-10 flex h-full w-[320px] shrink-0 flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
-      <div className="flex-1 space-y-5 overflow-y-auto p-4">
+    <div className="flex-1 space-y-5 overflow-y-auto p-4">
         <Accordion
           title="Campaign Brief"
           aside={
@@ -71,8 +85,7 @@ export function Sidebar() {
             ))}
           </div>
         </Accordion>
-      </div>
-    </aside>
+    </div>
   );
 }
 
