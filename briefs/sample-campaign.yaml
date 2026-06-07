@@ -1,0 +1,15 @@
+id: summer-hydration-2026
+targetRegion: DE
+targetAudience: Urban outdoor enthusiasts, 25-40
+campaignMessage: Stay wild. Stay hydrated.
+localizedMessage: Bleib wild. Bleib hydriert.
+products:
+  - id: acme-hydra-bottle
+    name: Hydra Bottle
+    primaryColor: "#1473E6"
+    logoPath: assets/inputs/hydra-logo.png
+  - id: acme-trail-pack
+    name: Trail Pack
+    primaryColor: "#E0218A"
+    logoPath: assets/inputs/trail-logo.png
+    inputAsset: assets/inputs/trail-pack.png
