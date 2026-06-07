@@ -8,11 +8,11 @@ export default function CompliancePage() {
   const { assets, hasRun } = useRun();
 
   return (
-    <div className="flex h-full flex-col items-start p-8 pb-40">
+    <div className="flex min-h-full flex-col items-start p-4 pb-12 sm:p-8">
       <h2 className="mb-6 text-xl font-bold text-white">Automated Compliance Report</h2>
 
-      <div className="w-full max-w-4xl overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
-        <table className="w-full text-left text-[13px]">
+      <div className="w-full max-w-4xl overflow-x-auto rounded-xl border border-border bg-surface shadow-2xl">
+        <table className="w-full min-w-[640px] text-left text-[13px]">
           <thead className="border-b border-border bg-surface-2 text-text-muted">
             <tr>
               <th className="p-4 font-medium">Asset Target</th>

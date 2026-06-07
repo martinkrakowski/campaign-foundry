@@ -78,22 +78,23 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
       tabIndex={-1}
       className="absolute bottom-6 left-1/2 z-20 flex w-full max-w-[800px] -translate-x-1/2 flex-col rounded-xl border border-border bg-surface p-2 shadow-2xl outline-none"
     >
-      <div className="flex items-center justify-between border-b border-border px-2 pb-4 pt-1">
-        <span className="font-mono text-[11px] uppercase tracking-widest text-text-muted">
+      <div className="flex items-center justify-between gap-3 border-b border-border px-2 pb-4 pt-1">
+        <span className="shrink-0 font-mono text-[11px] uppercase tracking-widest text-text-muted">
           Pipeline Orchestrator
         </span>
-        <span className={`text-[12px] ${statusColor}`}>{status}</span>
+        <span className={`truncate text-right text-[12px] ${statusColor}`}>{status}</span>
       </div>
-      <div className="flex items-center justify-between px-2 pt-2">
+      <div className="flex items-center justify-between gap-2 px-2 pt-2">
         <button
           type="button"
           onClick={onToggleTelemetry}
-          className="flex items-center space-x-2 rounded border border-border bg-surface-2 px-2 py-1 text-[12px] text-text-muted transition-colors hover:text-white"
+          aria-label="Toggle telemetry logs"
+          className="flex shrink-0 items-center space-x-2 rounded border border-border bg-surface-2 px-2 py-1 text-[12px] text-text-muted transition-colors hover:text-white"
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M4 15V9a2 2 0 012-2h12a2 2 0 012 2v6a2 2 0 01-2 2H6a2 2 0 01-2-2z" />
           </svg>
-          <span>Toggle Telemetry Logs</span>
+          <span className="hidden sm:inline">Toggle Telemetry Logs</span>
         </button>
 
         <div className="flex items-center gap-2">
@@ -104,12 +105,14 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
               onClick={() => setConfirm("regenerate")}
               disabled={loading}
               aria-haspopup="dialog"
-              className="flex items-center space-x-2 rounded-full border border-border bg-surface-2 px-4 py-1.5 text-[13px] text-text-primary transition-colors hover:bg-border-hover disabled:cursor-not-allowed disabled:text-text-muted"
+              className="flex shrink-0 items-center space-x-2 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-[13px] text-text-primary transition-colors hover:bg-border-hover disabled:cursor-not-allowed disabled:text-text-muted sm:px-4"
             >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
-              <span>Regenerate Rejected ({rejectedCount})</span>
+              <span>
+                Regenerate<span className="hidden sm:inline"> Rejected</span> ({rejectedCount})
+              </span>
             </button>
           )}
 
@@ -119,16 +122,22 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
             disabled={loading}
             aria-busy={loading || undefined}
             aria-haspopup="dialog"
-            className="flex items-center space-x-2 rounded-full bg-white px-6 py-1.5 text-[13px] font-semibold text-black transition-colors hover:bg-gray-200 disabled:bg-surface-2 disabled:text-text-muted"
+            className="flex shrink-0 items-center space-x-2 rounded-full bg-white px-4 py-1.5 text-[13px] font-semibold text-black transition-colors hover:bg-gray-200 disabled:bg-surface-2 disabled:text-text-muted sm:px-6"
           >
             {loading ? (
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
             ) : (
-              <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <svg className="h-4 w-4 shrink-0" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
                 <path d="M21 12l-18 12v-24z" />
               </svg>
             )}
-            <span>{loading ? "Orchestrating…" : "Execute Pipeline"}</span>
+            <span>
+              {loading ? "Orchestrating…" : (
+                <>
+                  Execute<span className="hidden sm:inline"> Pipeline</span>
+                </>
+              )}
+            </span>
           </button>
         </div>
       </div>

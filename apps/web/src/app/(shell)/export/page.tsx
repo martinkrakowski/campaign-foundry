@@ -28,7 +28,7 @@ export default function ExportPage() {
 
   if (!hasRun || assets.length === 0) {
     return (
-      <div className="flex h-full flex-col items-start p-8 pb-40">
+      <div className="flex min-h-full flex-col items-start p-4 pb-12 sm:p-8">
         <h2 className="mb-6 text-xl font-bold text-white">Print Export Queue</h2>
         <p className="text-text-muted">
           Run the orchestration pipeline to generate PNG renders and CMYK PDF physical proofs.
@@ -39,7 +39,7 @@ export default function ExportPage() {
 
   if (approved.length === 0) {
     return (
-      <div className="flex h-full flex-col items-start p-8 pb-40">
+      <div className="flex min-h-full flex-col items-start p-4 pb-12 sm:p-8">
         <h2 className="mb-6 text-xl font-bold text-white">Print Export Queue</h2>
         <p className="max-w-md text-text-muted">
           No creatives approved yet. Approve creatives in the <span className="text-text-primary">Grid</span> to
@@ -50,7 +50,7 @@ export default function ExportPage() {
   }
 
   return (
-    <div className="flex h-full flex-col items-start gap-8 p-8 pb-40">
+    <div className="flex min-h-full flex-col items-start gap-8 p-4 pb-12 sm:p-8">
       <div>
         <h2 className="text-xl font-bold text-white">Print Export Queue</h2>
         <p className="mt-1 text-[13px] text-text-muted">
