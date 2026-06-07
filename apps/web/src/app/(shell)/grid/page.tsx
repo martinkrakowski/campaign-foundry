@@ -126,6 +126,7 @@ function ComplianceBadge({ asset }: { asset: Asset }) {
 
 const SOURCE_BADGE: Record<Asset["backgroundSource"], { label: string; cls: string }> = {
   imagen: { label: "IMAGEN", cls: "border-info/50 bg-info/20 text-info" },
+  openrouter: { label: "OPENROUTER", cls: "border-info/50 bg-info/20 text-info" },
   procedural: { label: "FALLBACK", cls: "border-warning/50 bg-warning/20 text-warning" },
   reused: { label: "REUSED", cls: "border-success/50 bg-success/20 text-success" },
 };

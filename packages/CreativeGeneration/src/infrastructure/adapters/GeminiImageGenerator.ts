@@ -52,8 +52,9 @@ export class GeminiImageGenerator implements ImageGeneratorPort {
       const message = error instanceof Error ? error.message : String(error);
       if (this.fallback) {
         // Observable degradation — don't let a bad key/model silently look "fine".
-        // The fallback reports its own source (procedural), which propagates up.
-        console.warn(`[GeminiImageGenerator] Imagen failed for ${product.id} @ ${ratio.value}; using procedural fallback. ${message}`);
+        // The fallback reports its own source (openrouter / procedural), which
+        // propagates up so the run log shows what actually produced the background.
+        console.warn(`[GeminiImageGenerator] Imagen failed for ${product.id} @ ${ratio.value}; using fallback generator. ${message}`);
         return this.fallback.resolveBackground(product, ratio, context);
       }
       throw new Error(message);
