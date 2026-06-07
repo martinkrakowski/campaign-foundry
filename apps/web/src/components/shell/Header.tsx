@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { cn } from "@/lib/cn";
 import { ModelSelector } from "./ModelSelector";
 import { MobileMenu } from "./MobileMenu";
@@ -18,6 +18,9 @@ const TABS = [
 export function Header() {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
+  // Stable identity so MobileMenu's focus/scroll-lock effect only runs on open/close,
+  // not on unrelated Header re-renders.
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
 
   return (
     <header className="relative z-50 flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-4">
@@ -71,7 +74,7 @@ export function Header() {
         </button>
       </div>
 
-      <MobileMenu open={menuOpen} onClose={() => setMenuOpen(false)} tabs={TABS} />
+      <MobileMenu open={menuOpen} onClose={closeMenu} tabs={TABS} />
     </header>
   );
 }

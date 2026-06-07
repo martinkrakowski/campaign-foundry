@@ -65,6 +65,15 @@ export function MobileMenu({ open, onClose, tabs }: MobileMenuProps) {
     };
   }, [open, onClose]);
 
+  // Close on navigation so any in-menu link (the tabs, but also the brief "Edit"
+  // link inside SidebarContent) dismisses the overlay rather than leaving it open
+  // over the new route. Skips the initial render (the path the menu opened on).
+  const openedAt = useRef(pathname);
+  useEffect(() => {
+    if (open && pathname !== openedAt.current) onClose();
+    openedAt.current = pathname;
+  }, [pathname, open, onClose]);
+
   if (!open) return null;
 
   return createPortal(
