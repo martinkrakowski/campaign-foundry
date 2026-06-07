@@ -17,6 +17,14 @@ const PROHIBITED_TERMS = [
 const MIN_BRAND_COLOR_DENSITY = 0.02;
 /** Per-channel tolerance (±) when matching a pixel to the target brand colour. */
 const CHANNEL_TOLERANCE = 10;
+/**
+ * Fraction of the frame (anchored top-right) sampled for the brand colour. The
+ * compositor paints the logo into roughly this box, so the density check scores
+ * the deterministic brand layer rather than a GenAI photo background that may
+ * legitimately carry no brand colour anywhere else.
+ */
+const LOGO_REGION_WIDTH = 0.28;
+const LOGO_REGION_HEIGHT = 0.22;
 
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace(/^#/, "");
@@ -48,7 +56,12 @@ export class BrandComplianceChecker implements CompliancePort {
     const canvas = createCanvas(image.width, image.height);
     const ctx = canvas.getContext("2d");
     ctx.drawImage(image, 0, 0);
-    const { data } = ctx.getImageData(0, 0, image.width, image.height);
+
+    // Sample only the top-right logo region — the deterministic brand layer.
+    const regionW = Math.max(1, Math.round(image.width * LOGO_REGION_WIDTH));
+    const regionH = Math.max(1, Math.round(image.height * LOGO_REGION_HEIGHT));
+    const regionX = image.width - regionW;
+    const { data } = ctx.getImageData(regionX, 0, regionW, regionH);
 
     const total = data.length / 4;
     let matched = 0;
