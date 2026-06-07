@@ -27,10 +27,11 @@ async function main(): Promise<void> {
     console.warn("  !  Pipeline halted at the legal gate — no creatives generated.\n");
   }
   for (const asset of assets) {
+    // brandCompliant is derived (density gate AND logo present).
     const mark = asset.passedCompliance && asset.logoApplied ? "ok " : "warn";
     const logo = asset.logoApplied ? "logo ok" : "logo missing";
     console.log(
-      `  [${mark}] ${asset.outputPath}   brand-density ${asset.complianceScore.toFixed(3)}   ${logo}`,
+      `  [${mark}] ${asset.outputPath}   ${asset.treatment.padEnd(12)} brand-density ${asset.complianceScore.toFixed(3)}   ${logo}`,
     );
   }
   const reportPath = await writeReport(result.value);
