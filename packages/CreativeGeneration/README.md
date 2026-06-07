@@ -12,7 +12,7 @@ outbound ports that orchestration depends on_, so the use case can render
 creatives without knowing whether a background came from Imagen, a reused asset,
 or a gradient — or that a canvas is involved at all.
 
-```
+```text
 CampaignOrchestration (domain + use case)
         │ depends on contracts ↓ (never on this package)
         ▼
@@ -74,7 +74,7 @@ For every `product × ratio`, `GenerateCampaignUseCase` calls the two ports in
 sequence. The composition root (`apps/api/server/lib/pipeline.ts`) decides which
 concrete generator is live and injects it:
 
-```
+```text
 product, ratio, context
       │
       ▼
@@ -143,7 +143,7 @@ does so for **any** underlying generator, including Imagen.
 The heart of the package. `compositeAsset` creates a canvas at the ratio's pixel
 size and paints four layers in strict bottom-to-top order:
 
-```
+```text
 ┌──────────────────────────────────────────────┐
 │  (4) brand logo ─ top-right, optional      ▣  │  width·0.16 wide, margin width·0.04
 │                                                │
