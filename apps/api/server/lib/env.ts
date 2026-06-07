@@ -36,7 +36,9 @@ let loaded = false;
  */
 export function loadEnv(): void {
   if (loaded) return;
-  for (const dir of [process.cwd(), projectRoot()]) {
+  // Dedupe: projectRoot() returns cwd when started from the repo root (the CLI),
+  // so a plain [cwd, projectRoot()] would read the same .env files twice.
+  for (const dir of new Set([process.cwd(), projectRoot()])) {
     applyEnvFile(resolve(dir, ".env.local"));
     applyEnvFile(resolve(dir, ".env"));
   }
