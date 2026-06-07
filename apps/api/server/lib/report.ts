@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { PipelineResult } from "@campaignforge/CampaignOrchestration";
+import type { PipelineResult } from "@campaignfoundry/CampaignOrchestration";
 import { outputRoot } from "./config.js";
 
 /** Persist a run's report.json under the output root; returns its path. */

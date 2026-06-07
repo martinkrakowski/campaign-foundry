@@ -20,7 +20,7 @@ generator:
       failure: abort-and-cleanup
 
     - name: dependency-consistency
-      description: "Every @campaignforge/* import must have a matching entry in package.json."
+      description: "Every @campaignfoundry/* import must have a matching entry in package.json."
       priority: high
       failure: abort
 

@@ -4,7 +4,7 @@ import type {
   BackgroundContext,
   ImageGeneratorPort,
   Product,
-} from "@campaignforge/CampaignOrchestration";
+} from "@campaignfoundry/CampaignOrchestration";
 
 /** Default Imagen model (override with the IMAGEN_MODEL env var). */
 const DEFAULT_MODEL = "imagen-4.0-generate-001";

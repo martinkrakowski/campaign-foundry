@@ -6,11 +6,11 @@ const API_ORIGIN = process.env.API_ORIGIN ?? "http://localhost:3001";
 
 const nextConfig: NextConfig = {
   transpilePackages: [
-    "@campaignforge/CampaignOrchestration",
-    "@campaignforge/CreativeGeneration",
-    "@campaignforge/GovernanceAndCompliance",
-    "@campaignforge/Distribution",
-    "@campaignforge/shared",
+    "@campaignfoundry/CampaignOrchestration",
+    "@campaignfoundry/CreativeGeneration",
+    "@campaignfoundry/GovernanceAndCompliance",
+    "@campaignfoundry/Distribution",
+    "@campaignfoundry/shared",
   ],
   async rewrites() {
     return [{ source: "/api/pipeline/:path*", destination: `${API_ORIGIN}/:path*` }];

@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { PDFDocument, StandardFonts, type PDFPage } from "pdf-lib";
-import type { ExportPort } from "@campaignforge/CampaignOrchestration";
+import type { ExportPort } from "@campaignfoundry/CampaignOrchestration";
 
 /** Footer stamped on every proof — makes the RGB-only limitation explicit (ProofMetadataEmbedding). */
 const PROOF_FOOTER = "CampaignForge proof — RGB asset, not colour-managed";

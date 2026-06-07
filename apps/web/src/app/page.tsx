@@ -104,7 +104,7 @@ export default function GalleryPage() {
     <main className="app">
       <header className="topbar">
         <div>
-          <h1>Campaign Forge</h1>
+          <h1>Campaign Foundry</h1>
           <p>Human-in-the-loop creative review</p>
         </div>
         <div className="actions">

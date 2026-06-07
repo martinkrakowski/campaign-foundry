@@ -1,5 +1,5 @@
 {
-  "name": "campaign-forge",
+  "name": "campaign-foundry",
   "private": true,
   "type": "module",
   "packageManager": "yarn@4.12.0",

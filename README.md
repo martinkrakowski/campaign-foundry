@@ -1,4 +1,4 @@
-# Campaign Forge — Creative Automation Pipeline
+# Campaign Foundry — Creative Automation Pipeline
 
 Turn a **single campaign brief** into on-brand social ad **creatives across every
 product and aspect ratio** — with automated brand & legal compliance and a

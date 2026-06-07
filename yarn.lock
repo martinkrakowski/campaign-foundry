@@ -40,21 +40,21 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@campaignforge/CampaignOrchestration@workspace:*, @campaignforge/CampaignOrchestration@workspace:packages/CampaignOrchestration":
+"@campaignfoundry/CampaignOrchestration@workspace:*, @campaignfoundry/CampaignOrchestration@workspace:packages/CampaignOrchestration":
   version: 0.0.0-use.local
-  resolution: "@campaignforge/CampaignOrchestration@workspace:packages/CampaignOrchestration"
+  resolution: "@campaignfoundry/CampaignOrchestration@workspace:packages/CampaignOrchestration"
   dependencies:
-    "@campaignforge/shared": "workspace:*"
+    "@campaignfoundry/shared": "workspace:*"
     typescript: "npm:^5.0.0"
   languageName: unknown
   linkType: soft
 
-"@campaignforge/CreativeGeneration@workspace:*, @campaignforge/CreativeGeneration@workspace:packages/CreativeGeneration":
+"@campaignfoundry/CreativeGeneration@workspace:*, @campaignfoundry/CreativeGeneration@workspace:packages/CreativeGeneration":
   version: 0.0.0-use.local
-  resolution: "@campaignforge/CreativeGeneration@workspace:packages/CreativeGeneration"
+  resolution: "@campaignfoundry/CreativeGeneration@workspace:packages/CreativeGeneration"
   dependencies:
-    "@campaignforge/CampaignOrchestration": "workspace:*"
-    "@campaignforge/shared": "workspace:*"
+    "@campaignfoundry/CampaignOrchestration": "workspace:*"
+    "@campaignfoundry/shared": "workspace:*"
     "@google/genai": "npm:^1.0.0"
     "@napi-rs/canvas": "npm:^0.1.0"
     "@types/node": "npm:^20.11.0"
@@ -62,39 +62,39 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@campaignforge/Distribution@workspace:*, @campaignforge/Distribution@workspace:packages/Distribution":
+"@campaignfoundry/Distribution@workspace:*, @campaignfoundry/Distribution@workspace:packages/Distribution":
   version: 0.0.0-use.local
-  resolution: "@campaignforge/Distribution@workspace:packages/Distribution"
+  resolution: "@campaignfoundry/Distribution@workspace:packages/Distribution"
   dependencies:
-    "@campaignforge/CampaignOrchestration": "workspace:*"
-    "@campaignforge/shared": "workspace:*"
+    "@campaignfoundry/CampaignOrchestration": "workspace:*"
+    "@campaignfoundry/shared": "workspace:*"
     "@types/node": "npm:^20.11.0"
     pdf-lib: "npm:^1.17.1"
     typescript: "npm:^5.0.0"
   languageName: unknown
   linkType: soft
 
-"@campaignforge/GovernanceAndCompliance@workspace:*, @campaignforge/GovernanceAndCompliance@workspace:packages/GovernanceAndCompliance":
+"@campaignfoundry/GovernanceAndCompliance@workspace:*, @campaignfoundry/GovernanceAndCompliance@workspace:packages/GovernanceAndCompliance":
   version: 0.0.0-use.local
-  resolution: "@campaignforge/GovernanceAndCompliance@workspace:packages/GovernanceAndCompliance"
+  resolution: "@campaignfoundry/GovernanceAndCompliance@workspace:packages/GovernanceAndCompliance"
   dependencies:
-    "@campaignforge/CampaignOrchestration": "workspace:*"
-    "@campaignforge/shared": "workspace:*"
+    "@campaignfoundry/CampaignOrchestration": "workspace:*"
+    "@campaignfoundry/shared": "workspace:*"
     "@napi-rs/canvas": "npm:^0.1.0"
     "@types/node": "npm:^20.11.0"
     typescript: "npm:^5.0.0"
   languageName: unknown
   linkType: soft
 
-"@campaignforge/api@workspace:apps/api":
+"@campaignfoundry/api@workspace:apps/api":
   version: 0.0.0-use.local
-  resolution: "@campaignforge/api@workspace:apps/api"
+  resolution: "@campaignfoundry/api@workspace:apps/api"
   dependencies:
-    "@campaignforge/CampaignOrchestration": "workspace:*"
-    "@campaignforge/CreativeGeneration": "workspace:*"
-    "@campaignforge/Distribution": "workspace:*"
-    "@campaignforge/GovernanceAndCompliance": "workspace:*"
-    "@campaignforge/shared": "workspace:*"
+    "@campaignfoundry/CampaignOrchestration": "workspace:*"
+    "@campaignfoundry/CreativeGeneration": "workspace:*"
+    "@campaignfoundry/Distribution": "workspace:*"
+    "@campaignfoundry/GovernanceAndCompliance": "workspace:*"
+    "@campaignfoundry/shared": "workspace:*"
     "@types/js-yaml": "npm:^4.0.9"
     "@types/node": "npm:^20.11.0"
     "@typescript-eslint/eslint-plugin": "npm:^8.0.0"
@@ -106,17 +106,17 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@campaignforge/shared@workspace:*, @campaignforge/shared@workspace:packages/shared":
+"@campaignfoundry/shared@workspace:*, @campaignfoundry/shared@workspace:packages/shared":
   version: 0.0.0-use.local
-  resolution: "@campaignforge/shared@workspace:packages/shared"
+  resolution: "@campaignfoundry/shared@workspace:packages/shared"
   dependencies:
     typescript: "npm:^5.0.0"
   languageName: unknown
   linkType: soft
 
-"@campaignforge/web@workspace:apps/web":
+"@campaignfoundry/web@workspace:apps/web":
   version: 0.0.0-use.local
-  resolution: "@campaignforge/web@workspace:apps/web"
+  resolution: "@campaignfoundry/web@workspace:apps/web"
   dependencies:
     "@types/node": "npm:^20.11.0"
     "@types/react": "npm:^19.0.0"
@@ -2340,9 +2340,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"campaign-forge@workspace:.":
+"campaign-foundry@workspace:.":
   version: 0.0.0-use.local
-  resolution: "campaign-forge@workspace:."
+  resolution: "campaign-foundry@workspace:."
   dependencies:
     "@hexagen-monaco/arch-linter": "npm:^0.4.0"
     "@hexagen-monaco/sync": "npm:^0.4.0"

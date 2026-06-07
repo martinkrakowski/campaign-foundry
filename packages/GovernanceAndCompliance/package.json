@@ -1,5 +1,5 @@
 {
-  "name": "@campaignforge/GovernanceAndCompliance",
+  "name": "@campaignfoundry/GovernanceAndCompliance",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,8 +17,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@campaignforge/CampaignOrchestration": "workspace:*",
-    "@campaignforge/shared": "workspace:*",
+    "@campaignfoundry/CampaignOrchestration": "workspace:*",
+    "@campaignfoundry/shared": "workspace:*",
     "@napi-rs/canvas": "^0.1.0"
   },
   "devDependencies": {

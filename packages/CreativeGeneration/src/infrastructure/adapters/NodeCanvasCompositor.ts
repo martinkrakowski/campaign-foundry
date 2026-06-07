@@ -3,7 +3,7 @@ import { createCanvas, loadImage } from "@napi-rs/canvas";
 import type {
   CompositeRequest,
   CompositorPort,
-} from "@campaignforge/CampaignOrchestration";
+} from "@campaignfoundry/CampaignOrchestration";
 import { wrapText } from "./canvas-util.js";
 
 /**

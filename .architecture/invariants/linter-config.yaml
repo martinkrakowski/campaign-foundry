@@ -2,8 +2,8 @@
 # Template: modular-monolith (flexible mode)
 
 global_whitelist:
-  - "@campaignforge/shared"
-  - "@campaignforge/shared/**"
+  - "@campaignfoundry/shared"
+  - "@campaignfoundry/shared/**"
 
 test_double_rules:
   allowed_cross_package_imports: true
