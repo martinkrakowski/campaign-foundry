@@ -11,11 +11,19 @@ export interface CompositeRequest {
   readonly ratio: AspectRatio;
 }
 
+/** The rendered creative plus the compositing signals the use case reports. */
+export interface CompositeResult {
+  /** The rendered PNG bytes. */
+  readonly image: Uint8Array;
+  /** Whether the brand logo layer was successfully applied (brand-compliance signal). */
+  readonly logoApplied: boolean;
+}
+
 /**
  * CompositorPort — outbound port: stack visual layers onto a canvas at the
- * ratio's dimensions and return the rendered PNG bytes. Implemented by
- * CreativeGeneration.
+ * ratio's dimensions and return the rendered PNG plus compositing signals.
+ * Implemented by CreativeGeneration.
  */
 export interface CompositorPort {
-  compositeAsset(request: CompositeRequest): Promise<Uint8Array>;
+  compositeAsset(request: CompositeRequest): Promise<CompositeResult>;
 }

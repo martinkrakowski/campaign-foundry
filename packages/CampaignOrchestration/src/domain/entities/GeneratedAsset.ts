@@ -14,4 +14,6 @@ export interface GeneratedAsset {
   /** Brand-colour pixel-density score in the range 0..1. */
   readonly complianceScore: number;
   readonly passedCompliance: boolean;
+  /** Brand compliance — whether the product logo was present and applied. */
+  readonly logoApplied: boolean;
 }

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import type {
   CompositeRequest,
+  CompositeResult,
   CompositorPort,
 } from "@campaignfoundry/CampaignOrchestration";
 import { hexToRgb, wrapText } from "./canvas-util.js";
@@ -17,7 +18,7 @@ import { hexToRgb, wrapText } from "./canvas-util.js";
  *   5. brand logo, top-right
  */
 export class NodeCanvasCompositor implements CompositorPort {
-  async compositeAsset(request: CompositeRequest): Promise<Uint8Array> {
+  async compositeAsset(request: CompositeRequest): Promise<CompositeResult> {
     const { width, height } = request.ratio;
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext("2d");
@@ -62,17 +63,20 @@ export class NodeCanvasCompositor implements CompositorPort {
       y += lineHeight;
     }
 
-    // Layer 5 — brand logo, anchored top-right (optional).
+    // Layer 5 — brand logo, anchored top-right (optional). Whether it applies is
+    // a brand-compliance signal the use case records on the asset.
+    let logoApplied = false;
     try {
       const logo = await loadImage(await readFile(request.logoPath));
       const target = width * 0.16;
       const scale = target / logo.width;
       const margin = width * 0.04;
       ctx.drawImage(logo, width - target - margin, margin, target, logo.height * scale);
+      logoApplied = true;
     } catch {
       // logo is optional — skip cleanly when the path is missing.
     }
 
-    return canvas.toBuffer("image/png");
+    return { image: canvas.toBuffer("image/png"), logoApplied };
   }
 }

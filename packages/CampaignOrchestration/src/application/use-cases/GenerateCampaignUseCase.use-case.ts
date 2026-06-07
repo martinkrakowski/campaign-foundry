@@ -75,14 +75,14 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
 
         // 5. ExecuteVisualComplianceCheck — brand-colour density.
         const visual = await this.deps.compliance.validateBrandColorDensity(
-          composite,
+          composite.image,
           product.primaryColor,
         );
 
         // 6. SaveOutputFiles — the use case owns the path (OutputDirectoryConvention).
         const outputPath = `${product.id}/${ratio.slug}.png`;
-        await this.deps.exporter.saveToDirectory(composite, outputPath);
-        if (ratio.value === "1:1" || proofSource === undefined) proofSource = composite;
+        await this.deps.exporter.saveToDirectory(composite.image, outputPath);
+        if (ratio.value === "1:1" || proofSource === undefined) proofSource = composite.image;
 
         assets.push({
           productId: product.id,
@@ -91,11 +91,12 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
           proofPath,
           complianceScore: visual.score ?? 0,
           passedCompliance: visual.passed,
+          logoApplied: composite.logoApplied,
         });
         log.record(
           "CompositeVariations",
-          `${product.id} @ ${ratio.value} — brand density ${(visual.score ?? 0).toFixed(3)}${visual.passed ? "" : " (below threshold)"}`,
-          visual.passed ? "info" : "warn",
+          `${product.id} @ ${ratio.value} — brand density ${(visual.score ?? 0).toFixed(3)}${visual.passed ? "" : " (below threshold)"}, logo ${composite.logoApplied ? "present" : "missing"}`,
+          visual.passed && composite.logoApplied ? "info" : "warn",
         );
       }
 
