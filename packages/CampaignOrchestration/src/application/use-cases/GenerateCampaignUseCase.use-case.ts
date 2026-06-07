@@ -94,25 +94,45 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     };
     const assets: GeneratedAsset[] = [];
 
+    // 3. ResolveBackgroundAssets — reuse inputAsset or generate. A background is
+    // resolved once per (product × ratio) and shared across that ratio's treatments.
+    // This is the slow GenAI step, so resolve them all *concurrently*: a sequential
+    // run of N image calls easily exceeds the dev proxy's request timeout, whereas
+    // concurrent resolution finishes in roughly a single call's latency. Each
+    // generator still degrades independently (Imagen → OpenRouter → procedural), so
+    // one slow/failed provider can't stall the others.
+    const bgKey = (productId: string, ratioValue: string): string => `${productId}/${ratioValue}`;
+    const backgroundJobs = brief.products.flatMap((product) =>
+      ratios
+        .filter((ratio) => treatments.some((t) => isTarget(product.id, ratio.value, t.id)))
+        .map((ratio) => ({ product, ratio })),
+    );
+    const backgrounds = new Map<string, Awaited<ReturnType<ImageGeneratorPort["resolveBackground"]>>>();
+    await Promise.all(
+      backgroundJobs.map(async ({ product, ratio }) => {
+        const background = await this.deps.imageGenerator.resolveBackground(product, ratio, context);
+        backgrounds.set(bgKey(product.id, ratio.value), background);
+        log.record(
+          "ResolveBackgroundAssets",
+          `${product.id} @ ${ratio.value} — background: ${background.source}${background.source === "procedural" ? " (Imagen unavailable — procedural fallback)" : ""}`,
+          background.source === "procedural" ? "warn" : "info",
+        );
+      }),
+    );
+
     for (const product of brief.products) {
       const proofPath = `proofs/${product.id}.pdf`;
       let proofSource: Uint8Array | undefined;
 
       for (const ratio of ratios) {
         // On a selective run, only the targeted treatments of this product×ratio run;
-        // skip the whole ratio (and its background generation) when none are targeted.
+        // skip the whole ratio when none are targeted (no background was resolved for it).
         const ratioTreatments = treatments.filter((t) => isTarget(product.id, ratio.value, t.id));
         if (ratioTreatments.length === 0) continue;
 
-        // 3. ResolveBackgroundAssets — reuse inputAsset or generate. Resolved once
-        // per ratio and shared across treatments, so variants differ only by their
-        // treatment (and we don't pay for N background generations per cell).
-        const background = await this.deps.imageGenerator.resolveBackground(product, ratio, context);
-        log.record(
-          "ResolveBackgroundAssets",
-          `${product.id} @ ${ratio.value} — background: ${background.source}${background.source === "procedural" ? " (Imagen unavailable — procedural fallback)" : ""}`,
-          background.source === "procedural" ? "warn" : "info",
-        );
+        // Background resolved (concurrently) above; present for every in-scope cell.
+        const background = backgrounds.get(bgKey(product.id, ratio.value));
+        if (!background) continue;
 
         for (const treatment of ratioTreatments) {
           // 4. CompositeVariations — deterministic layer stacking, treatment-driven.
