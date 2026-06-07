@@ -129,7 +129,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     return ok({ assets, log, halted: false });
   }
 
-  /** MinimumProductsRule: at least two unique products, or the pipeline never starts. */
+  /** MinimumProductsRule + UniqueTreatmentIds, or the pipeline never starts. */
   private validateBrief(brief: CampaignBrief): Result<true, Error> {
     const unique = new Set(brief.products.map((p) => p.id));
     if (unique.size < MINIMUM_PRODUCTS) {
@@ -138,6 +138,15 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
           `A campaign brief requires at least ${MINIMUM_PRODUCTS} unique products (received ${unique.size}).`,
         ),
       );
+    }
+    // Treatment id is the asset identity and an output-path segment, so duplicates
+    // would silently overwrite each other. Enforce here too (domain invariant) so
+    // callers that bypass brief parsing can't slip a malformed brief through.
+    if (brief.treatments) {
+      const ids = brief.treatments.map((t) => t.id);
+      if (new Set(ids).size !== ids.length) {
+        return err(new Error("A campaign brief requires unique treatment ids."));
+      }
     }
     return ok(true);
   }

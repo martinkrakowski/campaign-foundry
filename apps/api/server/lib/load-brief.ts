@@ -7,6 +7,14 @@ const REQUIRED_FIELDS = ["id", "targetRegion", "targetAudience", "campaignMessag
 
 const LAYOUTS = ["headline-bottom", "headline-top"] as const;
 const TONES = ["bold", "subtle"] as const;
+/**
+ * Treatment ids become a filesystem path segment (`<product>/<ratio>/<id>.png`)
+ * and the stable asset identity, and the brief is untrusted input. Constrain ids
+ * to a path-safe slug so a malformed brief is a clean 400 here, not a late export
+ * crash (the exporter's traversal guard would otherwise be the only line of
+ * defence, failing mid-run).
+ */
+const TREATMENT_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /** Structurally validate the optional `treatments` array, when present. */
 function validateTreatments(value: unknown): void {
@@ -14,11 +22,18 @@ function validateTreatments(value: unknown): void {
   if (!Array.isArray(value)) {
     throw new Error('Campaign brief field "treatments" must be an array.');
   }
+  const seen = new Set<string>();
   for (const t of value) {
     const rec = t as Record<string, unknown>;
-    if (typeof rec?.id !== "string" || rec.id.length === 0) {
-      throw new Error("Each treatment requires a non-empty string \"id\".");
+    if (typeof rec?.id !== "string" || !TREATMENT_ID.test(rec.id)) {
+      throw new Error(
+        `Treatment id must be a path-safe slug (lowercase letters, digits, hyphens; max 64 chars); got ${JSON.stringify(rec?.id)}.`,
+      );
     }
+    if (seen.has(rec.id)) {
+      throw new Error(`Duplicate treatment id "${rec.id}" — ids must be unique within a brief.`);
+    }
+    seen.add(rec.id);
     if (!LAYOUTS.includes(rec.layout as (typeof LAYOUTS)[number])) {
       throw new Error(`Treatment "${rec.id}" has invalid layout (expected one of ${LAYOUTS.join(", ")}).`);
     }
