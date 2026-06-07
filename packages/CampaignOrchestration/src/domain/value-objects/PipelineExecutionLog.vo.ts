@@ -1,59 +1,37 @@
-// @generated value-object stub — edit freely
+import type { LogEntry, LogLevel } from "./LogEntry.vo.js";
+
 /**
- * PipelineExecutionLog is an immutable value object.
- *
- * Value objects:
- * - Are immutable (no setters)
- * - Are compared by value, not identity
- * - Contain validation logic
- * - Can be shared safely
- *
- * @example
- * const vo = PipelineExecutionLog.create(rawValue);
- * if (vo.success) {
- *   // Use vo.value
- * }
+ * PipelineExecutionLog — operational telemetry for one pipeline run. Decoupled
+ * from the domain entities so they carry no runtime state. Acts as an append-only
+ * accumulator the use case writes to as it progresses.
  */
 export class PipelineExecutionLog {
-  /**
-   * Private constructor enforces factory pattern.
-   * Use PipelineExecutionLog.create() instead.
-   */
-  private constructor(private readonly value: unknown) {
-    // Value is immutable after construction
+  private readonly _entries: LogEntry[] = [];
+  readonly startedAt: Date = new Date();
+  completedAt?: Date;
+  totalOperations = 0;
+
+  constructor(readonly campaignId: string) {}
+
+  record(stage: string, message: string, level: LogLevel = "info"): void {
+    this._entries.push({ timestamp: new Date(), stage, message, level });
   }
 
-  /**
-   * Factory method with validation.
-   *
-   * @param value - Raw value to wrap
-   * @returns Result containing PipelineExecutionLog or validation error
-   *
-   * TODO: Implement validation logic
-   * Example:
-   * static create(value: string): Result<PipelineExecutionLog, Error> {
-   *   if (!value || value.length === 0) {
-   *     return { success: false, error: new Error('Value cannot be empty') };
-   *   }
-   *   return { success: true, value: new PipelineExecutionLog(value) };
-   * }
-   */
-  static create(value: unknown): { success: boolean; value?: PipelineExecutionLog; error?: Error } {
-    // TODO: Add validation
-    return { success: true, value: new PipelineExecutionLog(value) };
+  complete(): void {
+    this.completedAt = new Date();
   }
 
-  /**
-   * Get the wrapped value.
-   */
-  getValue(): unknown {
-    return this.value;
+  get entries(): readonly LogEntry[] {
+    return this._entries;
   }
 
-  /**
-   * Value objects are compared by value.
-   */
-  equals(other: PipelineExecutionLog): boolean {
-    return this.value === other.value;
+  toJSON() {
+    return {
+      campaignId: this.campaignId,
+      startedAt: this.startedAt,
+      completedAt: this.completedAt,
+      totalOperations: this.totalOperations,
+      entries: this._entries,
+    };
   }
 }

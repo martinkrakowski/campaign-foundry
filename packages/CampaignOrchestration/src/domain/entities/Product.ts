@@ -1,53 +1,14 @@
-// @generated entity stub — edit freely
 /**
- * Product is a domain entity with identity and lifecycle.
- *
- * Domain entities:
- * - Have unique identity (ID)
- * - Contain business logic and invariants
- * - Are mutable (unlike value objects)
- * - Enforce domain rules in their methods
- *
- * @example
- * const entity = new Product(id, props);
- * entity.performAction();
+ * Product — child entity owned by the {@link CampaignBrief} aggregate.
+ * One creative set (across every aspect ratio) is produced per product.
  */
-export class Product {
-  /**
-   * Constructor for Product entity.
-   *
-   * @param id - Unique identifier
-   * @param props - Entity properties
-   *
-   * TODO: Define your entity properties
-   * Example:
-   * constructor(
-   *   private readonly id: string,
-   *   private name: string,
-   *   private status: Status,
-   * ) {
-   *   // Validate invariants
-   * }
-   */
-  constructor(private readonly id: string) {
-    // TODO: Initialize entity state
-    // TODO: Validate invariants
-  }
-
-  /**
-   * Get entity ID.
-   */
-  getId(): string {
-    return this.id;
-  }
-
-  /**
-   * TODO: Add domain methods here
-   * Example:
-   * performAction(): Result<void, Error> {
-   *   // Validate business rules
-   *   // Update state
-   *   // Return result
-   * }
-   */
+export interface Product {
+  readonly id: string;
+  readonly name: string;
+  /** Brand colour as a hex string, e.g. "#1473E6". Drives procedural backgrounds and brand-compliance scoring. */
+  readonly primaryColor: string;
+  /** Path to the brand logo, composited onto every creative. */
+  readonly logoPath: string;
+  /** Optional pre-existing background asset; reused when present, otherwise a background is generated. */
+  readonly inputAsset?: string;
 }

@@ -1,53 +1,18 @@
-// @generated entity stub — edit freely
+import type { Product } from "./Product.js";
+
 /**
- * CampaignBrief is a domain entity with identity and lifecycle.
+ * CampaignBrief — aggregate root. The unit of work for a single campaign run:
+ * it owns the product collection and the campaign copy.
  *
- * Domain entities:
- * - Have unique identity (ID)
- * - Contain business logic and invariants
- * - Are mutable (unlike value objects)
- * - Enforce domain rules in their methods
- *
- * @example
- * const entity = new CampaignBrief(id, props);
- * entity.performAction();
+ * Invariants (e.g. "at least two products") are enforced by the use case's
+ * ValidateBriefIntegrity step, before any port is called.
  */
-export class CampaignBrief {
-  /**
-   * Constructor for CampaignBrief entity.
-   *
-   * @param id - Unique identifier
-   * @param props - Entity properties
-   *
-   * TODO: Define your entity properties
-   * Example:
-   * constructor(
-   *   private readonly id: string,
-   *   private name: string,
-   *   private status: Status,
-   * ) {
-   *   // Validate invariants
-   * }
-   */
-  constructor(private readonly id: string) {
-    // TODO: Initialize entity state
-    // TODO: Validate invariants
-  }
-
-  /**
-   * Get entity ID.
-   */
-  getId(): string {
-    return this.id;
-  }
-
-  /**
-   * TODO: Add domain methods here
-   * Example:
-   * performAction(): Result<void, Error> {
-   *   // Validate business rules
-   *   // Update state
-   *   // Return result
-   * }
-   */
+export interface CampaignBrief {
+  readonly id: string;
+  readonly targetRegion: string;
+  readonly targetAudience: string;
+  readonly campaignMessage: string;
+  /** Optional localized copy; the use case falls back to campaignMessage when this is absent. */
+  readonly localizedMessage?: string;
+  readonly products: readonly Product[];
 }
