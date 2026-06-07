@@ -112,8 +112,15 @@ export class NodeCanvasCompositor implements CompositorPort {
         const ly = top ? height - logoH - margin : margin;
         ctx.drawImage(logo, lx, ly, target, logoH);
         logoApplied = true;
-      } catch {
-        // logo is optional — skip cleanly when the path is missing/unreadable.
+      } catch (error) {
+        // A missing logo is optional — skip cleanly. A present-but-unreadable or
+        // corrupt one is likely a mistake, so surface it (observable degradation)
+        // without aborting the run: logoApplied stays false and the compliance
+        // report flags it.
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          const reason = error instanceof Error ? error.message : String(error);
+          console.warn(`[NodeCanvasCompositor] logo at ${logoPath} could not be applied: ${reason}`);
+        }
       }
     }
 
