@@ -16,4 +16,6 @@ export interface GeneratedAsset {
   readonly passedCompliance: boolean;
   /** Brand compliance — whether the product logo was present and applied. */
   readonly logoApplied: boolean;
+  /** The creative treatment id this asset was rendered with (e.g. "default", "subtle-top"). */
+  readonly treatment: string;
 }

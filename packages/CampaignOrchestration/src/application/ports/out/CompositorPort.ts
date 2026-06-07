@@ -1,4 +1,5 @@
 import type { AspectRatio } from "../../../domain/value-objects/AspectRatio.vo.js";
+import type { LayoutKind, ToneKind } from "../../../domain/value-objects/Treatment.vo.js";
 
 /** A single compositing request — one creative to render. */
 export interface CompositeRequest {
@@ -9,6 +10,10 @@ export interface CompositeRequest {
   readonly brandColor: string;
   readonly logoPath: string;
   readonly ratio: AspectRatio;
+  /** Treatment: where the headline/logo anchor (data-driven, not hardcoded). */
+  readonly layout: LayoutKind;
+  /** Treatment: visual intensity of the overlay. */
+  readonly tone: ToneKind;
 }
 
 /** The rendered creative plus the compositing signals the use case reports. */

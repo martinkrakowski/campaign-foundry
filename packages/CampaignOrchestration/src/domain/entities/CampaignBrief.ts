@@ -1,3 +1,4 @@
+import type { Treatment } from "../value-objects/Treatment.vo.js";
 import type { Product } from "./Product.js";
 
 /**
@@ -15,4 +16,10 @@ export interface CampaignBrief {
   /** Optional localized copy; the use case falls back to campaignMessage when this is absent. */
   readonly localizedMessage?: string;
   readonly products: readonly Product[];
+  /**
+   * Optional creative treatments to produce per product × aspect ratio. When
+   * absent the use case applies a single DEFAULT_TREATMENT, so existing briefs
+   * are unchanged.
+   */
+  readonly treatments?: readonly Treatment[];
 }
