@@ -1,12 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import * as yaml from "js-yaml";
-import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { LAYOUT_VALUES, TONE_VALUES, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 
 const REQUIRED_FIELDS = ["id", "targetRegion", "targetAudience", "campaignMessage", "products"] as const;
-
-const LAYOUTS = ["headline-bottom", "headline-top"] as const;
-const TONES = ["bold", "subtle"] as const;
 /**
  * Treatment ids become a filesystem path segment (`<product>/<ratio>/<id>.png`)
  * and the stable asset identity, and the brief is untrusted input. Constrain ids
@@ -34,11 +31,11 @@ function validateTreatments(value: unknown): void {
       throw new Error(`Duplicate treatment id "${rec.id}" — ids must be unique within a brief.`);
     }
     seen.add(rec.id);
-    if (!LAYOUTS.includes(rec.layout as (typeof LAYOUTS)[number])) {
-      throw new Error(`Treatment "${rec.id}" has invalid layout (expected one of ${LAYOUTS.join(", ")}).`);
+    if (!LAYOUT_VALUES.includes(rec.layout as (typeof LAYOUT_VALUES)[number])) {
+      throw new Error(`Treatment "${rec.id}" has invalid layout (expected one of ${LAYOUT_VALUES.join(", ")}).`);
     }
-    if (!TONES.includes(rec.tone as (typeof TONES)[number])) {
-      throw new Error(`Treatment "${rec.id}" has invalid tone (expected one of ${TONES.join(", ")}).`);
+    if (!TONE_VALUES.includes(rec.tone as (typeof TONE_VALUES)[number])) {
+      throw new Error(`Treatment "${rec.id}" has invalid tone (expected one of ${TONE_VALUES.join(", ")}).`);
     }
   }
 }

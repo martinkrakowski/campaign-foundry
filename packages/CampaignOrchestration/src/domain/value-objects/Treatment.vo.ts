@@ -1,8 +1,10 @@
 /** Where the headline and logo are anchored within the creative. */
-export type LayoutKind = "headline-bottom" | "headline-top";
+export const LAYOUT_VALUES = ["headline-bottom", "headline-top"] as const;
+export type LayoutKind = (typeof LAYOUT_VALUES)[number];
 
 /** Visual intensity of the message/brand overlay. */
-export type ToneKind = "bold" | "subtle";
+export const TONE_VALUES = ["bold", "subtle"] as const;
+export type ToneKind = (typeof TONE_VALUES)[number];
 
 /**
  * Treatment — a named creative treatment (layout + tone) the campaign requests.

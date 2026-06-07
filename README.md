@@ -152,7 +152,7 @@ treatments:
 
 Outputs are organized **by product, then aspect ratio**:
 
-```
+```text
 output/
 ├── acme-hydra-bottle/
 │   ├── 1x1.png
@@ -172,7 +172,7 @@ When a brief requests **more than one treatment**, creatives nest by treatment s
 each ratio slot holds its variants side-by-side
 (`output/<product>/<ratio>/<treatment>.png`):
 
-```
+```text
 output/acme-hydra-bottle/
 ├── 1x1/   ├── bold-bottom.png  └── subtle-top.png
 ├── 9x16/  ├── bold-bottom.png  └── subtle-top.png

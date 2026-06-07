@@ -25,7 +25,7 @@ export default function CompliancePage() {
             {!hasRun || assets.length === 0 ? (
               <tr className="opacity-50">
                 <td className="p-4 font-mono">—</td>
-                <td className="p-4">Brand Density Matrix</td>
+                <td className="p-4">Brand Density + Logo</td>
                 <td className="p-4 text-text-muted">Awaiting pipeline execution…</td>
                 <td className="p-4">
                   <GateBadge status="pending" />
