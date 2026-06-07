@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { projectRoot } from "@campaignfoundry/shared";
 
 /** Apply KEY=VALUE lines from a file without overriding vars already in process.env. */
 function applyEnvFile(path: string): void {
@@ -21,10 +22,27 @@ function applyEnvFile(path: string): void {
   }
 }
 
-// Search cwd upward (CLI runs from the repo root, Nitro from apps/api). First
-// value wins, so .env.local takes precedence over .env, and a real shell env
-// variable beats both.
-for (const dir of [process.cwd(), resolve(process.cwd(), ".."), resolve(process.cwd(), "../..")]) {
-  applyEnvFile(resolve(dir, ".env.local"));
-  applyEnvFile(resolve(dir, ".env"));
+let loaded = false;
+
+/**
+ * Load .env.local / .env into process.env (idempotent). Must be **called** — a
+ * bare `import "./env.js"` for its side effect gets tree-shaken by Nitro's
+ * bundler, which silently left GEMINI_API_KEY unset in the server and fell the
+ * pipeline back to the procedural generator (no real Imagen output).
+ *
+ * Loads from the project root and the cwd (the CLI runs at the repo root, Nitro in
+ * apps/api). First value wins, so .env.local beats .env and a real shell env var
+ * beats both.
+ */
+export function loadEnv(): void {
+  if (loaded) return;
+  // Dedupe: projectRoot() returns cwd when started from the repo root (the CLI),
+  // so a plain [cwd, projectRoot()] would read the same .env files twice.
+  for (const dir of new Set([process.cwd(), projectRoot()])) {
+    applyEnvFile(resolve(dir, ".env.local"));
+    applyEnvFile(resolve(dir, ".env"));
+  }
+  // Mark loaded only after a clean pass — if a read throws, a later call retries
+  // rather than being stuck with process.env half-populated.
+  loaded = true;
 }
