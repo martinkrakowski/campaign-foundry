@@ -2,13 +2,21 @@ import type { Product } from "../../../domain/entities/Product.js";
 import type { AspectRatio } from "../../../domain/value-objects/AspectRatio.vo.js";
 
 /**
+ * Campaign context handed to background generation so adapters (e.g. a GenAI
+ * model) can personalize imagery to the message, audience, and market — the
+ * pipeline's "relevance" lever. The procedural adapter ignores it.
+ */
+export interface BackgroundContext {
+  readonly campaignMessage: string;
+  readonly targetAudience: string;
+  readonly targetRegion: string;
+}
+
+/**
  * ImageGeneratorPort — outbound port: resolve or generate the base background
- * layer for a product at a target aspect ratio. Implemented by CreativeGeneration.
- *
- * When the product carries an inputAsset it is loaded and fitted; otherwise a
- * background is generated. Returns raw image bytes (Uint8Array) — no Node Buffer
- * leaks into the domain.
+ * layer for a product at a target aspect ratio. Implemented by CreativeGeneration
+ * (procedural, or Google Imagen). Returns raw PNG/JPEG bytes as Uint8Array.
  */
 export interface ImageGeneratorPort {
-  resolveBackground(product: Product, ratio: AspectRatio): Promise<Uint8Array>;
+  resolveBackground(product: Product, ratio: AspectRatio, context: BackgroundContext): Promise<Uint8Array>;
 }
