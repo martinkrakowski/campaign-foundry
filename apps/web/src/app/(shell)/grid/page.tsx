@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { API, assetKey, useRun, type Asset } from "@/lib/run-context";
 import { cn } from "@/lib/cn";
 
@@ -266,16 +266,43 @@ function PreviewModal({
   version: number;
   onClose: () => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  // Modal focus management: move focus in on open, trap Tab inside, restore on close.
   useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const focusables = dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button, [href], input, [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusables || focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      previouslyFocused?.focus?.();
+    };
   }, [onClose]);
 
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-black/80 p-8 backdrop-blur-sm"
       onClick={onClose}
       role="dialog"
@@ -283,6 +310,7 @@ function PreviewModal({
       aria-label={`${asset.productId} ${asset.aspectRatio} ${asset.treatment} preview`}
     >
       <button
+        ref={closeRef}
         type="button"
         onClick={onClose}
         aria-label="Close preview"

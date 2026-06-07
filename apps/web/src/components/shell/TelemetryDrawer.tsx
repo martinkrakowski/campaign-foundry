@@ -62,6 +62,10 @@ export function TelemetryDrawer({ open, onClose }: TelemetryDrawerProps) {
         open && (expanded ? "top-2" : "h-48"),
       )}
       aria-hidden={!open}
+      // Collapsed but still mounted (for the slide animation) — `inert` removes its
+      // buttons from the tab order and pointer events while closed; aria-hidden alone
+      // wouldn't.
+      inert={!open}
     >
       <div className="flex h-8 shrink-0 items-center justify-between border-b border-border bg-surface-2 px-4">
         <span className="font-mono text-[11px] uppercase tracking-wider text-text-muted">
