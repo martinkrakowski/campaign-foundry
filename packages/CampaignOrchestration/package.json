@@ -5,8 +5,21 @@
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
-  "exports": { ".": { "types": "./src/index.ts", "default": "./src/index.ts" } },
-  "scripts": { "build": "tsc", "lint": "eslint . --ext .ts,.tsx", "typecheck": "tsc --noEmit" },
-  "dependencies": { "@campaignforge/shared": "workspace:*" },
-  "devDependencies": { "typescript": "^5.0.0" }
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint . --ext .ts,.tsx",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@campaignforge/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
 }

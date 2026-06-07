@@ -4,13 +4,10 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
-    "composite": true,
-    "declaration": true,
-    "emitDeclarationOnly": true,
+    "skipLibCheck": true,
+    "noEmit": true,
     "paths": {
-      "@campaignforge/*": [
-        "./packages/*/src/index.ts"
-      ]
+      "@campaignforge/*": ["./packages/*/src/index.ts"]
     }
   }
 }

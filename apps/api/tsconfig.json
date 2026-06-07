@@ -1,6 +1,4 @@
 {
-  "extends": "./.nitro/types/tsconfig.json",
-  "compilerOptions": {
-    "moduleResolution": "bundler"
-  }
+  "extends": "../../tsconfig.base.json",
+  "include": ["server/**/*", "bin/**/*", ".nitro/types/**/*.d.ts"]
 }

@@ -14,18 +14,18 @@
   "dependencies": {
     "@campaignforge/CampaignOrchestration": "workspace:*",
     "@campaignforge/CreativeGeneration": "workspace:*",
-    "@campaignforge/GovernanceAndCompliance": "workspace:*",
     "@campaignforge/Distribution": "workspace:*",
+    "@campaignforge/GovernanceAndCompliance": "workspace:*",
     "@campaignforge/shared": "workspace:*",
     "js-yaml": "^4.1.0",
     "nitropack": "^2.13.0"
   },
   "devDependencies": {
-    "typescript": "^5.5.4",
-    "eslint": "^9.0.0",
-    "@typescript-eslint/parser": "^8.0.0",
-    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.11.0",
-    "@types/js-yaml": "^4.0.9"
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "typescript": "^5.5.4"
   }
 }
