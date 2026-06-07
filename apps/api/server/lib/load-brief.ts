@@ -1,17 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import * as yaml from "js-yaml";
-import { LAYOUT_VALUES, TONE_VALUES, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import {
+  LAYOUT_VALUES,
+  TONE_VALUES,
+  TREATMENT_ID_PATTERN,
+  type CampaignBrief,
+} from "@campaignfoundry/CampaignOrchestration";
 
 const REQUIRED_FIELDS = ["id", "targetRegion", "targetAudience", "campaignMessage", "products"] as const;
-/**
- * Treatment ids become a filesystem path segment (`<product>/<ratio>/<id>.png`)
- * and the stable asset identity, and the brief is untrusted input. Constrain ids
- * to a path-safe slug so a malformed brief is a clean 400 here, not a late export
- * crash (the exporter's traversal guard would otherwise be the only line of
- * defence, failing mid-run).
- */
-const TREATMENT_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /** Structurally validate the optional `treatments` array, when present. */
 function validateTreatments(value: unknown): void {
@@ -22,7 +19,7 @@ function validateTreatments(value: unknown): void {
   const seen = new Set<string>();
   for (const t of value) {
     const rec = t as Record<string, unknown>;
-    if (typeof rec?.id !== "string" || !TREATMENT_ID.test(rec.id)) {
+    if (typeof rec?.id !== "string" || !TREATMENT_ID_PATTERN.test(rec.id)) {
       throw new Error(
         `Treatment id must be a path-safe slug (lowercase letters, digits, hyphens; max 64 chars); got ${JSON.stringify(rec?.id)}.`,
       );

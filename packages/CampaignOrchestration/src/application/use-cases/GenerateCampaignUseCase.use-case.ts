@@ -2,7 +2,7 @@ import { ok, err, type Result } from "@campaignfoundry/shared";
 import type { CampaignBrief } from "../../domain/entities/CampaignBrief.js";
 import type { GeneratedAsset } from "../../domain/entities/GeneratedAsset.js";
 import { AspectRatio } from "../../domain/value-objects/AspectRatio.vo.js";
-import { DEFAULT_TREATMENT } from "../../domain/value-objects/Treatment.vo.js";
+import { DEFAULT_TREATMENT, TREATMENT_ID_PATTERN } from "../../domain/value-objects/Treatment.vo.js";
 import { PipelineExecutionLog } from "../../domain/value-objects/PipelineExecutionLog.vo.js";
 import type { PipelineResult } from "../../domain/value-objects/PipelineResult.vo.js";
 import type { CampaignPipelinePort } from "../ports/in/CampaignPipelinePort.js";
@@ -139,11 +139,18 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         ),
       );
     }
-    // Treatment id is the asset identity and an output-path segment, so duplicates
-    // would silently overwrite each other. Enforce here too (domain invariant) so
-    // callers that bypass brief parsing can't slip a malformed brief through.
+    // Treatment id is the asset identity and an output-path segment. Enforce both
+    // invariants here too (domain-level defense-in-depth) so callers that bypass
+    // brief parsing can't slip a malformed brief through: a path-unsafe id (e.g.
+    // "foo/bar") creates unintended nesting that the exporter's traversal guard
+    // doesn't catch, and duplicate ids silently overwrite each other.
     if (brief.treatments) {
       const ids = brief.treatments.map((t) => t.id);
+      if (ids.some((id) => !TREATMENT_ID_PATTERN.test(id))) {
+        return err(
+          new Error("Treatment ids must be path-safe slugs (lowercase letters, digits, hyphens; max 64 chars)."),
+        );
+      }
       if (new Set(ids).size !== ids.length) {
         return err(new Error("A campaign brief requires unique treatment ids."));
       }
