@@ -1,8 +1,8 @@
 # Campaign Foundry — Creative Automation Pipeline
 
 Turn a **single campaign brief** into on-brand social ad **creatives across every
-product and aspect ratio** — with automated brand & legal compliance and a
-human-in-the-loop (HITL) approval step before launch.
+product, aspect ratio, and creative treatment** — with automated brand & legal
+compliance and a human-in-the-loop (HITL) approval step before launch.
 
 Built as a proof-of-concept for scalable, localized social ad production: the
 creative team supplies a brief (and optional assets), and the pipeline generates,
@@ -20,11 +20,15 @@ audience**, and a **campaign message**, the pipeline:
    effort generating assets.
 3. **Resolves a background** per product — reuses a provided input asset when one
    exists, otherwise **generates** one.
-4. **Composites** the creative for **three aspect ratios** — `1:1` (1080×1080),
-   `9:16` (1080×1920), `16:9` (1920×1080) — overlaying the campaign message and
-   the product logo with deterministic layering.
-5. **Checks brand compliance** (brand-colour density) on each rendered creative.
-6. **Saves outputs** organized by product and aspect ratio, plus a print-proof PDF.
+4. **Composites** a creative for every **aspect ratio × treatment** — three ratios
+   (`1:1` 1080×1080, `9:16` 1080×1920, `16:9` 1920×1080) and one creative per
+   requested *treatment* (a layout + tone). Layering is deterministic; layout and
+   tone are **data from the brief**, not hardcoded — so "generate variations" is a
+   function of the brief.
+5. **Checks brand compliance** on each creative — **brand-colour density** *and*
+   **logo presence** — in addition to the legal gate from step 2.
+6. **Saves outputs** organized by product and aspect ratio (and treatment when a
+   brief requests more than one), plus a print-proof PDF per product.
 7. Surfaces every creative in a **HITL review UI** to approve/reject before launch.
 
 No external API keys are required — it runs **fully offline** by default (see
@@ -92,6 +96,12 @@ yarn generate --brief briefs/sample-campaign.yaml
 ```
 Generates every creative into `output/`, prints a run report, and writes proofs.
 
+Request multiple **creative treatments** (layout × tone) per cell — the pipeline
+produces the full product × ratio × treatment matrix:
+```bash
+yarn generate --brief briefs/sample-campaign-variants.yaml
+```
+
 ### Run it — dev servers (API + HITL UI)
 ```bash
 yarn dev
@@ -128,11 +138,21 @@ products:
     inputAsset: assets/inputs/trail-pack.png   # reused when present
 ```
 
+Optionally request **creative treatments** (omit for a single default treatment,
+so existing briefs are unchanged). See `briefs/sample-campaign-variants.yaml`:
+
+```yaml
+treatments:
+  - { id: bold-bottom, layout: headline-bottom, tone: bold }
+  - { id: subtle-top,  layout: headline-top,    tone: subtle }
+```
+`layout` ∈ `headline-bottom | headline-top`, `tone` ∈ `bold | subtle`.
+
 ## Example output
 
 Outputs are organized **by product, then aspect ratio**:
 
-```
+```text
 output/
 ├── acme-hydra-bottle/
 │   ├── 1x1.png
@@ -145,7 +165,18 @@ output/
 ├── proofs/
 │   ├── acme-hydra-bottle.pdf
 │   └── acme-trail-pack.pdf
-└── report.json     # per-asset compliance scores + pipeline log
+└── report.json     # per-asset compliance (density + logo + brandCompliant) + log
+```
+
+When a brief requests **more than one treatment**, creatives nest by treatment so
+each ratio slot holds its variants side-by-side
+(`output/<product>/<ratio>/<treatment>.png`):
+
+```text
+output/acme-hydra-bottle/
+├── 1x1/   ├── bold-bottom.png  └── subtle-top.png
+├── 9x16/  ├── bold-bottom.png  └── subtle-top.png
+└── 16x9/  ├── bold-bottom.png  └── subtle-top.png
 ```
 
 ---
@@ -162,15 +193,32 @@ output/
    from each product's brand colour) runs **fully offline with zero API keys**, so a
    reviewer can clone and run immediately. On any API error the run falls back to
    procedural — swapping generators is just an env var, no domain change.
-3. **Deterministic layer stacking.** Compositing follows a fixed Z-order —
-   background → dark contrast gradient (WCAG legibility) → centred message → logo
-   top-right — so output is reproducible and on-brand every run.
-4. **Compliance as a non-throwing circuit breaker.** Checks always return a
-   `ComplianceResult`; the *use case* owns the halt decision. The legal gate halts
-   the run early; the visual check annotates each asset's `complianceScore`.
-5. **Human-in-the-loop approval.** A review surface for approve/reject before
+3. **Deterministic, treatment-driven layer stacking.** Compositing follows a fixed
+   Z-order — background → contrast shade (WCAG legibility) → **brand-colour accent
+   band** → message → logo — but the *headline edge* (top/bottom), shade direction,
+   accent edge, and logo corner are driven by the treatment's **layout**, and the
+   shade opacity + font weight by its **tone**. The compositor holds no hardcoded
+   layout opinion; same inputs → same output every run.
+4. **Variations are a function of the brief.** A brief lists **treatments** (layout
+   + tone); the use case produces the full product × ratio × treatment matrix.
+   Adding a variation is data, not code — the strongest expression of the brief's
+   "generate variations" requirement, and a clean story for arbitrary reviewer
+   assets (drop in a YAML, get a branded, compliance-gated matrix).
+5. **Two-signal brand compliance, as a non-throwing circuit breaker.** Checks always
+   return a `ComplianceResult`; the *use case* owns the halt decision. The legal
+   gate halts early; per creative, brand compliance is **two independent signals** —
+   brand-colour **density** and **logo presence** — kept distinct on the entity, with
+   a derived `brandCompliant` (`density AND logo`) for a single green/red view. The
+   brand-colour accent band (decision 3) is what keeps density honest: it gives every
+   creative a deliberate ~5% density — clearing the gate in **both** the Imagen and
+   procedural paths — while a creative that lost its brand presence would still fail.
+   Without it, photographic GenAI backgrounds carry no brand colour and every asset
+   fails.
+6. **Human-in-the-loop approval.** A review surface for approve/reject before
    launch — directly targeting the "slow approval cycles" pain point in the brief.
-6. **Modular monolith.** In-process contexts, one repo, one command to run — with
+   The grid pivots product → ratio → treatment, so the variation matrix is legible
+   at a glance.
+7. **Modular monolith.** In-process contexts, one repo, one command to run — with
    clean seams to split into services later.
 
 ---
@@ -184,8 +232,10 @@ output/
   storage adapter — S3/Azure/Dropbox — is a drop-in replacement).
 - **Localization** falls back to the campaign message when no localized copy is
   supplied; full multi-locale generation is a stretch goal.
-- **Compliance heuristics are illustrative** (pixel-density + word-list), not a
-  production moderation system.
+- **Compliance heuristics are illustrative** (brand-colour pixel-density, logo
+  application, prohibited-word list), not a production moderation system. Logo
+  presence is enforced at composite time (the compositor is the authority), not
+  by detecting a logo in an arbitrary externally-supplied image.
 
 ---
 

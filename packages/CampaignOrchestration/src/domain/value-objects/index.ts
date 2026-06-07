@@ -5,3 +5,4 @@ export * from "./ComplianceResult.vo.js";
 export * from "./LogEntry.vo.js";
 export * from "./PipelineExecutionLog.vo.js";
 export * from "./PipelineResult.vo.js";
+export * from "./Treatment.vo.js";

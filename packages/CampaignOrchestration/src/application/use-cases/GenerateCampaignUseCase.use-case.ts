@@ -2,6 +2,7 @@ import { ok, err, type Result } from "@campaignfoundry/shared";
 import type { CampaignBrief } from "../../domain/entities/CampaignBrief.js";
 import type { GeneratedAsset } from "../../domain/entities/GeneratedAsset.js";
 import { AspectRatio } from "../../domain/value-objects/AspectRatio.vo.js";
+import { DEFAULT_TREATMENT, SAFE_ID_PATTERN } from "../../domain/value-objects/Treatment.vo.js";
 import { PipelineExecutionLog } from "../../domain/value-objects/PipelineExecutionLog.vo.js";
 import type { PipelineResult } from "../../domain/value-objects/PipelineResult.vo.js";
 import type { CampaignPipelinePort } from "../ports/in/CampaignPipelinePort.js";
@@ -43,9 +44,14 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     const halt = await this.runLegalGate(brief, log);
     if (halt) return ok({ assets: [], log, halted: true });
 
-    // 3-7. Generate every creative: one per (product × aspect ratio).
+    // 3-7. Generate every creative: one per (product × aspect ratio × treatment).
     const ratios = AspectRatio.all();
-    log.totalOperations = brief.products.length * ratios.length;
+    // A brief with no treatments still produces one creative per cell (back-compat).
+    const treatments = brief.treatments?.length ? brief.treatments : [DEFAULT_TREATMENT];
+    // Only namespace output by treatment when there's variation to disambiguate, so a
+    // single-treatment brief keeps the documented `<product>/<ratio>.png` layout.
+    const namespaceByTreatment = treatments.length > 1;
+    log.totalOperations = brief.products.length * ratios.length * treatments.length;
     // LocalizedMessageFallback — the use case resolves the copy; adapters never do.
     const copy = brief.localizedMessage ?? brief.campaignMessage;
     // Campaign context handed to the image generator for personalized (GenAI) backgrounds.
@@ -61,41 +67,55 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       let proofSource: Uint8Array | undefined;
 
       for (const ratio of ratios) {
-        // 3. ResolveBackgroundAssets — reuse inputAsset or generate.
+        // 3. ResolveBackgroundAssets — reuse inputAsset or generate. Resolved once
+        // per ratio and shared across treatments, so variants differ only by their
+        // treatment (and we don't pay for N background generations per cell).
         const background = await this.deps.imageGenerator.resolveBackground(product, ratio, context);
 
-        // 4. CompositeVariations — deterministic layer stacking.
-        const composite = await this.deps.compositor.compositeAsset({
-          background,
-          message: copy,
-          logoPath: product.logoPath,
-          ratio,
-        });
+        for (const treatment of treatments) {
+          // 4. CompositeVariations — deterministic layer stacking, treatment-driven.
+          const composite = await this.deps.compositor.compositeAsset({
+            background,
+            message: copy,
+            brandColor: product.primaryColor,
+            logoPath: product.logoPath,
+            ratio,
+            layout: treatment.layout,
+            tone: treatment.tone,
+          });
 
-        // 5. ExecuteVisualComplianceCheck — brand-colour density.
-        const visual = await this.deps.compliance.validateBrandColorDensity(
-          composite,
-          product.primaryColor,
-        );
+          // 5. ExecuteVisualComplianceCheck — brand-colour density.
+          const visual = await this.deps.compliance.validateBrandColorDensity(
+            composite.image,
+            product.primaryColor,
+          );
 
-        // 6. SaveOutputFiles — the use case owns the path (OutputDirectoryConvention).
-        const outputPath = `${product.id}/${ratio.slug}.png`;
-        await this.deps.exporter.saveToDirectory(composite, outputPath);
-        if (ratio.value === "1:1" || proofSource === undefined) proofSource = composite;
+          // 6. SaveOutputFiles — the use case owns the path (OutputDirectoryConvention).
+          const outputPath = namespaceByTreatment
+            ? `${product.id}/${ratio.slug}/${treatment.id}.png`
+            : `${product.id}/${ratio.slug}.png`;
+          await this.deps.exporter.saveToDirectory(composite.image, outputPath);
+          // Proof = the first treatment's 1:1 hero (one proof per product).
+          if (proofSource === undefined || (ratio.value === "1:1" && treatment === treatments[0])) {
+            proofSource = composite.image;
+          }
 
-        assets.push({
-          productId: product.id,
-          aspectRatio: ratio.value,
-          outputPath,
-          proofPath,
-          complianceScore: visual.score ?? 0,
-          passedCompliance: visual.passed,
-        });
-        log.record(
-          "CompositeVariations",
-          `${product.id} @ ${ratio.value} — brand density ${(visual.score ?? 0).toFixed(3)}${visual.passed ? "" : " (below threshold)"}`,
-          visual.passed ? "info" : "warn",
-        );
+          assets.push({
+            productId: product.id,
+            aspectRatio: ratio.value,
+            outputPath,
+            proofPath,
+            complianceScore: visual.score ?? 0,
+            passedCompliance: visual.passed,
+            logoApplied: composite.logoApplied,
+            treatment: treatment.id,
+          });
+          log.record(
+            "CompositeVariations",
+            `${product.id} @ ${ratio.value} [${treatment.id}] — brand density ${(visual.score ?? 0).toFixed(3)}${visual.passed ? "" : " (below threshold)"}, logo ${composite.logoApplied ? "present" : "missing"}`,
+            visual.passed && composite.logoApplied ? "info" : "warn",
+          );
+        }
       }
 
       // 7. ExportPrintProofs — one proof per product (hero 1:1 creative).
@@ -109,15 +129,37 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     return ok({ assets, log, halted: false });
   }
 
-  /** MinimumProductsRule: at least two unique products, or the pipeline never starts. */
+  /** MinimumProductsRule + path-safe/unique ids, or the pipeline never starts. */
   private validateBrief(brief: CampaignBrief): Result<true, Error> {
-    const unique = new Set(brief.products.map((p) => p.id));
+    // Product and treatment ids are output-path segments and the asset identity.
+    // Enforce path-safety here too (domain-level defense-in-depth) so callers that
+    // bypass brief parsing can't slip a malformed brief through: a path-unsafe id
+    // (e.g. "foo/bar") creates unintended nesting that the exporter's traversal
+    // guard doesn't catch, and duplicate treatment ids silently overwrite output.
+    const productIds = brief.products.map((p) => p.id);
+    if (productIds.some((id) => !SAFE_ID_PATTERN.test(id))) {
+      return err(
+        new Error("Product ids must be path-safe slugs (lowercase letters, digits, hyphens; max 64 chars)."),
+      );
+    }
+    const unique = new Set(productIds);
     if (unique.size < MINIMUM_PRODUCTS) {
       return err(
         new Error(
           `A campaign brief requires at least ${MINIMUM_PRODUCTS} unique products (received ${unique.size}).`,
         ),
       );
+    }
+    if (brief.treatments) {
+      const ids = brief.treatments.map((t) => t.id);
+      if (ids.some((id) => !SAFE_ID_PATTERN.test(id))) {
+        return err(
+          new Error("Treatment ids must be path-safe slugs (lowercase letters, digits, hyphens; max 64 chars)."),
+        );
+      }
+      if (new Set(ids).size !== ids.length) {
+        return err(new Error("A campaign brief requires unique treatment ids."));
+      }
     }
     return ok(true);
   }

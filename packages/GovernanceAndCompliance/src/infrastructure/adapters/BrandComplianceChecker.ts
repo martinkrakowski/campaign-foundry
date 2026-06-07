@@ -17,16 +17,17 @@ const PROHIBITED_TERMS = [
 const MIN_BRAND_COLOR_DENSITY = 0.02;
 /** Per-channel tolerance (±) when matching a pixel to the target brand colour. */
 const CHANNEL_TOLERANCE = 10;
-/**
- * The compositor draws the brand logo width-relative: a `width * 0.16` box with a
- * `width * 0.04` margin, pinned top-right (see NodeCanvasCompositor). We sample
- * that same box — anchored the same way — so the density tracks the deterministic
- * brand layer across every aspect ratio, rather than a height-relative guess from
- * the top edge that clipped the logo on 16:9 and over-diluted it on 9:16. A GenAI
- * photo background may legitimately carry no brand colour anywhere else.
+/*
+ * Density is sampled over the WHOLE creative. The compositor's brand-colour accent
+ * band (a solid, full-width strip on the headline edge) guarantees a layout- and
+ * ratio-invariant brand-colour floor (~5%), so whole-image sampling is a real
+ * signal — not a height-relative guess that clipped/diluted on extreme ratios.
+ *
+ * This supersedes the earlier logo-box sampling: that measured brand colour via a
+ * proxy (the logo, pinned top-right) and broke once layouts could move the logo.
+ * Logo presence is its own signal (GeneratedAsset.logoApplied) — kept distinct
+ * here so density measures density.
  */
-const LOGO_BOX = 0.16; // compositor: target = width * 0.16
-const LOGO_MARGIN = 0.04; // compositor: margin = width * 0.04
 
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace(/^#/, "");
@@ -58,17 +59,7 @@ export class BrandComplianceChecker implements CompliancePort {
     const canvas = createCanvas(image.width, image.height);
     const ctx = canvas.getContext("2d");
     ctx.drawImage(image, 0, 0);
-
-    // Sample the compositor's logo box (top-right, width-relative) plus a small
-    // slack for anti-aliased edges and taller logos, clamped to the canvas so
-    // getImageData never reads out of bounds.
-    const { width, height } = image;
-    const span = Math.round(width * (LOGO_BOX + 2 * LOGO_MARGIN)); // ~0.24·width
-    const regionX = Math.max(0, Math.round(width * (1 - LOGO_BOX - 2 * LOGO_MARGIN)));
-    const regionY = Math.round(width * LOGO_MARGIN); // matches the compositor's y origin
-    const regionW = Math.max(1, Math.min(span, width - regionX));
-    const regionH = Math.max(1, Math.min(span, height - regionY));
-    const { data } = ctx.getImageData(regionX, regionY, regionW, regionH);
+    const { data } = ctx.getImageData(0, 0, image.width, image.height);
 
     const total = data.length / 4;
     let matched = 0;

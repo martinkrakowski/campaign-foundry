@@ -1,19 +1,34 @@
 import type { AspectRatio } from "../../../domain/value-objects/AspectRatio.vo.js";
+import type { LayoutKind, ToneKind } from "../../../domain/value-objects/Treatment.vo.js";
 
 /** A single compositing request — one creative to render. */
 export interface CompositeRequest {
   readonly background: Uint8Array;
   /** The resolved campaign copy (localized message or fallback). */
   readonly message: string;
+  /** The product's primary brand colour (hex) — rendered as the brand accent. */
+  readonly brandColor: string;
   readonly logoPath: string;
   readonly ratio: AspectRatio;
+  /** Treatment: where the headline/logo anchor (data-driven, not hardcoded). */
+  readonly layout: LayoutKind;
+  /** Treatment: visual intensity of the overlay. */
+  readonly tone: ToneKind;
+}
+
+/** The rendered creative plus the compositing signals the use case reports. */
+export interface CompositeResult {
+  /** The rendered PNG bytes. */
+  readonly image: Uint8Array;
+  /** Whether the brand logo layer was successfully applied (brand-compliance signal). */
+  readonly logoApplied: boolean;
 }
 
 /**
  * CompositorPort — outbound port: stack visual layers onto a canvas at the
- * ratio's dimensions and return the rendered PNG bytes. Implemented by
- * CreativeGeneration.
+ * ratio's dimensions and return the rendered PNG plus compositing signals.
+ * Implemented by CreativeGeneration.
  */
 export interface CompositorPort {
-  compositeAsset(request: CompositeRequest): Promise<Uint8Array>;
+  compositeAsset(request: CompositeRequest): Promise<CompositeResult>;
 }
