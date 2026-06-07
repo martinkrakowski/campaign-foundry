@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { useRun } from "@/lib/run-context";
+import { assetKey, useRun } from "@/lib/run-context";
 import { cn } from "@/lib/cn";
 
 /**
@@ -10,10 +10,20 @@ import { cn } from "@/lib/cn";
  * per-run persistence (see the plan's follow-ups).
  */
 export default function RunsPage() {
-  const { brief, assets, halted, hasRun, loading } = useRun();
+  const { brief, assets, halted, hasRun, loading, decisions } = useRun();
 
   const passed = useMemo(() => assets.filter((a) => a.passedCompliance).length, [assets]);
   const passRate = assets.length ? Math.round((passed / assets.length) * 100) : 0;
+  const review = useMemo(() => {
+    let approved = 0;
+    let rejected = 0;
+    for (const a of assets) {
+      const d = decisions[assetKey(a)];
+      if (d === "approved") approved += 1;
+      else if (d === "rejected") rejected += 1;
+    }
+    return { approved, rejected, pending: assets.length - approved - rejected };
+  }, [assets, decisions]);
 
   const status = loading ? "running" : halted ? "halted" : hasRun ? "complete" : "idle";
 
@@ -34,6 +44,11 @@ export default function RunsPage() {
             <Stat label="Assets" value={String(assets.length)} />
             <Stat label="Passed compliance" value={`${passed}/${assets.length}`} />
             <Stat label="Pass rate" value={`${passRate}%`} />
+          </dl>
+          <dl className="grid grid-cols-3 divide-x divide-border border-t border-border text-center">
+            <Stat label="Approved" value={String(review.approved)} />
+            <Stat label="Rejected" value={String(review.rejected)} />
+            <Stat label="Pending review" value={String(review.pending)} />
           </dl>
         </div>
       )}

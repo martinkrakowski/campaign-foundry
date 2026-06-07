@@ -7,6 +7,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -60,6 +61,9 @@ export type Decision = "approved" | "rejected";
 
 /** Stable key for an asset across its product × aspect-ratio × treatment identity. */
 export const assetKey = (a: Asset): string => `${a.productId}/${a.aspectRatio}/${a.treatment}`;
+
+/** localStorage key for persisted HITL approve/reject decisions. */
+const DECISIONS_KEY = "cf:decisions";
 
 /**
  * The brief the shell starts with. The HITL surface (the /brief view) edits a
@@ -138,6 +142,42 @@ export function RunProvider({ children }: { children: ReactNode }) {
       active = false;
     };
   }, []);
+
+  // Persist approve/reject decisions across reloads: load (validated) once on mount,
+  // save on change. (execute clears decisions for a fresh run, which the save effect
+  // then flushes.) Best-effort — ignores private-mode/quota failures.
+  const skipFirstDecisionsSave = useRef(true);
+
+  useEffect(() => {
+    try {
+      // Validate before trusting storage: a stray "null"/array/primitive must not
+      // become `decisions`, or consumers indexing decisions[key] would throw.
+      const parsed: unknown = JSON.parse(localStorage.getItem(DECISIONS_KEY) ?? "null");
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const restored: Record<string, Decision> = {};
+        for (const [key, value] of Object.entries(parsed)) {
+          if (value === "approved" || value === "rejected") restored[key] = value;
+        }
+        setDecisions(restored);
+      }
+    } catch {
+      /* unreadable/malformed storage — start with no decisions */
+    }
+  }, []);
+
+  useEffect(() => {
+    // Skip the initial render so the empty starting state can't overwrite stored
+    // decisions before the load effect's update commits.
+    if (skipFirstDecisionsSave.current) {
+      skipFirstDecisionsSave.current = false;
+      return;
+    }
+    try {
+      localStorage.setItem(DECISIONS_KEY, JSON.stringify(decisions));
+    } catch {
+      /* storage unavailable — decisions stay in-memory for the session */
+    }
+  }, [decisions]);
 
   const execute = useCallback(async () => {
     setLoading(true);
