@@ -1,4 +1,4 @@
-import "./env.js"; // load .env / .env.local before reading process.env
+import { loadEnv } from "./env.js";
 import {
   GenerateCampaignUseCase,
   type CampaignBrief,
@@ -15,6 +15,11 @@ import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance
 import { FileSystemExporter } from "@campaignfoundry/Distribution";
 import type { Result } from "@campaignfoundry/shared";
 import { outputRoot } from "./config.js";
+
+// Load .env before any process.env read below. Called (not a bare side-effect
+// import) so Nitro's bundler can't tree-shake it — that was leaving GEMINI_API_KEY
+// unset in the server and silently falling back to the procedural generator.
+loadEnv();
 
 /**
  * Resolve the image generator. Input-asset reuse wraps whichever generator is
