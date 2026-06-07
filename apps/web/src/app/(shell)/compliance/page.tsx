@@ -35,15 +35,16 @@ export default function CompliancePage() {
               assets.map((asset) => (
                 <tr key={assetKey(asset)}>
                   <td className="p-4 font-mono">
-                    {asset.productId} @ {asset.aspectRatio}
+                    {asset.productId} @ {asset.aspectRatio} · {asset.treatment}
                   </td>
-                  <td className="p-4">Brand Density Matrix</td>
+                  <td className="p-4">Brand Density + Logo</td>
                   <td className="p-4 text-text-muted">
                     Brand-colour density {(asset.complianceScore * 100).toFixed(1)}%
-                    {asset.passedCompliance ? " — at or above threshold." : " — below threshold."}
+                    {asset.passedCompliance ? " — at or above threshold" : " — below threshold"}; logo{" "}
+                    {asset.logoApplied ? "present" : "missing"}.
                   </td>
                   <td className="p-4">
-                    <GateBadge status={asset.passedCompliance ? "pass" : "fail"} />
+                    <GateBadge status={asset.passedCompliance && asset.logoApplied ? "pass" : "fail"} />
                   </td>
                 </tr>
               ))

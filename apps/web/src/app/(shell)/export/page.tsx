@@ -48,7 +48,7 @@ export default function ExportPage() {
           {assets.map((asset) => (
             <Row
               key={assetKey(asset)}
-              label={`${asset.productId} @ ${asset.aspectRatio}`}
+              label={`${asset.productId} @ ${asset.aspectRatio} · ${asset.treatment}`}
               sub={asset.outputPath}
               href={`${API}/output/${asset.outputPath}`}
               cta="Download .PNG"

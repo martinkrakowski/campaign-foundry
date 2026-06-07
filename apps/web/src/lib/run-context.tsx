@@ -22,6 +22,9 @@ export interface Asset {
   proofPath?: string;
   complianceScore: number;
   passedCompliance: boolean;
+  logoApplied: boolean;
+  /** The creative treatment id (e.g. "default", "bold-bottom", "subtle-top"). */
+  treatment: string;
 }
 
 export type LogLevel = "info" | "warn" | "error";
@@ -53,8 +56,8 @@ export interface RunResult {
 
 export type Decision = "approved" | "rejected";
 
-/** Stable key for an asset across its product × aspect-ratio identity. */
-export const assetKey = (a: Asset): string => `${a.productId}/${a.aspectRatio}`;
+/** Stable key for an asset across its product × aspect-ratio × treatment identity. */
+export const assetKey = (a: Asset): string => `${a.productId}/${a.aspectRatio}/${a.treatment}`;
 
 /**
  * The brief the shell starts with. The HITL surface (the /brief view) edits a
@@ -69,6 +72,12 @@ const DEFAULT_BRIEF: CampaignBrief = {
   products: [
     { id: "acme-hydra-bottle", name: "Hydra Bottle", primaryColor: "#1473E6", logoPath: "assets/inputs/hydra-logo.png" },
     { id: "acme-trail-pack", name: "Trail Pack", primaryColor: "#E0218A", logoPath: "assets/inputs/trail-logo.png" },
+  ],
+  // Two treatments so the HITL grid demonstrates the variation matrix out of the
+  // box (each ratio slot rendered bold-bottom and subtle-top, side-by-side).
+  treatments: [
+    { id: "bold-bottom", layout: "headline-bottom", tone: "bold" },
+    { id: "subtle-top", layout: "headline-top", tone: "subtle" },
   ],
 };
 
