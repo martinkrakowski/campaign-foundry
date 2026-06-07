@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
+import { ModelSelector } from "./ModelSelector";
 
 const TABS = [
   { href: "/grid", label: "Grid" },
@@ -46,6 +47,7 @@ export function Header() {
       </nav>
 
       <div className="flex items-center space-x-4 text-sm">
+        <ModelSelector />
         <span className="font-mono text-[10px] uppercase tracking-widest text-text-muted">
           HITL Mode Active
         </span>
