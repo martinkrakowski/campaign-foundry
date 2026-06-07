@@ -62,7 +62,7 @@ __metadata:
   dependencies:
     "@campaignfoundry/CampaignOrchestration": "workspace:*"
     "@campaignfoundry/shared": "workspace:*"
-    "@google/genai": "npm:^1.0.0"
+    "@google/genai": "npm:^2.8.0"
     "@napi-rs/canvas": "npm:^0.1.0"
     "@types/node": "npm:^20.11.0"
     typescript: "npm:^5.0.0"
@@ -432,9 +432,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@google/genai@npm:^1.0.0":
-  version: 1.52.0
-  resolution: "@google/genai@npm:1.52.0"
+"@google/genai@npm:^2.8.0":
+  version: 2.8.0
+  resolution: "@google/genai@npm:2.8.0"
   dependencies:
     google-auth-library: "npm:^10.3.0"
     p-retry: "npm:^4.6.2"
@@ -445,7 +445,7 @@ __metadata:
   peerDependenciesMeta:
     "@modelcontextprotocol/sdk":
       optional: true
-  checksum: 10c0/2d22f6bd4baa915a402289dae4797410acbd5c5add1ed0c8d1bedef3ac7871fe1f04640d0612aa793fe7055f086719487491f55474a5b21597addfdea8631fa6
+  checksum: 10c0/d9c47de5799d91e81dde0c3c2a91b1eaed6ecbc797028185aefdd58ae95a36711d94a2701f1cdeb4e6e337f61d79383336d221aa837ce7cce5e598cb5fe96734
   languageName: node
   linkType: hard
 
