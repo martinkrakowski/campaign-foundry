@@ -23,32 +23,41 @@ import { outputRoot } from "./config.js";
 loadEnv();
 
 /**
- * Resolve the image generator as a graceful fallback chain, wrapped by input-asset
- * reuse:
+ * Resolve the image generator, wrapped by input-asset reuse. The primary source is
+ * chosen by `selected` (the UI's model picker); procedural is always the floor.
  *
- *   reuse asset → Imagen → OpenRouter (e.g. Grok Imagine) → procedural gradient
+ *   selected = undefined / "auto" → Imagen → OpenRouter (default) → procedural
+ *   selected = "procedural"       → procedural only
+ *   selected = "imagen"           → Imagen → OpenRouter (default) → procedural
+ *   selected = "<provider>/<model>" → that OpenRouter model → procedural
  *
- * Each GenAI provider is only inserted when its key is present, so the chain is
- * "whatever's configured, then procedural". When Imagen is rate-limited/unavailable
- * it falls through to OpenRouter; if that's also unavailable, the offline gradient.
+ * Each GenAI provider is only used when its key is present (else it falls through).
  */
-function imageGenerator(): ImageGeneratorPort {
+function imageGenerator(selected?: string): ImageGeneratorPort {
   const procedural = new ProceduralBackgroundGenerator();
-
-  // Second GenAI source (different provider/quota) before the procedural floor.
-  const openRouterKey = process.env.OPENROUTER_API_KEY;
-  const afterImagen: ImageGeneratorPort = openRouterKey
-    ? new OpenRouterImageGenerator({
-        apiKey: openRouterKey,
-        model: process.env.OPENROUTER_IMAGE_MODEL,
-        fallback: procedural,
-      })
-    : procedural;
-
   const geminiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
-  const generator = geminiKey
-    ? new GeminiImageGenerator({ apiKey: geminiKey, model: process.env.IMAGEN_MODEL, fallback: afterImagen })
-    : afterImagen;
+  const openRouterKey = process.env.OPENROUTER_API_KEY;
+
+  // An OpenRouter generator for a given model, falling back to procedural.
+  const openRouter = (model?: string): ImageGeneratorPort =>
+    openRouterKey
+      ? new OpenRouterImageGenerator({ apiKey: openRouterKey, model, fallback: procedural })
+      : procedural;
+
+  // Imagen with the OpenRouter default as its first fallback, then procedural.
+  const imagen = (): ImageGeneratorPort =>
+    geminiKey
+      ? new GeminiImageGenerator({
+          apiKey: geminiKey,
+          model: process.env.IMAGEN_MODEL,
+          fallback: openRouter(process.env.OPENROUTER_IMAGE_MODEL),
+        })
+      : openRouter(process.env.OPENROUTER_IMAGE_MODEL);
+
+  let generator: ImageGeneratorPort;
+  if (selected === "procedural") generator = procedural;
+  else if (selected && selected.includes("/")) generator = openRouter(selected);
+  else generator = imagen(); // "auto" / "imagen" / unset → default chain
 
   return new AssetReusingImageGenerator(generator);
 }
@@ -57,15 +66,19 @@ function imageGenerator(): ImageGeneratorPort {
  * Composition root — the one place that knows concrete adapters. Wires them into
  * the use case via constructor injection; everything above depends only on ports.
  */
-export function buildPipeline(): GenerateCampaignUseCase {
+export function buildPipeline(imageModel?: string): GenerateCampaignUseCase {
   return new GenerateCampaignUseCase({
-    imageGenerator: imageGenerator(),
+    imageGenerator: imageGenerator(imageModel),
     compositor: new NodeCanvasCompositor(process.env.MESSAGE_FONT),
     compliance: new BrandComplianceChecker(),
     exporter: new FileSystemExporter(outputRoot()),
   });
 }
 
-export function runCampaign(brief: CampaignBrief): Promise<Result<PipelineResult, Error>> {
-  return buildPipeline().execute(brief);
+/** Run a campaign. `imageModel` (from the UI's model picker) selects the primary generator. */
+export function runCampaign(
+  brief: CampaignBrief,
+  imageModel?: string,
+): Promise<Result<PipelineResult, Error>> {
+  return buildPipeline(imageModel).execute(brief);
 }

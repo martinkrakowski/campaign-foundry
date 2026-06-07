@@ -62,26 +62,22 @@ export class OpenRouterImageGenerator implements ImageGeneratorPort {
     ratio: AspectRatio,
     context: BackgroundContext,
   ): Promise<BackgroundResult> {
+    const prompt = this.buildPrompt(product, context);
+    const aspect = ASPECT_RATIO[ratio.value] ?? "1:1";
     try {
-      const response = await fetch(ENDPOINT, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${this.apiKey}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          // Image-only output (Grok Imagine, Flux, etc.). Text+image models like
-          // Gemini/Nano Banana would instead use ["image", "text"].
-          model: this.model,
-          modalities: ["image"],
-          image_config: { aspect_ratio: ASPECT_RATIO[ratio.value] ?? "1:1" },
-          messages: [{ role: "user", content: this.buildPrompt(product, context) }],
-        }),
-      });
-      if (!response.ok) {
-        throw new Error(`OpenRouter HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
+      // Image-only output (Grok Imagine, Flux, …). Text+image models (Nano Banana,
+      // GPT Image) reject that and need ["image","text"] — so retry once on the
+      // specific modality mismatch rather than requiring per-model config.
+      let dataUrl: string | undefined;
+      try {
+        dataUrl = await this.request(prompt, aspect, ["image"]);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("modalities")) {
+          dataUrl = await this.request(prompt, aspect, ["image", "text"]);
+        } else {
+          throw error;
+        }
       }
-      const dataUrl = this.extractImageUrl((await response.json()) as OpenRouterResponse);
       if (!dataUrl) throw new Error("OpenRouter returned no image data");
       const cover = await this.coverFit(this.decodeDataUrl(dataUrl), ratio);
       return { image: cover, source: "openrouter" };
@@ -93,6 +89,28 @@ export class OpenRouterImageGenerator implements ImageGeneratorPort {
       }
       throw new Error(message);
     }
+  }
+
+  /** One chat-completion image request; returns the image data URL (or undefined). */
+  private async request(
+    prompt: string,
+    aspectRatio: string,
+    modalities: string[],
+  ): Promise<string | undefined> {
+    const response = await fetch(ENDPOINT, {
+      method: "POST",
+      headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: this.model,
+        modalities,
+        image_config: { aspect_ratio: aspectRatio },
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`OpenRouter HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
+    }
+    return this.extractImageUrl((await response.json()) as OpenRouterResponse);
   }
 
   /** Generated images come back as base64 data URLs in the assistant message. */
