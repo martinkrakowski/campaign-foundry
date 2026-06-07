@@ -121,9 +121,12 @@ export function RunProvider({ children }: { children: ReactNode }) {
     fetch(`${API}/campaigns/result`)
       .then((r) => r.json() as Promise<RunResult>)
       .then((d) => {
-        if (active && d.assets?.length) {
+        // Restore any real persisted run — including a halted / log-only run with no
+        // assets (a present `log` marks a real run; the empty "no run yet" default
+        // from the API has assets:[] and log:null, which we leave as "never ran").
+        if (active && (d.assets?.length || d.log)) {
           setResult(d);
-          setAssetVersion((v) => v + 1);
+          if (d.assets?.length) setAssetVersion((v) => v + 1);
         }
       })
       .catch(() => undefined);
