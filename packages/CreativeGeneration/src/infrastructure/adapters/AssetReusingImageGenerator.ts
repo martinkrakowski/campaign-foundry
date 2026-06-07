@@ -6,6 +6,7 @@ import type {
   ImageGeneratorPort,
   Product,
 } from "@campaignfoundry/CampaignOrchestration";
+import { resolveAssetPath } from "../safe-path.js";
 
 /**
  * AssetReusingImageGenerator — ImageGeneratorPort decorator.
@@ -33,8 +34,10 @@ export class AssetReusingImageGenerator implements ImageGeneratorPort {
 
   /** Cover-fit a supplied asset to the target ratio; undefined if missing/unreadable. */
   private async tryReuseAsset(path: string, ratio: AspectRatio): Promise<Uint8Array | undefined> {
+    const safePath = resolveAssetPath(path);
+    if (!safePath) return undefined; // unsafe/absolute path → fall through to generation
     try {
-      const image = await loadImage(await readFile(path));
+      const image = await loadImage(await readFile(safePath));
       const canvas = createCanvas(ratio.width, ratio.height);
       const ctx = canvas.getContext("2d");
       const scale = Math.max(ratio.width / image.width, ratio.height / image.height);

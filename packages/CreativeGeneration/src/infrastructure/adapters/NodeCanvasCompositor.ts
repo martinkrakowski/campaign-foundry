@@ -6,6 +6,7 @@ import type {
 } from "@campaignfoundry/CampaignOrchestration";
 import { wrapText } from "./canvas-util.js";
 import { registerBundledFonts } from "../fonts.js";
+import { resolveAssetPath } from "../safe-path.js";
 
 /**
  * NodeCanvasCompositor — CompositorPort adapter.
@@ -55,14 +56,17 @@ export class NodeCanvasCompositor implements CompositorPort {
     }
 
     // Layer 4 — brand logo, anchored top-right (optional).
-    try {
-      const logo = await loadImage(await readFile(request.logoPath));
-      const target = width * 0.16;
-      const scale = target / logo.width;
-      const margin = width * 0.04;
-      ctx.drawImage(logo, width - target - margin, margin, target, logo.height * scale);
-    } catch {
-      // logo is optional — skip cleanly when the path is missing.
+    const logoPath = resolveAssetPath(request.logoPath);
+    if (logoPath) {
+      try {
+        const logo = await loadImage(await readFile(logoPath));
+        const target = width * 0.16;
+        const scale = target / logo.width;
+        const margin = width * 0.04;
+        ctx.drawImage(logo, width - target - margin, margin, target, logo.height * scale);
+      } catch {
+        // logo is optional — skip cleanly when the path is missing/unreadable.
+      }
     }
 
     return canvas.toBuffer("image/png");
