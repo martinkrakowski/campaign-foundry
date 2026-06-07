@@ -61,13 +61,13 @@ export default function BriefPage() {
   };
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-6 overflow-y-auto p-8 pb-40">
+    <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-6 overflow-y-auto p-4 pb-40 sm:p-8">
       <div>
         <h2 className="text-xl font-bold text-white">Campaign Brief</h2>
         <p className="text-[13px] text-text-muted">Edit the brief the orchestrator runs against.</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <LabeledInput label="Brief ID" value={form.id} onChange={(v) => setField("id", v)} />
         <LabeledInput
           label="Target Region"
@@ -104,7 +104,7 @@ export default function BriefPage() {
       <div className="space-y-4">
         {form.products.map((product, i) => (
           <div key={i} className="space-y-3 rounded-lg border border-border bg-surface p-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <LabeledInput label="ID" value={product.id} onChange={(v) => setProduct(i, { id: v })} />
               <LabeledInput
                 label="Name"
@@ -112,7 +112,7 @@ export default function BriefPage() {
                 onChange={(v) => setProduct(i, { name: v })}
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <LabeledInput
                 label="Primary Colour"
                 value={product.primaryColor}

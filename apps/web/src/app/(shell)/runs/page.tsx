@@ -28,7 +28,7 @@ export default function RunsPage() {
   const status = loading ? "running" : halted ? "halted" : hasRun ? "complete" : "idle";
 
   return (
-    <div className="flex h-full flex-col items-start p-8 pb-40">
+    <div className="flex h-full flex-col items-start p-4 pb-40 sm:p-8">
       <h2 className="mb-1 text-xl font-bold text-white">Runs</h2>
       <p className="mb-6 text-[13px] text-text-muted">Latest pipeline run (current session).</p>
 

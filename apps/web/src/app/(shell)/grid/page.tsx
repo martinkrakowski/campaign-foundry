@@ -73,12 +73,14 @@ export default function GridPage() {
 
   return (
     <div className="flex flex-col gap-12 p-6 pb-40">
-      <div className="flex items-center gap-4 rounded-lg border border-border bg-surface px-4 py-2 font-mono text-[11px]">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-border bg-surface px-4 py-2 font-mono text-[11px]">
         <span className="uppercase tracking-wider text-text-muted">Review</span>
         <span className="text-success">✓ {review.approved} approved</span>
         <span className="text-error">✗ {review.rejected} rejected</span>
         <span className="text-text-muted">○ {review.pending} pending</span>
-        <span className="ml-auto text-text-muted">Approved creatives are what the Export tab ships.</span>
+        <span className="ml-auto hidden text-text-muted md:inline">
+          Approved creatives are what the Export tab ships.
+        </span>
       </div>
       {products.map(({ productId, ratios }) => (
         <section key={productId}>
@@ -324,7 +326,7 @@ function PreviewModal({
   return (
     <div
       ref={dialogRef}
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-black/80 p-8 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-black/80 p-4 backdrop-blur-sm sm:p-8"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
