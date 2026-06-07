@@ -36,9 +36,11 @@ let loaded = false;
  */
 export function loadEnv(): void {
   if (loaded) return;
-  loaded = true;
   for (const dir of [process.cwd(), projectRoot()]) {
     applyEnvFile(resolve(dir, ".env.local"));
     applyEnvFile(resolve(dir, ".env"));
   }
+  // Mark loaded only after a clean pass — if a read throws, a later call retries
+  // rather than being stuck with process.env half-populated.
+  loaded = true;
 }
