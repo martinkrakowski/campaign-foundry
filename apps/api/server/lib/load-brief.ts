@@ -3,8 +3,8 @@ import { extname } from "node:path";
 import * as yaml from "js-yaml";
 import {
   LAYOUT_VALUES,
+  SAFE_ID_PATTERN,
   TONE_VALUES,
-  TREATMENT_ID_PATTERN,
   type CampaignBrief,
 } from "@campaignfoundry/CampaignOrchestration";
 
@@ -19,7 +19,7 @@ function validateTreatments(value: unknown): void {
   const seen = new Set<string>();
   for (const t of value) {
     const rec = t as Record<string, unknown>;
-    if (typeof rec?.id !== "string" || !TREATMENT_ID_PATTERN.test(rec.id)) {
+    if (typeof rec?.id !== "string" || !SAFE_ID_PATTERN.test(rec.id)) {
       throw new Error(
         `Treatment id must be a path-safe slug (lowercase letters, digits, hyphens; max 64 chars); got ${JSON.stringify(rec?.id)}.`,
       );
@@ -50,6 +50,14 @@ export function parseBrief(data: unknown): CampaignBrief {
   }
   if (!Array.isArray(record.products)) {
     throw new Error('Campaign brief field "products" must be an array.');
+  }
+  for (const p of record.products) {
+    const id = (p as Record<string, unknown>)?.id;
+    if (typeof id !== "string" || !SAFE_ID_PATTERN.test(id)) {
+      throw new Error(
+        `Product id must be a path-safe slug (lowercase letters, digits, hyphens; max 64 chars); got ${JSON.stringify(id)}.`,
+      );
+    }
   }
   validateTreatments(record.treatments);
   return record as unknown as CampaignBrief;
