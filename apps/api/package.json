@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "nitro build",
-    "dev": "nitro dev",
+    "dev": "nitro dev --port 3001",
     "preview": "node .output/server/index.mjs",
     "prepare": "nitro prepare",
     "lint": "eslint server --ext .ts",

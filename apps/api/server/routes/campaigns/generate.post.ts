@@ -1,11 +1,12 @@
 import type { CampaignBrief } from "@campaignforge/CampaignOrchestration";
 import { parseBrief } from "../../lib/load-brief.js";
 import { runCampaign } from "../../lib/pipeline.js";
+import { writeReport } from "../../lib/report.js";
 
 /**
- * POST /campaigns/generate — body is a campaign brief (JSON).
- * Returns the generated assets, the halt flag, and the execution log.
- * (`defineEventHandler`, `readBody`, `setResponseStatus` are auto-imported by Nitro.)
+ * POST /campaigns/generate — body is a campaign brief (JSON). Runs the pipeline,
+ * persists report.json (so GET /campaigns/result reflects it), and returns the
+ * assets, halt flag, and execution log.
  */
 export default defineEventHandler(async (event) => {
   let brief: CampaignBrief;
@@ -22,6 +23,7 @@ export default defineEventHandler(async (event) => {
     return { error: result.error.message };
   }
 
+  await writeReport(result.value);
   return {
     halted: result.value.halted,
     assets: result.value.assets,

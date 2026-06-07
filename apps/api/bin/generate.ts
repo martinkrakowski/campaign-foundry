@@ -1,25 +1,12 @@
-import { argv, exitCode } from "node:process";
-import { mkdir, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import type { PipelineResult } from "@campaignforge/CampaignOrchestration";
+import { argv } from "node:process";
 import { loadBrief } from "../server/lib/load-brief.js";
 import { runCampaign } from "../server/lib/pipeline.js";
 import { outputRoot } from "../server/lib/config.js";
+import { writeReport } from "../server/lib/report.js";
 
 function arg(flag: string): string | undefined {
   const i = argv.indexOf(flag);
   return i >= 0 ? argv[i + 1] : undefined;
-}
-
-async function writeReport(result: PipelineResult): Promise<string> {
-  const root = outputRoot();
-  await mkdir(root, { recursive: true });
-  const path = resolve(root, "report.json");
-  await writeFile(
-    path,
-    JSON.stringify({ halted: result.halted, assets: result.assets, log: result.log }, null, 2),
-  );
-  return path;
 }
 
 async function main(): Promise<void> {
@@ -52,4 +39,3 @@ main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
-void exitCode;

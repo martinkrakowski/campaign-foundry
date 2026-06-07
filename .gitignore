@@ -24,8 +24,10 @@ coverage/
 *.log
 .DS_Store
 
-# Generated creative output (binaries; see README)
-output/
+# Generated creative output (binaries; see README) — anchored so the Nitro
+# `server/routes/output/` source dir is NOT ignored.
+/output/
+/apps/api/output/
 
 # Keep per-template env examples tracked
 !.env.*.example
