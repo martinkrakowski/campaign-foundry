@@ -25,6 +25,8 @@ export interface Asset {
   logoApplied: boolean;
   /** The creative treatment id (e.g. "default", "bold-bottom", "subtle-top"). */
   treatment: string;
+  /** Background provenance: Imagen, OpenRouter, the procedural fallback, or a reused asset. */
+  backgroundSource: "imagen" | "openrouter" | "procedural" | "reused";
 }
 
 export type LogLevel = "info" | "warn" | "error";
@@ -93,6 +95,12 @@ interface RunContextValue {
   decisions: Record<string, Decision>;
   decide: (key: string, decision: Decision) => void;
   execute: () => Promise<void>;
+  /**
+   * Bumped each time a run completes. Appended to creative image URLs as a cache
+   * buster — runs overwrite the same output paths, so without it the browser
+   * keeps serving the previous render.
+   */
+  assetVersion: number;
 }
 
 const EMPTY_LOG: LogEntry[] = [];
@@ -105,6 +113,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [assetVersion, setAssetVersion] = useState(0);
 
   // Hydrate from the last persisted run so views aren't empty on first load.
   useEffect(() => {
@@ -112,7 +121,13 @@ export function RunProvider({ children }: { children: ReactNode }) {
     fetch(`${API}/campaigns/result`)
       .then((r) => r.json() as Promise<RunResult>)
       .then((d) => {
-        if (active && d.assets?.length) setResult(d);
+        // Restore any real persisted run — including a halted / log-only run with no
+        // assets (a present `log` marks a real run; the empty "no run yet" default
+        // from the API has assets:[] and log:null, which we leave as "never ran").
+        if (active && (d.assets?.length || d.log)) {
+          setResult(d);
+          if (d.assets?.length) setAssetVersion((v) => v + 1);
+        }
       })
       .catch(() => undefined);
     return () => {
@@ -146,6 +161,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
         );
       }
       setResult(data);
+      setAssetVersion((v) => v + 1);
       setDecisions({});
     } catch (e) {
       setError(e instanceof Error ? e.message : "Generation failed");
@@ -176,8 +192,9 @@ export function RunProvider({ children }: { children: ReactNode }) {
       decisions,
       decide,
       execute,
+      assetVersion,
     }),
-    [brief, result, loading, error, decisions, decide, execute],
+    [brief, result, loading, error, decisions, decide, execute, assetVersion],
   );
 
   return <RunContext.Provider value={value}>{children}</RunContext.Provider>;

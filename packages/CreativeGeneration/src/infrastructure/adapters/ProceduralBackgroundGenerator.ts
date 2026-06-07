@@ -2,6 +2,7 @@ import { createCanvas } from "@napi-rs/canvas";
 import type {
   AspectRatio,
   BackgroundContext,
+  BackgroundResult,
   ImageGeneratorPort,
   Product,
 } from "@campaignfoundry/CampaignOrchestration";
@@ -20,8 +21,8 @@ export class ProceduralBackgroundGenerator implements ImageGeneratorPort {
     product: Product,
     ratio: AspectRatio,
     _context: BackgroundContext,
-  ): Promise<Uint8Array> {
-    return this.generateGradient(product.primaryColor, ratio);
+  ): Promise<BackgroundResult> {
+    return { image: this.generateGradient(product.primaryColor, ratio), source: "procedural" };
   }
 
   private generateGradient(primaryColor: string, ratio: AspectRatio): Uint8Array {

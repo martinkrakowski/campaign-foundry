@@ -9,6 +9,7 @@ import {
   AssetReusingImageGenerator,
   GeminiImageGenerator,
   NodeCanvasCompositor,
+  OpenRouterImageGenerator,
   ProceduralBackgroundGenerator,
 } from "@campaignfoundry/CreativeGeneration";
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
@@ -22,16 +23,33 @@ import { outputRoot } from "./config.js";
 loadEnv();
 
 /**
- * Resolve the image generator. Input-asset reuse wraps whichever generator is
- * active — Google Imagen when a key is set, else the procedural gradient — so a
- * supplied asset is always reused before any generation is attempted.
+ * Resolve the image generator as a graceful fallback chain, wrapped by input-asset
+ * reuse:
+ *
+ *   reuse asset → Imagen → OpenRouter (e.g. Grok Imagine) → procedural gradient
+ *
+ * Each GenAI provider is only inserted when its key is present, so the chain is
+ * "whatever's configured, then procedural". When Imagen is rate-limited/unavailable
+ * it falls through to OpenRouter; if that's also unavailable, the offline gradient.
  */
 function imageGenerator(): ImageGeneratorPort {
   const procedural = new ProceduralBackgroundGenerator();
-  const apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
-  const generator = apiKey
-    ? new GeminiImageGenerator({ apiKey, model: process.env.IMAGEN_MODEL, fallback: procedural })
+
+  // Second GenAI source (different provider/quota) before the procedural floor.
+  const openRouterKey = process.env.OPENROUTER_API_KEY;
+  const afterImagen: ImageGeneratorPort = openRouterKey
+    ? new OpenRouterImageGenerator({
+        apiKey: openRouterKey,
+        model: process.env.OPENROUTER_IMAGE_MODEL,
+        fallback: procedural,
+      })
     : procedural;
+
+  const geminiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
+  const generator = geminiKey
+    ? new GeminiImageGenerator({ apiKey: geminiKey, model: process.env.IMAGEN_MODEL, fallback: afterImagen })
+    : afterImagen;
+
   return new AssetReusingImageGenerator(generator);
 }
 

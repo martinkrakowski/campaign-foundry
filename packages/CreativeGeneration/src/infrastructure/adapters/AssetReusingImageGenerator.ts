@@ -3,6 +3,7 @@ import { createCanvas, loadImage } from "@napi-rs/canvas";
 import type {
   AspectRatio,
   BackgroundContext,
+  BackgroundResult,
   ImageGeneratorPort,
   Product,
 } from "@campaignfoundry/CampaignOrchestration";
@@ -24,10 +25,10 @@ export class AssetReusingImageGenerator implements ImageGeneratorPort {
     product: Product,
     ratio: AspectRatio,
     context: BackgroundContext,
-  ): Promise<Uint8Array> {
+  ): Promise<BackgroundResult> {
     if (product.inputAsset) {
       const reused = await this.tryReuseAsset(product.inputAsset, ratio);
-      if (reused) return reused;
+      if (reused) return { image: reused, source: "reused" };
     }
     return this.generator.resolveBackground(product, ratio, context);
   }

@@ -104,10 +104,15 @@ yarn generate --brief briefs/sample-campaign-variants.yaml
 
 ### Run it — dev servers (API + HITL UI)
 ```bash
-yarn dev
+yarn dev   # from the REPO ROOT — Turbo starts both servers together
 ```
 - Nitro API → http://localhost:3001 (`POST /campaigns/generate`)
 - Next.js HITL UI → http://localhost:3000
+
+> Run this from the **repo root**, not `apps/web`. `yarn dev` inside `apps/web`
+> starts only the UI; the API on `:3001` won't be up, so the HITL view's pipeline
+> calls fail with `ECONNREFUSED` / a 500. (The UI surfaces this with an
+> actionable message; the API proxy logs the refused connection.)
 
 ```bash
 curl -X POST http://localhost:3001/campaigns/generate \

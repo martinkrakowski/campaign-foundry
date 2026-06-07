@@ -71,11 +71,16 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         // per ratio and shared across treatments, so variants differ only by their
         // treatment (and we don't pay for N background generations per cell).
         const background = await this.deps.imageGenerator.resolveBackground(product, ratio, context);
+        log.record(
+          "ResolveBackgroundAssets",
+          `${product.id} @ ${ratio.value} — background: ${background.source}${background.source === "procedural" ? " (Imagen unavailable — procedural fallback)" : ""}`,
+          background.source === "procedural" ? "warn" : "info",
+        );
 
         for (const treatment of treatments) {
           // 4. CompositeVariations — deterministic layer stacking, treatment-driven.
           const composite = await this.deps.compositor.compositeAsset({
-            background,
+            background: background.image,
             message: copy,
             brandColor: product.primaryColor,
             logoPath: product.logoPath,
@@ -109,6 +114,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
             passedCompliance: visual.passed,
             logoApplied: composite.logoApplied,
             treatment: treatment.id,
+            backgroundSource: background.source,
           });
           log.record(
             "CompositeVariations",

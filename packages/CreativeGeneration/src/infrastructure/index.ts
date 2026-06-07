@@ -3,4 +3,5 @@
 export * from "./adapters/AssetReusingImageGenerator.js";
 export * from "./adapters/GeminiImageGenerator.js";
 export * from "./adapters/NodeCanvasCompositor.js";
+export * from "./adapters/OpenRouterImageGenerator.js";
 export * from "./adapters/ProceduralBackgroundGenerator.js";
