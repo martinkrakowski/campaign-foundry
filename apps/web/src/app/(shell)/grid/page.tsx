@@ -191,10 +191,10 @@ function Artboard({
       className={cn(
         "group flex flex-col items-center gap-3 rounded-xl border p-3 transition-colors",
         decision === "approved"
-          ? "border-success/60"
+          ? "border-success/60 bg-success/10"
           : decision === "rejected"
-            ? "border-error/60"
-            : "border-transparent",
+            ? "border-error/60 bg-error/10"
+            : "border-border/60 bg-surface",
       )}
     >
       <div className="flex items-center gap-2 font-mono text-xs text-text-muted">
