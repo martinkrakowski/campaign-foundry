@@ -1,0 +1,9 @@
+# Rules for @hexagen-monaco/arch-linter
+# Template: modular-monolith (flexible mode)
+
+global_whitelist:
+  - "@campaignforge/shared"
+  - "@campaignforge/shared/**"
+
+test_double_rules:
+  allowed_cross_package_imports: true

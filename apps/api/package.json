@@ -1,0 +1,23 @@
+{
+  "name": "@campaignforge/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "nitro build",
+    "dev": "nitro dev",
+    "preview": "node .output/server/index.mjs",
+    "prepare": "nitro prepare",
+    "lint": "eslint server --ext .ts",
+    "typecheck": "nitro prepare && tsc --noEmit"
+  },
+  "dependencies": {
+    "nitropack": "^2.13.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "eslint": "^9.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0"
+  }
+}

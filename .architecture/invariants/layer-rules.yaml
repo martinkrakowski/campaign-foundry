@@ -1,0 +1,19 @@
+# HexaGen — Architectural Invariants
+# Template: modular-monolith (flexible mode)
+
+shared_kernel:
+  package: "@campaignforge/shared"
+  allowed_in_all_layers: true
+
+layers:
+  domain:
+    access_rule: "internal-only"
+    allowed_imports: ["@campaignforge/shared"]
+
+  application:
+    access_rule: "ports-only"
+    allowed_imports: ["domain", "@campaignforge/shared"]
+
+  infrastructure:
+    access_rule: "adapters"
+    allowed_imports: ["domain", "application", "@campaignforge/shared"]

@@ -1,0 +1,212 @@
+system: campaign-forge
+scope: '@campaignforge'
+architecture: modular-monolith
+workspaceTemplate: modular-monolith
+monorepo:
+  packageManager: yarn@4.12.0
+  linker: node-modules
+  buildTool: turbo
+  workspaces:
+    - apps/*
+    - packages/*
+  workspaceDefaults:
+    tsConfig:
+      extends: ../../tsconfig.base.json
+      compilerOptions:
+        rootDir: src
+        outDir: dist
+        composite: true
+        declaration: true
+        emitDeclarationOnly: true
+        declarationMap: true
+        tsBuildInfoFile: ./dist/.tsbuildinfo
+    packageJson:
+      scripts:
+        build: tsc
+        lint: eslint src --ext .ts,.tsx
+        typecheck: tsc --noEmit
+      devDependencies:
+        typescript: ^5.5.4
+        eslint: ^9.0.0
+        '@typescript-eslint/parser': ^8.0.0
+        '@typescript-eslint/eslint-plugin': ^8.0.0
+  turboConfig:
+    globalDependencies:
+      - '**/.env.*'
+    pipeline:
+      build:
+        dependsOn:
+          - ^build
+        outputs:
+          - dist/**
+      lint:
+        dependsOn:
+          - ^build
+      test:
+        dependsOn:
+          - ^build
+      typecheck:
+        outputs: []
+        cache: true
+generator:
+  version: 0.2.0
+  sync:
+    idempotent: true
+    createOnlyIfMissing: true
+    nonDestructive: true
+    layers:
+      domain:
+        folder: src/domain
+        subfolders:
+          - entities
+          - value_objects
+      application:
+        folder: src/application
+        subfolders:
+          - use-cases
+          - ports/in
+          - ports/out
+      infrastructure:
+        folder: src/infrastructure
+        subfolders:
+          - adapters
+    packageJson:
+      mergeStrategy: preserveExisting
+      injectIfMissing:
+        scripts:
+          build: tsc
+          lint: eslint src --ext .ts,.tsx
+          typecheck: tsc --noEmit
+    stubs:
+      enabled: true
+    apps:
+      enabled: true
+apps:
+  - name: web
+    framework: next.js
+    depends_on: &ref_0
+      - CampaignOrchestration
+      - CreativeGeneration
+      - Distribution
+      - GovernanceAndCompliance
+  - name: api
+    framework: nitro
+    depends_on: *ref_0
+bounded_contexts:
+  - name: shared
+    type: shared-kernel
+    description: Shared primitives, custom errors, base classes, utilities
+    depends_on: []
+    uiFramework: Next.js
+    apiFramework: Express
+    layers:
+      domain:
+        entities: []
+        value_objects:
+          - CustomError
+          - Identifier
+        domain_services: []
+      application:
+        use_cases: []
+        ports:
+          in: []
+          out: []
+      infrastructure:
+        adapters:
+          - Prisma.adapter.ts
+          - BullMQ.adapter.ts
+  - name: CampaignOrchestration
+    type: core
+    description: >
+      The core driving context that manages the full lifecycle of a campaign
+      brief through generation, compositing, compliance, and export.
+    depends_on:
+      - shared
+    uiFramework: Next.js
+    apiFramework: Express
+    layers:
+      domain:
+        entities:
+          - CampaignBrief
+          - GeneratedAsset
+          - Product
+        value_objects:
+          - AspectRatio
+          - ComplianceResult
+          - PipelineExecutionLog
+          - LogEntry
+          - PipelineResult
+        domain_services: []
+      application:
+        use_cases:
+          - GenerateCampaignUseCase
+        ports:
+          in: []
+          out: []
+      infrastructure:
+        adapters: []
+  - name: CreativeGeneration
+    type: core
+    description: >
+      Driven context responsible for background resolution and deterministic
+      canvas compositing. Has no knowledge of CampaignBrief or use-case logic.
+    depends_on:
+      - shared
+    uiFramework: Next.js
+    apiFramework: Express
+    layers:
+      domain:
+        entities: []
+        value_objects: []
+        domain_services: []
+      application:
+        use_cases: []
+        ports:
+          in: []
+          out:
+            - external-service-client.out-port.ts
+      infrastructure:
+        adapters: []
+  - name: GovernanceAndCompliance
+    type: core
+    description: >
+      Driven context acting as the automated circuit breaker for legal copy
+      safety and visual brand adherence.
+    depends_on:
+      - shared
+    uiFramework: Next.js
+    apiFramework: Express
+    layers:
+      domain:
+        entities: []
+        value_objects: []
+        domain_services: []
+      application:
+        use_cases: []
+        ports:
+          in: []
+          out: []
+      infrastructure:
+        adapters: []
+  - name: Distribution
+    type: core
+    description: >
+      Driven context handling file persistence and print-proof generation. Owns
+      no domain logic and is pure infrastructure.
+    depends_on:
+      - shared
+    uiFramework: Next.js
+    apiFramework: Express
+    layers:
+      domain:
+        entities: []
+        value_objects: []
+        domain_services: []
+      application:
+        use_cases: []
+        ports:
+          in: []
+          out:
+            - external-service-client.out-port.ts
+      infrastructure:
+        adapters: []

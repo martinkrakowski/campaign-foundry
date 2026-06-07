@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+.yarn/cache
+.yarn/install-state.gz
+.pnp.*
+
+# Build output
+dist/
+.turbo/
+.next/
+out/
+.nitro/
+.output/
+
+# Test / coverage
+coverage/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs & OS
+*.log
+.DS_Store
+
+# Generated creative output (binaries; see README)
+output/
+
+# Keep per-template env examples tracked
+!.env.*.example

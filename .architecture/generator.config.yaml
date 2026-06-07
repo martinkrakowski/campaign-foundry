@@ -1,0 +1,71 @@
+generator:
+  version: "1.0"
+  description: "Global invariants and safety rules"
+  workspace_template: "modular-monolith"
+
+  invariants:
+    - name: composite-safety
+      description: "Every tsconfig.json must contain paths: {} to override inherited source mappings."
+      priority: critical
+      failure: abort-and-cleanup
+
+    - name: barrel-ownership-boundary
+      description: "Barrels may only re-export types owned by the current bounded context."
+      priority: critical
+      failure: abort-and-cleanup
+
+    - name: port-single-ownership
+      description: "Each port interface belongs to exactly one bounded context."
+      priority: critical
+      failure: abort-and-cleanup
+
+    - name: dependency-consistency
+      description: "Every @campaignforge/* import must have a matching entry in package.json."
+      priority: high
+      failure: abort
+
+    - name: self-import-prevention
+      description: "No package imports itself by name."
+      priority: high
+      failure: abort
+
+    - name: signature-synchronization
+      description: "Generated consumers must derive exact signatures from the canonical port."
+      priority: high
+      failure: abort
+
+    - name: no-empty-stubs
+      description: "No empty barrels (export {}) in src/."
+      priority: medium
+      failure: warn-and-continue
+
+    - name: exports-field-mandatory
+      description: "Every package.json must include a complete exports map."
+      priority: medium
+      failure: warn-and-continue
+
+    - name: test-double-parity
+      description: "Test doubles must implement the same interface as the canonical port."
+      priority: medium
+      failure: warn-and-continue
+
+  bootstrap-sequence:
+    - load-ownership-map
+    - validate-port-ownership-map
+    - generate-package-skeleton
+    - enforce-tsconfig-paths-override
+    - generate-exports-field
+    - synchronize-signatures
+    - validate-barrel-chain
+    - enforce-dependency-consistency
+    - final-composite-reference-check
+
+  failure-behavior:
+    critical: abort-and-cleanup
+    high: abort
+    medium: warn-and-continue
+
+  ownership-registry:
+    ports:
+      ExternalServiceClient: CreativeGeneration
+      ExternalServiceClient: Distribution
