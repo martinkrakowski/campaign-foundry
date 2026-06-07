@@ -17,7 +17,7 @@ const assetSrc = (a: Asset, version: number): string =>
 
 /** Review grid — the HITL surface where a human approves or rejects creatives. */
 export default function GridPage() {
-  const { assets, decisions, decide, loading, assetVersion } = useRun();
+  const { assets, decisions, decide, loading, assetVersion, regeneratingKeys } = useRun();
   const [previewKey, setPreviewKey] = useState<string | null>(null);
   const closePreview = useCallback(() => setPreviewKey(null), []);
   // Derive the previewed asset from the live list (not a snapshot), so its
@@ -95,7 +95,10 @@ export default function GridPage() {
                       key={assetKey(asset)}
                       asset={asset}
                       version={assetVersion}
-                      loading={loading}
+                      loading={
+                        loading &&
+                        (regeneratingKeys === null || regeneratingKeys.has(assetKey(asset)))
+                      }
                       decision={decisions[assetKey(asset)]}
                       onDecide={(d) => decide(assetKey(asset), d)}
                       onPreview={() => setPreviewKey(assetKey(asset))}

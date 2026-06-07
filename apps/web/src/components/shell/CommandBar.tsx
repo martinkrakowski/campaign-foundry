@@ -1,23 +1,32 @@
 "use client";
 
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { useRun } from "@/lib/run-context";
+import { assetKey, useRun } from "@/lib/run-context";
 import { ASPECT_RATIOS } from "@/lib/aspect-ratios";
 
 interface CommandBarProps {
   onToggleTelemetry: () => void;
 }
 
-/** Floating bottom orchestrator bar: status, telemetry toggle, and Execute. */
+/** Which confirmation is open, if any. */
+type Confirm = "run" | "regenerate";
+
+/** Floating bottom orchestrator bar: status, telemetry toggle, regenerate, Execute. */
 export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
-  const { execute, loading, error, hasRun, halted, brief } = useRun();
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const { execute, regenerateRejected, loading, error, hasRun, halted, brief, assets, decisions } =
+    useRun();
+  const [confirm, setConfirm] = useState<Confirm | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
 
-  // What a run will (re)generate: products × aspect ratios × treatments.
+  // What a full run will (re)generate: products × aspect ratios × treatments.
   const expectedCount =
     brief.products.length * ASPECT_RATIOS.length * (brief.treatments?.length ?? 1);
+
+  const rejectedCount = useMemo(
+    () => assets.filter((a) => decisions[assetKey(a)] === "rejected").length,
+    [assets, decisions],
+  );
 
   const status = loading
     ? "Orchestrating…"
@@ -30,6 +39,38 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
           : "Standing by…";
 
   const statusColor = error || halted ? "text-error" : hasRun && !loading ? "text-success" : "text-text-primary";
+
+  // Confirm-dialog copy per action — the dialog itself is presentational.
+  const dialog =
+    confirm === "run"
+      ? {
+          title: hasRun ? "Regenerate the entire pipeline?" : "Run the entire pipeline?",
+          confirmLabel: hasRun ? "Regenerate" : "Generate",
+          onConfirm: execute,
+          description: (
+            <>
+              This {hasRun ? "regenerates" : "generates"} all{" "}
+              <span className="text-text-primary">{expectedCount} creatives</span> (every product ×
+              aspect ratio × treatment) and may consume GenAI quota/credits.
+            </>
+          ),
+        }
+      : confirm === "regenerate"
+        ? {
+            title: "Regenerate rejected creatives?",
+            confirmLabel: "Regenerate rejected",
+            onConfirm: regenerateRejected,
+            description: (
+              <>
+                This re-rolls only the{" "}
+                <span className="text-text-primary">{rejectedCount} rejected</span>{" "}
+                {rejectedCount === 1 ? "creative" : "creatives"} and returns{" "}
+                {rejectedCount === 1 ? "it" : "them"} to review. Approved and pending creatives are
+                left untouched.
+              </>
+            ),
+          }
+        : null;
 
   return (
     <div
@@ -55,36 +96,55 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
           <span>Toggle Telemetry Logs</span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => setConfirmOpen(true)}
-          disabled={loading}
-          aria-busy={loading || undefined}
-          aria-haspopup="dialog"
-          className="flex items-center space-x-2 rounded-full bg-white px-6 py-1.5 text-[13px] font-semibold text-black transition-colors hover:bg-gray-200 disabled:bg-surface-2 disabled:text-text-muted"
-        >
-          {loading ? (
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-          ) : (
-            <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
-              <path d="M21 12l-18 12v-24z" />
-            </svg>
+        <div className="flex items-center gap-2">
+          {/* Re-roll just the rejected creatives — only meaningful once some exist. */}
+          {rejectedCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setConfirm("regenerate")}
+              disabled={loading}
+              aria-haspopup="dialog"
+              className="flex items-center space-x-2 rounded-full border border-border bg-surface-2 px-4 py-1.5 text-[13px] text-text-primary transition-colors hover:bg-border-hover disabled:cursor-not-allowed disabled:text-text-muted"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              <span>Regenerate Rejected ({rejectedCount})</span>
+            </button>
           )}
-          <span>{loading ? "Orchestrating…" : "Execute Pipeline"}</span>
-        </button>
+
+          <button
+            type="button"
+            onClick={() => setConfirm("run")}
+            disabled={loading}
+            aria-busy={loading || undefined}
+            aria-haspopup="dialog"
+            className="flex items-center space-x-2 rounded-full bg-white px-6 py-1.5 text-[13px] font-semibold text-black transition-colors hover:bg-gray-200 disabled:bg-surface-2 disabled:text-text-muted"
+          >
+            {loading ? (
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            ) : (
+              <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path d="M21 12l-18 12v-24z" />
+              </svg>
+            )}
+            <span>{loading ? "Orchestrating…" : "Execute Pipeline"}</span>
+          </button>
+        </div>
       </div>
 
-      {confirmOpen &&
+      {dialog &&
         createPortal(
-          <ConfirmRunDialog
-            count={expectedCount}
-            regenerate={hasRun}
+          <ConfirmDialog
+            title={dialog.title}
+            description={dialog.description}
+            confirmLabel={dialog.confirmLabel}
             restoreFocusRef={barRef}
             onConfirm={() => {
-              setConfirmOpen(false);
-              void execute();
+              setConfirm(null);
+              void dialog.onConfirm();
             }}
-            onClose={() => setConfirmOpen(false)}
+            onClose={() => setConfirm(null)}
           />,
           document.body,
         )}
@@ -93,20 +153,23 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
 }
 
 /**
- * Confirms a full pipeline run — each run (re)generates every creative and can
- * consume GenAI quota/credits, so it shouldn't fire on an accidental click.
- * Portalled to <body> because the CommandBar's transform would otherwise trap a
- * fixed overlay. Closes on backdrop click, Cancel, or Escape; traps focus.
+ * Confirms a pipeline action — a run (re)generates creatives and can consume GenAI
+ * quota/credits, so it shouldn't fire on an accidental click. Presentational: the
+ * caller supplies the copy. Portalled to <body> because the CommandBar's transform
+ * would otherwise trap a fixed overlay. Closes on backdrop click, Cancel, or Escape;
+ * traps focus and restores it on close.
  */
-function ConfirmRunDialog({
-  count,
-  regenerate,
+function ConfirmDialog({
+  title,
+  description,
+  confirmLabel,
   restoreFocusRef,
   onConfirm,
   onClose,
 }: {
-  count: number;
-  regenerate: boolean;
+  title: string;
+  description: ReactNode;
+  confirmLabel: string;
   restoreFocusRef?: RefObject<HTMLElement | null>;
   onConfirm: () => void;
   onClose: () => void;
@@ -140,9 +203,9 @@ function ConfirmRunDialog({
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
-      // Restore focus to the trigger only if it's still focusable. Confirming
-      // disables the Execute button (loading), so focusing it would silently drop
-      // focus to <body>; fall back to a stable container in that case.
+      // Restore focus to the trigger only if it's still focusable. Confirming a run
+      // disables the trigger (loading), so focusing it would silently drop focus to
+      // <body>; fall back to a stable container in that case.
       const prev = previouslyFocused;
       if (prev && prev.isConnected && !(prev as HTMLButtonElement).disabled) {
         prev.focus();
@@ -159,20 +222,14 @@ function ConfirmRunDialog({
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label="Confirm pipeline run"
+      aria-label="Confirm pipeline action"
     >
       <div
         className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-base font-semibold text-white">
-          {regenerate ? "Regenerate the entire pipeline?" : "Run the entire pipeline?"}
-        </h2>
-        <p className="mt-2 text-[13px] leading-5 text-text-muted">
-          This {regenerate ? "regenerates" : "generates"} all{" "}
-          <span className="text-text-primary">{count} creatives</span> (every product × aspect
-          ratio × treatment) and may consume GenAI quota/credits.
-        </p>
+        <h2 className="text-base font-semibold text-white">{title}</h2>
+        <p className="mt-2 text-[13px] leading-5 text-text-muted">{description}</p>
         <div className="mt-5 flex justify-end gap-3">
           <button
             type="button"
@@ -187,7 +244,7 @@ function ConfirmRunDialog({
             onClick={onConfirm}
             className="rounded-full bg-white px-5 py-1.5 text-[13px] font-semibold text-black transition-colors hover:bg-gray-200"
           >
-            {regenerate ? "Regenerate" : "Generate"}
+            {confirmLabel}
           </button>
         </div>
       </div>
