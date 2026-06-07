@@ -1,4 +1,4 @@
-import type { CampaignBrief } from "@campaignforge/CampaignOrchestration";
+import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { parseBrief } from "../../lib/load-brief.js";
 import { runCampaign } from "../../lib/pipeline.js";
 import { writeReport } from "../../lib/report.js";

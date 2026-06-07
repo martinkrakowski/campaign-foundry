@@ -1,5 +1,5 @@
-system: campaign-forge
-scope: '@campaignforge'
+system: campaign-foundry
+scope: '@campaignfoundry'
 architecture: modular-monolith
 workspaceTemplate: modular-monolith
 monorepo:

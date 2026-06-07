@@ -1,4 +1,4 @@
-import { ok, err, type Result } from "@campaignforge/shared";
+import { ok, err, type Result } from "@campaignfoundry/shared";
 
 export type AspectRatioValue = "1:1" | "9:16" | "16:9";
 

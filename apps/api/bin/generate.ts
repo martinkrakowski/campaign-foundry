@@ -11,7 +11,7 @@ function arg(flag: string): string | undefined {
 
 async function main(): Promise<void> {
   const briefPath = arg("--brief") ?? "briefs/sample-campaign.yaml";
-  console.log(`\n  Campaign Forge — generating from ${briefPath}\n`);
+  console.log(`\n  Campaign Foundry — generating from ${briefPath}\n`);
 
   const brief = await loadBrief(briefPath);
   const result = await runCampaign(brief);

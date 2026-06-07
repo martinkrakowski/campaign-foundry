@@ -1,5 +1,5 @@
 {
-  "name": "@campaignforge/api",
+  "name": "@campaignfoundry/api",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -12,11 +12,11 @@
     "typecheck": "nitro prepare && tsc --noEmit"
   },
   "dependencies": {
-    "@campaignforge/CampaignOrchestration": "workspace:*",
-    "@campaignforge/CreativeGeneration": "workspace:*",
-    "@campaignforge/Distribution": "workspace:*",
-    "@campaignforge/GovernanceAndCompliance": "workspace:*",
-    "@campaignforge/shared": "workspace:*",
+    "@campaignfoundry/CampaignOrchestration": "workspace:*",
+    "@campaignfoundry/CreativeGeneration": "workspace:*",
+    "@campaignfoundry/Distribution": "workspace:*",
+    "@campaignfoundry/GovernanceAndCompliance": "workspace:*",
+    "@campaignfoundry/shared": "workspace:*",
     "js-yaml": "^4.1.0",
     "nitropack": "^2.13.0"
   },

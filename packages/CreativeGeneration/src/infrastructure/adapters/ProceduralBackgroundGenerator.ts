@@ -4,7 +4,7 @@ import type {
   AspectRatio,
   ImageGeneratorPort,
   Product,
-} from "@campaignforge/CampaignOrchestration";
+} from "@campaignfoundry/CampaignOrchestration";
 import { hexToRgb } from "./canvas-util.js";
 
 /**

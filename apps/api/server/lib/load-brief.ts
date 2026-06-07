@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import * as yaml from "js-yaml";
-import type { CampaignBrief } from "@campaignforge/CampaignOrchestration";
+import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 
 const REQUIRED_FIELDS = ["id", "targetRegion", "targetAudience", "campaignMessage", "products"] as const;
 

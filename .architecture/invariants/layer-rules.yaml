@@ -2,18 +2,18 @@
 # Template: modular-monolith (flexible mode)
 
 shared_kernel:
-  package: "@campaignforge/shared"
+  package: "@campaignfoundry/shared"
   allowed_in_all_layers: true
 
 layers:
   domain:
     access_rule: "internal-only"
-    allowed_imports: ["@campaignforge/shared"]
+    allowed_imports: ["@campaignfoundry/shared"]
 
   application:
     access_rule: "ports-only"
-    allowed_imports: ["domain", "@campaignforge/shared"]
+    allowed_imports: ["domain", "@campaignfoundry/shared"]
 
   infrastructure:
     access_rule: "adapters"
-    allowed_imports: ["domain", "application", "@campaignforge/shared"]
+    allowed_imports: ["domain", "application", "@campaignfoundry/shared"]

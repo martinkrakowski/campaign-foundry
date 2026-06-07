@@ -1,5 +1,5 @@
 {
-  "name": "@campaignforge/CampaignOrchestration",
+  "name": "@campaignfoundry/CampaignOrchestration",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@campaignforge/shared": "workspace:*"
+    "@campaignfoundry/shared": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.0.0"

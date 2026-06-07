@@ -1,5 +1,5 @@
 import { createCanvas, loadImage } from "@napi-rs/canvas";
-import type { CompliancePort, ComplianceResult } from "@campaignforge/CampaignOrchestration";
+import type { CompliancePort, ComplianceResult } from "@campaignfoundry/CampaignOrchestration";
 
 /** Prohibited promotional terminology — any hit fails the legal gate (ZeroToleranceLegalGate). */
 const PROHIBITED_TERMS = [

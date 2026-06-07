@@ -2,14 +2,14 @@ import {
   GenerateCampaignUseCase,
   type CampaignBrief,
   type PipelineResult,
-} from "@campaignforge/CampaignOrchestration";
+} from "@campaignfoundry/CampaignOrchestration";
 import {
   NodeCanvasCompositor,
   ProceduralBackgroundGenerator,
-} from "@campaignforge/CreativeGeneration";
-import { BrandComplianceChecker } from "@campaignforge/GovernanceAndCompliance";
-import { FileSystemExporter } from "@campaignforge/Distribution";
-import type { Result } from "@campaignforge/shared";
+} from "@campaignfoundry/CreativeGeneration";
+import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
+import { FileSystemExporter } from "@campaignfoundry/Distribution";
+import type { Result } from "@campaignfoundry/shared";
 import { outputRoot } from "./config.js";
 
 /**

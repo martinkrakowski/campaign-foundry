@@ -1,6 +1,6 @@
 import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
 import type { PipelineResult } from "../../../domain/value-objects/PipelineResult.vo.js";
-import type { Result } from "@campaignforge/shared";
+import type { Result } from "@campaignfoundry/shared";
 
 /**
  * CampaignPipelinePort — the single inbound entry-point contract. Every driving

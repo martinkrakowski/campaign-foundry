@@ -1,4 +1,4 @@
-import { ok, err, type Result } from "@campaignforge/shared";
+import { ok, err, type Result } from "@campaignfoundry/shared";
 import type { CampaignBrief } from "../../domain/entities/CampaignBrief.js";
 import type { GeneratedAsset } from "../../domain/entities/GeneratedAsset.js";
 import { AspectRatio } from "../../domain/value-objects/AspectRatio.vo.js";

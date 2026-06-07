@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata = {
-  title: "Campaign Forge — Creative Review",
+  title: "Campaign Foundry — Creative Review",
   description: "Human-in-the-loop review for automated social ad creatives",
 };
 
