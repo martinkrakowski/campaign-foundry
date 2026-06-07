@@ -5,21 +5,12 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
-  },
-  "scripts": {
-    "build": "tsc",
-    "lint": "eslint . --ext .ts,.tsx",
-    "typecheck": "tsc --noEmit"
-  },
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "scripts": { "build": "tsc", "lint": "eslint . --ext .ts,.tsx", "typecheck": "tsc --noEmit" },
   "dependencies": {
-    "@campaignforge/shared": "workspace:*"
+    "@campaignforge/CampaignOrchestration": "workspace:*",
+    "@campaignforge/shared": "workspace:*",
+    "pdf-lib": "^1.17.1"
   },
-  "devDependencies": {
-    "typescript": "^5.0.0"
-  }
+  "devDependencies": { "typescript": "^5.0.0", "@types/node": "^20.11.0" }
 }
