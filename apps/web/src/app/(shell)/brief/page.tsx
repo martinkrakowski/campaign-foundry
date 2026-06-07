@@ -2,8 +2,8 @@
 
 import type { CampaignBrief, Product } from "@campaignfoundry/CampaignOrchestration";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { useRun } from "@/lib/run-context";
+import { useRef, useState } from "react";
+import { API, useRun } from "@/lib/run-context";
 import { Button, Input } from "@/components/ui";
 
 type ProductDraft = { id: string; name: string; primaryColor: string; logoPath: string };
@@ -112,18 +112,12 @@ export default function BriefPage() {
                 onChange={(v) => setProduct(i, { name: v })}
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <LabeledInput
-                label="Primary Colour"
-                value={product.primaryColor}
-                onChange={(v) => setProduct(i, { primaryColor: v })}
-              />
-              <LabeledInput
-                label="Logo Path"
-                value={product.logoPath}
-                onChange={(v) => setProduct(i, { logoPath: v })}
-              />
-            </div>
+            <LabeledInput
+              label="Primary Colour"
+              value={product.primaryColor}
+              onChange={(v) => setProduct(i, { primaryColor: v })}
+            />
+            <LogoField value={product.logoPath} onChange={(v) => setProduct(i, { logoPath: v })} />
             <Button variant="ghost" size="sm" onClick={() => removeProduct(i)}>
               Remove
             </Button>
@@ -155,5 +149,105 @@ function LabeledInput({
       <span className="mb-1.5 block text-[11px] text-text-muted">{label}</span>
       <Input value={value} onChange={(e) => onChange(e.target.value)} />
     </label>
+  );
+}
+
+const ACCEPTED_LOGO_TYPES = ["image/png", "image/jpeg", "image/webp"];
+const MAX_LOGO_BYTES = 2 * 1024 * 1024;
+
+/** Build the proxied preview URL for a repo-relative `assets/...` logo path. */
+const logoSrc = (path: string): string => `${API}/assets/${path.replace(/^assets\//, "")}`;
+
+/** Read a File as a base64 data URL (for upload + instant preview). */
+const readAsDataUrl = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read file"));
+    reader.readAsDataURL(file);
+  });
+
+/**
+ * Logo field: a thumbnail preview, the editable repo-relative path, and an upload
+ * button. Uploading sends the file to /assets/logo and sets the path to the stored
+ * location; the path stays editable so existing `assets/...` references still work.
+ */
+function LogoField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const upload = async (file: File) => {
+    setError(null);
+    if (!ACCEPTED_LOGO_TYPES.includes(file.type)) {
+      setError("Use a PNG, JPEG, or WebP image.");
+      return;
+    }
+    if (file.size > MAX_LOGO_BYTES) {
+      setError("Logo must be 2 MB or smaller.");
+      return;
+    }
+    setUploading(true);
+    try {
+      const dataUrl = await readAsDataUrl(file);
+      const res = await fetch(`${API}/assets/logo`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dataUrl }),
+      });
+      const data = (await res.json()) as { path?: string; error?: string };
+      if (!res.ok || !data.path) throw new Error(data.error ?? `Upload failed (HTTP ${res.status}).`);
+      onChange(data.path);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div>
+      <span className="mb-1.5 block text-[11px] text-text-muted">Logo</span>
+      <div className="flex items-center gap-3">
+        {value ? (
+          // Plain <img>: an arbitrary user-supplied logo, not a known-size static asset.
+          <img
+            src={logoSrc(value)}
+            alt="Logo preview"
+            className="h-10 w-10 shrink-0 rounded-md border border-border bg-surface-2 object-contain p-1"
+          />
+        ) : (
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-dashed border-border text-[10px] text-text-muted">
+            none
+          </div>
+        )}
+        <Input
+          value={value}
+          placeholder="assets/inputs/logo.png"
+          onChange={(e) => onChange(e.target.value)}
+        />
+        <input
+          ref={fileRef}
+          type="file"
+          accept={ACCEPTED_LOGO_TYPES.join(",")}
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void upload(file);
+            e.target.value = "";
+          }}
+        />
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          disabled={uploading}
+          onClick={() => fileRef.current?.click()}
+        >
+          {uploading ? "Uploading…" : "Upload"}
+        </Button>
+      </div>
+      {error && <p className="mt-1.5 text-[11px] text-error">{error}</p>}
+    </div>
   );
 }

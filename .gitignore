@@ -30,5 +30,8 @@ coverage/
 /output/
 /apps/api/output/
 
+# User-uploaded logos (runtime, shared-mode) — tracked input logos under assets/ stay.
+/assets/uploads/
+
 # Keep per-template env examples tracked
 !.env.*.example
