@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRun } from "@/lib/run-context";
 
 interface CommandBarProps {
@@ -8,7 +10,11 @@ interface CommandBarProps {
 
 /** Floating bottom orchestrator bar: status, telemetry toggle, and Execute. */
 export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
-  const { execute, loading, error, hasRun, halted } = useRun();
+  const { execute, loading, error, hasRun, halted, brief } = useRun();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  // What a run will (re)generate: products × aspect ratios (3) × treatments.
+  const expectedCount = brief.products.length * 3 * (brief.treatments?.length ?? 1);
 
   const status = loading
     ? "Orchestrating…"
@@ -44,9 +50,10 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
 
         <button
           type="button"
-          onClick={execute}
+          onClick={() => setConfirmOpen(true)}
           disabled={loading}
           aria-busy={loading || undefined}
+          aria-haspopup="dialog"
           className="flex items-center space-x-2 rounded-full bg-white px-6 py-1.5 text-[13px] font-semibold text-black transition-colors hover:bg-gray-200 disabled:bg-surface-2 disabled:text-text-muted"
         >
           {loading ? (
@@ -58,6 +65,113 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
           )}
           <span>{loading ? "Orchestrating…" : "Execute Pipeline"}</span>
         </button>
+      </div>
+
+      {confirmOpen &&
+        createPortal(
+          <ConfirmRunDialog
+            count={expectedCount}
+            regenerate={hasRun}
+            onConfirm={() => {
+              setConfirmOpen(false);
+              void execute();
+            }}
+            onClose={() => setConfirmOpen(false)}
+          />,
+          document.body,
+        )}
+    </div>
+  );
+}
+
+/**
+ * Confirms a full pipeline run — each run (re)generates every creative and can
+ * consume GenAI quota/credits, so it shouldn't fire on an accidental click.
+ * Portalled to <body> because the CommandBar's transform would otherwise trap a
+ * fixed overlay. Closes on backdrop click, Cancel, or Escape; traps focus.
+ */
+function ConfirmRunDialog({
+  count,
+  regenerate,
+  onConfirm,
+  onClose,
+}: {
+  count: number;
+  regenerate: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    confirmRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const focusables = dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button, [href], [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusables || focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      previouslyFocused?.focus?.();
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      ref={dialogRef}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-8 backdrop-blur-sm"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Confirm pipeline run"
+    >
+      <div
+        className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-base font-semibold text-white">
+          {regenerate ? "Regenerate the entire pipeline?" : "Run the entire pipeline?"}
+        </h2>
+        <p className="mt-2 text-[13px] leading-5 text-text-muted">
+          This {regenerate ? "regenerates" : "generates"} all{" "}
+          <span className="text-text-primary">{count} creatives</span> (every product × aspect
+          ratio × treatment) and may consume GenAI quota/credits.
+        </p>
+        <div className="mt-5 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-border px-4 py-1.5 text-[13px] text-text-muted transition-colors hover:text-white"
+          >
+            Cancel
+          </button>
+          <button
+            ref={confirmRef}
+            type="button"
+            onClick={onConfirm}
+            className="rounded-full bg-white px-5 py-1.5 text-[13px] font-semibold text-black transition-colors hover:bg-gray-200"
+          >
+            {regenerate ? "Regenerate" : "Generate"}
+          </button>
+        </div>
       </div>
     </div>
   );
