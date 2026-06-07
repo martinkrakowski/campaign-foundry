@@ -61,7 +61,7 @@ export default function BriefPage() {
   };
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-6 overflow-y-auto p-4 pb-40 sm:p-8">
+    <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-6 overflow-y-auto p-4 pb-12 sm:p-8">
       <div>
         <h2 className="text-xl font-bold text-white">Campaign Brief</h2>
         <p className="text-[13px] text-text-muted">Edit the brief the orchestrator runs against.</p>

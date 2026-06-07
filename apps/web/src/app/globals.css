@@ -30,4 +30,10 @@
   ::-webkit-scrollbar-thumb:hover {
     background: var(--color-border-hover);
   }
+  /* The intersection of a horizontal + vertical scrollbar defaults to an opaque
+     light square (visible in the corner of the scrollable compliance table) —
+     blend it into the surface. */
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }

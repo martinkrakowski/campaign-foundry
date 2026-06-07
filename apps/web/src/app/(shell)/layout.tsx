@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { RunProvider } from "@/lib/run-context";
 import { Header } from "@/components/shell/Header";
 import { Sidebar } from "@/components/shell/Sidebar";
@@ -14,6 +15,10 @@ import { TelemetryDrawer } from "@/components/shell/TelemetryDrawer";
  */
 export default function ShellLayout({ children }: { children: ReactNode }) {
   const [terminalOpen, setTerminalOpen] = useState(false);
+  // The orchestrator (Execute + telemetry) only belongs on the review grid — that's
+  // where the creatives and the approve/reject flow live. Other views are read-only
+  // reports, so the floating bar would just obscure content there.
+  const showOrchestrator = usePathname().startsWith("/grid");
 
   return (
     <RunProvider>
@@ -26,8 +31,12 @@ export default function ShellLayout({ children }: { children: ReactNode }) {
               its own container instead of stretching the whole column past the viewport. */}
           <main className="relative flex h-full min-w-0 flex-1 flex-col">
             <div className="relative flex-1 overflow-auto rounded-xl">{children}</div>
-            <TelemetryDrawer open={terminalOpen} onClose={() => setTerminalOpen(false)} />
-            <CommandBar onToggleTelemetry={() => setTerminalOpen((v) => !v)} />
+            {showOrchestrator && (
+              <>
+                <TelemetryDrawer open={terminalOpen} onClose={() => setTerminalOpen(false)} />
+                <CommandBar onToggleTelemetry={() => setTerminalOpen((v) => !v)} />
+              </>
+            )}
           </main>
         </div>
       </div>
