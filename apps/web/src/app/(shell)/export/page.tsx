@@ -13,6 +13,12 @@ export default function ExportPage() {
     [assets, decisions],
   );
 
+  // Awaiting review — undecided only (excludes rejected, which aren't "pending").
+  const pending = useMemo(
+    () => assets.filter((a) => decisions[assetKey(a)] === undefined).length,
+    [assets, decisions],
+  );
+
   // One proof PDF per product that has at least one approved creative; dedupe by path.
   const proofs = useMemo(() => {
     const map = new Map<string, string>();
@@ -37,7 +43,7 @@ export default function ExportPage() {
         <h2 className="mb-6 text-xl font-bold text-white">Print Export Queue</h2>
         <p className="max-w-md text-text-muted">
           No creatives approved yet. Approve creatives in the <span className="text-text-primary">Grid</span> to
-          add them here — only approved creatives are exported ({assets.length} pending review).
+          add them here — only approved creatives are exported ({pending} pending review).
         </p>
       </div>
     );
