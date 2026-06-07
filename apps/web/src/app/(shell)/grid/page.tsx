@@ -18,8 +18,19 @@ const assetSrc = (a: Asset, version: number): string =>
 /** Review grid — the HITL surface where a human approves or rejects creatives. */
 export default function GridPage() {
   const { assets, decisions, decide, loading, assetVersion } = useRun();
-  const [preview, setPreview] = useState<Asset | null>(null);
-  const closePreview = useCallback(() => setPreview(null), []);
+  const [previewKey, setPreviewKey] = useState<string | null>(null);
+  const closePreview = useCallback(() => setPreviewKey(null), []);
+  // Derive the previewed asset from the live list (not a snapshot), so its
+  // compliance/logo metadata can never go stale against the cache-busted image; if
+  // a run replaces or removes it, the lookup returns null and the modal closes.
+  const previewAsset = useMemo(
+    () => (previewKey ? (assets.find((a) => assetKey(a) === previewKey) ?? null) : null),
+    [previewKey, assets],
+  );
+  // Close the modal when a run starts so it never shows mid-regeneration metadata.
+  useEffect(() => {
+    if (loading) setPreviewKey(null);
+  }, [loading]);
 
   // Pivot: product → ratio → [treatment variants]. The matrix is the story —
   // each ratio slot shows its treatments side-by-side for direct comparison.
@@ -69,7 +80,7 @@ export default function GridPage() {
                       loading={loading}
                       decision={decisions[assetKey(asset)]}
                       onDecide={(d) => decide(assetKey(asset), d)}
-                      onPreview={() => setPreview(asset)}
+                      onPreview={() => setPreviewKey(assetKey(asset))}
                     />
                   ))}
                 </div>
@@ -79,8 +90,8 @@ export default function GridPage() {
         </section>
       ))}
 
-      {preview && (
-        <PreviewModal asset={preview} version={assetVersion} onClose={closePreview} />
+      {previewAsset && (
+        <PreviewModal asset={previewAsset} version={assetVersion} onClose={closePreview} />
       )}
     </div>
   );
