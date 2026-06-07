@@ -1,6 +1,6 @@
 "use client";
 
-import type { CampaignBrief, Product } from "@campaignforge/CampaignOrchestration";
+import type { CampaignBrief, Product } from "@campaignfoundry/CampaignOrchestration";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useRun } from "@/lib/run-context";

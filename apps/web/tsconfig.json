@@ -7,7 +7,7 @@
       "@/*": [
         "src/*"
       ],
-      "@campaignforge/*": [
+      "@campaignfoundry/*": [
         "../../packages/*/src/index.ts"
       ]
     },

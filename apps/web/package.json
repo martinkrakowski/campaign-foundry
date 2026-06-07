@@ -1,5 +1,5 @@
 {
-  "name": "@campaignforge/web",
+  "name": "@campaignfoundry/web",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@campaignforge/CampaignOrchestration": "workspace:*",
+    "@campaignfoundry/CampaignOrchestration": "workspace:*",
     "clsx": "^2.1.0",
     "next": "^15.0.0",
     "react": "^19.0.0",

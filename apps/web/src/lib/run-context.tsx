@@ -1,6 +1,6 @@
 "use client";
 
-import type { CampaignBrief } from "@campaignforge/CampaignOrchestration";
+import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import {
   createContext,
   useCallback,
