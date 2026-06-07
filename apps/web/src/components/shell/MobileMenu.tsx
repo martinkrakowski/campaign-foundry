@@ -119,7 +119,7 @@ export function MobileMenu({ open, onClose, tabs }: MobileMenuProps) {
           })}
         </nav>
 
-        <SidebarContent />
+        <SidebarContent onNavigate={onClose} />
       </div>
     </div>,
     document.body,

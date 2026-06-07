@@ -19,8 +19,12 @@ export function Sidebar() {
 /**
  * The brief + project-bin panel body, without the desktop `<aside>` chrome — shared
  * by the desktop Sidebar and the mobile fullscreen menu so both stay in sync.
+ *
+ * `onNavigate` fires when an in-panel link is clicked; the mobile menu passes its
+ * close handler so following the "Edit" link dismisses the overlay even when it
+ * points at the current route (where a route-change listener wouldn't fire).
  */
-export function SidebarContent() {
+export function SidebarContent({ onNavigate }: { onNavigate?: () => void } = {}) {
   const { brief } = useRun();
   const aspectsLabel = "1:1, 9:16, 16:9";
 
@@ -31,6 +35,7 @@ export function SidebarContent() {
           aside={
             <Link
               href="/brief"
+              onClick={onNavigate}
               className="text-[11px] font-medium text-text-muted transition-colors hover:text-white"
             >
               Edit
