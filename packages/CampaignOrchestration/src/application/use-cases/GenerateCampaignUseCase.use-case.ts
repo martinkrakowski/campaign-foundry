@@ -5,7 +5,10 @@ import { AspectRatio } from "../../domain/value-objects/AspectRatio.vo.js";
 import { DEFAULT_TREATMENT, SAFE_ID_PATTERN } from "../../domain/value-objects/Treatment.vo.js";
 import { PipelineExecutionLog } from "../../domain/value-objects/PipelineExecutionLog.vo.js";
 import type { PipelineResult } from "../../domain/value-objects/PipelineResult.vo.js";
-import type { CampaignPipelinePort } from "../ports/in/CampaignPipelinePort.js";
+import type {
+  CampaignExecutionOptions,
+  CampaignPipelinePort,
+} from "../ports/in/CampaignPipelinePort.js";
 import type { CompliancePort } from "../ports/out/CompliancePort.js";
 import type { CompositorPort } from "../ports/out/CompositorPort.js";
 import type { ExportPort } from "../ports/out/ExportPort.js";
@@ -32,7 +35,10 @@ export interface GenerateCampaignDeps {
 export class GenerateCampaignUseCase implements CampaignPipelinePort {
   constructor(private readonly deps: GenerateCampaignDeps) {}
 
-  async execute(brief: CampaignBrief): Promise<Result<PipelineResult, Error>> {
+  async execute(
+    brief: CampaignBrief,
+    options?: CampaignExecutionOptions,
+  ): Promise<Result<PipelineResult, Error>> {
     const log = new PipelineExecutionLog(brief.id);
 
     // 1. ValidateBriefIntegrity — MinimumProductsRule, before any port is called.
@@ -51,7 +57,33 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     // Only namespace output by treatment when there's variation to disambiguate, so a
     // single-treatment brief keeps the documented `<product>/<ratio>.png` layout.
     const namespaceByTreatment = treatments.length > 1;
-    log.totalOperations = brief.products.length * ratios.length * treatments.length;
+
+    // Selective regeneration (HITL re-roll): when `regenerateOnly` is present, only the
+    // listed cells run — every other cell is skipped, leaving its output untouched.
+    // Targets are matched by the same identity the review UI keys on. Absent → full run.
+    const selective = options?.regenerateOnly !== undefined;
+    const targetKeys = selective
+      ? new Set(
+          (options?.regenerateOnly ?? []).map(
+            (t) => `${t.productId}/${t.aspectRatio}/${t.treatment}`,
+          ),
+        )
+      : null;
+    const isTarget = (productId: string, ratioValue: string, treatmentId: string): boolean =>
+      targetKeys === null || targetKeys.has(`${productId}/${ratioValue}/${treatmentId}`);
+
+    // Count only the cells this run will actually touch (full matrix, or the subset).
+    log.totalOperations = brief.products.reduce(
+      (total, product) =>
+        total +
+        ratios.reduce(
+          (perProduct, ratio) =>
+            perProduct +
+            treatments.filter((t) => isTarget(product.id, ratio.value, t.id)).length,
+          0,
+        ),
+      0,
+    );
     // LocalizedMessageFallback — the use case resolves the copy; adapters never do.
     const copy = brief.localizedMessage ?? brief.campaignMessage;
     // Campaign context handed to the image generator for personalized (GenAI) backgrounds.
@@ -67,6 +99,11 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       let proofSource: Uint8Array | undefined;
 
       for (const ratio of ratios) {
+        // On a selective run, only the targeted treatments of this product×ratio run;
+        // skip the whole ratio (and its background generation) when none are targeted.
+        const ratioTreatments = treatments.filter((t) => isTarget(product.id, ratio.value, t.id));
+        if (ratioTreatments.length === 0) continue;
+
         // 3. ResolveBackgroundAssets — reuse inputAsset or generate. Resolved once
         // per ratio and shared across treatments, so variants differ only by their
         // treatment (and we don't pay for N background generations per cell).
@@ -77,7 +114,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
           background.source === "procedural" ? "warn" : "info",
         );
 
-        for (const treatment of treatments) {
+        for (const treatment of ratioTreatments) {
           // 4. CompositeVariations — deterministic layer stacking, treatment-driven.
           const composite = await this.deps.compositor.compositeAsset({
             background: background.image,
@@ -100,8 +137,11 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
             ? `${product.id}/${ratio.slug}/${treatment.id}.png`
             : `${product.id}/${ratio.slug}.png`;
           await this.deps.exporter.saveToDirectory(composite.image, outputPath);
-          // Proof = the first treatment's 1:1 hero (one proof per product).
-          if (proofSource === undefined || (ratio.value === "1:1" && treatment === treatments[0])) {
+          // Proof = the first treatment's 1:1 hero (one proof per product). On a
+          // selective run, only re-proof when the hero itself is re-rolled — otherwise
+          // the existing proof stays valid and an off-hero cell mustn't overwrite it.
+          const isHero = ratio.value === "1:1" && treatment === treatments[0];
+          if (selective ? isHero : proofSource === undefined || isHero) {
             proofSource = composite.image;
           }
 
