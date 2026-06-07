@@ -2,6 +2,15 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "jsx": "preserve",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "src/*"
+      ],
+      "@campaignfoundry/*": [
+        "../../packages/*/src/index.ts"
+      ]
+    },
     "lib": [
       "dom",
       "dom.iterable",
