@@ -129,8 +129,22 @@ export function RunProvider({ children }: { children: ReactNode }) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(brief),
       });
-      const data = (await res.json()) as RunResult;
-      if (!res.ok) throw new Error(data.error ?? "Generation failed");
+      // The pipeline API is reached through a same-origin proxy; when it isn't
+      // running the proxy returns a non-JSON 5xx, so parse defensively and surface
+      // an actionable message instead of a raw "Unexpected token" JSON error.
+      const raw = await res.text();
+      let data: RunResult | null = null;
+      try {
+        data = JSON.parse(raw) as RunResult;
+      } catch {
+        data = null;
+      }
+      if (!res.ok || !data) {
+        throw new Error(
+          data?.error ??
+            `Pipeline API unreachable (HTTP ${res.status}). Start the full stack with \`yarn dev\` from the repo root (it runs the API on :3001 alongside this UI).`,
+        );
+      }
       setResult(data);
       setDecisions({});
     } catch (e) {
