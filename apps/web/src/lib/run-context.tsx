@@ -7,6 +7,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -138,19 +139,35 @@ export function RunProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Persist approve/reject decisions across reloads: load once on mount, save on
-  // change. (execute clears decisions for a fresh run, which the save effect then
-  // flushes to storage.) Best-effort — ignores private-mode/quota failures.
+  // Persist approve/reject decisions across reloads: load (validated) once on mount,
+  // save on change. (execute clears decisions for a fresh run, which the save effect
+  // then flushes.) Best-effort — ignores private-mode/quota failures.
+  const skipFirstDecisionsSave = useRef(true);
+
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(DECISIONS_KEY);
-      if (raw) setDecisions(JSON.parse(raw) as Record<string, Decision>);
+      // Validate before trusting storage: a stray "null"/array/primitive must not
+      // become `decisions`, or consumers indexing decisions[key] would throw.
+      const parsed: unknown = JSON.parse(localStorage.getItem(DECISIONS_KEY) ?? "null");
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const restored: Record<string, Decision> = {};
+        for (const [key, value] of Object.entries(parsed)) {
+          if (value === "approved" || value === "rejected") restored[key] = value;
+        }
+        setDecisions(restored);
+      }
     } catch {
-      /* unreadable storage — start with no decisions */
+      /* unreadable/malformed storage — start with no decisions */
     }
   }, []);
 
   useEffect(() => {
+    // Skip the initial render so the empty starting state can't overwrite stored
+    // decisions before the load effect's update commits.
+    if (skipFirstDecisionsSave.current) {
+      skipFirstDecisionsSave.current = false;
+      return;
+    }
     try {
       localStorage.setItem(DECISIONS_KEY, JSON.stringify(decisions));
     } catch {
