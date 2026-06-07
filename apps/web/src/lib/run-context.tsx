@@ -61,6 +61,9 @@ export type Decision = "approved" | "rejected";
 /** Stable key for an asset across its product × aspect-ratio × treatment identity. */
 export const assetKey = (a: Asset): string => `${a.productId}/${a.aspectRatio}/${a.treatment}`;
 
+/** localStorage key for persisted HITL approve/reject decisions. */
+const DECISIONS_KEY = "cf:decisions";
+
 /**
  * The brief the shell starts with. The HITL surface (the /brief view) edits a
  * copy of this; `execute()` sends whatever the current brief is.
@@ -134,6 +137,26 @@ export function RunProvider({ children }: { children: ReactNode }) {
       active = false;
     };
   }, []);
+
+  // Persist approve/reject decisions across reloads: load once on mount, save on
+  // change. (execute clears decisions for a fresh run, which the save effect then
+  // flushes to storage.) Best-effort — ignores private-mode/quota failures.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DECISIONS_KEY);
+      if (raw) setDecisions(JSON.parse(raw) as Record<string, Decision>);
+    } catch {
+      /* unreadable storage — start with no decisions */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(DECISIONS_KEY, JSON.stringify(decisions));
+    } catch {
+      /* storage unavailable — decisions stay in-memory for the session */
+    }
+  }, [decisions]);
 
   const execute = useCallback(async () => {
     setLoading(true);
