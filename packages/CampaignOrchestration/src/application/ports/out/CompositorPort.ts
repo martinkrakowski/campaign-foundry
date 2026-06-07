@@ -5,6 +5,8 @@ export interface CompositeRequest {
   readonly background: Uint8Array;
   /** The resolved campaign copy (localized message or fallback). */
   readonly message: string;
+  /** The product's primary brand colour (hex) — rendered as the brand accent. */
+  readonly brandColor: string;
   readonly logoPath: string;
   readonly ratio: AspectRatio;
 }

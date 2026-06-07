@@ -68,6 +68,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         const composite = await this.deps.compositor.compositeAsset({
           background,
           message: copy,
+          brandColor: product.primaryColor,
           logoPath: product.logoPath,
           ratio,
         });

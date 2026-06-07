@@ -4,7 +4,7 @@ import type {
   CompositeRequest,
   CompositorPort,
 } from "@campaignfoundry/CampaignOrchestration";
-import { wrapText } from "./canvas-util.js";
+import { hexToRgb, wrapText } from "./canvas-util.js";
 
 /**
  * NodeCanvasCompositor — CompositorPort adapter.
@@ -12,8 +12,9 @@ import { wrapText } from "./canvas-util.js";
  * Renders one creative with strict, deterministic layer stacking:
  *   1. background buffer
  *   2. dark bottom gradient (WCAG-legible copy)
- *   3. centred campaign message
- *   4. brand logo, top-right
+ *   3. brand-colour accent footer (on-brand presence + compliance anchor)
+ *   4. centred campaign message
+ *   5. brand logo, top-right
  */
 export class NodeCanvasCompositor implements CompositorPort {
   async compositeAsset(request: CompositeRequest): Promise<Uint8Array> {
@@ -32,7 +33,22 @@ export class NodeCanvasCompositor implements CompositorPort {
     ctx.fillStyle = shade;
     ctx.fillRect(0, 0, width, height);
 
-    // Layer 3 — centred campaign copy (wrapped to width).
+    // Layer 3 — brand-colour accent footer: a solid base band with a soft
+    // gradient fade above it. Guarantees the brand colour has a meaningful
+    // on-brand presence in every creative (~5% pixel density), which is also
+    // what the brand-density compliance gate measures.
+    const [ar, ag, ab] = hexToRgb(request.brandColor);
+    const solidTop = height * 0.95;
+    const fadeTop = height * 0.89;
+    const accent = ctx.createLinearGradient(0, fadeTop, 0, solidTop);
+    accent.addColorStop(0, `rgba(${ar}, ${ag}, ${ab}, 0)`);
+    accent.addColorStop(1, `rgb(${ar}, ${ag}, ${ab})`);
+    ctx.fillStyle = accent;
+    ctx.fillRect(0, fadeTop, width, solidTop - fadeTop);
+    ctx.fillStyle = `rgb(${ar}, ${ag}, ${ab})`;
+    ctx.fillRect(0, solidTop, width, height - solidTop);
+
+    // Layer 4 — centred campaign copy (wrapped to width).
     const fontSize = Math.round(width * 0.06);
     ctx.font = `bold ${fontSize}px sans-serif`;
     ctx.fillStyle = "#ffffff";
@@ -46,7 +62,7 @@ export class NodeCanvasCompositor implements CompositorPort {
       y += lineHeight;
     }
 
-    // Layer 4 — brand logo, anchored top-right (optional).
+    // Layer 5 — brand logo, anchored top-right (optional).
     try {
       const logo = await loadImage(await readFile(request.logoPath));
       const target = width * 0.16;
