@@ -3,26 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
-  },
-  "scripts": {
-    "build": "tsc",
-    "lint": "eslint . --ext .ts,.tsx",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@campaignforge/CampaignOrchestration": "workspace:*",
-    "@campaignforge/shared": "workspace:*",
-    "@napi-rs/canvas": "^0.1.0"
-  },
-  "devDependencies": {
-    "typescript": "^5.0.0",
-    "@types/node": "^20.11.0"
-  }
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": { ".": { "types": "./src/index.ts", "default": "./src/index.ts" } },
+  "scripts": { "build": "tsc", "lint": "eslint . --ext .ts,.tsx", "typecheck": "tsc --noEmit" },
+  "dependencies": { "@campaignforge/CampaignOrchestration": "workspace:*", "@campaignforge/shared": "workspace:*", "@napi-rs/canvas": "^0.1.0" },
+  "devDependencies": { "typescript": "^5.0.0", "@types/node": "^20.11.0" }
 }
