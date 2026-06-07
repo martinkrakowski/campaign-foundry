@@ -47,6 +47,17 @@ export default function GridPage() {
     }));
   }, [assets]);
 
+  const review = useMemo(() => {
+    let approved = 0;
+    let rejected = 0;
+    for (const a of assets) {
+      const d = decisions[assetKey(a)];
+      if (d === "approved") approved += 1;
+      else if (d === "rejected") rejected += 1;
+    }
+    return { approved, rejected, pending: assets.length - approved - rejected };
+  }, [assets, decisions]);
+
   if (assets.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center p-6 text-center">
@@ -62,6 +73,13 @@ export default function GridPage() {
 
   return (
     <div className="flex flex-col gap-12 p-6 pb-40">
+      <div className="flex items-center gap-4 rounded-lg border border-border bg-surface px-4 py-2 font-mono text-[11px]">
+        <span className="uppercase tracking-wider text-text-muted">Review</span>
+        <span className="text-success">✓ {review.approved} approved</span>
+        <span className="text-error">✗ {review.rejected} rejected</span>
+        <span className="text-text-muted">○ {review.pending} pending</span>
+        <span className="ml-auto text-text-muted">Approved creatives are what the Export tab ships.</span>
+      </div>
       {products.map(({ productId, ratios }) => (
         <section key={productId}>
           <h2 className="mb-5 font-mono text-[11px] uppercase tracking-widest text-text-muted">

@@ -3,16 +3,22 @@
 import { useMemo } from "react";
 import { API, assetKey, useRun } from "@/lib/run-context";
 
-/** Print export queue — PNG renders and CMYK proof PDFs ready for download. */
+/** Print export queue — the HITL-approved creatives + their proofs, ready to ship. */
 export default function ExportPage() {
-  const { assets, hasRun } = useRun();
+  const { assets, hasRun, decisions } = useRun();
 
-  // One proof PDF is produced per product; dedupe by path.
+  // Only approved creatives are exported — the HITL gate.
+  const approved = useMemo(
+    () => assets.filter((a) => decisions[assetKey(a)] === "approved"),
+    [assets, decisions],
+  );
+
+  // One proof PDF per product that has at least one approved creative; dedupe by path.
   const proofs = useMemo(() => {
     const map = new Map<string, string>();
-    for (const a of assets) if (a.proofPath) map.set(a.proofPath, a.productId);
+    for (const a of approved) if (a.proofPath) map.set(a.proofPath, a.productId);
     return [...map.entries()];
-  }, [assets]);
+  }, [approved]);
 
   if (!hasRun || assets.length === 0) {
     return (
@@ -25,15 +31,32 @@ export default function ExportPage() {
     );
   }
 
+  if (approved.length === 0) {
+    return (
+      <div className="flex h-full flex-col items-start p-8 pb-40">
+        <h2 className="mb-6 text-xl font-bold text-white">Print Export Queue</h2>
+        <p className="max-w-md text-text-muted">
+          No creatives approved yet. Approve creatives in the <span className="text-text-primary">Grid</span> to
+          add them here — only approved creatives are exported ({assets.length} pending review).
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col items-start gap-8 p-8 pb-40">
-      <h2 className="text-xl font-bold text-white">Print Export Queue</h2>
+      <div>
+        <h2 className="text-xl font-bold text-white">Print Export Queue</h2>
+        <p className="mt-1 text-[13px] text-text-muted">
+          {approved.length} of {assets.length} creatives approved for export.
+        </p>
+      </div>
 
       <section className="w-full max-w-4xl">
         <h3 className="mb-3 font-mono text-[11px] uppercase tracking-widest text-text-muted">
           Proof PDFs ({proofs.length})
         </h3>
-        <div className="overflow-hidden rounded-xl border border-border bg-surface shadow-2xl divide-y divide-border">
+        <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
           {proofs.map(([path, productId]) => (
             <Row key={path} label={productId} sub={path} href={`${API}/output/${path}`} cta="Download .PDF" />
           ))}
@@ -42,10 +65,10 @@ export default function ExportPage() {
 
       <section className="w-full max-w-4xl">
         <h3 className="mb-3 font-mono text-[11px] uppercase tracking-widest text-text-muted">
-          Renders ({assets.length})
+          Approved renders ({approved.length})
         </h3>
-        <div className="overflow-hidden rounded-xl border border-border bg-surface shadow-2xl divide-y divide-border">
-          {assets.map((asset) => (
+        <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
+          {approved.map((asset) => (
             <Row
               key={assetKey(asset)}
               label={`${asset.productId} @ ${asset.aspectRatio} · ${asset.treatment}`}
