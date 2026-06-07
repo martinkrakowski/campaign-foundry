@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import type {
   AspectRatio,
   BackgroundContext,
+  BackgroundResult,
   ImageGeneratorPort,
   Product,
 } from "@campaignfoundry/CampaignOrchestration";
@@ -37,7 +38,7 @@ export class GeminiImageGenerator implements ImageGeneratorPort {
     product: Product,
     ratio: AspectRatio,
     context: BackgroundContext,
-  ): Promise<Uint8Array> {
+  ): Promise<BackgroundResult> {
     try {
       const response = await this.ai.models.generateImages({
         model: this.model,
@@ -46,11 +47,12 @@ export class GeminiImageGenerator implements ImageGeneratorPort {
       });
       const imageBytes = response.generatedImages?.[0]?.image?.imageBytes;
       if (!imageBytes) throw new Error("Imagen returned no image data");
-      return Buffer.from(imageBytes, "base64");
+      return { image: Buffer.from(imageBytes, "base64"), source: "imagen" };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (this.fallback) {
         // Observable degradation — don't let a bad key/model silently look "fine".
+        // The fallback reports its own source (procedural), which propagates up.
         console.warn(`[GeminiImageGenerator] Imagen failed for ${product.id} @ ${ratio.value}; using procedural fallback. ${message}`);
         return this.fallback.resolveBackground(product, ratio, context);
       }

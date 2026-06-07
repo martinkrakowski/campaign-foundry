@@ -1,4 +1,5 @@
 import type { AspectRatioValue } from "../value-objects/AspectRatio.vo.js";
+import type { BackgroundSource } from "../value-objects/BackgroundSource.vo.js";
 
 /**
  * GeneratedAsset — one rendered creative (a product × aspect-ratio pairing).
@@ -22,4 +23,6 @@ export interface GeneratedAsset {
   readonly logoApplied: boolean;
   /** The creative treatment id this asset was rendered with (e.g. "default", "subtle-top"). */
   readonly treatment: string;
+  /** Provenance of the background layer (Imagen / procedural fallback / reused asset). */
+  readonly backgroundSource: BackgroundSource;
 }
