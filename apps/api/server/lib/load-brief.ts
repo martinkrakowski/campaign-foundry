@@ -75,6 +75,11 @@ export function parseRegenerateOnly(value: unknown): RegenerationTarget[] | unde
   if (!Array.isArray(value)) {
     throw new Error('"regenerateOnly" must be an array of { productId, aspectRatio, treatment }.');
   }
+  // An empty list would enable selective mode yet target nothing — a silent no-op
+  // run. Reject it so the contract fails fast instead (omit the field for a full run).
+  if (value.length === 0) {
+    throw new Error('"regenerateOnly" must contain at least one target (omit it for a full run).');
+  }
   return value.map((entry) => {
     const rec = entry as Record<string, unknown>;
     if (

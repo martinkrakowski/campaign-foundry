@@ -9,12 +9,34 @@ type ReportAsset = GeneratedAsset & { brandCompliant: boolean };
 /** Asset identity within the campaign matrix (matches the review UI's key). */
 const keyOf = (a: GeneratedAsset): string => `${a.productId}/${a.aspectRatio}/${a.treatment}`;
 
-/** Read the persisted report's assets, or [] if there's no readable report yet. */
+/** A persisted entry we can safely key for merging — guards against a corrupt report.json. */
+function isKeyable(a: unknown): a is ReportAsset {
+  return (
+    typeof a === "object" &&
+    a !== null &&
+    typeof (a as ReportAsset).productId === "string" &&
+    typeof (a as ReportAsset).aspectRatio === "string" &&
+    typeof (a as ReportAsset).treatment === "string"
+  );
+}
+
+/**
+ * Read the persisted report's assets, or [] if there's no readable report yet.
+ * Entries that can't be safely keyed (a hand-edited / corrupt report.json with
+ * null/primitive rows) are filtered out so the merge can't throw on `keyOf`.
+ */
 async function readPersistedAssets(path: string): Promise<ReportAsset[]> {
   try {
     const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
     const assets = (parsed as { assets?: unknown })?.assets;
-    return Array.isArray(assets) ? (assets as ReportAsset[]) : [];
+    if (!Array.isArray(assets)) return [];
+    const keyable = assets.filter(isKeyable);
+    if (keyable.length !== assets.length) {
+      console.warn(
+        `[report] dropped ${assets.length - keyable.length} unkeyable asset(s) from report.json during merge`,
+      );
+    }
+    return keyable;
   } catch {
     return [];
   }
