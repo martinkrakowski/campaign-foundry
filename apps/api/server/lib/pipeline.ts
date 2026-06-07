@@ -23,6 +23,20 @@ import { outputRoot } from "./config.js";
 loadEnv();
 
 /**
+ * Server-side allowlist of selectable image model ids — the security boundary for
+ * the untrusted `?model=` query (the UI's curated list is not enforceable). Anything
+ * else is rejected at the route, so callers can't invoke arbitrary OpenRouter models.
+ * Keep in sync with the UI catalog in apps/web/src/lib/models.ts.
+ */
+export const ALLOWED_IMAGE_MODELS: readonly string[] = [
+  "imagen",
+  "procedural",
+  "x-ai/grok-imagine-image-quality",
+  "google/gemini-2.5-flash-image",
+  "openai/gpt-5-image",
+];
+
+/**
  * Resolve the image generator, wrapped by input-asset reuse. The primary source is
  * chosen by `selected` (the UI's model picker); procedural is always the floor.
  *
