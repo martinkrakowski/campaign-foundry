@@ -11,6 +11,7 @@ dist/
 /apps/*/out/
 .nitro/
 .output/
+*.tsbuildinfo
 
 # Test / coverage
 coverage/
