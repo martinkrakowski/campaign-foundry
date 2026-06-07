@@ -41,12 +41,10 @@ export function SidebarContent() {
             <span className="font-mono">{brief.id}</span>
           </Field>
 
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Target Region">{brief.targetRegion}</Field>
-            <Field label="Aspects">
-              <span className="font-mono">{aspectsLabel}</span>
-            </Field>
-          </div>
+          <Field label="Target Region">{brief.targetRegion}</Field>
+          <Field label="Aspects">
+            <span className="font-mono">{aspectsLabel}</span>
+          </Field>
 
           <Field label="Localized Copy">
             <span className="block select-text leading-relaxed">
