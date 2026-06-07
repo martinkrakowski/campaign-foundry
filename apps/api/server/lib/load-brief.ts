@@ -6,6 +6,7 @@ import {
   SAFE_ID_PATTERN,
   TONE_VALUES,
   type CampaignBrief,
+  type RegenerationTarget,
 } from "@campaignfoundry/CampaignOrchestration";
 
 const REQUIRED_FIELDS = ["id", "targetRegion", "targetAudience", "campaignMessage", "products"] as const;
@@ -61,6 +62,32 @@ export function parseBrief(data: unknown): CampaignBrief {
   }
   validateTreatments(record.treatments);
   return record as unknown as CampaignBrief;
+}
+
+/**
+ * Structurally validate an untrusted `regenerateOnly` list (the HITL re-roll targets).
+ * Returns undefined when absent (a full run). These strings only ever drive set
+ * membership in the use case — never path construction — but we validate shape so a
+ * malformed payload fails fast with a clear 400 instead of a runtime error.
+ */
+export function parseRegenerateOnly(value: unknown): RegenerationTarget[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) {
+    throw new Error('"regenerateOnly" must be an array of { productId, aspectRatio, treatment }.');
+  }
+  return value.map((entry) => {
+    const rec = entry as Record<string, unknown>;
+    if (
+      typeof rec?.productId !== "string" ||
+      typeof rec?.aspectRatio !== "string" ||
+      typeof rec?.treatment !== "string"
+    ) {
+      throw new Error(
+        '"regenerateOnly" entries require string productId, aspectRatio, and treatment.',
+      );
+    }
+    return { productId: rec.productId, aspectRatio: rec.aspectRatio, treatment: rec.treatment };
+  });
 }
 
 /** Load and parse a brief from a .yaml / .yml / .json file. */

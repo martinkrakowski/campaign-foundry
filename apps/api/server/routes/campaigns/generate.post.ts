@@ -1,18 +1,28 @@
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { parseBrief } from "../../lib/load-brief.js";
+import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
 import { ALLOWED_IMAGE_MODELS, runCampaign } from "../../lib/pipeline.js";
 import { writeReport } from "../../lib/report.js";
 
 /**
- * POST /campaigns/generate — body is a campaign brief (JSON). An optional `?model=`
- * query selects the primary image model (else the default fallback chain). Runs the
- * pipeline, persists report.json (so GET /campaigns/result reflects it), and returns
- * the assets, halt flag, and execution log.
+ * POST /campaigns/generate — runs the pipeline and persists report.json (so GET
+ * /campaigns/result reflects it), returning the assets, halt flag, and execution log.
+ *
+ * Body is either a bare campaign brief, or an envelope `{ brief, regenerateOnly }`
+ * where `regenerateOnly` (the HITL re-roll) restricts the run to just those creatives
+ * and merges them into the persisted report. An optional `?model=` query selects the
+ * primary image model (else the default fallback chain).
  */
 export default defineEventHandler(async (event) => {
   let brief: CampaignBrief;
+  let regenerateOnly: ReturnType<typeof parseRegenerateOnly>;
   try {
-    brief = parseBrief(await readBody(event));
+    const body: unknown = await readBody(event);
+    // Envelope form carries a `brief` field; a bare brief is the body itself.
+    const isEnvelope = typeof body === "object" && body !== null && "brief" in body;
+    brief = parseBrief(isEnvelope ? (body as { brief: unknown }).brief : body);
+    regenerateOnly = isEnvelope
+      ? parseRegenerateOnly((body as { regenerateOnly?: unknown }).regenerateOnly)
+      : undefined;
   } catch (error) {
     setResponseStatus(event, 400);
     return { error: error instanceof Error ? error.message : "Invalid campaign brief" };
@@ -28,13 +38,15 @@ export default defineEventHandler(async (event) => {
     return { error: `Unknown image model: ${imageModel}` };
   }
 
-  const result = await runCampaign(brief, imageModel);
+  const result = await runCampaign(brief, imageModel, regenerateOnly);
   if (!result.success) {
     setResponseStatus(event, 422);
     return { error: result.error.message };
   }
 
-  await writeReport(result.value);
+  // A selective run produced only the regenerated cells — merge them into the
+  // persisted report so the full campaign survives a partial run.
+  await writeReport(result.value, { merge: regenerateOnly !== undefined });
   return {
     halted: result.value.halted,
     assets: result.value.assets,

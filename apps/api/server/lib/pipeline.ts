@@ -4,6 +4,7 @@ import {
   type CampaignBrief,
   type ImageGeneratorPort,
   type PipelineResult,
+  type RegenerationTarget,
 } from "@campaignfoundry/CampaignOrchestration";
 import {
   AssetReusingImageGenerator,
@@ -89,10 +90,15 @@ export function buildPipeline(imageModel?: string): GenerateCampaignUseCase {
   });
 }
 
-/** Run a campaign. `imageModel` (from the UI's model picker) selects the primary generator. */
+/**
+ * Run a campaign. `imageModel` (from the UI's model picker) selects the primary
+ * generator; `regenerateOnly` (the HITL re-roll) restricts the run to just those
+ * creatives, leaving every other cell untouched.
+ */
 export function runCampaign(
   brief: CampaignBrief,
   imageModel?: string,
+  regenerateOnly?: ReadonlyArray<RegenerationTarget>,
 ): Promise<Result<PipelineResult, Error>> {
-  return buildPipeline(imageModel).execute(brief);
+  return buildPipeline(imageModel).execute(brief, regenerateOnly ? { regenerateOnly } : undefined);
 }
