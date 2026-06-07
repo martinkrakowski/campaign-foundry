@@ -17,6 +17,17 @@ const PROHIBITED_TERMS = [
 const MIN_BRAND_COLOR_DENSITY = 0.02;
 /** Per-channel tolerance (±) when matching a pixel to the target brand colour. */
 const CHANNEL_TOLERANCE = 10;
+/*
+ * Density is sampled over the WHOLE creative. The compositor's brand-colour accent
+ * band (a solid, full-width strip on the headline edge) guarantees a layout- and
+ * ratio-invariant brand-colour floor (~5%), so whole-image sampling is a real
+ * signal — not a height-relative guess that clipped/diluted on extreme ratios.
+ *
+ * This supersedes the earlier logo-box sampling: that measured brand colour via a
+ * proxy (the logo, pinned top-right) and broke once layouts could move the logo.
+ * Logo presence is its own signal (GeneratedAsset.logoApplied) — kept distinct
+ * here so density measures density.
+ */
 
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace(/^#/, "");

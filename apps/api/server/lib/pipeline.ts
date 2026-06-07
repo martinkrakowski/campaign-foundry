@@ -6,6 +6,7 @@ import {
   type PipelineResult,
 } from "@campaignfoundry/CampaignOrchestration";
 import {
+  AssetReusingImageGenerator,
   GeminiImageGenerator,
   NodeCanvasCompositor,
   ProceduralBackgroundGenerator,
@@ -15,12 +16,18 @@ import { FileSystemExporter } from "@campaignfoundry/Distribution";
 import type { Result } from "@campaignfoundry/shared";
 import { outputRoot } from "./config.js";
 
-/** Resolve the image generator: Google Imagen when a key is set, else procedural. */
+/**
+ * Resolve the image generator. Input-asset reuse wraps whichever generator is
+ * active — Google Imagen when a key is set, else the procedural gradient — so a
+ * supplied asset is always reused before any generation is attempted.
+ */
 function imageGenerator(): ImageGeneratorPort {
   const procedural = new ProceduralBackgroundGenerator();
   const apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
-  if (!apiKey) return procedural;
-  return new GeminiImageGenerator({ apiKey, model: process.env.IMAGEN_MODEL, fallback: procedural });
+  const generator = apiKey
+    ? new GeminiImageGenerator({ apiKey, model: process.env.IMAGEN_MODEL, fallback: procedural })
+    : procedural;
+  return new AssetReusingImageGenerator(generator);
 }
 
 /**
@@ -30,7 +37,7 @@ function imageGenerator(): ImageGeneratorPort {
 export function buildPipeline(): GenerateCampaignUseCase {
   return new GenerateCampaignUseCase({
     imageGenerator: imageGenerator(),
-    compositor: new NodeCanvasCompositor(),
+    compositor: new NodeCanvasCompositor(process.env.MESSAGE_FONT),
     compliance: new BrandComplianceChecker(),
     exporter: new FileSystemExporter(outputRoot()),
   });

@@ -6,6 +6,8 @@ import type {
   CompositorPort,
 } from "@campaignfoundry/CampaignOrchestration";
 import { hexToRgb, wrapText } from "./canvas-util.js";
+import { registerBundledFonts } from "../fonts.js";
+import { resolveAssetPath } from "../safe-path.js";
 
 /**
  * NodeCanvasCompositor — CompositorPort adapter.
@@ -20,8 +22,15 @@ import { hexToRgb, wrapText } from "./canvas-util.js";
  * `layout` mirrors the headline edge (bottom ↔ top) and the logo corner; `tone`
  * scales the shade opacity and font weight. The solid portion of the accent band
  * stays fully opaque in every tone, so the brand-density compliance floor holds.
+ *
+ * Copy is drawn in a bundled font (default "Inter") so headlines look identical
+ * on every machine, independent of the reviewer's installed system fonts.
  */
 export class NodeCanvasCompositor implements CompositorPort {
+  constructor(private readonly fontFamily: string = "Inter") {
+    registerBundledFonts();
+  }
+
   async compositeAsset(request: CompositeRequest): Promise<CompositeResult> {
     const { width, height } = request.ratio;
     const top = request.layout === "headline-top";
@@ -46,7 +55,8 @@ export class NodeCanvasCompositor implements CompositorPort {
     ctx.fillRect(0, 0, width, height);
 
     // Layer 3 — brand-colour accent band: a solid base flush to the headline edge
-    // plus a soft fade into the image. Solid stays opaque in every tone.
+    // plus a soft fade into the image. Solid stays opaque in every tone, and this
+    // band — not the logo — is what guarantees the brand-density compliance floor.
     const [ar, ag, ab] = hexToRgb(request.brandColor);
     const solidH = height * 0.05;
     const fadeH = height * 0.06;
@@ -68,8 +78,10 @@ export class NodeCanvasCompositor implements CompositorPort {
     }
 
     // Layer 4 — campaign copy (wrapped to width), anchored on the headline edge.
+    // Bundled font (default "Inter") for machine-independent rendering; weight
+    // comes from the treatment's tone.
     const fontSize = Math.round(width * 0.06);
-    ctx.font = `${fontWeight} ${fontSize}px sans-serif`;
+    ctx.font = `${fontWeight} ${fontSize}px ${this.fontFamily}, sans-serif`;
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
@@ -85,20 +97,24 @@ export class NodeCanvasCompositor implements CompositorPort {
 
     // Layer 5 — brand logo, anchored opposite the headline (top-right for a bottom
     // headline, bottom-left for a top headline). Whether it applies is a
-    // brand-compliance signal the use case records on the asset.
+    // brand-compliance signal the use case records on the asset. The path is
+    // brief-supplied (untrusted), so it's resolved through resolveAssetPath.
     let logoApplied = false;
-    try {
-      const logo = await loadImage(await readFile(request.logoPath));
-      const target = width * 0.16;
-      const scale = target / logo.width;
-      const logoH = logo.height * scale;
-      const margin = width * 0.04;
-      const lx = top ? margin : width - target - margin;
-      const ly = top ? height - logoH - margin : margin;
-      ctx.drawImage(logo, lx, ly, target, logoH);
-      logoApplied = true;
-    } catch {
-      // logo is optional — skip cleanly when the path is missing.
+    const logoPath = resolveAssetPath(request.logoPath);
+    if (logoPath) {
+      try {
+        const logo = await loadImage(await readFile(logoPath));
+        const target = width * 0.16;
+        const scale = target / logo.width;
+        const logoH = logo.height * scale;
+        const margin = width * 0.04;
+        const lx = top ? margin : width - target - margin;
+        const ly = top ? height - logoH - margin : margin;
+        ctx.drawImage(logo, lx, ly, target, logoH);
+        logoApplied = true;
+      } catch {
+        // logo is optional — skip cleanly when the path is missing/unreadable.
+      }
     }
 
     return { image: canvas.toBuffer("image/png"), logoApplied };
