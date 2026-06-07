@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { API, assetKey, useRun, type Asset } from "@/lib/run-context";
+import { ASPECT_RATIOS } from "@/lib/aspect-ratios";
 import { cn } from "@/lib/cn";
 
-/** Stable display order for aspect ratios. */
-const RATIO_ORDER = ["1:1", "9:16", "16:9"];
+/** Rank an aspect ratio by the shared display order. */
 const ratioRank = (r: string): number => {
-  const i = RATIO_ORDER.indexOf(r);
-  return i === -1 ? RATIO_ORDER.length : i;
+  const i = ASPECT_RATIOS.indexOf(r as (typeof ASPECT_RATIOS)[number]);
+  return i === -1 ? ASPECT_RATIOS.length : i;
 };
 
 /** Creative image URL, cache-busted per run (runs overwrite the same paths). */
