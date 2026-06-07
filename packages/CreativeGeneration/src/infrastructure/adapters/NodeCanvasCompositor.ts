@@ -5,6 +5,7 @@ import type {
   CompositorPort,
 } from "@campaignfoundry/CampaignOrchestration";
 import { wrapText } from "./canvas-util.js";
+import { registerBundledFonts } from "../fonts.js";
 
 /**
  * NodeCanvasCompositor — CompositorPort adapter.
@@ -14,8 +15,15 @@ import { wrapText } from "./canvas-util.js";
  *   2. dark bottom gradient (WCAG-legible copy)
  *   3. centred campaign message
  *   4. brand logo, top-right
+ *
+ * Copy is drawn in a bundled font (default "Inter") so headlines look identical
+ * on every machine, independent of the reviewer's installed system fonts.
  */
 export class NodeCanvasCompositor implements CompositorPort {
+  constructor(private readonly fontFamily: string = "Inter") {
+    registerBundledFonts();
+  }
+
   async compositeAsset(request: CompositeRequest): Promise<Uint8Array> {
     const { width, height } = request.ratio;
     const canvas = createCanvas(width, height);
@@ -34,7 +42,7 @@ export class NodeCanvasCompositor implements CompositorPort {
 
     // Layer 3 — centred campaign copy (wrapped to width).
     const fontSize = Math.round(width * 0.06);
-    ctx.font = `bold ${fontSize}px sans-serif`;
+    ctx.font = `bold ${fontSize}px ${this.fontFamily}, sans-serif`;
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";

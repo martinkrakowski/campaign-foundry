@@ -30,7 +30,7 @@ function imageGenerator(): ImageGeneratorPort {
 export function buildPipeline(): GenerateCampaignUseCase {
   return new GenerateCampaignUseCase({
     imageGenerator: imageGenerator(),
-    compositor: new NodeCanvasCompositor(),
+    compositor: new NodeCanvasCompositor(process.env.MESSAGE_FONT),
     compliance: new BrandComplianceChecker(),
     exporter: new FileSystemExporter(outputRoot()),
   });
