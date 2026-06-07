@@ -8,7 +8,7 @@ node_modules/
 dist/
 .turbo/
 .next/
-out/
+/apps/*/out/
 .nitro/
 .output/
 

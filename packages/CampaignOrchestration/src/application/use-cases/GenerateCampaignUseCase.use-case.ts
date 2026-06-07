@@ -48,6 +48,12 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     log.totalOperations = brief.products.length * ratios.length;
     // LocalizedMessageFallback — the use case resolves the copy; adapters never do.
     const copy = brief.localizedMessage ?? brief.campaignMessage;
+    // Campaign context handed to the image generator for personalized (GenAI) backgrounds.
+    const context = {
+      campaignMessage: brief.campaignMessage,
+      targetAudience: brief.targetAudience,
+      targetRegion: brief.targetRegion,
+    };
     const assets: GeneratedAsset[] = [];
 
     for (const product of brief.products) {
@@ -56,7 +62,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
 
       for (const ratio of ratios) {
         // 3. ResolveBackgroundAssets — reuse inputAsset or generate.
-        const background = await this.deps.imageGenerator.resolveBackground(product, ratio);
+        const background = await this.deps.imageGenerator.resolveBackground(product, ratio, context);
 
         // 4. CompositeVariations — deterministic layer stacking.
         const composite = await this.deps.compositor.compositeAsset({

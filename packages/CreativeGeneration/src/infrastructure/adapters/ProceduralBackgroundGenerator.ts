@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import type {
   AspectRatio,
+  BackgroundContext,
   ImageGeneratorPort,
   Product,
 } from "@campaignforge/CampaignOrchestration";
@@ -12,11 +13,14 @@ import { hexToRgb } from "./canvas-util.js";
  *
  * Reuses a product's inputAsset when present (cover-fitted to the ratio),
  * otherwise generates a deterministic diagonal gradient from the brand colour.
- * Runs fully offline — this is the exact seam where a GenAI image model plugs in
- * (a sibling adapter behind the same port, no domain change).
+ * Runs fully offline — the GenAI-free default and the graceful fallback.
  */
 export class ProceduralBackgroundGenerator implements ImageGeneratorPort {
-  async resolveBackground(product: Product, ratio: AspectRatio): Promise<Uint8Array> {
+  async resolveBackground(
+    product: Product,
+    ratio: AspectRatio,
+    _context: BackgroundContext,
+  ): Promise<Uint8Array> {
     if (product.inputAsset) {
       const reused = await this.tryLoadAsset(product.inputAsset, ratio);
       if (reused) return reused;
