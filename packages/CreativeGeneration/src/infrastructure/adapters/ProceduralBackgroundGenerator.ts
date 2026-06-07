@@ -1,5 +1,4 @@
-import { readFile } from "node:fs/promises";
-import { createCanvas, loadImage } from "@napi-rs/canvas";
+import { createCanvas } from "@napi-rs/canvas";
 import type {
   AspectRatio,
   BackgroundContext,
@@ -11,9 +10,10 @@ import { hexToRgb } from "./canvas-util.js";
 /**
  * ProceduralBackgroundGenerator — ImageGeneratorPort adapter.
  *
- * Reuses a product's inputAsset when present (cover-fitted to the ratio),
- * otherwise generates a deterministic diagonal gradient from the brand colour.
- * Runs fully offline — the GenAI-free default and the graceful fallback.
+ * Generates a deterministic diagonal gradient from the product's brand colour.
+ * Runs fully offline — the GenAI-free default and the graceful fallback. Reuse of
+ * a product's inputAsset is handled upstream by AssetReusingImageGenerator, so
+ * this adapter has one job: synthesize a background.
  */
 export class ProceduralBackgroundGenerator implements ImageGeneratorPort {
   async resolveBackground(
@@ -21,26 +21,7 @@ export class ProceduralBackgroundGenerator implements ImageGeneratorPort {
     ratio: AspectRatio,
     _context: BackgroundContext,
   ): Promise<Uint8Array> {
-    if (product.inputAsset) {
-      const reused = await this.tryLoadAsset(product.inputAsset, ratio);
-      if (reused) return reused;
-    }
     return this.generateGradient(product.primaryColor, ratio);
-  }
-
-  private async tryLoadAsset(path: string, ratio: AspectRatio): Promise<Uint8Array | undefined> {
-    try {
-      const image = await loadImage(await readFile(path));
-      const canvas = createCanvas(ratio.width, ratio.height);
-      const ctx = canvas.getContext("2d");
-      const scale = Math.max(ratio.width / image.width, ratio.height / image.height);
-      const w = image.width * scale;
-      const h = image.height * scale;
-      ctx.drawImage(image, (ratio.width - w) / 2, (ratio.height - h) / 2, w, h);
-      return canvas.toBuffer("image/png");
-    } catch {
-      return undefined; // missing / unreadable asset → fall back to generation
-    }
   }
 
   private generateGradient(primaryColor: string, ratio: AspectRatio): Uint8Array {
