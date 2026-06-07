@@ -24,12 +24,12 @@
     "format": "prettier --write \"**/*.{ts,tsx,md}\""
   },
   "devDependencies": {
-    "@hexagen-monaco/arch-linter": "^0.4.0",
-    "@hexagen-monaco/sync": "^0.4.0",
-    "eslint": "^9.0.0",
+    "@hexagen-monaco/arch-linter": "^0.5.2",
+    "@hexagen-monaco/sync": "^0.5.2",
+    "eslint": "^10.4.1",
     "prettier": "^3.0.0",
     "tsx": "^4.7.0",
     "turbo": "^2.0.0",
-    "typescript": "^5.5.4"
+    "typescript": "^6.0.3"
   }
 }
