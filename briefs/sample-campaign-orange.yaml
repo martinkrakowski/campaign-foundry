@@ -1,0 +1,28 @@
+# Orange campaign variation — reuses existing input images instead of generating
+# backgrounds. Each product sets `inputAsset` to an image already in assets/inputs/,
+# so the pipeline reuses it (cover-fit to each ratio) and badges every creative
+# REUSED — the run is fully offline, no GenAI keys needed. The brand colour is
+# orange, which drives the accent band and brand-compliance scoring.
+id: summer-hydration-2026-orange
+targetRegion: DE
+targetAudience: Urban outdoor enthusiasts, 25-40
+campaignMessage: Stay wild. Stay hydrated.
+localizedMessage: Bleib wild. Bleib hydriert.
+products:
+  - id: acme-hydra-bottle
+    name: Hydra Bottle
+    primaryColor: "#FF7A00"
+    logoPath: assets/inputs/hydra-logo.png
+    inputAsset: assets/inputs/hydra-logo.png   # reused as the background (REUSED)
+  - id: acme-trail-pack
+    name: Trail Pack
+    primaryColor: "#FF7A00"
+    logoPath: assets/inputs/trail-logo.png
+    inputAsset: assets/inputs/trail-logo.png   # reused as the background (REUSED)
+treatments:
+  - id: bold-bottom
+    layout: headline-bottom
+    tone: bold
+  - id: subtle-top
+    layout: headline-top
+    tone: subtle
