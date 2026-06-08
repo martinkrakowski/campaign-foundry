@@ -102,3 +102,23 @@ jobs:
         run: "yarn test:cov"
         env:
           NODE_ENV: test
+
+      # Tests live in __tests__/ next to their modules, but Nitro scans apps/api/server/
+      # recursively. A *.test.ts file landing there gets registered as a route and crashes
+      # `yarn dev` at boot — a runtime fault the build and coverage gate don't catch. Fail
+      # the build if the Nitro route manifest ever references a test file.
+      - name: Guard the API route scan against test files
+        run: |
+          MANIFEST="apps/api/.nitro/types/nitro-routes.d.ts"
+          yarn workspace @campaignfoundry/api exec nitro prepare
+          # Fail closed: a missing manifest means the guard can't validate anything.
+          if [ ! -f "$MANIFEST" ]; then
+            echo "::error::Nitro route manifest not found at $MANIFEST"
+            exit 1
+          fi
+          # `\.test\b` is robust to Nitro's quoting/extension (matches .test', .test.ts, .test/, …).
+          if grep -Eq '__tests__|\.test\b' "$MANIFEST"; then
+            echo "::error::A test file was scanned as a Nitro route. Keep tests out of the server scan (see apps/api/nitro.config.ts \`ignore\`)."
+            exit 1
+          fi
+          echo "Nitro route manifest is free of test files."
