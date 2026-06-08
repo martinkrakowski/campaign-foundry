@@ -68,6 +68,24 @@ const DECISIONS_KEY = "cf:decisions";
 /** localStorage flag: the brief picker has been shown/dismissed once (don't auto-open again). */
 const BRIEF_PICKED_KEY = "cf:brief-picked";
 
+/** localStorage key for the active brief, so a reload restores it (and its run) not DEFAULT. */
+const BRIEF_KEY = "cf:brief";
+
+/** Minimal shape guard for a brief restored from storage (don't trust hand-edited JSON). */
+function isStoredBrief(value: unknown): value is CampaignBrief {
+  if (typeof value !== "object" || value === null) return false;
+  const b = value as Partial<CampaignBrief>;
+  return (
+    typeof b.id === "string" &&
+    b.id.length > 0 &&
+    Array.isArray(b.products) &&
+    b.products.length > 0 &&
+    b.products.every(
+      (p) => p && typeof p.id === "string" && typeof p.name === "string" && typeof p.primaryColor === "string",
+    )
+  );
+}
+
 /**
  * The brief the shell starts with. The HITL surface (the /brief view) edits a
  * copy of this; `execute()` sends whatever the current brief is.
@@ -181,6 +199,12 @@ export function RunProvider({ children }: { children: ReactNode }) {
       briefIdRef.current = next.id;
       setBriefState(next);
       setError(null);
+      // Remember the active brief so a reload restores it (and its run) instead of DEFAULT.
+      try {
+        localStorage.setItem(BRIEF_KEY, JSON.stringify(next));
+      } catch {
+        /* storage unavailable — brief just won't persist across reloads */
+      }
       // (1) Already showing this brief's run — leave the grid (and decisions) intact.
       if (result?.log?.campaignId === next.id) return;
       // Switching to a different brief invalidates any in-flight run and leaves the
@@ -219,18 +243,31 @@ export function RunProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Hydrate from the starting brief's own persisted run so the grid isn't empty on
-  // first load — and matches the brief shown (the shell always starts on DEFAULT_BRIEF),
-  // rather than restoring whichever brief happened to run last.
+  // On first load, restore the brief the user last had (DEFAULT if none) and hydrate
+  // that brief's own persisted run — so a reload after a previous session brings back
+  // the right brief and its creatives, not DEFAULT with an empty grid. The brief lives
+  // in localStorage (the report alone can't reconstruct messages/colours/logos).
   useEffect(() => {
     let active = true;
-    fetch(`${API}/campaigns/result?campaignId=${encodeURIComponent(DEFAULT_BRIEF.id)}`)
+    let startBrief = DEFAULT_BRIEF;
+    try {
+      const parsed: unknown = JSON.parse(localStorage.getItem(BRIEF_KEY) ?? "null");
+      if (isStoredBrief(parsed)) startBrief = parsed;
+    } catch {
+      /* unreadable/malformed storage — start from DEFAULT_BRIEF */
+    }
+    if (startBrief !== DEFAULT_BRIEF) {
+      briefIdRef.current = startBrief.id;
+      setBriefState(startBrief);
+    }
+    fetch(`${API}/campaigns/result?campaignId=${encodeURIComponent(startBrief.id)}`)
       .then((r) => r.json() as Promise<RunResult>)
       .then((d) => {
         // Restore any real persisted run — including a halted / log-only run with no
         // assets (a present `log` marks a real run; the empty "no run yet" default
         // from the API has assets:[] and log:null, which we leave as "never ran").
-        if (active && (d.assets?.length || d.log)) {
+        // Guard against a brief switch racing this initial fetch.
+        if (active && briefIdRef.current === startBrief.id && (d.assets?.length || d.log)) {
           setResult(d);
           if (d.assets?.length) setAssetVersion((v) => v + 1);
         }
