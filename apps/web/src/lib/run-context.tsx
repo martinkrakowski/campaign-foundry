@@ -189,12 +189,13 @@ export function RunProvider({ children }: { children: ReactNode }) {
       runSeq.current += 1;
       setLoading(false);
       setRegeneratingKeys(null);
-      // (2)/(3) Clear, then adopt the persisted run only if it's actually this brief's.
-      // report.json is the single most-recent run regardless of which brief produced it,
-      // so match on campaignId before trusting it; a mismatch leaves the grid empty.
+      // (2)/(3) Clear, then adopt this brief's own persisted run if one exists. The API
+      // keys reports by campaign id, so we ask for exactly this brief's report — every
+      // brief's run survives independently, not just the most recent. Empty → grid stays
+      // in the "ready to run" state.
       setResult(null);
       setDecisions({});
-      fetch(`${API}/campaigns/result`)
+      fetch(`${API}/campaigns/result?campaignId=${encodeURIComponent(next.id)}`)
         .then((r) => r.json() as Promise<RunResult>)
         .then((d) => {
           if (briefIdRef.current !== next.id) return; // superseded by a later switch
@@ -218,10 +219,12 @@ export function RunProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Hydrate from the last persisted run so views aren't empty on first load.
+  // Hydrate from the starting brief's own persisted run so the grid isn't empty on
+  // first load — and matches the brief shown (the shell always starts on DEFAULT_BRIEF),
+  // rather than restoring whichever brief happened to run last.
   useEffect(() => {
     let active = true;
-    fetch(`${API}/campaigns/result`)
+    fetch(`${API}/campaigns/result?campaignId=${encodeURIComponent(DEFAULT_BRIEF.id)}`)
       .then((r) => r.json() as Promise<RunResult>)
       .then((d) => {
         // Restore any real persisted run — including a halted / log-only run with no

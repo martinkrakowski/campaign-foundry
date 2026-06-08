@@ -9,6 +9,22 @@ type ReportAsset = GeneratedAsset & { brandCompliant: boolean };
 /** Asset identity within the campaign matrix (matches the review UI's key). */
 const keyOf = (a: GeneratedAsset): string => `${a.productId}/${a.aspectRatio}/${a.treatment}`;
 
+/**
+ * Resolve the per-campaign report path under `<output>/reports/<campaignId>.json`,
+ * or null when the id can't be a safe single path segment. The id originates from a
+ * brief (validated) but also flows in from the untrusted `?campaignId=` query, so we
+ * reject anything that isn't a plain slug — no separators, no `..` traversal.
+ */
+export function campaignReportPath(root: string, campaignId: string): string | null {
+  if (!campaignId || !/^[A-Za-z0-9._-]+$/.test(campaignId) || campaignId === "." || campaignId === "..") {
+    return null;
+  }
+  return resolve(root, "reports", `${campaignId}.json`);
+}
+
+/** The "latest run" pointer — read by GET /campaigns/result when no campaignId is given. */
+export const latestReportPath = (root: string): string => resolve(root, "report.json");
+
 /** A persisted entry we can safely key for merging — guards against a corrupt report.json. */
 function isKeyable(a: unknown): a is ReportAsset {
   return (
@@ -43,19 +59,30 @@ async function readPersistedAssets(path: string): Promise<ReportAsset[]> {
 }
 
 /**
- * Persist a run's report.json under the output root; returns its path.
+ * Persist a run's report under the output root; returns the per-campaign path it wrote.
  *
- * With `merge` (a selective/HITL re-roll), the run's assets are overlaid onto the
- * previously persisted set by identity — replacing the regenerated cells and keeping
- * everything else — so a full report survives a partial run (and a page reload).
+ * Reports are keyed by campaign id (`<output>/reports/<campaignId>.json`) so every
+ * brief's run survives independently — switching briefs in the UI reloads the right
+ * one instead of always seeing the most recent run. A copy is also written to the
+ * `<output>/report.json` "latest" pointer for callers that don't pass a campaign id.
+ *
+ * With `merge` (a selective/HITL re-roll), the run's assets are overlaid onto this
+ * campaign's previously persisted set by identity — replacing the regenerated cells
+ * and keeping everything else — so a full report survives a partial run (and a reload).
  */
 export async function writeReport(
   result: PipelineResult,
   { merge = false }: { merge?: boolean } = {},
 ): Promise<string> {
   const root = outputRoot();
+  const latest = latestReportPath(root);
+  // The campaign id is the report's identity. Fall back to the latest-only pointer if a
+  // run somehow lacks one (defensive — the use case always stamps the brief id).
+  const perCampaign = result.log?.campaignId ? campaignReportPath(root, result.log.campaignId) : null;
+
   await mkdir(root, { recursive: true });
-  const path = resolve(root, "report.json");
+  if (perCampaign) await mkdir(resolve(root, "reports"), { recursive: true });
+
   // `brandCompliant` is a derived view field (density gate AND logo present); the
   // entity keeps the two raw signals as the source of truth.
   const fresh: ReportAsset[] = result.assets.map((a) => ({
@@ -65,18 +92,19 @@ export async function writeReport(
 
   let assets = fresh;
   if (merge) {
-    // Map preserves existing order; re-keying an existing entry updates it in place,
-    // and any genuinely new cell is appended.
+    // Merge against this campaign's own prior report (not the global latest), so a
+    // re-roll of one brief never folds in another brief's creatives. Map preserves
+    // existing order; re-keying an existing entry updates it in place, new cells append.
+    const base = perCampaign ?? latest;
     const byKey = new Map(
-      (await readPersistedAssets(path)).map((a) => [keyOf(a), a] as const),
+      (await readPersistedAssets(base)).map((a) => [keyOf(a), a] as const),
     );
     for (const a of fresh) byKey.set(keyOf(a), a);
     assets = [...byKey.values()];
   }
 
-  await writeFile(
-    path,
-    JSON.stringify({ halted: result.halted, assets, log: result.log }, null, 2),
-  );
-  return path;
+  const payload = JSON.stringify({ halted: result.halted, assets, log: result.log }, null, 2);
+  if (perCampaign) await writeFile(perCampaign, payload);
+  await writeFile(latest, payload);
+  return perCampaign ?? latest;
 }

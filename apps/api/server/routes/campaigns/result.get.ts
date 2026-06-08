@@ -1,12 +1,32 @@
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
 import { outputRoot } from "../../lib/config.js";
+import { campaignReportPath, latestReportPath } from "../../lib/report.js";
 
-/** GET /campaigns/result — the most recent run's report.json, or an empty result. */
-export default defineEventHandler(async () => {
+/** The empty "no run yet" result the UI treats as "never ran". */
+const EMPTY = { halted: false, assets: [], log: null };
+
+/**
+ * GET /campaigns/result — a run's persisted report.json.
+ *
+ * With `?campaignId=`, returns that brief's own report (`<output>/reports/<id>.json`),
+ * so switching briefs in the UI reloads the right run rather than the most recent one;
+ * an unknown or unsafe id yields the empty result. Without it, returns the latest run.
+ */
+export default defineEventHandler(async (event) => {
+  const root = outputRoot();
+  const campaignId = getQuery(event).campaignId;
+
+  let path: string | null;
+  if (typeof campaignId === "string") {
+    path = campaignReportPath(root, campaignId); // null for an unsafe/empty id
+    if (!path) return EMPTY;
+  } else {
+    path = latestReportPath(root);
+  }
+
   try {
-    return JSON.parse(await readFile(resolve(outputRoot(), "report.json"), "utf8"));
+    return JSON.parse(await readFile(path, "utf8"));
   } catch {
-    return { halted: false, assets: [], log: null };
+    return EMPTY;
   }
 });
