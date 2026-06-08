@@ -1,8 +1,8 @@
-# Orange campaign variation — reuses existing input images instead of generating
-# backgrounds. Each product sets `inputAsset` to an image already in assets/inputs/,
-# so the pipeline reuses it (cover-fit to each ratio) and badges every creative
-# REUSED — the run is fully offline, no GenAI keys needed. The brand colour is
-# orange, which drives the accent band and brand-compliance scoring.
+# Orange campaign variation — generates hero imagery with the selected image model
+# (or the default fallback chain), with orange as the brand accent. No `inputAsset`,
+# so the pipeline falls through reuse → Imagen → OpenRouter → procedural; the brand
+# colour drives the accent band and brand-compliance scoring, and the logo is
+# composited on top. Use this to demo the model selector with an orange campaign.
 id: summer-hydration-2026-orange
 targetRegion: DE
 targetAudience: Urban outdoor enthusiasts, 25-40
@@ -13,12 +13,12 @@ products:
     name: Hydra Bottle
     primaryColor: "#FF7A00"
     logoPath: assets/inputs/hydra-logo.png
-    inputAsset: assets/inputs/hydra-logo.png   # reused as the background (REUSED)
+    # no inputAsset — pipeline generates imagery, orange accent band applied
   - id: acme-trail-pack
     name: Trail Pack
     primaryColor: "#FF7A00"
     logoPath: assets/inputs/trail-logo.png
-    inputAsset: assets/inputs/trail-logo.png   # reused as the background (REUSED)
+    # no inputAsset — pipeline generates imagery, orange accent band applied
 treatments:
   - id: bold-bottom
     layout: headline-bottom
