@@ -65,6 +65,9 @@ export const assetKey = (a: Asset): string => `${a.productId}/${a.aspectRatio}/$
 /** localStorage key for persisted HITL approve/reject decisions. */
 const DECISIONS_KEY = "cf:decisions";
 
+/** localStorage flag: the brief picker has been shown/dismissed once (don't auto-open again). */
+const BRIEF_PICKED_KEY = "cf:brief-picked";
+
 /**
  * The brief the shell starts with. The HITL surface (the /brief view) edits a
  * copy of this; `execute()` sends whatever the current brief is.
@@ -119,6 +122,14 @@ interface RunContextValue {
   /** Selected primary image model id (null = Auto / default chain). Sent with execute. */
   selectedModel: string | null;
   setSelectedModel: (model: string | null) => void;
+  /**
+   * Brief picker: lists the briefs in `briefs/` so a reviewer can load their own
+   * spec instead of the built-in demo. Auto-opens once on first visit (then
+   * remembered); reopenable from the sidebar.
+   */
+  briefPickerOpen: boolean;
+  openBriefPicker: () => void;
+  closeBriefPicker: () => void;
 }
 
 const EMPTY_LOG: LogEntry[] = [];
@@ -134,6 +145,28 @@ export function RunProvider({ children }: { children: ReactNode }) {
   const [assetVersion, setAssetVersion] = useState(0);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [regeneratingKeys, setRegeneratingKeys] = useState<ReadonlySet<string> | null>(null);
+  const [briefPickerOpen, setBriefPickerOpen] = useState(false);
+
+  // Brief picker: auto-open once on first visit so a reviewer sees they can load
+  // their own spec; remember the dismissal so reloads don't re-prompt. Reopenable
+  // from the sidebar.
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(BRIEF_PICKED_KEY) !== "1") setBriefPickerOpen(true);
+    } catch {
+      /* storage unavailable — just don't auto-open */
+    }
+  }, []);
+
+  const openBriefPicker = useCallback(() => setBriefPickerOpen(true), []);
+  const closeBriefPicker = useCallback(() => {
+    setBriefPickerOpen(false);
+    try {
+      localStorage.setItem(BRIEF_PICKED_KEY, "1");
+    } catch {
+      /* best-effort */
+    }
+  }, []);
 
   // Hydrate from the last persisted run so views aren't empty on first load.
   useEffect(() => {
@@ -300,6 +333,9 @@ export function RunProvider({ children }: { children: ReactNode }) {
       assetVersion,
       selectedModel,
       setSelectedModel,
+      briefPickerOpen,
+      openBriefPicker,
+      closeBriefPicker,
     }),
     [
       brief,
@@ -313,6 +349,9 @@ export function RunProvider({ children }: { children: ReactNode }) {
       regeneratingKeys,
       assetVersion,
       selectedModel,
+      briefPickerOpen,
+      openBriefPicker,
+      closeBriefPicker,
     ],
   );
 

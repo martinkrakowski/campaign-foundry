@@ -12,7 +12,33 @@ export function Sidebar() {
   return (
     <aside className="relative z-10 hidden h-full w-[320px] shrink-0 flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl lg:flex">
       <SidebarContent />
+      <BrowseBriefsButton />
     </aside>
+  );
+}
+
+/**
+ * Footer action that opens the brief picker. Shared by the desktop sidebar and the
+ * mobile menu; `onActivate` lets the mobile menu close itself before the picker opens.
+ */
+export function BrowseBriefsButton({ onActivate }: { onActivate?: () => void } = {}) {
+  const { openBriefPicker } = useRun();
+  return (
+    <div className="shrink-0 border-t border-border p-3">
+      <button
+        type="button"
+        onClick={() => {
+          onActivate?.();
+          openBriefPicker();
+        }}
+        className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-[12px] font-medium text-text-primary transition-colors hover:bg-border-hover"
+      >
+        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+        </svg>
+        Browse briefs
+      </button>
+    </div>
   );
 }
 
