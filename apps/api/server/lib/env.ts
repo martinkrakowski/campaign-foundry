@@ -47,8 +47,11 @@ export function loadEnv(): void {
   // dev server started before keys were added) is self-evident in the logs instead of
   // silently falling back to procedural gradients.
   const providers: string[] = [];
+  // Mirror pipeline.ts's `geminiKey = GEMINI_API_KEY ?? GOOGLE_API_KEY` so this log
+  // reflects exactly when Imagen runs — and name whichever key is actually set.
   if (process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY) {
-    providers.push("imagen (GEMINI_API_KEY ✓)");
+    const keyName = process.env.GEMINI_API_KEY ? "GEMINI_API_KEY" : "GOOGLE_API_KEY";
+    providers.push(`imagen (${keyName} ✓)`);
   }
   if (process.env.OPENROUTER_API_KEY) providers.push("openrouter (OPENROUTER_API_KEY ✓)");
   if (providers.length > 0) {
