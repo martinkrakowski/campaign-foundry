@@ -17,6 +17,37 @@ import type { ImageGeneratorPort } from "../ports/out/ImageGeneratorPort.js";
 /** A campaign brief must contain at least this many unique products. */
 const MINIMUM_PRODUCTS = 2;
 
+/**
+ * Cap on concurrently-generated backgrounds. Backgrounds are the slow GenAI step,
+ * so we parallelize them — but each is a multi-megabyte image and an upstream
+ * request, so an unbounded fan-out on a large brief would spike peak memory and
+ * burst the provider. A small pool keeps the latency win for typical briefs while
+ * bounding both.
+ */
+const MAX_CONCURRENT_BACKGROUNDS = 8;
+
+/**
+ * Run `fn` over `items` with at most `limit` in flight at once, preserving input
+ * order in the result — a tiny bounded-concurrency pool (no external dependency) so
+ * the pipeline can parallelize without an unbounded request burst.
+ */
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await fn(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 /** Ports injected at the composition root — the use case depends on contracts, never adapters. */
 export interface GenerateCampaignDeps {
   readonly imageGenerator: ImageGeneratorPort;
@@ -92,50 +123,43 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       targetAudience: brief.targetAudience,
       targetRegion: brief.targetRegion,
     };
-    const assets: GeneratedAsset[] = [];
-
-    // 3. ResolveBackgroundAssets — reuse inputAsset or generate. A background is
-    // resolved once per (product × ratio) and shared across that ratio's treatments.
-    // This is the slow GenAI step, so resolve them all *concurrently*: a sequential
-    // run of N image calls easily exceeds the dev proxy's request timeout, whereas
-    // concurrent resolution finishes in roughly a single call's latency. Each
-    // generator still degrades independently (Imagen → OpenRouter → procedural), so
-    // one slow/failed provider can't stall the others.
-    const bgKey = (productId: string, ratioValue: string): string => `${productId}/${ratioValue}`;
-    const backgroundJobs = brief.products.flatMap((product) =>
+    // 3-6. Generate each in-scope cell (product × ratio): resolve its background, then
+    // composite/score/save every treatment that shares it. Cells run with BOUNDED
+    // concurrency — background generation is the slow GenAI step, so a sequential run
+    // overran the dev proxy's request timeout; an unbounded fan-out would instead
+    // buffer every multi-MB background at once and burst the provider. A small pool
+    // gets the latency win while capping peak memory and in-flight requests: each
+    // background is local to its cell and released once its composites are made. Each
+    // generator still degrades on its own (Imagen → OpenRouter → procedural), so one
+    // slow/failed provider can't stall the pool.
+    const cells = brief.products.flatMap((product) =>
       ratios
-        .filter((ratio) => treatments.some((t) => isTarget(product.id, ratio.value, t.id)))
-        .map((ratio) => ({ product, ratio })),
+        .map((ratio) => ({
+          product,
+          ratio,
+          ratioTreatments: treatments.filter((t) => isTarget(product.id, ratio.value, t.id)),
+        }))
+        // On a selective run, skip a ratio entirely when none of its treatments are targeted.
+        .filter((cell) => cell.ratioTreatments.length > 0),
     );
-    const backgrounds = new Map<string, Awaited<ReturnType<ImageGeneratorPort["resolveBackground"]>>>();
-    await Promise.all(
-      backgroundJobs.map(async ({ product, ratio }) => {
+
+    const cellResults = await mapWithConcurrency(
+      cells,
+      MAX_CONCURRENT_BACKGROUNDS,
+      async ({ product, ratio, ratioTreatments }) => {
+        // ResolveBackgroundAssets — reuse inputAsset or generate, once per cell.
         const background = await this.deps.imageGenerator.resolveBackground(product, ratio, context);
-        backgrounds.set(bgKey(product.id, ratio.value), background);
         log.record(
           "ResolveBackgroundAssets",
           `${product.id} @ ${ratio.value} — background: ${background.source}${background.source === "procedural" ? " (Imagen unavailable — procedural fallback)" : ""}`,
           background.source === "procedural" ? "warn" : "info",
         );
-      }),
-    );
 
-    for (const product of brief.products) {
-      const proofPath = `proofs/${product.id}.pdf`;
-      let proofSource: Uint8Array | undefined;
-
-      for (const ratio of ratios) {
-        // On a selective run, only the targeted treatments of this product×ratio run;
-        // skip the whole ratio when none are targeted (no background was resolved for it).
-        const ratioTreatments = treatments.filter((t) => isTarget(product.id, ratio.value, t.id));
-        if (ratioTreatments.length === 0) continue;
-
-        // Background resolved (concurrently) above; present for every in-scope cell.
-        const background = backgrounds.get(bgKey(product.id, ratio.value));
-        if (!background) continue;
-
+        const cellAssets: GeneratedAsset[] = [];
+        // The first treatment's 1:1 composite is this product's print-proof source.
+        let heroImage: Uint8Array | undefined;
         for (const treatment of ratioTreatments) {
-          // 4. CompositeVariations — deterministic layer stacking, treatment-driven.
+          // CompositeVariations — deterministic layer stacking, treatment-driven.
           const composite = await this.deps.compositor.compositeAsset({
             background: background.image,
             message: copy,
@@ -146,30 +170,24 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
             tone: treatment.tone,
           });
 
-          // 5. ExecuteVisualComplianceCheck — brand-colour density.
+          // ExecuteVisualComplianceCheck — brand-colour density.
           const visual = await this.deps.compliance.validateBrandColorDensity(
             composite.image,
             product.primaryColor,
           );
 
-          // 6. SaveOutputFiles — the use case owns the path (OutputDirectoryConvention).
+          // SaveOutputFiles — the use case owns the path (OutputDirectoryConvention).
           const outputPath = namespaceByTreatment
             ? `${product.id}/${ratio.slug}/${treatment.id}.png`
             : `${product.id}/${ratio.slug}.png`;
           await this.deps.exporter.saveToDirectory(composite.image, outputPath);
-          // Proof = the first treatment's 1:1 hero (one proof per product). On a
-          // selective run, only re-proof when the hero itself is re-rolled — otherwise
-          // the existing proof stays valid and an off-hero cell mustn't overwrite it.
-          const isHero = ratio.value === "1:1" && treatment === treatments[0];
-          if (selective ? isHero : proofSource === undefined || isHero) {
-            proofSource = composite.image;
-          }
+          if (ratio.value === "1:1" && treatment === treatments[0]) heroImage = composite.image;
 
-          assets.push({
+          cellAssets.push({
             productId: product.id,
             aspectRatio: ratio.value,
             outputPath,
-            proofPath,
+            proofPath: `proofs/${product.id}.pdf`,
             complianceScore: visual.score ?? 0,
             passedCompliance: visual.passed,
             logoApplied: composite.logoApplied,
@@ -182,13 +200,25 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
             visual.passed && composite.logoApplied ? "info" : "warn",
           );
         }
-      }
+        return { productId: product.id, assets: cellAssets, heroImage };
+      },
+    );
 
-      // 7. ExportPrintProofs — one proof per product (hero 1:1 creative).
-      if (proofSource) {
-        await this.deps.exporter.generatePrintProof(proofSource, proofPath);
-        log.record("ExportPrintProofs", `Print proof written for ${product.id}`);
-      }
+    // mapWithConcurrency preserves input order, so assets stay product → ratio → treatment.
+    const assets: GeneratedAsset[] = cellResults.flatMap((cell) => cell.assets);
+
+    // 7. ExportPrintProofs — one proof per product, from its 1:1 hero (first treatment).
+    // On a selective run the hero only ran if it was targeted, so a non-hero re-roll
+    // leaves the existing proof untouched.
+    const heroByProduct = new Map<string, Uint8Array>();
+    for (const cell of cellResults) {
+      if (cell.heroImage) heroByProduct.set(cell.productId, cell.heroImage);
+    }
+    for (const product of brief.products) {
+      const heroImage = heroByProduct.get(product.id);
+      if (!heroImage) continue;
+      await this.deps.exporter.generatePrintProof(heroImage, `proofs/${product.id}.pdf`);
+      log.record("ExportPrintProofs", `Print proof written for ${product.id}`);
     }
 
     log.complete();
