@@ -46,7 +46,7 @@ Hexagonal architecture (**ports & adapters**) in a **modular monolith** — Yarn
 workspaces + Turborepo. The domain core has zero infrastructure dependencies;
 everything that touches the outside world is an adapter behind a port.
 
-```
+```text
                        ┌──────────────────────────────────────────┐
    campaign brief ───▶ │  CampaignOrchestration  (core domain)    │
    (YAML / JSON)       │  GenerateCampaignUseCase                 │
@@ -54,8 +54,8 @@ everything that touches the outside world is an adapter behind a port.
                        │   owns the port contracts ▼              │
                        │  ImageGeneratorPort  CompositorPort      │
                        │  CompliancePort      ExportPort          │
-                       └──────┬───────────┬───────────┬───────────┘
-                              │           │           │
+                       └───────┬───────────┬────────────────┬─────┘
+                               │           │                │
               ┌────────────────▼──┐  ┌─────▼──────────┐  ┌──▼───────────────┐
               │ CreativeGeneration│  │ Governance &   │  │ Distribution     │
               │  procedural bg +  │  │ Compliance     │  │ filesystem export│
@@ -112,7 +112,7 @@ OPENROUTER_IMAGE_MODEL=x-ai/grok-imagine-image-quality   # default
 **Fallback chain** — each tier is used only when its key is present, and any
 failure or rate-limit drops to the next, so a run never aborts:
 
-```
+```text
 reuse provided asset → Imagen → OpenRouter → procedural gradient
 ```
 
