@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import type { GeneratedAsset, PipelineResult } from "@campaignfoundry/CampaignOrchestration";
 import { outputRoot } from "./config.js";
 
@@ -12,13 +13,13 @@ const keyOf = (a: GeneratedAsset): string => `${a.productId}/${a.aspectRatio}/${
 /**
  * Resolve the per-campaign report path under `<output>/reports/<campaignId>.json`,
  * or null when the id can't be a safe single path segment. The id originates from a
- * brief (validated) but also flows in from the untrusted `?campaignId=` query, so we
- * reject anything that isn't a plain slug — no separators, no `..` traversal.
+ * brief (validated against the same pattern) but also flows in from the untrusted
+ * `?campaignId=` query — so reuse SAFE_ID_PATTERN, the canonical brief/product/treatment
+ * slug. It allows only lowercase letters, digits and hyphens, which inherently rules out
+ * separators, `.`/`..` traversal, and anything else that isn't one safe path segment.
  */
 export function campaignReportPath(root: string, campaignId: string): string | null {
-  if (!campaignId || !/^[A-Za-z0-9._-]+$/.test(campaignId) || campaignId === "." || campaignId === "..") {
-    return null;
-  }
+  if (!SAFE_ID_PATTERN.test(campaignId)) return null;
   return resolve(root, "reports", `${campaignId}.json`);
 }
 

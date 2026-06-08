@@ -17,7 +17,11 @@ export default defineEventHandler(async (event) => {
   const campaignId = getQuery(event).campaignId;
 
   let path: string | null;
-  if (typeof campaignId === "string") {
+  if (campaignId !== undefined) {
+    // A present campaignId must be a single string. Repeated params yield string[] —
+    // treat that (and any non-string) as an invalid id → empty, not a fall-through to
+    // the latest run, matching the "unknown/unsafe id → empty result" contract.
+    if (typeof campaignId !== "string") return EMPTY;
     path = campaignReportPath(root, campaignId); // null for an unsafe/empty id
     if (!path) return EMPTY;
   } else {
