@@ -10,10 +10,12 @@ export function ModelSelector() {
   const { selectedModel, setSelectedModel, brief } = useRun();
   const [open, setOpen] = useState(false);
 
-  // A brief whose products carry `inputAsset` reuses that image and skips the
-  // selected model for those products (reuse wins over generation). Surface that so
-  // the model choice can't be silently overridden without the reviewer noticing.
-  const reusesAssets = brief.products.some((p) => Boolean(p.inputAsset));
+  // A product with `inputAsset` reuses that image and skips the selected model for
+  // that product — but only when the asset resolves and is readable server-side;
+  // otherwise it falls back to generation. The UI can't know that outcome ahead of a
+  // run, so this flags the *possibility* (and the wording below says "may"), letting
+  // the reviewer notice the model choice could be overridden.
+  const hasInputAssets = brief.products.some((p) => Boolean(p.inputAsset));
 
   return (
     <>
@@ -27,12 +29,12 @@ export function ModelSelector() {
         <span className="text-brand-primary" aria-hidden>◆</span>
         <span className="hidden text-text-muted sm:inline">Model:</span> {labelFor(selectedModel)}
       </button>
-      {reusesAssets && (
+      {hasInputAssets && (
         <span
-          title="This brief sets inputAsset on a product — that image is reused and the selected model is skipped for it."
+          title="This brief sets inputAsset on a product. When that image resolves, it's reused and the selected model is skipped for that product; a missing or unreadable asset falls back to model generation."
           className="hidden items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-1 font-mono text-[10px] text-warning sm:inline-flex"
         >
-          <span aria-hidden>↻</span> reuse brief · model not used
+          <span aria-hidden>↻</span> reuse brief · model may be skipped
         </span>
       )}
       {open && (
