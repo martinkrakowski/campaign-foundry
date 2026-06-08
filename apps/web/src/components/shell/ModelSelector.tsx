@@ -31,8 +31,11 @@ export function ModelSelector() {
       </button>
       {hasInputAssets && (
         <span
+          tabIndex={0}
+          role="note"
+          aria-label="Reuse brief: a product sets inputAsset, so the selected image model may be skipped for it. A missing or unreadable asset falls back to model generation."
           title="This brief sets inputAsset on a product. When that image resolves, it's reused and the selected model is skipped for that product; a missing or unreadable asset falls back to model generation."
-          className="hidden items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-1 font-mono text-[10px] text-warning sm:inline-flex"
+          className="hidden cursor-default items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-1 font-mono text-[10px] text-warning outline-none focus-visible:ring-2 focus-visible:ring-warning sm:inline-flex"
         >
           <span aria-hidden>↻</span> reuse brief · model may be skipped
         </span>
