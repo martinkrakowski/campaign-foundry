@@ -1,6 +1,6 @@
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { projectRoot } from "@campaignfoundry/shared";
+import { errorMessage, projectRoot } from "@campaignfoundry/shared";
 import { loadBrief } from "../../lib/load-brief.js";
 
 /** Brief formats the CLI/loader understands. */
@@ -25,9 +25,7 @@ export default defineEventHandler(async () => {
       .map((e) => e.name)
       .sort();
   } catch (error) {
-    console.warn(
-      `[briefs] could not read ${dir}: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    console.warn(`[briefs] could not read ${dir}: ${errorMessage(error)}`);
     return { briefs: [] };
   }
 
@@ -38,9 +36,7 @@ export default defineEventHandler(async () => {
     } catch (error) {
       // Skip a malformed/invalid brief rather than failing the whole list — but log
       // it so a reviewer can see why their brief isn't appearing in the picker.
-      console.warn(
-        `[briefs] skipped ${file}: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      console.warn(`[briefs] skipped ${file}: ${errorMessage(error)}`);
     }
   }
   return { briefs };

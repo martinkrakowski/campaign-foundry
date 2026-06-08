@@ -16,11 +16,18 @@ export default defineConfig({
         test: {
           name: "node",
           environment: "node",
-          include: [
-            "packages/*/src/**/*.test.ts",
-            "apps/api/server/**/*.test.ts",
-            "apps/api/bin/**/*.test.ts",
-          ],
+          include: ["packages/*/src/**/*.test.ts"],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "api",
+          environment: "node",
+          include: ["apps/api/server/**/*.test.ts", "apps/api/bin/**/*.test.ts"],
+          // Provide Nitro's auto-imported h3 globals (defineEventHandler, …) so route
+          // modules load and can be driven as real Request → Response in tests.
+          setupFiles: ["./apps/api/vitest.setup.ts"],
         },
       },
       {
