@@ -1,8 +1,9 @@
-# Orange campaign variation — generates hero imagery with the selected image model
-# (or the default fallback chain), with orange as the brand accent. No `inputAsset`,
-# so the pipeline falls through reuse → Imagen → OpenRouter → procedural; the brand
-# colour drives the accent band and brand-compliance scoring, and the logo is
-# composited on top. Use this to demo the model selector with an orange campaign.
+# Orange campaign variation, with orange as the brand accent. No `inputAsset`, so
+# backgrounds are generated (never reused) by the selected image model — the chain is
+# conditional: Auto runs Imagen → OpenRouter → procedural with each tier key-gated;
+# selecting an OpenRouter model uses it → procedural; with no keys it's procedural.
+# The brand colour drives the accent band and brand-compliance scoring, and the logo
+# is composited on top. Use this to demo the model selector with an orange campaign.
 id: summer-hydration-2026-orange
 targetRegion: DE
 targetAudience: Urban outdoor enthusiasts, 25-40
