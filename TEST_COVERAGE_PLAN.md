@@ -1,25 +1,27 @@
 # Test Coverage Plan — Campaign Foundry → 100%
 
 **Branch:** `feat/test-coverage`
+**Runner:** **Vitest** (v8 coverage, happy-dom for the UI)
 **Goal:** Take the repository from **zero tests** to **100% coverage**
-(statements / branches / functions / lines) across every workspace, using the
-stack the repo already mandates — `node:test` + `node:assert/strict`, tests in
-`__tests__/` dirs, fakes injected at the ports — and wire coverage enforcement
-into Turbo and CI.
+(statements / branches / functions / lines) across every workspace, with the
+gate enforced in CI.
 
-This is a **plan**, not the implementation. It is ordered so coverage rises in
-meaningful order (highest-value business logic first) and so each phase is
-independently shippable.
+This is the implementation plan. It is ordered so coverage rises in meaningful
+order (highest-value business logic first) and so each phase is independently
+shippable. Vitest was chosen deliberately over the original `node:test` stack:
+the 100% target includes the Next.js UI, and Vitest's built-in DOM environment
+and zero-config v8 coverage remove the two biggest risks of a hand-wired
+`node:test` + `c8` + `tsx` setup. The repo's test contract
+(`.agents/testing.md`, `.agents/tech-stack.md`) was updated to match.
 
 ---
 
 ## 0. Guiding principles
 
-1. **Honor the existing contract.** `.agents/testing.md` is law: `node:test`
-   runner, `node:assert/strict` assertions, `*.test.ts` files in a `__tests__/`
-   directory adjacent to the module, `mock.fn()` over external mock libs, no
-   `expect()`, no Jest/Vitest/Mocha/Chai. One behaviour per test; the name states
-   the behaviour.
+1. **Vitest + `expect`, with `vi` for mocking.** `describe`/`test`/`expect` from
+   `vitest`; `vi.fn()` / `vi.spyOn()` / `vi.mock()` for seams. Tests live in a
+   `__tests__/` directory adjacent to the module, named `*.test.ts` (`*.test.tsx`
+   for UI). UI tests use `@testing-library/react` under happy-dom.
 2. **The architecture already paid for these tests.** The use case depends only on
    ports, so the entire pipeline is unit-testable with four in-memory fake
    adapters and **zero real I/O**. That is the spine of this plan — write the
@@ -27,17 +29,15 @@ independently shippable.
 3. **Unit by default, integration by exception.** Pure logic and port-driven
    orchestration are unit tests with fakes. Code that *is* the I/O seam (canvas
    compositing, PDF export, filesystem persistence, HTTP routes, the CLI) gets a
-   small, **named, isolated** integration layer that uses real adapters against a
-   temp directory and fixture assets — exactly as `.agents/testing.md` permits.
-4. **100% is a ratchet, not a vanity metric.** We enforce thresholds in CI so the
-   number can never regress, and we justify every coverage exclusion in writing.
+   small, named, isolated integration layer using real adapters against a temp
+   directory and fixture assets.
+4. **100% is a ratchet, not a vanity metric.** Branch coverage is in the gate, the
+   inventory targets *behaviours* not lines, and every coverage exclusion is
+   justified in writing.
 
 ---
 
 ## 1. The honest scope decisions (resolve these first)
-
-Three things stand between us and a *truthful* 100%. Each needs an explicit
-decision, recorded here, before any test is written.
 
 ### 1a. Dead generated scaffolding — **delete it** (recommended)
 
@@ -52,295 +52,231 @@ behaviour:
 | `packages/shared/src/domain/value-objects/Identifier.vo.ts` | stub factory that validates nothing |
 
 They are exported from `shared`'s barrels but used nowhere. "Covering" them means
-writing tests for code that lies about the system's capabilities (there is no
-database, no job queue). **Recommendation: delete all four and their barrel
-re-exports.** This removes ~4 files of misleading surface *and* removes the
-coverage burden. If product direction is to keep them as scaffolding, the
-fallback is to `c8`-ignore them with a written justification — but deletion is
+testing code that lies about the system's capabilities (there is no database, no
+job queue). **Recommendation: delete all four and their barrel re-exports.** The
+fallback is to coverage-ignore them with a written justification — but deletion is
 the honest move and is the default this plan assumes.
 
-> Decision owner: maintainer. Default: **delete**.
+### 1b. The Next.js UI — happy-dom + Testing Library
 
-### 1b. The Next.js UI — DOM testing is required for true 100%
-
-`node:test` has no DOM. To cover `run-context.tsx` (stateful provider) and the
-React components/pages, we need a DOM global. The thread-the-needle solution that
-stays inside the contract:
-
-- **Runner stays `node:test`.** Assertions stay `node:assert/strict`.
-- Add **`happy-dom`** (register a DOM global) + **`@testing-library/react`** +
-  **`@testing-library/user-event`** as `devDependencies` of `apps/web` only.
-- This brings **no `expect()` and no competing runner** — RTL renders, we assert
-  with `node:assert`. It is compatible with `.agents/testing.md`'s prohibitions.
-
-This is the one place the plan adds libraries. Update `.agents/tech-stack.md` in
-the same change (the doc explicitly asks for this) so the stack reference doesn't
-go stale.
-
-> Decision owner: maintainer. Default: **add the DOM layer** (the alternative —
-> excluding the UI — means the headline "100%" wouldn't include the review UI,
-> which is half the product).
+Vitest's `happy-dom` environment gives us a DOM for free; we add
+`@testing-library/react` + `@testing-library/user-event` + `@vitejs/plugin-react`
+to render and drive components. This is the only place the plan adds libraries,
+and it was the deciding factor in choosing Vitest — covering `run-context.tsx` and
+~20 components/pages is a config line here rather than a hand-rolled DOM shim.
 
 ### 1c. Small seam refactors to make adapters testable cleanly
 
-Two adapters construct their external client internally, which forces ugly module
-mocking. A *minimal* refactor makes them honestly injectable:
-
 - **`GeminiImageGenerator`** — accept an optional pre-built client
   (`models.generateImages`-shaped) in its options, defaulting to
-  `new GoogleGenAI(...)`. Lets a test inject a `mock.fn()` instead of hitting
-  Google. ~3 lines.
-- **`OpenRouterImageGenerator`** — already uses global `fetch`; no refactor
-  needed (mock `globalThis.fetch` with `mock.method`). Documented here so we
-  don't refactor it needlessly.
-- **API routes** — keep them *thin* (parse → delegate → serialize) so the
-  business logic they call is already unit-covered via `lib/`; the routes
-  themselves get covered by the HTTP integration layer (§4). No logic should
-  live in a route that isn't reachable from `lib/`.
+  `new GoogleGenAI(...)`. Lets a test inject a `vi.fn()` instead of hitting Google.
+  ~3 lines, behaviour-preserving.
+- **`OpenRouterImageGenerator`** — already uses global `fetch`; mock with
+  `vi.spyOn(globalThis, "fetch")`. No refactor needed.
+- **API routes** — keep them thin (parse → delegate → serialize) so their logic is
+  already unit-covered via `lib/`; the routes themselves are covered by the HTTP
+  integration layer (§4). No logic should live in a route that isn't reachable
+  from `lib/`.
 
-> These are behaviour-preserving and each ships with the test that proves it.
+> Each refactor ships with the test that motivated it.
 
 ---
 
-## 2. Test infrastructure (Phase 0 — do this before any test)
+## 2. Test infrastructure (Phase 0 — done)
 
-### 2.1 TypeScript execution
+### 2.1 Tooling
 
-Packages run from source (`"main": "src/index.ts"` + path mapping), so tests must
-execute TS directly. The repo already depends on **`tsx`**. Run tests with:
+- **Runner/transform:** Vitest (Vite + esbuild). Runs the TS source directly;
+  Vite resolves the codebase's `.js`-suffixed imports to their `.ts` files
+  (validated). No `tsx`, no build step before tests.
+- **Coverage:** `@vitest/coverage-v8` — V8 coverage with source-map remap to
+  `.ts`/`.tsx`, one flag (`--coverage`).
+- **DOM:** `happy-dom` + `@testing-library/react` + `@testing-library/user-event`
+  + `@vitejs/plugin-react` (web project only).
 
-```
-node --import tsx --test "src/**/*.test.ts"
-```
-
-(Node 22 in CI; `tsx` strips types and emits inline source maps, which the
-coverage tool consumes.)
-
-### 2.2 Coverage tool: `c8`
-
-Node's built-in `--experimental-test-coverage` does not remap through `tsx`
-cleanly on Node 22. Use **`c8`** (V8 coverage + source-map remap to `.ts`) at the
-**repo root** as a dev dependency:
-
-```
-c8 --reporter=text --reporter=lcov \
-   node --import tsx --test "<workspace>/**/*.test.ts"
-```
-
-### 2.3 Per-package `test` script
-
-`turbo.json` already declares a `test` task (`dependsOn: ^build`) and CI already
-calls `yarn test`, but **no package defines a `test` script today**, so the suite
-is currently a no-op. Add to each workspace `package.json`:
-
-```jsonc
-"scripts": {
-  "test": "node --import tsx --test \"src/**/*.test.ts\"",
-  "test:cov": "c8 --100 node --import tsx --test \"src/**/*.test.ts\""
-}
-```
-
-(`apps/web` uses `\"src/**/*.test.ts\" \"src/**/*.test.tsx\"`; `apps/api` globs
-`server/**` and `bin/**`.)
-
-### 2.4 Root-level aggregate coverage
-
-Add a root script that measures coverage across the whole monorepo in one pass
-(so cross-package c8 merging is unnecessary):
-
-```jsonc
-"scripts": {
-  "test:cov": "c8 --100 --reporter=text --reporter=lcov node --import tsx --test \"{packages,apps}/**/src/**/*.test.{ts,tsx}\" \"apps/api/server/**/*.test.ts\" \"apps/api/bin/**/*.test.ts\""
-}
-```
-
-### 2.5 `.c8rc.json` (coverage config + justified exclusions)
-
-```jsonc
-{
-  "all": true,                       // count untested files as 0%, not invisible
-  "100": true,                       // fail under 100% on any metric
-  "src": ["packages", "apps"],
-  "include": ["**/src/**/*.ts", "**/src/**/*.tsx", "apps/api/server/**/*.ts", "apps/api/bin/**/*.ts"],
-  "exclude": [
-    "**/*.test.ts", "**/*.test.tsx", "**/__tests__/**",
-    "**/dist/**", "**/.next/**", "**/.nitro/**", "**/.output/**",
-    "**/index.ts",                   // generated barrels: pure re-exports, no logic
-    "**/*.config.{ts,mts,js,mjs}",   // next/tailwind/postcss/eslint configs
-    "apps/web/next-env.d.ts",
-    "**/*.d.ts"
-  ]
-}
-```
-
-Every exclusion above is **non-executable or generated**: barrels (re-exports),
-config files, type declarations, build output. Type-only files (entity/port
-interfaces, `BackgroundSource`, `LogEntry`, `ComplianceResult`, `PipelineResult`)
-emit no runtime code and contribute no coverable lines, so they need no special
-handling.
-
-### 2.6 CI
-
-`.github/workflows/ci.yml` already runs `yarn test`. Two edits:
-- Point the Test step at `yarn test:cov` so CI enforces the 100% gate.
-- Upload `coverage/lcov.info` as an artifact (optional, for PR visibility).
-
-Node version in CI is `"22"` — fine for `tsx --test`. No change needed.
-
-### 2.7 Shared test toolkit
-
-Create `packages/CampaignOrchestration/src/application/use-cases/__tests__/_fakes.ts`
-(or a tiny internal test-only module) housing the four reusable fakes:
+### 2.2 Root `vitest.config.ts` (two projects, one coverage report)
 
 ```ts
-// In-memory fakes — the whole point of ports. No I/O, fully deterministic.
+projects: [
+  { extends: true, test: { name: "node", environment: "node",
+      include: ["packages/*/src/**/*.test.ts", "apps/api/server/**/*.test.ts", "apps/api/bin/**/*.test.ts"] } },
+  { extends: true, plugins: [react()],
+    resolve: { alias: { "@": webSrc }, dedupe: ["react", "react-dom"] },
+    test: { name: "web", environment: "happy-dom",
+      include: ["apps/web/src/**/*.test.{ts,tsx}"], setupFiles: ["./apps/web/vitest.setup.ts"] } },
+]
+```
+
+`apps/web/vitest.setup.ts` calls RTL `cleanup()` after each test.
+
+### 2.3 Root scripts
+
+```jsonc
+"test":       "vitest run",
+"test:cov":   "vitest run --coverage",
+"test:watch": "vitest"
+```
+
+A single root config covers all workspaces, so no per-package `test` scripts are
+needed. CI runs `yarn test` (and `yarn test:cov` once the gate is on).
+
+### 2.4 Coverage config + justified exclusions
+
+Configured in `vitest.config.ts` under `test.coverage`. Excludes are all
+non-executable or generated: `**/index.ts` (re-export barrels), `**/*.config.*`,
+`**/*.d.ts`, `**/__tests__/**`, the root `layout.tsx` html/body shell. Type-only
+files (entity/port interfaces, `BackgroundSource`, `LogEntry`, `ComplianceResult`,
+`PipelineResult`) emit no runtime code and need no handling.
+
+The `thresholds: { 100: true }` gate is **added in the final phase** so
+intermediate commits stay green; until then `test:cov` only reports.
+
+### 2.5 CI
+
+`.github/workflows/ci.yml` already runs `yarn test`. Switch the Test step to
+`yarn test:cov` when the gate goes on; Node 22 in CI is fine for Vitest.
+
+### 2.6 Shared test toolkit
+
+`packages/CampaignOrchestration/src/application/use-cases/__tests__/_fakes.ts`
+houses the four reusable in-memory fakes built on `vi.fn()`:
+
+```ts
 export const fakeImageGenerator = (source: BackgroundSource = "procedural"): ImageGeneratorPort => ({
-  resolveBackground: mock.fn(async () => ({ image: new Uint8Array([1, 2, 3]), source })),
+  resolveBackground: vi.fn(async () => ({ image: new Uint8Array([1, 2, 3]), source })),
 });
 export const fakeCompositor = (logoApplied = true): CompositorPort => ({
-  compositeAsset: mock.fn(async () => ({ image: new Uint8Array([4, 5, 6]), logoApplied })),
+  compositeAsset: vi.fn(async () => ({ image: new Uint8Array([4, 5, 6]), logoApplied })),
 });
 export const fakeCompliance = (opts?: { legalPass?: boolean; density?: number }): CompliancePort => ({ /* ... */ });
 export const recordingExporter = (): ExportPort & { saved: string[]; proofs: string[] } => ({ /* ... */ });
 ```
 
-These fakes are the lever: they make the use case's entire behaviour testable
-with assertions on *what the ports were called with*, not on real images.
+These make the use case's behaviour testable via assertions on *what the ports
+were called with*, not on real images.
 
 ---
 
 ## 3. Coverage inventory — unit tests (the core, by value)
 
-Ordered highest-value first. Each row is one `__tests__/<module>.test.ts` file.
+Each row is one `__tests__/<module>.test.ts` file.
 
 ### Phase 1 — `CampaignOrchestration` (the business core; highest ROI)
 
 | Module | Behaviours to cover |
 | --- | --- |
-| `application/use-cases/GenerateCampaignUseCase` | **The big one.** Validation: rejects non-slug id, duplicate product ids, `< 2` products, non-slug treatment id, duplicate treatment ids; accepts a valid brief. Legal gate: halts on prohibited copy (campaign **and** localized message), returns `halted:true` + empty assets + zero generator calls. Happy path: full `product × ratio × treatment` matrix count; asset order is product→ratio→treatment; `outputPath` namespacing **on** for >1 treatment and **off** for one; localized-message fallback to `campaignMessage`; `backgroundSource` propagated onto assets; warn-level log on procedural source. Selective regen: only targeted cells run, others untouched, proof only rewritten when its hero is targeted. Hero/proof: one proof per product from its 1:1 first-treatment composite. Concurrency: `mapWithConcurrency` preserves order with `limit < n`, `limit > n`, and `n = 0`. |
-| `domain/value-objects/AspectRatio.vo` | `create` ok for each ratio; `create` err for unknown; `all()` returns the three; `slug` colon→x; `equals` true/false; width/height correct. |
-| `domain/value-objects/Treatment.vo` | `SAFE_ID_PATTERN` accepts valid slugs, rejects uppercase / `..` / slash / empty / >64 chars; `DEFAULT_TREATMENT` shape; `LAYOUT_VALUES` / `TONE_VALUES` membership. |
-| `domain/value-objects/PipelineExecutionLog.vo` | `record` appends with level + timestamp; default level `info`; `complete()` sets `completedAt`; `entries` is read-only view; `toJSON` shape incl. `totalOperations`. |
+| `application/use-cases/GenerateCampaignUseCase` | **The big one.** Validation: rejects non-slug id, duplicate product ids, `< 2` products, non-slug treatment id, duplicate treatment ids; accepts a valid brief. Legal gate: halts on prohibited copy (campaign **and** localized message), returns `halted:true` + empty assets + zero generator calls. Happy path: full `product × ratio × treatment` matrix count; asset order product→ratio→treatment; `outputPath` namespacing on for >1 treatment, off for one; localized-message fallback; `backgroundSource` propagated; warn log on procedural. Selective regen: only targeted cells run, others untouched, proof rewritten only when its hero is targeted. Hero/proof: one proof per product from its 1:1 first-treatment composite. `mapWithConcurrency`: order preserved with `limit < n`, `limit > n`, `n = 0`. |
+| `domain/value-objects/AspectRatio.vo` | `create` ok per ratio; err for unknown; `all()` returns three; `slug` colon→x; `equals` true/false; dimensions. |
+| `domain/value-objects/Treatment.vo` | `SAFE_ID_PATTERN` accepts valid, rejects uppercase / `..` / slash / empty / >64; `DEFAULT_TREATMENT`; layout/tone membership. |
+| `domain/value-objects/PipelineExecutionLog.vo` | `record` appends w/ level+timestamp; default `info`; `complete()` sets `completedAt`; `entries` read-only; `toJSON` shape. |
 
 ### Phase 2 — driven adapters (`CreativeGeneration`, `GovernanceAndCompliance`)
 
 | Module | Type | Behaviours |
 | --- | --- | --- |
-| `CreativeGeneration/.../canvas-util` | unit | `hexToRgb`: `#abc` short form, 6-digit, missing `#`, padding/truncation; `wrapText`: wraps at width, single long word, empty → `[text]`. |
-| `CreativeGeneration/.../safe-path` (`resolveAssetPath`) | unit | accepts `assets/inputs/x.png`; rejects absolute, `../` escape, empty, and a path resolving outside `assets/`. |
-| `CreativeGeneration/.../ProceduralBackgroundGenerator` | unit | returns `source:"procedural"`; deterministic (same input → identical bytes); non-empty PNG; ignores context. |
-| `CreativeGeneration/.../AssetReusingImageGenerator` (decorator) | unit | with `inputAsset` present + readable → `source:"reused"`, does **not** delegate; missing/unsafe/unreadable `inputAsset` → delegates to wrapped generator. Wrapped generator is a `mock.fn()`. |
-| `CreativeGeneration/.../GeminiImageGenerator` | unit (injected client) | success → `source:"imagen"`, prompt contains product name/audience/region/colour; client throws → delegates to `fallback`; throws with no `fallback`; empty image data → fallback. |
-| `CreativeGeneration/.../OpenRouterImageGenerator` | unit (mock `fetch`) | success → `source:"openrouter"`; modality-mismatch error → retries with `["image","text"]`; non-OK HTTP → fallback; `extractImageUrl` for `images[].image_url.url`, `images[].url`, and `content[]` array; `decodeDataUrl` with/without comma; ratio→aspect mapping. |
-| `GovernanceAndCompliance/.../BrandComplianceChecker` | unit (synthetic image) | `validateLegalCopy`: clean passes, each prohibited term fails, case-insensitive, multi-hit reason lists all; `validateBrandColorDensity`: a solid brand-colour PNG passes with score ~1, a black PNG fails below threshold, tolerance ±10 boundary, score formula, `total=0` guard. (Build the test PNG in-memory with canvas — deterministic, no fixtures.) |
+| `CreativeGeneration/.../canvas-util` | unit | `hexToRgb` short/6-digit/no-`#`/pad/truncate; `wrapText` wraps, single long word, empty → `[text]`. |
+| `CreativeGeneration/.../safe-path` | unit | accepts `assets/inputs/x.png`; rejects absolute, `../` escape, empty, outside `assets/`. |
+| `CreativeGeneration/.../ProceduralBackgroundGenerator` | unit | `source:"procedural"`; deterministic; non-empty PNG; ignores context. |
+| `CreativeGeneration/.../AssetReusingImageGenerator` | unit | `inputAsset` present+readable → `reused`, no delegate; missing/unsafe/unreadable → delegates (wrapped = `vi.fn()`). |
+| `CreativeGeneration/.../GeminiImageGenerator` | unit (injected client) | success → `imagen`, prompt contents; client throws → fallback; throws w/o fallback; empty data → fallback. |
+| `CreativeGeneration/.../OpenRouterImageGenerator` | unit (mock `fetch`) | success → `openrouter`; modality-mismatch retry; non-OK → fallback; `extractImageUrl` variants; `decodeDataUrl`; ratio→aspect map. |
+| `GovernanceAndCompliance/.../BrandComplianceChecker` | unit (synthetic image) | `validateLegalCopy` clean/each term/case-insensitive/multi-hit reason; `validateBrandColorDensity` solid passes, black fails, ±10 boundary, score formula, `total=0` guard (build the PNG in-memory). |
 
 ### Phase 3 — `shared`
 
 | Module | Behaviours |
 | --- | --- |
-| `domain/result` | `ok` shape `{success:true,value}`; `err` shape `{success:false,error}`; type narrowing exercised. |
-| `infrastructure/project-root` | `PROJECT_ROOT` env override wins; walks up to a `yarn.lock`/`turbo.json` marker; falls back to cwd at filesystem root; memoization (second call doesn't re-walk — assert via a spy or stable result). *Reset the module cache between tests.* |
-
-*(If §1a is accepted, the four stubs are deleted and need no tests.)*
+| `domain/result` | `ok`/`err` shapes; type narrowing. *(Done — Phase 0 smoke test.)* |
+| `infrastructure/project-root` | `PROJECT_ROOT` override wins; walks to marker; cwd fallback at fs root; memoization (reset module between tests). |
 
 ---
 
 ## 4. Coverage inventory — integration tests (the I/O seams)
 
-Named and isolated per `.agents/testing.md`. Real adapters, temp dirs, fixture
-assets. Suffix files `*.itest.ts`? No — keep `*.test.ts` (the contract names one
-convention) but place them in `__tests__/integration/` and have them create/clean
-a `mkdtemp` working directory.
+Real adapters, `mkdtemp` working dirs, fixture assets under `__tests__/fixtures/`.
 
 ### Phase 4 — `Distribution` + `CreativeGeneration` rendering
 
 | Module | Behaviours |
 | --- | --- |
-| `Distribution/.../FileSystemExporter` | `saveToDirectory` writes bytes to `<temp>/a/b.png` (creates dirs); `generatePrintProof` writes a valid PDF (magic bytes `%PDF`, crop marks present, footer text); `resolveSafe` throws on `../` traversal in both methods. Uses `mkdtemp`. |
-| `CreativeGeneration/.../NodeCanvasCompositor` | renders a PNG at each ratio's exact dimensions; `logoApplied:true` with a real fixture logo, `false` on `ENOENT`, `false`+warn on an unreadable/corrupt logo; `headline-top` vs `headline-bottom` and `bold` vs `subtle` both render (cover all layout/tone branches); deterministic bytes for identical input. Uses a small fixture PNG under `__tests__/fixtures/`. |
-| `CreativeGeneration/.../fonts` (`registerBundledFonts`) | registers from `assets/fonts` (idempotent — second call no-ops); warns once when no fonts dir is found (run in a temp cwd). |
+| `Distribution/.../FileSystemExporter` | `saveToDirectory` writes bytes (creates dirs); `generatePrintProof` writes a valid PDF (`%PDF`, crop marks, footer); `resolveSafe` throws on `../` in both methods. |
+| `CreativeGeneration/.../NodeCanvasCompositor` | renders PNG at each ratio's exact dimensions; `logoApplied` true (fixture logo) / false on `ENOENT` / false+warn on corrupt; `headline-top`/`-bottom` × `bold`/`subtle` branches; deterministic bytes. |
+| `CreativeGeneration/.../fonts` | registers from `assets/fonts` (idempotent); warns once when none found (temp cwd). |
 
 ### Phase 5 — `apps/api` lib + routes + CLI
 
 | Module | Type | Behaviours |
 | --- | --- | --- |
-| `server/lib/env` | unit | `applyEnvFile` parses `K=V`, strips matching quotes, skips comments/blank/`=`-less lines, never overrides an existing `process.env`; provider-detection log lines for imagen-only / openrouter-only / both / none; idempotent `loadEnv` (second call no-ops). Use a temp `.env` and a saved/restored `process.env`. |
-| `server/lib/config` (`outputRoot`) | unit | default `<root>/output`; `OUTPUT_DIR` override (absolute and relative). |
-| `server/lib/load-brief` | unit | `parseBrief`: each missing required field; non-object; non-slug id/product/treatment; non-array products/treatments; valid → typed brief. `validateTreatments`: bad layout, bad tone, dup id. `parseRegenerateOnly`: undefined→undefined, non-array throws, empty array throws, non-string fields throw, valid maps. `loadBrief`: `.yaml`, `.yml`, `.json` parse paths. |
-| `server/lib/pipeline` | unit (env-driven) | `ALLOWED_IMAGE_MODELS` membership; `imageGenerator` selection branches: `"procedural"`→procedural-only, `"<provider>/<model>"`→OpenRouter (key set vs unset), default/`"imagen"` chain, reuse decorator always outermost (assert via a product with `inputAsset`). Set/unset `GEMINI_API_KEY`/`OPENROUTER_API_KEY` per case. `buildPipeline`/`runCampaign` smoke against a temp output dir with a minimal brief. |
-| `server/lib/report` | integration | `campaignReportPath` safe id vs unsafe→null; `latestReportPath`; `isKeyable` true/false; `readPersistedAssets` on missing file→[], corrupt JSON→[], non-array assets→[], drops unkeyable rows with warn; `writeReport` fresh (writes per-campaign **and** latest, derives `brandCompliant = passed && logo`); `writeReport` merge overlays by identity, preserves untouched cells, merges against per-campaign not latest. `mkdtemp` output root via `OUTPUT_DIR`. |
-| `server/routes/*` | integration (HTTP) | Boot the Nitro/h3 app (or use `nitropack`'s test util / a built `.output` + `supertest`-style fetch). `GET /` → `{status:"ok"}`; `POST /campaigns/generate` bare brief → 200 with assets; envelope with `regenerateOnly` → merge; bad brief → 400; unknown `?model=` → 400; business failure (e.g. 1 product) → 422. `GET /campaigns/result` latest / `?campaignId=` / unknown id → EMPTY / non-string param → EMPTY. `GET /campaigns/briefs` lists & skips malformed. `GET /output/**` streams a file, 404 missing, 400 on traversal, correct content-type. |
-| `bin/generate.ts` | integration | Refactor `main()` to be importable (export it; keep the `main().catch` guard behind an `import.meta` entry check). Run against `briefs/sample-campaign.yaml` into a temp `OUTPUT_DIR`; assert exit code 0, report written, assets listed; run a legal-gate-failing brief → halted message; a `<2` product brief → exit 1. |
+| `server/lib/env` | unit | `applyEnvFile` parse/quote-strip/skip/no-override; provider-detection logs (imagen/openrouter/both/none); idempotent `loadEnv`. Save/restore `process.env`. |
+| `server/lib/config` | unit | default `<root>/output`; `OUTPUT_DIR` override (abs + rel). |
+| `server/lib/load-brief` | unit | `parseBrief` each missing field / non-object / non-slug ids / non-array; `validateTreatments` bad layout/tone/dup; `parseRegenerateOnly` undefined/non-array/empty/non-string/valid; `loadBrief` yaml/yml/json. |
+| `server/lib/pipeline` | unit (env) | `ALLOWED_IMAGE_MODELS`; `imageGenerator` selection branches (procedural / `<provider>/<model>` w/ key set+unset / default+imagen); reuse decorator outermost; `buildPipeline`/`runCampaign` smoke to temp dir. |
+| `server/lib/report` | integration | `campaignReportPath` safe/unsafe; `latestReportPath`; `isKeyable`; `readPersistedAssets` missing/corrupt/non-array/drops-unkeyable; `writeReport` fresh (per-campaign+latest, derives `brandCompliant`); merge overlays by identity, preserves untouched, merges per-campaign not latest. |
+| `server/routes/*` | integration (HTTP) | Boot the Nitro/h3 app. `GET /`; `POST /generate` bare/envelope/400/unknown-model-400/422; `GET /result` latest / `?campaignId=` / unknown→EMPTY / non-string→EMPTY; `GET /briefs` lists+skips malformed; `GET /output/**` streams / 404 / 400 traversal / content-type. |
+| `bin/generate.ts` | integration | Export `main()`; run vs sample brief into temp `OUTPUT_DIR` → exit 0, report written; legal-gate brief → halted; `<2` products → exit 1. |
 
-### Phase 6 — `apps/web` (DOM layer from §1b)
+### Phase 6 — `apps/web` (happy-dom)
 
 | Module | Type | Behaviours |
 | --- | --- | --- |
-| `lib/cn` | unit | merges classes; later Tailwind class wins (`px-2 px-4`→`px-4`); conditional/array inputs. |
-| `lib/models` (`labelFor`, `MODELS`) | unit | `labelFor(null)`→"Auto", known id→label, unknown id→"Auto"; catalog ids mirror `ALLOWED_IMAGE_MODELS` (a guard test that fails if the two drift). |
-| `lib/aspect-ratios` | unit | exported order matches the domain set (guard test). |
-| `lib/run-context` (`RunProvider`/`useRun`) | DOM | `useRun` outside provider throws; `assetKey` identity; `execute` posts the brief and populates assets (mock `fetch`); **stale-run guard** — a brief switch mid-run discards the late response (drive two overlapping `fetch` resolutions, assert the grid shows the second brief); `assetVersion` bumps on success; `decide` toggles approve/reject/clear; `regenerateRejected` no-op when none rejected, else posts envelope and overlays by identity + clears those decisions; `localStorage` persistence of brief/decisions and validated restore (reject malformed stored JSON); `setBrief` keeps the run when `campaignId` matches, else fetches the per-campaign report; error path surfaces the actionable message on non-JSON 5xx. |
-| `components/shell/CommandBar` | DOM | expected-count math (`products × ratios × treatments`); confirm dialog gates `execute`; regenerate button appears only with rejected > 0; disabled while loading; status/colour per state. |
-| `components/shell/*` (Header, Sidebar, BriefPicker, ModelSelector, TelemetryDrawer, MobileMenu, Accordion) | DOM | render under `RunProvider`; key interactions (model select sets `selectedModel`; brief picker select calls `setBrief`; telemetry toggle; accordion open/close). |
-| `app/(shell)/*` pages (grid, compliance, export, runs, brief) + `layout` | DOM | empty state vs populated; **grid** pivot product→ratio→treatment, badges (PASS/LOW, LOGO/NO LOGO, source), preview modal open/escape/focus-trap, per-tile regen spinner; **export** lists only approved + dedup proofs; **compliance** row per asset with derived gate; **layout** shows orchestrator only on `/grid`. |
-| `components/ui/*` (button, card, input) | DOM | variant class application; passthrough props. |
+| `lib/cn` | unit | merges; later Tailwind class wins; conditional/array inputs. |
+| `lib/models` | unit | `labelFor` null/known/unknown; catalog ids mirror `ALLOWED_IMAGE_MODELS` (drift guard). |
+| `lib/aspect-ratios` | unit | order matches domain set (drift guard). |
+| `lib/run-context` | DOM | `useRun` outside provider throws; `assetKey`; `execute` posts brief + populates (mock `fetch`); **stale-run guard** (overlapping resolutions → second wins); `assetVersion` bump; `decide` toggle; `regenerateRejected` no-op/envelope/overlay/clear; `localStorage` persist+validated restore; `setBrief` keep-on-match vs fetch; error path message. |
+| `components/shell/CommandBar` | DOM | expected-count math; confirm gate; regenerate button visibility; disabled while loading; status/colour. |
+| `components/shell/*` | DOM | render under provider; model select; brief picker select; telemetry toggle; accordion. |
+| `app/(shell)/*` pages | DOM | empty vs populated; grid pivot + badges + preview modal (esc/focus-trap) + per-tile spinner; export approved-only + dedup proofs; compliance row+gate; layout orchestrator only on `/grid`. |
+| `components/ui/*` | DOM | variant classes; prop passthrough. |
 
 ---
 
 ## 5. Phased rollout & sequencing
 
-| Phase | Scope | Why this order | Net coverage gain |
-| --- | --- | --- | --- |
-| **0** | Infra: scripts, `c8`, `.c8rc`, fakes toolkit, CI gate, §1a deletions, §1c refactors | Nothing measurable until the harness exists | harness only |
-| **1** | `CampaignOrchestration` core | Highest business value; proves the fakes pattern | the domain + use case |
-| **2** | `CreativeGeneration` + `GovernanceAndCompliance` units | Pure helpers + injected/mock adapters | most adapter logic |
-| **3** | `shared` | Tiny, fast, unblocks aggregate number | kernel |
-| **4** | Rendering/export integration | Real canvas/PDF seams | I/O adapters |
-| **5** | `apps/api` lib + routes + CLI | Wiring + HTTP contract | the backend edge |
-| **6** | `apps/web` (DOM) | Largest surface; lands last behind the DOM decision | the UI |
+| Phase | Scope | Status |
+| --- | --- | --- |
+| **0** | Vitest harness, config, scripts, fakes toolkit, §1a deletions, §1c refactors | **infra done** |
+| **1** | `CampaignOrchestration` core | pending |
+| **2** | `CreativeGeneration` + `GovernanceAndCompliance` units | pending |
+| **3** | `shared` | result.ts done; project-root pending |
+| **4** | Rendering/export integration | pending |
+| **5** | `apps/api` lib + routes + CLI | pending |
+| **6** | `apps/web` (happy-dom) | pending |
 
-Each phase ends green at **100% for the packages it touches** (run
-`yarn workspace <pkg> test:cov`), so the ratchet only ever goes up. The repo-wide
-`--100` gate flips on at the end of Phase 6 (before then, per-package gates hold).
+Each phase ends green for the modules it touches. The repo-wide
+`thresholds: { 100: true }` gate flips on in the final commit; CI switches to
+`yarn test:cov` at the same time.
 
 ---
 
 ## 6. Definition of done
 
-- [ ] `yarn test:cov` at the root reports **100%** statements/branches/functions/lines.
-- [ ] Every workspace has a `test` + `test:cov` script; `turbo test` runs them all.
-- [ ] CI runs `yarn test:cov` and fails the build under 100%.
-- [ ] Every coverage exclusion in `.c8rc.json` is non-executable or generated, and
-      justified inline.
-- [ ] No production code path is reachable only from a route/CLI that lacks a test.
-- [ ] `.agents/tech-stack.md` updated for the DOM test libs (§1b); `.agents/testing.md`
-      unchanged (we conformed to it).
-- [ ] Dead stubs resolved per §1a (deleted, or ignored-with-justification).
-- [ ] Seam refactors (§1c) each shipped with the test that motivated them.
-- [ ] `.agents/session-log.md` appended (per `AGENTS.md`).
+- [ ] `yarn test:cov` reports **100%** statements/branches/functions/lines.
+- [ ] `vitest.config.ts` carries the 100% threshold gate.
+- [ ] CI runs `yarn test:cov` and fails under 100%.
+- [ ] Every coverage exclusion is non-executable or generated, justified inline.
+- [ ] No production path is reachable only from a route/CLI that lacks a test.
+- [ ] Dead stubs resolved per §1a.
+- [ ] Seam refactors (§1c) each shipped with their motivating test.
+- [ ] `.agents/session-log.md` appended.
 
 ---
 
 ## 7. Risks & trade-offs
 
-- **"100%" can incentivize hollow tests.** Mitigation: branch coverage is in the
-  gate, and the inventory above targets *behaviours*, not lines. Review tests for
-  meaningful assertions, not just execution.
-- **The UI is the long pole.** ~20 components/pages + the stateful provider. If
-  timeline pressure hits, ship Phases 0–5 (full backend + domain at 100%) and
-  land Phase 6 behind a temporary per-package threshold, rather than weakening the
-  backend gate.
-- **Nitro route testing has two viable shapes** — boot the dev server and fetch,
-  or unit-test extracted handlers. This plan prefers booting (covers the real
-  wiring incl. auto-imports), accepting a slower, isolated integration suite.
-- **`c8` + `tsx` source-map remap** is the one tooling bet. Validate it in Phase 0
-  with a single trivial test before building out — if remap is flaky on Node 22,
-  fall back to `node --experimental-test-coverage` with a `tsc`-built `dist/`
-  target, or pin Node 24+ in CI where native TS + coverage is smoother.
+- **"100%" can incentivize hollow tests.** Mitigation: branch coverage in the
+  gate; the inventory targets behaviours, not lines.
+- **The UI is the long pole** (~20 components/pages + the provider). If timeline
+  pressure hits, ship Phases 0–5 (full backend + domain at 100%) and land Phase 6
+  behind a temporary per-project threshold rather than weakening the backend gate.
+- **Nitro route testing** prefers booting the app (covers real wiring incl.
+  auto-imports), accepting a slower, isolated integration suite.
+- **Single React instance.** The web project sets `resolve.dedupe: ["react",
+  "react-dom"]` so root-installed RTL and `apps/web`'s React never double up
+  ("invalid hook call").
 
 ---
 
-## 8. Estimated shape (rough, for planning only)
+## 8. Estimated shape (rough)
 
 | Area | Test files | Character |
 | --- | --- | --- |
@@ -352,6 +288,5 @@ Each phase ends green at **100% for the packages it touches** (run
 | `apps/web` | ~20 | DOM |
 | **Total** | **~40 files** | — |
 
-The backend + domain (Phases 0–5, ~22 files) is the high-value 80% and is fully
-inside the existing `node:test` stack. The UI (Phase 6) is the remaining surface
-and the only part needing new (contract-compatible) tooling.
+The backend + domain (Phases 0–5, ~22 files) is the high-value majority. The UI
+(Phase 6) is the remaining surface and the main beneficiary of the Vitest choice.
