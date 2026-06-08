@@ -55,6 +55,7 @@ export default function BriefPage() {
   const idValid = BRIEF_ID_PATTERN.test(form.id);
 
   const save = () => {
+    /* istanbul ignore next -- the Save button is disabled when the id is invalid; this is belt-and-suspenders */
     if (!idValid) return; // guard: the API would reject an unsafe id, and it can't persist/reload
     const next: CampaignBrief = {
       id: form.id,

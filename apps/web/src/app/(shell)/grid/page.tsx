@@ -24,6 +24,7 @@ export default function GridPage() {
   // compliance/logo metadata can never go stale against the cache-busted image; if
   // a run replaces or removes it, the lookup returns null and the modal closes.
   const previewAsset = useMemo(
+    /* istanbul ignore next -- the loading effect clears previewKey before assets change, so find() always hits */
     () => (previewKey ? (assets.find((a) => assetKey(a) === previewKey) ?? null) : null),
     [previewKey, assets],
   );
@@ -307,6 +308,7 @@ function PreviewModal({
       const focusables = dialogRef.current?.querySelectorAll<HTMLElement>(
         'button, [href], input, [tabindex]:not([tabindex="-1"])',
       );
+      /* istanbul ignore next -- the dialog always contains focusable controls */
       if (!focusables || focusables.length === 0) return;
       const first = focusables[0];
       const last = focusables[focusables.length - 1];

@@ -21,7 +21,7 @@ export function Sidebar() {
  * Footer action that opens the brief picker. Shared by the desktop sidebar and the
  * mobile menu; `onActivate` lets the mobile menu close itself before the picker opens.
  */
-export function BrowseBriefsButton({ onActivate }: { onActivate?: () => void } = {}) {
+export function BrowseBriefsButton({ onActivate }: { onActivate?: () => void }) {
   const { openBriefPicker } = useRun();
   return (
     <div className="shrink-0 border-t border-border p-3">
@@ -50,7 +50,7 @@ export function BrowseBriefsButton({ onActivate }: { onActivate?: () => void } =
  * close handler so following the "Edit" link dismisses the overlay even when it
  * points at the current route (where a route-change listener wouldn't fire).
  */
-export function SidebarContent({ onNavigate }: { onNavigate?: () => void } = {}) {
+export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { brief } = useRun();
   const aspectsLabel = "1:1, 9:16, 16:9";
 

@@ -73,6 +73,7 @@ function StatusBadge({ status }: { status: "running" | "halted" | "complete" | "
         status === "complete" && "border-success/30 bg-success/20 text-success",
         status === "halted" && "border-error/30 bg-error/20 text-error",
         status === "running" && "border-info/30 bg-info/20 text-info",
+        /* istanbul ignore next -- idle never reaches the badge: the summary is hidden when idle */
         status === "idle" && "border-border bg-surface-2 text-text-muted",
       )}
     >

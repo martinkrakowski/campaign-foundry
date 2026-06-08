@@ -198,6 +198,7 @@ function ConfirmDialog({
       const focusables = dialogRef.current?.querySelectorAll<HTMLElement>(
         'button, [href], [tabindex]:not([tabindex="-1"])',
       );
+      /* istanbul ignore next -- the dialog always contains focusable controls */
       if (!focusables || focusables.length === 0) return;
       const first = focusables[0];
       const last = focusables[focusables.length - 1];

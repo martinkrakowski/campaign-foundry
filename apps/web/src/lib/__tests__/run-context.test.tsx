@@ -438,6 +438,30 @@ describe("RunProvider — log-only and superseded restores", () => {
     expect(result.current.hasRun).toBe(false);
   });
 
+  test("swallows a failed run fetch triggered by setBrief", async () => {
+    vi.mocked(globalThis.fetch).mockRejectedValue(new Error("down"));
+    const { result } = setup();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() =>
+      result.current.setBrief({
+        id: "sb",
+        targetRegion: "US",
+        targetAudience: "x",
+        campaignMessage: "y",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" },
+          { id: "p2", name: "P2", primaryColor: "#222222", logoPath: "b.png" },
+        ],
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current.brief.id).toBe("sb");
+  });
+
   test("drops a regenerate that errors after a brief switch", async () => {
     let rejectRegen!: (e: unknown) => void;
     vi.mocked(globalThis.fetch).mockImplementation((_url, init) => {

@@ -22,7 +22,8 @@ Object.defineProperty(globalThis, "localStorage", { value: memoryStorage, config
 // Default benign fetch so RunProvider's mount effects (restore-run) resolve to an
 // empty "no run yet" result instead of hitting the network. Tests override as needed.
 beforeEach(() => {
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+  // A fresh Response per call — a Response body can only be read once.
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
     new Response(JSON.stringify({ halted: false, assets: [], log: null }), {
       status: 200,
       headers: { "content-type": "application/json" },
