@@ -234,13 +234,16 @@ Real adapters, `mkdtemp` working dirs, fixture assets under `__tests__/fixtures/
 
 | Phase | Scope | Status |
 | --- | --- | --- |
-| **0** | Vitest harness, config, scripts, fakes toolkit, §1a deletions, §1c refactors | **infra done** |
-| **1** | `CampaignOrchestration` core | pending |
-| **2** | `CreativeGeneration` + `GovernanceAndCompliance` units | pending |
-| **3** | `shared` | result.ts done; project-root pending |
-| **4** | Rendering/export integration | pending |
-| **5** | `apps/api` lib + routes + CLI | pending |
-| **6** | `apps/web` (happy-dom) | pending |
+| **0** | Vitest harness, config, scripts, fakes toolkit, §1a deletions, §1c refactors | ✅ done |
+| **1** | `CampaignOrchestration` core | ✅ done |
+| **2** | `CreativeGeneration` + `GovernanceAndCompliance` units | ✅ done |
+| **3** | `shared` | ✅ done |
+| **4** | Rendering/export integration | ✅ done |
+| **5** | `apps/api` lib + routes + CLI | ✅ done |
+| **6** | `apps/web` (happy-dom) | ✅ done |
+
+**Result: 100%** statements/branches/functions/lines across all workspaces —
+271 tests across 37 files, gate enforced in CI.
 
 Each phase ends green for the modules it touches. The repo-wide
 `thresholds: { 100: true }` gate flips on in the final commit; CI switches to
