@@ -7,8 +7,13 @@ import { cn } from "@/lib/cn";
 
 /** Header control: shows the active image model and opens a modal to switch it. */
 export function ModelSelector() {
-  const { selectedModel, setSelectedModel } = useRun();
+  const { selectedModel, setSelectedModel, brief } = useRun();
   const [open, setOpen] = useState(false);
+
+  // A brief whose products carry `inputAsset` reuses that image and skips the
+  // selected model for those products (reuse wins over generation). Surface that so
+  // the model choice can't be silently overridden without the reviewer noticing.
+  const reusesAssets = brief.products.some((p) => Boolean(p.inputAsset));
 
   return (
     <>
@@ -22,6 +27,14 @@ export function ModelSelector() {
         <span className="text-brand-primary" aria-hidden>◆</span>
         <span className="hidden text-text-muted sm:inline">Model:</span> {labelFor(selectedModel)}
       </button>
+      {reusesAssets && (
+        <span
+          title="This brief sets inputAsset on a product — that image is reused and the selected model is skipped for it."
+          className="hidden items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-1 font-mono text-[10px] text-warning sm:inline-flex"
+        >
+          <span aria-hidden>↻</span> reuse brief · model not used
+        </span>
+      )}
       {open && (
         <ModelModal
           selected={selectedModel}
