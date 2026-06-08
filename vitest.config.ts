@@ -39,7 +39,10 @@ export default defineConfig({
       },
     ],
     coverage: {
-      provider: "v8",
+      // istanbul (not v8): the v8 provider's rolldown remapper can't parse
+      // TS-in-.tsx (`import type`, `interface`) and drops those files; istanbul
+      // instruments through Vite's transform, so plugin-react handles the UI.
+      provider: "istanbul",
       reporter: ["text", "lcov"],
       // The 100% gate is added in the final phase (see TEST_COVERAGE_PLAN.md §5) so
       // intermediate commits stay green; until then `test:cov` only reports.
