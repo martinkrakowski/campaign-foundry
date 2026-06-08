@@ -7,8 +7,15 @@ import { cn } from "@/lib/cn";
 
 /** Header control: shows the active image model and opens a modal to switch it. */
 export function ModelSelector() {
-  const { selectedModel, setSelectedModel } = useRun();
+  const { selectedModel, setSelectedModel, brief } = useRun();
   const [open, setOpen] = useState(false);
+
+  // A product with `inputAsset` reuses that image and skips the selected model for
+  // that product — but only when the asset resolves and is readable server-side;
+  // otherwise it falls back to generation. The UI can't know that outcome ahead of a
+  // run, so this flags the *possibility* (and the wording below says "may"), letting
+  // the reviewer notice the model choice could be overridden.
+  const hasInputAssets = brief.products.some((p) => Boolean(p.inputAsset));
 
   return (
     <>
@@ -22,6 +29,17 @@ export function ModelSelector() {
         <span className="text-brand-primary" aria-hidden>◆</span>
         <span className="hidden text-text-muted sm:inline">Model:</span> {labelFor(selectedModel)}
       </button>
+      {hasInputAssets && (
+        <span
+          tabIndex={0}
+          role="note"
+          aria-label="Reuse brief: a product sets inputAsset, so the selected image model may be skipped for it. A missing or unreadable asset falls back to model generation."
+          title="This brief sets inputAsset on a product. When that image resolves, it's reused and the selected model is skipped for that product; a missing or unreadable asset falls back to model generation."
+          className="hidden cursor-default items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-1 font-mono text-[10px] text-warning outline-none focus-visible:ring-2 focus-visible:ring-warning sm:inline-flex"
+        >
+          <span aria-hidden>↻</span> reuse brief · model may be skipped
+        </span>
+      )}
       {open && (
         <ModelModal
           selected={selectedModel}
