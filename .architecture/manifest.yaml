@@ -102,9 +102,7 @@ bounded_contexts:
     layers:
       domain:
         entities: []
-        value_objects:
-          - CustomError
-          - Identifier
+        value_objects: []
         domain_services: []
       application:
         use_cases: []
@@ -112,9 +110,7 @@ bounded_contexts:
           in: []
           out: []
       infrastructure:
-        adapters:
-          - Prisma.adapter.ts
-          - BullMQ.adapter.ts
+        adapters: []
   - name: CampaignOrchestration
     type: core
     description: >

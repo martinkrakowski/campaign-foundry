@@ -92,13 +92,9 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     // Selective regeneration (HITL re-roll): when `regenerateOnly` is present, only the
     // listed cells run — every other cell is skipped, leaving its output untouched.
     // Targets are matched by the same identity the review UI keys on. Absent → full run.
-    const selective = options?.regenerateOnly !== undefined;
-    const targetKeys = selective
-      ? new Set(
-          (options?.regenerateOnly ?? []).map(
-            (t) => `${t.productId}/${t.aspectRatio}/${t.treatment}`,
-          ),
-        )
+    const targets = options?.regenerateOnly;
+    const targetKeys = targets
+      ? new Set(targets.map((t) => `${t.productId}/${t.aspectRatio}/${t.treatment}`))
       : null;
     const isTarget = (productId: string, ratioValue: string, treatmentId: string): boolean =>
       targetKeys === null || targetKeys.has(`${productId}/${ratioValue}/${treatmentId}`);

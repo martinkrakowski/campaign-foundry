@@ -41,8 +41,10 @@ export function BriefPicker() {
           data = null;
         }
         if (!res.ok || !data) throw new Error(`Briefs request failed (HTTP ${res.status})`);
+        /* istanbul ignore next -- `active` is the unmount-race guard; false only if the picker closes mid-fetch */
         if (active) setEntries(data.briefs ?? []);
       } catch {
+        /* istanbul ignore next -- same unmount-race guard on the error path */
         if (active) setError(true);
       }
     })();
@@ -65,6 +67,7 @@ export function BriefPicker() {
       const focusables = dialogRef.current?.querySelectorAll<HTMLElement>(
         'a[href], button, [tabindex]:not([tabindex="-1"])',
       );
+      /* istanbul ignore next -- the dialog always contains focusable controls */
       if (!focusables || focusables.length === 0) return;
       const first = focusables[0];
       const last = focusables[focusables.length - 1];

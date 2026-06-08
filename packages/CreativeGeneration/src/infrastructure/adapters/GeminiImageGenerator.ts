@@ -10,11 +10,24 @@ import type {
 /** Default Imagen model (override with the IMAGEN_MODEL env var). */
 const DEFAULT_MODEL = "imagen-4.0-generate-001";
 
+/** The slice of the `@google/genai` client this adapter actually uses. */
+export interface ImagenClient {
+  models: {
+    generateImages(args: {
+      model: string;
+      prompt: string;
+      config: { numberOfImages: number; aspectRatio: string };
+    }): Promise<{ generatedImages?: Array<{ image?: { imageBytes?: string } }> }>;
+  };
+}
+
 export interface GeminiImageGeneratorOptions {
   readonly apiKey: string;
   readonly model?: string;
   /** Used on any API failure (no access, rate limit, network) so a run never aborts. */
   readonly fallback?: ImageGeneratorPort;
+  /** Injectable client seam (defaults to a real GoogleGenAI) — lets tests stub the SDK. */
+  readonly client?: ImagenClient;
 }
 
 /**
@@ -24,12 +37,12 @@ export interface GeminiImageGeneratorOptions {
  * procedural fallback if the call fails. The exact GenAI seam the README describes.
  */
 export class GeminiImageGenerator implements ImageGeneratorPort {
-  private readonly ai: GoogleGenAI;
+  private readonly ai: ImagenClient;
   private readonly model: string;
   private readonly fallback?: ImageGeneratorPort;
 
   constructor(options: GeminiImageGeneratorOptions) {
-    this.ai = new GoogleGenAI({ apiKey: options.apiKey });
+    this.ai = options.client ?? new GoogleGenAI({ apiKey: options.apiKey });
     this.model = options.model && options.model.length > 0 ? options.model : DEFAULT_MODEL;
     this.fallback = options.fallback;
   }

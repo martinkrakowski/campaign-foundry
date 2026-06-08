@@ -73,7 +73,9 @@ export class BrandComplianceChecker implements CompliancePort {
       }
     }
 
-    const score = total > 0 ? matched / total : 0;
+    // A decodable image always has ≥1 pixel; Math.max keeps the divide safe
+    // without a dead total-zero branch.
+    const score = matched / Math.max(total, 1);
     const passed = score >= MIN_BRAND_COLOR_DENSITY;
     return {
       passed,

@@ -1,4 +1,5 @@
 import { argv } from "node:process";
+import { pathToFileURL } from "node:url";
 import { loadBrief } from "../server/lib/load-brief.js";
 import { runCampaign } from "../server/lib/pipeline.js";
 import { outputRoot } from "../server/lib/config.js";
@@ -9,8 +10,8 @@ function arg(flag: string): string | undefined {
   return i >= 0 ? argv[i + 1] : undefined;
 }
 
-async function main(): Promise<void> {
-  const briefPath = arg("--brief") ?? "briefs/sample-campaign.yaml";
+export async function main(briefPathArg?: string): Promise<void> {
+  const briefPath = briefPathArg ?? arg("--brief") ?? "briefs/sample-campaign.yaml";
   console.log(`\n  Campaign Foundry — generating from ${briefPath}\n`);
 
   const brief = await loadBrief(briefPath);
@@ -39,7 +40,10 @@ async function main(): Promise<void> {
   console.log(`  Report: ${reportPath}\n`);
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+/* istanbul ignore next -- CLI entry guard; main() is covered directly in tests */
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
