@@ -49,6 +49,14 @@ export function parseBrief(data: unknown): CampaignBrief {
       throw new Error(`Campaign brief is missing required field: "${field}".`);
     }
   }
+  // The brief id is the campaign's persisted-report filename (per-campaign reload), so
+  // enforce the same path-safe slug as product/treatment ids — an unsafe id would run
+  // but never persist/reload per-campaign.
+  if (typeof record.id !== "string" || !SAFE_ID_PATTERN.test(record.id)) {
+    throw new Error(
+      `Campaign id must be a path-safe slug (lowercase letters, digits, hyphens; max 64 chars); got ${JSON.stringify(record.id)}.`,
+    );
+  }
   if (!Array.isArray(record.products)) {
     throw new Error('Campaign brief field "products" must be an array.');
   }

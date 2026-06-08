@@ -8,6 +8,11 @@ import { Button, Input } from "@/components/ui";
 
 type ProductDraft = { id: string; name: string; primaryColor: string; logoPath: string };
 
+// Mirrors the server's canonical SAFE_ID_PATTERN (CampaignOrchestration). The API is the
+// authority and rejects an unsafe id; this just fails fast in the editor so a reviewer
+// isn't surprised by a brief that runs but can't persist/reload by id. Keep in sync.
+const BRIEF_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
 const toDraft = (p: Product): ProductDraft => ({
   id: p.id,
   name: p.name,
@@ -47,7 +52,10 @@ export default function BriefPage() {
   const removeProduct = (i: number) =>
     setForm((f) => ({ ...f, products: f.products.filter((_, idx) => idx !== i) }));
 
+  const idValid = BRIEF_ID_PATTERN.test(form.id);
+
   const save = () => {
+    if (!idValid) return; // guard: the API would reject an unsafe id, and it can't persist/reload
     const next: CampaignBrief = {
       id: form.id,
       targetRegion: form.targetRegion,
@@ -68,7 +76,12 @@ export default function BriefPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <LabeledInput label="Brief ID" value={form.id} onChange={(v) => setField("id", v)} />
+        <LabeledInput
+          label="Brief ID"
+          value={form.id}
+          onChange={(v) => setField("id", v)}
+          error={idValid ? undefined : "Lowercase letters, digits and hyphens only (max 64) — used as the reload key."}
+        />
         <LabeledInput
           label="Target Region"
           value={form.targetRegion}
@@ -132,7 +145,9 @@ export default function BriefPage() {
       </div>
 
       <div className="flex gap-3">
-        <Button onClick={save}>Save brief</Button>
+        <Button onClick={save} disabled={!idValid}>
+          Save brief
+        </Button>
         <Button variant="ghost" onClick={() => router.back()}>
           Cancel
         </Button>
@@ -145,15 +160,18 @@ function LabeledInput({
   label,
   value,
   onChange,
+  error,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  error?: string;
 }) {
   return (
     <label className="block">
       <span className="mb-1.5 block text-[11px] text-text-muted">{label}</span>
-      <Input value={value} onChange={(e) => onChange(e.target.value)} />
+      <Input value={value} onChange={(e) => onChange(e.target.value)} invalid={Boolean(error)} />
+      {error && <span className="mt-1 block text-[11px] text-error">{error}</span>}
     </label>
   );
 }

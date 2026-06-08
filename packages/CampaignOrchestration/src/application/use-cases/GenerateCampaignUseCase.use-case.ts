@@ -227,6 +227,14 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
 
   /** MinimumProductsRule + path-safe/unique ids, or the pipeline never starts. */
   private validateBrief(brief: CampaignBrief): Result<true, Error> {
+    // The brief id is the campaign's persisted-report filename (per-campaign reload);
+    // enforce path-safety here too (defense-in-depth) so a caller bypassing parsing
+    // can't create a campaign that runs but can never be persisted/reloaded by id.
+    if (!SAFE_ID_PATTERN.test(brief.id)) {
+      return err(
+        new Error("Campaign id must be a path-safe slug (lowercase letters, digits, hyphens; max 64 chars)."),
+      );
+    }
     // Product and treatment ids are output-path segments and the asset identity.
     // Enforce path-safety here too (domain-level defense-in-depth) so callers that
     // bypass brief parsing can't slip a malformed brief through: a path-unsafe id
