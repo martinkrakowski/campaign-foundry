@@ -189,12 +189,14 @@ function Artboard({
   return (
     <figure
       className={cn(
-        "group flex flex-col items-center gap-3 rounded-xl border p-3 transition-colors",
+        // Surface tile matching the sidebar; only the border colour signals the
+        // review decision (green = approved, red = rejected), default = sidebar border.
+        "group flex flex-col items-center gap-3 rounded-xl border bg-surface p-3 transition-colors",
         decision === "approved"
-          ? "border-success/60 bg-success/10"
+          ? "border-success"
           : decision === "rejected"
-            ? "border-error/60 bg-error/10"
-            : "border-border/60 bg-surface",
+            ? "border-error"
+            : "border-border",
       )}
     >
       <div className="flex items-center gap-2 font-mono text-xs text-text-muted">
