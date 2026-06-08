@@ -137,7 +137,7 @@ const EMPTY_LOG: LogEntry[] = [];
 const RunContext = createContext<RunContextValue | null>(null);
 
 export function RunProvider({ children }: { children: ReactNode }) {
-  const [brief, setBrief] = useState<CampaignBrief>(DEFAULT_BRIEF);
+  const [brief, setBriefState] = useState<CampaignBrief>(DEFAULT_BRIEF);
   const [result, setResult] = useState<RunResult | null>(null);
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
   const [loading, setLoading] = useState(false);
@@ -156,6 +156,18 @@ export function RunProvider({ children }: { children: ReactNode }) {
     } catch {
       /* storage unavailable — just don't auto-open */
     }
+  }, []);
+
+  // Loading or committing a brief invalidates the previous run: its creatives and
+  // review decisions belong to the old brief. Clear them (and any error) so the grid
+  // shows the empty "ready to run" state for the new brief instead of stale tiles.
+  // Only ever called as a deliberate commit — the editor's Save and the picker's
+  // select — never per keystroke, so this won't wipe the grid mid-edit.
+  const setBrief = useCallback((next: CampaignBrief) => {
+    setBriefState(next);
+    setResult(null);
+    setDecisions({});
+    setError(null);
   }, []);
 
   const openBriefPicker = useCallback(() => setBriefPickerOpen(true), []);
@@ -339,6 +351,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
     }),
     [
       brief,
+      setBrief,
       result,
       loading,
       error,
