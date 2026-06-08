@@ -44,15 +44,15 @@ everything that touches the outside world is an adapter behind a port.
 
 ```
                        ┌──────────────────────────────────────────┐
-   campaign brief ───▶ │  CampaignOrchestration  (core domain)     │
-   (YAML / JSON)       │  GenerateCampaignUseCase                  │
-                       │                                           │
-                       │   owns the port contracts ▼               │
-                       │  ImageGeneratorPort  CompositorPort       │
-                       │  CompliancePort      ExportPort           │
+   campaign brief ───▶ │  CampaignOrchestration  (core domain)    │
+   (YAML / JSON)       │  GenerateCampaignUseCase                 │
+                       │                                          │
+                       │   owns the port contracts ▼              │
+                       │  ImageGeneratorPort  CompositorPort      │
+                       │  CompliancePort      ExportPort          │
                        └──────┬───────────┬───────────┬───────────┘
                               │           │           │
-              ┌───────────────▼──┐  ┌─────▼──────────┐  ┌──▼───────────────┐
+              ┌────────────────▼──┐  ┌─────▼──────────┐  ┌──▼───────────────┐
               │ CreativeGeneration│  │ Governance &   │  │ Distribution     │
               │  procedural bg +  │  │ Compliance     │  │ filesystem export│
               │  canvas compositor│  │ brand + legal  │  │ + print proofs   │
@@ -86,6 +86,7 @@ React 19 · `@napi-rs/canvas` (compositing, prebuilt — no system libs) · `pdf
 
 ### Install
 ```bash
+corepack enable
 yarn install
 cp .env.example .env.local   # defaults work as-is; no external keys needed
 ```
