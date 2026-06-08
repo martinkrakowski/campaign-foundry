@@ -15,7 +15,6 @@ products:
     name: Trail Pack
     primaryColor: "#E0218A"
     logoPath: assets/inputs/trail-logo.png
-    inputAsset: assets/inputs/trail-pack.png
 treatments:
   - id: bold-bottom
     layout: headline-bottom
