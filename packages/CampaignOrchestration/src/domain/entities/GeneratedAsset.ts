@@ -8,7 +8,7 @@ import type { BackgroundSource } from "../value-objects/BackgroundSource.vo.js";
 export interface GeneratedAsset {
   readonly productId: string;
   readonly aspectRatio: AspectRatioValue;
-  /** Relative path of the saved PNG, e.g. "acme-hydra-bottle/1x1.png". */
+  /** Relative path of the saved PNG, e.g. "hydra-bottle/1x1.png". */
   readonly outputPath: string;
   /** Relative path of the print-proof PDF, when one was generated. */
   readonly proofPath?: string;
