@@ -13,12 +13,12 @@ products:
   - id: acme-hydra-bottle
     name: Hydra Bottle
     primaryColor: "#FF7A00"
-    logoPath: assets/inputs/hydra-logo.png
+    logoPath: assets/inputs/hydra-logo-orange.png
     # no inputAsset — pipeline generates imagery, orange accent band applied
   - id: acme-trail-pack
     name: Trail Pack
     primaryColor: "#FF7A00"
-    logoPath: assets/inputs/trail-logo.png
+    logoPath: assets/inputs/trail-logo-orange.png
     # no inputAsset — pipeline generates imagery, orange accent band applied
 treatments:
   - id: bold-bottom
