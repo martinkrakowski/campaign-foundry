@@ -116,6 +116,12 @@ failure or rate-limit drops to the next, so a run never aborts:
 reuse provided asset → Imagen → OpenRouter → procedural gradient
 ```
 
+> **Keys are read once at startup.** If you add keys to `.env.local` while
+> `yarn dev` is already running, **restart `yarn dev`** (from the repo root) to pick
+> them up — otherwise the server keeps the keyless snapshot and stays on procedural.
+> On boot the API logs which providers it detected (`[env] image generation: …`), so
+> a keyless run is obvious rather than a silent gradient.
+
 Every creative records which source produced its background (`imagen` /
 `openrouter` / `procedural` / `reused`) — surfaced as a badge in the review grid
 and stored in `report.json`. So a fallback (e.g. Imagen hitting its daily quota →

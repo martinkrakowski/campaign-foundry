@@ -42,6 +42,24 @@ export function loadEnv(): void {
     applyEnvFile(resolve(dir, ".env.local"));
     applyEnvFile(resolve(dir, ".env"));
   }
+
+  // Announce, once, what image generation will actually do — so a keyless run (or a
+  // dev server started before keys were added) is self-evident in the logs instead of
+  // silently falling back to procedural gradients.
+  const providers: string[] = [];
+  if (process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY) {
+    providers.push("imagen (GEMINI_API_KEY ✓)");
+  }
+  if (process.env.OPENROUTER_API_KEY) providers.push("openrouter (OPENROUTER_API_KEY ✓)");
+  if (providers.length > 0) {
+    console.log(`[env] image generation: ${providers.join(", ")} — procedural fallback`);
+  } else {
+    console.warn(
+      "[env] image generation: procedural only — no GenAI keys detected. " +
+        "Add OPENROUTER_API_KEY or GEMINI_API_KEY to .env.local for real imagery, then restart the dev server.",
+    );
+  }
+
   // Mark loaded only after a clean pass — if a read throws, a later call retries
   // rather than being stuck with process.env half-populated.
   loaded = true;
