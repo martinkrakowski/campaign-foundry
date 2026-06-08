@@ -1,24 +1,23 @@
-# Reuse demo brief — both products set `inputAsset` to a provided background that
-# exists in assets/inputs/, so the pipeline REUSES it (cover-fit to each ratio)
-# instead of generating. Every creative is badged REUSED and the run is fully
-# offline (no GenAI keys). This is the counterpart to the generate briefs: load it
-# to demonstrate the reuse path — the header shows the "reuse brief" hint, and the
-# grid source badges read REUSED.
-id: summer-hydration-2026-reuse
+# Reuse demo brief — Studio Reuse. Both products set `inputAsset` to a provided studio
+# background that exists in assets/inputs/, so the pipeline REUSES it (cover-fit to each
+# ratio) instead of generating. Every creative is badged REUSED and the run is fully offline
+# (no GenAI keys). This is the counterpart to the generate briefs: load it to demonstrate the
+# reuse path — the header shows the "reuse brief" hint, and the grid source badges read REUSED.
+id: studio-reuse-2026
 targetRegion: DE
-targetAudience: Urban outdoor enthusiasts, 25-40
-campaignMessage: Stay wild. Stay hydrated.
-localizedMessage: Bleib wild. Bleib hydriert.
+targetAudience: Studio & lifestyle product shoots
+campaignMessage: Shot once. Sized everywhere.
+localizedMessage: Einmal fotografiert. Überall skaliert.
 products:
-  - id: acme-hydra-bottle
-    name: Hydra Bottle
+  - id: studio-bottle
+    name: Studio Bottle
     primaryColor: "#1473E6"
-    logoPath: assets/inputs/hydra-logo.png
+    logoPath: assets/inputs/studio-bottle-logo.png
     inputAsset: assets/inputs/reuse-bg.png   # reused background (REUSED)
-  - id: acme-trail-pack
-    name: Trail Pack
+  - id: studio-pack
+    name: Studio Pack
     primaryColor: "#E0218A"
-    logoPath: assets/inputs/trail-logo.png
+    logoPath: assets/inputs/studio-pack-logo.png
     inputAsset: assets/inputs/reuse-bg.png   # reused background (REUSED)
 treatments:
   - id: bold-bottom

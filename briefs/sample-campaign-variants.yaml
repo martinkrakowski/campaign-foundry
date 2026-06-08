@@ -1,20 +1,20 @@
-# Variants demo brief — same campaign as sample-campaign.yaml, but requesting two
-# creative treatments. The pipeline produces product × ratio × treatment, so the
-# HITL grid shows each ratio slot with both treatments side-by-side.
-id: summer-hydration-2026-variants
-targetRegion: DE
-targetAudience: Urban outdoor enthusiasts, 25-40
-campaignMessage: Stay wild. Stay hydrated.
-localizedMessage: Bleib wild. Bleib hydriert.
+# Variants demo brief — Urban Commute, requesting two creative treatments. The pipeline
+# produces product × ratio × treatment, so the HITL grid shows each ratio slot with both
+# treatments (bold-bottom and subtle-top) side-by-side. Use this to demo the variation matrix.
+id: urban-commute-2026
+targetRegion: GB
+targetAudience: City commuters & students, 22-38
+campaignMessage: Move through the city.
+localizedMessage: Move through the city.
 products:
-  - id: acme-hydra-bottle
-    name: Hydra Bottle
-    primaryColor: "#1473E6"
-    logoPath: assets/inputs/hydra-logo.png
-  - id: acme-trail-pack
-    name: Trail Pack
-    primaryColor: "#E0218A"
-    logoPath: assets/inputs/trail-logo.png
+  - id: city-backpack
+    name: City Backpack
+    primaryColor: "#6C5CE7"
+    logoPath: assets/inputs/city-logo.png
+  - id: metro-flask
+    name: Metro Flask
+    primaryColor: "#00B894"
+    logoPath: assets/inputs/metro-logo.png
 treatments:
   - id: bold-bottom
     layout: headline-bottom

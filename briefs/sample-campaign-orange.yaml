@@ -1,24 +1,24 @@
-# Orange campaign variation, with orange as the brand accent. No `inputAsset`, so
-# backgrounds are generated (never reused) by the selected image model — the chain is
-# conditional: Auto runs Imagen → OpenRouter → procedural with each tier key-gated;
-# selecting an OpenRouter model uses it → procedural; with no keys it's procedural.
-# The brand colour drives the accent band and brand-compliance scoring, and the logo
-# is composited on top. Use this to demo the model selector with an orange campaign.
-id: summer-hydration-2026-orange
+# Trail Blaze — an orange limited-edition campaign. No `inputAsset`, so backgrounds are
+# generated (never reused) by the selected image model — the chain is conditional: Auto
+# runs Imagen → OpenRouter → procedural with each tier key-gated; selecting an OpenRouter
+# model uses it → procedural; with no keys it's procedural. The orange brand colour drives
+# the accent band and brand-compliance scoring, and the logo is composited on top. Use this
+# to demo the model selector with a single-accent campaign.
+id: trail-blaze-2026
 targetRegion: DE
 targetAudience: Urban outdoor enthusiasts, 25-40
-campaignMessage: Stay wild. Stay hydrated.
-localizedMessage: Bleib wild. Bleib hydriert.
+campaignMessage: Ignite the trail.
+localizedMessage: Entfache den Pfad.
 products:
-  - id: acme-hydra-bottle
-    name: Hydra Bottle
+  - id: blaze-bottle
+    name: Blaze Bottle
     primaryColor: "#FF7A00"
-    logoPath: assets/inputs/hydra-logo-orange.png
+    logoPath: assets/inputs/blaze-bottle-logo.png
     # no inputAsset — pipeline generates imagery, orange accent band applied
-  - id: acme-trail-pack
-    name: Trail Pack
+  - id: blaze-pack
+    name: Blaze Pack
     primaryColor: "#FF7A00"
-    logoPath: assets/inputs/trail-logo-orange.png
+    logoPath: assets/inputs/blaze-pack-logo.png
     # no inputAsset — pipeline generates imagery, orange accent band applied
 treatments:
   - id: bold-bottom

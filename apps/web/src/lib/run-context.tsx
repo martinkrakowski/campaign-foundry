@@ -79,8 +79,8 @@ const DEFAULT_BRIEF: CampaignBrief = {
   campaignMessage: "Stay wild. Stay hydrated.",
   localizedMessage: "Bleib wild. Bleib hydriert.",
   products: [
-    { id: "acme-hydra-bottle", name: "Hydra Bottle", primaryColor: "#1473E6", logoPath: "assets/inputs/hydra-logo.png" },
-    { id: "acme-trail-pack", name: "Trail Pack", primaryColor: "#E0218A", logoPath: "assets/inputs/trail-logo.png" },
+    { id: "hydra-bottle", name: "Hydra Bottle", primaryColor: "#1473E6", logoPath: "assets/inputs/hydra-logo.png" },
+    { id: "trail-pack", name: "Trail Pack", primaryColor: "#E0218A", logoPath: "assets/inputs/trail-logo.png" },
   ],
   // Two treatments so the HITL grid demonstrates the variation matrix out of the
   // box (each ratio slot rendered bold-bottom and subtle-top, side-by-side).

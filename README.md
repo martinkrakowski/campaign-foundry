@@ -172,11 +172,11 @@ targetAudience: Urban outdoor enthusiasts, 25–40
 campaignMessage: Stay wild. Stay hydrated.
 localizedMessage: Bleib wild. Bleib hydriert.
 products:
-  - id: acme-hydra-bottle
+  - id: hydra-bottle
     name: Hydra Bottle
     primaryColor: "#1473E6"
     logoPath: assets/inputs/hydra-logo.png
-  - id: acme-trail-pack
+  - id: trail-pack
     name: Trail Pack
     primaryColor: "#E0218A"
     logoPath: assets/inputs/trail-logo.png
@@ -203,17 +203,17 @@ Outputs are organized **by product, then aspect ratio**:
 
 ```text
 output/
-├── acme-hydra-bottle/
+├── hydra-bottle/
 │   ├── 1x1.png
 │   ├── 9x16.png
 │   └── 16x9.png
-├── acme-trail-pack/
+├── trail-pack/
 │   ├── 1x1.png
 │   ├── 9x16.png
 │   └── 16x9.png
 ├── proofs/
-│   ├── acme-hydra-bottle.pdf
-│   └── acme-trail-pack.pdf
+│   ├── hydra-bottle.pdf
+│   └── trail-pack.pdf
 └── report.json     # per-asset compliance (density + logo + brandCompliant) + log
 ```
 
@@ -222,7 +222,7 @@ each ratio slot holds its variants side-by-side
 (`output/<product>/<ratio>/<treatment>.png`):
 
 ```text
-output/acme-hydra-bottle/
+output/city-backpack/
 ├── 1x1/   ├── bold-bottom.png  └── subtle-top.png
 ├── 9x16/  ├── bold-bottom.png  └── subtle-top.png
 └── 16x9/  ├── bold-bottom.png  └── subtle-top.png
