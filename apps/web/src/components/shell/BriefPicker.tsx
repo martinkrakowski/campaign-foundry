@@ -22,20 +22,30 @@ export function BriefPicker() {
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
-  // (Re)load the list each time the picker opens.
+  // (Re)load the list each time the picker opens. Parse defensively (check res.ok and
+  // guard JSON) so an API error — a non-2xx `{ error }` body, or a non-JSON 5xx from the
+  // proxy when the API is down — surfaces as an error state, not a misleading empty list.
   useEffect(() => {
     if (!briefPickerOpen) return;
     let active = true;
     setEntries(null);
     setError(false);
-    fetch(`${API}/campaigns/briefs`)
-      .then((r) => r.json() as Promise<{ briefs: BriefEntry[] }>)
-      .then((d) => {
-        if (active) setEntries(d.briefs ?? []);
-      })
-      .catch(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API}/campaigns/briefs`);
+        const raw = await res.text();
+        let data: { briefs?: BriefEntry[] } | null = null;
+        try {
+          data = JSON.parse(raw) as { briefs?: BriefEntry[] };
+        } catch {
+          data = null;
+        }
+        if (!res.ok || !data) throw new Error(`Briefs request failed (HTTP ${res.status})`);
+        if (active) setEntries(data.briefs ?? []);
+      } catch {
         if (active) setError(true);
-      });
+      }
+    })();
     return () => {
       active = false;
     };

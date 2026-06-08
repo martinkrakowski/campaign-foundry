@@ -16,8 +16,18 @@ export default defineEventHandler(async () => {
   const dir = resolve(projectRoot(), "briefs");
   let files: string[];
   try {
-    files = (await readdir(dir)).filter((f) => BRIEF_PATTERN.test(f)).sort();
-  } catch {
+    // withFileTypes + isFile() lists only regular files; symlinks (isFile() is false
+    // for them) are skipped, so a symlink dropped into briefs/ can't make us read a
+    // file outside the directory — defense-in-depth on the "fixed directory" assumption.
+    const entries = await readdir(dir, { withFileTypes: true });
+    files = entries
+      .filter((e) => e.isFile() && BRIEF_PATTERN.test(e.name))
+      .map((e) => e.name)
+      .sort();
+  } catch (error) {
+    console.warn(
+      `[briefs] could not read ${dir}: ${error instanceof Error ? error.message : String(error)}`,
+    );
     return { briefs: [] };
   }
 
@@ -25,8 +35,12 @@ export default defineEventHandler(async () => {
   for (const file of files) {
     try {
       briefs.push({ file, brief: await loadBrief(resolve(dir, file)) });
-    } catch {
-      // Skip a malformed/invalid brief rather than failing the whole list.
+    } catch (error) {
+      // Skip a malformed/invalid brief rather than failing the whole list — but log
+      // it so a reviewer can see why their brief isn't appearing in the picker.
+      console.warn(
+        `[briefs] skipped ${file}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
   return { briefs };
