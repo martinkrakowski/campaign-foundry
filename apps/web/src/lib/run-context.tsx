@@ -158,17 +158,43 @@ export function RunProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Loading or committing a brief invalidates the previous run: its creatives and
-  // review decisions belong to the old brief. Clear them (and any error) so the grid
-  // shows the empty "ready to run" state for the new brief instead of stale tiles.
-  // Only ever called as a deliberate commit — the editor's Save and the picker's
-  // select — never per keystroke, so this won't wipe the grid mid-edit.
-  const setBrief = useCallback((next: CampaignBrief) => {
-    setBriefState(next);
-    setResult(null);
-    setDecisions({});
-    setError(null);
-  }, []);
+  // Tracks the latest brief id asked for, so an in-flight persisted-run fetch from an
+  // earlier switch can't land on the grid after the user has moved to another brief.
+  const briefIdRef = useRef(brief.id);
+
+  // Loading or committing a brief swaps which run the grid should show. Only ever called
+  // as a deliberate commit — the editor's Save and the picker's select — never per
+  // keystroke, so this won't wipe the grid mid-edit. Behaviour:
+  //   1. If the run already on screen belongs to this brief, keep it (and its review
+  //      decisions) — e.g. re-selecting the brief that's already loaded.
+  //   2. Otherwise load the persisted run for this brief if one exists on disk, so
+  //      previously generated creatives reappear without re-running the pipeline.
+  //   3. Otherwise fall back to the empty "ready to run" state.
+  const setBrief = useCallback(
+    (next: CampaignBrief) => {
+      briefIdRef.current = next.id;
+      setBriefState(next);
+      setError(null);
+      // (1) Already showing this brief's run — leave the grid (and decisions) intact.
+      if (result?.log?.campaignId === next.id) return;
+      // (2)/(3) Clear, then adopt the persisted run only if it's actually this brief's.
+      // report.json is the single most-recent run regardless of which brief produced it,
+      // so match on campaignId before trusting it; a mismatch leaves the grid empty.
+      setResult(null);
+      setDecisions({});
+      fetch(`${API}/campaigns/result`)
+        .then((r) => r.json() as Promise<RunResult>)
+        .then((d) => {
+          if (briefIdRef.current !== next.id) return; // superseded by a later switch
+          if (d?.log?.campaignId === next.id && (d.assets?.length || d.log)) {
+            setResult(d);
+            if (d.assets?.length) setAssetVersion((v) => v + 1);
+          }
+        })
+        .catch(() => undefined);
+    },
+    [result],
+  );
 
   const openBriefPicker = useCallback(() => setBriefPickerOpen(true), []);
   const closeBriefPicker = useCallback(() => {
