@@ -51,7 +51,6 @@ before continuing.
 | Before starting work     | `npm run build && npm run typecheck`     | STOP — fix first        |
 | Any `.ts` / `.tsx` edit  | `npm run lint && npm run typecheck`      | Fix before continuing   |
 | After adding a template  | `hexagen validate-templates`             | Resolve conflicts       |
-| Before committing        | `npm test`                               | Diagnose — never skip    |
 
 (If this project uses yarn or pnpm, substitute the package manager — the
 triggers stay the same.)
@@ -90,7 +89,6 @@ default branch.
 Deeper guidance lives in `.agents/`:
 
 - `architecture.md` — layer boundaries and import rules
-- `testing.md` — runner, assertions, file naming
 - `git.md` — commit/branch/PR rules
 - `tech-stack.md` — exact tools, with negative examples
 - `session-log.md` — running log of AI-assisted sessions (present when session
