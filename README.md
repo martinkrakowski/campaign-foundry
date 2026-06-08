@@ -180,8 +180,12 @@ products:
     name: Trail Pack
     primaryColor: "#E0218A"
     logoPath: assets/inputs/trail-logo.png
-    inputAsset: assets/inputs/trail-pack.png   # reused when present
 ```
+
+Add an optional **`inputAsset`** to a product to **reuse** a provided background
+(cover-fit per ratio, badged `REUSED`) instead of generating one — see
+`briefs/sample-campaign-reuse.yaml`. A missing/unreadable `inputAsset` simply falls
+through to generation, so it's safe to omit.
 
 Optionally request **creative treatments** (omit for a single default treatment,
 so existing briefs are unchanged). See `briefs/sample-campaign-variants.yaml`:
