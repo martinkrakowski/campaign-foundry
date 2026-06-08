@@ -151,7 +151,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         const background = await this.deps.imageGenerator.resolveBackground(product, ratio, context);
         log.record(
           "ResolveBackgroundAssets",
-          `${product.id} @ ${ratio.value} — background: ${background.source}${background.source === "procedural" ? " (Imagen unavailable — procedural fallback)" : ""}`,
+          `${product.id} @ ${ratio.value} — background: ${background.source}${background.source === "procedural" ? " (procedural fallback — no GenAI background)" : ""}`,
           background.source === "procedural" ? "warn" : "info",
         );
 
@@ -239,6 +239,11 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       );
     }
     const unique = new Set(productIds);
+    // Reject duplicate product ids: the id is the output-path segment, proof name, and
+    // per-product key, so a repeat would silently overwrite another product's creatives.
+    if (unique.size !== productIds.length) {
+      return err(new Error("A campaign brief requires unique product ids."));
+    }
     if (unique.size < MINIMUM_PRODUCTS) {
       return err(
         new Error(
