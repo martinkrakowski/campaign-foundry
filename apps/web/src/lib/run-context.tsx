@@ -162,6 +162,12 @@ export function RunProvider({ children }: { children: ReactNode }) {
   // earlier switch can't land on the grid after the user has moved to another brief.
   const briefIdRef = useRef(brief.id);
 
+  // Monotonic run token. Bumped when a run starts and when a brief switch invalidates
+  // any in-flight run; execute()/regenerateRejected() capture it before awaiting and
+  // only commit their results if it still matches — so a run that resolves after the
+  // user switched briefs can't repopulate the grid with the previous brief's creatives.
+  const runSeq = useRef(0);
+
   // Loading or committing a brief swaps which run the grid should show. Only ever called
   // as a deliberate commit — the editor's Save and the picker's select — never per
   // keystroke, so this won't wipe the grid mid-edit. Behaviour:
@@ -177,6 +183,12 @@ export function RunProvider({ children }: { children: ReactNode }) {
       setError(null);
       // (1) Already showing this brief's run — leave the grid (and decisions) intact.
       if (result?.log?.campaignId === next.id) return;
+      // Switching to a different brief invalidates any in-flight run and leaves the
+      // "orchestrating" UI state, so a late-resolving run can't write back (the seq
+      // guard in execute/regenerateRejected) and the grid isn't stuck spinning.
+      runSeq.current += 1;
+      setLoading(false);
+      setRegeneratingKeys(null);
       // (2)/(3) Clear, then adopt the persisted run only if it's actually this brief's.
       // report.json is the single most-recent run regardless of which brief produced it,
       // so match on campaignId before trusting it; a mismatch leaves the grid empty.
@@ -296,17 +308,20 @@ export function RunProvider({ children }: { children: ReactNode }) {
   );
 
   const execute = useCallback(async () => {
+    const seq = (runSeq.current += 1);
     setLoading(true);
     setError(null);
     try {
       const data = await postGenerate(brief);
+      if (runSeq.current !== seq) return; // a brief switch (or newer run) superseded this
       setResult(data);
       setAssetVersion((v) => v + 1);
       setDecisions({});
     } catch (e) {
+      if (runSeq.current !== seq) return;
       setError(e instanceof Error ? e.message : "Generation failed");
     } finally {
-      setLoading(false);
+      if (runSeq.current === seq) setLoading(false);
     }
   }, [brief, postGenerate]);
 
@@ -317,11 +332,13 @@ export function RunProvider({ children }: { children: ReactNode }) {
     if (targets.length === 0) return;
     const targetKeys = new Set(targets.map((t) => `${t.productId}/${t.aspectRatio}/${t.treatment}`));
 
+    const seq = (runSeq.current += 1);
     setRegeneratingKeys(targetKeys);
     setLoading(true);
     setError(null);
     try {
       const data = await postGenerate({ brief, regenerateOnly: targets });
+      if (runSeq.current !== seq) return; // a brief switch (or newer run) superseded this
       // The response carries only the regenerated cells — overlay them onto the
       // existing set by identity so approved/pending creatives are preserved.
       setResult((prev) => {
@@ -337,10 +354,13 @@ export function RunProvider({ children }: { children: ReactNode }) {
         return next;
       });
     } catch (e) {
+      if (runSeq.current !== seq) return;
       setError(e instanceof Error ? e.message : "Regeneration failed");
     } finally {
-      setLoading(false);
-      setRegeneratingKeys(null);
+      if (runSeq.current === seq) {
+        setLoading(false);
+        setRegeneratingKeys(null);
+      }
     }
   }, [brief, decisions, result, postGenerate]);
 
