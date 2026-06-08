@@ -109,8 +109,15 @@ jobs:
       # the build if the Nitro route manifest ever references a test file.
       - name: Guard the API route scan against test files
         run: |
+          MANIFEST="apps/api/.nitro/types/nitro-routes.d.ts"
           yarn workspace @campaignfoundry/api exec nitro prepare
-          if grep -E "__tests__|\.test'" apps/api/.nitro/types/nitro-routes.d.ts; then
+          # Fail closed: a missing manifest means the guard can't validate anything.
+          if [ ! -f "$MANIFEST" ]; then
+            echo "::error::Nitro route manifest not found at $MANIFEST"
+            exit 1
+          fi
+          # `\.test\b` is robust to Nitro's quoting/extension (matches .test', .test.ts, .test/, …).
+          if grep -Eq '__tests__|\.test\b' "$MANIFEST"; then
             echo "::error::A test file was scanned as a Nitro route. Keep tests out of the server scan (see apps/api/nitro.config.ts \`ignore\`)."
             exit 1
           fi
