@@ -65,7 +65,7 @@ export default defineConfig({
         "**/index.ts", // generated barrels: pure re-exports, no logic
         "**/*.config.{ts,mts,js,mjs}",
         "**/*.d.ts",
-        "apps/web/src/app/**/layout.tsx", // root html/body shell, no logic
+        "apps/web/src/app/layout.tsx", // root html/body shell; uses next/font (build-time only)
       ],
     },
   },

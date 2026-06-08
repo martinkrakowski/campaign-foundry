@@ -382,7 +382,9 @@ export function RunProvider({ children }: { children: ReactNode }) {
       // The response carries only the regenerated cells — overlay them onto the
       // existing set by identity so approved/pending creatives are preserved.
       setResult((prev) => {
-        const byKey = new Map((prev?.assets ?? []).map((a) => [assetKey(a), a] as const));
+        /* istanbul ignore next -- regenerate runs only with an existing run, so prev is non-null */
+        const existing = prev?.assets ?? [];
+        const byKey = new Map(existing.map((a) => [assetKey(a), a] as const));
         for (const a of data.assets) byKey.set(assetKey(a), a);
         return { halted: data.halted, assets: [...byKey.values()], log: data.log };
       });
