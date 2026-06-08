@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
-import { SidebarContent } from "./Sidebar";
+import { SidebarContent, BrowseBriefsButton } from "./Sidebar";
 
 interface NavTab {
   href: string;
@@ -121,6 +121,9 @@ export function MobileMenu({ open, onClose, tabs }: MobileMenuProps) {
 
         <SidebarContent onNavigate={onClose} />
       </div>
+
+      {/* Pinned footer: open the brief picker (closing the menu first so it's visible). */}
+      <BrowseBriefsButton onActivate={onClose} />
     </div>,
     document.body,
   );

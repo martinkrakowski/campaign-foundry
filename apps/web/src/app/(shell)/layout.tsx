@@ -7,6 +7,7 @@ import { Header } from "@/components/shell/Header";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { CommandBar } from "@/components/shell/CommandBar";
 import { TelemetryDrawer } from "@/components/shell/TelemetryDrawer";
+import { BriefPicker } from "@/components/shell/BriefPicker";
 
 /**
  * The primary application shell: persistent header, brief/asset sidebar, the
@@ -40,6 +41,7 @@ export default function ShellLayout({ children }: { children: ReactNode }) {
           </main>
         </div>
       </div>
+      <BriefPicker />
     </RunProvider>
   );
 }
