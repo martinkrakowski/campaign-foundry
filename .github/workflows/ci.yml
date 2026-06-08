@@ -97,7 +97,8 @@ jobs:
         run: "yarn lint"
 
       # run_tests = true; delete this step to skip tests in CI.
+      # test:cov enforces the 100% coverage gate (vitest.config.ts thresholds).
       - name: Test
-        run: "yarn test"
+        run: "yarn test:cov"
         env:
           NODE_ENV: test

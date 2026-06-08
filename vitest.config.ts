@@ -51,8 +51,8 @@ export default defineConfig({
       // instruments through Vite's transform, so plugin-react handles the UI.
       provider: "istanbul",
       reporter: ["text", "lcov"],
-      // The 100% gate is added in the final phase (see TEST_COVERAGE_PLAN.md §5) so
-      // intermediate commits stay green; until then `test:cov` only reports.
+      // The repo is fully tested — enforce 100% so coverage can never regress.
+      thresholds: { lines: 100, functions: 100, branches: 100, statements: 100 },
       include: [
         "packages/*/src/**/*.{ts,tsx}",
         "apps/api/server/**/*.ts",
