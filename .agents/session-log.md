@@ -58,3 +58,25 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Left open:**
   - Package-level `lint` script can't resolve the eslint bin inside a workspace
     (pre-existing; eslint works at the repo root).
+
+---
+
+## 2026-06-09 — PR #36 qodo review triage + fixes
+
+- **Mode:** Implementer
+- **Changes:**
+  - FireflyImageGenerator: cache the IMS token (`{token, expiresAt}`, 60 s refresh
+    margin) and share one in-flight grant across concurrent generations; +4 tests.
+  - env.ts startup summary: list Firefly when both credentials are set (opt-in via
+    the "firefly" model) and warn on half-configured credentials; +2 tests.
+- **Decisions:**
+  - qodo finding #1 (console.warn vs structured logger) rejected: AGENTS.md names
+    `src/infrastructure/logging/logger.ts`, but no logger module exists anywhere in
+    the repo and `console.*` with a `[Component]` prefix is the actual convention
+    (~16 sites, incl. both sibling adapters). Findings #2/#3 confirmed and fixed.
+  - 5 min default token TTL when IMS omits `expires_in` (conservative; IMS normally
+    reports ~24 h).
+- **Left open:**
+  - AGENTS.md's logging convention doesn't match the codebase (no logger module, no
+    eslint-no-console config) — either adopt a structured logger repo-wide or amend
+    AGENTS.md; qodo compliance rule 960794 will keep firing until one happens.

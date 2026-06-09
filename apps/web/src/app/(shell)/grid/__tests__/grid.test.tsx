@@ -48,9 +48,11 @@ describe("GridPage", () => {
       makeAsset({ productId: "beta", aspectRatio: "9:16", backgroundSource: "procedural", passedCompliance: false, logoApplied: false }),
       makeAsset({ productId: "gamma", aspectRatio: "16:9", backgroundSource: "reused" }),
       makeAsset({ productId: "delta", aspectRatio: "1:1", backgroundSource: "openrouter" }),
+      makeAsset({ productId: "epsilon", aspectRatio: "1:1", backgroundSource: "firefly" }),
     ]);
     renderWithRun(<GridPage />);
     await waitFor(() => expect(screen.getAllByText("IMAGEN").length).toBeGreaterThan(0));
+    expect(screen.getByText("FIREFLY")).toBeTruthy();
     expect(screen.getByText("FALLBACK")).toBeTruthy();
     expect(screen.getByText("REUSED")).toBeTruthy();
     expect(screen.getByText("OPENROUTER")).toBeTruthy();

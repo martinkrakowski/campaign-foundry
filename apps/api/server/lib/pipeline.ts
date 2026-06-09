@@ -8,6 +8,7 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import {
   AssetReusingImageGenerator,
+  FireflyImageGenerator,
   GeminiImageGenerator,
   NodeCanvasCompositor,
   OpenRouterImageGenerator,
@@ -30,6 +31,7 @@ loadEnv();
  * Keep in sync with the UI catalog in apps/web/src/lib/models.ts.
  */
 export const ALLOWED_IMAGE_MODELS: readonly string[] = [
+  "firefly",
   "imagen",
   "procedural",
   "x-ai/grok-imagine-image-quality",
@@ -44,14 +46,18 @@ export const ALLOWED_IMAGE_MODELS: readonly string[] = [
  *   selected = undefined / "auto" → Imagen → OpenRouter (default) → procedural
  *   selected = "procedural"       → procedural only
  *   selected = "imagen"           → Imagen → OpenRouter (default) → procedural
+ *   selected = "firefly"          → Adobe Firefly → Imagen → OpenRouter → procedural
  *   selected = "<provider>/<model>" → that OpenRouter model → procedural
  *
- * Each GenAI provider is only used when its key is present (else it falls through).
+ * Each GenAI provider is only used when its credentials are present (else it falls
+ * through). Adopting Firefly was a one-line addition here — the domain never changed.
  */
 function imageGenerator(selected?: string): ImageGeneratorPort {
   const procedural = new ProceduralBackgroundGenerator();
   const geminiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
   const openRouterKey = process.env.OPENROUTER_API_KEY;
+  const fireflyId = process.env.FIREFLY_CLIENT_ID;
+  const fireflySecret = process.env.FIREFLY_CLIENT_SECRET;
 
   // An OpenRouter generator for a given model, falling back to procedural.
   const openRouter = (model?: string): ImageGeneratorPort =>
@@ -69,8 +75,16 @@ function imageGenerator(selected?: string): ImageGeneratorPort {
         })
       : openRouter(process.env.OPENROUTER_IMAGE_MODEL);
 
+  // Adobe Firefly Services, degrading to the default chain when it's unavailable or
+  // its credentials are absent.
+  const firefly = (): ImageGeneratorPort =>
+    fireflyId && fireflySecret
+      ? new FireflyImageGenerator({ clientId: fireflyId, clientSecret: fireflySecret, fallback: imagen() })
+      : imagen();
+
   let generator: ImageGeneratorPort;
   if (selected === "procedural") generator = procedural;
+  else if (selected === "firefly") generator = firefly();
   else if (selected && selected.includes("/")) generator = openRouter(selected);
   else generator = imagen(); // "auto" / "imagen" / unset → default chain
 

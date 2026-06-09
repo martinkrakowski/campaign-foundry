@@ -26,8 +26,8 @@ export interface Asset {
   logoApplied: boolean;
   /** The creative treatment id (e.g. "default", "bold-bottom", "subtle-top"). */
   treatment: string;
-  /** Background provenance: Imagen, OpenRouter, the procedural fallback, or a reused asset. */
-  backgroundSource: "imagen" | "openrouter" | "procedural" | "reused";
+  /** Background provenance: Firefly, Imagen, OpenRouter, the procedural fallback, or a reused asset. */
+  backgroundSource: "firefly" | "imagen" | "openrouter" | "procedural" | "reused";
 }
 
 export type LogLevel = "info" | "warn" | "error";

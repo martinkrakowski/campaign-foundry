@@ -54,12 +54,24 @@ export function loadEnv(): void {
     providers.push(`imagen (${keyName} ✓)`);
   }
   if (process.env.OPENROUTER_API_KEY) providers.push("openrouter (OPENROUTER_API_KEY ✓)");
+  // Mirror pipeline.ts's Firefly gate: both credentials required, and opt-in via the
+  // "firefly" model — credentials alone don't change the default Imagen → OpenRouter chain.
+  const fireflyId = process.env.FIREFLY_CLIENT_ID;
+  const fireflySecret = process.env.FIREFLY_CLIENT_SECRET;
+  if (fireflyId && fireflySecret) {
+    providers.push(`firefly (FIREFLY_CLIENT_ID/FIREFLY_CLIENT_SECRET ✓; select the "firefly" model)`);
+  } else if (fireflyId || fireflySecret) {
+    // Half-configured Firefly silently does nothing — exactly the trap this log exists for.
+    console.warn(
+      `[env] Firefly half-configured — ${fireflyId ? "FIREFLY_CLIENT_SECRET" : "FIREFLY_CLIENT_ID"} is missing, so the "firefly" model will use the fallback chain.`,
+    );
+  }
   if (providers.length > 0) {
     console.log(`[env] image generation: ${providers.join(", ")} — procedural fallback`);
   } else {
     console.warn(
       "[env] image generation: procedural only — no GenAI keys detected. " +
-        "Add OPENROUTER_API_KEY or GEMINI_API_KEY to .env.local for real imagery, then restart the dev server.",
+        "Add GEMINI_API_KEY, OPENROUTER_API_KEY, or FIREFLY_CLIENT_ID + FIREFLY_CLIENT_SECRET to .env.local for real imagery, then restart the dev server.",
     );
   }
 

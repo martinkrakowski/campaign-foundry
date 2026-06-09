@@ -13,6 +13,7 @@ export interface ModelOption {
 
 export const MODELS: readonly ModelOption[] = [
   { id: null, label: "Auto", provider: "Imagen → fallback chain" },
+  { id: "firefly", label: "Adobe Firefly", provider: "Adobe Firefly Services" },
   { id: "imagen", label: "Google Imagen", provider: "Google" },
   { id: "x-ai/grok-imagine-image-quality", label: "Grok Imagine", provider: "xAI · OpenRouter" },
   { id: "google/gemini-2.5-flash-image", label: "Nano Banana", provider: "Google · OpenRouter" },

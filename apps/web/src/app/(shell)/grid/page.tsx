@@ -149,6 +149,7 @@ function ComplianceBadge({ asset }: { asset: Asset }) {
 }
 
 const SOURCE_BADGE: Record<Asset["backgroundSource"], { label: string; cls: string }> = {
+  firefly: { label: "FIREFLY", cls: "border-brand-primary/50 bg-brand-primary/20 text-brand-primary" },
   imagen: { label: "IMAGEN", cls: "border-info/50 bg-info/20 text-info" },
   openrouter: { label: "OPENROUTER", cls: "border-info/50 bg-info/20 text-info" },
   procedural: { label: "FALLBACK", cls: "border-warning/50 bg-warning/20 text-warning" },
