@@ -83,6 +83,13 @@ describe("loadEnv", () => {
     expect(warned).toMatch(/procedural only/); // credentials alone don't enable a provider
   });
 
+  test("names the client id as the missing half when only the secret is set", async () => {
+    writeEnv(".env.local", "FIREFLY_CLIENT_SECRET=secret");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    (await loadFresh())();
+    expect(warn.mock.calls.flat().join(" ")).toMatch(/FIREFLY_CLIENT_ID is missing/);
+  });
+
   test("warns when no GenAI keys are present", async () => {
     writeEnv(".env.local", "X=y");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
