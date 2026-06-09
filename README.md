@@ -104,16 +104,25 @@ procedural backgrounds. To generate real hero imagery, set either or both keys i
 ```bash
 GEMINI_API_KEY=...            # Google Imagen (primary GenAI source)
 OPENROUTER_API_KEY=...        # OpenRouter (second source: Grok / Nano Banana / GPT Image, …)
+FIREFLY_CLIENT_ID=...         # Adobe Firefly Services (select with the "firefly" model)
+FIREFLY_CLIENT_SECRET=...     # — server-to-server IMS credentials
 # optional overrides:
 IMAGEN_MODEL=imagen-4.0-generate-001
 OPENROUTER_IMAGE_MODEL=x-ai/grok-imagine-image-quality   # default
 ```
 
-**Fallback chain** — each tier is used only when its key is present, and any
+**Adobe Firefly Services** is a first-class provider: select the `firefly` model (UI
+picker or `?model=firefly`) and, with credentials set, hero backgrounds are generated
+with Firefly v3, degrading to the chain below on any failure. It's a single adapter
+(`FireflyImageGenerator`) behind `ImageGeneratorPort` — adopting it touched one file
+plus one line at the composition root; the domain, compliance, export, and UI are
+unchanged.
+
+**Fallback chain** — each tier is used only when its credentials are present, and any
 failure or rate-limit drops to the next, so a run never aborts:
 
 ```text
-reuse provided asset → Imagen → OpenRouter → procedural gradient
+reuse provided asset → (Firefly | Imagen) → OpenRouter → procedural gradient
 ```
 
 > **Keys are read once at startup.** If you add keys to `.env.local` while

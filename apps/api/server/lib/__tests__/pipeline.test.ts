@@ -16,7 +16,7 @@ const brief: CampaignBrief = {
   ],
 };
 
-const KEYS = ["GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY"];
+const KEYS = ["GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY", "FIREFLY_CLIENT_ID", "FIREFLY_CLIENT_SECRET"];
 
 describe("pipeline composition root", () => {
   let dir: string;
@@ -44,6 +44,7 @@ describe("pipeline composition root", () => {
   test("ALLOWED_IMAGE_MODELS lists the curated ids", () => {
     expect(ALLOWED_IMAGE_MODELS).toContain("procedural");
     expect(ALLOWED_IMAGE_MODELS).toContain("imagen");
+    expect(ALLOWED_IMAGE_MODELS).toContain("firefly");
     expect(ALLOWED_IMAGE_MODELS).toContain("x-ai/grok-imagine-image-quality");
   });
 
@@ -51,6 +52,7 @@ describe("pipeline composition root", () => {
     // Construction is lazy (no network), so this exercises each branch of imageGenerator().
     expect(buildPipeline("procedural")).toBeInstanceOf(GenerateCampaignUseCase);
     expect(buildPipeline()).toBeInstanceOf(GenerateCampaignUseCase); // default, no keys → procedural floor
+    expect(buildPipeline("firefly")).toBeInstanceOf(GenerateCampaignUseCase); // no Firefly creds → default chain
 
     process.env.OPENROUTER_API_KEY = "o";
     expect(buildPipeline("x-ai/grok-imagine-image-quality")).toBeInstanceOf(GenerateCampaignUseCase); // explicit OpenRouter model
@@ -58,6 +60,10 @@ describe("pipeline composition root", () => {
 
     process.env.GEMINI_API_KEY = "g";
     expect(buildPipeline("imagen")).toBeInstanceOf(GenerateCampaignUseCase); // Imagen + OpenRouter fallback
+
+    process.env.FIREFLY_CLIENT_ID = "cid";
+    process.env.FIREFLY_CLIENT_SECRET = "secret";
+    expect(buildPipeline("firefly")).toBeInstanceOf(GenerateCampaignUseCase); // Firefly + chain fallback
   });
 
   test("runCampaign executes fully offline with the procedural model", async () => {
