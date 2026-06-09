@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const CLEAR = ["GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY", "A", "B", "C", "D", "E", "X"];
+const CLEAR = ["GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY", "FIREFLY_CLIENT_ID", "FIREFLY_CLIENT_SECRET", "A", "B", "C", "D", "E", "X"];
 
 /** Fresh module so the `loaded` flag starts false each test. */
 const loadFresh = async () => {
@@ -65,6 +65,22 @@ describe("loadEnv", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     (await loadFresh())();
     expect(log.mock.calls.flat().join(" ")).toMatch(/imagen \(GOOGLE_API_KEY/);
+  });
+
+  test("logs firefly when both IMS credentials are present", async () => {
+    writeEnv(".env.local", "FIREFLY_CLIENT_ID=cid\nFIREFLY_CLIENT_SECRET=secret");
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    (await loadFresh())();
+    expect(log.mock.calls.flat().join(" ")).toMatch(/firefly \(FIREFLY_CLIENT_ID/);
+  });
+
+  test("warns when Firefly is half-configured and does not list it as a provider", async () => {
+    writeEnv(".env.local", "FIREFLY_CLIENT_ID=cid");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    (await loadFresh())();
+    const warned = warn.mock.calls.flat().join(" ");
+    expect(warned).toMatch(/FIREFLY_CLIENT_SECRET is missing/);
+    expect(warned).toMatch(/procedural only/); // credentials alone don't enable a provider
   });
 
   test("warns when no GenAI keys are present", async () => {
