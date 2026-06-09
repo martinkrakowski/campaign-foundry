@@ -50,6 +50,10 @@ const wire = (opts: { ims?: Response; generate?: Response; image?: Response } = 
 
 const creds = { clientId: "cid", clientSecret: "secret" };
 
+/** IMS grants made so far — the caching tests assert how many actually ran. */
+const imsCalls = () =>
+  fetchMock.mock.calls.filter((call: unknown[]) => String(call[0]).includes("adobelogin")).length;
+
 describe("FireflyImageGenerator", () => {
   test("authenticates, generates, and returns a firefly-sourced image", async () => {
     wire();
@@ -120,5 +124,40 @@ describe("FireflyImageGenerator", () => {
     fetchMock.mockRejectedValueOnce("network kaput");
     const out = await new FireflyImageGenerator({ ...creds, fallback: fallback() }).resolveBackground(product, ratio(), ctx);
     expect(out.source).toBe("procedural");
+  });
+
+  test("caches the IMS token across sequential generations", async () => {
+    wire();
+    const generator = new FireflyImageGenerator(creds);
+    await generator.resolveBackground(product, ratio(), ctx);
+    await generator.resolveBackground(product, ratio("16:9"), ctx);
+    expect(imsCalls()).toBe(1);
+  });
+
+  test("concurrent generations share one in-flight IMS grant", async () => {
+    wire();
+    const generator = new FireflyImageGenerator(creds);
+    await Promise.all([
+      generator.resolveBackground(product, ratio(), ctx),
+      generator.resolveBackground(product, ratio("16:9"), ctx),
+    ]);
+    expect(imsCalls()).toBe(1);
+  });
+
+  test("re-authenticates when the remaining token lifetime is inside the refresh margin", async () => {
+    wire({ ims: res({ json: { access_token: "tok", expires_in: 30 } }) }); // 30 s < the 60 s margin
+    const generator = new FireflyImageGenerator(creds);
+    await generator.resolveBackground(product, ratio(), ctx);
+    await generator.resolveBackground(product, ratio(), ctx);
+    expect(imsCalls()).toBe(2);
+  });
+
+  test("does not cache a failed grant — the next generation retries IMS", async () => {
+    wire({ ims: res({ ok: false, status: 503 }) });
+    const generator = new FireflyImageGenerator({ ...creds, fallback: fallback() });
+    expect((await generator.resolveBackground(product, ratio(), ctx)).source).toBe("procedural");
+    wire(); // IMS recovers
+    expect((await generator.resolveBackground(product, ratio(), ctx)).source).toBe("firefly");
+    expect(imsCalls()).toBe(2);
   });
 });

@@ -13,9 +13,15 @@ const IMS_TOKEN_ENDPOINT = "https://ims-na1.adobelogin.com/ims/token/v3";
 const FIREFLY_GENERATE_ENDPOINT = "https://firefly-api.adobe.io/v3/images/generate";
 /** Default IMS scopes for Firefly Services. */
 const DEFAULT_SCOPE = "openid,AdobeID,firefly_api,ff_apis";
+/** Stop reusing a cached IMS token this long before its reported expiry. */
+const TOKEN_EXPIRY_MARGIN_MS = 60_000;
+/** Conservative cache lifetime when IMS omits `expires_in`. */
+const DEFAULT_TOKEN_TTL_SECONDS = 5 * 60;
 
 interface ImsTokenResponse {
   access_token?: string;
+  /** Lifetime in seconds — IMS reports ~24 h for client-credentials tokens. */
+  expires_in?: number;
 }
 interface FireflyGenerateResponse {
   outputs?: Array<{ image?: { url?: string } }>;
@@ -47,6 +53,10 @@ export class FireflyImageGenerator implements ImageGeneratorPort {
   private readonly clientSecret: string;
   private readonly scope: string;
   private readonly fallback?: ImageGeneratorPort;
+  /** Bearer token reused across generations until shortly before its expiry. */
+  private cachedToken?: { token: string; expiresAt: number };
+  /** In-flight IMS grant shared by concurrent generations (a run resolves up to 8 cells at once). */
+  private authRequest?: Promise<string>;
 
   constructor(options: FireflyImageGeneratorOptions) {
     this.clientId = options.clientId;
@@ -77,8 +87,24 @@ export class FireflyImageGenerator implements ImageGeneratorPort {
     }
   }
 
-  /** Client-credentials grant against Adobe IMS; returns a bearer access token. */
+  /**
+   * Bearer token for Firefly calls. IMS client-credentials tokens are long-lived
+   * (~24 h) and a campaign run resolves one background per product × ratio cell
+   * concurrently, so the token is cached until shortly before expiry and concurrent
+   * generations share a single in-flight grant instead of bursting the token endpoint.
+   */
   private async authenticate(): Promise<string> {
+    if (this.cachedToken && Date.now() < this.cachedToken.expiresAt) return this.cachedToken.token;
+    // A settled grant always clears itself, so a failed one is retried on the next
+    // generation (each failure already degrades per cell) instead of rejecting forever.
+    this.authRequest ??= this.requestToken().finally(() => {
+      this.authRequest = undefined;
+    });
+    return this.authRequest;
+  }
+
+  /** Client-credentials grant against Adobe IMS; caches and returns the bearer token. */
+  private async requestToken(): Promise<string> {
     const response = await fetch(IMS_TOKEN_ENDPOINT, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -90,9 +116,11 @@ export class FireflyImageGenerator implements ImageGeneratorPort {
       }),
     });
     if (!response.ok) throw new Error(`Adobe IMS auth failed (HTTP ${response.status})`);
-    const token = ((await response.json()) as ImsTokenResponse).access_token;
-    if (!token) throw new Error("Adobe IMS returned no access token");
-    return token;
+    const body = (await response.json()) as ImsTokenResponse;
+    if (!body.access_token) throw new Error("Adobe IMS returned no access token");
+    const ttlMs = (body.expires_in ?? DEFAULT_TOKEN_TTL_SECONDS) * 1000;
+    this.cachedToken = { token: body.access_token, expiresAt: Date.now() + ttlMs - TOKEN_EXPIRY_MARGIN_MS };
+    return body.access_token;
   }
 
   /** One Firefly generate call; returns the output image URL. */
