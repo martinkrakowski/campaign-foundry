@@ -25,6 +25,9 @@ coverage/
 *.log
 .DS_Store
 
+# hexagen sync writes a fresh run log every invocation — an artifact, not source
+SYNC-MIGRATION-REPORT.md
+
 # Generated creative output (binaries; see README) — anchored so the Nitro
 # `server/routes/output/` source dir is NOT ignored.
 /output/
