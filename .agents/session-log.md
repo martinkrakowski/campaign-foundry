@@ -80,3 +80,38 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - AGENTS.md's logging convention doesn't match the codebase (no logger module, no
     eslint-no-console config) — either adopt a structured logger repo-wide or amend
     AGENTS.md; qodo compliance rule 960794 will keep firing until one happens.
+
+---
+
+## 2026-06-09 — hexagen tooling repair (branch fix/hexagen-tooling, no PR yet)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Bumped @hexagen-monaco/sync + arch-linter ^0.4.0 → ^0.6.0 (root cause: the
+    wizard wrote manifest.yaml with `workspaceTemplate`, a key only parsed from
+    0.6.0 on, while scaffolding ^0.4.0 pins — every hexagen command failed at load).
+  - Reconciled .architecture/ with repo reality: value_objects → value-objects
+    layer naming; dropped the two deleted external-service-client.out-port stubs;
+    declared adapter-context depends_on CampaignOrchestration; whitelisted
+    @campaignfoundry/CampaignOrchestration in invariants/linter-config.yaml
+    (the linter reads invariants, not manifest depends_on).
+  - Ran the first successful `yarn sync` (verified in a throwaway clone first):
+    removed shared's two empty placeholder barrels + parent re-exports, added
+    adapter barrels (CreativeGeneration's now exports fonts/safe-path too), empty
+    application skeletons, `"dependencies": {}` in shared/package.json.
+    Second sync is byte-level idempotent; all gates green (287 tests, 100% cov).
+  - Gitignored SYNC-MIGRATION-REPORT.md (per-run artifact).
+- **Decisions:**
+  - lint:arch is green; templates:validate works ("no templates installed").
+  - Did NOT wire CI gates: at 0.6.0 every failure exits 0 (manifest parse failure,
+    arch violations) — gating would pass vacuously. Blocked on upstream fix.
+- **Left open (upstream, hexagen-monaco):**
+  - Scaffolder must pin the CLI version whose schema it writes (the root cause).
+  - Exit codes: sync + arch validate exit 0 on every failure mode.
+  - --dry-run is not read-only: it deleted legacy empty barrels and wrote the
+    migration report (repeatable until converged).
+  - Dry-run planner + counters mislabel unconditional same-content rewrites as
+    create/update (43 "would" lines on a fully converged tree) — unusable as a
+    drift detector until fixed.
+  - Failure rollback runs `git reset --hard && git clean -fd` in the consumer repo.
+  - Then: release 0.6.1, bump pins here, wire sync:dry + lint:arch into CI.
