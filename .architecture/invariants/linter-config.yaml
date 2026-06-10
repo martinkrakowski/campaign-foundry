@@ -4,6 +4,11 @@
 global_whitelist:
   - "@campaignfoundry/shared"
   - "@campaignfoundry/shared/**"
+  # CampaignOrchestration owns the ports (ImageGeneratorPort, CompositorPort, …);
+  # adapter packages import those interfaces to implement them — edges depending
+  # on the core, per .agents/architecture.md.
+  - "@campaignfoundry/CampaignOrchestration"
+  - "@campaignfoundry/CampaignOrchestration/**"
 
 test_double_rules:
   allowed_cross_package_imports: true
