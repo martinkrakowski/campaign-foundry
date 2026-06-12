@@ -52,11 +52,24 @@ jobs:
         run: |
           corepack prepare "$(node -p 'require("./package.json").packageManager')" --activate
 
-      # First run has no committed lockfile, so install is NOT immutable.
-      # After you commit yarn.lock, switch this to `yarn install --immutable`
-      # (npm: `npm ci`; pnpm: `pnpm install --frozen-lockfile`). See SETUP.md.
+      # yarn.lock is committed, so install is immutable: CI fails on a stale
+      # lockfile instead of silently rewriting it. This also protects the
+      # sync --check step below — its clean-tree preflight would otherwise
+      # trip on an install-mutated lockfile and mask the real drift signal.
       - name: Install dependencies
-        run: "yarn install"
+        run: "yarn install --immutable"
+
+      # Hexagen architecture gates (require >=0.7.0 — earlier CLIs exited 0 on
+      # every failure mode, so gating was vacuous; see .agents/session-log.md,
+      # 2026-06-09 entry). `sync --check` is read-only and exits 1 iff the
+      # committed tree drifted from what .architecture/manifest.yaml generates;
+      # `arch validate` enforces the layer/import rules. Both are sub-second,
+      # hence ahead of the build for fail-fast.
+      - name: Architecture drift gate (hexagen sync --check)
+        run: "yarn sync:check"
+
+      - name: Architecture lint (hexagen arch validate)
+        run: "yarn lint:arch"
 
       # Turbo caches task outputs keyed by input hash, so unchanged packages are
       # skipped on warm runs (cache_strategy = turbo-cache). Set TURBO_TOKEN
