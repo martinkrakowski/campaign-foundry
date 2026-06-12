@@ -115,3 +115,32 @@ To keep this file out of version control, add `.agents/session-log.md` to
     drift detector until fixed.
   - Failure rollback runs `git reset --hard && git clean -fd` in the consumer repo.
   - Then: release 0.6.1, bump pins here, wire sync:dry + lint:arch into CI.
+
+---
+
+## 2026-06-12 — hexagen 0.7.0 + CI architecture gates (branch fix/hexagen-tooling)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Bumped @hexagen-monaco/sync + arch-linter ^0.6.0 → ^0.7.0 — the upstream
+    release that fixed everything the 2026-06-09 entry left open: honest exit
+    codes, read-only dry-run, truthful op counts, a `--check` drift mode, and
+    journaled scoped rollback (no more git-reset against this repo).
+  - Accepted yarn-4's normalized shared/package.json: install strips the empty
+    `"dependencies": {}` that 0.6.0's sync kept re-adding; 0.7.0 emits the
+    block only when non-empty, so the install↔sync churn loop is dead.
+  - Added the `sync:check` script and wired CI: `yarn install --immutable`
+    (lockfile is committed) + two fail-fast gates ahead of the build —
+    `sync:check` (drift) and `lint:arch`.
+- **Decisions:**
+  - Gates went straight to `sync --check` rather than landing `sync:dry` first:
+    0.7.0 shipped both upstream hardening waves at once, so the interim step
+    had no window in which it was the best available gate.
+  - Probed the gate in both directions before trusting it: converged tree →
+    exit 0 / `Total ops : 0`; deleted generated barrel → exit 1 / "Drift
+    detected: 1 pending change(s)". Non-vacuous, unlike 0.6.0.
+- **Left open:**
+  - setup-node's yarn cache is still disabled (TODO in ci.yml) — enabling it
+    requires corepack BEFORE setup-node (yarn-4 probe gotcha); separate change.
+  - Cosmetic upstream nit: dry-run logs each planned barrel op twice (counted
+    once — the summary table and exit code are correct).
