@@ -144,3 +144,54 @@ To keep this file out of version control, add `.agents/session-log.md` to
     requires corepack BEFORE setup-node (yarn-4 probe gotcha); separate change.
   - Cosmetic upstream nit: dry-run logs each planned barrel op twice (counted
     once — the summary table and exit code are correct).
+
+---
+
+## 2026-06-15 — hexagen 0.8.0 bump + PR #37 qodo review triage (branch fix/hexagen-tooling)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Narrowed the CampaignOrchestration arch whitelist to its root entrypoint
+    (`dd6c645`): dropped the `@campaignfoundry/CampaignOrchestration/**`
+    `global_whitelist` line. The package's `exports` map exposes only `.`, so no
+    subpath import resolves and none exist in the tree — `/**` added breadth with
+    no edge to cover. The exact-root entry stays (load-bearing: adapters import
+    the ports inward from the core).
+  - Bumped @hexagen-monaco/sync + arch-linter ^0.7.0 → ^0.8.0 (`b1a834a`) once the
+    upstream published 0.8.0. Needed a pin edit, not just a lock refresh: the 0.x
+    caret `^0.7.0` means `<0.8.0`. 0.8.0 is functionally identical to 0.7.1 for
+    both packages — the substance (sync's manifest-migration feature; arch-linter
+    extracting `cross-package-violation.ts`) shipped in 0.7.1, which `^0.7.0` never
+    pulled in; 0.8.0 carries it across and clears the skew in one move.
+  - All three gates green on 0.8.0: `lint:arch` compliant (the `dd6c645` whitelist
+    change holds under the refactored linter), `sync:check` `Total ops : 0` (no
+    drift, tree untouched), 287 tests.
+  - Enabled setup-node's yarn cache (`ci.yml`): moved `corepack enable` ahead of
+    setup-node so its `cache: yarn` probe resolves Yarn 4 (Classic reports the
+    wrong cache folder) — clears the carried-over 2026-06-12 TODO. Caches Berry's
+    global cache (`enableGlobalCache: true` → `~/.yarn/berry/cache`); a miss only
+    re-downloads, `install --immutable` stays authoritative.
+  - Bumped checkout/setup-node/cache `@v4`→`@v5` (`ci.yml`): the v4 majors declare
+    `using: node20`, deprecated as GitHub defaults the JS action runtime to Node 24
+    on 2026-06-16 (Node 20 removed fall 2026). v5 majors are node24-native and
+    nothing else (verified release notes); `ubuntu-latest` meets the required
+    runner ≥ v2.327.1. `node-version: "22"` (the build Node) is a separate axis — left as-is.
+- **Decisions:**
+  - qodo PR #37 finding #1 ("overbroad whitelist", labeled Bug) — validated the
+    kernel (the `/**` was unnecessary) but rejected the Bug framing: the `exports`
+    map already forecloses deep imports, `/**` matched zero real imports, and
+    whitelisting the core's entrypoint is the intended hexagonal edge. Applied the
+    one-line tightening, nothing more.
+  - qodo finding #2 ("stale TEST_COVERAGE_PLAN.md", Informational) — confirmed
+    stale but mis-attributed (the staleness predates this PR; it came from the stub
+    deletion in `56722fc`) and out of scope (doc untouched, belongs to
+    feat/test-coverage). Left as-is. Posted both verdicts as a PR comment.
+  - Targeted 0.8.0 over 0.7.1: same content for our packages, but aligns the
+    consumer to the generator's published `latest` instead of trailing by a minor.
+- **Left open:**
+  - 0.8.0's manifest-migration analyzer reports "16 entries: 7 blocked, 9 skipped"
+    in `--check` mode (writes nothing, doesn't fail the gate) — unexamined; look
+    before adopting `hexagen manifest migrate`.
+  - Confirmed obsolete: 0.8.0 `sync --check` refuses a dirty tree ("use
+    `--allow-dirty`") instead of the old `git reset --hard` — the rollback footgun
+    flagged on 2026-06-09 is gone.
