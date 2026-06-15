@@ -31,38 +31,59 @@ jobs:
     name: Build, Typecheck, Lint & Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          # No package-manager cache here — actions/setup-node's cache requires a
-          # committed lockfile and fails without one. The Turbo cache below covers
-          # task outputs; re-enable the setup-node cache once you commit yarn.lock.
-
-      # Corepack activates the package manager pinned in package.json
-      # (`packageManager`). Without it, the runner's default Yarn (Classic)
-      # can't honor a Yarn-4 project. See SETUP.md.
+      # Corepack ships with the runner's pre-installed Node and must be enabled
+      # BEFORE setup-node: the `cache: yarn` step below probes the cache folder
+      # with whatever `yarn` is on PATH, and without Corepack that's Yarn Classic
+      # — which reports the wrong folder and fails the cache step. Enabling here
+      # installs the Yarn-4 shim (version read from package.json `packageManager`)
+      # so the probe resolves Berry's cache folder. See SETUP.md.
       - name: Enable Corepack
         run: corepack enable
 
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          # yarn.lock is committed, so setup-node keys its cache on it. Corepack
+          # (above) makes the probed folder Berry's global cache
+          # (enableGlobalCache: true → ~/.yarn/berry/cache). A wrong/empty cache
+          # only costs a re-download — `install --immutable` stays the source of
+          # truth — so this can never turn a green build red.
+          cache: "yarn"
+
       # Read the pinned version from package.json's `packageManager` at runtime
       # so CI can never drift from what the project declares (no baked version).
+      # Runs under the Node setup-node just installed; the shim from Enable
+      # Corepack stays on PATH (Node 22 ships no competing `yarn`).
       - name: Prepare package manager
         run: |
           corepack prepare "$(node -p 'require("./package.json").packageManager')" --activate
 
-      # First run has no committed lockfile, so install is NOT immutable.
-      # After you commit yarn.lock, switch this to `yarn install --immutable`
-      # (npm: `npm ci`; pnpm: `pnpm install --frozen-lockfile`). See SETUP.md.
+      # yarn.lock is committed, so install is immutable: CI fails on a stale
+      # lockfile instead of silently rewriting it. This also protects the
+      # sync --check step below — its clean-tree preflight would otherwise
+      # trip on an install-mutated lockfile and mask the real drift signal.
       - name: Install dependencies
-        run: "yarn install"
+        run: "yarn install --immutable"
+
+      # Hexagen architecture gates (require >=0.7.0 — earlier CLIs exited 0 on
+      # every failure mode, so gating was vacuous; see .agents/session-log.md,
+      # 2026-06-09 entry). `sync --check` is read-only and exits 1 iff the
+      # committed tree drifted from what .architecture/manifest.yaml generates;
+      # `arch validate` enforces the layer/import rules. Both are sub-second,
+      # hence ahead of the build for fail-fast.
+      - name: Architecture drift gate (hexagen sync --check)
+        run: "yarn sync:check"
+
+      - name: Architecture lint (hexagen arch validate)
+        run: "yarn lint:arch"
 
       # Turbo caches task outputs keyed by input hash, so unchanged packages are
       # skipped on warm runs (cache_strategy = turbo-cache). Set TURBO_TOKEN
       # and TURBO_TEAM below for the cross-run remote cache.
       - name: Restore Turbo cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .turbo
           key: ${{ runner.os }}-turbo-${{ github.sha }}

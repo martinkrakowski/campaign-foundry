@@ -59,7 +59,7 @@ generator:
         folder: src/domain
         subfolders:
           - entities
-          - value_objects
+          - value-objects
       application:
         folder: src/application
         subfolders:
@@ -148,6 +148,7 @@ bounded_contexts:
       canvas compositing. Has no knowledge of CampaignBrief or use-case logic.
     depends_on:
       - shared
+      - CampaignOrchestration
     uiFramework: Next.js
     apiFramework: Express
     layers:
@@ -159,8 +160,7 @@ bounded_contexts:
         use_cases: []
         ports:
           in: []
-          out:
-            - external-service-client.out-port.ts
+          out: []
       infrastructure:
         adapters: []
   - name: GovernanceAndCompliance
@@ -170,6 +170,7 @@ bounded_contexts:
       safety and visual brand adherence.
     depends_on:
       - shared
+      - CampaignOrchestration
     uiFramework: Next.js
     apiFramework: Express
     layers:
@@ -191,6 +192,7 @@ bounded_contexts:
       no domain logic and is pure infrastructure.
     depends_on:
       - shared
+      - CampaignOrchestration
     uiFramework: Next.js
     apiFramework: Express
     layers:
@@ -202,7 +204,6 @@ bounded_contexts:
         use_cases: []
         ports:
           in: []
-          out:
-            - external-service-client.out-port.ts
+          out: []
       infrastructure:
         adapters: []

@@ -80,3 +80,67 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - AGENTS.md's logging convention doesn't match the codebase (no logger module, no
     eslint-no-console config) — either adopt a structured logger repo-wide or amend
     AGENTS.md; qodo compliance rule 960794 will keep firing until one happens.
+
+---
+
+## 2026-06-09 — hexagen tooling repair (branch fix/hexagen-tooling, no PR yet)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Bumped @hexagen-monaco/sync + arch-linter ^0.4.0 → ^0.6.0 (root cause: the
+    wizard wrote manifest.yaml with `workspaceTemplate`, a key only parsed from
+    0.6.0 on, while scaffolding ^0.4.0 pins — every hexagen command failed at load).
+  - Reconciled .architecture/ with repo reality: value_objects → value-objects
+    layer naming; dropped the two deleted external-service-client.out-port stubs;
+    declared adapter-context depends_on CampaignOrchestration; whitelisted
+    @campaignfoundry/CampaignOrchestration in invariants/linter-config.yaml
+    (the linter reads invariants, not manifest depends_on).
+  - Ran the first successful `yarn sync` (verified in a throwaway clone first):
+    removed shared's two empty placeholder barrels + parent re-exports, added
+    adapter barrels (CreativeGeneration's now exports fonts/safe-path too), empty
+    application skeletons, `"dependencies": {}` in shared/package.json.
+    Second sync is byte-level idempotent; all gates green (287 tests, 100% cov).
+  - Gitignored SYNC-MIGRATION-REPORT.md (per-run artifact).
+- **Decisions:**
+  - lint:arch is green; templates:validate works ("no templates installed").
+  - Did NOT wire CI gates: at 0.6.0 every failure exits 0 (manifest parse failure,
+    arch violations) — gating would pass vacuously. Blocked on upstream fix.
+- **Left open (upstream, hexagen-monaco):**
+  - Scaffolder must pin the CLI version whose schema it writes (the root cause).
+  - Exit codes: sync + arch validate exit 0 on every failure mode.
+  - --dry-run is not read-only: it deleted legacy empty barrels and wrote the
+    migration report (repeatable until converged).
+  - Dry-run planner + counters mislabel unconditional same-content rewrites as
+    create/update (43 "would" lines on a fully converged tree) — unusable as a
+    drift detector until fixed.
+  - Failure rollback runs `git reset --hard && git clean -fd` in the consumer repo.
+  - Then: release 0.6.1, bump pins here, wire sync:dry + lint:arch into CI.
+
+---
+
+## 2026-06-12 — hexagen 0.7.0 + CI architecture gates (branch fix/hexagen-tooling)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Bumped @hexagen-monaco/sync + arch-linter ^0.6.0 → ^0.7.0 — the upstream
+    release that fixed everything the 2026-06-09 entry left open: honest exit
+    codes, read-only dry-run, truthful op counts, a `--check` drift mode, and
+    journaled scoped rollback (no more git-reset against this repo).
+  - Accepted yarn-4's normalized shared/package.json: install strips the empty
+    `"dependencies": {}` that 0.6.0's sync kept re-adding; 0.7.0 emits the
+    block only when non-empty, so the install↔sync churn loop is dead.
+  - Added the `sync:check` script and wired CI: `yarn install --immutable`
+    (lockfile is committed) + two fail-fast gates ahead of the build —
+    `sync:check` (drift) and `lint:arch`.
+- **Decisions:**
+  - Gates went straight to `sync --check` rather than landing `sync:dry` first:
+    0.7.0 shipped both upstream hardening waves at once, so the interim step
+    had no window in which it was the best available gate.
+  - Probed the gate in both directions before trusting it: converged tree →
+    exit 0 / `Total ops : 0`; deleted generated barrel → exit 1 / "Drift
+    detected: 1 pending change(s)". Non-vacuous, unlike 0.6.0.
+- **Left open:**
+  - setup-node's yarn cache is still disabled (TODO in ci.yml) — enabling it
+    requires corepack BEFORE setup-node (yarn-4 probe gotcha); separate change.
+  - Cosmetic upstream nit: dry-run logs each planned barrel op twice (counted
+    once — the summary table and exit code are correct).
