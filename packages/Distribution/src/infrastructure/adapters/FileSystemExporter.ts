@@ -4,7 +4,7 @@ import { PDFDocument, StandardFonts, type PDFPage } from "pdf-lib";
 import type { ExportPort } from "@campaignfoundry/CampaignOrchestration";
 
 /** Footer stamped on every proof — makes the RGB-only limitation explicit (ProofMetadataEmbedding). */
-const PROOF_FOOTER = "CampaignForge proof — RGB asset, not colour-managed";
+const PROOF_FOOTER = "Campaign Foundry proof — RGB asset, not colour-managed";
 const CROP_MARK_LEN = 16;
 const PAGE_MARGIN = 24;
 const FOOTER_BAND = 28;
