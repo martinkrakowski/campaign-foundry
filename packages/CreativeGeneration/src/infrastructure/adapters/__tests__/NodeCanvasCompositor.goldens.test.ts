@@ -87,6 +87,10 @@ const insetFixture = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures/compositor-goldens-insets.json"), "utf8"),
 ) as GoldenFixture;
 
+// Pixel goldens are keyed by platform-arch (darwin-arm64 on the laptop today).
+// Structural tests in NodeCanvasCompositor.test.ts are the platform-independent
+// guard for offsets, wrap width, clamping, overlap, and validation. Record a
+// linux map from CI before un-skipping this cell there (same caveat as #45).
 describe("NodeCanvasCompositor inset goldens", () => {
   const compositor = new NodeCanvasCompositor();
   const backgrounds = new ProceduralBackgroundGenerator();
