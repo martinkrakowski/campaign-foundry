@@ -123,6 +123,53 @@ done
 
 Then launch one CLI per lane with its brief (template A).
 
+### Lane status is derived, never asserted
+
+**Do not take a lane's word for its own state.** Ask git and the forge, and let their output
+*be* the status. A lane is in exactly one of three states, and each is a command, not a claim:
+
+```bash
+lane=feat/e1-web; wt=../wt-e1-web
+
+# 1. Does a PR exist? No PR = the lane is stuck, whatever its prose says.
+gh pr list --head "$lane" --json number,url,isDraft --jq '.[] | "#\(.number) \(.url)"'
+
+# 2. Is it green? The gate's exit code is the answer; the lane's summary is not.
+(cd "$wt" && yarn build && yarn typecheck && yarn lint && yarn lint:arch && yarn test:cov)
+echo "gate exit: $?"
+
+# 3. What actually changed, and is the tree clean?
+git -C "$wt" status --porcelain=v1 -b
+git -C "$wt" log --oneline origin/main..HEAD
+git -C "$wt" diff --stat origin/main...HEAD
+```
+
+Run these **before** believing any progress report, and again before opening stage 2 on a PR.
+
+`gh pr list --head` lists **open** PRs only — after stage 5 a merged lane reads as empty, which
+is not "stuck". Add `--state merged` (or `--state all`) when you are checking a lane you have
+already merged.
+
+The failure this prevents is specific and has now happened twice. A lane reported
+*"in progress — 1 test file failing"* with a confident root cause. The tree held five
+failures across four files, none of them the diagnosed cause; a silent validation
+regression that no failing test pointed at; ~2,000 lines of **test deletions** staged as
+the recovery attempt; coverage 6 points under the gate; and no pushed branch at all. Every
+one of those is visible in three commands. None of it was in the report.
+
+Two consequences worth stating plainly:
+
+- **A lane with no PR has not started stage 2.** The pipeline's value is in review →
+  remediate → sweep; a lane that stalls before opening a PR never reaches the stage that
+  catches things. When that lane's work was finally reviewed, it produced 17 findings, 13
+  of them real — including one that silently rewrote a persisted policy on every save.
+  Those defects existed the whole time; nothing had looked yet.
+- **`git status` is part of the status.** A working tree that is deleting tests is a lane
+  thrashing, not progressing. Read the diffstat's *deletions*, not just its file count.
+
+When the derived status contradicts the report, the derived status wins — and say so in
+your own summary rather than relaying the prose.
+
 ### Stage 2 — Review
 
 For each PR, run an **adversarial reviewer against the branch diff, never the working
@@ -197,6 +244,8 @@ Rules:
 - Append a session-log entry (Mode / Changes / Decisions / Left open).
 
 Final message: PR URL, files changed, coverage line, deviations. Nothing else.
+If you cannot produce a PR URL and a passing gate, say **STUCK** and what blocks it —
+do not report progress. The orchestrator verifies both independently either way.
 ```
 
 ### Template B — Reviewer (orchestrator subagent, read-only)
@@ -283,6 +332,9 @@ Never resolve a thread you did not answer, and never claim a fix you have not ve
 | No `--delete-branch` while a worktree holds the branch | `gh pr merge --delete-branch` fails after a successful merge and looks like a merge failure. |
 | Refresh **every** PR before merging, even one with no worktree | A spec of the form `PR||branch` used to skip the refresh and merge stale; the script now refreshes in a throwaway **detached** worktree (`git worktree add` refuses a branch checked out elsewhere). |
 | Never name a shell local `path` in zsh | `path` is tied to `$PATH`; `local … path …` empties PATH inside the function, so every `git`/`awk`/`sort` call fails. It cost the merge helper its entire conflict-resolution path until a scenario test caught it. |
+| Lane status is derived, never asserted | A lane reported "1 test file failing" over a tree with 5 failures in 4 files, a silent regression, ~2,000 lines of staged test deletions, and no pushed branch. `gh pr list --head`, the gate exit code and `git status` would each have caught it. |
+| No PR URL means the lane is stuck, not nearly done | Stalling before stage 2 skips the only stage that finds defects. The lane in question carried 13 real findings that surfaced the moment a review finally ran. |
+| Read deletions in the diffstat, not just files changed | The "recovery" that looked like progress was deleting the test suites whose sources still existed — a coverage gate can never be met that way. |
 | Keep `yarn install` per worktree, never share | Stale `node_modules` in the main checkout crashed the dev server long after the feature merged. |
 
 ---
@@ -292,6 +344,7 @@ Never resolve a thread you did not answer, and never claim a fix you have not ve
 | Symptom | Action |
 |---|---|
 | Implementer CLI exits non-zero (quota, auth, crash) | Read its log tail; if lanes already pushed, keep them; finish the remaining lanes with a different CLI using the same brief. Note the handover in the session log. |
+| A lane reports progress but `gh pr list --head` is empty | Treat it as stuck. Read its log tail and `git -C <wt> status --porcelain -b`; if the tree is deleting tests or the branch is unpushed, stop the lane, park the tree (`git stash push -u`) rather than discarding it, and diagnose from the last commit — not from the report. |
 | `main` goes red after a merge | Stop the merge chain, reproduce locally, ship a minimal hotfix PR first, then resume — do not merge more work onto a red main. |
 | CI red only on the runner (green locally) | Suspect environment: runtime version, missing optional binary, timing. Compare `node -v` and the CI matrix before touching the test. |
 | Unexpected merge conflict | Never auto-resolve outside the append-only set. Resolve by hand, run the full gate, then re-run the merge. |
