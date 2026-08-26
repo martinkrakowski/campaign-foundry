@@ -544,29 +544,30 @@ function MotionCell({
   version: number;
   children: ReactNode;
 }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  // The element arrives through a callback ref, so the controls exist only once
+  // it is mounted (the first render has none) — no null guard on every handler.
+  const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const label = assetLabel(asset);
 
-  const play = () => {
-    const video = videoRef.current;
-    /* istanbul ignore next -- the ref is bound as soon as the video mounts */
-    if (!video) return;
-    startPlayback(video);
-    setPlaying(true);
-  };
-  const stop = () => {
-    const video = videoRef.current;
-    /* istanbul ignore next -- the ref is bound as soon as the video mounts */
-    if (!video) return;
-    stopPlayback(video);
-    setPlaying(false);
-  };
+  const controls =
+    video === null
+      ? undefined
+      : {
+          play: () => {
+            startPlayback(video);
+            setPlaying(true);
+          },
+          stop: () => {
+            stopPlayback(video);
+            setPlaying(false);
+          },
+        };
 
   return (
-    <div className={TILE_CLASS} onMouseEnter={play} onMouseLeave={stop}>
+    <div className={TILE_CLASS} onMouseEnter={controls?.play} onMouseLeave={controls?.stop}>
       <video
-        ref={videoRef}
+        ref={setVideo}
         src={videoSrc(asset, version)}
         poster={assetSrc(asset, version)}
         muted
@@ -579,7 +580,7 @@ function MotionCell({
       {children}
       <button
         type="button"
-        onClick={playing ? stop : play}
+        onClick={playing ? controls?.stop : controls?.play}
         aria-pressed={playing}
         aria-label={`${playing ? "Pause" : "Play"} ${label}`}
         className="absolute bottom-2 right-2 z-20 rounded-full border border-border bg-black/70 px-2 py-1 font-mono text-[10px] text-white"
