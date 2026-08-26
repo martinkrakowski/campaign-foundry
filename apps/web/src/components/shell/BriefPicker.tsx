@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { API, useRun } from "@/lib/run-context";
+import { useRouter } from "next/navigation";
+import { Button, Input } from "@/components/ui";
+import { duplicateBrief, listBriefs, unknownErrorMessage, type BriefEntry } from "@/lib/briefs-api";
+import { useRun } from "@/lib/run-context";
 
-interface BriefEntry {
-  file: string;
-  brief: CampaignBrief;
-}
+// Mirrors CampaignOrchestration SAFE_ID_PATTERN. Value-importing the package
+// constant from source barrels fails the Next build (it resolves `.js` siblings).
+const BRIEF_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /**
  * Modal that lists the briefs in the project's `briefs/` folder so a reviewer can
@@ -17,32 +18,30 @@ interface BriefEntry {
  */
 export function BriefPicker() {
   const { briefPickerOpen, closeBriefPicker, setBrief, brief: current } = useRun();
+  const router = useRouter();
   const [entries, setEntries] = useState<BriefEntry[] | null>(null);
   const [error, setError] = useState(false);
+  const [actionError, setActionError] = useState<string | undefined>();
+  const [duplicateTarget, setDuplicateTarget] = useState<BriefEntry | null>(null);
+  const [duplicateId, setDuplicateId] = useState("");
+  const [duplicating, setDuplicating] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
-  // (Re)load the list each time the picker opens. Parse defensively (check res.ok and
-  // guard JSON) so an API error — a non-2xx `{ error }` body, or a non-JSON 5xx from the
-  // proxy when the API is down — surfaces as an error state, not a misleading empty list.
+  // (Re)load the list each time the picker opens. Parse defensively so an API error
+  // surfaces as an error state, not a misleading empty list.
   useEffect(() => {
     if (!briefPickerOpen) return;
     let active = true;
     setEntries(null);
     setError(false);
+    setActionError(undefined);
+    setDuplicateTarget(null);
     (async () => {
       try {
-        const res = await fetch(`${API}/campaigns/briefs`);
-        const raw = await res.text();
-        let data: { briefs?: BriefEntry[] } | null = null;
-        try {
-          data = JSON.parse(raw) as { briefs?: BriefEntry[] };
-        } catch {
-          data = null;
-        }
-        if (!res.ok || !data) throw new Error(`Briefs request failed (HTTP ${res.status})`);
+        const briefs = await listBriefs();
         /* istanbul ignore next -- `active` is the unmount-race guard; false only if the picker closes mid-fetch */
-        if (active) setEntries(data.briefs ?? []);
+        if (active) setEntries(briefs);
       } catch {
         /* istanbul ignore next -- same unmount-race guard on the error path */
         if (active) setError(true);
@@ -65,7 +64,7 @@ export function BriefPicker() {
       }
       if (e.key !== "Tab") return;
       const focusables = dialogRef.current?.querySelectorAll<HTMLElement>(
-        'a[href], button, [tabindex]:not([tabindex="-1"])',
+        'a[href], button, input, [tabindex]:not([tabindex="-1"])',
       );
       /* istanbul ignore next -- the dialog always contains focusable controls */
       if (!focusables || focusables.length === 0) return;
@@ -91,6 +90,36 @@ export function BriefPicker() {
   const select = (entry: BriefEntry) => {
     setBrief(entry.brief);
     closeBriefPicker();
+  };
+
+  const createNew = () => {
+    closeBriefPicker();
+    router.push("/new");
+  };
+
+  const confirmDuplicate = async () => {
+    /* istanbul ignore next -- the form only renders while a target is selected */
+    if (!duplicateTarget) return;
+    if (!BRIEF_ID_PATTERN.test(duplicateId)) {
+      setActionError("New id must be a path-safe slug (lowercase letters, digits, hyphens; max 64).");
+      return;
+    }
+    setDuplicating(true);
+    setActionError(undefined);
+    try {
+      const result = await duplicateBrief(duplicateTarget.brief.id, duplicateId);
+      try {
+        setEntries(await listBriefs());
+      } catch {
+        /* list refresh is best-effort; the copy still exists */
+      }
+      setBrief(result.brief);
+      closeBriefPicker();
+    } catch (err) {
+      setActionError(unknownErrorMessage(err, "Duplicate failed"));
+    } finally {
+      setDuplicating(false);
+    }
   };
 
   return (
@@ -128,6 +157,13 @@ export function BriefPicker() {
         </div>
 
         <div className="min-h-0 flex-1 divide-y divide-border overflow-y-auto">
+          <button
+            type="button"
+            onClick={createNew}
+            className="flex w-full items-center gap-2 px-4 py-3 text-left text-[13px] font-medium text-text-primary transition-colors hover:bg-surface-2"
+          >
+            Create new
+          </button>
           {error ? (
             <p className="p-4 text-[13px] text-error">Could not load briefs. Is the API running?</p>
           ) : entries === null ? (
@@ -142,30 +178,79 @@ export function BriefPicker() {
               const treatmentCount = entry.brief.treatments?.length ?? 1;
               const isCurrent = entry.brief.id === current.id;
               return (
-                <button
-                  key={entry.file}
-                  type="button"
-                  onClick={() => select(entry)}
-                  className="flex w-full flex-col items-start gap-0.5 px-4 py-3 text-left transition-colors hover:bg-surface-2"
-                >
-                  <span className="flex w-full items-center justify-between gap-2">
-                    <span className="font-mono text-[13px] text-text-primary">{entry.file}</span>
-                    {isCurrent && (
-                      <span className="shrink-0 rounded border border-border bg-surface-2 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-text-muted">
-                        current
-                      </span>
-                    )}
-                  </span>
-                  <span className="text-[11px] text-text-muted">
-                    {entry.brief.id} · {productCount} product{productCount === 1 ? "" : "s"} ·{" "}
-                    {treatmentCount} treatment{treatmentCount === 1 ? "" : "s"} ·{" "}
-                    {entry.brief.targetRegion}
-                  </span>
-                </button>
+                <div key={entry.file} className="flex items-stretch hover:bg-surface-2">
+                  <button
+                    type="button"
+                    onClick={() => select(entry)}
+                    className="flex min-w-0 flex-1 flex-col items-start gap-0.5 px-4 py-3 text-left"
+                  >
+                    <span className="flex w-full items-center justify-between gap-2">
+                      <span className="font-mono text-[13px] text-text-primary">{entry.file}</span>
+                      {isCurrent && (
+                        <span className="shrink-0 rounded border border-border bg-surface-2 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-text-muted">
+                          current
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-[11px] text-text-muted">
+                      {entry.brief.id} · {productCount} product{productCount === 1 ? "" : "s"} ·{" "}
+                      {treatmentCount} treatment{treatmentCount === 1 ? "" : "s"} ·{" "}
+                      {entry.brief.targetRegion}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="shrink-0 px-3 text-[11px] font-medium text-text-muted hover:text-white"
+                    onClick={() => {
+                      setDuplicateTarget(entry);
+                      setDuplicateId("");
+                      setActionError(undefined);
+                    }}
+                  >
+                    Duplicate
+                  </button>
+                </div>
               );
             })
           )}
         </div>
+
+        {duplicateTarget ? (
+          <form
+            className="space-y-3 border-t border-border px-4 py-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void confirmDuplicate();
+            }}
+          >
+            <p className="text-[12px] text-text-muted">
+              Duplicate <span className="font-mono text-text-primary">{duplicateTarget.brief.id}</span> as
+            </p>
+            <Input
+              value={duplicateId}
+              onChange={(e) => setDuplicateId(e.target.value)}
+              aria-label="New brief id"
+              invalid={Boolean(actionError)}
+            />
+            {actionError ? <p className="text-[11px] text-error">{actionError}</p> : null}
+            <div className="flex gap-2">
+              <Button type="submit" size="sm" disabled={duplicating} isLoading={duplicating}>
+                Duplicate
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setDuplicateTarget(null);
+                  setActionError(undefined);
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </form>
+        ) : null}
       </div>
     </div>
   );
