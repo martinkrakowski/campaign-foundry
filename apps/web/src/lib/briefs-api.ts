@@ -313,13 +313,15 @@ export async function getPool(briefId: string, signal?: AbortSignal): Promise<Co
 
 /**
  * Generate `count` headline suggestions into the pool (legal-gated server-side).
+ * The brief is sent inline — the model needs its products and message, and the
+ * pool is stored under `brief.id` — so the wizard can generate before Save.
  * Without OPENROUTER_API_KEY the API answers 503 — surfaced as a BriefsApiError.
  */
 export async function generatePool(
-  briefId: string,
+  brief: CampaignBrief,
   count = POOL_SUGGESTION_COUNT,
 ): Promise<{ pool: CopyPool; added: number }> {
-  const data = await requestJson(`${API}/campaigns/pools/copy`, jsonInit("POST", { briefId, count }));
+  const data = await requestJson(`${API}/campaigns/pools/copy`, jsonInit("POST", { brief, count }));
   const added = (data as { added?: unknown }).added;
   return { pool: asPool(data), added: typeof added === "number" ? added : 0 };
 }

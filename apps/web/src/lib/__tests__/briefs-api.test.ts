@@ -349,23 +349,32 @@ describe("copy pool calls", () => {
     await expect(getPool("camp")).rejects.toMatchObject({ message: "Invalid response" });
   });
 
-  test("generatePool posts briefId and count and returns pool + added", async () => {
+  test("generatePool posts the brief inline with count and returns pool + added", async () => {
+    const brief = {
+      id: "camp",
+      targetRegion: "DE",
+      targetAudience: "a",
+      campaignMessage: "Hi",
+      products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "a.png" }],
+      mode: "variation" as const,
+      variation: { count: 2 },
+    };
     mockFetch((url, init) => {
       expect(url).toBe(`${API}/campaigns/pools/copy`);
       expect(init.method).toBe("POST");
-      expect(JSON.parse(String(init.body))).toEqual({ briefId: "camp", count: 10 });
+      expect(JSON.parse(String(init.body))).toEqual({ brief, count: 10 });
       return json({ pool, added: 1 }, 201);
     });
-    expect(await generatePool("camp")).toEqual({ pool, added: 1 });
+    expect(await generatePool(brief)).toEqual({ pool, added: 1 });
 
     mockFetch((_url, init) => {
-      expect(JSON.parse(String(init.body))).toEqual({ briefId: "camp", count: 3 });
+      expect(JSON.parse(String(init.body))).toEqual({ brief, count: 3 });
       return json({ pool });
     });
-    expect(await generatePool("camp", 3)).toEqual({ pool, added: 0 });
+    expect(await generatePool(brief, 3)).toEqual({ pool, added: 0 });
 
     mockFetch(() => json({ error: "OPENROUTER_API_KEY is not set" }, 503));
-    await expect(generatePool("camp")).rejects.toMatchObject({
+    await expect(generatePool(brief)).rejects.toMatchObject({
       status: 503,
       message: "OPENROUTER_API_KEY is not set",
     });

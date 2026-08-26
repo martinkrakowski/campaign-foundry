@@ -26,8 +26,9 @@ const poolOf = (entries: PoolEntry[]) => ({
 
 /**
  * In-memory copy pool behind the pools routes: GET (404 until generated), POST
- * generate (adds `next` entries, or a fixed reply), PATCH approve/reject/edit
- * (an edit containing "miracle" is rejected by the fake legal gate).
+ * generate (requires the draft brief inline — the wizard has not saved it yet —
+ * then adds `next` entries, or a fixed reply), PATCH approve/reject/edit (an
+ * edit containing "miracle" is rejected by the fake legal gate).
  */
 const fakePoolApi = (opts: { initial?: PoolEntry[] | null; generate?: () => Response; patch?: () => Response } = {}) => {
   let entries: PoolEntry[] | null = opts.initial ?? null;
@@ -39,6 +40,10 @@ const fakePoolApi = (opts: { initial?: PoolEntry[] | null; generate?: () => Resp
     calls.push({ method, body });
     if (method === "GET") return entries === null ? json({ error: "not found" }, 404) : json({ pool: poolOf(entries) });
     if (method === "POST") {
+      const inline = (body as { brief?: { id?: unknown; mode?: unknown } }).brief;
+      if (typeof inline?.id !== "string" || inline.mode !== "variation") {
+        return json({ error: "Campaign brief must be an object." }, 400);
+      }
       if (opts.generate) return opts.generate();
       const n = entries?.length ?? 0;
       entries = [...(entries ?? []), { id: `h${n + 1}`, text: `Suggested ${n + 1}`, status: "approved" }];
@@ -471,7 +476,15 @@ describe("Wizard", () => {
     await user.click(screen.getByRole("button", { name: "Generate 10 suggestions" }));
     expect(await screen.findByText("Suggested 1")).toBeTruthy();
     expect(screen.getByText("Headline pool (1 approved)")).toBeTruthy();
-    expect(pool.calls.filter((c) => c.method === "POST")[0].body).toEqual({ briefId: "camp-one", count: 10 });
+    // The draft brief travels inline (id, products, message) so Generate works before Save.
+    expect(pool.calls.filter((c) => c.method === "POST")[0].body).toEqual({
+      brief: expect.objectContaining({
+        id: "camp-one",
+        mode: "variation",
+        products: [expect.objectContaining({ id: "alpha" }), expect.objectContaining({ id: "beta" })],
+      }),
+      count: 10,
+    });
 
     await user.click(screen.getByRole("button", { name: "Reject h1" }));
     expect(await screen.findByText("Headline pool (0 approved)")).toBeTruthy();

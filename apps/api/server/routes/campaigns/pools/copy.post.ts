@@ -1,13 +1,14 @@
 import {
   CopyGeneratorError,
   mergePool,
+  type CampaignBrief,
   type CopyPool,
   type CopyPoolEntry,
 } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
 import { findBriefById, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
-import { assertSafeId } from "../../../lib/load-brief.js";
+import { assertSafeId, parseBrief } from "../../../lib/load-brief.js";
 import { copyGenerator } from "../../../lib/pipeline.js";
 import { InvalidCopyPoolError, isPoolDirSymlink, readPool, withPoolLock, writePool } from "../../../lib/pools.js";
 
@@ -112,15 +113,19 @@ function mapGeneratorError(error: CopyGeneratorError): HttpFailure {
 /**
  * POST /campaigns/pools/copy — generate headlines, legal-gate each, persist the pool.
  *
- * Body `{ briefId, count? }`. Default count 10, max 25. Reply `{ pool, added }`:
- * 201 when new entries were persisted, 200 (`added: 0`, no write) when the model
- * only repeated known headlines. 404 unknown brief, 503 without
- * OPENROUTER_API_KEY, 422 if the generator returned nothing usable at all.
+ * Body `{ briefId, count? }` for a saved brief, or `{ brief, count? }` with the
+ * brief inline (validated like generate; the pool is stored under `brief.id`),
+ * so the wizard can curate a pool before the brief is saved. Default count 10,
+ * max 25. Reply `{ pool, added }`: 201 when new entries were persisted, 200
+ * (`added: 0`, no write) when the model only repeated known headlines. 404
+ * unknown `briefId`, 503 without OPENROUTER_API_KEY, 422 if the generator
+ * returned nothing usable at all.
  * Upstream failures: 502 auth/other, 429 (+ Retry-After) or 503 rate limit,
  * 503 network/timeout, 422 unreadable body. Approved entries feed the planner
  * when a brief sets `variation.axes.headline: pool://copy` (see lib/pools.ts).
  */
 export default defineEventHandler(async (event) => {
+  let brief: CampaignBrief | undefined;
   let briefId: string;
   let count: number;
   try {
@@ -129,18 +134,26 @@ export default defineEventHandler(async (event) => {
       throw new Error("Request body must be an object.");
     }
     const record = body as Record<string, unknown>;
-    assertSafeId(record.briefId, "briefId");
-    briefId = record.briefId;
+    if (record.brief !== undefined) {
+      brief = parseBrief(record.brief);
+      briefId = brief.id;
+    } else {
+      assertSafeId(record.briefId, "briefId");
+      briefId = record.briefId;
+    }
     count = parseCount(record.count);
   } catch (error) {
     setResponseStatus(event, 400);
     return { error: errorMessage(error) };
   }
 
-  const found = await findBriefById(briefId);
-  if (!found) {
-    setResponseStatus(event, 404);
-    return { error: `Brief "${briefId}" not found.` };
+  if (brief === undefined) {
+    const found = await findBriefById(briefId);
+    if (!found) {
+      setResponseStatus(event, 404);
+      return { error: `Brief "${briefId}" not found.` };
+    }
+    brief = found.brief;
   }
   if (await isPoolDirSymlink(briefId)) {
     setResponseStatus(event, 400);
@@ -155,7 +168,7 @@ export default defineEventHandler(async (event) => {
 
   let suggested: readonly string[];
   try {
-    suggested = await generator.suggestHeadlines({ brief: found.brief, count });
+    suggested = await generator.suggestHeadlines({ brief, count });
   } catch (error) {
     if (!(error instanceof CopyGeneratorError)) throw error;
     const failure = mapGeneratorError(error);

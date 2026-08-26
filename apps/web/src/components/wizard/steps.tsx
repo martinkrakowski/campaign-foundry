@@ -407,7 +407,7 @@ function HeadlinePoolPanel({ state, dispatch }: { state: WizardState; dispatch: 
           size="sm"
           disabled={busy || unavailable !== undefined}
           isLoading={busy}
-          onClick={() => void apply(async () => (await generatePool(briefId)).pool)}
+          onClick={() => void apply(async () => (await generatePool(toBrief(state))).pool)}
         >
           Generate {POOL_SUGGESTION_COUNT} suggestions
         </Button>
