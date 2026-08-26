@@ -16,7 +16,7 @@ import {
 const payload = (over: Partial<JobResult> = {}): JobResult => ({
   halted: false,
   assets: [],
-  log: new PipelineExecutionLog("camp"),
+  log: new PipelineExecutionLog("camp", () => new Date("2026-01-01T00:00:00.000Z")),
   ...over,
 });
 

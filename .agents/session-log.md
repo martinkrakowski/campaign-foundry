@@ -312,3 +312,15 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Remaining custom `post`/`job`/`result` callbacks are the helper's extension points (inspect POST body, hang a POST, toggle `posted`, poll sequencing) — not duplicate routers.
 - **Left open:**
   - No hand-rolled `vi.mocked(globalThis.fetch).mockImplementation` routers remain.
+## 2026-08-25 — inject log clock (D14 follow-up)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `PipelineExecutionLog` constructor is now `(campaignId, now)`; `startedAt` / `record` / `complete` call `now()`. No default clock in the domain.
+  - `GenerateCampaignDeps.now` is required; `buildPipeline` supplies `() => new Date()`. Tests use a fixed/sequenced fake clock and assert exact timestamps.
+  - Dropped the CampaignOrchestration eslint ignore of `PipelineExecutionLog.vo.ts` (manifest template + `yarn sync`).
+- **Decisions:**
+  - No `now` default in the use case either — application/use-cases is under the same deterministic-core lint.
+  - Composition root is the only place that may close over `new Date()`.
+- **Left open:**
+  - none for this follow-up.
