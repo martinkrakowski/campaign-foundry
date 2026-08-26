@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AspectRatio, type CompositeRequest, type LayoutKind, type ToneKind } from "@campaignfoundry/CampaignOrchestration";
+import { createCanvas } from "@napi-rs/canvas";
+import { AspectRatio, MOTION_KINDS, restT, type CompositeRequest, type LayoutKind, type ToneKind } from "@campaignfoundry/CampaignOrchestration";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 import { ProceduralBackgroundGenerator } from "../ProceduralBackgroundGenerator.js";
 import {
@@ -76,6 +77,46 @@ describe("NodeCanvasCompositor goldens", () => {
         }
       }
       expect(observed).toEqual(map);
+    },
+  );
+
+  test.skipIf(Boolean(skipReason))(
+    skipReason ??
+      "draw at restT(kind) is byte-identical to the still for every MOTION_KINDS kind",
+    async () => {
+      const map = resolveGoldenMap(fixture, key);
+      if (!map) {
+        throw new Error(`unreachable: skipped when goldens missing for "${key}"`);
+      }
+
+      for (const layout of LAYOUTS) {
+        for (const tone of TONES) {
+          for (const ratioValue of RATIOS) {
+            const r = ratio(ratioValue);
+            const bg = await backgrounds.resolveBackground(product, r, bgCtx);
+            const request: CompositeRequest = {
+              background: bg.image,
+              message: MESSAGE,
+              brandColor: BRAND,
+              logoPath: LOGO,
+              ratio: r,
+              layout,
+              tone,
+            };
+            const still = await compositor.compositeAsset(request);
+            const stillHash = sha256(still.image);
+            expect(stillHash).toBe(map[cellKey(layout, tone, ratioValue)]);
+
+            const prepared = await NodeCanvasCompositor.prepare(request);
+            for (const kind of MOTION_KINDS) {
+              const canvas = createCanvas(prepared.width, prepared.height);
+              const ctx = canvas.getContext("2d");
+              NodeCanvasCompositor.draw(ctx, prepared, restT(kind), kind);
+              expect(sha256(canvas.toBuffer("image/png"))).toBe(stillHash);
+            }
+          }
+        }
+      }
     },
   );
 });
