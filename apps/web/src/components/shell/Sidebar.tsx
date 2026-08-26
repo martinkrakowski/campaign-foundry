@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Accordion } from "./Accordion";
+import { useRouter } from "next/navigation";
 import { useRun } from "@/lib/run-context";
 
 /**
@@ -23,8 +24,22 @@ export function Sidebar() {
  */
 export function BrowseBriefsButton({ onActivate }: { onActivate?: () => void }) {
   const { openBriefPicker } = useRun();
+  const router = useRouter();
   return (
-    <div className="shrink-0 border-t border-border p-3">
+    <div className="flex shrink-0 gap-2 border-t border-border p-3">
+      <button
+        type="button"
+        onClick={() => {
+          onActivate?.();
+          router.push("/new");
+        }}
+        className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-primary px-3 py-2 text-[12px] font-medium text-white transition-colors hover:bg-brand-primary-hover"
+      >
+        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m-7-7h14" />
+        </svg>
+        Create new
+      </button>
       <button
         type="button"
         onClick={() => {
