@@ -350,6 +350,31 @@ describe("CanvasFfmpegVideoCompositor", () => {
     });
   });
 
+  test("redacts before taking the tail so a path cut by the 4000-char window cannot leak", async () => {
+    const stderr = `${"x".repeat(3_995)} /var/secret/lib/x264 end`;
+    const compositor = new CanvasFfmpegVideoCompositor({
+      spawn: fakeFfmpeg({ code: 1, stderr }),
+      ffmpegPath: "/opt/ffmpeg",
+    });
+    await expect(compositor.compositeVideo(videoRequest())).rejects.toSatisfy((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      expect(message.endsWith("<path> end")).toBe(true);
+      expect(message).not.toContain("secret");
+      return true;
+    });
+  });
+
+  test("leaves lone slashes, fractions, and single-segment roots alone", async () => {
+    const stderr = "libavutil 58. 2.100 / 58. 2.100 fps=30000/1001 root=/tmp bad=/opt/ffmpeg/x C:\\Users\\me\\clip";
+    const compositor = new CanvasFfmpegVideoCompositor({
+      spawn: fakeFfmpeg({ code: 1, stderr }),
+      ffmpegPath: "/opt/ffmpeg",
+    });
+    await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(
+      "libavutil 58. 2.100 / 58. 2.100 fps=30000/1001 root=/tmp bad=ffmpeg/x <path>",
+    );
+  });
+
   test("names the exit code when stderr is empty", async () => {
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: fakeFfmpeg({ code: 3, stderr: "" }),

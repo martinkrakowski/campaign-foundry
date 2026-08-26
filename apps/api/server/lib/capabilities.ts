@@ -123,10 +123,14 @@ export function recordFfmpegProbe(cap: Capabilities): void {
   }
 }
 
+// Absolute paths only: a root plus at least one segment and a second separator,
+// so ffmpeg's lone "/" version separators survive (mirrors the adapter).
+const ABSOLUTE_PATH = /(?:\/|[A-Za-z]:[\\/])[^\s"'`=),\\/]+[\\/][^\s"'`=),]*/g;
+
 function redactAbsolutePaths(text: string, known: readonly string[]): string {
   let out = text;
   for (const p of known) {
     out = out.split(p).join("ffmpeg");
   }
-  return out.replace(/(?:\/|[A-Za-z]:[\\/])[^\s"'`=),]+/g, "<path>");
+  return out.replace(ABSOLUTE_PATH, "<path>");
 }

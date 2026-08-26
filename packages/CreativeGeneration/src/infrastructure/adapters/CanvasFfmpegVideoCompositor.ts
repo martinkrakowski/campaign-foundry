@@ -303,15 +303,21 @@ function validateRequest(request: VideoCompositeRequest): readonly number[] {
   return [...new Set(sampleAt)].sort((a, b) => a - b);
 }
 
+/** Redact first, then take the tail — a cut that lands mid-path must not leak its remainder. */
 function formatFfmpegFailure(detail: string, ffmpegPath: string): string {
-  const tail = detail.length > STDERR_TAIL ? detail.slice(-STDERR_TAIL) : detail;
-  return redactAbsolutePaths(tail, [ffmpegPath]);
+  const redacted = redactAbsolutePaths(detail, [ffmpegPath]);
+  return redacted.length > STDERR_TAIL ? redacted.slice(-STDERR_TAIL) : redacted;
 }
+
+// Absolute paths only: a root (`/` or `C:\`) plus at least one segment and a
+// second separator, so ffmpeg's lone "/" version separators and fractions
+// such as "30000/1001" survive.
+const ABSOLUTE_PATH = /(?:\/|[A-Za-z]:[\\/])[^\s"'`=),\\/]+[\\/][^\s"'`=),]*/g;
 
 function redactAbsolutePaths(text: string, known: readonly string[]): string {
   let out = text;
   for (const p of known) {
     out = out.split(p).join("ffmpeg");
   }
-  return out.replace(/(?:\/|[A-Za-z]:[\\/])[^\s"'`=),]+/g, "<path>");
+  return out.replace(ABSOLUTE_PATH, "<path>");
 }

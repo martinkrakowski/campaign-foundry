@@ -99,6 +99,7 @@ describe("generate CLI main()", () => {
     writeFileSync(path, briefJson());
     await main(path);
     expect(process.exitCode).not.toBe(1);
+    expect(probeMock).toHaveBeenCalledWith({ timeoutMs: 2_000 });
     expect(vi.mocked(console.warn).mock.calls.flat().join(" ")).toMatch(/motion unavailable: no binary/);
   });
 

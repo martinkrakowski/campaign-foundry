@@ -212,7 +212,7 @@ __metadata:
     "@google/genai": "npm:^1.0.0"
     "@napi-rs/canvas": "npm:^0.1.0"
     "@types/node": "npm:^20.11.0"
-    ffmpeg-static: "npm:5"
+    ffmpeg-static: "npm:5.3.0"
     typescript: "npm:^5.0.0"
   languageName: unknown
   linkType: soft
@@ -255,7 +255,7 @@ __metadata:
     "@typescript-eslint/eslint-plugin": "npm:^8.0.0"
     "@typescript-eslint/parser": "npm:^8.0.0"
     eslint: "npm:^9.0.0"
-    ffmpeg-static: "npm:5"
+    ffmpeg-static: "npm:5.3.0"
     js-yaml: "npm:^4.1.0"
     nitropack: "npm:^2.13.0"
     typescript: "npm:^5.5.4"
@@ -4021,7 +4021,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ffmpeg-static@npm:5":
+"ffmpeg-static@npm:5.3.0":
   version: 5.3.0
   resolution: "ffmpeg-static@npm:5.3.0"
   dependencies:

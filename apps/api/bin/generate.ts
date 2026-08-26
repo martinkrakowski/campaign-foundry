@@ -6,13 +6,17 @@ import { outputRoot } from "../server/lib/config.js";
 import { writeReport } from "../server/lib/report.js";
 import { probeFfmpeg, setCapabilities } from "../server/lib/capabilities.js";
 
+const CLI_PROBE_TIMEOUT_MS = 2_000;
+
 function arg(flag: string): string | undefined {
   const i = argv.indexOf(flag);
   return i >= 0 ? argv[i + 1] : undefined;
 }
 
 export async function main(briefPathArg?: string): Promise<void> {
-  const cap = await probeFfmpeg();
+  // The brief parser still rejects `formats: motion`, so there is nothing to gate
+  // the probe on yet; cap it instead so a wedged binary cannot stall the CLI.
+  const cap = await probeFfmpeg({ timeoutMs: CLI_PROBE_TIMEOUT_MS });
   setCapabilities(cap);
   if (!cap.motion) {
     console.warn(`[generate] motion unavailable: ${cap.reason}`);
