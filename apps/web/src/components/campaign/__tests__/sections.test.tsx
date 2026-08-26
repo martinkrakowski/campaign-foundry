@@ -289,7 +289,7 @@ describe("ErrorStrip", () => {
 
 describe("TableOfContents", () => {
   test("lists every section and badges the ones with errors", () => {
-    render(<TableOfContents errors={{ identity: { a: "1", b: "2" }, copy: {} }} />);
+    render(<TableOfContents errors={{ identity: { a: "1", b: "2" }, copy: {} }} mode="brief" />);
     expect(screen.getByRole("button", { name: /Identity/ }).textContent).toContain("2");
     expect(screen.getByRole("button", { name: /^Copy$/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Treatments/ })).toBeTruthy();
@@ -304,7 +304,7 @@ describe("TableOfContents", () => {
     target.scrollIntoView = scrollIntoView;
     document.body.appendChild(target);
 
-    render(<TableOfContents errors={{}} onNavigate={onNavigate} />);
+    render(<TableOfContents errors={{}} mode="brief" onNavigate={onNavigate} />);
     await user.click(screen.getByRole("button", { name: "Products" }));
 
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
@@ -314,7 +314,7 @@ describe("TableOfContents", () => {
 
   test("a missing target section is a no-op rather than a crash", async () => {
     const user = userEvent.setup();
-    render(<TableOfContents errors={{}} />);
+    render(<TableOfContents errors={{}} mode="brief" />);
     await user.click(screen.getByRole("button", { name: "Output" }));
     expect(screen.getByRole("button", { name: "Output" })).toBeTruthy();
   });

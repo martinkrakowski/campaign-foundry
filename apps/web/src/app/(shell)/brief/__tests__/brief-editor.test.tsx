@@ -301,7 +301,8 @@ describe("BriefPage — data flow", () => {
       /Policy/.test(b.textContent ?? ""),
     ) as HTMLElement;
     expect(chip).toBeTruthy();
-    expect(document.getElementById("policy")).toBeNull();
+    await user.click(await screen.findByText("New brief..."));
+    await waitFor(() => expect(document.getElementById("policy")).toBeNull());
 
     await user.click(chip);
     expect(chip).toBeTruthy();

@@ -4,3 +4,4 @@ export { CopySection } from "./CopySection";
 export { ProductsSection } from "./ProductsSection";
 export { TreatmentsSection } from "./TreatmentsSection";
 export { OutputSection } from "./OutputSection";
+export { PolicySection } from "./PolicySection";

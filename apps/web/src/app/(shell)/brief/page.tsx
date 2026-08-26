@@ -25,11 +25,12 @@ import {
   purgeDraftFromStorage,
 } from "@/components/campaign/editor-state";
 import { validateState, getTotalErrorCount, type FieldErrors } from "@/components/campaign/validate";
-import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, OutputSection } from "@/components/campaign/sections";
+import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, OutputSection, PolicySection } from "@/components/campaign/sections";
 import { StatusChip } from "@/components/campaign/StatusChip";
 import { TableOfContents } from "@/components/campaign/TableOfContents";
 import { ErrorStrip } from "@/components/campaign/ErrorStrip";
 import { BriefSelector } from "@/components/campaign/BriefSelector";
+import { HeadlinePoolDrawer } from "@/components/campaign/HeadlinePoolDrawer";
 
 const LEAVE_PROMPT = "You have unsaved changes. Are you sure you want to leave?";
 
@@ -44,6 +45,7 @@ export default function BriefPage() {
   const [persistError, setPersistError] = useState<string | undefined>();
   const [saveAsId, setSaveAsId] = useState<string | null>(null);
   const [showYamlSplit, setShowYamlSplit] = useState(false);
+  const [poolDrawerOpen, setPoolDrawerOpen] = useState(false);
 
   // Load briefs on mount and set up focus listener
   useEffect(() => {
@@ -218,7 +220,7 @@ export default function BriefPage() {
       {/* Sticky TOC */}
       {!showYamlSplit && (
         <div className="hidden w-48 shrink-0 p-4 lg:block">
-          <TableOfContents errors={errors} />
+          <TableOfContents errors={errors} mode={state.mode} />
         </div>
       )}
 
@@ -259,14 +261,19 @@ export default function BriefPage() {
             <IdentitySection state={state} dispatch={dispatch} errors={errors.identity ?? {}} />
           </div>
           <div id="copy">
-            <CopySection state={state} dispatch={dispatch} errors={errors.copy ?? {}} />
+            <CopySection state={state} dispatch={dispatch} errors={errors.copy ?? {}} onOpenPool={() => setPoolDrawerOpen(true)} />
           </div>
           <div id="products">
             <ProductsSection state={state} dispatch={dispatch} errors={errors.products ?? {}} />
           </div>
           <div id="treatments">
-            <TreatmentsSection state={state} dispatch={dispatch} errors={errors.treatments ?? {}} />
+            {state.mode === "brief" ? (
+              <TreatmentsSection state={state} dispatch={dispatch} errors={errors.treatments ?? {}} />
+            ) : null}
           </div>
+          {state.mode === "variation" ? (
+            <PolicySection state={state} dispatch={dispatch} errors={errors.policy ?? {}} />
+          ) : null}
           <div id="output">
             <OutputSection state={state} dispatch={dispatch} errors={errors.output ?? {}} />
           </div>
@@ -311,7 +318,15 @@ export default function BriefPage() {
         </div>
       </div>
 
-      {/* Save as dialog */}
+       {/* Headline pool drawer */}
+       <HeadlinePoolDrawer
+         state={state}
+         dispatch={dispatch}
+         open={poolDrawerOpen}
+         onClose={() => setPoolDrawerOpen(false)}
+       />
+
+       {/* Save as dialog */}
       {saveAsId !== null && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-xl border border-border bg-surface p-6">
