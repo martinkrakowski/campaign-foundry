@@ -700,3 +700,22 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Left open:**
   - `GET /campaigns/capabilities` for the wizard / export picker; the wizard's `STATIC_PLATFORMS` still hides motion platforms (lane B owns the wizard).
   - Lane B's `variant.headline` read in `GenerateCampaignUseCase` (coordinated: B adds it, or A on rebase).
+
+## 2026-08-26 — PR #58 review fixes (lane A, motion generation)
+
+- **Mode:** Implementer
+- **Changes:**
+  - CLI integration test guarded like the adapter tests (`test.skipIf(!ffmpegOk)` + the CI-must-run assertion).
+  - `VariationPolicy` bounds `minDistance` by the active Hamming axes (6 static, 8 with motion on: `motion` + `durationSec` count only while `motionEnabled`); wizard `maxMinDistance(state)` mirrors the rule (base 6, optional axes add one each). Hash/goldens unchanged.
+  - `ExportPort.remove(relativePath)` (idempotent) — `FileSystemExporter` deletes under the confined root with `rm({ force })`; a variation still always removes `<product>/<ratio>/v<i>.mp4` so a re-roll of a motion slot leaves no stale clip.
+  - `PlatformSafeZone` moved to `ports/out/PlatformProfilePort.ts` and gains `formats`; `PlanVariationsUseCase(platformZones)` resolves `output.platforms` into `PlanInput.motionRatios`, `VariationPolicy.motionRatios` (hashed only on motion briefs) and `drawMotion` skips ratios no requested motion platform packages. `pipeline.platformZones` is the one resolver (generator + planner + `POST /campaigns/plan`).
+  - Grid `MotionCell` binds the `<video>` through a callback-ref state — no `istanbul ignore` null guards.
+  - `GET /output/**`: `Accept-Ranges: bytes` + `Content-Length` on 200; single `Range: bytes=…` → 206 + `Content-Range`; malformed/unsatisfiable → 416; multi-range → whole file. `getRequestHeader` added to the vitest h3 globals.
+  - Static variation rows are built in the pre-motion key order (reports byte-identical); `formatDuration` doc fixed; briefs GET test for a motion brief while the capability is off.
+- **Decisions:**
+  - The motion axes count as active only when `motionEnabled` (motion listed *and* `formats: motion`), not merely non-empty — a motion axis that cannot be drawn must not widen the bound.
+  - Platforms that are all static with `formats: [motion]` yield `motionRatios: []` → every variant a still (nothing could ship the clip) rather than an error.
+- **Verification:** `yarn generate --brief briefs/sample-motion.yaml` → 8 creatives: 6 stills + 2 clips (both `trail-pack/9x16`), i.e. 8 PNG (incl. 2 posters) + 2 MP4; coverage 100 % on every axis.
+- **Left open:**
+  - Wizard motion/headline controls (the `maxMinDistance` optional-axis count is a stub until they land).
+
