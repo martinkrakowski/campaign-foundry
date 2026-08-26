@@ -4,6 +4,7 @@ import { emptyProduct, initialWizardState, type WizardState } from "../wizard-st
 
 const validProducts = (): WizardState["products"] => [
   {
+    key: 1,
     id: "alpha",
     name: "A",
     primaryColor: "#1473E6",
@@ -12,6 +13,7 @@ const validProducts = (): WizardState["products"] => [
     idTouched: true,
   },
   {
+    key: 2,
     id: "beta",
     name: "B",
     primaryColor: "#E0218A",
@@ -82,11 +84,20 @@ describe("validateStep", () => {
       /integer/,
     );
     expect(validateStep("policy", { ...base, variation: { ...base.variation, seed: "nope" } }).seed).toMatch(
-      /finite/,
+      /integer in \[0, 2\^32\)/,
     );
     expect(
-      validateStep("policy", { ...base, variation: { ...base.variation, minDistance: "-1" } }).minDistance,
+      validateStep("policy", { ...base, variation: { ...base.variation, seed: "1.5" } }).seed,
     ).toMatch(/integer/);
+    expect(
+      validateStep("policy", { ...base, variation: { ...base.variation, seed: "4294967296" } }).seed,
+    ).toMatch(/2\^32/);
+    expect(
+      validateStep("policy", { ...base, variation: { ...base.variation, minDistance: "-1" } }).minDistance,
+    ).toMatch(/\[0, 6\]/);
+    expect(
+      validateStep("policy", { ...base, variation: { ...base.variation, minDistance: "7" } }).minDistance,
+    ).toMatch(/\[0, 6\]/);
     expect(
       validateStep("policy", { ...base, variation: { ...base.variation, perProduct: "1.5" } }).perProduct,
     ).toMatch(/integer/);
@@ -97,9 +108,27 @@ describe("validateStep", () => {
     expect(
       validateStep("policy", {
         ...base,
+        variation: { ...base.variation, seed: "0", minDistance: "6", perProduct: "", perRatio: "" },
+      }),
+    ).toEqual({});
+    expect(
+      validateStep("policy", {
+        ...base,
         variation: { ...base.variation, seed: "", minDistance: "", perProduct: "", perRatio: "" },
       }),
     ).toEqual({});
+    expect(
+      validateStep("policy", { ...base, variation: { ...base.variation, layout: [] } }).layout,
+    ).toMatch(/at least one/);
+    expect(
+      validateStep("policy", { ...base, variation: { ...base.variation, tone: [] } }).tone,
+    ).toMatch(/at least one/);
+    expect(
+      validateStep("policy", { ...base, variation: { ...base.variation, background: [] } }).background,
+    ).toMatch(/at least one/);
+    expect(
+      validateStep("policy", { ...base, variation: { ...base.variation, paletteShift: [] } }).paletteShift,
+    ).toMatch(/at least one/);
   });
 
   test("output requires at least one platform; review has no extra checks", () => {

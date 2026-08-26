@@ -6,10 +6,18 @@ export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 
 export type FieldErrors = Record<string, string>;
 
+const UINT32_MAX = 0xffffffff;
+const MIN_DISTANCE_MAX = 6;
+
 function isIntegerAtLeast(value: string, min: number): boolean {
   if (value.trim() === "") return false;
   const num = Number(value);
   return Number.isInteger(num) && num >= min;
+}
+
+function isIntegerInRange(value: string, min: number, max: number): boolean {
+  const num = Number(value);
+  return Number.isInteger(num) && num >= min && num <= max;
 }
 
 function isOptionalIntegerAtLeast(value: string, min: number): boolean {
@@ -17,9 +25,9 @@ function isOptionalIntegerAtLeast(value: string, min: number): boolean {
   return isIntegerAtLeast(value, min);
 }
 
-function isOptionalFiniteNumber(value: string): boolean {
+function isOptionalIntegerInRange(value: string, min: number, max: number): boolean {
   if (value.trim() === "") return true;
-  return Number.isFinite(Number(value));
+  return isIntegerInRange(value, min, max);
 }
 
 export function validateType(state: WizardState): FieldErrors {
@@ -73,17 +81,25 @@ export function validatePolicy(state: WizardState): FieldErrors {
   if (!isIntegerAtLeast(state.variation.count, 1)) {
     errors.count = "variation.count must be an integer >= 1.";
   }
-  if (!isOptionalFiniteNumber(state.variation.seed)) {
-    errors.seed = "variation.seed must be a finite number.";
+  if (!isOptionalIntegerInRange(state.variation.seed, 0, UINT32_MAX)) {
+    errors.seed = "variation.seed must be an integer in [0, 2^32).";
   }
-  if (!isOptionalIntegerAtLeast(state.variation.minDistance, 0)) {
-    errors.minDistance = "variation.minDistance must be an integer >= 0.";
+  if (!isOptionalIntegerInRange(state.variation.minDistance, 0, MIN_DISTANCE_MAX)) {
+    errors.minDistance = "variation.minDistance must be an integer in [0, 6].";
   }
   if (!isOptionalIntegerAtLeast(state.variation.perProduct, 0)) {
     errors.perProduct = "coverage.perProduct must be an integer >= 0.";
   }
   if (!isOptionalIntegerAtLeast(state.variation.perRatio, 0)) {
     errors.perRatio = "coverage.perRatio must be an integer >= 0.";
+  }
+  if (state.variation.layout.length === 0) errors.layout = "Select at least one layout.";
+  if (state.variation.tone.length === 0) errors.tone = "Select at least one tone.";
+  if (state.variation.background.length === 0) {
+    errors.background = "Select at least one background source.";
+  }
+  if (state.variation.paletteShift.length === 0) {
+    errors.paletteShift = "Select at least one palette shift.";
   }
   return errors;
 }
