@@ -19,7 +19,7 @@ const item = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("ExportPage — platform packaging", () => {
-  test("shows static platform tabs, packages the selected tab, and links the zip", async () => {
+  test("shows static platform toggles, packages the selected one, and links the zip", async () => {
     const user = userEvent.setup();
     localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/1:1/default": "approved" }));
     seedPersistedRun([makeAsset()]);
@@ -41,10 +41,10 @@ describe("ExportPage — platform packaging", () => {
         }),
     });
     renderWithRun(<ExportPage />);
-    expect(await screen.findByRole("tablist", { name: "Platforms" })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "instagram-feed" })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "linkedin" })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "x" })).toBeTruthy();
+    expect(await screen.findByRole("group", { name: "Platforms" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "instagram-feed", pressed: true })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "linkedin", pressed: false })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "x", pressed: false })).toBeTruthy();
     // Nothing packaged yet: the download is a disabled hint, not a link that would 404.
     const placeholder = screen.getByRole("button", { name: "Download zip" }) as HTMLButtonElement;
     expect(placeholder.disabled).toBe(true);
@@ -59,7 +59,9 @@ describe("ExportPage — platform packaging", () => {
     expect(zip.getAttribute("href")).toBe(`${API}/campaigns/packages/seed/instagram-feed.zip`);
 
     // linkedin has no package: back to the disabled hint.
-    await user.click(screen.getByRole("tab", { name: "linkedin" }));
+    await user.click(screen.getByRole("button", { name: "linkedin" }));
+    expect(screen.getByRole("button", { name: "linkedin", pressed: true })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "instagram-feed", pressed: false })).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Download zip" })).toBeNull();
     expect((screen.getByRole("button", { name: "Download zip" }) as HTMLButtonElement).disabled).toBe(true);
   });

@@ -119,13 +119,14 @@ export default function ExportPage() {
         <p className="mt-1 text-[13px] text-text-muted">
           Copy already-rendered creatives into per-platform folders. Never re-renders.
         </p>
-        <div role="tablist" aria-label="Platforms" className="mt-4 flex flex-wrap gap-2">
+        {/* Toggle buttons (aria-pressed), not the tabs pattern: the list below is a
+            plain section, not a tabpanel, and arrow-key roving would be overkill here. */}
+        <div role="group" aria-label="Platforms" className="mt-4 flex flex-wrap gap-2">
           {STATIC_PLATFORMS.map((id) => (
             <button
               key={id}
               type="button"
-              role="tab"
-              aria-selected={platform === id}
+              aria-pressed={platform === id}
               onClick={() => setPlatform(id)}
               className={
                 platform === id
