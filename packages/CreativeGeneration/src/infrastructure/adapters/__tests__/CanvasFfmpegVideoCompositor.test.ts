@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest";
-import { spawnSync } from "node:child_process";
+import { spawn as realSpawn, spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -182,6 +182,33 @@ const skipReason = ffmpegOk
   : `ffmpeg-static binary cannot execute${ffmpegProbe?.error ? ` (${ffmpegProbe.error.message})` : ffmpegProbe ? ` (exited ${ffmpegProbe.status})` : " (path is null)"}`;
 
 describe("CanvasFfmpegVideoCompositor", () => {
+  // Local machines without a working binary may skip the real-binary tests;
+  // CI must never skip them silently, or a broken binary would ship green.
+  test.runIf(process.env.CI)("the ffmpeg-static binary executes on CI", () => {
+    expect(ffmpegOk, skipReason).toBe(true);
+  });
+
+  test.skipIf(!ffmpegOk)(
+    skipReason ?? "rejects cleanly when the real binary exits early on a bad flag (EPIPE on stdin)",
+    async () => {
+      const spawn: FfmpegSpawn = (command, args, options) =>
+        realSpawn(command, ["-not-a-real-flag", ...args], options);
+      const compositor = new CanvasFfmpegVideoCompositor({ spawn });
+      await expect(compositor.compositeVideo(videoRequest({ durationSec: 5, fps: 30 }))).rejects.toSatisfy(
+        (error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          expect(message).toMatch(/Unrecognized option|not-a-real-flag/);
+          // No absolute path survives (the banner's lone "/" separators are not paths).
+          expect(message).not.toMatch(/(?:^|[\s'"=])\/[^\s/]+\//);
+          return true;
+        },
+      );
+      // The gate was released: a follow-up encode with a healthy fake still runs.
+      const next = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
+      await expect(next.compositeVideo(videoRequest({ sampleAt: [] }))).resolves.toBeTruthy();
+    },
+  );
+
   test.skipIf(!ffmpegOk)(
     skipReason ?? "encodes a playable mp4 from 24 frames at 12 fps (108×192)",
     async () => {
