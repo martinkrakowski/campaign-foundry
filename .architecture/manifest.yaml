@@ -158,6 +158,7 @@ bounded_contexts:
           - VariationPolicy
           - VariationPlan
           - MotionKind
+          - CopyPool
         domain_services: []
       application:
         use_cases:
