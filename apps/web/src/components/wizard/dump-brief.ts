@@ -14,8 +14,23 @@ export const BRIEF_KEY_ORDER = [
   "output",
 ] as const;
 
-function dumpString(value: string): string {
-  return /^[A-Za-z0-9_./-]+$/.test(value) ? value : JSON.stringify(value);
+const YAML_BOOL_NULL = /^(?:~|true|false|null|yes|no|on|off)$/i;
+const YAML_NUMBER = /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/;
+const YAML_DATE = /^\d{4}-\d{2}-\d{2}(?:[Tt ].*)?$/;
+const YAML_SPECIAL_START = /^[&*!%@`|>{}[\]#\\]/;
+
+/** Quote strings js-yaml would resolve as a non-string (bool/null/number/date/indicator). */
+export function quoteYamlScalar(value: string): string {
+  const needsQuote =
+    value === "" ||
+    YAML_BOOL_NULL.test(value) ||
+    YAML_NUMBER.test(value) ||
+    YAML_DATE.test(value) ||
+    YAML_SPECIAL_START.test(value) ||
+    value.includes(": ") ||
+    value.includes(" #") ||
+    !/^[A-Za-z0-9_./-]+$/.test(value);
+  return needsQuote ? JSON.stringify(value) : value;
 }
 
 function dumpArray(arr: unknown[], indent: number): string {
@@ -48,7 +63,7 @@ function dumpObject(obj: Record<string, unknown>, indent: number): string {
 function formatValue(value: unknown, indent: number): string {
   switch (typeof value) {
     case "string":
-      return ` ${dumpString(value)}`;
+      return ` ${quoteYamlScalar(value)}`;
     case "number":
     case "boolean":
       return ` ${String(value)}`;

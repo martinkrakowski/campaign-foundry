@@ -1,6 +1,6 @@
 import { describe, test, expect } from "vitest";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { dumpBrief } from "../dump-brief";
+import { dumpBrief, quoteYamlScalar } from "../dump-brief";
 
 const brief: CampaignBrief = {
   id: "camp",
@@ -32,6 +32,53 @@ const brief: CampaignBrief = {
   },
   output: { formats: ["static"], platforms: ["instagram-feed", "linkedin", "x"] },
 };
+
+describe("quoteYamlScalar", () => {
+  test("quotes strings yaml would resolve as a non-string", () => {
+    for (const value of [
+      "true",
+      "False",
+      "null",
+      "~",
+      "yes",
+      "NO",
+      "on",
+      "Off",
+      "42",
+      "-3.5",
+      ".5",
+      "1e10",
+      "2020-01-01",
+      "2020-01-01T12:00:00Z",
+      "*anchor",
+      "&ref",
+      "!tag",
+      "%YAML",
+      "@x",
+      "`tick",
+      "\\slash",
+      "|block",
+      ">fold",
+      "{obj",
+      "}end",
+      "[list",
+      "]end",
+      "#comment",
+      "a: b",
+      "foo # bar",
+      "",
+      "has space",
+    ]) {
+      expect(quoteYamlScalar(value), value).toBe(JSON.stringify(value));
+    }
+  });
+
+  test("leaves ordinary path-safe strings unquoted", () => {
+    expect(quoteYamlScalar("camp")).toBe("camp");
+    expect(quoteYamlScalar("assets/inputs/a.png")).toBe("assets/inputs/a.png");
+    expect(quoteYamlScalar("hydra-bottle")).toBe("hydra-bottle");
+  });
+});
 
 describe("dumpBrief", () => {
   test("emits canonical key order and quotes unsafe strings", () => {
