@@ -332,4 +332,24 @@ describe("headline pool state", () => {
     expect(emptied.variation.headline).toBe(false);
     expect(wizardReducer(withPool, { type: "setPool", pool: null }).variation.headline).toBe(false);
   });
+
+  test("setPool remembers that it dropped the axis until an entry is approved again", () => {
+    // Off axis: emptying the pool is silent.
+    const silent = wizardReducer(initialWizardState, { type: "setPool", pool: pool(["rejected"]) });
+    expect(silent.headlineAxisDropped).toBe(false);
+
+    const on = wizardReducer(
+      wizardReducer(initialWizardState, { type: "setPool", pool: pool(["approved"]) }),
+      { type: "toggleHeadline" },
+    );
+    const dropped = wizardReducer(on, { type: "setPool", pool: pool(["rejected"]) });
+    expect(dropped.variation.headline).toBe(false);
+    expect(dropped.headlineAxisDropped).toBe(true);
+    // Still nothing approved: the notice stays even though the axis is now off.
+    const still = wizardReducer(dropped, { type: "setPool", pool: pool(["rejected", "rejected"]) });
+    expect(still.headlineAxisDropped).toBe(true);
+    const recovered = wizardReducer(still, { type: "setPool", pool: pool(["approved", "rejected"]) });
+    expect(recovered.headlineAxisDropped).toBe(false);
+    expect(recovered.variation.headline).toBe(false);
+  });
 });

@@ -556,6 +556,61 @@ describe("Wizard", () => {
     expect(screen.getByText(/no approved entries/)).toBeTruthy();
   });
 
+  test("headline pool: an edit that rejects the last approved entry says the axis was turned off", async () => {
+    const user = userEvent.setup();
+    const pool = fakePoolApi({ initial: [{ id: "h1", text: "Stay wild", status: "approved" }] });
+    routeWizardApi({ pool });
+    renderWithRun(<Wizard />);
+    await fillType(user, "Randomized");
+    await fillProducts(user);
+    expect(await screen.findByText("Headline pool (1 approved)")).toBeTruthy();
+    // Rejecting while the axis is off is silent.
+    await user.click(screen.getByRole("button", { name: "Reject h1" }));
+    expect(await screen.findByText("Headline pool (0 approved)")).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Approve h1" }));
+    expect(await screen.findByText("Headline pool (1 approved)")).toBeTruthy();
+
+    await fillCopy(user);
+    await user.click(screen.getByRole("button", { name: "pool://copy" }));
+    expect(screen.getByRole("button", { name: "pool://copy" }).getAttribute("aria-pressed")).toBe("true");
+    await user.click(screen.getByRole("button", { name: "Back" }));
+
+    // The edit flips the last approved entry to rejected: the reducer drops the axis; the panel says so.
+    await user.click(screen.getByRole("button", { name: "Edit h1" }));
+    await user.clear(screen.getByRole("textbox", { name: "Edit h1" }));
+    await user.type(screen.getByRole("textbox", { name: "Edit h1" }), "A miracle cure");
+    await user.click(screen.getByRole("button", { name: "Save h1" }));
+    expect(await screen.findByRole("status")).toHaveProperty(
+      "textContent",
+      "No approved headlines — the headline axis was turned off",
+    );
+    // A further change that still leaves no approvals keeps the notice.
+    await user.click(screen.getByRole("button", { name: "Approve h1" }));
+    expect(await screen.findByText("Headline pool (0 approved)")).toBeTruthy();
+    expect(screen.getByRole("status")).toBeTruthy();
+
+    // The policy step keeps its own message and the toggle is off and blocked.
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    const toggle = screen.getByRole("button", { name: "pool://copy" }) as HTMLButtonElement;
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByText(/no approved entries/)).toBeTruthy();
+
+    // The notice survives the step change; approving again clears it.
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(await screen.findByRole("status")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Edit h1" }));
+    await user.clear(screen.getByRole("textbox", { name: "Edit h1" }));
+    await user.type(screen.getByRole("textbox", { name: "Edit h1" }), "Fresh alpine water");
+    await user.click(screen.getByRole("button", { name: "Save h1" }));
+    expect(await screen.findByText("Fresh alpine water")).toBeTruthy();
+    expect(screen.getByRole("status")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Approve h1" }));
+    expect(await screen.findByText("Headline pool (1 approved)")).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   test("headline pool: surfaces patch and load failures, pluralises the axis label", async () => {
     const user = userEvent.setup();
     const pool = fakePoolApi({

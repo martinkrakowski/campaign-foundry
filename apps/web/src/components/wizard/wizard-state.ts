@@ -60,6 +60,11 @@ export interface WizardState {
   platforms: string[];
   /** The brief's copy pool as last fetched/edited in the Copy step; null until one exists. */
   pool: CopyPool | null;
+  /**
+   * True after a pool change removed the last approved entry while the headline
+   * axis was on (the reducer turned it off); cleared once an entry is approved again.
+   */
+  headlineAxisDropped: boolean;
 }
 
 export type WizardAction =
@@ -122,6 +127,7 @@ export const initialWizardState: WizardState = {
   },
   platforms: [...STATIC_PLATFORMS],
   pool: null,
+  headlineAxisDropped: false,
 };
 
 /** Number of approved entries in the wizard's pool (0 without a pool). */
@@ -232,17 +238,21 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
       };
     case "toggleHeadline":
       return { ...state, variation: { ...state.variation, headline: !state.variation.headline } };
-    case "setPool":
+    case "setPool": {
       // The axis is only meaningful with something to draw from: losing the last
-      // approved entry switches it off rather than leaving a brief that cannot plan.
+      // approved entry switches it off rather than leaving a brief that cannot plan
+      // — and remembers that it did, so the Copy step can say so.
+      const none = approvedHeadlines(action.pool) === 0;
       return {
         ...state,
         pool: action.pool,
+        headlineAxisDropped: none && (state.headlineAxisDropped || state.variation.headline),
         variation: {
           ...state.variation,
-          headline: state.variation.headline && approvedHeadlines(action.pool) > 0,
+          headline: state.variation.headline && !none,
         },
       };
+    }
     case "togglePlatform":
       return { ...state, platforms: toggleOrdered(state.platforms, action.value, STATIC_PLATFORMS) };
   }

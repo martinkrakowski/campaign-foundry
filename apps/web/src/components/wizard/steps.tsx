@@ -350,6 +350,9 @@ function PoolEntryRow({
   );
 }
 
+/** Shown on the Copy step after a pool change removed the last approved entry while the axis was on. */
+const HEADLINE_AXIS_DROPPED = "No approved headlines — the headline axis was turned off";
+
 /**
  * Headline pool — the HITL surface for `headline: pool://copy`. Loads the
  * brief's pool, lets the user generate suggestions (legal-gated server-side),
@@ -416,6 +419,11 @@ function HeadlinePoolPanel({ state, dispatch }: { state: WizardState; dispatch: 
         Approved entries become the <code>headline: {HEADLINE_POOL_REF}</code> axis in the policy step.
       </p>
       {unavailable ? <p className="text-[13px] text-warning">{unavailable}</p> : null}
+      {state.headlineAxisDropped ? (
+        <p role="status" className="text-[13px] text-warning">
+          {HEADLINE_AXIS_DROPPED}
+        </p>
+      ) : null}
       {error ? <p className="text-[13px] text-error">{error}</p> : null}
       {entries.length === 0 ? (
         <p className="text-[13px] text-text-muted">No headlines yet.</p>
