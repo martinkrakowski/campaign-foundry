@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderWithRun, nextMock } from "@/__tests__/helpers";
+import { json, mockPipelineApi, nextMock, renderWithRun } from "@/__tests__/helpers";
 import BriefPage from "../page";
 
 beforeEach(() => localStorage.setItem("cf:brief-picked", "1"));
@@ -75,4 +75,60 @@ describe("BriefPage", () => {
     await user.click(screen.getByText("Cancel"));
     expect(nextMock().router.back).toHaveBeenCalled();
   });
+
+  test("Save to briefs/ offers Replace on 409 then writes the file", async () => {
+    const user = userEvent.setup();
+    const urls: string[] = [];
+    mockPipelineApi({
+      post: (url, init) => {
+        urls.push(url);
+        const body = JSON.parse(String(init.body)) as { id: string };
+        if (url.includes("replace=1")) return json({ file: `${body.id}.yaml`, brief: body }, 201);
+        return json({ error: `Brief "${body.id}" already exists.` }, 409);
+      },
+    });
+    renderWithRun(<BriefPage />);
+    await user.click(screen.getByText("Save to briefs/"));
+    expect(await screen.findByText(/already exists/)).toBeTruthy();
+    await user.click(screen.getByText("Replace"));
+    expect(await screen.findByText(/Saved to briefs\/summer-hydration-2026.yaml/)).toBeTruthy();
+    expect(urls.some((u) => u.includes("replace=1"))).toBe(true);
+  });
+
+  test("Save as… posts the in-memory copy under a new id and selects it", async () => {
+    const user = userEvent.setup();
+    mockPipelineApi({
+      post: (url, init) => {
+        expect(url).not.toContain("/duplicate");
+        const body = JSON.parse(String(init.body)) as { id: string; campaignMessage: string };
+        return json({ file: `${body.id}.yaml`, brief: body }, 201);
+      },
+    });
+    renderWithRun(<BriefPage />);
+    await user.clear(screen.getByDisplayValue("Bleib wild. Bleib hydriert."));
+    await user.click(screen.getByText("Save as…"));
+    await user.click(screen.getByText("Save copy")); // empty id → validation message
+    expect(await screen.findByText(/path-safe slug/)).toBeTruthy();
+    await user.type(screen.getByLabelText("Save as new id"), "Bad Id");
+    expect(screen.getByText(/Lowercase letters, digits and hyphens only/)).toBeTruthy();
+    await user.clear(screen.getByLabelText("Save as new id"));
+    await user.type(screen.getByLabelText("Save as new id"), "camp-copy");
+    await user.click(screen.getByText("Save copy"));
+    expect(await screen.findByText(/Saved to briefs\/camp-copy.yaml/)).toBeTruthy();
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("cf:brief") ?? "{}").id).toBe("camp-copy"));
+  });
+
+  test("Save as… can be cancelled and a non-409 persist error is shown", async () => {
+    const user = userEvent.setup();
+    mockPipelineApi({
+      post: () => json({ error: "disk full" }, 500),
+    });
+    renderWithRun(<BriefPage />);
+    await user.click(screen.getByText("Save as…"));
+    await user.click(screen.getAllByText("Cancel")[0]);
+    expect(screen.queryByLabelText("Save as new id")).toBeNull();
+    await user.click(screen.getByText("Save to briefs/"));
+    expect(await screen.findByText("disk full")).toBeTruthy();
+  });
 });
+

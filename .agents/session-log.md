@@ -460,3 +460,22 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Composition root is the only place that may close over `new Date()`.
 - **Left open:**
   - none for this follow-up.
+
+---
+
+## 2026-08-26 — persist briefs and create-campaign wizard (wave 3 lane B)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Typed web client `apps/web/src/lib/briefs-api.ts` for list/create/replace/update/duplicate/upload/plan. Plan 404 and network failure return `{ kind: "unavailable" }` so the wizard does not depend on lane A's `POST /campaigns/plan`.
+  - `/brief` keeps the in-memory Save → `/grid` loop and adds **Save to briefs/** (POST create, 409 → Replace with `?replace=1`) and **Save as…** (POST the in-memory editor under a new id).
+  - `BriefPicker`: **Create new** → `/new`; **Duplicate** prompts for a path-safe id, POSTs `/campaigns/briefs/:id/duplicate` with `{ newId }`, reloads, `setBrief(copy)`.
+  - Wizard at `(shell)/new`: type → products → copy → (policy) → output → review. Classic ≥2 products, randomized ≥1 (D10). Estimate panel debounces `POST /campaigns/plan`. No "Generate suggestions".
+- **Decisions:**
+  - Save-as on a dirty editor POSTs a cloned brief (new id) rather than the duplicate endpoint, which copies the on-disk file and would drop unsaved edits.
+  - YAML preview copies `BRIEF_KEY_ORDER` locally; no `js-yaml` (web has no such dependency).
+  - SAFE_ID_PATTERN is duplicated in the web app (value-importing CampaignOrchestration barrels breaks the Next build).
+  - `PUT /campaigns/briefs/:id` is implemented on the client but unused by the UI (create + `?replace=1` covers persist).
+- **Left open:**
+  - Lane A lands `POST /campaigns/plan`; until then the estimate panel shows "estimate unavailable" on 404.
+
