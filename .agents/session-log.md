@@ -581,6 +581,21 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Global page of 24 across the filtered list (not per product section).
 - **Left open:**
   - Motion platforms stay hidden; zip is store-only (no compression). This lane does not touch compositor/parser/generation/pools.
+## 2026-08-26 — wave 4 Lane B: approved headline copy pools (Phase 3.1–3.3)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `CopyPool` VO (`approvedTexts`, `mergePool` by normalised text; no clock). Port `CopyGeneratorPort` (object input) in CampaignOrchestration; adapter `OpenRouterCopyGenerator` (chat completions, `openai/gpt-4o-mini`, injected `fetch`).
+  - Persistence `briefs/<briefId>/pools.json` (directory — briefs lister ignores it); atomic tmp+rename.
+  - Routes: `POST /campaigns/pools/copy` (generate + `validateLegalCopy` + persist), `GET`/`PATCH /campaigns/pools/:briefId`. Composition-root factory `copyGenerator()`; not wired into `GenerateCampaignUseCase`.
+  - README "Copy pools" block. Parser still rejects `pool://`.
+- **Decisions:**
+  - `CopyGeneratorPort.model` is on the port so routes persist provenance without importing the adapter.
+  - PATCH legal failures persist as `rejected` with a reason (HITL can see why), not 422.
+  - POST merges into an existing pool; existing entries win on normalised text.
+- **Left open:**
+  - Phase 3.4 allowlist `headline: pool://copy` and planner consumption.
+  - Wizard "Generate suggestions" control.
 
 
 
@@ -601,3 +616,28 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Zip64 not needed — a platform package is a handful of PNGs plus a manifest.
 - **Left open:**
   - Packaging flag (`packaging`) is a single boolean shared by concurrent package calls; the Export button is disabled while any call is in flight, so this is cosmetic.
+## 2026-08-26 — PR #52 review fixes (lane B, copy pools)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `pools.ts`: unique tmp names (`pools.json.<pid>-<rand>.tmp`), `withPoolLock`
+    (per-briefId promise chain, errors don't poison it), `isPoolDirSymlink`.
+  - `CopyGeneratorError` (kind + `retryAfterSeconds`) lives on the port so the
+    edge maps it without importing the adapter. Adapter: fence-strip + join
+    content-parts before `JSON.parse`, 30 s `AbortSignal.timeout` (`timeoutMs`
+    injectable), `<<< >>>`-delimited one-line brief fields, `seen` set dropped.
+    `OPENROUTER_COPY_MODEL` in the composition root; ports/out barrel alphabetised.
+  - POST: usable texts capped at `count` and 60 chars; read→merge→write under
+    the lock; known-only regeneration → 200 `added: 0` (no write); error map
+    503/502/429+Retry-After/422; replies carry `added`. PATCH: stale reason
+    cleared on a passing edit, duplicate normalised text → 422 naming the
+    other id, duplicate ids → 400, `entries: []` → 200 without a write, symlinked
+    `briefs/<id>` → 400 on both routes.
+- **Decisions:**
+  - The LLM call stays outside the lock (slow); only the file section is
+    serialised, and de-dup against the pool happens inside it.
+  - Other non-2xx upstream replies map to 502 (not in the brief; auth-adjacent).
+  - Route tests import `CopyGeneratorError` after `vi.resetModules()` so
+    `instanceof` sees the route's module instance.
+- **Left open:**
+  - Phase 3.4 allowlist `headline: pool://copy`, planner consumption, wizard control.
