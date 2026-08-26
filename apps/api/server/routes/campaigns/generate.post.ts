@@ -1,11 +1,13 @@
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { completeJob, createJob, failJob, runJob } from "../../lib/jobs.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
 import { ALLOWED_IMAGE_MODELS, runCampaign } from "../../lib/pipeline.js";
 import { writeReport } from "../../lib/report.js";
 
 /**
- * POST /campaigns/generate — runs the pipeline and persists report.json (so GET
- * /campaigns/result reflects it), returning the assets, halt flag, and execution log.
+ * POST /campaigns/generate — validates the brief, starts an in-process run, and
+ * returns 202 `{ jobId }` immediately. Poll GET /campaigns/jobs/:id; on success the
+ * report is persisted so GET /campaigns/result reflects it.
  *
  * Body is either a bare campaign brief, or an envelope `{ brief, regenerateOnly }`
  * where `regenerateOnly` (the HITL re-roll) restricts the run to just those creatives
@@ -38,18 +40,22 @@ export default defineEventHandler(async (event) => {
     return { error: `Unknown image model: ${imageModel}` };
   }
 
-  const result = await runCampaign(brief, imageModel, regenerateOnly);
-  if (!result.success) {
-    setResponseStatus(event, 422);
-    return { error: result.error.message };
-  }
-
-  // A selective run produced only the regenerated cells — merge them into the
-  // persisted report so the full campaign survives a partial run.
-  await writeReport(result.value, { merge: regenerateOnly !== undefined });
-  return {
-    halted: result.value.halted,
-    assets: result.value.assets,
-    log: result.value.log,
-  };
+  const jobId = createJob();
+  runJob(jobId, async () => {
+    const result = await runCampaign(brief, imageModel, regenerateOnly);
+    if (!result.success) {
+      failJob(jobId, result.error.message);
+      return;
+    }
+    // A selective run produced only the regenerated cells — merge them into the
+    // persisted report so the full campaign survives a partial run.
+    await writeReport(result.value, { merge: regenerateOnly !== undefined });
+    completeJob(jobId, {
+      halted: result.value.halted,
+      assets: result.value.assets,
+      log: result.value.log,
+    });
+  });
+  setResponseStatus(event, 202);
+  return { jobId };
 });
