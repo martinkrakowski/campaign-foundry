@@ -81,15 +81,6 @@ export class VariationPolicy {
     if (!seedResult.success) return seedResult;
     const seed = seedResult.value;
 
-    const minDistanceResult = requireInteger(
-      variation.minDistance ?? 1,
-      "minDistance",
-      0,
-      DISTANCE_AXES.length,
-    );
-    if (!minDistanceResult.success) return minDistanceResult;
-    const minDistance = minDistanceResult.value;
-
     const perProductResult = requireInteger(variation.coverage?.perProduct ?? 0, "coverage.perProduct", 0);
     if (!perProductResult.success) return perProductResult;
     const perRatioResult = requireInteger(variation.coverage?.perRatio ?? 0, "coverage.perRatio", 0);
@@ -100,6 +91,30 @@ export class VariationPolicy {
     };
 
     const axes = variation.axes;
+    const motion = unique(
+      axes?.motion !== undefined ? [...(axes.motion as readonly MotionKind[])] : [...DEFAULT_MOTION],
+    );
+    const motionResult = requireMotion(motion);
+    if (!motionResult.success) return motionResult;
+    const duration = unique(axes?.duration !== undefined ? [...axes.duration] : [...DEFAULT_DURATION]);
+    const durationResult = requireDuration(duration);
+    if (!durationResult.success) return durationResult;
+    const formats = brief.output?.formats ?? ["static"];
+    const motionEnabled = formats.includes("motion") && motion.length > 0;
+    const mixStatic = motionEnabled && formats.includes("static");
+
+    // A candidate can differ in at most the axes this brief activates: every
+    // DISTANCE_AXES entry except the optional ones that are off. An optional axis
+    // counts only while it has at least one drawable option (motion here; headline
+    // joins the same rule); `durationSec` is drawn only on motion slots, so it
+    // follows the motion axis.
+    const activeAxes = DISTANCE_AXES.filter(
+      (axis) => (axis !== "motion" && axis !== "durationSec") || motionEnabled,
+    ).length;
+    const minDistanceResult = requireInteger(variation.minDistance ?? 1, "minDistance", 0, activeAxes);
+    if (!minDistanceResult.success) return minDistanceResult;
+    const minDistance = minDistanceResult.value;
+
     const layout = unique(
       axes?.layout !== undefined ? [...(axes.layout as readonly LayoutKind[])] : [...LAYOUT_VALUES],
     );
@@ -116,18 +131,6 @@ export class VariationPolicy {
     );
     const paletteShiftResult = requirePaletteShift(paletteShift);
     if (!paletteShiftResult.success) return paletteShiftResult;
-    const motion = unique(
-      axes?.motion !== undefined ? [...(axes.motion as readonly MotionKind[])] : [...DEFAULT_MOTION],
-    );
-    const motionResult = requireMotion(motion);
-    if (!motionResult.success) return motionResult;
-    const duration = unique(axes?.duration !== undefined ? [...axes.duration] : [...DEFAULT_DURATION]);
-    const durationResult = requireDuration(duration);
-    if (!durationResult.success) return durationResult;
-    const formats = brief.output?.formats ?? ["static"];
-    const motionEnabled = formats.includes("motion") && motion.length > 0;
-    const mixStatic = motionEnabled && formats.includes("static");
-
     const productIds = unique(brief.products.map((product) => product.id));
     const ratios = AspectRatio.all().map((ratio) => ratio.value);
     const axisProductSize =

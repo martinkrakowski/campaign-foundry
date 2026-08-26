@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest";
-import { hasErrors, validateStep } from "../validate";
+import { hasErrors, maxMinDistance, validateStep } from "../validate";
 import { emptyProduct, initialWizardState, type WizardState } from "../wizard-state";
 
 const validProducts = (): WizardState["products"] => [
@@ -24,6 +24,10 @@ const validProducts = (): WizardState["products"] => [
 ];
 
 describe("validateStep", () => {
+  test("maxMinDistance is the six always-active Hamming axes while no optional axis is exposed", () => {
+    expect(maxMinDistance(initialWizardState)).toBe(6);
+  });
+
   test("type requires a path-safe brief id", () => {
     expect(validateStep("type", initialWizardState).briefId).toMatch(/Lowercase letters/);
     expect(validateStep("type", { ...initialWizardState, briefId: "camp" })).toEqual({});

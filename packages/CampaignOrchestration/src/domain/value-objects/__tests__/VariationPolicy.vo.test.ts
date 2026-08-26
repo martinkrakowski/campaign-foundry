@@ -135,6 +135,26 @@ describe("VariationPolicy.fromBrief", () => {
     if (a.success && b.success) expect(a.value.policyHash).toBe(b.value.policyHash);
   });
 
+  test("minDistance is bounded by the active axes: 6 for a static brief, 8 once motion is on", () => {
+    const motionOn = (minDistance: number) =>
+      VariationPolicy.fromBrief(
+        brief({
+          variation: { count: 1, minDistance, axes: { motion: ["ken-burns-in"] } },
+          output: { formats: ["motion"] },
+        }),
+      );
+    // A motion axis that cannot be drawn (no motion format) does not count.
+    const motionOff = (minDistance: number) =>
+      VariationPolicy.fromBrief(
+        brief({ variation: { count: 1, minDistance, axes: { motion: ["ken-burns-in"] } } }),
+      );
+    expect(VariationPolicy.fromBrief(brief({ variation: { count: 1, minDistance: 6 } })).success).toBe(true);
+    expect(motionOn(8).success).toBe(true);
+    expect(motionOn(9).success).toBe(false);
+    expect(motionOff(6).success).toBe(true);
+    expect(motionOff(7).success).toBe(false);
+  });
+
   test("BACKGROUND_AXIS_SOURCES is the brief-parser set", () => {
     expect(BACKGROUND_AXIS_SOURCES).toEqual(["procedural", "asset-pool", "genai"]);
   });
@@ -146,7 +166,7 @@ describe("VariationPolicy.fromBrief", () => {
     [{ count: Number.POSITIVE_INFINITY }, /count/],
     [{ count: Number.NaN }, /count/],
     [{ count: 1, minDistance: -1 }, /minDistance/],
-    [{ count: 1, minDistance: 9 }, /minDistance/],
+    [{ count: 1, minDistance: 7 }, /minDistance/],
     [{ count: 1, minDistance: 1.5 }, /minDistance/],
     [{ count: 1, minDistance: Number.POSITIVE_INFINITY }, /minDistance/],
     [{ count: 1, coverage: { perProduct: -1 } }, /coverage\.perProduct/],
