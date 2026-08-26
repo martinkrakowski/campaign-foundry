@@ -65,10 +65,15 @@ export function isBriefSourceName(name: string): boolean {
   return BRIEF_SOURCE_EXTS.some((ext) => lower.endsWith(ext));
 }
 
+/** Compute SHA-256 hex digest of raw bytes. */
+export function hashBytes(bytes: Buffer): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
 /** Compute SHA-256 hex digest of a file's raw bytes. */
 export async function hashFile(path: string): Promise<string> {
   const bytes = await readFile(path);
-  return createHash("sha256").update(bytes).digest("hex");
+  return hashBytes(bytes);
 }
 
 /** True if anything (file, dir, symlink) exists at `path`. */
@@ -166,4 +171,25 @@ export async function replaceBriefFile(path: string, brief: CampaignBrief): Prom
     }
     throw error;
   }
+}
+
+const briefChains = new Map<string, Promise<unknown>>();
+
+/**
+ * Serialise revision-check→write sections per brief id within this process, so a
+ * conditional write cannot be overtaken between its hash comparison and its write.
+ * Errors in `fn` do not poison the chain.
+ */
+export function withBriefLock<T>(briefId: string, fn: () => Promise<T>): Promise<T> {
+  const previous = briefChains.get(briefId) ?? Promise.resolve();
+  const run = previous.then(fn, fn);
+  const settled = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  briefChains.set(briefId, settled);
+  void settled.then(() => {
+    if (briefChains.get(briefId) === settled) briefChains.delete(briefId);
+  });
+  return run;
 }

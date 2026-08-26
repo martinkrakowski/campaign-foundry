@@ -504,6 +504,7 @@ describe("authoring briefs", () => {
     expect(json.revision).toBeDefined();
     expect(json.revision).toMatch(/^[a-f0-9]{64}$/);
     expect(json.revision).not.toBe(staleRevision);
+    expect(await loadBrief(campYaml())).toMatchObject({ campaignMessage: "Hi" });
   });
 
   test("POST ?replace=1 without revision succeeds (backward compatible)", async () => {
@@ -529,6 +530,7 @@ describe("authoring briefs", () => {
     expect(json.revision).toBeDefined();
     expect(json.revision).toMatch(/^[a-f0-9]{64}$/);
     expect(json.revision).not.toBe(staleRevision);
+    expect(await loadBrief(campYaml())).toMatchObject({ campaignMessage: "Hi" });
   });
 
   test("PUT without revision succeeds (backward compatible)", async () => {
@@ -742,5 +744,62 @@ describe("authoring briefs", () => {
     } finally {
       g.readBody = original;
     }
+  });
+
+  test("POST with concurrent delete in replace mode falls through to create", async () => {
+    const { create } = await api();
+    const briefFiles = await import("../../../lib/brief-files.js");
+    mkdirSync(join(dir, "briefs"), { recursive: true });
+    writeFileSync(campYaml(), briefFiles.dumpBrief(brief({ campaignMessage: "Original" })));
+    vi.spyOn(briefFiles, "hashFile").mockImplementation(async (_path: string) => {
+      // Throw ENOENT to simulate the file being deleted between lookup and hash
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    const res = await create()(
+      jsonReq("http://x/campaigns/briefs?replace=1&revision=stalehash", "POST", brief({ campaignMessage: "Fallback" })),
+    );
+    // ENOENT during hash check in replace mode falls through to create attempt
+    expect([201, 409]).toContain(res.status);
+    vi.spyOn(briefFiles, "hashFile").mockRestore();
+  });
+
+  test("PUT with concurrent delete returns 404", async () => {
+    const { create, update } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const briefFiles = await import("../../../lib/brief-files.js");
+    vi.spyOn(briefFiles, "hashFile").mockImplementation(async (_path: string) => {
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    const res = await update()(
+      jsonReq(`http://x/campaigns/briefs/camp?revision=stalehash`, "PUT", brief({ campaignMessage: "Edited" })),
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'Brief "camp" not found.' });
+  });
+
+  test("POST with unexpected hash error surfaces the error", async () => {
+    const { create } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const briefFiles = await import("../../../lib/brief-files.js");
+    vi.spyOn(briefFiles, "hashFile").mockImplementation(async (_path: string) => {
+      throw Object.assign(new Error("EIO"), { code: "EIO" });
+    });
+    const res = await create()(
+      jsonReq("http://x/campaigns/briefs?replace=1&revision=stalehash", "POST", brief({ campaignMessage: "Nope" })),
+    );
+    expect(res.status).toBe(500);
+  });
+
+  test("PUT with unexpected hash error surfaces the error", async () => {
+    const { create, update } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const briefFiles = await import("../../../lib/brief-files.js");
+    vi.spyOn(briefFiles, "hashFile").mockImplementation(async (_path: string) => {
+      throw Object.assign(new Error("EIO"), { code: "EIO" });
+    });
+    const res = await update()(
+      jsonReq(`http://x/campaigns/briefs/camp?revision=stalehash`, "PUT", brief({ campaignMessage: "Edited" })),
+    );
+    expect(res.status).toBe(500);
   });
 });

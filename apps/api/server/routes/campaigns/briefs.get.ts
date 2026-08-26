@@ -1,8 +1,8 @@
-import { readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { errorMessage } from "@campaignfoundry/shared";
-import { BRIEF_SOURCE_EXTS, briefsDir, hashFile } from "../../lib/brief-files.js";
-import { loadBrief } from "../../lib/load-brief.js";
+import { BRIEF_SOURCE_EXTS, briefsDir, hashBytes } from "../../lib/brief-files.js";
+import { parseBriefText } from "../../lib/load-brief.js";
 
 const BRIEF_PATTERN = new RegExp(
   `(?:${BRIEF_SOURCE_EXTS.map((ext) => ext.replace(".", "\\.")).join("|")})$`,
@@ -36,10 +36,9 @@ export default defineEventHandler(async () => {
   for (const file of files) {
     try {
       const filePath = resolve(dir, file);
-      const [brief, revision] = await Promise.all([
-        loadBrief(filePath),
-        hashFile(filePath),
-      ]);
+      const raw = await readFile(filePath, "utf8");
+      const brief = parseBriefText(filePath, raw);
+      const revision = hashBytes(Buffer.from(raw, "utf8"));
       briefs.push({ file, brief, revision });
     } catch (error) {
       // Skip a malformed/invalid brief rather than failing the whole list — but log

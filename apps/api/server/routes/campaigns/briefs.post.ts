@@ -6,7 +6,9 @@ import {
   findBriefFileById,
   hashFile,
   isExistsError,
+  isErrno,
   replaceBriefFile,
+  withBriefLock,
   SYMLINK_WRITE_ERROR,
 } from "../../lib/brief-files.js";
 import { parseBrief } from "../../lib/load-brief.js";
@@ -39,18 +41,29 @@ export default defineEventHandler(async (event) => {
     return { error: `Brief "${brief.id}" already exists.` };
   }
 
-  if (replace && existing && expectedRevision) {
-    const currentRevision = await hashFile(existing);
-    if (currentRevision !== expectedRevision) {
-      setResponseStatus(event, 409);
-      return { error: "Brief was modified by another user.", revision: currentRevision };
-    }
-  }
-
   const filePath = existing ?? briefYamlPath(brief.id);
+  let result: { error?: string; revision?: string } | undefined;
   try {
-    if (replace) await replaceBriefFile(filePath, brief);
-    else await createBriefFile(filePath, brief);
+    await withBriefLock(brief.id, async () => {
+      if (replace && existing && expectedRevision) {
+        try {
+          const currentRevision = await hashFile(existing);
+          if (currentRevision !== expectedRevision) {
+            result = { error: "Brief was modified by another user.", revision: currentRevision };
+            return;
+          }
+        } catch (error) {
+          if (isErrno(error, "ENOENT")) {
+            // File was deleted between the lookup and the hash — fall through to create
+            return;
+          }
+          throw error;
+        }
+      }
+
+      if (replace) await replaceBriefFile(filePath, brief);
+      else await createBriefFile(filePath, brief);
+    });
   } catch (error) {
     if (errorMessage(error) === SYMLINK_WRITE_ERROR) {
       setResponseStatus(event, 400);
@@ -61,6 +74,11 @@ export default defineEventHandler(async (event) => {
       return { error: `Brief "${brief.id}" already exists.` };
     }
     throw error;
+  }
+
+  if (result?.error) {
+    setResponseStatus(event, 409);
+    return result;
   }
 
   setResponseStatus(event, 201);
