@@ -12,6 +12,31 @@ export default tseslint.config(
     },
   },
   {
+    files: ['src/domain/**/*.ts', 'src/domain/**/*.tsx'],
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Math',
+          property: 'random',
+          message: 'Use SeededRandom instead of Math.random in the deterministic core.',
+        },
+        {
+          object: 'Date',
+          property: 'now',
+          message: 'Do not use the wall clock in the deterministic core; use SeededRandom.',
+        },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "NewExpression[callee.name='Date']",
+          message: 'Do not use the wall clock in the deterministic core; use SeededRandom.',
+        },
+      ],
+    },
+  },
+  {
     ignores: ['dist/**', 'node_modules/**'],
   },
 );

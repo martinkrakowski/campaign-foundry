@@ -195,3 +195,21 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Confirmed obsolete: 0.8.0 `sync --check` refuses a dirty tree ("use
     `--allow-dirty`") instead of the old `git reset --hard` — the rollback footgun
     flagged on 2026-06-09 is gone.
+
+---
+
+## 2026-08-25 — SeededRandom + scoped determinism lint
+
+- **Mode:** Implementer
+- **Changes:**
+  - Added `SeededRandom` VO + `seedFrom` (mulberry32 + FNV-1a) in shared, with
+    golden tests; hexagen barrels re-export it.
+  - Owned a files-scoped ban on `Math.random` / wall-clock `Date` via per-context
+    eslint templates on `shared` and `CampaignOrchestration`.
+- **Decisions:**
+  - Landed D14 through `bounded_contexts[].generator.eslint.template`, not a
+    hand-edit of generated `eslint.config.js` (hexagen would overwrite it).
+  - Excluded `PipelineExecutionLog.vo.ts` from the Date restriction rather than
+    injecting a clock.
+- **Left open:**
+  - Phase 0.3–0.6, Phase J, the planner.

@@ -12,6 +12,53 @@ export default tseslint.config(
     },
   },
   {
+    files: [
+      'src/domain/**/*.ts',
+      'src/domain/**/*.tsx',
+      'src/application/use-cases/PlanVariationsUseCase.use-case.ts',
+    ],
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Math',
+          property: 'random',
+          message: 'Use SeededRandom instead of Math.random in the deterministic core.',
+        },
+      ],
+    },
+  },
+  {
+    files: [
+      'src/domain/**/*.ts',
+      'src/domain/**/*.tsx',
+      'src/application/use-cases/PlanVariationsUseCase.use-case.ts',
+    ],
+    ignores: ['src/domain/value-objects/PipelineExecutionLog.vo.ts'],
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Math',
+          property: 'random',
+          message: 'Use SeededRandom instead of Math.random in the deterministic core.',
+        },
+        {
+          object: 'Date',
+          property: 'now',
+          message: 'Do not use the wall clock in the deterministic core; use SeededRandom.',
+        },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "NewExpression[callee.name='Date']",
+          message: 'Do not use the wall clock in the deterministic core; use SeededRandom.',
+        },
+      ],
+    },
+  },
+  {
     ignores: ['dist/**', 'node_modules/**'],
   },
 );
