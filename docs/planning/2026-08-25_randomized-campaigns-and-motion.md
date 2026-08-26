@@ -1,9 +1,9 @@
 # Randomized Campaigns, Motion Creatives & Create New Project — Architecture & Development Plan
 
 **Date:** 2026-08-25
-**Status:** Revised (decisions D1–D14 locked; two open questions) — supersedes the v1 draft of the same day
+**Status:** Revised v2.1 (decisions D1–D14 locked; one open question) — supersedes the v1 draft of the same day; v2.1 folds in the wave-1 code review (PRs #40–#42)
 **Scope:** `packages/CampaignOrchestration`, `packages/CreativeGeneration`, `packages/Distribution`, `packages/GovernanceAndCompliance`, `packages/shared`, `apps/api`, `apps/web`, `briefs/`, `.agents/`
-**Related:** `.agents/session-log.md` (2026-08-25 review + revision entries), `.agents/tech-stack.md`, `.agents/testing.md`
+**Related:** `.agents/session-log.md` (2026-08-25 review + revision entries; the C/H/M/L findings themselves are recorded in §2 of this document), `.agents/tech-stack.md`, `.agents/testing.md`
 
 > **Revision note.** This version incorporates four independent plan reviews (findings C1–C4, H1–H9, M1–M6, L1–L5 in §2) and three product decisions from the author (D1–D3). The most consequential corrections vs. the first draft: byte-level determinism is **not** promised for GenAI backgrounds or mp4 containers; a **job handle** moves into the MVP; variant identity is **`productId/variantIndex`** and is migrated across every consumer in one PR; new ports live in **CampaignOrchestration**, never in CreativeGeneration; `/brief` **stays an editor**; the parser **rejects** not-yet-supported axes instead of silently running the classic matrix.
 
@@ -13,12 +13,12 @@
 
 | ID | Decision | Consequence |
 |----|----------|-------------|
-| **D1** | **`ffmpeg-static`**, version pinned. No system ffmpeg. | Zero setup, same binary locally and in CI. GPL-licensed binary — note for client distribution. Row added to `.agents/tech-stack.md` in the same PR. Boot check *executes* the resolved binary; the "binary missing" story is a boot-check failure, not a wizard branch. |
+| **D1** | **`ffmpeg-static`**, version pinned. No system ffmpeg. | Zero setup, same binary locally and in CI. GPL-licensed binary — note for client distribution. Row added to `.agents/tech-stack.md` in the same PR. There is **no failing boot check today** (`env.ts` only warns); Phase 4.6 adds a Nitro plugin (`server/plugins/ffmpeg-check.ts`) that probes the binary once, **warns rather than crashes**, and flips the `formats: motion` allowlist off when it fails. The CLI gets the same probe in `bin/generate.ts`. |
 | **D2** | **No audio** in the motion MVP. | No BGM pool, no loudness, no muxing. Later: a locked `bgm` asset referenced from the brief. |
 | **D3** | **OpenRouter chat** (text model) for copy pools via a new adapter. | The existing image adapters (`OpenRouterImageGenerator`, `GeminiImageGenerator`) are not reusable for text. Gemini text is a possible second adapter, not a reuse. |
 | **D4** | **Determinism is tiered** (§3). Plan and composite are bit-stable; GenAI sources are cached and attributed; mp4 is frame-deterministic, container-approximate. | Golden tests assert on the plan JSON and canvas frames only. Never on GenAI pixels or mp4 bytes. |
 | **D5** | **Job handle in the MVP.** `POST /campaigns/generate` → `202 { jobId }` + `GET /campaigns/jobs/:id` polling; in-memory store; SSE optional later. | Nothing at N=100 ships on the synchronous POST (it already overran the Next proxy on a 12-cell demo). Classic mode uses the same path. |
-| **D6** | **Variant identity = `productId/variantIndex`** in variation mode; `seed` is provenance. Classic key `productId/aspectRatio/treatment` unchanged. | One PR migrates `report.ts keyOf`, `run-context assetKey`, `RegenerationTarget` + `parseRegenerateOnly`, grid, export, `bin/generate.ts`. Merge is golden-tested. |
+| **D6** | **Variant identity = `productId/variantIndex`** in variation mode; `seed` is provenance. Classic key `productId/aspectRatio/treatment` unchanged. | One PR migrates every consumer: `GenerateCampaignUseCase` **target matcher** (`targetKeys`), `RegenerationTarget` in the **inbound port** `ports/in/CampaignPipelinePort.ts` (so the inbound port *does* change — 2.4 amended), `report.ts keyOf` **and `isKeyable`**, `run-context assetKey`, `parseRegenerateOnly`, grid, export, runs and compliance pages. The CLI builds no keys and is untouched. Merge is golden-tested. |
 | **D7** | **Ports live in `CampaignOrchestration/application/ports/out`.** `VideoCompositorPort`, `CopyGeneratorPort` sit beside `CompositorPort`. Adapters stay in CreativeGeneration. | Matches current law (CreativeGeneration's `ports/` dirs are empty by design); `hexagen arch validate` stays green. |
 | **D8** | **Parser allowlist.** `parseBrief` validates v2 fields against `SUPPORTED_AXES` / `SUPPORTED_FORMATS` that grow as phases land; unsupported values are a 400. | A variation brief can never silently run as the classic matrix. Schema ships in P0 without implying pools or motion exist. |
 | **D9** | **`/brief` stays the in-memory editor** and gains *Save to briefs/*. The wizard at `(shell)/new` authors from scratch. | The current tweak → Run HITL loop is preserved. |
@@ -26,7 +26,7 @@
 | **D11** | **Packaging never re-renders.** Platform profiles map onto the three existing canvases; safe insets are applied at *generation* as the union of insets for platforms sharing a ratio; classic briefs pass zeros. | No 100 × 7 explosion; classic output byte-identical (snapshot-guarded). 4:5 is a later `AspectRatio` extension. Reels/TikTok/Shorts listed only after motion (P4). |
 | **D12** | **Brand floor is static across `t`.** Motion moves background and headline only; accent band and logo never animate. | Per-frame density holds by construction; compliance samples frames as a regression guard. No per-frame logo-localisation ("logo-hold") detector is invented. |
 | **D13** | **Planner fails loud.** `count` is the total; distance is Hamming over discrete axes (continuous axes are enumerated steps); over-generate to `count × 3`; if accepted < `count` the plan fails with the shortfall and the axis-product size. Re-roll is `replan(plan, index, attempt)` inside the planner. | Never emits near-duplicates; re-roll stays golden-tested and distance-checked. |
-| **D14** | **Lint rule is scoped.** `no-restricted-properties` for `Math.random` / `Date` applies to `CampaignOrchestration/domain/**`, the planner use case, and `shared/domain/**` only. | `PipelineExecutionLog` (`new Date()`) and Firefly IMS expiry (`Date.now()`) keep working. |
+| **D14** | **Lint rule is scoped and owned once.** The ban lives in a root `eslint.deterministic-core.js` fragment, spread into every bounded context's generated `eslint.config.js` through the hexagen **workspace-default** eslint template (CampaignOrchestration's per-context override widens it to `src/application/use-cases/**` and exempts `PipelineExecutionLog.vo.ts`). Covers `Math.random`, `Date.now`, bare `Date()`, zero-arg `new Date()`, `performance.now`, `crypto.randomUUID`/`getRandomValues`, and `globalThis.*` escapes; `__tests__` excluded; `new Date(value)` allowed. | Firefly IMS expiry (`Date.now()`, infrastructure) is outside the scope. `PipelineExecutionLog` keeps its clock by explicit filename exemption — injecting a clock is a follow-up, not part of wave 1. *(Landed in PR #41.)* |
 
 ---
 
@@ -165,6 +165,8 @@ interface CopyGeneratorPort { suggestHeadlines(brief: CampaignBrief, count: numb
 
 ## 5. Phased Implementation Plan
 
+> **Wave 1 status (2026-08-25):** P0 (#41 seed + lint, #40 schema v2) and J (#42 job handle) are implemented and reviewed; the task rows below reflect what landed, including the review fixes. Deferred from the wave-1 review, tracked for later PRs: inject a clock into `PipelineExecutionLog` (D14 note); collapse the four test fetch-router fixtures in `apps/web` into one `mockPipelineApi` helper; real `done/total` progress from the pipeline log (the fields stay 0 until completion by design in J).
+
 Phases are atomic and independently mergeable. **P0 → J → P2 → P1 → P5 → P6 (partial) is the MVP** (randomized static campaigns, authored in the UI, packaged per platform). P4 (motion) and P3 (pools) are independent follow-on trains.
 
 ---
@@ -175,9 +177,10 @@ Phases are atomic and independently mergeable. **P0 → J → P2 → P1 → P5 �
 | # | Task | File(s) |
 |---|------|---------|
 | 0.1 | `SeededRandom` VO + `seedFrom`; `yarn sync`; commit barrels. | `packages/shared/src/domain/value-objects/SeededRandom.vo.ts` |
-| 0.2 | **(D14)** Scoped `no-restricted-properties` rule for `Math.random` / `Date`. | `packages/CampaignOrchestration/eslint.config.js`, `packages/shared/eslint.config.js` |
+| 0.2 | **(D14)** Deterministic-core lint fragment + hexagen templates (workspace default + CampaignOrchestration override). Package `eslint.config.js` files stay `@generated`. | `eslint.deterministic-core.js`, `.architecture/manifest.yaml` |
 | 0.3 | `CampaignBrief` gains optional `mode`, `variation`, `output`. | `CampaignOrchestration/src/domain/entities/CampaignBrief.ts` |
-| 0.4 | **(D8, H3)** `parseBrief` validates v2 blocks against `SUPPORTED_AXES` / `SUPPORTED_FORMATS`; unsupported → throws (400). | `apps/api/server/lib/load-brief.ts` |
+| 0.4 | **(D8, H3)** `parseBrief` validates v2 blocks against `SUPPORTED_AXES` / `SUPPORTED_FORMATS`; unsupported → throws (400). `variation.count` is required when `mode: variation`. | `apps/api/server/lib/load-brief.ts` |
+| 0.4b | **(D8)** `runCampaign` refuses `mode: variation` (API 422, CLI failure) until Phase 2 consumes the policy — parse-but-never-run. Removed in 2.4. | `apps/api/server/lib/pipeline.ts` |
 | 0.5 | `?model=` vs `genai` axis: axis decides *whether*, `?model=` decides *which provider*. `paletteShift` applied only by `ProceduralBackgroundGenerator`. Document in `pipeline.ts`. | `apps/api/server/lib/pipeline.ts` |
 | 0.6 | Sample brief (static axes only). | `briefs/sample-randomized.yaml` |
 
@@ -190,9 +193,9 @@ Phases are atomic and independently mergeable. **P0 → J → P2 → P1 → P5 �
 
 | # | Task | File(s) |
 |---|------|---------|
-| J.1 | `POST /campaigns/generate` → `202 { jobId }`; run continues in-process; `writeReport` on completion. | `apps/api/server/routes/campaigns/generate.post.ts`, `apps/api/server/lib/jobs.ts` |
+| J.1 | `POST /campaigns/generate` → `202 { jobId }`; run continues in-process; `writeReport` on completion. **409** while that campaign already has a running job (no concurrent writers to the same paths). Store capped at `MAX_JOBS = 50`, settled jobs expire after `JOB_TTL_MS` (unref'd timer). | `apps/api/server/routes/campaigns/generate.post.ts`, `apps/api/server/lib/jobs.ts` |
 | J.2 | `GET /campaigns/jobs/:id` → `{ status, done, total, log, result? }`; 404 for unknown (restart). | `apps/api/server/routes/campaigns/jobs/[id].get.ts` |
-| J.3 | `run-context` polls; on 404 recovers from `GET /campaigns/result`. Classic mode uses the same path. | `apps/web/src/lib/run-context.tsx` |
+| J.3 | `run-context` polls with backoff (250 ms → 2 s), tolerates up to five transient non-OK polls, and owns an `AbortController` per run (aborted on brief switch, unmount, new run). A 404 is reported as **lost**, never as a result: the saved report is shown *as the previous run* (no cache-bust, decisions kept, explicit message); a lost re-roll leaves the grid untouched. One `fetchPersistedRun()` serves mount, `setBrief`, and recovery. | `apps/web/src/lib/run-context.tsx` |
 | J.4 | `bin/generate.ts` unchanged (in-process, no job). | — |
 
 **Acceptance:** a 12-cell classic run completes through the job path; killing Nitro mid-run and reloading the page shows the last persisted report, not a spinner.
@@ -207,8 +210,8 @@ Phases are atomic and independently mergeable. **P0 → J → P2 → P1 → P5 �
 | 2.1 | `VariationPolicy`, `Variant`, `VariationPlan`, `MotionKind` (kinds declared, unused until P4). | `CampaignOrchestration/src/domain/**` |
 | 2.2 | **(D13, C3)** `PlanVariationsUseCase.plan(brief)`: coverage minimums first, then seeded draws to `count × 3`, greedy-accept at `minDistance`, fail with shortfall + axis-product size. `estimate = { creatives, feasibility, genaiCalls }`. | `CampaignOrchestration/src/application/use-cases/PlanVariationsUseCase.use-case.ts` |
 | 2.3 | `replan(plan, index, attempt)` — re-draws one slot at `seedFrom(id, index, attempt)`, distance-checked against the rest. | same |
-| 2.4 | `GenerateCampaignUseCase`: when `mode === "variation"` call the planner internally; cells = variants; `MINIMUM_PRODUCTS` → 1 in that mode (D10). Inbound port unchanged. | `GenerateCampaignUseCase.use-case.ts` |
-| 2.5 | **(D6, C2)** Identity migration: `GeneratedAsset` fields; `keyOf` / `assetKey` branch on `variantIndex`; `RegenerationTarget` + `parseRegenerateOnly` accept `variantIndex` + `attempt`; grid, export, CLI. Output path `<product>/<ratio>/v<index>.png`. | `report.ts`, `run-context.tsx`, `load-brief.ts`, `grid/page.tsx`, `export/page.tsx`, `bin/generate.ts` |
+| 2.4 | `GenerateCampaignUseCase`: when `mode === "variation"` call the planner internally; cells = variants; `MINIMUM_PRODUCTS` → 1 in that mode (D10). Remove the 0.4b refusal. `execute(brief, options)` keeps its signature; `RegenerationTarget` on the inbound port widens (see 2.5). | `GenerateCampaignUseCase.use-case.ts`, `pipeline.ts` |
+| 2.5 | **(D6, C2)** Identity migration: `GeneratedAsset` fields; the use case's `targetKeys` matcher; `RegenerationTarget` (inbound port) + `parseRegenerateOnly` accept `variantIndex` + `attempt`; `keyOf` **and `isKeyable`** / `assetKey` branch on `variantIndex`; grid, export, runs, compliance pages. Output path `<product>/<ratio>/v<index>.png`. | `GenerateCampaignUseCase.use-case.ts`, `ports/in/CampaignPipelinePort.ts`, `report.ts`, `run-context.tsx`, `load-brief.ts`, `grid/page.tsx`, `export/page.tsx`, `runs/page.tsx`, `compliance/page.tsx` |
 | 2.6 | GenAI cache: `BackgroundContext.seed`; Firefly/Gemini/OpenRouter adapters hash `(provider, model, prompt, ratio, seed)` → `output/cache/<key>.png`; descriptor records hit/miss. `.gitignore` `output/cache`. | `CreativeGeneration/src/infrastructure/adapters/*ImageGenerator.ts`, `.gitignore` |
 | 2.7 | Report gains `policyHash`, `seed`; Runs page shows them. | `report.ts`, `runs/page.tsx` |
 
@@ -225,7 +228,7 @@ Phases are atomic and independently mergeable. **P0 → J → P2 → P1 → P5 �
 | 1.2 | **(H7)** `POST /campaigns/assets`: writes only under `assets/inputs/<briefId>/`; png/jpg; size cap; refuses seeded demo logos. Local-tool trust model stated in the route doc. | `apps/api/server/routes/campaigns/assets.post.ts` |
 | 1.3 | **(D9)** `/brief` keeps editing in memory; adds **Save to briefs/**. | `apps/web/src/app/(shell)/brief/page.tsx` |
 | 1.4 | `BriefPicker`: **Create new** row, **Duplicate** per entry. | `apps/web/src/components/shell/BriefPicker.tsx` |
-| 1.5 | Wizard `(shell)/new`: Campaign type → Brand & products → Copy → Variation policy → Output → Review. Randomized type enabled only when P2 is merged; "Generate suggestions" hidden until P3. | `apps/web/src/app/(shell)/new/page.tsx`, `components/wizard/*` |
+| 1.5 | Wizard `(shell)/new`: Campaign type → Brand & products → Copy → Variation policy → Output → Review. P2 lands first, so the Randomized type is live from the start; "Generate suggestions" hidden until P3. | `apps/web/src/app/(shell)/new/page.tsx`, `components/wizard/*` |
 | 1.6 | Estimate + feasibility panel in the policy step (from `PlanVariationsUseCase.estimate` via `POST /campaigns/plan`, dry-run). | `apps/api/server/routes/campaigns/plan.post.ts`, wizard |
 
 **Acceptance:** a brief authored in the wizard round-trips through `GET /campaigns/briefs` and runs; a one-product variation brief saves and runs; a one-product classic brief is blocked with the existing message; upload outside `assets/inputs/<briefId>/` is impossible by construction (route test).
@@ -268,11 +271,11 @@ Phases are atomic and independently mergeable. **P0 → J → P2 → P1 → P5 �
 | 4.1 | **(D7)** `VideoCompositorPort` beside `CompositorPort`; export from `ports/out/index.ts`. | `CampaignOrchestration/src/application/ports/out/VideoCompositorPort.ts` |
 | 4.2 | **(H8)** Refactor: `prepareCreative(request)` loads background + logo once → `drawCreative(ctx, prepared, t)`; still path renders the rest pose (`t = 1`; each `MotionKind` declares its rest). **Byte-identical stills** are the PR's acceptance test. Own PR, no other change. | `NodeCanvasCompositor.ts` |
 | 4.3 | **(D12)** Motion moves background and headline only; accent band and logo static for all `t`. | `NodeCanvasCompositor.ts`, `MotionKind.vo.ts` |
-| 4.4 | `CanvasFfmpegVideoCompositor`: frame loop → raw RGBA piped to `ffmpeg-static`; `-r fps -pix_fmt yuv420p -c:v libx264 -preset veryfast -crf 20 -movflags +faststart -map_metadata -1`; poster = rest frame; `sampledFrames` at `sampleAt`. | `CreativeGeneration/src/infrastructure/adapters/CanvasFfmpegVideoCompositor.ts` |
+| 4.4 | `CanvasFfmpegVideoCompositor`: frame loop → raw RGBA piped to `ffmpeg-static`. Input side is mandatory for a raw pipe: `-f rawvideo -pix_fmt rgba -s <w>x<h> -framerate <fps> -i -`; output: `-c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 20 -movflags +faststart -map_metadata -1 -f mp4`. Poster = rest frame; `sampledFrames` at `sampleAt`. | `CreativeGeneration/src/infrastructure/adapters/CanvasFfmpegVideoCompositor.ts` |
 | 4.5 | **(M2)** Perf spike before scoping 4.4: measure frames/s on a laptop; encode pool starts at 2 (canvas raster is the bottleneck, not ffmpeg). Budget: 10 × 6 s 9:16 variants < 3 min, else default fps 24. | spike branch; numbers into this doc |
-| 4.6 | **(D1, L1)** Boot check executes the binary; `.mp4` in the output content-type map; `ffmpeg-static` row + GPL note in `.agents/tech-stack.md`. | `apps/api/server/lib/env.ts`, `routes/output/[...path].get.ts`, `.agents/tech-stack.md`, `apps/api/package.json` |
+| 4.6 | **(D1, L1)** Nitro plugin probes the binary once (warn, don't crash; disables `formats: motion`); same probe in the CLI; `.mp4` in the output content-type map; `ffmpeg-static` row + GPL note in `.agents/tech-stack.md`. | `apps/api/server/plugins/ffmpeg-check.ts`, `apps/api/bin/generate.ts`, `routes/output/[...path].get.ts`, `.agents/tech-stack.md`, `apps/api/package.json` |
 | 4.7 | Compliance samples `sampledFrames` with `validateBrandColorDensity`; `ExportPort.saveToDirectory` reused for `.mp4`; proof uses the poster. Generate sets `sampleAt`. | `GenerateCampaignUseCase.use-case.ts` |
-| 4.8 | Schema allowlist gains `motion`, `duration`, `formats: motion`; profiles with `formats: [motion]` become visible. | `load-brief.ts`, `PlatformProfile.vo.ts` |
+| 4.8 | Schema allowlist gains `motion`, `duration`, `formats: motion`. Making motion platform profiles visible **depends on P5 5.1** (`PlatformProfile.vo.ts` does not exist before it) — that half ships after P5. | `load-brief.ts`, (`PlatformProfile.vo.ts` after P5) |
 | 4.9 | Grid video cells (poster + hover-play); estimate gains frames/encode minutes. | `grid/page.tsx`, `CommandBar.tsx` |
 
 **Acceptance:** 4.2 lands with zero snapshot diffs; ffmpeg smoke test produces a playable mp4 (skipped when the binary cannot execute); sampled-frame density ≥ threshold for every `MotionKind`.
@@ -310,7 +313,7 @@ P0 (seed + schema allowlist)
       └── P2 (planner + generate-from-plan + identity)
            ├── P1 (briefs API + wizard) ── P5 (packaging) ── P6 (grid/estimate)   = MVP
            │        └── P3 (pools)
-           └── P4 (drawCreative → port + ffmpeg adapter → video cells)
+           └── P4 (drawCreative → port + ffmpeg adapter → video cells; 4.8's profile half waits for P5)
 ```
 
 ---
@@ -333,10 +336,9 @@ P0 (seed + schema allowlist)
 
 | ID | Question | Blocks |
 |----|----------|--------|
-| **Q1** | Offer reels/TikTok/Shorts in the static MVP? They map to 9:16 stills today. **Recommendation: no** — hide until P4 (already the default in 5.1). | Nothing; confirms 5.1 |
 | **Q2** | When to add a 4:5 `AspectRatio` (Instagram feed native)? It touches the compositor matrix and every product's render count. | A later Phase 5 extension only |
 
-*Resolved:* ffmpeg (D1), audio (D2), copy provider (D3), GenAI video (deferred to a Phase 8 `VideoGeneratorPort` behind the same opt-in pattern as `FireflyImageGenerator`).
+*Resolved:* ffmpeg (D1), audio (D2), copy provider (D3), GenAI video (deferred to a Phase 8 `VideoGeneratorPort` behind the same opt-in pattern as `FireflyImageGenerator`), reels/TikTok/Shorts in the static MVP (no — D11 and 5.1 hide them until P4).
 
 ---
 
@@ -344,7 +346,7 @@ P0 (seed + schema allowlist)
 
 - **Determinism expectations.** Tier 3 will surprise anyone who reads "seeded" as "byte-identical everywhere". The report's cache key and `policyHash` are the answer; the README modes section must say it plainly.
 - **Identity migration blast radius.** Six consumers in one PR. Mitigation: classic key untouched, fixture reports for both shapes, merge golden test.
-- **Planner feasibility at high counts.** The sample policy has ~48 discrete combos against `count: 100`; the estimate will show infeasible until more axes are unlocked or `count` drops. That is the feature working.
+- **Planner feasibility at high counts.** The §4.1 sample's static axes give 2 × 2 × 3 × 3 = 36 discrete combos (432 once motion and duration unlock) against `count: 100`; the estimate will show infeasible until more axes are unlocked or `count` drops. That is the feature working.
 - **Motion throughput.** 3.7 GB raw per 15 s variant through a pipe. The spike (4.5) decides fps default and pool size before code is scoped; do not skip it.
 - **GenAI cost.** Opt-in axis + estimate + cache. Keys present ⇒ cost warning in the panel.
 - **Scope creep from MoneyPrinterTurbo** (narration, subtitles, stock footage, BGM). Out. Revisit only after P4 ships.
