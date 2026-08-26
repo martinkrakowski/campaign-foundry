@@ -306,3 +306,26 @@ To keep this file out of version control, add `.agents/session-log.md` to
     rejected without a header scan.
 - **Left open:**
   - Phase 1.3–1.6 UI (Save to briefs/, BriefPicker create/duplicate, wizard).
+
+## 2026-08-25 — briefs API review fixes (PR #47)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `findBriefFileById`: POST/PUT/duplicate key off `brief.id` (filename may differ)
+    and rewrite the found file in its own format (JSON vs yaml). README examples
+    use `summer-hydration-2026` / `winter-summit-2026`.
+  - Creates use `writeFile(..., { flag: "wx" })` (EEXIST → 409). Rewrites `lstat`
+    and 400 if the target is a symlink. Asset uploads 413 on encoded size before
+    decode as well as after.
+  - `dumpBrief` orders known keys then emits remaining ones. `?replace=1` uses
+    the first query value when repeated.
+  - Shared `assertSafeId`, `errorMessage` on the new routes, `briefs.get.ts`
+    uses `briefsDir()` + `BRIEF_SOURCE_EXTS`, output GET uses `resolveConfined`.
+    Dropped `briefFileName` and the JSON-only PUT 404.
+- **Decisions:**
+  - PUT rewrites json in place (dropped "JSON briefs must be replaced via POST").
+  - YAML comments lost on PUT is inherent to re-serialising — documented on PUT.
+  - Left as-is: duplicate keeps source `logoPath` (shared inputs), YAML scalar
+    coercion, `withTempProjectRoot` test helper.
+- **Left open:**
+  - Phase 1.3–1.6 UI.
