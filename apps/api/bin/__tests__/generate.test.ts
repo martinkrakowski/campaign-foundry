@@ -1,5 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -13,6 +15,19 @@ vi.mock("../../server/lib/capabilities.js", async (importOriginal) => {
 });
 
 import { main } from "../generate.js";
+
+// Same guard as the CanvasFfmpegVideoCompositor adapter tests: the motion
+// integration test encodes through the real ffmpeg-static binary and must skip
+// (not fail) on a host where it cannot execute — but never silently on CI.
+const require = createRequire(import.meta.url);
+const ffmpegStatic = require("ffmpeg-static") as string | null;
+const ffmpegProbe = ffmpegStatic
+  ? spawnSync(ffmpegStatic, ["-version"], { encoding: "utf8", timeout: 5_000 })
+  : undefined;
+const ffmpegOk = ffmpegProbe?.status === 0;
+const skipReason = ffmpegOk
+  ? undefined
+  : `ffmpeg-static binary cannot execute${ffmpegProbe?.error ? ` (${ffmpegProbe.error.message})` : ffmpegProbe ? ` (exited ${ffmpegProbe.status})` : " (path is null)"}`;
 
 const KEYS = ["GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY"];
 
@@ -93,30 +108,38 @@ describe("generate CLI main()", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  test("integration: a motion brief writes mp4 + poster through the real ffmpeg-static encoder", async () => {
-    const path = join(dir, "motion.json");
-    writeFileSync(
-      path,
-      briefJson({
-        id: "motion",
-        mode: "variation",
-        variation: { count: 1, seed: 1, axes: { motion: ["accent-wipe"], duration: [2], layout: ["headline-bottom"], tone: ["bold"] } },
-        output: { formats: ["motion"], platforms: ["instagram-reel"] },
-      }),
-    );
-    await main(path);
-    expect(process.exitCode).not.toBe(1);
-    const report = JSON.parse(readFileSync(resolve(dir, "reports", "motion.json"), "utf8")) as {
-      assets: Array<{ outputPath: string; videoPath?: string; format?: string; durationSec?: number }>;
-    };
-    expect(report.assets).toHaveLength(1);
-    const [asset] = report.assets;
-    expect(asset).toMatchObject({ format: "motion", durationSec: 2 });
-    expect(asset.videoPath).toMatch(/\/v0\.mp4$/);
-    expect(existsSync(resolve(dir, asset.videoPath!))).toBe(true);
-    expect(existsSync(resolve(dir, asset.outputPath))).toBe(true);
-    expect(vi.mocked(console.log).mock.calls.flat().join("\n")).toMatch(/v0\.mp4 \(\+poster\)/);
-  }, 60_000);
+  test.runIf(process.env.CI)("the ffmpeg-static binary executes on CI", () => {
+    expect(ffmpegOk, skipReason).toBe(true);
+  });
+
+  test.skipIf(!ffmpegOk)(
+    skipReason ?? "integration: a motion brief writes mp4 + poster through the real ffmpeg-static encoder",
+    async () => {
+      const path = join(dir, "motion.json");
+      writeFileSync(
+        path,
+        briefJson({
+          id: "motion",
+          mode: "variation",
+          variation: { count: 1, seed: 1, axes: { motion: ["accent-wipe"], duration: [2], layout: ["headline-bottom"], tone: ["bold"] } },
+          output: { formats: ["motion"], platforms: ["instagram-reel"] },
+        }),
+      );
+      await main(path);
+      expect(process.exitCode).not.toBe(1);
+      const report = JSON.parse(readFileSync(resolve(dir, "reports", "motion.json"), "utf8")) as {
+        assets: Array<{ outputPath: string; videoPath?: string; format?: string; durationSec?: number }>;
+      };
+      expect(report.assets).toHaveLength(1);
+      const [asset] = report.assets;
+      expect(asset).toMatchObject({ format: "motion", durationSec: 2 });
+      expect(asset.videoPath).toMatch(/\/v0\.mp4$/);
+      expect(existsSync(resolve(dir, asset.videoPath!))).toBe(true);
+      expect(existsSync(resolve(dir, asset.outputPath))).toBe(true);
+      expect(vi.mocked(console.log).mock.calls.flat().join("\n")).toMatch(/v0\.mp4 \(\+poster\)/);
+    },
+    60_000,
+  );
 
   test("warns on a failed ffmpeg probe without changing the exit code", async () => {
     probeMock.mockResolvedValueOnce({ motion: false, reason: "no binary" });
