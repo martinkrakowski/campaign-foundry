@@ -159,8 +159,12 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
       finished.catch(() => {}); // observed below via race; keep a late error from going unhandled
 
       // Wall-clock budget: SIGTERM at expiry, SIGKILL if the child is still around
-      // after the grace period. The race below rejects immediately either way so a
-      // hung ffmpeg (or a stdin that never drains) cannot hold the gate forever.
+      // after the grace period. The races below stop waiting on the write and the
+      // exit code at expiry, so a hung ffmpeg (or a stdin that never drains) cannot
+      // hold the gate forever — but the gate is released and the work dir removed
+      // only once the child has actually closed (see `finally`), so no more than
+      // MAX_CONCURRENT_ENCODES ffmpeg processes ever exist and a live encoder never
+      // races the cleanup.
       const timeout = encodeTimeout(child, this.encodeTimeoutMs, this.killGraceMs);
 
       let writeError: unknown;
@@ -178,6 +182,9 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
         throw new Error(formatFfmpegFailure(error instanceof Error ? error.message : String(error), ffmpegPath));
       } finally {
         timeout.clear();
+        // SIGTERM → SIGKILL guarantees the child exits; wait for that exit (a
+        // spawn error has already settled `finished`) before the outer cleanup.
+        await finished.catch(() => {});
       }
 
       if (code !== 0) {

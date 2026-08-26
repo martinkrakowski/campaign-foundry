@@ -461,24 +461,74 @@ describe("CanvasFfmpegVideoCompositor", () => {
     expect(out.video.byteLength).toBeGreaterThan(0);
   });
 
-  test("kills a hung ffmpeg after encodeTimeoutMs, escalates to SIGKILL, and releases the gate", async () => {
+  test("kills a hung ffmpeg after encodeTimeoutMs, escalates to SIGKILL, and rejects only once the child has closed", async () => {
     const signals: NodeJS.Signals[] = [];
+    let closed = false;
+    const spawn: FfmpegSpawn = (command, args, options) => {
+      // Exits only on SIGKILL — SIGTERM is ignored, as a wedged encoder would.
+      const inner = fakeFfmpeg({ hang: true, signals, closeOnSignal: "SIGKILL" })(command, args, options);
+      inner.once("close", () => {
+        closed = true;
+      });
+      return inner;
+    };
     const compositor = new CanvasFfmpegVideoCompositor({
-      spawn: fakeFfmpeg({ hang: true, signals }),
+      spawn,
       ffmpegPath: "/opt/ffmpeg",
       encodeTimeoutMs: 40,
       killGraceMs: 20,
     });
     await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(/ffmpeg encode timed out after 40ms/);
-    expect(signals).toEqual(["SIGTERM"]);
-    await new Promise((r) => setTimeout(r, 40));
+    // The rejection waited for the escalation and the close: no live child is left behind.
     expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(closed).toBe(true);
 
     // Gate released: two healthy encodes still run concurrently afterwards.
     const healthy = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
     await expect(
       Promise.all([healthy.compositeVideo(videoRequest({ sampleAt: [] })), healthy.compositeVideo(videoRequest({ sampleAt: [] }))]),
     ).resolves.toHaveLength(2);
+  });
+
+  test("a timed-out encode holds its gate slot until the child closes, so MAX_CONCURRENT_ENCODES is never exceeded", async () => {
+    const hungSignals: NodeJS.Signals[][] = [];
+    let live = 0;
+    let maxLive = 0;
+    let liveWhenHealthySpawned = -1;
+    const track = (proc: ReturnType<FfmpegSpawn>): ReturnType<FfmpegSpawn> => {
+      live += 1;
+      maxLive = Math.max(maxLive, live);
+      proc.once("close", () => {
+        live -= 1;
+      });
+      return proc;
+    };
+    const hung: FfmpegSpawn = (command, args, options) => {
+      const signals: NodeJS.Signals[] = [];
+      hungSignals.push(signals);
+      return track(fakeFfmpeg({ hang: true, signals, closeOnSignal: "SIGKILL" })(command, args, options));
+    };
+    const healthySpawn: FfmpegSpawn = (command, args, options) => {
+      liveWhenHealthySpawned = live;
+      return track(fakeFfmpeg({})(command, args, options));
+    };
+    const hungCompositor = new CanvasFfmpegVideoCompositor({ spawn: hung, ffmpegPath: "/opt/ffmpeg", encodeTimeoutMs: 40, killGraceMs: 20 });
+    const healthy = new CanvasFfmpegVideoCompositor({ spawn: healthySpawn, ffmpegPath: "/opt/ffmpeg" });
+
+    // Two hung encodes fill the pool; the healthy one must wait for a real exit.
+    const results = await Promise.allSettled([
+      hungCompositor.compositeVideo(videoRequest()),
+      hungCompositor.compositeVideo(videoRequest()),
+      healthy.compositeVideo(videoRequest({ sampleAt: [] })),
+    ]);
+    expect(results.map((r) => r.status)).toEqual(["rejected", "rejected", "fulfilled"]);
+    expect(hungSignals).toEqual([
+      ["SIGTERM", "SIGKILL"],
+      ["SIGTERM", "SIGKILL"],
+    ]);
+    expect(maxLive).toBe(MAX_CONCURRENT_ENCODES);
+    // The healthy child spawned only after at least one hung child had closed.
+    expect(liveWhenHealthySpawned).toBeLessThan(MAX_CONCURRENT_ENCODES);
   });
 
   test("does not SIGKILL a child that exits on SIGTERM", async () => {
@@ -497,7 +547,7 @@ describe("CanvasFfmpegVideoCompositor", () => {
   test("times out when frames are written but ffmpeg never closes", async () => {
     // The hung fake drains stdin, so every frame is written before the wait on close.
     const compositor = new CanvasFfmpegVideoCompositor({
-      spawn: fakeFfmpeg({ hang: true }),
+      spawn: fakeFfmpeg({ hang: true, closeOnSignal: "SIGKILL" }),
       ffmpegPath: "/opt/ffmpeg",
       encodeTimeoutMs: 60,
       killGraceMs: 5,
