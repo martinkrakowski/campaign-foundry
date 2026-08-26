@@ -94,10 +94,14 @@ describe("validateStep", () => {
     ).toMatch(/2\^32/);
     expect(
       validateStep("policy", { ...base, variation: { ...base.variation, minDistance: "-1" } }).minDistance,
-    ).toMatch(/\[0, 6\]/);
+    ).toMatch(/\[0, 7\]/);
+    expect(
+      validateStep("policy", { ...base, variation: { ...base.variation, minDistance: "8" } }).minDistance,
+    ).toMatch(/\[0, 7\]/);
     expect(
       validateStep("policy", { ...base, variation: { ...base.variation, minDistance: "7" } }).minDistance,
-    ).toMatch(/\[0, 6\]/);
+    ).toBeUndefined();
+
     expect(
       validateStep("policy", { ...base, variation: { ...base.variation, perProduct: "1.5" } }).perProduct,
     ).toMatch(/integer/);

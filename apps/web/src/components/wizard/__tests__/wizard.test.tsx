@@ -15,13 +15,60 @@ beforeEach(() => {
 
 const estimate = { creatives: 12, axisProductSize: 36, feasible: true, genaiCalls: 0 };
 
+type PoolEntry = { id: string; text: string; status: "approved" | "rejected"; reason?: string };
+
+const poolOf = (entries: PoolEntry[]) => ({
+  briefId: "camp-one",
+  generatedAt: "2026-01-01T00:00:00.000Z",
+  model: "m",
+  entries,
+});
+
+/**
+ * In-memory copy pool behind the pools routes: GET (404 until generated), POST
+ * generate (adds `next` entries, or a fixed reply), PATCH approve/reject/edit
+ * (an edit containing "miracle" is rejected by the fake legal gate).
+ */
+const fakePoolApi = (opts: { initial?: PoolEntry[] | null; generate?: () => Response; patch?: () => Response } = {}) => {
+  let entries: PoolEntry[] | null = opts.initial ?? null;
+  const calls: Array<{ method: string; body: unknown }> = [];
+  const handle = (url: string, init: RequestInit): Response | undefined => {
+    if (!url.includes("/campaigns/pools")) return undefined;
+    const method = init.method ?? "GET";
+    const body = init.body === undefined ? undefined : (JSON.parse(String(init.body)) as unknown);
+    calls.push({ method, body });
+    if (method === "GET") return entries === null ? json({ error: "not found" }, 404) : json({ pool: poolOf(entries) });
+    if (method === "POST") {
+      if (opts.generate) return opts.generate();
+      const n = entries?.length ?? 0;
+      entries = [...(entries ?? []), { id: `h${n + 1}`, text: `Suggested ${n + 1}`, status: "approved" }];
+      return json({ pool: poolOf(entries), added: 1 }, 201);
+    }
+    if (opts.patch) return opts.patch();
+    const patches = (body as { entries: Array<{ id: string; status: "approved" | "rejected"; text?: string }> }).entries;
+    entries = (entries ?? []).map((entry) => {
+      const patch = patches.find((p) => p.id === entry.id);
+      if (!patch) return entry;
+      const text = patch.text ?? entry.text;
+      if (text.includes("miracle")) return { id: entry.id, text, status: "rejected", reason: "Prohibited terminology: miracle" };
+      return { id: entry.id, text, status: patch.status };
+    });
+    return json({ pool: poolOf(entries) });
+  };
+  return { handle, calls, entries: () => entries };
+};
+
 const routeWizardApi = (opts: {
   plan?: (url: string, init: RequestInit) => Response | Promise<Response>;
   brief?: (url: string, init: RequestInit) => Response;
   asset?: (url: string, init: RequestInit) => Response | Promise<Response>;
-} = {}) =>
-  mockPipelineApi({
+  pool?: ReturnType<typeof fakePoolApi>;
+} = {}) => {
+  const base = mockPipelineApi({
+    result: (url) => opts.pool?.handle(url, {}) ?? json({ error: "not found" }, 404),
     post: (url, init) => {
+      const pooled = opts.pool?.handle(url, init);
+      if (pooled) return pooled;
       if (url.includes("/campaigns/plan")) {
         return opts.plan
           ? opts.plan(url, init)
@@ -40,6 +87,15 @@ const routeWizardApi = (opts: {
       return json({ jobId: "job-1" }, 202);
     },
   });
+  // mockPipelineApi only hands `init` to POST handlers; route PATCH (pool edits) here.
+  const inner = base.getMockImplementation();
+  base.mockImplementation((url, init) => {
+    const req = (init ?? {}) as RequestInit;
+    const patched = req.method === "PATCH" ? opts.pool?.handle(String(url), req) : undefined;
+    return patched ? Promise.resolve(patched) : inner!(url, init);
+  });
+  return base;
+};
 
 async function fillType(user: UserEvent, mode: "Classic" | "Randomized", id = "camp-one") {
   await user.click(screen.getByRole("button", { name: new RegExp(`^${mode}`) }));
@@ -157,9 +213,9 @@ describe("Wizard", () => {
     expect(screen.getByText(/variation.seed must be an integer in \[0, 2\^32\)/)).toBeTruthy();
     await user.clear(screen.getByLabelText("Seed (optional)"));
     await user.clear(screen.getByLabelText("Min distance"));
-    await user.type(screen.getByLabelText("Min distance"), "7");
+    await user.type(screen.getByLabelText("Min distance"), "8");
     await user.click(screen.getByRole("button", { name: "Next" }));
-    expect(screen.getByText(/variation.minDistance must be an integer in \[0, 6\]/)).toBeTruthy();
+    expect(screen.getByText(/variation.minDistance must be an integer in \[0, 7\]/)).toBeTruthy();
     await user.clear(screen.getByLabelText("Min distance"));
     await user.type(screen.getByLabelText("Min distance"), "2");
     await user.click(screen.getByRole("button", { name: "headline-top" }));
@@ -391,6 +447,162 @@ describe("Wizard", () => {
     await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief"));
     expect(replaced).toBe(true);
     expect((posted[0] as { mode: string }).mode).toBe("variation");
+  });
+
+  test("headline pool: loads, generates, approves, rejects, edits, and unlocks the headline axis", async () => {
+    const user = userEvent.setup();
+    const pool = fakePoolApi();
+    const planned: unknown[] = [];
+    routeWizardApi({
+      pool,
+      plan: (_url, init) => {
+        const brief = JSON.parse(String(init.body)) as { variation: { axes: Record<string, unknown> } };
+        planned.push(brief.variation.axes.headline);
+        const pooled = brief.variation.axes.headline === "pool://copy";
+        return json({ policyHash: "h", seed: 1, estimate: { ...estimate, axisProductSize: pooled ? 72 : 36 }, variants: [] });
+      },
+    });
+    renderWithRun(<Wizard />);
+    await fillType(user, "Randomized");
+    await fillProducts(user);
+    expect(await screen.findByText("Headline pool (0 approved)")).toBeTruthy();
+    expect(screen.getByText("No headlines yet.")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Generate 10 suggestions" }));
+    expect(await screen.findByText("Suggested 1")).toBeTruthy();
+    expect(screen.getByText("Headline pool (1 approved)")).toBeTruthy();
+    expect(pool.calls.filter((c) => c.method === "POST")[0].body).toEqual({ briefId: "camp-one", count: 10 });
+
+    await user.click(screen.getByRole("button", { name: "Reject h1" }));
+    expect(await screen.findByText("Headline pool (0 approved)")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Approve h1" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Approve h1" }));
+    expect(await screen.findByText("Headline pool (1 approved)")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Edit h1" }));
+    await user.click(screen.getByRole("button", { name: "Cancel h1" }));
+    expect(screen.queryByRole("textbox", { name: "Edit h1" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Edit h1" }));
+    const editor = screen.getByLabelText("Edit h1");
+    await user.clear(editor);
+    expect((screen.getByRole("button", { name: "Save h1" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.type(editor, "A miracle cure");
+    await user.click(screen.getByRole("button", { name: "Save h1" }));
+    expect(await screen.findByText("Prohibited terminology: miracle")).toBeTruthy();
+    expect(screen.getByText("A miracle cure")).toBeTruthy();
+    expect(screen.getByText("Headline pool (0 approved)")).toBeTruthy();
+    expect(pool.calls.filter((c) => c.method === "PATCH").at(-1)?.body).toEqual({
+      entries: [{ id: "h1", status: "approved", text: "A miracle cure" }],
+    });
+    // A clean edit keeps the HITL rejection (legal passes, status untouched); approving then unlocks it.
+    await user.click(screen.getByRole("button", { name: "Edit h1" }));
+    await user.clear(screen.getByRole("textbox", { name: "Edit h1" }));
+    await user.type(screen.getByRole("textbox", { name: "Edit h1" }), "Fresh alpine water");
+    await user.click(screen.getByRole("button", { name: "Save h1" }));
+    expect(await screen.findByText("Fresh alpine water")).toBeTruthy();
+    expect(screen.queryByText("Prohibited terminology: miracle")).toBeNull();
+    expect(screen.getByText("Headline pool (0 approved)")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Approve h1" }));
+    expect(await screen.findByText("Headline pool (1 approved)")).toBeTruthy();
+
+    await fillCopy(user);
+    expect(screen.getByText("Variation policy")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("36")).toBeTruthy(), { timeout: PLAN_DEBOUNCE_MS + 1000 });
+    expect(screen.getByText("1 approved headline")).toBeTruthy();
+    const toggle = screen.getByRole("button", { name: "pool://copy" }) as HTMLButtonElement;
+    expect(toggle.disabled).toBe(false);
+    await user.click(toggle);
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    await waitFor(() => expect(screen.getByText("72")).toBeTruthy(), { timeout: PLAN_DEBOUNCE_MS + 1000 });
+    expect(planned.at(-1)).toBe("pool://copy");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText(/headline: "pool:\/\/copy"/)).toBeTruthy();
+  });
+
+  test("headline pool: the axis is blocked without an approved entry and generation is disabled on 503", async () => {
+    const user = userEvent.setup();
+    const pool = fakePoolApi({
+      initial: [{ id: "h1", text: "A miracle", status: "rejected", reason: "Prohibited terminology: miracle" }],
+      generate: () => json({ error: "OPENROUTER_API_KEY is not set" }, 503),
+    });
+    routeWizardApi({ pool });
+    renderWithRun(<Wizard />);
+    await fillType(user, "Randomized");
+    await fillProducts(user);
+    expect(await screen.findByText("A miracle")).toBeTruthy();
+    expect(screen.getByText("Prohibited terminology: miracle")).toBeTruthy();
+    const generate = screen.getByRole("button", { name: "Generate 10 suggestions" }) as HTMLButtonElement;
+    await user.click(generate);
+    expect(await screen.findByText("OPENROUTER_API_KEY is not set")).toBeTruthy();
+    expect(generate.disabled).toBe(true);
+
+    await fillCopy(user);
+    const toggle = screen.getByRole("button", { name: "pool://copy" }) as HTMLButtonElement;
+    expect(toggle.disabled).toBe(true);
+    expect(screen.getByText(/no approved entries/)).toBeTruthy();
+  });
+
+  test("headline pool: surfaces patch and load failures, pluralises the axis label", async () => {
+    const user = userEvent.setup();
+    const pool = fakePoolApi({
+      initial: [
+        { id: "h1", text: "Stay wild", status: "approved" },
+        { id: "h2", text: "Go far", status: "approved" },
+      ],
+      patch: () => json({ error: "disk full" }, 500),
+    });
+    routeWizardApi({ pool });
+    renderWithRun(<Wizard />);
+    await fillType(user, "Randomized");
+    await fillProducts(user);
+    expect(await screen.findByText("Stay wild")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Reject h1" }));
+    expect(await screen.findByText("disk full")).toBeTruthy();
+    expect(screen.getByText("Headline pool (2 approved)")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Edit h1" }));
+    await user.type(screen.getByRole("textbox", { name: "Edit h1" }), "!");
+    await user.click(screen.getByRole("button", { name: "Save h1" }));
+    expect(await screen.findAllByText("disk full")).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Edit h1" })).toBeTruthy();
+
+    await fillCopy(user);
+    expect(screen.getByText("2 approved headlines")).toBeTruthy();
+
+    mockPipelineApi({ result: () => json({ error: "boom" }, 500) });
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(await screen.findByText("boom")).toBeTruthy();
+  });
+
+  test("headline pool: ignores a load that settles after leaving the Copy step", async () => {
+    const user = userEvent.setup();
+    const pending: Array<{ resolve: (r: Response) => void; reject: (e: unknown) => void }> = [];
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/pools")
+          ? new Promise<Response>((resolve, reject) => {
+              pending.push({ resolve, reject });
+            })
+          : json({ halted: false, assets: [], log: null }),
+    });
+    renderWithRun(<Wizard />);
+    await fillType(user, "Randomized");
+    await fillProducts(user);
+    expect(screen.getByText("No headlines yet.")).toBeTruthy();
+    await waitFor(() => expect(pending).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    pending[0].resolve(json({ pool: poolOf([{ id: "h1", text: "Late", status: "approved" }]) }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(pending).toHaveLength(2));
+    expect(screen.getByText("Headline pool (0 approved)")).toBeTruthy();
+    expect(screen.queryByText("Late")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    pending[1].reject(new Error("late failure"));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(pending).toHaveLength(3));
+    expect(screen.queryByText("late failure")).toBeNull();
+    pending[2].resolve(json({ error: "not found" }, 404));
+    expect(await screen.findByText("No headlines yet.")).toBeTruthy();
   });
 
   test("surfaces a non-conflict save error", async () => {

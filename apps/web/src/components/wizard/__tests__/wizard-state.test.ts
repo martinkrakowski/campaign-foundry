@@ -1,5 +1,7 @@
 import { describe, test, expect, afterEach, vi } from "vitest";
+import type { CopyPool } from "@campaignfoundry/CampaignOrchestration";
 import {
+  approvedHeadlines,
   assetFileName,
   canPlan,
   fileToBase64,
@@ -230,6 +232,7 @@ describe("toBrief / canPlan", () => {
         tone: [],
         background: [],
         paletteShift: [],
+        headline: false,
       },
     });
     expect(randomized.variation).toEqual({
@@ -252,6 +255,7 @@ describe("toBrief / canPlan", () => {
         tone: [],
         background: [],
         paletteShift: [],
+        headline: false,
       },
     });
     expect(ratioOnly.variation).toEqual({
@@ -272,6 +276,7 @@ describe("toBrief / canPlan", () => {
         tone: ["bold"],
         background: ["procedural"],
         paletteShift: [0],
+        headline: false,
       },
     });
     expect(noOptional.variation).toEqual({
@@ -285,11 +290,46 @@ describe("toBrief / canPlan", () => {
     });
   });
 
+  test("emits headline: pool://copy only when the axis is on", () => {
+    const on = toBrief({ ...filled, mode: "variation", variation: { ...filled.variation, headline: true } });
+    expect(on.variation?.axes?.headline).toBe("pool://copy");
+    const off = toBrief({ ...filled, mode: "variation" });
+    expect(off.variation?.axes).not.toHaveProperty("headline");
+  });
+
   test("canPlan requires variation mode, an id, a product id, and count >= 1", () => {
     expect(canPlan(initialWizardState)).toBe(false);
     expect(canPlan({ ...filled, mode: "variation" })).toBe(true);
     expect(canPlan({ ...filled, mode: "variation", variation: { ...filled.variation, count: "0" } })).toBe(
       false,
     );
+  });
+});
+
+describe("headline pool state", () => {
+  const pool = (statuses: readonly ("approved" | "rejected")[]): CopyPool => ({
+    briefId: "camp",
+    generatedAt: "2026-01-01T00:00:00.000Z",
+    model: "m",
+    entries: statuses.map((status, i) => ({ id: `h${i + 1}`, text: `Line ${i + 1}`, status })),
+  });
+
+  test("approvedHeadlines counts approved entries and is 0 without a pool", () => {
+    expect(approvedHeadlines(null)).toBe(0);
+    expect(approvedHeadlines(pool(["approved", "rejected", "approved"]))).toBe(2);
+  });
+
+  test("toggleHeadline flips the axis; setPool stores the pool and drops the axis when nothing is approved", () => {
+    const on = wizardReducer(initialWizardState, { type: "toggleHeadline" });
+    expect(on.variation.headline).toBe(true);
+    expect(wizardReducer(on, { type: "toggleHeadline" }).variation.headline).toBe(false);
+
+    const withPool = wizardReducer(on, { type: "setPool", pool: pool(["approved"]) });
+    expect(withPool.pool?.entries).toHaveLength(1);
+    expect(withPool.variation.headline).toBe(true);
+
+    const emptied = wizardReducer(withPool, { type: "setPool", pool: pool(["rejected"]) });
+    expect(emptied.variation.headline).toBe(false);
+    expect(wizardReducer(withPool, { type: "setPool", pool: null }).variation.headline).toBe(false);
   });
 });

@@ -7,7 +7,8 @@ export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 export type FieldErrors = Record<string, string>;
 
 const UINT32_MAX = 0xffffffff;
-const MIN_DISTANCE_MAX = 6;
+/** DISTANCE_AXES.length in CampaignOrchestration (copied; the seven Hamming axes incl. headline). */
+const MIN_DISTANCE_MAX = 7;
 
 function isIntegerAtLeast(value: string, min: number): boolean {
   if (value.trim() === "") return false;
@@ -85,7 +86,7 @@ export function validatePolicy(state: WizardState): FieldErrors {
     errors.seed = "variation.seed must be an integer in [0, 2^32).";
   }
   if (!isOptionalIntegerInRange(state.variation.minDistance, 0, MIN_DISTANCE_MAX)) {
-    errors.minDistance = "variation.minDistance must be an integer in [0, 6].";
+    errors.minDistance = "variation.minDistance must be an integer in [0, 7].";
   }
   if (!isOptionalIntegerAtLeast(state.variation.perProduct, 0)) {
     errors.perProduct = "coverage.perProduct must be an integer >= 0.";

@@ -1,4 +1,4 @@
-import type { CampaignBrief, Product } from "@campaignfoundry/CampaignOrchestration";
+import type { CampaignBrief, CopyPool, Product } from "@campaignfoundry/CampaignOrchestration";
 
 export const WIZARD_STEPS = ["type", "products", "copy", "policy", "output", "review"] as const;
 export type WizardStepId = (typeof WIZARD_STEPS)[number];
@@ -17,6 +17,8 @@ export const LAYOUT_OPTIONS = ["headline-top", "headline-bottom"] as const;
 export const TONE_OPTIONS = ["bold", "subtle"] as const;
 export const BACKGROUND_OPTIONS = ["procedural", "asset-pool", "genai"] as const;
 export const PALETTE_SHIFT_OPTIONS = [0, 0.1, 0.2] as const;
+/** The only pool reference the parser accepts for the `headline` axis (mirrors HEADLINE_POOL_REF). */
+export const HEADLINE_POOL_REF = "pool://copy";
 /** PLATFORM_PROFILES hides motion platforms until a later wave — there is no fetch route. */
 export const STATIC_PLATFORMS = ["instagram-feed", "linkedin", "x"] as const;
 
@@ -52,8 +54,12 @@ export interface WizardState {
     tone: string[];
     background: string[];
     paletteShift: number[];
+    /** Draw headlines from the approved copy pool (`headline: pool://copy`). */
+    headline: boolean;
   };
   platforms: string[];
+  /** The brief's copy pool as last fetched/edited in the Copy step; null until one exists. */
+  pool: CopyPool | null;
 }
 
 export type WizardAction =
@@ -69,6 +75,8 @@ export type WizardAction =
   | { type: "toggleTone"; value: string }
   | { type: "toggleBackground"; value: string }
   | { type: "togglePalette"; value: number }
+  | { type: "toggleHeadline" }
+  | { type: "setPool"; pool: CopyPool | null }
   | { type: "togglePlatform"; value: string };
 
 export function stepsFor(mode: CampaignMode): readonly WizardStepId[] {
@@ -110,9 +118,16 @@ export const initialWizardState: WizardState = {
     tone: [...TONE_OPTIONS],
     background: ["procedural"],
     paletteShift: [...PALETTE_SHIFT_OPTIONS],
+    headline: false,
   },
   platforms: [...STATIC_PLATFORMS],
+  pool: null,
 };
+
+/** Number of approved entries in the wizard's pool (0 without a pool). */
+export function approvedHeadlines(pool: CopyPool | null): number {
+  return pool === null ? 0 : pool.entries.filter((entry) => entry.status === "approved").length;
+}
 
 export function slugify(value: string): string {
   return value
@@ -215,6 +230,19 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
           paletteShift: toggleOrdered(state.variation.paletteShift, action.value, PALETTE_SHIFT_OPTIONS),
         },
       };
+    case "toggleHeadline":
+      return { ...state, variation: { ...state.variation, headline: !state.variation.headline } };
+    case "setPool":
+      // The axis is only meaningful with something to draw from: losing the last
+      // approved entry switches it off rather than leaving a brief that cannot plan.
+      return {
+        ...state,
+        pool: action.pool,
+        variation: {
+          ...state.variation,
+          headline: state.variation.headline && approvedHeadlines(action.pool) > 0,
+        },
+      };
     case "togglePlatform":
       return { ...state, platforms: toggleOrdered(state.platforms, action.value, STATIC_PLATFORMS) };
   }
@@ -276,6 +304,7 @@ export function toBrief(state: WizardState): CampaignBrief {
     tone: [...state.variation.tone],
     background: { source: [...state.variation.background] },
     paletteShift: [...state.variation.paletteShift],
+    ...(state.variation.headline ? { headline: HEADLINE_POOL_REF } : {}),
   };
 
   return {
