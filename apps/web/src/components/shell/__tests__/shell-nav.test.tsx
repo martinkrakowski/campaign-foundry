@@ -1,9 +1,10 @@
 import { describe, test, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { createElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRun, seedPersistedRun, nextMock, exerciseFocusTrap } from "@/__tests__/helpers";
 import { RunProvider } from "@/lib/run-context";
+import { EditorDirtyProvider } from "@/lib/editor-dirty-context";
 import { Accordion } from "../Accordion";
 import { Sidebar } from "../Sidebar";
 import { Header } from "../Header";
@@ -119,7 +120,13 @@ describe("MobileMenu", () => {
     const { rerender } = renderWithRun(<MobileMenu open onClose={onClose} tabs={tabs} />);
     await screen.findByRole("dialog", { name: "Menu" });
     nextMock().nav.pathname = "/export"; // navigate away
-    rerender(<RunProvider>{<MobileMenu open onClose={onClose} tabs={tabs} />}</RunProvider>);
+    rerender(
+      <RunProvider>
+        <EditorDirtyProvider>
+          <MobileMenu open onClose={onClose} tabs={tabs} />
+        </EditorDirtyProvider>
+      </RunProvider>,
+    );
     await waitFor(() => expect(closed).toBe(true));
   });
 });
@@ -128,7 +135,7 @@ describe("Create new", () => {
   test("the sidebar's Create new button navigates to /brief", async () => {
     const { BrowseBriefsButton } = await import("../Sidebar");
     const onActivate = vi.fn();
-    render(createElement(RunProvider, null, createElement(BrowseBriefsButton, { onActivate })));
+    renderWithRun(createElement(BrowseBriefsButton, { onActivate }));
     await userEvent.setup().click(screen.getByRole("button", { name: /create new/i }));
     expect(onActivate).toHaveBeenCalled();
     expect(nextMock().router.push).toHaveBeenCalledWith("/brief");

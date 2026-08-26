@@ -2,7 +2,7 @@
 
 import { Button, Input } from "@/components/ui";
 import type { Dispatch } from "react";
-import type { EditorState, EditorAction, TreatmentDraft } from "@/components/campaign/editor-state";
+import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import type { FieldErrors } from "@/components/campaign/validate";
 import { SectionShell, Field } from "./IdentitySection";
 import { LAYOUT_OPTIONS, TONE_OPTIONS } from "@/components/campaign/editor-state";

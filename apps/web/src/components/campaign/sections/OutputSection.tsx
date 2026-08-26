@@ -4,7 +4,7 @@ import { Button } from "@/components/ui";
 import type { Dispatch } from "react";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import type { FieldErrors } from "@/components/campaign/validate";
-import { SectionShell, Field } from "./IdentitySection";
+import { SectionShell } from "./IdentitySection";
 import { STATIC_PLATFORMS } from "@/components/campaign/editor-state";
 
 export function OutputSection({ state, dispatch, errors }: { state: EditorState; dispatch: Dispatch<EditorAction>; errors: FieldErrors }) {

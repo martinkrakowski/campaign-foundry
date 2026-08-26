@@ -1,6 +1,10 @@
 import type { CampaignBrief, CopyPool, Product } from "@campaignfoundry/CampaignOrchestration";
 import type { ProductDraft, CampaignMode } from "./editor-state";
-import { emptyProduct as baseEmptyProduct, slugify, approvedHeadlines as baseApprovedHeadlines, toBrief as baseToBrief, canPlan as baseCanPlan, PLAN_DEBOUNCE_MS as BASE_PLAN_DEBOUNCE_MS } from "./editor-state";
+import {
+  slugify,
+  approvedHeadlines as baseApprovedHeadlines,
+  PLAN_DEBOUNCE_MS as BASE_PLAN_DEBOUNCE_MS,
+} from "./editor-state";
 
 export const WIZARD_STEPS = ["type", "products", "copy", "policy", "output", "review"] as const;
 export type WizardStepId = (typeof WIZARD_STEPS)[number];

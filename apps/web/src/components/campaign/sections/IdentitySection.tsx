@@ -2,7 +2,6 @@
 
 import type { Dispatch } from "react";
 import { Input } from "@/components/ui";
-import { cn } from "@/lib/cn";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import type { FieldErrors } from "@/components/campaign/validate";
 

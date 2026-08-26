@@ -233,6 +233,7 @@ export default function BriefPage() {
             </p>
             <input
               type="text"
+              aria-label="New brief id"
               placeholder="New brief id"
               value={saveAsId}
               onChange={(e) => setSaveAsId(e.target.value)}

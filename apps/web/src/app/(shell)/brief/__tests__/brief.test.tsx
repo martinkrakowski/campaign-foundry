@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { json, mockPipelineApi, nextMock, renderWithRun } from "@/__tests__/helpers";
+import { renderWithRun } from "@/__tests__/helpers";
 import BriefPage from "../page";
 
 beforeEach(() => {
@@ -38,8 +38,10 @@ describe("BriefPage E1 Features", () => {
   test("Save as... opens dialog", async () => {
     const user = userEvent.setup();
     renderWithRun(<BriefPage />);
-    await user.click(screen.getByText("Save as..."));
-    expect(screen.getByText("Save as...")).toBeTruthy();
+    // Once the dialog is open, "Save as..." matches both the action-bar button and
+    // the dialog heading — query by role so each assertion names the one it means.
+    await user.click(screen.getByRole("button", { name: "Save as..." }));
+    expect(screen.getByRole("heading", { name: "Save as..." })).toBeTruthy();
     expect(screen.getByLabelText("New brief id")).toBeTruthy();
   });
 

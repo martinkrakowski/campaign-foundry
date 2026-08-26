@@ -1,20 +1,16 @@
 // SHIM: Standalone validate functions for WizardState compatibility.
 // The /new wizard will be removed in E3; until then, this shim keeps it working.
 import type { WizardState, WizardStepId } from "./wizard-state";
-import { maxMinDistance as campaignMaxMinDistance } from "@/components/campaign/validate";
+import {
+  maxMinDistance as campaignMaxMinDistance,
+  validatePolicy as campaignValidatePolicy,
+} from "@/components/campaign/validate";
 import type { EditorState } from "@/components/campaign/editor-state";
-import { toBrief } from "@/components/campaign/wizard-compat";
 
 const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 
 export type FieldErrors = Record<string, string>;
-
-function isIntegerAtLeast(value: string, min: number): boolean {
-  if (value.trim() === "") return false;
-  const num = Number(value);
-  return Number.isInteger(num) && num >= min;
-}
 
 // Convert WizardState to EditorState for campaign validate functions
 function toEditorState(state: WizardState): EditorState {
@@ -103,12 +99,9 @@ export function validateCopy(state: WizardState): FieldErrors {
 }
 
 export function validatePolicy(state: WizardState): FieldErrors {
-  const errors: FieldErrors = {};
-  if (state.mode !== "variation") return errors;
-  if (!isIntegerAtLeast(state.variation.count, 1)) {
-    errors.count = "variation.count must be an integer >= 1.";
-  }
-  return errors;
+  // Delegate rather than reimplement: the wizard must keep validating seed, minDistance,
+  // coverage and the axis lists exactly as the editor does until E3 removes this screen.
+  return campaignValidatePolicy(toEditorState(state));
 }
 
 export function validateOutput(state: WizardState): FieldErrors {
