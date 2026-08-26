@@ -270,6 +270,47 @@ or 503 (rate limit), 503 (network / 30 s timeout), 422 (unreadable reply).
 the current output for that report — renders are not campaign-namespaced;
 `packagedAt` on `manifest.json` records when this copy was taken.
 
+### Motion
+
+Randomized briefs can mix silent mp4 variants with the stills. Encoding uses the
+pinned `ffmpeg-static` binary (never system ffmpeg); the API's boot probe and
+`yarn generate` log `[ffmpeg-check]` / `[generate] motion unavailable: …` when it
+cannot run, and the brief parser then rejects `motion`, `duration`,
+`formats: motion`, and motion platforms with that reason.
+
+```yaml
+variation:
+  axes:
+    motion: [ken-burns-in, headline-rise]   # ⊆ ken-burns-in | ken-burns-out | headline-rise | accent-wipe
+    duration: [6]                           # whole seconds in [2, 30]; 30 fps
+output:
+  formats: [static, motion]                 # [motion] alone makes every variant a clip
+  platforms: [instagram-feed, instagram-reel]
+```
+
+- **Draw.** With both formats the motion axis keeps one *still* slot, so a plan
+  mixes PNGs and clips; `motion` and `durationSec` are Hamming axes (so
+  `minDistance` goes up to 8). Static briefs draw exactly as before — goldens
+  and `policyHash` are unchanged.
+- **Render.** A motion variant writes `<product>/<ratio>/v<index>.mp4` plus its
+  poster `v<index>.png` (the still the grid, export, proof, and packaging use).
+  Motion moves background and headline only; the accent band and logo never
+  animate, and the brand-density check runs on five sampled frames
+  (`t = 0, ¼, ½, ¾, 1`) — the asset passes only if every frame does and the
+  minimum score is recorded.
+- **Safe zones.** With `output.platforms` set, generation offsets headline and
+  logo by the per-ratio union (max per side) of the requested platforms' safe
+  insets; static platforms are zeros, so classic output is byte-identical.
+- **Package.** `instagram-story`, `instagram-reel`, `tiktok`, and
+  `youtube-short` (all 9:16) are packageable while the probe is on: each motion
+  item copies the mp4 and poster, records `format`, `durationSec`, and a
+  `duration` check against the profile's cap; static profiles ignore clips.
+- **Review.** Grid cells render the clip over its poster (hover to play, or the
+  play control for keyboard users); the estimate panel adds `frames` and an
+  encode estimate of ≈ 7 ms per frame.
+
+`yarn generate --brief briefs/sample-motion.yaml` runs the sample end-to-end.
+
 ---
 
 ## Example input

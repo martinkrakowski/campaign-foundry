@@ -680,3 +680,23 @@ To keep this file out of version control, add `.agents/session-log.md` to
     `instanceof` sees the route's module instance.
 - **Left open:**
   - Phase 3.4 allowlist `headline: pool://copy`, planner consumption, wizard control.
+
+## 2026-08-26 — wave 5 Lane A: motion generation end-to-end (Phase 4.7–4.9, 5.1–5.2, D11, D12)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Parser (`load-brief.ts`): `motion` (⊆ `MOTION_KINDS`), `duration` (integers in [2, 30]), `formats: motion`, and every `PLATFORM_PROFILES` id whose formats the host can produce are accepted only while `capabilities.motion` is true; otherwise rejected with the probe `reason`. `parseBrief(data, capabilities = getCapabilities())` / `loadBrief(path, capabilities?)` are the injectable accessor. Unknown platform ids now fail at parse (`Unknown output platform`), not at package time.
+  - Planner: `VariationPolicy` gains `motion` (default `[]`), `duration` (default `[6]`), `motionEnabled`, `mixStatic`; `Variant.motion?` / `durationSec?`; `DISTANCE_AXES` += `motion`, `durationSec` (minDistance ≤ 8); `drawMotion()` consumes no draws on static briefs, keeps one still slot when both formats are requested; `estimate.frames` on motion plans. Static goldens and `policyHash` unchanged (motion fields join the hash only when enabled).
+  - Generation: `GenerateCampaignDeps.videoCompositor` + optional `platformSafeZones` resolver; motion variants call `compositeVideo({ …, durationSec, fps: 30, motion, sampleAt: [0, .25, .5, .75, 1] })`, save `v<i>.mp4` + poster `v<i>.png`, brand-check every sampled frame (all must pass; min score recorded; zero frames fails), `GeneratedAsset.videoPath` / `durationSec` / `format: "motion"` / descriptor `motion` + `durationSec`. D11: with `output.platforms`, the per-ratio max-per-side union of the profiles' insets is passed as `safeInsets`; classic / no-platform paths pass nothing.
+  - Distribution: motion profiles carry real 9:16 insets and `maxDurationSec`; `visible` replaced by `isPlatformVisible(profile, capabilities)` / `visiblePlatformIds(capabilities)`; packaging copies mp4 + poster for motion profiles with `format`, `durationSec`, and `checks.duration`; static profiles ignore clips. `package.post.ts` passes the probe flag.
+  - Web: grid motion cells are `<video muted preload="metadata" poster>` with hover-to-play and an `aria-pressed` play control; motion chip; mp4 + poster downloads; preview modal plays with controls; export rows show duration and link the mp4, motion platforms join the picker once the run holds a motion asset; estimate panel and Runs show `frames` + `≈ frames × 7 ms`. `briefs-api.ts`: additive `frames?` and motion item fields.
+  - `briefs/sample-motion.yaml` (from `docs/plan-implemented`), README **Motion** section, CLI prints `v<i>.mp4 (+poster)`.
+- **Decisions:**
+  - `Distribution.SafeInsets` stays a structural copy: `lint:arch` forbids a domain import of another package; the test asserts `expectTypeOf<SafeInsets>().toEqualTypeOf<PortSafeInsets>()`.
+  - Orchestration never imports Distribution (would be a cycle): insets arrive through a `PlatformSafeZoneResolver` injected at the composition root.
+  - With `formats: [static, motion]` the motion draw includes an explicit still slot so a plan mixes PNGs and mp4s; `formats: [motion]` alone makes every variant a clip.
+  - The web offers motion platforms when the run contains a motion asset (there is no capabilities endpoint; a motion run is proof the probe was on).
+- **Verification:** `yarn generate --brief briefs/sample-motion.yaml` → 8 PNG + 5 MP4 (11 s, ffmpeg-static 5.3.0 on this machine); coverage 100 % lines/branches/functions/statements.
+- **Left open:**
+  - `GET /campaigns/capabilities` for the wizard / export picker; the wizard's `STATIC_PLATFORMS` still hides motion platforms (lane B owns the wizard).
+  - Lane B's `variant.headline` read in `GenerateCampaignUseCase` (coordinated: B adds it, or A on rebase).
