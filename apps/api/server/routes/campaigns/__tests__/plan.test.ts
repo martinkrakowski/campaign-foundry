@@ -82,6 +82,21 @@ describe("POST /campaigns/plan", () => {
     expect(((await res.json()) as { error: string }).error).toMatch(/exceeds axisProductSize|shortfall/);
   });
 
+  test("returns 400 when the brief is not variation mode", async () => {
+    const res = await call({
+      id: "camp",
+      targetRegion: "DE",
+      targetAudience: "a",
+      campaignMessage: "Hi",
+      products: [
+        { id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "assets/inputs/hydra-logo.png" },
+        { id: "beta", name: "B", primaryColor: "#E0218A", logoPath: "assets/inputs/trail-logo.png" },
+      ],
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("not a variation brief");
+  });
+
   test("returns 400 for an unparseable brief", async () => {
     const res = await call({ id: "camp" });
     expect(res.status).toBe(400);

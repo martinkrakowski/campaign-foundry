@@ -16,6 +16,11 @@ export default defineEventHandler(async (event) => {
     return { error: error instanceof Error ? error.message : "Invalid campaign brief" };
   }
 
+  if (brief.mode !== "variation") {
+    setResponseStatus(event, 400);
+    return { error: "not a variation brief" };
+  }
+
   const planned = new PlanVariationsUseCase().plan(brief);
   if (!planned.success) {
     setResponseStatus(event, 422);

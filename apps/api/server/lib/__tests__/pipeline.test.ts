@@ -80,7 +80,7 @@ describe("pipeline composition root", () => {
     expect(r.success).toBe(true);
     if (r.success) {
       expect(r.value.assets).toHaveLength(4);
-      expect(r.value.assets.every((a) => a.outputPath.includes("/v") && a.format === "static")).toBe(true);
+      expect(r.value.assets.every((a) => a.outputPath.includes("/v") && a.format === "static" && a.attempt === 0)).toBe(true);
       expect(r.value.policyHash).toEqual(expect.any(String));
       expect(r.value.seed).toBe(42);
     }

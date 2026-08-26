@@ -42,9 +42,9 @@ export async function readReport(root: string, campaignId: string): Promise<unkn
 export const latestReportPath = (root: string): string => resolve(root, "report.json");
 
 /**
- * A persisted report row that can be keyed. Classic rows need the triple + path.
- * Variation rows need productId + numeric variantIndex + path; treatment may be
- * absent at runtime (the type keeps the four strings so packaging still compiles).
+ * A persisted report row that can be keyed. Every row — classic or variation —
+ * has the four strings. Variation rows additionally carry integer variantIndex
+ * and attempt (>= 0).
  */
 export type PersistedAsset = {
   productId: string;
@@ -52,7 +52,10 @@ export type PersistedAsset = {
   treatment: string;
   outputPath: string;
   variantIndex?: number;
+  attempt?: number;
 };
+
+const isNonNegInt = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n >= 0;
 
 /**
  * Guard for a persisted report row — used by both the merge path and packaging.
@@ -61,11 +64,12 @@ export type PersistedAsset = {
 export function isPersistedAsset(a: unknown): a is PersistedAsset {
   if (typeof a !== "object" || a === null) return false;
   const rec = a as Record<string, unknown>;
-  if (typeof rec.productId !== "string" || typeof rec.outputPath !== "string") return false;
-  if (typeof rec.variantIndex === "number") {
-    return Number.isInteger(rec.variantIndex) && rec.variantIndex >= 0;
-  }
-  return typeof rec.aspectRatio === "string" && typeof rec.treatment === "string";
+  if (typeof rec.productId !== "string") return false;
+  if (typeof rec.aspectRatio !== "string") return false;
+  if (typeof rec.treatment !== "string") return false;
+  if (typeof rec.outputPath !== "string") return false;
+  if (rec.variantIndex === undefined) return true;
+  return isNonNegInt(rec.variantIndex) && isNonNegInt(rec.attempt);
 }
 
 /**
