@@ -1,6 +1,6 @@
 "use client";
 
-import { useReducer, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui";
 import { useRun } from "@/lib/run-context";
@@ -26,21 +26,30 @@ export function Wizard() {
   const [saving, setSaving] = useState(false);
   const { setBrief } = useRun();
   const router = useRouter();
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const moved = useRef(false);
 
   const steps = stepsFor(state.mode);
   const stepId = steps[state.stepIndex];
   const last = state.stepIndex >= steps.length - 1;
   const stepProps = { state, dispatch, errors };
 
+  useEffect(() => {
+    if (!moved.current) return;
+    headingRef.current?.focus();
+  }, [state.stepIndex]);
+
   const goNext = () => {
     const nextErrors = validateStep(stepId, state);
     setErrors(nextErrors);
     if (hasErrors(nextErrors)) return;
+    moved.current = true;
     dispatch({ type: "next" });
     setErrors({});
   };
 
   const goBack = () => {
+    moved.current = true;
     dispatch({ type: "back" });
     setErrors({});
     setPersistError(undefined);
@@ -79,6 +88,7 @@ export function Wizard() {
         {steps.map((id, index) => (
           <li
             key={id}
+            aria-current={index === state.stepIndex ? "step" : undefined}
             className={
               index === state.stepIndex
                 ? "font-mono text-[11px] uppercase tracking-widest text-white"
@@ -90,7 +100,9 @@ export function Wizard() {
         ))}
       </ol>
 
-      <h3 className="text-sm font-semibold text-white">{STEP_TITLES[stepId]}</h3>
+      <h3 ref={headingRef} tabIndex={-1} className="text-sm font-semibold text-white">
+        {STEP_TITLES[stepId]}
+      </h3>
 
       {stepId === "type" ? <CampaignTypeStep {...stepProps} /> : null}
       {stepId === "products" ? <ProductsStep {...stepProps} /> : null}
