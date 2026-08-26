@@ -130,6 +130,31 @@ describe("report persistence", () => {
     expect(isPersistedAsset({ ...motion, format: "static" })).toBe(true);
   });
 
+  test("isPersistedAsset validates the motion metadata and skips unknown formats", () => {
+    const motion = {
+      productId: "alpha",
+      aspectRatio: "9:16",
+      treatment: "headline-top-bold",
+      outputPath: "alpha/9x16/v1.png",
+      variantIndex: 1,
+      attempt: 0,
+      format: "motion",
+      videoPath: "alpha/9x16/v1.mp4",
+      durationSec: 6,
+    };
+    expect(isPersistedAsset(motion)).toBe(true);
+    expect(isPersistedAsset({ ...motion, durationSec: undefined })).toBe(false);
+    expect(isPersistedAsset({ ...motion, durationSec: "6" })).toBe(false);
+    expect(isPersistedAsset({ ...motion, durationSec: Number.NaN })).toBe(false);
+    expect(isPersistedAsset({ ...motion, durationSec: Number.POSITIVE_INFINITY })).toBe(false);
+    // Unknown formats are dropped (counted as skipped by the callers), never packaged as stills.
+    expect(isPersistedAsset({ ...motion, format: "gif" })).toBe(false);
+    expect(isPersistedAsset({ ...motion, format: null })).toBe(false);
+    // Classic rows carry no format; static rows need no motion metadata.
+    expect(isPersistedAsset({ ...motion, format: undefined, videoPath: undefined, durationSec: undefined })).toBe(true);
+    expect(isPersistedAsset({ ...motion, format: "static", videoPath: undefined, durationSec: undefined })).toBe(true);
+  });
+
   test("isPersistedAsset requires the four strings plus integer variantIndex and attempt on variation rows", () => {
     const variation = {
       productId: "alpha",

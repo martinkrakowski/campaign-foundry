@@ -71,8 +71,14 @@ export function isPersistedAsset(a: unknown): a is PersistedAsset {
   if (typeof rec.aspectRatio !== "string") return false;
   if (typeof rec.treatment !== "string") return false;
   if (typeof rec.outputPath !== "string") return false;
-  // A motion row without a readable mp4 path can't be packaged: drop it like any other corrupt row.
-  if (rec.format === "motion" && typeof rec.videoPath !== "string") return false;
+  // `format` is absent on classic rows, else static | motion. An unknown format is
+  // skipped (and counted) rather than packaged as a still; a motion row without a
+  // readable mp4 path or a finite clip length can't be packaged or duration-checked.
+  if (rec.format !== undefined && rec.format !== "static" && rec.format !== "motion") return false;
+  if (rec.format === "motion") {
+    if (typeof rec.videoPath !== "string") return false;
+    if (typeof rec.durationSec !== "number" || !Number.isFinite(rec.durationSec)) return false;
+  }
   if (rec.variantIndex === undefined) return true;
   return isNonNegInt(rec.variantIndex) && isNonNegInt(rec.attempt);
 }
