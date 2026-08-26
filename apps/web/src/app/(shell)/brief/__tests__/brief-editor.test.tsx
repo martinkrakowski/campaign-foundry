@@ -103,12 +103,14 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     const calls = routes({});
     renderWithRun(<BriefPage />);
+    await waitForEditorReady();
 
     await fillValidDraft(user);
 
-    const save = screen.getByText("Save & apply").closest("button") as HTMLButtonElement;
-    await waitFor(() => expect(save.disabled).toBe(false));
-    await user.click(save);
+    await waitFor(() =>
+      expect((screen.getByText("Save & apply").closest("button") as HTMLButtonElement).disabled).toBe(false),
+    );
+    await user.click(screen.getByText("Save & apply"));
     await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
   });
 
@@ -190,20 +192,30 @@ describe("BriefPage — data flow", () => {
     await waitFor(() => expect(screen.queryByText("Draft not applied")).toBeNull());
   });
 
-  test("Discard clears an edited draft", async () => {
+  test("Discard throws away the edit", async () => {
     const user = userEvent.setup();
     routes({});
     renderWithRun(<BriefPage />);
+    await waitForEditorReady();
 
-    await user.type(screen.getByLabelText("Brief ID"), "temp");
+    const before = (screen.getByLabelText("Campaign Message") as HTMLInputElement).value;
+    await user.type(screen.getByLabelText("Campaign Message"), " edited");
+    expect((screen.getByLabelText("Campaign Message") as HTMLInputElement).value).not.toBe(before);
+
+    // Discard resets to a blank draft. The run-context sync does not pull the active
+    // brief back in — its dependencies have not changed — so the editor stays empty
+    // until the user picks something.
     await user.click(screen.getByText("Discard"));
-    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Message") as HTMLInputElement).value).toBe(""),
+    );
   });
 
   test("the YAML split shows the serialized brief and hides the contents list", async () => {
     const user = userEvent.setup();
     routes({});
     renderWithRun(<BriefPage />);
+    await waitForEditorReady();
 
     await user.click(screen.getByText("YAML split on"));
     expect(screen.getByText(/"targetRegion"/)).toBeTruthy();
@@ -322,13 +334,20 @@ describe("BriefPage — data flow", () => {
     const calls = routes({});
     renderWithRun(<BriefPage />);
 
+    // Wait for the editor to adopt the active brief first: clearing a field the sync is
+    // about to repopulate leaves the draft valid again and the buttons enabled.
+    await waitForEditorReady();
     await user.clear(screen.getByLabelText("Target Region"));
-    const apply = screen.getByText("Apply to run").closest("button") as HTMLButtonElement;
-    const save = screen.getByText("Save & apply").closest("button") as HTMLButtonElement;
-    const saveAs = screen.getByText("Save as...").closest("button") as HTMLButtonElement;
-    await waitFor(() => expect(apply.disabled).toBe(true));
-    expect(save.disabled).toBe(true);
-    expect(saveAs.disabled).toBe(true);
+
+    // Re-query inside the assertion — React replaces these nodes on re-render, so a
+    // reference captured beforehand can be stale by the time the draft turns invalid.
+    const button = (label: string) =>
+      screen.getByText(label).closest("button") as HTMLButtonElement;
+    await waitFor(() => {
+      expect(button("Apply to run").disabled).toBe(true);
+      expect(button("Save & apply").disabled).toBe(true);
+      expect(button("Save as...").disabled).toBe(true);
+    });
     expect(calls.some((c) => c.method !== "GET")).toBe(false);
   });
 
