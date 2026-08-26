@@ -14,6 +14,11 @@ export interface CompositeRequest {
   readonly layout: LayoutKind;
   /** Treatment: visual intensity of the overlay. */
   readonly tone: ToneKind;
+  /**
+   * Platform safe-zone insets in px. Absent or all-zero keeps today's
+   * geometry (classic callers omit the field).
+   */
+  readonly safeInsets?: { top: number; right: number; bottom: number; left: number };
 }
 
 /** The rendered creative plus the compositing signals the use case reports. */

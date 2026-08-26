@@ -99,4 +99,68 @@ describe("NodeCanvasCompositor", () => {
     const out = await compositor.compositeAsset(request({ logoPath: "/etc/passwd" }));
     expect(out.logoApplied).toBe(false);
   });
+
+  test("omitted and all-zero safeInsets produce identical PNG bytes", async () => {
+    const omitted = await compositor.compositeAsset(request());
+    const zeros = await compositor.compositeAsset(
+      request({ safeInsets: { top: 0, right: 0, bottom: 0, left: 0 } }),
+    );
+    expect(Buffer.from(zeros.image).equals(Buffer.from(omitted.image))).toBe(true);
+  });
+
+  test("headline first baseline and logo top-left move by exactly the inset on every ratio and layout", async () => {
+    const insets = { top: 120, right: 40, bottom: 200, left: 30 };
+    const layouts = ["headline-top", "headline-bottom"] as const;
+    const ratios = ["1:1", "9:16", "16:9"] as const;
+
+    for (const layout of layouts) {
+      for (const value of ratios) {
+        const r = ratio(value);
+        const zero = await blit(request({ layout, ratio: r }));
+        const inset = await blit(request({ layout, ratio: r, safeInsets: insets }));
+
+        const zeroHeadline = zero.fillText[0];
+        const insetHeadline = inset.fillText[0];
+        const zeroLogo = zero.drawImage[1];
+        const insetLogo = inset.drawImage[1];
+        if (!zeroHeadline || !insetHeadline || !zeroLogo || !insetLogo) {
+          throw new Error(`missing blit capture for ${layout} ${value}`);
+        }
+
+        if (layout === "headline-top") {
+          expect(insetHeadline.y).toBe(zeroHeadline.y + insets.top);
+          expect(insetLogo.x).toBe(zeroLogo.x + insets.left);
+          expect(insetLogo.y).toBe(zeroLogo.y - insets.bottom);
+        } else {
+          expect(insetHeadline.y).toBe(zeroHeadline.y - insets.bottom);
+          expect(insetLogo.x).toBe(zeroLogo.x - insets.right);
+          expect(insetLogo.y).toBe(zeroLogo.y + insets.top);
+        }
+        expect(insetHeadline.x).toBe(zeroHeadline.x);
+      }
+    }
+  });
 });
+
+type BlitPoint = { x: number; y: number };
+
+/** Paint a prepared request and record fillText / drawImage positions. */
+async function blit(req: CompositeRequest): Promise<{ fillText: BlitPoint[]; drawImage: BlitPoint[] }> {
+  const prepared = await NodeCanvasCompositor.prepare(req);
+  const canvas = createCanvas(prepared.width, prepared.height);
+  const ctx = canvas.getContext("2d");
+  const fillText: BlitPoint[] = [];
+  const drawImage: BlitPoint[] = [];
+  const origFill = ctx.fillText.bind(ctx);
+  const origDraw = ctx.drawImage.bind(ctx);
+  ctx.fillText = ((text: string, x: number, y: number, maxWidth?: number) => {
+    fillText.push({ x, y });
+    return origFill(text, x, y, maxWidth);
+  }) as typeof ctx.fillText;
+  ctx.drawImage = ((...args: Parameters<typeof ctx.drawImage>) => {
+    drawImage.push({ x: args[1] as number, y: args[2] as number });
+    return origDraw(...args);
+  }) as typeof ctx.drawImage;
+  NodeCanvasCompositor.draw(ctx, prepared, 1);
+  return { fillText, drawImage };
+}

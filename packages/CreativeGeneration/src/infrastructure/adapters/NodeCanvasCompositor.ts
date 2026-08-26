@@ -41,6 +41,8 @@ interface PreparedCreative {
       }
     | undefined;
   readonly logoApplied: boolean;
+  /** Normalized safe-zone insets; zeros when the request omitted them. */
+  readonly insets: { readonly top: number; readonly right: number; readonly bottom: number; readonly left: number };
 }
 
 /**
@@ -122,9 +124,10 @@ export class NodeCanvasCompositor implements CompositorPort {
     ctx.textBaseline = "alphabetic";
     const lines = wrapText(ctx, prepared.message, width * 0.85);
     const lineHeight = fontSize * 1.25;
+    const { top: insetTop, bottom: insetBottom } = prepared.insets;
     let y = top
-      ? height * 0.1 + fontSize // first baseline near the top
-      : height - height * 0.08 - (lines.length - 1) * lineHeight; // last baseline near the bottom
+      ? height * 0.1 + fontSize + insetTop // first baseline near the top, then inset
+      : height - height * 0.08 - (lines.length - 1) * lineHeight - insetBottom; // last baseline near the bottom, then inset
     for (const line of lines) {
       ctx.fillText(line, width / 2, y);
       y += lineHeight;
@@ -148,6 +151,12 @@ export class NodeCanvasCompositor implements CompositorPort {
     const subtle = request.tone === "subtle";
     const shadeAlpha = subtle ? 0.4 : 0.7;
     const fontWeight = subtle ? "500" : "bold";
+    const insets = {
+      top: request.safeInsets?.top ?? 0,
+      right: request.safeInsets?.right ?? 0,
+      bottom: request.safeInsets?.bottom ?? 0,
+      left: request.safeInsets?.left ?? 0,
+    };
 
     const background = await loadImage(Buffer.from(request.background));
 
@@ -164,8 +173,8 @@ export class NodeCanvasCompositor implements CompositorPort {
         const scale = target / image.width;
         const logoH = image.height * scale;
         const margin = width * 0.04;
-        const lx = top ? margin : width - target - margin;
-        const ly = top ? height - logoH - margin : margin;
+        const lx = (top ? margin : width - target - margin) + (top ? insets.left : -insets.right);
+        const ly = (top ? height - logoH - margin : margin) + (top ? -insets.bottom : insets.top);
         logo = { image, x: lx, y: ly, width: target, height: logoH };
         logoApplied = true;
       } catch (error) {
@@ -192,6 +201,7 @@ export class NodeCanvasCompositor implements CompositorPort {
       background,
       logo,
       logoApplied,
+      insets,
     };
   }
 

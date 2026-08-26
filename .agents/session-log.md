@@ -460,3 +460,18 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Composition root is the only place that may close over `new Date()`.
 - **Left open:**
   - none for this follow-up.
+
+---
+
+## 2026-08-26 — compositor optional safeInsets (Phase 5.2 compositor half)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `CompositeRequest.safeInsets?` (`top/right/bottom/left`). Absent or all-zero keeps today's geometry.
+  - `NodeCanvasCompositor.prepare` normalizes insets and offsets the captured logo anchor; `draw` offsets the headline first/last baseline. Accent band, shade, background, and `t` are unchanged.
+  - Existing 12-cell goldens still omit the field (byte-identical). New `compositor-goldens-insets.json` records one `headline-top/bold/9:16` cell with `{ top: 120, bottom: 200 }` on `darwin-arm64`, skip-on-missing-key. Structural test spies `fillText`/`drawImage` on every ratio × layout.
+- **Decisions:**
+  - Logo offset lives in prepare (that is where x/y are captured); headline offset lives in draw via threaded `PreparedCreative.insets`. Callers are not wired — GenerateCampaignUseCase still omits the field.
+- **Left open:**
+  - Lane A / later wave: union of platform-profile insets at generate time. Linux inset golden not recorded (skipIf).
+
