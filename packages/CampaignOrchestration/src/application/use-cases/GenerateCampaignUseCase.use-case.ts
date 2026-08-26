@@ -266,14 +266,44 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
 
     const targets = options?.regenerateOnly;
     let variants: readonly Variant[];
+    const attemptByIndex = new Map<number, number>();
     if (targets) {
       const variationTargets = targets.filter(isVariationTarget);
+      if (variationTargets.length === 0) {
+        return err(new Error("targets do not match the brief mode"));
+      }
+      const seen = new Set<number>();
+      const unique = variationTargets.filter((target) => {
+        if (seen.has(target.variantIndex)) return false;
+        seen.add(target.variantIndex);
+        return true;
+      });
       const slots: Variant[] = [];
-      for (const target of variationTargets) {
-        const next = this.deps.planner.replan(plan, target.variantIndex, target.attempt ?? 0);
+      for (const target of unique) {
+        if (
+          !Number.isInteger(target.variantIndex) ||
+          target.variantIndex < 0 ||
+          target.variantIndex >= plan.variants.length
+        ) {
+          return err(new Error(`Invalid variant index ${target.variantIndex}.`));
+        }
+        const occupant = plan.variants[target.variantIndex];
+        if (occupant.productId !== target.productId) {
+          return err(
+            new Error(
+              `Variation target productId "${target.productId}" does not match plan slot ${target.variantIndex} ("${occupant.productId}").`,
+            ),
+          );
+        }
+        const attempt = target.attempt ?? 1;
+        if (!Number.isInteger(attempt) || attempt < 1) {
+          return err(new Error(`replan attempt must be an integer >= 1 (received ${attempt}).`));
+        }
+        const next = this.deps.planner.replan(plan, target.variantIndex, attempt);
         if (!next.success) return next;
         plan = next.value;
         slots.push(plan.variants[target.variantIndex]);
+        attemptByIndex.set(target.variantIndex, attempt);
       }
       variants = slots;
     } else {
@@ -286,8 +316,11 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       `policy ${plan.policyHash} seed ${plan.seed} — ${variants.length} variants`,
     );
 
+    const pinnedProofIndex = firstSquareIndexByProduct(plan.variants);
+
     const productById = new Map(brief.products.map((product) => [product.id, product]));
-    const cells: Array<{ variant: Variant; product: Product; ratio: AspectRatio }> = [];
+    const cells: Array<{ variant: Variant; product: Product; ratio: AspectRatio; attempt: number }> =
+      [];
     for (const variant of variants) {
       const product = productById.get(variant.productId);
       if (!product) {
@@ -295,11 +328,25 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       }
       const ratio = AspectRatio.create(variant.aspectRatio);
       if (!ratio.success) return ratio;
-      cells.push({ variant, product, ratio: ratio.value });
+      cells.push({
+        variant,
+        product,
+        ratio: ratio.value,
+        attempt: attemptByIndex.get(variant.index) ?? 0,
+      });
     }
 
     const cellResults = await mapWithConcurrency(cells, MAX_CONCURRENT_BACKGROUNDS, (cell) =>
-      this.renderVariant(cell.variant, cell.product, cell.ratio, copy, context, log),
+      this.renderVariant(
+        cell.variant,
+        cell.product,
+        cell.ratio,
+        copy,
+        context,
+        log,
+        cell.attempt,
+        pinnedProofIndex.get(cell.product.id) === cell.variant.index,
+      ),
     );
 
     const assets: GeneratedAsset[] = cellResults.map((cell) => cell.asset);
@@ -333,6 +380,8 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     copy: string,
     context: BackgroundContext,
     log: PipelineExecutionLog,
+    attempt: number,
+    writeProof: boolean,
   ): Promise<{ asset: GeneratedAsset; heroImage?: Uint8Array }> {
     const cellContext: BackgroundContext = {
       ...context,
@@ -380,6 +429,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       treatment,
       backgroundSource: background.source,
       variantIndex: variant.index,
+      attempt,
       seed: variant.seed,
       format: "static",
       descriptor: {
@@ -396,7 +446,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     );
     return {
       asset,
-      heroImage: ratio.value === "1:1" ? composite.image : undefined,
+      heroImage: writeProof ? composite.image : undefined,
     };
   }
 
@@ -470,4 +520,15 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     log.record("ExecuteLegalGateCheck", "Legal gate passed");
     return false;
   }
+}
+
+/** First 1:1 variant of each product in plan order — the only slot that may rewrite its proof. */
+function firstSquareIndexByProduct(variants: readonly Variant[]): Map<string, number> {
+  const pinned = new Map<string, number>();
+  for (const variant of variants) {
+    if (variant.aspectRatio === "1:1" && !pinned.has(variant.productId)) {
+      pinned.set(variant.productId, variant.index);
+    }
+  }
+  return pinned;
 }

@@ -14,7 +14,8 @@ export interface ClassicRegenerationTarget {
 
 /**
  * Variation slot identity: product + variantIndex (D6). `attempt` is the re-roll
- * counter passed through to `replan(plan, index, attempt)`.
+ * counter passed through to `replan(plan, index, attempt)` — originals are 0,
+ * so a re-roll must send `>= 1` (`previous + 1`). Omitted defaults to 1.
  */
 export interface VariationRegenerationTarget {
   readonly productId: string;

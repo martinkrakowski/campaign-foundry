@@ -59,6 +59,11 @@ export interface GeneratedAsset {
    * fixtures stay byte-identical (optional fields omit from serialization).
    */
   readonly variantIndex?: number;
+  /**
+   * Re-roll counter. Variation originals are `0`; each replan request is
+   * `previous + 1`. Omitted on classic assets so report JSON stays byte-identical.
+   */
+  readonly attempt?: number;
   /** Provenance seed from the plan. Variation assets only. */
   readonly seed?: number;
   /** Output format. Variation assets set `"static"`; classic omits it. */
