@@ -7,18 +7,23 @@ import type { LogEntry, LogLevel } from "./LogEntry.vo.js";
  */
 export class PipelineExecutionLog {
   private readonly _entries: LogEntry[] = [];
-  readonly startedAt: Date = new Date();
+  readonly startedAt: Date;
   completedAt?: Date;
   totalOperations = 0;
 
-  constructor(readonly campaignId: string) {}
+  constructor(
+    readonly campaignId: string,
+    private readonly now: () => Date,
+  ) {
+    this.startedAt = now();
+  }
 
   record(stage: string, message: string, level: LogLevel = "info"): void {
-    this._entries.push({ timestamp: new Date(), stage, message, level });
+    this._entries.push({ timestamp: this.now(), stage, message, level });
   }
 
   complete(): void {
-    this.completedAt = new Date();
+    this.completedAt = this.now();
   }
 
   get entries(): readonly LogEntry[] {
