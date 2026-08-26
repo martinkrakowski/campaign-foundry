@@ -480,6 +480,39 @@ To keep this file out of version control, add `.agents/session-log.md` to
 
 ---
 
+## 2026-08-26 — persist briefs and create-campaign wizard (wave 3 lane B)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Typed web client `apps/web/src/lib/briefs-api.ts` for list/create/replace/update/duplicate/upload/plan. Plan 404 and network failure return `{ kind: "unavailable" }` so the wizard does not depend on lane A's `POST /campaigns/plan`.
+  - `/brief` keeps the in-memory Save → `/grid` loop and adds **Save to briefs/** (POST create, 409 → Replace with `?replace=1`) and **Save as…** (POST the in-memory editor under a new id).
+  - `BriefPicker`: **Create new** → `/new`; **Duplicate** prompts for a path-safe id, POSTs `/campaigns/briefs/:id/duplicate` with `{ newId }`, reloads, `setBrief(copy)`.
+  - Wizard at `(shell)/new`: type → products → copy → (policy) → output → review. Classic ≥2 products, randomized ≥1 (D10). Estimate panel debounces `POST /campaigns/plan`. No "Generate suggestions".
+- **Decisions:**
+  - Save-as on a dirty editor POSTs a cloned brief (new id) rather than the duplicate endpoint, which copies the on-disk file and would drop unsaved edits.
+  - YAML preview copies `BRIEF_KEY_ORDER` locally; no `js-yaml` (web has no such dependency).
+  - SAFE_ID_PATTERN is duplicated in the web app (value-importing CampaignOrchestration barrels breaks the Next build).
+  - `PUT /campaigns/briefs/:id` is implemented on the client but unused by the UI (create + `?replace=1` covers persist).
+- **Left open:**
+  - Lane A lands `POST /campaigns/plan`; until then the estimate panel shows "estimate unavailable" on 404.
+
+---
+
+## 2026-08-26 — PR #51 review findings (brief save + wizard)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `/brief` merges editor drafts over loaded products by id (keeps `inputAsset` and other optional fields) and re-initialises the form when `brief.id` changes. Save is disabled while `form.id !== brief.id`.
+  - Wizard policy validation matches `VariationPolicy.fromBrief` (seed uint32, minDistance 0–6, coverage ≥ 0). Empty axis selections block Next instead of omitting the axis (omitted = planner defaults).
+  - Logo uploads are named `<productId>-<stem>.<ext>`; a 409 for that name is treated as success. Product drafts have a stable `key` for React keys and async upload dispatch; Remove is disabled while that product's upload is in flight.
+  - YAML preview quotes scalars js-yaml would retype. EstimatePanel passes `AbortSignal` into `planCampaign` and aborts on edit/unmount; the leave-step test uses fake timers.
+  - Stepper sets `aria-current="step"` and moves focus to the step heading after Next/Back.
+  - Removed unused `updateBrief`; collapsed `BriefWriteResult` into `BriefEntry`; `fileToBase64` uses `FileReader.readAsDataURL`.
+- **Decisions:**
+  - Left `PUT /campaigns/briefs/:id` unwired — create + `?replace=1` still covers persist. Dropped the unused client helper rather than adding a second save path.
+  - Left the 404 → "estimate unavailable" branch as the network/absent fallback (route exists on `main`).
+- **Left open:**
+  - none for this review pass.
 ## 2026-08-26 — compositor optional safeInsets (Phase 5.2 compositor half)
 
 - **Mode:** Implementer

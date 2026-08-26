@@ -2,9 +2,10 @@
 
 import type { CampaignBrief, Product } from "@campaignfoundry/CampaignOrchestration";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRun } from "@/lib/run-context";
 import { Button, Input } from "@/components/ui";
+import { createBrief, isBriefsApiError, unknownErrorMessage } from "@/lib/briefs-api";
 
 type ProductDraft = { id: string; name: string; primaryColor: string; logoPath: string };
 
@@ -20,19 +21,45 @@ const toDraft = (p: Product): ProductDraft => ({
   logoPath: p.logoPath,
 });
 
+const formFromBrief = (source: CampaignBrief) => ({
+  id: source.id,
+  targetRegion: source.targetRegion,
+  targetAudience: source.targetAudience,
+  campaignMessage: source.campaignMessage,
+  localizedMessage: source.localizedMessage ?? "",
+  products: source.products.map(toDraft),
+});
+
+/** Merge editor drafts onto the loaded products so optional fields (inputAsset, …) survive. */
+const mergeProducts = (originals: readonly Product[], drafts: readonly ProductDraft[]): Product[] =>
+  drafts.map((draft, index) => {
+    const original = originals.find((product) => product.id === draft.id) ?? originals[index];
+    return original ? { ...original, ...draft } : draft;
+  });
+
 /** HITL brief authoring — edits the brief the orchestrator runs against. */
 export default function BriefPage() {
   const { brief, setBrief } = useRun();
   const router = useRouter();
 
-  const [form, setForm] = useState({
-    id: brief.id,
-    targetRegion: brief.targetRegion,
-    targetAudience: brief.targetAudience,
-    campaignMessage: brief.campaignMessage,
-    localizedMessage: brief.localizedMessage ?? "",
-    products: brief.products.map(toDraft),
-  });
+  const [form, setForm] = useState(() => formFromBrief(brief));
+  const [savedFile, setSavedFile] = useState<string | undefined>();
+  const [persistError, setPersistError] = useState<string | undefined>();
+  const [conflict, setConflict] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveAsId, setSaveAsId] = useState<string | null>(null);
+  const [pendingAsId, setPendingAsId] = useState<string | undefined>();
+
+  useEffect(() => {
+    setForm(formFromBrief(brief));
+    setPersistError(undefined);
+    setConflict(false);
+    setSaveAsId(null);
+    setPendingAsId(undefined);
+    setSavedFile((file) => (file && file.startsWith(`${brief.id}.`) ? file : undefined));
+  }, [brief.id]); // identity of the loaded brief (picker switch), not per-keystroke edits
+
+  const draftStale = form.id !== brief.id;
 
   const setField = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
@@ -54,6 +81,16 @@ export default function BriefPage() {
 
   const idValid = BRIEF_ID_PATTERN.test(form.id);
 
+  const persistableBrief = (id: string): CampaignBrief => ({
+    ...brief,
+    id,
+    targetRegion: form.targetRegion,
+    targetAudience: form.targetAudience,
+    campaignMessage: form.campaignMessage,
+    localizedMessage: form.localizedMessage || undefined,
+    products: mergeProducts(brief.products, form.products),
+  });
+
   const save = () => {
     /* istanbul ignore next -- the Save button is disabled when the id is invalid; this is belt-and-suspenders */
     if (!idValid) return; // guard: the API would reject an unsafe id, and it can't persist/reload
@@ -69,11 +106,48 @@ export default function BriefPage() {
     router.push("/grid");
   };
 
+  const persist = async (opts: { replace?: boolean; asId?: string } = {}) => {
+    const targetId = opts.asId ?? form.id;
+    /* istanbul ignore next -- persist buttons are disabled when the current id is invalid */
+    if (!opts.asId && !idValid) return;
+    if (opts.asId !== undefined && !BRIEF_ID_PATTERN.test(opts.asId)) {
+      setPersistError("New id must be a path-safe slug (lowercase letters, digits, hyphens; max 64).");
+      return;
+    }
+    setSaving(true);
+    setPersistError(undefined);
+    setConflict(false);
+    setPendingAsId(opts.asId);
+    try {
+      // Save-as always POSTs the in-memory editor (including unsaved edits) under the
+      // new id, rather than duplicating a possibly stale on-disk file.
+      const result = await createBrief(persistableBrief(targetId), { replace: opts.replace });
+      setSavedFile(result.file);
+      if (opts.asId) {
+        setField("id", opts.asId);
+        setBrief(result.brief);
+        setSaveAsId(null);
+      }
+    } catch (error) {
+      if (isBriefsApiError(error) && error.status === 409) {
+        setConflict(true);
+        setPersistError(error.message);
+      } else {
+        setPersistError(unknownErrorMessage(error, "Save failed"));
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-6 overflow-y-auto p-4 pb-12 sm:p-8">
       <div>
         <h2 className="text-xl font-bold text-white">Campaign Brief</h2>
         <p className="text-[13px] text-text-muted">Edit the brief the orchestrator runs against.</p>
+        {savedFile ? (
+          <p className="mt-1 font-mono text-[12px] text-text-muted">Saved to briefs/{savedFile}</p>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -145,10 +219,55 @@ export default function BriefPage() {
         ))}
       </div>
 
-      <div className="flex gap-3">
-        <Button onClick={save} disabled={!idValid}>
+      {persistError ? <p className="text-[13px] text-error">{persistError}</p> : null}
+
+      {saveAsId !== null ? (
+        <div className="space-y-2 rounded-lg border border-border bg-surface p-4">
+          <LabeledInput
+            label="Save as new id"
+            value={saveAsId}
+            onChange={setSaveAsId}
+            error={
+              saveAsId.length > 0 && !BRIEF_ID_PATTERN.test(saveAsId)
+                ? "Lowercase letters, digits and hyphens only (max 64)."
+                : undefined
+            }
+          />
+          <div className="flex gap-2">
+            <Button size="sm" onClick={() => void persist({ asId: saveAsId })} disabled={saving}>
+              Save copy
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setSaveAsId(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap gap-3">
+        <Button onClick={save} disabled={!idValid || draftStale}>
           Save brief
         </Button>
+        <Button
+          variant="secondary"
+          onClick={() => void persist()}
+          disabled={!idValid || saving || draftStale}
+          isLoading={saving && pendingAsId === undefined}
+        >
+          Save to briefs/
+        </Button>
+        <Button variant="secondary" onClick={() => setSaveAsId("")} disabled={!idValid || saving || draftStale}>
+          Save as…
+        </Button>
+        {conflict ? (
+          <Button
+            variant="secondary"
+            onClick={() => void persist({ replace: true, asId: pendingAsId })}
+            disabled={saving || draftStale}
+          >
+            Replace
+          </Button>
+        ) : null}
         <Button variant="ghost" onClick={() => router.back()}>
           Cancel
         </Button>
@@ -169,10 +288,12 @@ function LabeledInput({
   error?: string;
 }) {
   return (
-    <label className="block">
-      <span className="mb-1.5 block text-[11px] text-text-muted">{label}</span>
-      <Input value={value} onChange={(e) => onChange(e.target.value)} invalid={Boolean(error)} />
-      {error && <span className="mt-1 block text-[11px] text-error">{error}</span>}
-    </label>
+    <div>
+      <label className="block">
+        <span className="mb-1.5 block text-[11px] text-text-muted">{label}</span>
+        <Input value={value} onChange={(e) => onChange(e.target.value)} invalid={Boolean(error)} />
+      </label>
+      {error ? <span className="mt-1 block text-[11px] text-error">{error}</span> : null}
+    </div>
   );
 }
