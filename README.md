@@ -304,7 +304,10 @@ output:
 - **Formats.** `formats: [motion]` alone makes every variant a clip (no still
   slot); `[static, motion]` mixes. With the motion format an *absent* `motion`
   axis means every kind; an explicitly empty one (`motion: []`) is rejected
-  ("select at least one motion kind").
+  ("select at least one motion kind"). Formats and platforms must agree: every
+  requested format needs a platform that packages it and every platform needs a
+  requested format (`formats: [static]` + `instagram-reel`, or `[motion]` +
+  `instagram-feed`, are 400s naming both).
 - **Draw.** With both formats the motion axis keeps one *still* slot, so a plan
   mixes PNGs and clips; `motion` and `durationSec` are Hamming axes, and
   `minDistance` is bounded by the axes the brief activates (6 for a static

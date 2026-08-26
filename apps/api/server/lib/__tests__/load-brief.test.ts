@@ -336,6 +336,24 @@ describe("parseBrief motion allowlist (D8, gated on the ffmpeg capability)", () 
     expect(() => parseBrief(input, MOTION_ON)).toThrow(message);
   });
 
+  test.each([
+    ["[static] + a motion-only platform", { formats: ["static"], platforms: ["instagram-reel"] }, /platform "instagram-reel" packages only \[motion\], which output.formats \[static\] does not request/],
+    ["[motion] + a static-only platform", { formats: ["motion"], platforms: ["instagram-feed"] }, /platform "instagram-feed" packages only \[static\], which output.formats \[motion\] does not request/],
+    ["no formats (static) + a motion-only platform", { platforms: ["instagram-reel"] }, /platform "instagram-reel" packages only \[motion\], which output.formats \[static\] does not request/],
+    ["a format no requested platform packages", { formats: ["static", "motion"], platforms: ["instagram-reel"] }, /format "static" is requested but none of output.platforms \[instagram-reel\] can package it/],
+  ])("rejects incompatible formats/platforms: %s", (_label, output, message) => {
+    expect(() => parseBrief(motionBrief({ output }), MOTION_ON)).toThrow(message);
+  });
+
+  test("accepts formats/platforms that agree: static, mixed, and motion-only", () => {
+    const parse = (output: Record<string, unknown>) => parseBrief(motionBrief({ output }), MOTION_ON).output;
+    expect(parse({ formats: ["static"], platforms: ["instagram-feed"] })?.formats).toEqual(["static"]);
+    expect(parse({ formats: ["static", "motion"], platforms: ["instagram-feed", "tiktok"] })?.formats).toEqual(["static", "motion"]);
+    expect(parse({ formats: ["motion"], platforms: ["instagram-reel", "youtube-short"] })?.formats).toEqual(["motion"]);
+    // Platforms without formats keep the static default.
+    expect(parse({ platforms: ["linkedin"] })?.platforms).toEqual(["linkedin"]);
+  });
+
   test("formats: motion with an explicitly empty motion axis is rejected; an absent axis is accepted", () => {
     const empty = motionBrief({
       variation: { ...v2Brief.variation, axes: { ...staticAxes, motion: [] } },

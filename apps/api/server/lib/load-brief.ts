@@ -10,7 +10,7 @@ import {
   type CampaignBrief,
   type RegenerationTarget,
 } from "@campaignfoundry/CampaignOrchestration";
-import { isPlatformVisible, platformProfile } from "@campaignfoundry/Distribution";
+import { isPlatformVisible, platformProfile, type PlatformProfile } from "@campaignfoundry/Distribution";
 import { getCapabilities, type Capabilities } from "./capabilities.js";
 
 const REQUIRED_FIELDS = ["id", "targetRegion", "targetAudience", "campaignMessage", "products"] as const;
@@ -229,7 +229,8 @@ function validateFormats(value: unknown, capabilities: Capabilities): void {
 }
 
 /** Every PLATFORM_PROFILES id whose formats this host can produce (motion ones need the capability). */
-function validatePlatforms(value: unknown, capabilities: Capabilities): void {
+function validatePlatforms(value: unknown, capabilities: Capabilities): PlatformProfile[] {
+  const profiles: PlatformProfile[] = [];
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error(
       'Campaign brief field "output.platforms" must be a non-empty array of non-empty strings.',
@@ -248,6 +249,33 @@ function validatePlatforms(value: unknown, capabilities: Capabilities): void {
     if (!isPlatformVisible(profile, capabilities)) {
       throw new Error(`Unsupported output platform "${entry}": ${motionUnavailable(capabilities)}.`);
     }
+    profiles.push(profile);
+  }
+  return profiles;
+}
+
+/**
+ * Formats and platforms must agree: every requested format needs a platform that
+ * packages it, and every platform needs a requested format it packages — otherwise
+ * the run renders creatives nothing can ship (`formats: [static]` + `instagram-reel`)
+ * or lists a platform that would package nothing (`formats: [motion]` + `instagram-feed`).
+ * `formats` defaults to `[static]`, as the planner does.
+ */
+function validateFormatPlatformCompatibility(formats: readonly string[], platforms: readonly PlatformProfile[]): void {
+  const list = (values: readonly string[]): string => `[${values.join(", ")}]`;
+  for (const { id, formats: packaged } of platforms) {
+    if (!packaged.some((format) => formats.includes(format))) {
+      throw new Error(
+        `Output platform "${id}" packages only ${list(packaged)}, which output.formats ${list(formats)} does not request.`,
+      );
+    }
+  }
+  for (const format of formats) {
+    if (!platforms.some((profile) => (profile.formats as readonly string[]).includes(format))) {
+      throw new Error(
+        `Output format "${format}" is requested but none of output.platforms ${list(platforms.map((p) => p.id))} can package it.`,
+      );
+    }
   }
 }
 
@@ -260,7 +288,11 @@ function validateOutput(value: unknown, capabilities: Capabilities): void {
     validateFormats(value.formats, capabilities);
   }
   if (value.platforms !== undefined) {
-    validatePlatforms(value.platforms, capabilities);
+    const profiles = validatePlatforms(value.platforms, capabilities);
+    validateFormatPlatformCompatibility(
+      (value.formats as readonly string[] | undefined) ?? [...SUPPORTED_FORMATS],
+      profiles,
+    );
   }
 }
 
