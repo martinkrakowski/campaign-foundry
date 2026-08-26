@@ -7,6 +7,7 @@ import {
   type CopyGeneratorPort,
   type ImageGeneratorPort,
   type PipelineResult,
+  type PlatformSafeZoneResolver,
   type RegenerationTarget,
 } from "@campaignfoundry/CampaignOrchestration";
 import {
@@ -116,7 +117,7 @@ export function buildPipeline(imageModel?: string): GenerateCampaignUseCase {
   return new GenerateCampaignUseCase({
     imageGenerator: imageGenerator(imageModel),
     proceduralGenerator: new ProceduralBackgroundGenerator(),
-    planner: new PlanVariationsUseCase(),
+    planner: new PlanVariationsUseCase(platformZones),
     compositor: new NodeCanvasCompositor(process.env.MESSAGE_FONT),
     // Motion variants only; the parser has already gated them on the ffmpeg probe.
     videoCompositor: new CanvasFfmpegVideoCompositor({ fontFamily: process.env.MESSAGE_FONT }),
@@ -124,12 +125,19 @@ export function buildPipeline(imageModel?: string): GenerateCampaignUseCase {
     exporter: new FileSystemExporter(outputRoot()),
     now: () => new Date(),
     // D11: safe insets come from Distribution's profile table; orchestration only sees a resolver.
-    platformSafeZones: (platformId) => {
-      const profile = platformProfile(platformId);
-      return profile ? { ratio: profile.ratio, safeInsets: profile.safeInsets } : undefined;
-    },
+    platformSafeZones: platformZones,
   });
 }
+
+/**
+ * Distribution's profile table as orchestration sees it: the generator reads the
+ * safe insets (D11), the planner the ratio + formats (motion draws only where a
+ * requested platform can package a clip).
+ */
+export const platformZones: PlatformSafeZoneResolver = (platformId) => {
+  const profile = platformProfile(platformId);
+  return profile ? { ratio: profile.ratio, safeInsets: profile.safeInsets, formats: profile.formats } : undefined;
+};
 
 /**
  * Run a campaign. `imageModel` (from `?model=`) selects *which* provider; the

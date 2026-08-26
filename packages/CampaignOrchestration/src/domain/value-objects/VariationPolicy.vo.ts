@@ -34,6 +34,16 @@ const DEFAULT_DURATION: readonly number[] = [6];
 const MIN_DURATION_SEC = 2;
 const MAX_DURATION_SEC = 30;
 
+/**
+ * Plan-time inputs the brief cannot carry: `motionRatios` are the canvas
+ * ratios of the requested motion-capable platforms, resolved by the caller
+ * from `output.platforms` (the domain never reads the profile table). Absent →
+ * every ratio may carry a clip; empty → none can be packaged, so none is drawn.
+ */
+export interface PlanInput {
+  readonly motionRatios?: readonly AspectRatioValue[];
+}
+
 export interface VariationCoverage {
   readonly perProduct: number;
   readonly perRatio: number;
@@ -65,9 +75,11 @@ export class VariationPolicy {
     readonly motionEnabled: boolean,
     /** True iff `output.formats` also includes "static": the motion draw keeps a still slot. */
     readonly mixStatic: boolean,
+    /** Ratios a motion slot may be drawn for (every ratio unless `output.platforms` narrows it). */
+    readonly motionRatios: readonly AspectRatioValue[],
   ) {}
 
-  static fromBrief(brief: CampaignBrief): Result<VariationPolicy, Error> {
+  static fromBrief(brief: CampaignBrief, input: PlanInput = {}): Result<VariationPolicy, Error> {
     const variation = brief.variation;
     if (variation === undefined || variation.count === undefined) {
       return err(new Error('Variation policy requires "count".'));
@@ -133,6 +145,7 @@ export class VariationPolicy {
     if (!paletteShiftResult.success) return paletteShiftResult;
     const productIds = unique(brief.products.map((product) => product.id));
     const ratios = AspectRatio.all().map((ratio) => ratio.value);
+    const motionRatios = unique(input.motionRatios ?? ratios);
     const axisProductSize =
       productIds.length *
       ratios.length *
@@ -155,7 +168,7 @@ export class VariationPolicy {
       seed,
       tone,
       // Static briefs hash exactly as before the motion axes existed (golden-stable).
-      ...(motionEnabled ? { duration, mixStatic, motion } : {}),
+      ...(motionEnabled ? { duration, mixStatic, motion, motionRatios } : {}),
     });
 
     return ok(
@@ -176,6 +189,7 @@ export class VariationPolicy {
         duration,
         motionEnabled,
         mixStatic,
+        motionRatios,
       ),
     );
   }
@@ -234,6 +248,7 @@ function hashPolicy(payload: {
   duration?: readonly number[];
   mixStatic?: boolean;
   motion?: readonly string[];
+  motionRatios?: readonly string[];
 }): string {
   return createHash("sha256").update(canonicalJson(payload)).digest("hex");
 }

@@ -477,6 +477,8 @@ describe("PlanVariationsUseCase.replan", () => {
   });
 });
 
+const ZERO = { top: 0, right: 0, bottom: 0, left: 0 };
+
 const motionBrief = (over: Partial<CampaignBrief> = {}): CampaignBrief =>
   brief({
     variation: {
@@ -538,6 +540,60 @@ describe("PlanVariationsUseCase — motion axes", () => {
     const nine = planner().plan(motionBrief({ variation: { count: 1, seed: 7, minDistance: 9 } }));
     expect(nine.success).toBe(false);
     if (!nine.success) expect(nine.error.message).toMatch(/minDistance/);
+  });
+
+  test("draws motion only for the ratios of the requested motion platforms", () => {
+    const zones = {
+      "instagram-feed": { ratio: "1:1", formats: ["static"], safeInsets: ZERO },
+      "instagram-reel": { ratio: "9:16", formats: ["motion"], safeInsets: ZERO },
+    } as const;
+    const withPlatforms = new PlanVariationsUseCase((id) => zones[id as keyof typeof zones]);
+    const result = withPlatforms.plan(
+      motionBrief({
+        variation: { count: 12, seed: 7, minDistance: 1, axes: { motion: ["ken-burns-in"], duration: [4] } },
+        output: { formats: ["static", "motion"], platforms: ["instagram-feed", "instagram-reel", "myspace"] },
+      }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.policy.motionRatios).toEqual(["9:16"]);
+    const clips = result.value.variants.filter((v) => v.motion !== undefined);
+    expect(clips.length).toBeGreaterThan(0);
+    expect(clips.every((v) => v.aspectRatio === "9:16")).toBe(true);
+    expect(result.value.estimate.frames).toBe(clips.length * 4 * 30);
+
+    // Every requested platform is static: no ratio can ship a clip, so none is drawn.
+    const staticOnly = withPlatforms.plan(
+      motionBrief({ output: { formats: ["motion"], platforms: ["instagram-feed"] } }),
+    );
+    expect(staticOnly.success).toBe(true);
+    if (!staticOnly.success) return;
+    expect(staticOnly.value.policy.motionRatios).toEqual([]);
+    expect(staticOnly.value.variants.every((v) => v.motion === undefined)).toBe(true);
+    expect(staticOnly.value.estimate.frames).toBe(0);
+
+    // No platforms, or a planner without the resolver, keeps every ratio eligible.
+    const unrestricted = withPlatforms.plan(motionBrief());
+    const noResolver = planner().plan(motionBrief({ output: { formats: ["motion"], platforms: ["instagram-feed"] } }));
+    expect(unrestricted.success && noResolver.success).toBe(true);
+    if (!unrestricted.success || !noResolver.success) return;
+    expect(unrestricted.value.policy.motionRatios).toEqual(["1:1", "9:16", "16:9"]);
+    expect(noResolver.value.variants.some((v) => v.motion !== undefined && v.aspectRatio !== "9:16")).toBe(true);
+  });
+
+  test("replan of a ratio no motion platform packages stays a still", () => {
+    const zones = { "instagram-reel": { ratio: "9:16", formats: ["motion"], safeInsets: ZERO } } as const;
+    const withPlatforms = new PlanVariationsUseCase((id) => zones[id as keyof typeof zones]);
+    const planned = withPlatforms.plan(
+      motionBrief({ output: { formats: ["motion"], platforms: ["instagram-reel"] } }),
+    );
+    expect(planned.success).toBe(true);
+    if (!planned.success) return;
+    const index = planned.value.variants.findIndex((v) => v.aspectRatio !== "9:16");
+    expect(index).toBeGreaterThanOrEqual(0);
+    const next = withPlatforms.replan(planned.value, index, 1);
+    expect(next.success).toBe(true);
+    if (next.success) expect(next.value.variants[index].motion).toBeUndefined();
   });
 
   test("replan keeps the frames estimate in step with the re-drawn slot", () => {

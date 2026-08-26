@@ -289,9 +289,13 @@ output:
 ```
 
 - **Draw.** With both formats the motion axis keeps one *still* slot, so a plan
-  mixes PNGs and clips; `motion` and `durationSec` are Hamming axes (so
-  `minDistance` goes up to 8). Static briefs draw exactly as before — goldens
-  and `policyHash` are unchanged.
+  mixes PNGs and clips; `motion` and `durationSec` are Hamming axes, and
+  `minDistance` is bounded by the axes the brief activates (6 for a static
+  brief, 8 once motion is on). With `output.platforms` set, clips are drawn
+  only for the ratios of the requested *motion* platforms (`instagram-reel` →
+  9:16 only; a 1:1 clip could not be packaged anywhere) — other ratios stay
+  stills. Static briefs draw exactly as before — goldens and `policyHash` are
+  unchanged.
 - **Render.** A motion variant writes `<product>/<ratio>/v<index>.mp4` plus its
   poster `v<index>.png` (the still the grid, export, proof, and packaging use).
   Motion moves background and headline only; the accent band and logo never

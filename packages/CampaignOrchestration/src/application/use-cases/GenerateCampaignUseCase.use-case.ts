@@ -18,6 +18,7 @@ import type { CompliancePort } from "../ports/out/CompliancePort.js";
 import type { CompositeRequest, CompositorPort, SafeInsets } from "../ports/out/CompositorPort.js";
 import type { ExportPort } from "../ports/out/ExportPort.js";
 import type { BackgroundContext, ImageGeneratorPort } from "../ports/out/ImageGeneratorPort.js";
+import type { PlatformSafeZoneResolver } from "../ports/out/PlatformProfilePort.js";
 import type { VideoCompositorPort } from "../ports/out/VideoCompositorPort.js";
 import { MOTION_FPS } from "./PlanVariationsUseCase.use-case.js";
 
@@ -71,18 +72,6 @@ export interface VariationPlanner {
   plan(brief: CampaignBrief): Result<VariationPlan, Error>;
   replan(plan: VariationPlan, index: number, attempt: number): Result<VariationPlan, Error>;
 }
-
-/**
- * Platform safe zone as the composition root sees it (Distribution's profile
- * table). Injected as a resolver so orchestration never depends on Distribution.
- */
-export interface PlatformSafeZone {
-  readonly ratio: AspectRatioValue;
-  readonly safeInsets: SafeInsets;
-}
-
-/** Resolve a platform id from `output.platforms`; unknown ids resolve to undefined and are ignored. */
-export type PlatformSafeZoneResolver = (platformId: string) => PlatformSafeZone | undefined;
 
 /** Ports injected at the composition root — the use case depends on contracts, never adapters. */
 export interface GenerateCampaignDeps {

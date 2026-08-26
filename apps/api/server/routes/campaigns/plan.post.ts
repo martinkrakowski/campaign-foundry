@@ -1,5 +1,6 @@
 import { PlanVariationsUseCase } from "@campaignfoundry/CampaignOrchestration";
 import { parseBrief } from "../../lib/load-brief.js";
+import { platformZones } from "../../lib/pipeline.js";
 
 /**
  * POST /campaigns/plan — dry-run the variation planner (no generation).
@@ -21,7 +22,7 @@ export default defineEventHandler(async (event) => {
     return { error: "not a variation brief" };
   }
 
-  const planned = new PlanVariationsUseCase().plan(brief);
+  const planned = new PlanVariationsUseCase(platformZones).plan(brief);
   if (!planned.success) {
     setResponseStatus(event, 422);
     return { error: planned.error.message };

@@ -67,6 +67,21 @@ describe("POST /campaigns/plan", () => {
     expect(body.estimate.frames).toBe(motion.length * 4 * 30);
   });
 
+  test("motion platforms narrow clips to their ratio (instagram-reel → 9:16 only)", async () => {
+    setCapabilities({ motion: true });
+    const res = await call(
+      variationBrief({
+        variation: { count: 6, seed: 42, minDistance: 1, axes: { motion: ["ken-burns-in"], duration: [4] } },
+        output: { formats: ["static", "motion"], platforms: ["instagram-feed", "instagram-reel"] },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { variants: Array<{ aspectRatio: string; motion?: string }> };
+    const motion = body.variants.filter((v) => v.motion !== undefined);
+    expect(motion.length).toBeGreaterThan(0);
+    expect(motion.every((v) => v.aspectRatio === "9:16")).toBe(true);
+  });
+
   test("rejects a motion brief with 400 when the capability is off", async () => {
     const res = await call(variationBrief({ output: { formats: ["motion"] } }));
     expect(res.status).toBe(400);

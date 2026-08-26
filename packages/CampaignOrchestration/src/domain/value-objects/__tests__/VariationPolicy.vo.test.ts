@@ -49,6 +49,7 @@ describe("VariationPolicy.fromBrief", () => {
     expect(policy.duration).toEqual([6]);
     expect(policy.motionEnabled).toBe(false);
     expect(policy.mixStatic).toBe(false);
+    expect(policy.motionRatios).toEqual(["1:1", "9:16", "16:9"]);
     expect(policy.productIds).toEqual(["alpha", "beta"]);
     expect(policy.ratios).toEqual(["1:1", "9:16", "16:9"]);
     expect(policy.axisProductSize).toBe(2 * 3 * 2 * 2 * 1 * 1);
@@ -153,6 +154,28 @@ describe("VariationPolicy.fromBrief", () => {
     expect(motionOn(9).success).toBe(false);
     expect(motionOff(6).success).toBe(true);
     expect(motionOff(7).success).toBe(false);
+  });
+
+  test("motionRatios narrows to the plan input and joins the hash only for motion briefs", () => {
+    const motion = brief({
+      variation: { count: 1, axes: { motion: ["ken-burns-in"] } },
+      output: { formats: ["motion"] },
+    });
+    const all = VariationPolicy.fromBrief(motion);
+    const vertical = VariationPolicy.fromBrief(motion, { motionRatios: ["9:16", "9:16"] });
+    const none = VariationPolicy.fromBrief(motion, { motionRatios: [] });
+    expect(all.success && vertical.success && none.success).toBe(true);
+    if (!all.success || !vertical.success || !none.success) return;
+    expect(all.value.motionRatios).toEqual(["1:1", "9:16", "16:9"]);
+    expect(vertical.value.motionRatios).toEqual(["9:16"]);
+    expect(none.value.motionRatios).toEqual([]);
+    expect(vertical.value.policyHash).not.toBe(all.value.policyHash);
+
+    const still = brief({ variation: { count: 12, seed: 7, minDistance: 1 } });
+    const golden = VariationPolicy.fromBrief(still);
+    const narrowed = VariationPolicy.fromBrief(still, { motionRatios: ["9:16"] });
+    expect(golden.success && narrowed.success).toBe(true);
+    if (golden.success && narrowed.success) expect(narrowed.value.policyHash).toBe(golden.value.policyHash);
   });
 
   test("BACKGROUND_AXIS_SOURCES is the brief-parser set", () => {

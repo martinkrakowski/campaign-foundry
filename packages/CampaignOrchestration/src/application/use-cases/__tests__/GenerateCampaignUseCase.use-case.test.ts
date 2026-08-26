@@ -1,6 +1,7 @@
 import { describe, test, expect, vi } from "vitest";
 import { GenerateCampaignUseCase, unionSafeInsets } from "../GenerateCampaignUseCase.use-case.js";
-import type { GenerateCampaignDeps, PlatformSafeZoneResolver } from "../GenerateCampaignUseCase.use-case.js";
+import type { GenerateCampaignDeps } from "../GenerateCampaignUseCase.use-case.js";
+import type { PlatformSafeZone, PlatformSafeZoneResolver } from "../../ports/out/PlatformProfilePort.js";
 import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
 import type { Product } from "../../../domain/entities/Product.js";
 import type { Variant } from "../../../domain/entities/Variant.js";
@@ -762,10 +763,10 @@ describe("GenerateCampaignUseCase — motion variants", () => {
   });
 });
 
-const ZONES: Record<string, { ratio: "1:1" | "9:16" | "16:9"; safeInsets: { top: number; right: number; bottom: number; left: number } }> = {
-  "instagram-feed": { ratio: "1:1", safeInsets: { top: 0, right: 0, bottom: 0, left: 0 } },
-  "instagram-reel": { ratio: "9:16", safeInsets: { top: 250, right: 0, bottom: 340, left: 60 } },
-  tiktok: { ratio: "9:16", safeInsets: { top: 120, right: 120, bottom: 400, left: 0 } },
+const ZONES: Record<string, PlatformSafeZone> = {
+  "instagram-feed": { ratio: "1:1", safeInsets: { top: 0, right: 0, bottom: 0, left: 0 }, formats: ["static"] },
+  "instagram-reel": { ratio: "9:16", safeInsets: { top: 250, right: 0, bottom: 340, left: 60 }, formats: ["motion"] },
+  tiktok: { ratio: "9:16", safeInsets: { top: 120, right: 120, bottom: 400, left: 0 }, formats: ["motion"] },
 };
 const resolver: PlatformSafeZoneResolver = (id) => ZONES[id];
 

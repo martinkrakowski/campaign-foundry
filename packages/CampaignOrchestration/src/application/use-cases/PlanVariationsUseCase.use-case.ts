@@ -6,8 +6,10 @@ import type { MotionKind } from "../../domain/value-objects/MotionKind.vo.js";
 import type { VariationPlan } from "../../domain/value-objects/VariationPlan.vo.js";
 import {
   DISTANCE_AXES,
+  type PlanInput,
   VariationPolicy,
 } from "../../domain/value-objects/VariationPolicy.vo.js";
+import type { PlatformSafeZoneResolver } from "../ports/out/PlatformProfilePort.js";
 
 /** Re-roll bound: 64 draws from `seedFrom(briefId, index, attempt)`. */
 const REPLAN_MAX_DRAWS = 64;
@@ -29,8 +31,14 @@ interface AxisDraw {
  * distance or coverage.
  */
 export class PlanVariationsUseCase {
-  plan(brief: CampaignBrief): Result<VariationPlan, Error> {
-    const policyResult = VariationPolicy.fromBrief(brief);
+  /** `platformZones` (the composition root's profile resolver) narrows motion draws to packageable ratios. */
+  constructor(private readonly platformZones?: PlatformSafeZoneResolver) {}
+
+  plan(brief: CampaignBrief, input: PlanInput = {}): Result<VariationPlan, Error> {
+    const policyResult = VariationPolicy.fromBrief(brief, {
+      ...input,
+      ...motionRatiosInput(brief.output?.platforms, this.platformZones),
+    });
     if (!policyResult.success) return policyResult;
     const policy = policyResult.value;
 
@@ -149,30 +157,57 @@ function drawAxes(
   policy: VariationPolicy,
   fixed: AxisDraw,
 ): Omit<Variant, "index" | "seed"> {
+  // Draw order is the golden sequence: product, ratio, then the treatment axes.
+  const productId = fixed.productId ?? rng.pick(policy.productIds);
+  const aspectRatio = fixed.aspectRatio ?? rng.pick(policy.ratios);
   return {
-    productId: fixed.productId ?? rng.pick(policy.productIds),
-    aspectRatio: fixed.aspectRatio ?? rng.pick(policy.ratios),
+    productId,
+    aspectRatio,
     layout: rng.pick(policy.layout),
     tone: rng.pick(policy.tone),
     backgroundSource: rng.pick(policy.backgroundSource),
     paletteShift: rng.pick(policy.paletteShift),
-    ...drawMotion(rng, policy),
+    ...drawMotion(rng, policy, aspectRatio),
   };
 }
 
 /**
  * Motion axes. Static briefs consume no draws (goldens unchanged). With both
  * formats requested the draw keeps one still slot, so a mixed brief yields PNGs
- * and mp4s; `duration` is drawn only for a motion slot.
+ * and mp4s; `duration` is drawn only for a motion slot. A ratio no requested
+ * motion platform packages stays a still (no draws consumed).
  */
-function drawMotion(rng: SeededRandom, policy: VariationPolicy): Pick<Variant, "motion" | "durationSec"> {
-  if (!policy.motionEnabled) return {};
+function drawMotion(
+  rng: SeededRandom,
+  policy: VariationPolicy,
+  aspectRatio: AspectRatioValue,
+): Pick<Variant, "motion" | "durationSec"> {
+  if (!policy.motionEnabled || !policy.motionRatios.includes(aspectRatio)) return {};
   const slots: ReadonlyArray<MotionKind | undefined> = policy.mixStatic
     ? [undefined, ...policy.motion]
     : policy.motion;
   const motion = rng.pick(slots);
   if (motion === undefined) return {};
   return { motion, durationSec: rng.pick(policy.duration) };
+}
+
+/**
+ * Ratios a clip can be packaged for: those of the requested motion-capable
+ * platforms. No `output.platforms` (or no resolver) leaves the draw unrestricted;
+ * platforms that are all static yield `[]`, so a brief that cannot ship a clip
+ * anywhere never renders one.
+ */
+function motionRatiosInput(
+  platformIds: readonly string[] | undefined,
+  resolve: PlatformSafeZoneResolver | undefined,
+): Pick<PlanInput, "motionRatios"> {
+  if (!platformIds || !resolve) return {};
+  const motionRatios = new Set<AspectRatioValue>();
+  for (const id of platformIds) {
+    const zone = resolve(id);
+    if (zone?.formats.includes("motion")) motionRatios.add(zone.ratio);
+  }
+  return { motionRatios: [...motionRatios] };
 }
 
 function hamming(a: Variant, b: Variant): number {
