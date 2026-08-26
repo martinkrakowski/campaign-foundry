@@ -342,7 +342,7 @@ variation:
   coverage:              # optional minimums the planner satisfies first
     perProduct: 1
     perRatio: 1
-  axes:                  # a list per axis; an omitted axis is locked to its default
+  axes:                  # a list per axis; omitted axes take defaults (see below)
     layout: [headline-top, headline-bottom]
     tone: [bold, subtle]
     background: { source: [procedural] }   # procedural | asset-pool | genai
@@ -351,6 +351,8 @@ output:
   formats: [static]
   platforms: [instagram-feed, linkedin, x]
 ```
+
+Omitted axes are **not** all locked to one value: `layout` and `tone` expand to every supported value, `background.source` defaults to `[procedural]`, `paletteShift` to `[0]`, `duration` to `[6]`, `motion` to every `MOTION_KINDS` entry when `output.formats` includes `motion` (otherwise off), and `headline` is off unless `pool://copy` is requested. Lock an axis by listing exactly one value.
 
 How a plan is built: coverage minimums are placed first, then seeded draws
 from one generator seeded by `seedFrom(briefId, seed)` are accepted greedily (each variant also carries a provenance seed `seedFrom(briefId, index, "0")`; the per-slot `seedFrom(briefId, index, attempt)` generator is used only by re-rolls) while each stays at
