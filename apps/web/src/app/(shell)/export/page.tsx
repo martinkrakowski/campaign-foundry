@@ -12,7 +12,7 @@ const STATIC_PLATFORMS = ["instagram-feed", "linkedin", "x"] as const;
  */
 const MOTION_PLATFORMS = ["instagram-story", "instagram-reel", "tiktok", "youtube-short"] as const;
 
-/** Encode minutes shown on export rows; mirrors the estimate panel's per-frame budget. */
+/** Clip length shown on motion export rows, in whole seconds (the brief's `duration` axis). */
 const formatDuration = (seconds: number): string => `${seconds}s`;
 
 /** Print export queue — the HITL-approved creatives + their proofs, ready to ship. */
