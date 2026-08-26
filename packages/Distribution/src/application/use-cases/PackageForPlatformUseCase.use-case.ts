@@ -1,3 +1,4 @@
+import { assetIdentity } from "@campaignfoundry/CampaignOrchestration";
 import { ok, err, errorMessage, type Result } from "@campaignfoundry/shared";
 import { platformProfile, type PlatformProfile } from "../../domain/value-objects/PlatformProfile.vo.js";
 import type {
@@ -5,12 +6,13 @@ import type {
   PackageStorePort,
 } from "../ports/out/PackageStorePort.js";
 
-/** The four fields packaging needs from a persisted report row. */
+/** The fields packaging needs from a persisted report row (`variantIndex` only on variation rows). */
 export interface PackageableAsset {
   readonly productId: string;
   readonly aspectRatio: string;
   readonly treatment: string;
   readonly outputPath: string;
+  readonly variantIndex?: number;
 }
 
 export interface PackageForPlatformInput {
@@ -21,6 +23,11 @@ export interface PackageForPlatformInput {
   readonly packagedAt: string;
   /** Report rows that failed the persisted-asset guard; counted on every platform manifest. */
   readonly skipped?: number;
+  /**
+   * Asset identities (`assetIdentity`) to package — the HITL-approved set. Omitted
+   * means every asset; an empty list packages nothing.
+   */
+  readonly include?: readonly string[];
 }
 
 export interface PackagedPlatform {
@@ -28,6 +35,8 @@ export interface PackagedPlatform {
   readonly manifestPath: string;
   readonly items: readonly PackageManifestItem[];
   readonly skipped: number;
+  readonly included: number;
+  readonly excluded: number;
 }
 
 export interface PackageForPlatformResult {
@@ -57,11 +66,15 @@ export class PackageForPlatformUseCase {
     }
 
     const skipped = input.skipped ?? 0;
+    const include = input.include === undefined ? null : new Set(input.include);
     const platforms: PackagedPlatform[] = [];
     for (const { platformId, profile } of profiles) {
       try {
         // Assets have no format field yet — treat every generated creative as static.
-        const selected = input.assets.filter((asset) => asset.aspectRatio === profile.ratio);
+        const eligible = input.assets.filter((asset) => asset.aspectRatio === profile.ratio);
+        const selected = include === null ? eligible : eligible.filter((a) => include.has(assetIdentity(a)));
+        const included = selected.length;
+        const excluded = eligible.length - selected.length;
         const items: PackageManifestItem[] = [];
         for (const asset of selected) {
           const bytes = await this.store.readAsset(asset.outputPath);
@@ -83,10 +96,12 @@ export class PackageForPlatformUseCase {
           platformId,
           packagedAt: input.packagedAt,
           skipped,
+          included,
+          excluded,
           profile,
           items,
         });
-        platforms.push({ platformId, manifestPath, items, skipped });
+        platforms.push({ platformId, manifestPath, items, skipped, included, excluded });
       } catch (error) {
         return err(new Error(`Platform "${platformId}": ${withoutAbsolutePaths(errorMessage(error))}`));
       }

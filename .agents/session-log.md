@@ -566,6 +566,21 @@ To keep this file out of version control, add `.agents/session-log.md` to
 
 ---
 
+## 2026-08-26 — wave 4 Lane C: review UI at N=100 + packaging (PR 11)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Grid: product/ratio/format filters, descriptor-axis filters when present, descriptor chips, `content-visibility: auto` + paged sections of 24 (no virtualization lib).
+  - CommandBar: debounced `POST /campaigns/plan` estimate for variation briefs (cache by policyHash, 422 message verbatim, Execute disabled while infeasible/unknown); classic still uses product × ratio × treatment.
+  - run-context: additive estimate + packaging state (`setEstimate`, `packageSelected`, `loadPackages`).
+  - Runs: estimate summary when present. Export: static platform tabs, Package POST, zip download link.
+  - API: `GET /campaigns/packages/:campaignId` listing + store-only zip (`zlib.crc32`, no new dep). Did not touch `package.post.ts`.
+- **Decisions:**
+  - Hard-coded `STATIC_PLATFORMS` in Export (same three ids as the wizard) — do not import Distribution into Next.
+  - briefs-api owns `API` as a local constant so RunProvider can import package helpers without a cycle.
+  - Global page of 24 across the filtered list (not per product section).
+- **Left open:**
+  - Motion platforms stay hidden; zip is store-only (no compression). This lane does not touch compositor/parser/generation/pools.
 ## 2026-08-26 — wave 4 Lane B: approved headline copy pools (Phase 3.1–3.3)
 
 - **Mode:** Implementer
@@ -586,6 +601,21 @@ To keep this file out of version control, add `.agents/session-log.md` to
 
 ---
 
+## 2026-08-26 — PR #53 review fixes (review UI at N=100 + packaging)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Packaging honours HITL approvals: Export sends `include` (approved `assetKey`s) once the reviewer has decided anything; `POST /campaigns/package` validates it (strings, ≤ 1000) and `PackageForPlatformUseCase` filters by `assetIdentity` before the per-platform ratio select. Manifests + results carry `included` / `excluded`. Omitted `include` packages everything (CLI/API unchanged).
+  - Grid filters + page are keyed by `brief.id:assetVersion` — a brief switch or new run resets them; a select value missing from the live options acts as "All".
+  - CommandBar clears the plan and sets the estimate to `loading` the moment a variation brief changes, so Execute stays disabled until the new estimate lands; Runs shows "estimating…". Unmount test asserts the abort via the fetch `signal`.
+  - `packageSelected` / `loadPackages` capture `brief.id` + a package sequence and drop superseded results; a brief switch aborts the in-flight package request.
+  - Zip route streams (first pass measures size + CRC, then local headers / bytes / central directory as a `Readable`); ENOENT/ENOTDIR mid-walk → 409 "Package is being rewritten, retry"; UTF-8 name flag + DOS date 1980-01-01. Tests: CRC vector `123456789` → `0xCBF43926`, local-header check at each central-directory offset, the 409 path.
+  - Export renders "Download zip" only when a package exists for the platform (disabled hint otherwise); platform picker is `aria-pressed` buttons in a labelled group instead of an incomplete tabs pattern.
+- **Decisions:**
+  - No policyHash cache for the planner: the dedupe of the context write (same hash → skip `setEstimate`) is sufficient. The planner call is per brief change after the 250 ms debounce.
+  - Zip64 not needed — a platform package is a handful of PNGs plus a manifest.
+- **Left open:**
+  - Packaging flag (`packaging`) is a single boolean shared by concurrent package calls; the Export button is disabled while any call is in flight, so this is cosmetic.
 ## 2026-08-26 — PR #52 review fixes (lane B, copy pools)
 
 - **Mode:** Implementer

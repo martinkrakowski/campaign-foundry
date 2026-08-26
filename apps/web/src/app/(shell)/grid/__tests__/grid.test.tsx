@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach } from "vitest";
 import { screen, waitFor, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, Fragment } from "react";
-import { renderWithRun, seedPersistedRun, makeAsset, exerciseFocusTrap, mockPipelineApi, jobOk } from "@/__tests__/helpers";
+import { renderWithRun, seedPersistedRun, makeAsset, exerciseFocusTrap, mockPipelineApi, jobOk, json } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import GridPage from "../page";
 
@@ -63,7 +63,10 @@ describe("GridPage", () => {
     ]);
     renderWithRun(<GridPage />);
     expect(await screen.findByText("alpha @ 1:1 · v0 · headline-top-subtle")).toBeTruthy();
-    expect(screen.getByText("headline-top · subtle · procedural")).toBeTruthy();
+    expect(screen.getAllByText("headline-top").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("subtle").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("procedural").length).toBeGreaterThan(0);
+    expect(screen.getByText("shift 0.1")).toBeTruthy();
   });
 
   test("omits the descriptor chip when a variant has no descriptor", async () => {
@@ -157,5 +160,129 @@ describe("GridPage", () => {
     await screen.findByText("Approve"); // run restored
     await user.click(screen.getByText("regen"));
     expect(await screen.findByText("Regenerating…")).toBeTruthy();
+  });
+
+  test("renders 100 mixed assets, filters, pages, and descriptor chips", async () => {
+    const user = userEvent.setup();
+    const hundred = Array.from({ length: 100 }, (_, i) =>
+      makeAsset({
+        productId: i < 50 ? "alpha" : "beta",
+        aspectRatio: (["1:1", "9:16", "16:9"] as const)[i % 3],
+        outputPath: `asset-${i}.png`,
+        treatment: `t${i}`,
+        format: i % 7 === 0 ? "motion" : "static",
+        ...(i % 3 === 0
+          ? {}
+          : {
+              variantIndex: i,
+              descriptor: {
+                layout: i % 2 === 0 ? "headline-top" : "headline-bottom",
+                tone: i % 4 < 2 ? "bold" : "subtle",
+                backgroundSource: i % 5 === 0 ? "genai" : "procedural",
+                paletteShift: i % 6 === 0 ? 0.2 : 0,
+              },
+            }),
+      }),
+    );
+    seedPersistedRun(hundred);
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText(/Showing 24 of 100/)).toBeTruthy();
+    expect(screen.getAllByText("Approve")).toHaveLength(24);
+    expect(document.querySelector("figure")?.className).toMatch(/content-visibility/);
+    expect(screen.getAllByText("headline-top").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("Layout")).toBeTruthy();
+
+    await user.click(screen.getByText("Show more"));
+    expect(await screen.findByText(/Showing 48 of 100/)).toBeTruthy();
+    expect(screen.getAllByText("Approve")).toHaveLength(48);
+
+    await user.selectOptions(screen.getByLabelText("Product"), "alpha");
+    expect(await screen.findByText(/Showing 24 of 50/)).toBeTruthy();
+
+    await user.selectOptions(screen.getByLabelText("Ratio"), "1:1");
+    await user.selectOptions(screen.getByLabelText("Format"), "motion");
+    await user.selectOptions(screen.getByLabelText("Layout"), "headline-bottom");
+    expect(await screen.findByText(/No creatives match the current filters/)).toBeTruthy();
+    expect(screen.queryByText("Show more")).toBeNull();
+  });
+
+  test("a brief switch resets the filters and the page to defaults", async () => {
+    function Switch() {
+      const { setBrief, brief } = useRun();
+      return createElement(Fragment, null,
+        createElement("button", {
+          onClick: () =>
+            setBrief({
+              ...brief,
+              id: "other",
+              products: [{ id: "gamma", name: "Gamma", primaryColor: "#111111", logoPath: "g.png" }],
+            }),
+        }, "switch"),
+        createElement(GridPage, null),
+      );
+    }
+    const user = userEvent.setup();
+    const seedAssets = Array.from({ length: 30 }, (_, i) =>
+      makeAsset({ productId: i % 2 ? "alpha" : "beta", outputPath: `a-${i}.png`, treatment: `t${i}` }),
+    );
+    const otherAssets = [
+      makeAsset({ productId: "gamma", outputPath: "gamma/1x1.png" }),
+      makeAsset({ productId: "delta", outputPath: "delta/1x1.png" }),
+    ];
+    seedPersistedRun(seedAssets);
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("campaignId=other")
+          ? json({ halted: false, assets: otherAssets, log: { entries: [], campaignId: "other" } })
+          : json({ halted: false, assets: seedAssets, log: { entries: [], campaignId: "seed" } }),
+    });
+    renderWithRun(<Switch />);
+    expect(await screen.findByText(/Showing 24 of 30/)).toBeTruthy();
+    await user.click(screen.getByText("Show more"));
+    expect(await screen.findByText(/Showing 30 of 30/)).toBeTruthy();
+    await user.selectOptions(screen.getByLabelText("Product"), "alpha");
+    expect(await screen.findByText(/Showing 15 of 15/)).toBeTruthy();
+    expect((screen.getByLabelText("Product") as HTMLSelectElement).value).toBe("alpha");
+
+    await user.click(screen.getByText("switch"));
+    expect(await screen.findByText(/Showing 2 of 2/)).toBeTruthy();
+    expect((screen.getByLabelText("Product") as HTMLSelectElement).value).toBe("");
+    // The first change after the reset starts from the defaults, not the stale state.
+    await user.selectOptions(screen.getByLabelText("Product"), "gamma");
+    expect(await screen.findByText(/Showing 1 of 1/)).toBeTruthy();
+  });
+
+  test("omits axis filters when no asset has a descriptor", async () => {
+    seedPersistedRun([makeAsset(), makeAsset({ productId: "beta", outputPath: "beta/1x1.png" })]);
+    renderWithRun(<GridPage />);
+    expect(await screen.findByLabelText("Product")).toBeTruthy();
+    expect(screen.getByLabelText("Ratio")).toBeTruthy();
+    expect(screen.getByLabelText("Format")).toBeTruthy();
+    expect(screen.queryByLabelText("Layout")).toBeNull();
+    expect(screen.queryByLabelText("Tone")).toBeNull();
+    expect(screen.queryByLabelText("Background source")).toBeNull();
+  });
+
+  test("tone and background filters reduce the visible set", async () => {
+    const user = userEvent.setup();
+    seedPersistedRun([
+      makeAsset({
+        variantIndex: 0,
+        descriptor: { layout: "headline-top", tone: "bold", backgroundSource: "genai", paletteShift: 0 },
+      }),
+      makeAsset({
+        productId: "beta",
+        variantIndex: 1,
+        outputPath: "beta/1x1.png",
+        descriptor: { layout: "headline-bottom", tone: "subtle", backgroundSource: "procedural", paletteShift: 0.2 },
+      }),
+    ]);
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText(/Showing 2 of 2/)).toBeTruthy();
+    await user.selectOptions(screen.getByLabelText("Tone"), "subtle");
+    expect(await screen.findByText(/Showing 1 of 1/)).toBeTruthy();
+    await user.selectOptions(screen.getByLabelText("Tone"), "All");
+    await user.selectOptions(screen.getByLabelText("Background source"), "genai");
+    expect(await screen.findByText(/Showing 1 of 1/)).toBeTruthy();
   });
 });
