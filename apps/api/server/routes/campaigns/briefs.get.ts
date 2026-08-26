@@ -1,8 +1,8 @@
-import { readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { errorMessage } from "@campaignfoundry/shared";
-import { BRIEF_SOURCE_EXTS, briefsDir } from "../../lib/brief-files.js";
-import { loadBrief } from "../../lib/load-brief.js";
+import { BRIEF_SOURCE_EXTS, briefsDir, hashBytes } from "../../lib/brief-files.js";
+import { parseBriefText } from "../../lib/load-brief.js";
 
 const BRIEF_PATTERN = new RegExp(
   `(?:${BRIEF_SOURCE_EXTS.map((ext) => ext.replace(".", "\\.")).join("|")})$`,
@@ -35,7 +35,14 @@ export default defineEventHandler(async () => {
   const briefs = [];
   for (const file of files) {
     try {
-      briefs.push({ file, brief: await loadBrief(resolve(dir, file)) });
+      const filePath = resolve(dir, file);
+      // Hash the bytes as they are on disk, not a re-encoded decode of them: the
+      // write path hashes raw bytes, and a file that is not valid UTF-8 would
+      // otherwise get a listing revision no conditional write could ever match.
+      const bytes = await readFile(filePath);
+      const revision = hashBytes(bytes);
+      const brief = parseBriefText(filePath, bytes.toString("utf8"));
+      briefs.push({ file, brief, revision });
     } catch (error) {
       // Skip a malformed/invalid brief rather than failing the whole list — but log
       // it so a reviewer can see why their brief isn't appearing in the picker.

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   mkdtempSync,
@@ -116,6 +117,18 @@ describe("GET /campaigns/briefs", () => {
     expect((await res.json()) as { briefs: unknown[] }).toEqual({ briefs: [] });
     expect(warn).toHaveBeenCalled();
   });
+
+  test("includes revision (content hash) on every entry", async () => {
+    mkdirSync(join(dir, "briefs"), { recursive: true });
+    writeFileSync(join(dir, "briefs", "good.yaml"), validBrief);
+    const res = await web(await handlerFor(dir))(new Request("http://x/campaigns/briefs"));
+    const json = (await res.json()) as { briefs: { file: string; brief: { id: string }; revision: string }[] };
+    expect(json.briefs).toHaveLength(1);
+    expect(json.briefs[0].revision).toBeDefined();
+    expect(json.briefs[0].revision).toMatch(/^[a-f0-9]{64}$/);
+    const expectedHash = createHash("sha256").update(validBrief).digest("hex");
+    expect(json.briefs[0].revision).toBe(expectedHash);
+  });
 });
 
 describe("authoring briefs", () => {
@@ -160,7 +173,8 @@ describe("authoring briefs", () => {
 
     const listed = await list()(new Request("http://x/campaigns/briefs"));
     const json = (await listed.json()) as { briefs: { file: string; brief: { id: string } }[] };
-    expect(json.briefs).toEqual([{ file: "camp.yaml", brief: payload }]);
+    expect(json.briefs).toMatchObject([{ file: "camp.yaml", brief: payload }]);
+    expect(json.briefs[0]).toHaveProperty("revision");
 
     const onDisk = await loadBrief(campYaml());
     expect(onDisk).toMatchObject({ id: "camp", localizedMessage: "Hallo" });
@@ -473,6 +487,107 @@ describe("authoring briefs", () => {
     }
   });
 
+  test("POST ?replace=1 with stale revision returns 409 with current revision", async () => {
+    const { create } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const staleRevision = "stalehash";
+    const res = await create()(
+      jsonReq(
+        `http://x/campaigns/briefs?replace=1&revision=${staleRevision}`,
+        "POST",
+        brief({ campaignMessage: "Updated" }),
+      ),
+    );
+    expect(res.status).toBe(409);
+    const json = (await res.json()) as { error: string; revision: string };
+    expect(json.error).toBe("Brief was modified by another user.");
+    expect(json.revision).toBeDefined();
+    expect(json.revision).toMatch(/^[a-f0-9]{64}$/);
+    expect(json.revision).not.toBe(staleRevision);
+    expect(await loadBrief(campYaml())).toMatchObject({ campaignMessage: "Hi" });
+  });
+
+  test("POST ?replace=1 without revision succeeds (backward compatible)", async () => {
+    const { create } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const res = await create()(
+      jsonReq("http://x/campaigns/briefs?replace=1", "POST", brief({ campaignMessage: "Updated" })),
+    );
+    expect(res.status).toBe(201);
+    expect(await loadBrief(campYaml())).toMatchObject({ campaignMessage: "Updated" });
+  });
+
+  test("PUT with stale revision returns 409 with current revision", async () => {
+    const { create, update } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const staleRevision = "stalehash";
+    const res = await update()(
+      jsonReq(`http://x/campaigns/briefs/camp?revision=${staleRevision}`, "PUT", brief({ campaignMessage: "Edited" })),
+    );
+    expect(res.status).toBe(409);
+    const json = (await res.json()) as { error: string; revision: string };
+    expect(json.error).toBe("Brief was modified by another user.");
+    expect(json.revision).toBeDefined();
+    expect(json.revision).toMatch(/^[a-f0-9]{64}$/);
+    expect(json.revision).not.toBe(staleRevision);
+    expect(await loadBrief(campYaml())).toMatchObject({ campaignMessage: "Hi" });
+  });
+
+  test("PUT without revision succeeds (backward compatible)", async () => {
+    const { create, update } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const res = await update()(
+      jsonReq("http://x/campaigns/briefs/camp", "PUT", brief({ campaignMessage: "Edited" })),
+    );
+    expect(res.status).toBe(200);
+    expect(await loadBrief(campYaml())).toMatchObject({ campaignMessage: "Edited" });
+  });
+
+  test("PUT with current revision succeeds", async () => {
+    const { create, update } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const currentRevision = createHash("sha256").update(readFileSync(campYaml())).digest("hex");
+    const res = await update()(
+      jsonReq(
+        `http://x/campaigns/briefs/camp?revision=${currentRevision}`,
+        "PUT",
+        brief({ campaignMessage: "Edited" }),
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(await loadBrief(campYaml())).toMatchObject({ campaignMessage: "Edited" });
+  });
+
+  test("POST ?replace=1 with revision as array uses first value", async () => {
+    const { create } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const currentRevision = createHash("sha256").update(readFileSync(campYaml())).digest("hex");
+    const res = await create()(
+      jsonReq(
+        `http://x/campaigns/briefs?replace=1&revision=${currentRevision}&revision=stale`,
+        "POST",
+        brief({ campaignMessage: "Updated" }),
+      ),
+    );
+    expect(res.status).toBe(201);
+    expect(await loadBrief(campYaml())).toMatchObject({ campaignMessage: "Updated" });
+  });
+
+  test("PUT with revision as array uses first value", async () => {
+    const { create, update } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const currentRevision = createHash("sha256").update(readFileSync(campYaml())).digest("hex");
+    const res = await update()(
+      jsonReq(
+        `http://x/campaigns/briefs/camp?revision=${currentRevision}&revision=stale`,
+        "PUT",
+        brief({ campaignMessage: "Edited" }),
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(await loadBrief(campYaml())).toMatchObject({ campaignMessage: "Edited" });
+  });
+
   test("duplicate copies products, changes id, and returns 201", async () => {
     const { create, duplicate } = await api();
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
@@ -629,5 +744,109 @@ describe("authoring briefs", () => {
     } finally {
       g.readBody = original;
     }
+  });
+
+  test("POST with concurrent delete in replace mode falls through to create", async () => {
+    const { create } = await api();
+    const briefFiles = await import("../../../lib/brief-files.js");
+    mkdirSync(join(dir, "briefs"), { recursive: true });
+    writeFileSync(campYaml(), briefFiles.dumpBrief(brief({ campaignMessage: "Original" })));
+    vi.spyOn(briefFiles, "hashFile").mockImplementation(async (_path: string) => {
+      // Throw ENOENT to simulate the file being deleted between lookup and hash
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    const res = await create()(
+      jsonReq("http://x/campaigns/briefs?replace=1&revision=stalehash", "POST", brief({ campaignMessage: "Fallback" })),
+    );
+    // ENOENT during hash check in replace mode falls through to create attempt
+    expect([201, 409]).toContain(res.status);
+    vi.spyOn(briefFiles, "hashFile").mockRestore();
+  });
+
+  test("PUT with concurrent delete returns 404", async () => {
+    const { create, update } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const briefFiles = await import("../../../lib/brief-files.js");
+    vi.spyOn(briefFiles, "hashFile").mockImplementation(async (_path: string) => {
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    const res = await update()(
+      jsonReq(`http://x/campaigns/briefs/camp?revision=stalehash`, "PUT", brief({ campaignMessage: "Edited" })),
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'Brief "camp" not found.' });
+  });
+
+  test("POST with unexpected hash error surfaces the error", async () => {
+    const { create } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const briefFiles = await import("../../../lib/brief-files.js");
+    vi.spyOn(briefFiles, "hashFile").mockImplementation(async (_path: string) => {
+      throw Object.assign(new Error("EIO"), { code: "EIO" });
+    });
+    const res = await create()(
+      jsonReq("http://x/campaigns/briefs?replace=1&revision=stalehash", "POST", brief({ campaignMessage: "Nope" })),
+    );
+    expect(res.status).toBe(500);
+  });
+
+  test("PUT with unexpected hash error surfaces the error", async () => {
+    const { create, update } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const briefFiles = await import("../../../lib/brief-files.js");
+    vi.spyOn(briefFiles, "hashFile").mockImplementation(async (_path: string) => {
+      throw Object.assign(new Error("EIO"), { code: "EIO" });
+    });
+    const res = await update()(
+      jsonReq(`http://x/campaigns/briefs/camp?revision=stalehash`, "PUT", brief({ campaignMessage: "Edited" })),
+    );
+    expect(res.status).toBe(500);
+  });
+
+  test("two conditional PUTs with the same revision: exactly one wins, the other gets 409", async () => {
+    const { create, update, list } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const listed = (await (await list()(new Request("http://x/campaigns/briefs"))).json()) as {
+      briefs: { revision: string }[];
+    };
+    const revision = listed.briefs[0].revision;
+
+    // Both requests are issued against the same handler instance and awaited together,
+    // so they overlap exactly the way two browser tabs would. Without the per-brief lock
+    // both pass the hash comparison and the later write silently discards the earlier.
+    const put = update();
+    const [first, second] = await Promise.all([
+      put(jsonReq(`http://x/campaigns/briefs/camp?revision=${revision}`, "PUT", brief({ campaignMessage: "A" }))),
+      put(jsonReq(`http://x/campaigns/briefs/camp?revision=${revision}`, "PUT", brief({ campaignMessage: "B" }))),
+    ]);
+
+    expect([first.status, second.status].sort()).toEqual([200, 409]);
+    // The loser must not have written: the file holds exactly the winner's message.
+    expect(await loadBrief(campYaml())).toMatchObject({
+      campaignMessage: first.status === 200 ? "A" : "B",
+    });
+  });
+
+  test("the listing revision matches the write path's hash for a non-UTF-8 file", async () => {
+    const { list } = await api();
+    mkdirSync(join(dir, "briefs"), { recursive: true });
+    // A lone 0xFF byte is not valid UTF-8. Decoding to a string and re-encoding replaces
+    // it with U+FFFD and changes the digest, so the listing would hand out a revision no
+    // conditional write could ever match — a 409 the client can never clear.
+    writeFileSync(
+      campYaml(),
+      Buffer.concat([
+        Buffer.from('id: camp\ntargetRegion: DE\ntargetAudience: a\ncampaignMessage: "hi '),
+        Buffer.from([0xff]),
+        Buffer.from('"\nproducts:\n  - id: alpha\n  - id: beta\n'),
+      ]),
+    );
+
+    const listed = (await (await list()(new Request("http://x/campaigns/briefs"))).json()) as {
+      briefs: { revision: string }[];
+    };
+    const { hashFile } = await import("../../../lib/brief-files.js");
+    expect(listed.briefs).toHaveLength(1);
+    expect(listed.briefs[0].revision).toBe(await hashFile(campYaml()));
   });
 });
