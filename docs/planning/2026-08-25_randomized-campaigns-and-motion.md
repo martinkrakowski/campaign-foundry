@@ -1,7 +1,7 @@
 # Randomized Campaigns, Motion Creatives & Create New Project — Architecture & Development Plan
 
 **Date:** 2026-08-25
-**Status:** Implemented through wave 5 (2026-08-26) — decisions D1–D14 locked, one open question (Q2). Supersedes the v1 draft of the same day; v2.1 folded in the wave-1 code review (PRs #40–#42). §5 carries the per-phase **Wave status** table (PRs #39–#58 plus the wave-5 lanes), task 4.5 the recorded perf-spike numbers, §10 the evidence behind each Definition-of-Done item and the deferred list.
+**Status:** Implemented through wave 5 (2026-08-26) — decisions D1–D14 locked, one open question (Q2). Supersedes the v1 draft of the same day; v2.1 folded in the wave-1 code review (PRs #40–#42). §5 carries the per-phase **Wave status** table (PRs #39–#59), task 4.5 the recorded perf-spike numbers, §10 the evidence behind each Definition-of-Done item and the deferred list.
 **Scope:** `packages/CampaignOrchestration`, `packages/CreativeGeneration`, `packages/Distribution`, `packages/GovernanceAndCompliance`, `packages/shared`, `apps/api`, `apps/web`, `briefs/`, `.agents/`
 **Related:** `.agents/session-log.md` (2026-08-25 review + revision entries; the C/H/M/L findings themselves are recorded in §2 of this document), `.agents/tech-stack.md`, `.agents/testing.md`
 
@@ -175,7 +175,7 @@ Every phase below has landed on `main` including the two wave-5 implementation l
 |-------|-------|-------|------|
 | P0 | 0.1 `SeededRandom` + `seedFrom`, 0.2 deterministic-core lint (D14) | #41 | 1 |
 | P0 | 0.3 schema v2, 0.4 allowlist (D8), 0.4b parse-but-never-run, 0.6 `briefs/sample-randomized.yaml` | #40 | 1 |
-| P0 | 0.5 `?model=` vs `genai` axis documented in `pipeline.ts` | #50 | 3 |
+| P0 | 0.5 `?model=` vs `genai` axis documented in `pipeline.ts` | #40 | 1 |
 | J | J.1–J.4 job handle, polling, lost-job recovery | #42 | 1 |
 | P2 | 2.1 VOs + `MotionKind`, 2.2 `plan`, 2.3 `replan` | #46 | 2 |
 | P2 | 2.4 generate-from-plan (D10), 2.5 identity migration (D6), 2.6 GenAI seed cache, 2.7 `policyHash`/`seed` in the report + Runs page | #50 | 3 |
@@ -194,7 +194,7 @@ Every phase below has landed on `main` including the two wave-5 implementation l
 | P3 | 3.4 allowlist `headline: pool://copy` + planner consumption, 3.5 wizard pool panel | #57 | 5 |
 | P7 | Plan document | #39 | 1 |
 | P7 | Wave-1 deferrals: clock injected into `PipelineExecutionLog`; shared `mockPipelineApi` | #43, #44 | 2 |
-| P7 | README Modes section, `briefs/sample-motion.yaml`, `briefs/sample-pooled.yaml`, this status table | wave 5 lane C `docs/plan-implemented` | 5 |
+| P7 | README Modes section, `briefs/sample-motion.yaml`, `briefs/sample-pooled.yaml`, this status table | #56 (+ #59 session log) | 5 |
 
 Phases are atomic and independently mergeable. **P0 → J → P2 → P1 → P5 → P6 (partial) is the MVP** (randomized static campaigns, authored in the UI, packaged per platform). P4 (motion) and P3 (pools) are independent follow-on trains.
 
