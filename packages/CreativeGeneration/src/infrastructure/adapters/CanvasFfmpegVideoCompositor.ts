@@ -18,6 +18,10 @@ import { NodeCanvasCompositor } from "./NodeCanvasCompositor.js";
 
 /** Encode pool size — canvas raster is the bottleneck, not ffmpeg. */
 export const MAX_CONCURRENT_ENCODES = 2;
+/** Wall-clock budget for one encode before the child is killed. */
+export const DEFAULT_ENCODE_TIMEOUT_MS = 120_000;
+/** Grace after SIGTERM before escalating to SIGKILL. */
+export const DEFAULT_KILL_GRACE_MS = 2_000;
 
 export type FfmpegSpawn = (
   command: string,
@@ -29,6 +33,10 @@ export interface CanvasFfmpegVideoCompositorOptions {
   readonly fontFamily?: string;
   readonly spawn?: FfmpegSpawn;
   readonly ffmpegPath?: string | null;
+  /** Kill the encode and reject after this many ms (default {@link DEFAULT_ENCODE_TIMEOUT_MS}). */
+  readonly encodeTimeoutMs?: number;
+  /** SIGTERM → SIGKILL escalation delay (default {@link DEFAULT_KILL_GRACE_MS}). */
+  readonly killGraceMs?: number;
 }
 
 type Prepared = Awaited<ReturnType<typeof NodeCanvasCompositor.prepare>>;
@@ -70,6 +78,8 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
   private readonly fontFamily: string;
   private readonly spawn: FfmpegSpawn;
   private readonly ffmpegPath: string | null;
+  private readonly encodeTimeoutMs: number;
+  private readonly killGraceMs: number;
 
   constructor(options: CanvasFfmpegVideoCompositorOptions = {}) {
     this.fontFamily = options.fontFamily ?? "Inter";
@@ -77,6 +87,8 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
       options.spawn ??
       ((command, args, spawnOptions) => defaultSpawn(command, [...args], spawnOptions));
     this.ffmpegPath = options.ffmpegPath !== undefined ? options.ffmpegPath : ffmpegStatic;
+    this.encodeTimeoutMs = options.encodeTimeoutMs ?? DEFAULT_ENCODE_TIMEOUT_MS;
+    this.killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
   }
 
   async compositeVideo(request: VideoCompositeRequest): Promise<VideoCompositeResult> {
@@ -144,14 +156,16 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
         child.once("error", reject);
         child.once("close", (code) => resolve(code));
       });
+      finished.catch(() => {}); // observed below via race; keep a late error from going unhandled
+
+      // Wall-clock budget: SIGTERM at expiry, SIGKILL if the child is still around
+      // after the grace period. The race below rejects immediately either way so a
+      // hung ffmpeg (or a stdin that never drains) cannot hold the gate forever.
+      const timeout = encodeTimeout(child, this.encodeTimeoutMs, this.killGraceMs);
 
       let writeError: unknown;
       try {
-        for (let i = 0; i < frames; i++) {
-          NodeCanvasCompositor.draw(ctx, prepared, i / (frames - 1), request.motion);
-          await writeWithBackpressure(child.stdin, Buffer.from(canvas.data()));
-        }
-        child.stdin.end();
+        await Promise.race([writeFrames(child.stdin, canvas, ctx, prepared, request, frames), timeout.promise]);
       } catch (error) {
         writeError = error;
         if (!child.killed) child.kill();
@@ -159,9 +173,11 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
 
       let code: number | null;
       try {
-        code = await finished;
+        code = await Promise.race([finished, timeout.promise]);
       } catch (error) {
         throw new Error(formatFfmpegFailure(error instanceof Error ? error.message : String(error), ffmpegPath));
+      } finally {
+        timeout.clear();
       }
 
       if (code !== 0) {
@@ -213,6 +229,42 @@ function ffmpegArgs(width: number, height: number, fps: number, outPath: string)
     "-y",
     outPath,
   ];
+}
+
+async function writeFrames(
+  stdin: Writable,
+  canvas: Canvas,
+  ctx: SKRSContext2D,
+  prepared: Prepared,
+  request: VideoCompositeRequest,
+  frames: number,
+): Promise<void> {
+  for (let i = 0; i < frames; i++) {
+    NodeCanvasCompositor.draw(ctx, prepared, i / (frames - 1), request.motion);
+    await writeWithBackpressure(stdin, Buffer.from(canvas.data()));
+  }
+  stdin.end();
+}
+
+interface EncodeTimeout {
+  readonly promise: Promise<never>;
+  clear(): void;
+}
+
+function encodeTimeout(child: ChildProcess, timeoutMs: number, killGraceMs: number): EncodeTimeout {
+  let killTimer: ReturnType<typeof setTimeout> | undefined;
+  child.once("close", () => clearTimeout(killTimer));
+  let expire!: (error: Error) => void;
+  const promise = new Promise<never>((_, reject) => {
+    expire = reject;
+  });
+  promise.catch(() => {}); // raced twice; a stray rejection must not surface as unhandled
+  const timer = setTimeout(() => {
+    child.kill("SIGTERM");
+    killTimer = setTimeout(() => child.kill("SIGKILL"), killGraceMs);
+    expire(new Error(`ffmpeg encode timed out after ${timeoutMs}ms`));
+  }, timeoutMs);
+  return { promise, clear: () => clearTimeout(timer) };
 }
 
 async function writeWithBackpressure(stdin: Writable, data: Buffer): Promise<void> {

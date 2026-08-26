@@ -13,6 +13,8 @@ const require = createRequire(import.meta.url);
 const ffmpegStatic = require("ffmpeg-static") as string | null;
 import {
   CanvasFfmpegVideoCompositor,
+  DEFAULT_ENCODE_TIMEOUT_MS,
+  DEFAULT_KILL_GRACE_MS,
   MAX_CONCURRENT_ENCODES,
   type FfmpegSpawn,
 } from "../CanvasFfmpegVideoCompositor.js";
@@ -99,6 +101,10 @@ function fakeFfmpeg(opts: {
   throwOnWrite?: unknown;
   alreadyKilled?: boolean;
   closeOnWriteThrow?: number | null;
+  /** Never emit close; record kill signals (optionally close on the given signal). */
+  hang?: boolean;
+  closeOnSignal?: NodeJS.Signals;
+  signals?: NodeJS.Signals[];
 }): FfmpegSpawn {
   return (_command, args) => {
     const outPath = args[args.length - 1];
@@ -125,12 +131,18 @@ function fakeFfmpeg(opts: {
       stdout,
       stderr,
       killed: Boolean(opts.alreadyKilled),
-      kill() {
+      kill(signal?: NodeJS.Signals) {
         proc.killed = true;
+        opts.signals?.push(signal ?? "SIGTERM");
+        if (opts.hang) {
+          if (signal === opts.closeOnSignal) queueMicrotask(() => proc.emit("close", null, signal));
+          return true;
+        }
         queueMicrotask(() => proc.emit("close", opts.code ?? 1, null));
         return true;
       },
     });
+    if (opts.hang) return proc as never;
 
     if (opts.writeFalse) {
       Object.defineProperty(stdin, "write", {
@@ -377,6 +389,55 @@ describe("CanvasFfmpegVideoCompositor", () => {
     }
     const out = await compositor.compositeVideo(videoRequest({ sampleAt: [] }));
     expect(out.video.byteLength).toBeGreaterThan(0);
+  });
+
+  test("kills a hung ffmpeg after encodeTimeoutMs, escalates to SIGKILL, and releases the gate", async () => {
+    const signals: NodeJS.Signals[] = [];
+    const compositor = new CanvasFfmpegVideoCompositor({
+      spawn: fakeFfmpeg({ hang: true, signals }),
+      ffmpegPath: "/opt/ffmpeg",
+      encodeTimeoutMs: 40,
+      killGraceMs: 20,
+    });
+    await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(/ffmpeg encode timed out after 40ms/);
+    expect(signals).toEqual(["SIGTERM"]);
+    await new Promise((r) => setTimeout(r, 40));
+    expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+
+    // Gate released: two healthy encodes still run concurrently afterwards.
+    const healthy = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
+    await expect(
+      Promise.all([healthy.compositeVideo(videoRequest({ sampleAt: [] })), healthy.compositeVideo(videoRequest({ sampleAt: [] }))]),
+    ).resolves.toHaveLength(2);
+  });
+
+  test("does not SIGKILL a child that exits on SIGTERM", async () => {
+    const signals: NodeJS.Signals[] = [];
+    const compositor = new CanvasFfmpegVideoCompositor({
+      spawn: fakeFfmpeg({ hang: true, signals, closeOnSignal: "SIGTERM" }),
+      ffmpegPath: "/opt/ffmpeg",
+      encodeTimeoutMs: 30,
+      killGraceMs: 10,
+    });
+    await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(/timed out/);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(signals).toEqual(["SIGTERM"]);
+  });
+
+  test("times out when frames are written but ffmpeg never closes", async () => {
+    // The hung fake drains stdin, so every frame is written before the wait on close.
+    const compositor = new CanvasFfmpegVideoCompositor({
+      spawn: fakeFfmpeg({ hang: true }),
+      ffmpegPath: "/opt/ffmpeg",
+      encodeTimeoutMs: 60,
+      killGraceMs: 5,
+    });
+    await expect(compositor.compositeVideo(videoRequest())).rejects.toThrow(/timed out after 60ms/);
+  });
+
+  test("exposes the default timeout constants", () => {
+    expect(DEFAULT_ENCODE_TIMEOUT_MS).toBe(120_000);
+    expect(DEFAULT_KILL_GRACE_MS).toBe(2_000);
   });
 
   test("limits overlapping encodes to MAX_CONCURRENT_ENCODES", async () => {
