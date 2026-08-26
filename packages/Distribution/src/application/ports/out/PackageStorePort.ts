@@ -1,14 +1,20 @@
 import type { PlatformProfile } from "../../../domain/value-objects/PlatformProfile.vo.js";
 
-/** One copied creative in a platform package. */
+/** One copied creative in a platform package. Motion items copy the mp4 and its poster. */
 export interface PackageManifestItem {
   readonly productId: string;
   readonly aspectRatio: string;
   readonly treatment: string;
+  readonly format: "static" | "motion";
+  /** The PNG (static) or the mp4 (motion), relative to the output root. */
   readonly source: string;
   readonly packagedPath: string;
+  /** Packaged poster PNG — motion items only. */
+  readonly posterPath?: string;
+  /** Clip length in seconds — motion items only. */
+  readonly durationSec?: number;
   readonly bytes: number;
-  readonly checks: { readonly size: "pass" | "fail" };
+  readonly checks: { readonly size: "pass" | "fail"; readonly duration?: "pass" | "fail" };
 }
 
 /**
