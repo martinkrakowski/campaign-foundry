@@ -6,11 +6,6 @@ export interface BriefEntry {
   brief: CampaignBrief;
 }
 
-export interface BriefWriteResult {
-  file: string;
-  brief: CampaignBrief;
-}
-
 export interface AssetUploadResult {
   path: string;
 }
@@ -86,7 +81,7 @@ function jsonInit(method: string, body: unknown): RequestInit {
   };
 }
 
-function asWriteResult(data: unknown): BriefWriteResult {
+function asBriefEntry(data: unknown): BriefEntry {
   if (typeof data !== "object" || data === null) {
     throw new BriefsApiError("Invalid response", 200);
   }
@@ -107,19 +102,13 @@ export async function listBriefs(): Promise<BriefEntry[]> {
 export async function createBrief(
   brief: CampaignBrief,
   opts: { replace?: boolean } = {},
-): Promise<BriefWriteResult> {
+): Promise<BriefEntry> {
   const query = opts.replace ? "?replace=1" : "";
-  return asWriteResult(await requestJson(`${API}/campaigns/briefs${query}`, jsonInit("POST", brief)));
+  return asBriefEntry(await requestJson(`${API}/campaigns/briefs${query}`, jsonInit("POST", brief)));
 }
 
-export async function updateBrief(id: string, brief: CampaignBrief): Promise<BriefWriteResult> {
-  return asWriteResult(
-    await requestJson(`${API}/campaigns/briefs/${encodeURIComponent(id)}`, jsonInit("PUT", brief)),
-  );
-}
-
-export async function duplicateBrief(id: string, newId: string): Promise<BriefWriteResult> {
-  return asWriteResult(
+export async function duplicateBrief(id: string, newId: string): Promise<BriefEntry> {
+  return asBriefEntry(
     await requestJson(
       `${API}/campaigns/briefs/${encodeURIComponent(id)}/duplicate`,
       jsonInit("POST", { newId }),

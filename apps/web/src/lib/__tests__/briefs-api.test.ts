@@ -9,7 +9,6 @@ import {
   listBriefs,
   planCampaign,
   unknownErrorMessage,
-  updateBrief,
   uploadAsset,
 } from "../briefs-api";
 
@@ -64,7 +63,7 @@ describe("listBriefs", () => {
   });
 });
 
-describe("createBrief / updateBrief / duplicateBrief / uploadAsset", () => {
+describe("createBrief / duplicateBrief / uploadAsset", () => {
   const write = { file: "camp.yaml", brief };
 
   test("POSTs a create and replace", async () => {
@@ -77,16 +76,6 @@ describe("createBrief / updateBrief / duplicateBrief / uploadAsset", () => {
     await expect(createBrief(brief, { replace: true })).resolves.toEqual(write);
     expect(urls[0]).toBe(`${API}/campaigns/briefs`);
     expect(urls[1]).toBe(`${API}/campaigns/briefs?replace=1`);
-  });
-
-  test("PUTs an update", async () => {
-    mockFetch((url, init) => {
-      expect(url).toBe(`${API}/campaigns/briefs/camp`);
-      expect(init.method).toBe("PUT");
-      expect(JSON.parse(String(init.body))).toEqual(brief);
-      return json(write);
-    });
-    await expect(updateBrief("camp", brief)).resolves.toEqual(write);
   });
 
   test("POSTs a duplicate with { newId }", async () => {
