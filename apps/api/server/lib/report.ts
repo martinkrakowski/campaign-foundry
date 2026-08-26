@@ -44,7 +44,7 @@ export const latestReportPath = (root: string): string => resolve(root, "report.
 /**
  * A persisted report row that can be keyed. Every row — classic or variation —
  * has the four strings. Variation rows additionally carry integer variantIndex
- * and attempt (>= 0).
+ * and attempt (>= 0); motion rows carry the mp4 path and clip length.
  */
 export type PersistedAsset = {
   productId: string;
@@ -53,6 +53,9 @@ export type PersistedAsset = {
   outputPath: string;
   variantIndex?: number;
   attempt?: number;
+  format?: "static" | "motion";
+  videoPath?: string;
+  durationSec?: number;
 };
 
 const isNonNegInt = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n >= 0;
@@ -68,6 +71,8 @@ export function isPersistedAsset(a: unknown): a is PersistedAsset {
   if (typeof rec.aspectRatio !== "string") return false;
   if (typeof rec.treatment !== "string") return false;
   if (typeof rec.outputPath !== "string") return false;
+  // A motion row without a readable mp4 path can't be packaged: drop it like any other corrupt row.
+  if (rec.format === "motion" && typeof rec.videoPath !== "string") return false;
   if (rec.variantIndex === undefined) return true;
   return isNonNegInt(rec.variantIndex) && isNonNegInt(rec.attempt);
 }

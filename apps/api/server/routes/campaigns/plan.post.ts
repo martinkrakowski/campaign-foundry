@@ -40,6 +40,8 @@ export default defineEventHandler(async (event) => {
       tone: variant.tone,
       backgroundSource: variant.backgroundSource,
       paletteShift: variant.paletteShift,
+      // Motion slots only — static plans serialize exactly as before.
+      ...(variant.motion !== undefined ? { motion: variant.motion, durationSec: variant.durationSec } : {}),
     })),
   };
 });

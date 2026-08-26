@@ -11,6 +11,7 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import {
   AssetReusingImageGenerator,
+  CanvasFfmpegVideoCompositor,
   FileSystemBackgroundCache,
   FireflyImageGenerator,
   GeminiImageGenerator,
@@ -20,7 +21,7 @@ import {
   ProceduralBackgroundGenerator,
 } from "@campaignfoundry/CreativeGeneration";
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
-import { FileSystemExporter } from "@campaignfoundry/Distribution";
+import { FileSystemExporter, platformProfile } from "@campaignfoundry/Distribution";
 import type { Result } from "@campaignfoundry/shared";
 import { outputRoot } from "./config.js";
 
@@ -117,9 +118,16 @@ export function buildPipeline(imageModel?: string): GenerateCampaignUseCase {
     proceduralGenerator: new ProceduralBackgroundGenerator(),
     planner: new PlanVariationsUseCase(),
     compositor: new NodeCanvasCompositor(process.env.MESSAGE_FONT),
+    // Motion variants only; the parser has already gated them on the ffmpeg probe.
+    videoCompositor: new CanvasFfmpegVideoCompositor({ fontFamily: process.env.MESSAGE_FONT }),
     compliance: new BrandComplianceChecker(),
     exporter: new FileSystemExporter(outputRoot()),
     now: () => new Date(),
+    // D11: safe insets come from Distribution's profile table; orchestration only sees a resolver.
+    platformSafeZones: (platformId) => {
+      const profile = platformProfile(platformId);
+      return profile ? { ratio: profile.ratio, safeInsets: profile.safeInsets } : undefined;
+    },
   });
 }
 

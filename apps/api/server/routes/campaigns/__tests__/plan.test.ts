@@ -1,5 +1,6 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, afterEach } from "vitest";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
+import { setCapabilities } from "../../../lib/capabilities.js";
 import planHandler from "../plan.post.js";
 
 const web = (handler: EventHandler) => {
@@ -44,6 +45,34 @@ const variationBrief = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("POST /campaigns/plan", () => {
+  afterEach(() => setCapabilities({ motion: false, reason: "not probed" }));
+
+  test("motion slots carry motion + durationSec; static slots do not; estimate carries frames", async () => {
+    setCapabilities({ motion: true });
+    const res = await call(
+      variationBrief({
+        variation: { count: 6, seed: 42, minDistance: 1, axes: { motion: ["ken-burns-in"], duration: [4] } },
+        output: { formats: ["static", "motion"] },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      estimate: { frames: number };
+      variants: Array<{ motion?: string; durationSec?: number }>;
+    };
+    const motion = body.variants.filter((v) => v.motion !== undefined);
+    expect(motion.length).toBeGreaterThan(0);
+    expect(motion.every((v) => v.motion === "ken-burns-in" && v.durationSec === 4)).toBe(true);
+    expect(body.variants.filter((v) => v.motion === undefined).every((v) => !("durationSec" in v))).toBe(true);
+    expect(body.estimate.frames).toBe(motion.length * 4 * 30);
+  });
+
+  test("rejects a motion brief with 400 when the capability is off", async () => {
+    const res = await call(variationBrief({ output: { formats: ["motion"] } }));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/motion output is unavailable/);
+  });
+
   test("returns a plan summary for a valid variation brief", async () => {
     const res = await call(variationBrief());
     expect(res.status).toBe(200);

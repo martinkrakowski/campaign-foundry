@@ -99,6 +99,20 @@ describe("pipeline composition root", () => {
     if (r.success) expect(r.value.assets.map((a) => a.outputPath)).toEqual(["alpha/1x1.png"]);
   });
 
+  test("variation + platforms resolves safe zones from the profile table (unknown ids ignored)", async () => {
+    const r = await runCampaign(
+      {
+        ...brief,
+        mode: "variation",
+        variation: { count: 2, seed: 1, axes: { layout: ["headline-bottom"], tone: ["bold"] } },
+        output: { formats: ["static"], platforms: ["instagram-feed", "myspace"] },
+      },
+      "procedural",
+    );
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.value.assets).toHaveLength(2);
+  });
+
   test("copyGenerator is undefined without OPENROUTER_API_KEY and constructed with it", () => {
     expect(copyGenerator()).toBeUndefined();
     process.env.OPENROUTER_API_KEY = "k";

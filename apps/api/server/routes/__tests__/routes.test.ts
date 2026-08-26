@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
 import { createCanvas } from "@napi-rs/canvas";
 import { createJob, failJob } from "../../lib/jobs.js";
+import { setCapabilities } from "../../lib/capabilities.js";
 import indexHandler from "../index.js";
 import generateHandler from "../campaigns/generate.post.js";
 import resultHandler from "../campaigns/result.get.js";
@@ -448,6 +449,47 @@ describe("POST /campaigns/package", () => {
     expect(Number.isNaN(Date.parse(feedManifest.packagedAt))).toBe(false);
     expect(existsSync(resolve(dir, "packages/camp/instagram-feed/alpha/1x1.png"))).toBe(true);
     expect(existsSync(resolve(dir, "packages/camp/x/alpha/16x9.png"))).toBe(true);
+  });
+
+  test("packages mp4 + poster for a motion platform only while the capability is on", async () => {
+    seedPng("alpha/9x16/v1.png");
+    mkdirSync(resolve(dir, "alpha/9x16"), { recursive: true });
+    writeFileSync(resolve(dir, "alpha/9x16/v1.mp4"), new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]));
+    seedReport([
+      reportAsset({
+        aspectRatio: "9:16",
+        outputPath: "alpha/9x16/v1.png",
+        videoPath: "alpha/9x16/v1.mp4",
+        durationSec: 6,
+        format: "motion",
+        variantIndex: 1,
+        attempt: 0,
+        treatment: "headline-top-bold",
+      }),
+    ]);
+    const off = await call({ campaignId: "camp", platforms: ["instagram-reel"] });
+    expect(off.status).toBe(422);
+    expect(((await off.json()) as { error: string }).error).toMatch(/not visible/);
+
+    setCapabilities({ motion: true });
+    try {
+      const res = await call({ campaignId: "camp", platforms: ["instagram-reel"] });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        platforms: Array<{ items: Array<{ format: string; source: string; posterPath: string; durationSec: number; checks: { size: string; duration: string } }> }>;
+      };
+      expect(body.platforms[0].items).toHaveLength(1);
+      expect(body.platforms[0].items[0]).toMatchObject({
+        format: "motion",
+        source: "alpha/9x16/v1.mp4",
+        durationSec: 6,
+        checks: { size: "pass", duration: "pass" },
+      });
+      expect(existsSync(resolve(dir, "packages/camp/instagram-reel/alpha/9x16/v1.mp4"))).toBe(true);
+      expect(existsSync(resolve(dir, "packages/camp/instagram-reel/alpha/9x16/v1.png"))).toBe(true);
+    } finally {
+      setCapabilities({ motion: false, reason: "not probed" });
+    }
   });
 
   test("packages only the included identities and records included/excluded on the manifest", async () => {

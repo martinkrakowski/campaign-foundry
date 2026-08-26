@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { existsSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -92,6 +92,31 @@ describe("generate CLI main()", () => {
     await main(path);
     expect(process.exitCode).toBe(1);
   });
+
+  test("integration: a motion brief writes mp4 + poster through the real ffmpeg-static encoder", async () => {
+    const path = join(dir, "motion.json");
+    writeFileSync(
+      path,
+      briefJson({
+        id: "motion",
+        mode: "variation",
+        variation: { count: 1, seed: 1, axes: { motion: ["accent-wipe"], duration: [2], layout: ["headline-bottom"], tone: ["bold"] } },
+        output: { formats: ["motion"], platforms: ["instagram-reel"] },
+      }),
+    );
+    await main(path);
+    expect(process.exitCode).not.toBe(1);
+    const report = JSON.parse(readFileSync(resolve(dir, "reports", "motion.json"), "utf8")) as {
+      assets: Array<{ outputPath: string; videoPath?: string; format?: string; durationSec?: number }>;
+    };
+    expect(report.assets).toHaveLength(1);
+    const [asset] = report.assets;
+    expect(asset).toMatchObject({ format: "motion", durationSec: 2 });
+    expect(asset.videoPath).toMatch(/\/v0\.mp4$/);
+    expect(existsSync(resolve(dir, asset.videoPath!))).toBe(true);
+    expect(existsSync(resolve(dir, asset.outputPath))).toBe(true);
+    expect(vi.mocked(console.log).mock.calls.flat().join("\n")).toMatch(/v0\.mp4 \(\+poster\)/);
+  }, 60_000);
 
   test("warns on a failed ffmpeg probe without changing the exit code", async () => {
     probeMock.mockResolvedValueOnce({ motion: false, reason: "no binary" });

@@ -114,6 +114,22 @@ describe("report persistence", () => {
     ).toBe(false);
   });
 
+  test("isPersistedAsset requires a string videoPath on motion rows", () => {
+    const motion = {
+      productId: "alpha",
+      aspectRatio: "9:16",
+      treatment: "headline-top-bold",
+      outputPath: "alpha/9x16/v1.png",
+      variantIndex: 1,
+      attempt: 0,
+      format: "motion",
+      durationSec: 6,
+    };
+    expect(isPersistedAsset(motion)).toBe(false);
+    expect(isPersistedAsset({ ...motion, videoPath: "alpha/9x16/v1.mp4" })).toBe(true);
+    expect(isPersistedAsset({ ...motion, format: "static" })).toBe(true);
+  });
+
   test("isPersistedAsset requires the four strings plus integer variantIndex and attempt on variation rows", () => {
     const variation = {
       productId: "alpha",
