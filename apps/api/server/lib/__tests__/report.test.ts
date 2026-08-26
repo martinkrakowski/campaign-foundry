@@ -7,7 +7,7 @@ import {
   type GeneratedAsset,
   type PipelineResult,
 } from "@campaignfoundry/CampaignOrchestration";
-import { campaignReportPath, latestReportPath, writeReport } from "../report.js";
+import { campaignReportPath, isPersistedAsset, latestReportPath, readReport, writeReport } from "../report.js";
 
 type ReportAsset = GeneratedAsset & { brandCompliant: boolean };
 
@@ -26,7 +26,7 @@ const asset = (over: Partial<GeneratedAsset> = {}): GeneratedAsset => ({
 const beta = (over: Partial<GeneratedAsset> = {}) => asset({ productId: "beta", outputPath: "beta/1x1.png", ...over });
 const result = (assets: GeneratedAsset[], campaignId = "camp"): PipelineResult => ({
   assets,
-  log: new PipelineExecutionLog(campaignId),
+  log: new PipelineExecutionLog(campaignId, () => new Date("2026-01-01T00:00:00.000Z")),
   halted: false,
 });
 const readAssets = (p: string): ReportAsset[] => (JSON.parse(readFileSync(p, "utf8")) as { assets: ReportAsset[] }).assets;
@@ -55,6 +55,28 @@ describe("report persistence", () => {
     expect(latestReportPath(root)).toBe(resolve(root, "report.json"));
   });
 
+  test("readReport returns the parsed per-campaign report", async () => {
+    await writeReport(result([asset()]));
+    await expect(readReport(root, "camp")).resolves.toMatchObject({
+      halted: false,
+      assets: [expect.objectContaining({ productId: "alpha" })],
+    });
+  });
+
+  test("readReport returns undefined for an unsafe id", async () => {
+    await expect(readReport(root, "../evil")).resolves.toBeUndefined();
+  });
+
+  test("readReport returns undefined when the file is missing", async () => {
+    await expect(readReport(root, "camp")).resolves.toBeUndefined();
+  });
+
+  test("readReport returns undefined for invalid JSON", async () => {
+    mkdirSync(resolve(root, "reports"), { recursive: true });
+    writeFileSync(resolve(root, "reports", "camp.json"), "{not json");
+    await expect(readReport(root, "camp")).resolves.toBeUndefined();
+  });
+
   test("writes per-campaign and latest, deriving brandCompliant (density AND logo)", async () => {
     const path = await writeReport(result([asset({ logoApplied: false }), beta()]));
     expect(path).toBe(resolve(root, "reports", "camp.json"));
@@ -79,12 +101,24 @@ describe("report persistence", () => {
     expect(readAssets(path)).toHaveLength(1);
   });
 
+  test("isPersistedAsset requires the four string identity/path fields", () => {
+    expect(isPersistedAsset({ productId: "alpha", aspectRatio: "1:1" })).toBe(false);
+    expect(isPersistedAsset({ productId: "alpha", aspectRatio: "1:1", treatment: "default" })).toBe(false);
+    expect(
+      isPersistedAsset({ productId: "alpha", aspectRatio: "1:1", treatment: "default", outputPath: "alpha/1x1.png" }),
+    ).toBe(true);
+    expect(isPersistedAsset(null)).toBe(false);
+    expect(isPersistedAsset("nope")).toBe(false);
+  });
+
   test("merge drops unkeyable rows from a corrupt prior report, with a warning", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mkdirSync(resolve(root, "reports"), { recursive: true });
     writeFileSync(
       resolve(root, "reports", "camp.json"),
-      JSON.stringify({ assets: [null, { productId: "x" }, beta()] }),
+      JSON.stringify({
+        assets: [null, { productId: "x" }, { productId: "alpha", aspectRatio: "1:1", treatment: "default" }, beta()],
+      }),
     );
     const path = await writeReport(result([asset()]), { merge: true });
 

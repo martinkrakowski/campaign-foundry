@@ -1,7 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, resolve, sep } from "node:path";
+import { dirname } from "node:path";
 import { PDFDocument, StandardFonts, type PDFPage } from "pdf-lib";
 import type { ExportPort } from "@campaignfoundry/CampaignOrchestration";
+import { resolveSafe } from "../safe-path.js";
 
 /** Footer stamped on every proof — makes the RGB-only limitation explicit (ProofMetadataEmbedding). */
 const PROOF_FOOTER = "Campaign Foundry proof — RGB asset, not colour-managed";
@@ -18,7 +19,7 @@ export class FileSystemExporter implements ExportPort {
   constructor(private readonly outputRoot: string) {}
 
   async saveToDirectory(imageBuffer: Uint8Array, relativePath: string): Promise<void> {
-    const target = this.resolveSafe(relativePath);
+    const target = resolveSafe(this.outputRoot, relativePath, "write");
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, imageBuffer);
   }
@@ -37,7 +38,7 @@ export class FileSystemExporter implements ExportPort {
     this.drawCropMarks(page, PAGE_MARGIN, imgY, png.width, png.height);
     page.drawText(PROOF_FOOTER, { x: PAGE_MARGIN, y: PAGE_MARGIN, size: 10, font });
 
-    const target = this.resolveSafe(relativePath);
+    const target = resolveSafe(this.outputRoot, relativePath, "write");
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, await pdf.save());
   }
@@ -53,15 +54,5 @@ export class FileSystemExporter implements ExportPort {
       page.drawLine({ start: { x: cx - CROP_MARK_LEN, y: cy }, end: { x: cx + CROP_MARK_LEN, y: cy }, thickness: 0.5 });
       page.drawLine({ start: { x: cx, y: cy - CROP_MARK_LEN }, end: { x: cx, y: cy + CROP_MARK_LEN }, thickness: 0.5 });
     }
-  }
-
-  /** Resolve a relative path under the output root, refusing any path traversal. */
-  private resolveSafe(relativePath: string): string {
-    const root = resolve(this.outputRoot);
-    const target = resolve(root, relativePath);
-    if (target !== root && !target.startsWith(root + sep)) {
-      throw new Error(`Refusing to write outside the output root: ${relativePath}`);
-    }
-    return target;
   }
 }

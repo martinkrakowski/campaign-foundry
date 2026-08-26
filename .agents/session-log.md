@@ -329,3 +329,134 @@ To keep this file out of version control, add `.agents/session-log.md` to
     coercion, `withTempProjectRoot` test helper.
 - **Left open:**
   - Phase 1.3–1.6 UI.
+## 2026-08-25 — variation planner (Phase 2.1–2.3)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Added `VariationPolicy`, `VariationPlan`, `Variant` (`variantTreatmentId`), and `MotionKind` (`restT` table) in CampaignOrchestration.
+  - Added pure `PlanVariationsUseCase.plan` / `replan` with seeded draws, coverage minimums, Hamming `minDistance`, `count×3` candidate cap, and a 64-draw replan bound.
+  - Manifest + `yarn sync` barrels. Golden tests pin `policyHash` and the first three variants. Did not touch `GenerateCampaignUseCase` or `pipeline.ts`.
+- **Decisions:**
+  - Stored `policy` and `briefId` on the plan so `replan` does not need the original brief.
+  - Background axis values are `procedural | asset-pool | genai` (brief parser), not the rendered-asset `BackgroundSource`.
+  - `perRatio` coverage is one walk of ratios after the product pass (skip if already ≥ perRatio).
+- **Left open:**
+  - Phase 2.4 consume the planner from `GenerateCampaignUseCase`; identity migration (2.5); GenAI cache (2.6).
+
+## 2026-08-25 — variation planner review fixes (PR #46)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Coverage is now a property of the accepted set: round-robin deficient
+    products/ratios (retry distance rejects), then fill to `count`; fail up
+    front when `perProduct × |products|` or `perRatio × |ratios|` exceeds
+    `count`; `err` naming the first unmet product/ratio after planning.
+  - `replan` refuses a substitute that would break coverage; bounded redraw.
+  - `VariationPolicy.fromBrief` validates count/minDistance/coverage/seed/
+    paletteShift and canonicalises option lists before `axisProductSize` and
+    `policyHash`. Shortfall messages include `accepted` and `minDistance`.
+- **Decisions:**
+  - Hamming axes live on the policy VO (`DISTANCE_AXES`) so `minDistance`
+    cannot exceed the axis count. Planner stays pure (no clock / Math.random).
+  - Golden `policyHash` and first-three-variant literals did not change
+    (zero coverage + unique lists are identity for the golden brief).
+- **Left open:**
+  - Phase 2.4 consume the planner from `GenerateCampaignUseCase`.
+## 2026-08-25 — platform packaging (Phase 5.1+5.3)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `PlatformProfile` table in Distribution (three canvases only; motion platforms hidden).
+  - `PackageStorePort` + `FileSystemPackageStore` + `PackageForPlatformUseCase`: copy matching-ratio statics under `output/<campaignId>/platforms/<id>/` and write `manifest.json`. Never re-renders.
+  - `POST /campaigns/package` wires the use case at the route; `readReport` helper shared with `GET /campaigns/result`.
+- **Decisions:**
+  - LinkedIn is 1:1 static (this wave's table wins over the long-form `1:1 | 16:9` note).
+  - `safeInsets` are zeros; `maxBytes` is 8 MiB static / 100 MiB motion (documented caps, not live APIs).
+  - Empty ratio selection still writes an empty-items manifest so the platform folder exists.
+  - Port/adapter omitted from the hexagen manifest: listing them emits `*.out-port.ts` / `*.adapter.ts` stubs that clash with neighbour names (`ExportPort.ts`, `FileSystemExporter.ts`). Hand-export the port from `application/ports/out/index.ts`.
+  - Distribution `src/index.ts` re-exports application + domain (hexagen modular-monolith mode does not refresh the package root barrel when new layers gain content).
+- **Left open:**
+  - Phase 5.2 (safe insets at generation) and 5.4 (export-page UI). Motion profiles stay `visible: false` until P4.
+
+## 2026-08-25 — PR #48 packaging review fixes
+
+- **Mode:** Implementer
+- **Changes:**
+  - Use case catches store errors per platform (`Platform "<id>": <reason>`, absolute paths stripped) and the route maps use-case `err` to 422.
+  - Adapter stages each platform in `<platformDir>.staging-<random>` then `rm -rf` + `rename` so a failure never leaves a mixed folder and a smaller re-package drops stale files.
+  - Packaging moved to `output/packages/<campaignId>/<platformId>/`. Shared `resolveSafe` helper; campaign root resolved in the adapter constructor; `readFile` Buffer returned as-is.
+  - Exported `isPersistedAsset` (productId/aspectRatio/treatment/outputPath); invalid rows skipped + counted on the manifest; non-array `assets` → 422. Duplicate platform ids de-duplicated in order.
+  - `packagedAt` ISO timestamp injected from the composition-root clock (no `new Date()` in the use case). Removed filled-layer `.gitkeep`s; `yarn sync` barrel-exported `safe-path.ts`.
+- **Decisions:**
+  - Refuted Qodo "old campaign packages newer bytes": renders are not campaign-namespaced; that is wave-3 identity/output-path work. The package is explicitly the current output for that report (`packagedAt` + route/README sentence).
+- **Left open:**
+  - Wave-3 campaign-namespaced output paths. Phase 5.2 / 5.4.
+## 2026-08-25 — drawCreative extract (Phase 4.2)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Recorded 12-cell compositor PNG goldens (both layouts × both tones × three ratios, procedural hydra-bottle `#1473E6` background + bundled logo) from the pre-refactor compositor, then split `NodeCanvasCompositor.compositeAsset` into `prepareCreative` (I/O) and `drawCreative(ctx, prepared, t)` (pure blit; `t` ignored, stills pass `t = 1`).
+  - Golden sha256 fixture is the wave-3 safety net; hashes unchanged after the extract.
+- **Decisions:**
+  - wrapText stays in `drawCreative` on the real ctx (drawing-adjacent, not filesystem I/O) so measureText cannot drift.
+  - No barrel or manifest *file* was edited. The `@generated` barrels `export *` from `NodeCanvasCompositor.ts`, so the new module-level `PreparedCreative` / `drawCreative` exports still leaked from `@campaignfoundry/CreativeGeneration`'s root (and through them `@napi-rs/canvas` `Image` / `SKRSContext2D`). Hexagen has no non-barreled `internal` export path.
+- **Left open:**
+  - Phase 4.3 motion (background + headline only; band and logo static across `t`).
+
+## 2026-08-25 — compositor goldens keyed by platform
+
+- **Mode:** Implementer
+- **Changes:**
+  - Keyed the 12-cell PNG sha256 fixture by `darwin` / `linux` so CI (FreeType) and local (CoreText) both assert byte-identity without changing draw/prepare.
+- **Decisions:**
+  - Missing `process.platform` failed the test (did not skip) in this commit. See the following entry for arch-keyed maps and skip-on-missing.
+- **Left open:**
+  - none.
+
+## 2026-08-25 — PR #45 review: public surface, golden keying, evidence
+
+- **Mode:** Implementer
+- **Changes:**
+  - `NodeCanvasCompositor.prepare(request)` / `.draw(ctx, prepared, t)` are static members; `PreparedCreative` is module-private (not exported). The barrel surface stays the class. Dropped unused `PreparedCreative.subtle` — tone still drives `shadeAlpha` / `fontWeight` locally; draw path unchanged.
+  - Goldens keyed by `${process.platform}-${process.arch}` (`darwin-arm64`, `linux-x64`). Missing or empty map skips via `test.skipIf` with a message naming the key and how to record it. Key-resolution helper unit-tested.
+- **Decisions:**
+  - Darwin hashes were recorded at `6263f1d` (pre-refactor) and are unchanged through the refactor — proven identity on darwin. The linux map was recorded from CI *after* the refactor, so it pins the refactored output going forward but does not prove identity on the FreeType path.
+- **Left open:**
+  - none.
+## 2026-08-25 — shared mockPipelineApi helper
+
+- **Mode:** Implementer
+- **Changes:**
+  - Exported `json`, `jobOk`, and `mockPipelineApi({ report?, job?, post?, result? })` from `apps/web/src/__tests__/helpers.ts`.
+  - Wired the four fetch-router copies (vitest.setup `beforeEach`, `seedPersistedRun`, `seedSingle`, run-context `mockApi`) through that helper; removed duplicate local `json` helpers in coverage-gaps, run-context, grid, and shell-modals tests.
+- **Decisions:**
+  - Default POST jobId stays `job-1` (run-context); other call sites still passed `post` so `test-job` / `seed-job` (and pending POST) were unchanged in this first pass.
+  - `mockApi` is a thin wrapper that forwards `{ post, job, result }` so run-context call sites stay as they were.
+- **Left open:**
+  - Consolidation was not complete. Remaining hand-rolled `fetch` routers: `coverage-gaps.test.tsx` (POST → 500 "boom"; pending POST; telemetry `seedLog`), `grid.test.tsx` (pending POST, empty / one-asset report), `shell-modals.test.tsx` (`/campaigns/briefs` via GET, telemetry `seedLog`), `run-context.test.tsx` (`campaignId=…` routers, restore `mockResolvedValue` / `mockRejectedValue`). `mockApi` alias still present. Per-site `post` overrides still existed only to pick `seed-job` / `test-job`.
+
+---
+
+## 2026-08-25 — mockPipelineApi review findings
+
+- **Mode:** Implementer
+- **Changes:**
+  - Dropped the `mockApi` alias; run-context call sites use `mockPipelineApi`. Converted the remaining 1:1 hand-rolled fetch routers (coverage-gaps POST 500 / pending POST / telemetry seedLog; grid pending POST + empty/one-asset reports; shell-modals `/campaigns/briefs` via `result` + telemetry seedLog; run-context `campaignId=…` + restore resolve/reject) onto `{ post, job, result, report }`.
+  - One `EMPTY_REPORT` + `MockReport` type; job-GET default is `jobSnapshot` of that report (`log: { entries: [] }` when `log` is null). Optional `jobId`; dropped `test-job` / `seed-job` post overrides. `mockPipelineApi` spies `fetch` when it is not already a mock. Job route matches `${API}/campaigns/jobs/`. Fresh-Response comment lives on `json()`.
+- **Decisions:**
+  - `done/total = 0` when `halted` matches production `completeJob` (`apps/api/server/lib/jobs.ts`); the old inline fixture that used asset length on a halted job was wrong — left `jobOk` as-is.
+  - Remaining custom `post`/`job`/`result` callbacks are the helper's extension points (inspect POST body, hang a POST, toggle `posted`, poll sequencing) — not duplicate routers.
+- **Left open:**
+  - No hand-rolled `vi.mocked(globalThis.fetch).mockImplementation` routers remain.
+## 2026-08-25 — inject log clock (D14 follow-up)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `PipelineExecutionLog` constructor is now `(campaignId, now)`; `startedAt` / `record` / `complete` call `now()`. No default clock in the domain.
+  - `GenerateCampaignDeps.now` is required; `buildPipeline` supplies `() => new Date()`. Tests use a fixed/sequenced fake clock and assert exact timestamps.
+  - Dropped the CampaignOrchestration eslint ignore of `PipelineExecutionLog.vo.ts` (manifest template + `yarn sync`).
+- **Decisions:**
+  - No `now` default in the use case either — application/use-cases is under the same deterministic-core lint.
+  - Composition root is the only place that may close over `new Date()`.
+- **Left open:**
+  - none for this follow-up.

@@ -105,6 +105,7 @@ export function buildPipeline(imageModel?: string): GenerateCampaignUseCase {
     compositor: new NodeCanvasCompositor(process.env.MESSAGE_FONT),
     compliance: new BrandComplianceChecker(),
     exporter: new FileSystemExporter(outputRoot()),
+    now: () => new Date(),
   });
 }
 

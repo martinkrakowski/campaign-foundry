@@ -71,7 +71,7 @@ everything that touches the outside world is an adapter behind a port.
 | `packages/CampaignOrchestration` | Domain model + `GenerateCampaignUseCase` + the four port contracts |
 | `packages/CreativeGeneration` | Background generation + compositing adapters |
 | `packages/GovernanceAndCompliance` | Brand-colour + prohibited-words compliance adapter |
-| `packages/Distribution` | Filesystem export + print-proof (PDF) adapter |
+| `packages/Distribution` | Filesystem export, print-proof (PDF), and per-platform packaging |
 | `packages/shared` | `Result` kernel and shared primitives |
 | `apps/api` | Nitro server: `POST /campaigns/generate` + the composition root |
 | `apps/web` | Next.js HITL review interface |
@@ -232,6 +232,11 @@ curl -X POST http://localhost:3001/campaigns/assets \
 format; they never create a sibling named `<id>.yaml`. Asset `name` is a slug
 plus `.png`/`.jpg`/`.jpeg`.
 
+`POST /campaigns/package` copies a run's already-rendered creatives into
+`output/packages/<campaignId>/<platformId>/` (never re-renders). The package is
+the current output for that report — renders are not campaign-namespaced;
+`packagedAt` on `manifest.json` records when this copy was taken.
+
 ---
 
 ## Example input
@@ -286,6 +291,13 @@ output/
 ├── proofs/
 │   ├── hydra-bottle.pdf
 │   └── trail-pack.pdf
+├── reports/
+│   └── summer-hydration-2026.json
+├── packages/
+│   └── summer-hydration-2026/
+│       └── instagram-feed/
+│           ├── hydra-bottle/1x1.png
+│           └── manifest.json   # packagedAt + skipped + items
 └── report.json     # per-asset compliance (density + logo + brandCompliant) + log
 ```
 

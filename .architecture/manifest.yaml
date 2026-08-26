@@ -148,16 +148,21 @@ bounded_contexts:
           - CampaignBrief
           - GeneratedAsset
           - Product
+          - Variant
         value_objects:
           - AspectRatio
           - ComplianceResult
           - PipelineExecutionLog
           - LogEntry
           - PipelineResult
+          - VariationPolicy
+          - VariationPlan
+          - MotionKind
         domain_services: []
       application:
         use_cases:
           - GenerateCampaignUseCase
+          - PlanVariationsUseCase
         ports:
           in: []
           out: []
@@ -179,11 +184,9 @@ bounded_contexts:
                 '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
               },
             },
-            // Deterministic core, widened to the use cases. PipelineExecutionLog is the one
-            // sanctioned wall-clock reader in the domain (it stamps the run log).
+            // Deterministic core, widened to the use cases.
             ...deterministicCore({
               extraFiles: ['src/application/use-cases/**/*.ts'],
-              ignores: ['src/domain/value-objects/PipelineExecutionLog.vo.ts'],
             }),
             {
               ignores: ['dist/**', 'node_modules/**'],
@@ -236,8 +239,8 @@ bounded_contexts:
   - name: Distribution
     type: core
     description: >
-      Driven context handling file persistence and print-proof generation. Owns
-      no domain logic and is pure infrastructure.
+      Driven context handling file persistence, print-proof generation, and
+      per-platform packaging of already-rendered creatives.
     depends_on:
       - shared
       - CampaignOrchestration
@@ -246,10 +249,12 @@ bounded_contexts:
     layers:
       domain:
         entities: []
-        value_objects: []
+        value_objects:
+          - PlatformProfile
         domain_services: []
       application:
-        use_cases: []
+        use_cases:
+          - PackageForPlatformUseCase
         ports:
           in: []
           out: []
