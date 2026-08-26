@@ -49,7 +49,14 @@ const fakeStore = (read: Uint8Array = SMALL): PackageStorePort & {
 
 const exec = (
   store: PackageStorePort,
-  over: Partial<{ campaignId: string; assets: GeneratedAsset[]; platforms: string[]; packagedAt: string; skipped: number }> = {},
+  over: Partial<{
+    campaignId: string;
+    assets: GeneratedAsset[];
+    platforms: string[];
+    packagedAt: string;
+    skipped: number;
+    include: string[];
+  }> = {},
 ) =>
   new PackageForPlatformUseCase(store).execute({
     campaignId: "camp",
@@ -108,7 +115,50 @@ describe("PackageForPlatformUseCase", () => {
     expect(feed.items.every((i) => i.checks.size === "pass")).toBe(true);
     expect(x.items.every((i) => i.checks.size === "pass")).toBe(true);
     expect(feed.skipped).toBe(0);
+    expect(feed.included).toBe(2);
+    expect(feed.excluded).toBe(0);
     expect(store.manifests[0].manifest.packagedAt).toBe(PACKAGED_AT);
+    expect(store.manifests[0].manifest.included).toBe(2);
+    expect(store.manifests[0].manifest.excluded).toBe(0);
+  });
+
+  test("packages only the included identities (classic triple and variation product/v<index>)", async () => {
+    const store = fakeStore();
+    const assets = [
+      asset({ productId: "alpha", outputPath: "alpha/1x1.png" }),
+      asset({ productId: "beta", outputPath: "beta/1x1.png" }),
+      asset({ productId: "gamma", outputPath: "gamma/v2.png", variantIndex: 2, treatment: "headline-top-bold" }),
+      asset({ productId: "gamma", outputPath: "gamma/v3.png", variantIndex: 3, treatment: "headline-top-bold" }),
+      asset({ productId: "alpha", aspectRatio: "16:9", outputPath: "alpha/16x9.png" }),
+    ];
+    const result = await exec(store, {
+      assets,
+      platforms: ["instagram-feed", "x"],
+      include: ["alpha/1:1/default", "gamma/v3", "nobody/1:1/default"],
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const [feed, x] = result.value.platforms;
+    expect(feed.items.map((i) => i.source)).toEqual(["alpha/1x1.png", "gamma/v3.png"]);
+    expect(feed.included).toBe(2);
+    expect(feed.excluded).toBe(2);
+    expect(x.items).toEqual([]);
+    expect(x.included).toBe(0);
+    expect(x.excluded).toBe(1);
+    expect(store.reads).not.toContain("beta/1x1.png");
+    expect(store.manifests[0].manifest.included).toBe(2);
+    expect(store.manifests[0].manifest.excluded).toBe(2);
+  });
+
+  test("an empty include list packages nothing but still writes the manifest", async () => {
+    const store = fakeStore();
+    const result = await exec(store, { include: [] });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.platforms[0].items).toEqual([]);
+    expect(result.value.platforms[0].excluded).toBe(1);
+    expect(store.readAsset).not.toHaveBeenCalled();
+    expect(store.writeManifest).toHaveBeenCalledTimes(1);
   });
 
   test("records a size fail but still writes the packaged file", async () => {

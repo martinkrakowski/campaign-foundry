@@ -39,6 +39,12 @@ export default function ExportPage() {
     [assets, decisions],
   );
 
+  // Decisions live in the browser, so packaging must be told which creatives passed
+  // review. Once the reviewer has decided anything, only approved keys are sent;
+  // with no decisions at all the whole run is packaged (the CLI/API default).
+  const hasDecisions = pending < assets.length;
+  const approvedKeys = useMemo(() => approved.map(assetKey), [approved]);
+
   // One proof PDF per product that has at least one approved creative; dedupe by path.
   const proofs = useMemo(() => {
     const map = new Map<string, string>();
@@ -134,7 +140,7 @@ export default function ExportPage() {
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => void packageSelected([platform])}
+            onClick={() => void packageSelected([platform], hasDecisions ? approvedKeys : undefined)}
             disabled={packaging}
             className="rounded-full bg-white px-4 py-1.5 text-[13px] font-semibold text-black transition-colors hover:bg-gray-200 disabled:bg-surface-2 disabled:text-text-muted"
           >

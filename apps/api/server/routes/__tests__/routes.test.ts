@@ -442,6 +442,53 @@ describe("POST /campaigns/package", () => {
     expect(existsSync(resolve(dir, "packages/camp/x/alpha/16x9.png"))).toBe(true);
   });
 
+  test("packages only the included identities and records included/excluded on the manifest", async () => {
+    seedPng("alpha/1x1.png");
+    seedPng("beta/1x1.png");
+    seedPng("gamma/v1.png");
+    seedReport([
+      reportAsset(),
+      reportAsset({ productId: "beta", outputPath: "beta/1x1.png" }),
+      reportAsset({ productId: "gamma", outputPath: "gamma/v1.png", variantIndex: 1, attempt: 0 }),
+    ]);
+    const res = await call({
+      campaignId: "camp",
+      platforms: ["instagram-feed"],
+      include: ["alpha/1:1/default", "gamma/v1"],
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      platforms: Array<{ items: Array<{ source: string }>; included: number; excluded: number }>;
+    };
+    expect(body.platforms[0].items.map((i) => i.source)).toEqual(["alpha/1x1.png", "gamma/v1.png"]);
+    expect(body.platforms[0].included).toBe(2);
+    expect(body.platforms[0].excluded).toBe(1);
+    const onDisk = JSON.parse(
+      readFileSync(resolve(dir, "packages/camp/instagram-feed/manifest.json"), "utf8"),
+    ) as { included: number; excluded: number };
+    expect(onDisk).toMatchObject({ included: 2, excluded: 1 });
+    expect(existsSync(resolve(dir, "packages/camp/instagram-feed/beta/1x1.png"))).toBe(false);
+  });
+
+  test("returns 400 when include is not an array of strings", async () => {
+    let res = await call({ campaignId: "camp", platforms: ["instagram-feed"], include: "alpha/1:1/default" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "include must be an array of strings" });
+    res = await call({ campaignId: "camp", platforms: ["instagram-feed"], include: ["ok", 1] });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "include must be an array of strings" });
+  });
+
+  test("returns 400 when include has more than 1000 entries", async () => {
+    const res = await call({
+      campaignId: "camp",
+      platforms: ["instagram-feed"],
+      include: Array.from({ length: 1001 }, (_, i) => `p${i}/1:1/default`),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "include must have at most 1000 entries" });
+  });
+
   test("returns 400 when campaignId is missing", async () => {
     const res = await call({ platforms: ["instagram-feed"] });
     expect(res.status).toBe(400);

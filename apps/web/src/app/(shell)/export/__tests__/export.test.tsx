@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRun, seedPersistedRun, makeAsset, json, mockPipelineApi } from "@/__tests__/helpers";
 import { API } from "@/lib/run-context";
@@ -57,6 +57,54 @@ describe("ExportPage — platform packaging", () => {
     expect((screen.getByText("Download zip") as HTMLAnchorElement).getAttribute("href")).toBe(
       `${API}/campaigns/packages/seed/linkedin.zip`,
     );
+  });
+
+  test("sends the approved asset keys as include, and omits include with no decisions", async () => {
+    const user = userEvent.setup();
+    const assets = [
+      makeAsset(),
+      makeAsset({ productId: "beta", outputPath: "beta/1x1.png" }),
+      makeAsset({ productId: "gamma", outputPath: "gamma/1x1.png" }),
+    ];
+    localStorage.setItem(
+      "cf:decisions",
+      JSON.stringify({ "alpha/1:1/default": "approved", "beta/1:1/default": "rejected" }),
+    );
+    seedPersistedRun(assets);
+    const bodies: unknown[] = [];
+    mockPipelineApi({
+      report: { halted: false, assets, log: { entries: [], campaignId: "seed" } },
+      packagePost: (_url, init) => {
+        bodies.push(JSON.parse(String(init.body)));
+        return json({ platforms: [] });
+      },
+    });
+    renderWithRun(<ExportPage />);
+    await user.click(await screen.findByRole("button", { name: "Package" }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]).toEqual({
+      campaignId: "seed",
+      platforms: ["instagram-feed"],
+      include: ["alpha/1:1/default"],
+    });
+  });
+
+  test("omits include when the reviewer has not decided anything", async () => {
+    const user = userEvent.setup();
+    const assets = [makeAsset()];
+    seedPersistedRun(assets);
+    const bodies: unknown[] = [];
+    mockPipelineApi({
+      report: { halted: false, assets, log: { entries: [], campaignId: "seed" } },
+      packagePost: (_url, init) => {
+        bodies.push(JSON.parse(String(init.body)));
+        return json({ platforms: [] });
+      },
+    });
+    renderWithRun(<ExportPage />);
+    await user.click(await screen.findByRole("button", { name: "Package" }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]).toEqual({ campaignId: "seed", platforms: ["instagram-feed"] });
   });
 
   test("surfaces a package error", async () => {

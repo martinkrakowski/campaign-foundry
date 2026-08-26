@@ -232,6 +232,20 @@ describe("packageCampaign / listPackages", () => {
     });
   });
 
+  test("sends include only when given", async () => {
+    mockFetch((_url, init) => {
+      expect(JSON.parse(String(init.body))).toEqual({
+        campaignId: "camp",
+        platforms: ["instagram-feed"],
+        include: ["alpha/1:1/default"],
+      });
+      return json({ platforms: [] });
+    });
+    await expect(
+      packageCampaign("camp", ["instagram-feed"], { include: ["alpha/1:1/default"] }),
+    ).resolves.toEqual({ platforms: [] });
+  });
+
   test("drops malformed platforms and items", async () => {
     mockFetch(() =>
       json({

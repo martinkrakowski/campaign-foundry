@@ -21,6 +21,9 @@ export interface PackageManifest {
   readonly platformId: string;
   readonly packagedAt: string;
   readonly skipped: number;
+  /** Ratio-matching assets kept / dropped by the caller's `include` list (0 excluded when omitted). */
+  readonly included: number;
+  readonly excluded: number;
   readonly profile: PlatformProfile;
   readonly items: readonly PackageManifestItem[];
 }

@@ -231,15 +231,19 @@ function asPackagedPlatforms(data: unknown): PackagedPlatform[] {
   return out;
 }
 
-/** Copy a run's renders into per-platform folders. Never re-renders. */
+/**
+ * Copy a run's renders into per-platform folders. Never re-renders. `include`
+ * is the list of approved asset keys; omitted packages every asset.
+ */
 export async function packageCampaign(
   campaignId: string,
   platforms: readonly string[],
-  signal?: AbortSignal,
+  opts: { include?: readonly string[]; signal?: AbortSignal } = {},
 ): Promise<{ platforms: PackagedPlatform[] }> {
+  const body = opts.include === undefined ? { campaignId, platforms } : { campaignId, platforms, include: opts.include };
   const data = await requestJson(`${API}/campaigns/package`, {
-    ...jsonInit("POST", { campaignId, platforms }),
-    signal,
+    ...jsonInit("POST", body),
+    signal: opts.signal,
   });
   return { platforms: asPackagedPlatforms(data) };
 }

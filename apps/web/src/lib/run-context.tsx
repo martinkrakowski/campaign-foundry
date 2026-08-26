@@ -294,7 +294,11 @@ interface RunContextValue {
   packaging: boolean;
   packageError: string | null;
   packages: PackagedPlatform[];
-  packageSelected: (platforms: readonly string[]) => Promise<void>;
+  /**
+   * Package the given platforms. `include` is the approved asset keys (the HITL
+   * gate); omit it to package every asset of the run.
+   */
+  packageSelected: (platforms: readonly string[], include?: readonly string[]) => Promise<void>;
   loadPackages: () => Promise<void>;
 }
 
@@ -619,11 +623,11 @@ export function RunProvider({ children }: { children: ReactNode }) {
   );
 
   const packageSelected = useCallback(
-    async (platforms: readonly string[]) => {
+    async (platforms: readonly string[], include?: readonly string[]) => {
       setPackaging(true);
       setPackageError(null);
       try {
-        const result = await packageCampaign(brief.id, platforms);
+        const result = await packageCampaign(brief.id, platforms, { include });
         setPackages((prev) => {
           const byId = new Map(prev.map((p) => [p.platformId, p] as const));
           for (const p of result.platforms) byId.set(p.platformId, p);

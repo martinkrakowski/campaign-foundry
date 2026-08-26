@@ -13,6 +13,8 @@ const manifest = (over: Partial<PackageManifest> = {}): PackageManifest => ({
   platformId: "instagram-feed",
   packagedAt: "2026-08-25T12:00:00.000Z",
   skipped: 0,
+  included: 0,
+  excluded: 0,
   profile: platformProfile("instagram-feed")!,
   items: [],
   ...over,
