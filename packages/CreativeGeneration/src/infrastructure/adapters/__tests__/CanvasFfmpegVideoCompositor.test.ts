@@ -19,6 +19,45 @@ import {
 
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47];
 
+interface Mp4Box {
+  readonly type: string;
+  readonly start: number;
+  readonly end: number;
+  readonly payload: number;
+}
+
+/** Tiny ISO-BMFF walker: top-level box types in order, with `moov`'s mvhd duration. */
+function parseMp4Boxes(bytes: Buffer, start = 0, end = bytes.length): Mp4Box[] {
+  const boxes: Mp4Box[] = [];
+  let offset = start;
+  while (offset + 8 <= end) {
+    let size = bytes.readUInt32BE(offset);
+    const type = bytes.toString("latin1", offset + 4, offset + 8);
+    let payload = offset + 8;
+    if (size === 1) {
+      size = Number(bytes.readBigUInt64BE(offset + 8));
+      payload = offset + 16;
+    } else if (size === 0) {
+      size = end - offset;
+    }
+    boxes.push({ type, start: offset, end: offset + size, payload });
+    offset += size;
+  }
+  return boxes;
+}
+
+function mvhdDuration(bytes: Buffer): number {
+  const moov = parseMp4Boxes(bytes).find((b) => b.type === "moov");
+  if (!moov) throw new Error("no moov box");
+  const mvhd = parseMp4Boxes(bytes, moov.payload, moov.end).find((b) => b.type === "mvhd");
+  if (!mvhd) throw new Error("no mvhd box");
+  const version = bytes.readUInt8(mvhd.payload);
+  // version 0: creation(4) modification(4) timescale(4) duration(4); version 1: 8/8/4/8.
+  return version === 1
+    ? Number(bytes.readBigUInt64BE(mvhd.payload + 4 + 8 + 8 + 4))
+    : bytes.readUInt32BE(mvhd.payload + 4 + 4 + 4 + 4);
+}
+
 const ratio = () => {
   const r = AspectRatio.create("9:16");
   if (!r.success) throw r.error;
@@ -61,7 +100,8 @@ function fakeFfmpeg(opts: {
   alreadyKilled?: boolean;
   closeOnWriteThrow?: number | null;
 }): FfmpegSpawn {
-  return () => {
+  return (_command, args) => {
+    const outPath = args[args.length - 1];
     if (opts.missingStdio) {
       const proc = Object.assign(new EventEmitter(), {
         stdin: null,
@@ -122,7 +162,8 @@ function fakeFfmpeg(opts: {
           stderr.write(errText.slice(i, i + chunkSize));
         }
         stderr.end();
-        stdout.end(opts.stdout ?? Buffer.from("xxxxftypxxxxmoovxxxx"));
+        stdout.end();
+        if ((opts.code ?? 0) === 0) writeFileSync(outPath, opts.stdout ?? Buffer.from("xxxxftypxxxxmoovxxxx"));
         proc.emit("close", opts.code ?? 0);
       }, opts.delayMs ?? 5);
     });
@@ -150,8 +191,13 @@ describe("CanvasFfmpegVideoCompositor", () => {
         const out = await compositor.compositeVideo(videoRequest({ sampleAt: [0, 0.5, 1] }));
         writeFileSync(join(dir, "clip.mp4"), out.video);
         const bytes = Buffer.from(out.video);
-        expect(bytes.includes(Buffer.from("ftyp"))).toBe(true);
-        expect(bytes.includes(Buffer.from("moov"))).toBe(true);
+        const order = parseMp4Boxes(bytes).map((b) => b.type);
+        // A finalized (non-fragmented) faststart mp4: moov ahead of mdat, no moof.
+        expect([
+          ["ftyp", "moov", "free", "mdat"],
+          ["ftyp", "moov", "mdat"],
+        ]).toContainEqual(order);
+        expect(mvhdDuration(bytes)).toBeGreaterThan(0);
         expect(Array.from(out.poster.slice(0, 4))).toEqual(PNG_MAGIC);
         expect(out.sampledFrames).toHaveLength(3);
         for (const frame of out.sampledFrames) {
@@ -309,10 +355,10 @@ describe("CanvasFfmpegVideoCompositor", () => {
   test("limits overlapping encodes to MAX_CONCURRENT_ENCODES", async () => {
     let active = 0;
     let maxActive = 0;
-    const spawn: FfmpegSpawn = () => {
+    const spawn: FfmpegSpawn = (command, args, options) => {
       active += 1;
       maxActive = Math.max(maxActive, active);
-      const inner = fakeFfmpeg({ delayMs: 80 })("/opt/ffmpeg", [], {});
+      const inner = fakeFfmpeg({ delayMs: 80 })(command, args, options);
       inner.once("close", () => {
         active -= 1;
       });

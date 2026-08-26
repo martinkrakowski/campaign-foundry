@@ -1,6 +1,9 @@
 import { spawn as defaultSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { once } from "node:events";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Writable } from "node:stream";
 import { createCanvas, type Canvas, type SKRSContext2D } from "@napi-rs/canvas";
 import type {
@@ -113,8 +116,14 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
     ffmpegPath: string,
   ): Promise<Uint8Array> {
     await encodeGate.acquire();
+    // The mp4 muxer needs a seekable output to write a finalized `moov` with real
+    // durations; on `pipe:1` it can only emit fragmented mp4 (`empty_moov`), which
+    // players report as duration 0 and platform uploaders reject. Encode to a temp
+    // file and read it back instead.
+    const workDir = await mkdtemp(join(tmpdir(), "cf-encode-"));
+    const outPath = join(workDir, "out.mp4");
     try {
-      const child = this.spawn(ffmpegPath, ffmpegArgs(prepared.width, prepared.height, request.fps), {
+      const child = this.spawn(ffmpegPath, ffmpegArgs(prepared.width, prepared.height, request.fps, outPath), {
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
       });
@@ -123,11 +132,9 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
         throw new Error("ffmpeg stdio pipes were not created");
       }
 
-      const stdoutChunks: Buffer[] = [];
       let stderr = "";
-      child.stdout.on("data", (chunk: Buffer) => {
-        stdoutChunks.push(chunk);
-      });
+      child.stdout.resume(); // nothing is written to stdout; keep the pipe from filling
+
       child.stderr.setEncoding("utf8");
       child.stderr.on("data", (chunk: string) => {
         stderr += chunk;
@@ -166,14 +173,15 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
           formatFfmpegFailure(writeError instanceof Error ? writeError.message : String(writeError), ffmpegPath),
         );
       }
-      return new Uint8Array(Buffer.concat(stdoutChunks));
+      return new Uint8Array(await readFile(outPath));
     } finally {
       encodeGate.release();
+      await rm(workDir, { recursive: true, force: true });
     }
   }
 }
 
-function ffmpegArgs(width: number, height: number, fps: number): string[] {
+function ffmpegArgs(width: number, height: number, fps: number, outPath: string): string[] {
   return [
     "-f",
     "rawvideo",
@@ -193,14 +201,18 @@ function ffmpegArgs(width: number, height: number, fps: number): string[] {
     "veryfast",
     "-crf",
     "20",
-    // empty_moov is required so the mp4 muxer can write to a non-seekable pipe.
+    // faststart moves the finalized moov ahead of mdat (progressive playback);
+    // bitexact strips encoder tags so identical frames yield identical bytes.
     "-movflags",
-    "+faststart+empty_moov",
+    "+faststart",
+    "-fflags",
+    "+bitexact",
     "-map_metadata",
     "-1",
     "-f",
     "mp4",
-    "pipe:1",
+    "-y",
+    outPath,
   ];
 }
 
