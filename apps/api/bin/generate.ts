@@ -4,6 +4,9 @@ import { loadBrief } from "../server/lib/load-brief.js";
 import { runCampaign } from "../server/lib/pipeline.js";
 import { outputRoot } from "../server/lib/config.js";
 import { writeReport } from "../server/lib/report.js";
+import { probeFfmpeg, setCapabilities } from "../server/lib/capabilities.js";
+
+const CLI_PROBE_TIMEOUT_MS = 2_000;
 
 function arg(flag: string): string | undefined {
   const i = argv.indexOf(flag);
@@ -11,6 +14,14 @@ function arg(flag: string): string | undefined {
 }
 
 export async function main(briefPathArg?: string): Promise<void> {
+  // The brief parser still rejects `formats: motion`, so there is nothing to gate
+  // the probe on yet; cap it instead so a wedged binary cannot stall the CLI.
+  const cap = await probeFfmpeg({ timeoutMs: CLI_PROBE_TIMEOUT_MS });
+  setCapabilities(cap);
+  if (!cap.motion) {
+    console.warn(`[generate] motion unavailable: ${cap.reason}`);
+  }
+
   const briefPath = briefPathArg ?? arg("--brief") ?? "briefs/sample-campaign.yaml";
   console.log(`\n  Campaign Foundry — generating from ${briefPath}\n`);
 

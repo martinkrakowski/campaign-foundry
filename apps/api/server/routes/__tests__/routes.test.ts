@@ -193,6 +193,46 @@ describe("POST /campaigns/generate", () => {
     expect(((await report.json()) as { assets: unknown[] }).assets).toHaveLength(4);
   });
 
+  test("variation re-roll fails when the plan changed since the persisted run", async () => {
+    const policy = {
+      count: 4,
+      seed: 42,
+      minDistance: 1,
+      axes: {
+        layout: ["headline-top", "headline-bottom"],
+        tone: ["bold", "subtle"],
+        background: { source: ["procedural"] },
+        paletteShift: [0, 0.1],
+      },
+    };
+    const seed = await call(brief({ mode: "variation", variation: policy }));
+    const { body: first } = await awaitJob(((await seed.json()) as { jobId: string }).jobId);
+    expect(first.status).toBe("completed");
+    const slot = first.result?.assets[0];
+    const reroll = await call({
+      brief: brief({ mode: "variation", variation: { ...policy, seed: 43 } }),
+      regenerateOnly: [{ productId: slot!.productId, variantIndex: slot!.variantIndex }],
+    });
+    expect(reroll.status).toBe(202);
+    const { body } = await awaitJob(((await reroll.json()) as { jobId: string }).jobId);
+    expect(body.status).toBe("failed");
+    expect(body.error).toMatch(/^Plan changed since the last run \(policyHash [0-9a-f]{64} ≠ [0-9a-f]{64}\); run the full campaign\.$/);
+    const report = await web("get", "/campaigns/result", resultHandler)(
+      new Request("http://x/campaigns/result?campaignId=camp"),
+    );
+    expect(((await report.json()) as { assets: unknown[] }).assets).toHaveLength(4);
+  });
+
+  test("variation re-roll without a persisted report is not pinned", async () => {
+    const res = await call({
+      brief: brief({ mode: "variation", products: [brief().products[0]], variation: { count: 2, seed: 42 } }),
+      regenerateOnly: [{ productId: "alpha", variantIndex: 0 }],
+    });
+    const { body } = await awaitJob(((await res.json()) as { jobId: string }).jobId);
+    expect(body.status).toBe("completed");
+    expect(body.result?.assets).toHaveLength(1);
+  });
+
   test("variation target productId mismatch fails the job", async () => {
     const vbrief = brief({
       mode: "variation",
@@ -331,6 +371,14 @@ describe("GET /output/**", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("image/png");
     expect((await res.arrayBuffer()).byteLength).toBeGreaterThan(0);
+  });
+
+  test("streams an mp4 with video/mp4 content type", async () => {
+    writeFileSync(resolve(dir, "clip.mp4"), "ftyp");
+    const res = await call("clip.mp4");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("video/mp4");
+    await res.arrayBuffer();
   });
 
   test("falls back to octet-stream for an unknown extension", async () => {

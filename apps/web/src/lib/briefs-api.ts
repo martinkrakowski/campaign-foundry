@@ -1,4 +1,10 @@
-import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import type {
+  CampaignBrief,
+  CopyPool,
+  CopyPoolEntryStatus,
+} from "@campaignfoundry/CampaignOrchestration";
+
+export type { CopyPool, CopyPoolEntry, CopyPoolEntryStatus } from "@campaignfoundry/CampaignOrchestration";
 
 /** Same path as run-context `API`. Local so RunProvider can import these helpers without a cycle. */
 const API = "/api/pipeline";
@@ -268,4 +274,61 @@ export async function listPackages(
     throw new BriefsApiError(errorFrom(data, `Request failed (HTTP ${res.status})`), res.status);
   }
   return { platforms: asPackagedPlatforms(data) };
+}
+
+/** One HITL change for PATCH /campaigns/pools/:briefId (text re-runs the legal gate). */
+export interface PoolEntryPatch {
+  id: string;
+  status: CopyPoolEntryStatus;
+  text?: string;
+}
+
+/** Default suggestion batch for POST /campaigns/pools/copy (the API's own default). */
+export const POOL_SUGGESTION_COUNT = 10;
+
+function asPool(data: unknown): CopyPool {
+  if (typeof data !== "object" || data === null) throw new BriefsApiError("Invalid response", 200);
+  const pool = (data as { pool?: unknown }).pool;
+  if (typeof pool !== "object" || pool === null || !Array.isArray((pool as { entries?: unknown }).entries)) {
+    throw new BriefsApiError("Invalid response", 200);
+  }
+  return pool as CopyPool;
+}
+
+/** The brief's copy pool; 404 (nothing generated yet) is `null`, not an error. */
+export async function getPool(briefId: string, signal?: AbortSignal): Promise<CopyPool | null> {
+  let res: Response;
+  try {
+    res = await fetch(`${API}/campaigns/pools/${encodeURIComponent(briefId)}`, { signal });
+  } catch {
+    throw new BriefsApiError("Network error", 0);
+  }
+  if (res.status === 404) return null;
+  const data = await parseJsonBody(res);
+  if (!res.ok) {
+    throw new BriefsApiError(errorFrom(data, `Request failed (HTTP ${res.status})`), res.status);
+  }
+  return asPool(data);
+}
+
+/**
+ * Generate `count` headline suggestions into the pool (legal-gated server-side).
+ * The brief is sent inline — the model needs its products and message, and the
+ * pool is stored under `brief.id` — so the wizard can generate before Save.
+ * Without OPENROUTER_API_KEY the API answers 503 — surfaced as a BriefsApiError.
+ */
+export async function generatePool(
+  brief: CampaignBrief,
+  count = POOL_SUGGESTION_COUNT,
+): Promise<{ pool: CopyPool; added: number }> {
+  const data = await requestJson(`${API}/campaigns/pools/copy`, jsonInit("POST", { brief, count }));
+  const added = (data as { added?: unknown }).added;
+  return { pool: asPool(data), added: typeof added === "number" ? added : 0 };
+}
+
+/** Approve / reject / edit pool entries by id. */
+export async function patchPool(briefId: string, entries: readonly PoolEntryPatch[]): Promise<CopyPool> {
+  return asPool(
+    await requestJson(`${API}/campaigns/pools/${encodeURIComponent(briefId)}`, jsonInit("PATCH", { entries })),
+  );
 }

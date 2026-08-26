@@ -4,6 +4,7 @@ import type {
   CompositeRequest,
   CompositeResult,
   CompositorPort,
+  MotionKind,
   SafeInsets,
 } from "@campaignfoundry/CampaignOrchestration";
 import { hexToRgb, wrapText } from "./canvas-util.js";
@@ -64,7 +65,7 @@ interface PreparedCreative {
  * on every machine, independent of the reviewer's installed system fonts.
  *
  * Still path: {@link NodeCanvasCompositor.prepare} (I/O) →
- * {@link NodeCanvasCompositor.draw} at `t = 1`.
+ * {@link NodeCanvasCompositor.draw} at `t = 1` with no `motion`.
  */
 export class NodeCanvasCompositor implements CompositorPort {
   constructor(private readonly fontFamily: string = "Inter") {
@@ -72,19 +73,28 @@ export class NodeCanvasCompositor implements CompositorPort {
   }
 
   /**
-   * Paint a prepared creative onto `ctx`. `t` is accepted and currently ignored
-   * by every layer — `t = 1` is the still's rest pose (motion is a later wave).
-   * When motion arrives, `t` will drive background + headline; the logo's inset
-   * offset stays in prepare so it is static across frames. Overlap-vs-headline
-   * is resolved here from the still layout and will need to re-run per frame
-   * once headline position depends on `t`.
+   * Paint a prepared creative onto `ctx`. With no `motion`, `t` is ignored and
+   * the blit matches the still path. With `motion`, `t` ∈ [0, 1] drives that
+   * kind; the solid accent and logo stay put. Logo placement (including the
+   * headline-overlap snap) is resolved from the rest-pose headline box, so a
+   * rising headline can never make the logo jump between edges mid-clip.
    */
-  static draw(ctx: SKRSContext2D, prepared: PreparedCreative, t: number): void {
-    void t;
+  static draw(ctx: SKRSContext2D, prepared: PreparedCreative, t: number, motion?: MotionKind): void {
     const { width, height, top, shadeAlpha } = prepared;
+    const eased = motion === undefined ? 1 : easeOutCubic(t);
 
-    // Layer 1 — background.
-    ctx.drawImage(prepared.background, 0, 0, width, height);
+    // Layer 1 — background. Ken-burns zooms this layer only, around the canvas centre.
+    const zoom = kenBurnsScale(motion, eased);
+    if (zoom === 1) {
+      ctx.drawImage(prepared.background, 0, 0, width, height);
+    } else {
+      ctx.save();
+      ctx.translate(width / 2, height / 2);
+      ctx.scale(zoom, zoom);
+      ctx.translate(-width / 2, -height / 2);
+      ctx.drawImage(prepared.background, 0, 0, width, height);
+      ctx.restore();
+    }
 
     // Layer 2 — contrast shade, darkest at the headline edge, fading into the image.
     const shade = top
@@ -101,38 +111,55 @@ export class NodeCanvasCompositor implements CompositorPort {
     const [ar, ag, ab] = hexToRgb(prepared.brandColor);
     const solidH = height * 0.05;
     const fadeH = height * 0.06;
+    const wipe = motion === "accent-wipe" ? eased : 1;
     ctx.fillStyle = `rgb(${ar}, ${ag}, ${ab})`;
     if (top) {
       ctx.fillRect(0, 0, width, solidH);
-      const fade = ctx.createLinearGradient(0, solidH, 0, solidH + fadeH);
-      fade.addColorStop(0, `rgb(${ar}, ${ag}, ${ab})`);
-      fade.addColorStop(1, `rgba(${ar}, ${ag}, ${ab}, 0)`);
-      ctx.fillStyle = fade;
-      ctx.fillRect(0, solidH, width, fadeH);
+      if (wipe > 0) {
+        const fade = ctx.createLinearGradient(0, solidH, 0, solidH + fadeH);
+        fade.addColorStop(0, `rgb(${ar}, ${ag}, ${ab})`);
+        fade.addColorStop(1, `rgba(${ar}, ${ag}, ${ab}, 0)`);
+        ctx.fillStyle = fade;
+        ctx.fillRect(0, solidH, width, fadeH * wipe);
+      }
     } else {
       ctx.fillRect(0, height - solidH, width, solidH);
-      const fade = ctx.createLinearGradient(0, height - solidH - fadeH, 0, height - solidH);
-      fade.addColorStop(0, `rgba(${ar}, ${ag}, ${ab}, 0)`);
-      fade.addColorStop(1, `rgb(${ar}, ${ag}, ${ab})`);
-      ctx.fillStyle = fade;
-      ctx.fillRect(0, height - solidH - fadeH, width, fadeH);
+      if (wipe > 0) {
+        const fade = ctx.createLinearGradient(0, height - solidH - fadeH, 0, height - solidH);
+        fade.addColorStop(0, `rgba(${ar}, ${ag}, ${ab}, 0)`);
+        fade.addColorStop(1, `rgb(${ar}, ${ag}, ${ab})`);
+        ctx.fillStyle = fade;
+        ctx.fillRect(0, height - solidH - fadeH * wipe, width, fadeH * wipe);
+      }
     }
 
     // Layer 4 — campaign copy, wrapped to the inset-reduced width and centred
     // in the inset rectangle. wrapText uses this ctx so metrics match the blit.
     const headline = layoutHeadline(ctx, prepared);
+    const rise = motion === "headline-rise";
+    const dy = rise ? (1 - eased) * 0.12 * height : 0;
+    const alpha = rise ? eased : 1;
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
+    if (dy !== 0 || alpha !== 1) {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(0, dy);
+    }
     let y = headline.firstY;
     for (const line of headline.lines) {
       ctx.fillText(line, headline.centerX, y);
       y += headline.lineHeight;
     }
+    if (dy !== 0 || alpha !== 1) {
+      ctx.restore();
+    }
 
     // Layer 5 — brand logo, anchored opposite the headline (top-right for a bottom
     // headline, bottom-left for a top headline). Inset offset was captured in
-    // prepare; if the still headline block overlaps it, snap to an inset edge.
+    // prepare; if the rest-pose headline block overlaps it, snap to an inset edge.
+    // The rest-pose box (not the translated one) keeps the logo static across `t`.
     if (prepared.logo) {
       const { image, x, width: lw, height: lh } = prepared.logo;
       let ly = prepared.logo.y;
@@ -220,6 +247,19 @@ export class NodeCanvasCompositor implements CompositorPort {
 const ZERO_INSETS: SafeInsets = { top: 0, right: 0, bottom: 0, left: 0 };
 const SIDES = ["top", "right", "bottom", "left"] as const;
 const ELLIPSIS = "…";
+/** Zoom amount applied away from the ken-burns rest pose so scale(restT) === 1. */
+const KEN_BURNS_ZOOM = 0.08;
+
+function easeOutCubic(t: number): number {
+  return 1 - (1 - t) ** 3;
+}
+
+/** Identity at restT: in eases 1.08 → 1.00, out eases 1.00 → 1.08. */
+function kenBurnsScale(motion: MotionKind | undefined, eased: number): number {
+  if (motion === "ken-burns-in") return 1 + KEN_BURNS_ZOOM * (1 - eased);
+  if (motion === "ken-burns-out") return 1 + KEN_BURNS_ZOOM * eased;
+  return 1;
+}
 
 function normalizeSafeInsets(
   raw: CompositeRequest["safeInsets"],

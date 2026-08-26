@@ -1,3 +1,4 @@
+# Requires PR #58 (motion generation) — merged 2026-08-26.
 # Randomized motion sample. Same static axes as sample-randomized.yaml plus the
 # `motion` and `duration` axes and `formats: [static, motion]`, so the planner
 # mixes still PNGs with silent mp4 variants (poster + sampled frames checked for

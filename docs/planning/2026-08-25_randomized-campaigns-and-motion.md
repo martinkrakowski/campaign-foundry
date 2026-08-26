@@ -1,7 +1,7 @@
 # Randomized Campaigns, Motion Creatives & Create New Project — Architecture & Development Plan
 
 **Date:** 2026-08-25
-**Status:** Implemented through wave 5 (2026-08-26) — decisions D1–D14 locked, one open question (Q2). Supersedes the v1 draft of the same day; v2.1 folded in the wave-1 code review (PRs #40–#42). §5 carries the per-phase **Wave status** table (PRs #39–#54 plus the wave-5 lanes), task 4.5 the recorded perf-spike numbers, §10 the evidence behind each Definition-of-Done item and the deferred list.
+**Status:** Implemented through wave 5 (2026-08-26) — decisions D1–D14 locked, one open question (Q2). Supersedes the v1 draft of the same day; v2.1 folded in the wave-1 code review (PRs #40–#42). §5 carries the per-phase **Wave status** table (PRs #39–#58 plus the wave-5 lanes), task 4.5 the recorded perf-spike numbers, §10 the evidence behind each Definition-of-Done item and the deferred list.
 **Scope:** `packages/CampaignOrchestration`, `packages/CreativeGeneration`, `packages/Distribution`, `packages/GovernanceAndCompliance`, `packages/shared`, `apps/api`, `apps/web`, `briefs/`, `.agents/`
 **Related:** `.agents/session-log.md` (2026-08-25 review + revision entries; the C/H/M/L findings themselves are recorded in §2 of this document), `.agents/tech-stack.md`, `.agents/testing.md`
 
@@ -169,7 +169,7 @@ interface CopyGeneratorPort { suggestHeadlines(brief: CampaignBrief, count: numb
 
 ### Wave status (2026-08-26)
 
-Every phase below has landed on `main` except the two wave-5 implementation lanes, which are open PRs at the time of writing. PR numbers are GitHub PRs on `main`; "wave" is the delegation wave in `.agents/session-log.md`.
+Every phase below has landed on `main` including the two wave-5 implementation lanes: #57 (`feat/pool-headlines`) and #58 (`feat/motion-generation`). PR numbers are GitHub PRs on `main`; "wave" is the delegation wave in `.agents/session-log.md`.
 
 | Phase | Tasks | PR(s) | Wave |
 |-------|-------|-------|------|
@@ -183,15 +183,15 @@ Every phase below has landed on `main` except the two wave-5 implementation lane
 | P1 | 1.3 `/brief` Save, 1.4 picker Create/Duplicate, 1.5 wizard, 1.6 `POST /campaigns/plan` estimate | #51 (plan route itself in #50) | 3 |
 | P5 | 5.1 `PlatformProfile` table, 5.3 `PackageForPlatformUseCase` + manifest | #48 | 2 |
 | P5 | 5.2 compositor half — optional `safeInsets` on `CompositeRequest` (zeros byte-identical) | #49 | 3 |
-| P5 | 5.2 generate half — union of platform insets per ratio in variation mode (D11) | wave 5 lane A `feat/motion-generation`, in progress | 5 |
-| P5 | 5.4 Export tabs, checks, zip (+ `GET /campaigns/packages/:campaignId`) | #53 | 4 |
+| P5 | 5.2 generate half — union of platform insets per ratio in variation mode (D11) | #58 | 5 |
+| P5 | 5.4 Export tabs, checks, zip (+ `GET /campaigns/packages/:campaignId`) | #53, #55 (empty-zip hotfix) | 4 |
 | P6 | 6.1 grid filters/chips/paging, 6.2 estimate panel, 6.3 re-roll rejected, 6.4 Runs `seed` + `policyHash` | #53 (6.3 identity path in #50) | 4 |
 | P4 | 4.2 `prepareCreative` / `drawCreative` extract (H8) with platform-keyed goldens | #45 | 2 |
 | P4 | 4.1 `VideoCompositorPort`, 4.3 motion in `draw` (D12), 4.4 `CanvasFfmpegVideoCompositor`, 4.6 boot probe + `.mp4` route + tech-stack row | #54 | 4 |
 | P4 | 4.5 perf spike — numbers recorded in the task row below; no PR | — | 4 |
-| P4 | 4.7 sampled-frame compliance + mp4 export, 4.8 allowlist `motion`/`duration`/`formats: motion` + visible motion profiles, 4.9 grid video cells + frames estimate | wave 5 lane A `feat/motion-generation`, in progress | 5 |
+| P4 | 4.7 sampled-frame compliance + mp4 export, 4.8 allowlist `motion`/`duration`/`formats: motion` + visible motion profiles, 4.9 grid video cells + frames estimate | #58 | 5 |
 | P3 | 3.1 `briefs/<id>/pools.json`, 3.2 `CopyGeneratorPort` + `OpenRouterCopyGenerator`, 3.3 `POST /campaigns/pools/copy` (+ `GET`/`PATCH /campaigns/pools/:briefId`) | #52 | 4 |
-| P3 | 3.4 allowlist `headline: pool://copy` + planner consumption, 3.5 wizard pool panel | wave 5 lane B `feat/pool-headlines`, in progress | 5 |
+| P3 | 3.4 allowlist `headline: pool://copy` + planner consumption, 3.5 wizard pool panel | #57 | 5 |
 | P7 | Plan document | #39 | 1 |
 | P7 | Wave-1 deferrals: clock injected into `PipelineExecutionLog`; shared `mockPipelineApi` | #43, #44 | 2 |
 | P7 | README Modes section, `briefs/sample-motion.yaml`, `briefs/sample-pooled.yaml`, this status table | wave 5 lane C `docs/plan-implemented` | 5 |
@@ -305,6 +305,11 @@ Phases are atomic and independently mergeable. **P0 → J → P2 → P1 → P5 �
 
 **4.5 spike results (recorded 2026-08-26, verbatim):**
 
+| 4.6 | **(D1, L1)** Nitro plugin probes the binary once (warn, don't crash; disables `formats: motion`); same probe in the CLI; `.mp4` in the output content-type map; `ffmpeg-static` row + GPL note in `.agents/tech-stack.md`. | `apps/api/server/plugins/ffmpeg-check.ts`, `apps/api/bin/generate.ts`, `routes/output/[...path].get.ts`, `.agents/tech-stack.md`, `apps/api/package.json` |
+| 4.7 | Compliance samples `sampledFrames` with `validateBrandColorDensity`; `ExportPort.saveToDirectory` reused for `.mp4`; proof uses the poster. Generate sets `sampleAt`. | `GenerateCampaignUseCase.use-case.ts` |
+| 4.8 | Schema allowlist gains `motion`, `duration`, `formats: motion`. Making motion platform profiles visible **depends on P5 5.1** (`PlatformProfile.vo.ts` does not exist before it) — that half ships after P5. | `load-brief.ts`, (`PlatformProfile.vo.ts` after P5) |
+| 4.9 | Grid video cells (poster + hover-play); estimate gains frames/encode minutes. | `grid/page.tsx`, `CommandBar.tsx` |
+
 > Perf spike (plan 4.5) — 2026-08-26, darwin-arm64 laptop, @napi-rs/canvas 0.1 + ffmpeg-static 5, 1080×1920 raw RGBA piped:
 > - 30 fps × 6 s veryfast: 180 frames in 1.31 s (137 fps end-to-end), draw 0.1 ms/frame, pipe+encode 6.9 ms/frame, 1.49 GB raw, 1.19 MB mp4
 > - 24 fps × 6 s veryfast: 144 frames in 0.74 s (193 fps), 4.7 ms/frame, 1.11 MB
@@ -313,10 +318,6 @@ Phases are atomic and independently mergeable. **P0 → J → P2 → P1 → P5 �
 > Acceptance (10 × 6 s < 3 min) met by ~14×. Decisions: fps default 30, preset veryfast (medium costs ~8 % for ~15 % smaller files — optional flag), encode pool 2, no fps fallback needed. Bottleneck is the pipe/encode, not canvas.
 
 The M2 assumption that canvas raster would be the bottleneck was wrong: draw is 0.1 ms/frame; the raw-RGBA pipe and libx264 dominate. `MAX_CONCURRENT_ENCODES = 2` (#54) stands.
-| 4.6 | **(D1, L1)** Nitro plugin probes the binary once (warn, don't crash; disables `formats: motion`); same probe in the CLI; `.mp4` in the output content-type map; `ffmpeg-static` row + GPL note in `.agents/tech-stack.md`. | `apps/api/server/plugins/ffmpeg-check.ts`, `apps/api/bin/generate.ts`, `routes/output/[...path].get.ts`, `.agents/tech-stack.md`, `apps/api/package.json` |
-| 4.7 | Compliance samples `sampledFrames` with `validateBrandColorDensity`; `ExportPort.saveToDirectory` reused for `.mp4`; proof uses the poster. Generate sets `sampleAt`. | `GenerateCampaignUseCase.use-case.ts` |
-| 4.8 | Schema allowlist gains `motion`, `duration`, `formats: motion`. Making motion platform profiles visible **depends on P5 5.1** (`PlatformProfile.vo.ts` does not exist before it) — that half ships after P5. | `load-brief.ts`, (`PlatformProfile.vo.ts` after P5) |
-| 4.9 | Grid video cells (poster + hover-play); estimate gains frames/encode minutes. | `grid/page.tsx`, `CommandBar.tsx` |
 
 **Acceptance:** 4.2 lands with zero snapshot diffs; ffmpeg smoke test produces a playable mp4 (skipped when the binary cannot execute); sampled-frame density ≥ threshold for every `MotionKind`.
 
@@ -403,15 +404,15 @@ Each item carries the evidence that exists on `main` as of 2026-08-26 (test name
 2. Re-running the same brief with the same seed yields an identical `policyHash` and identical PNGs for procedural/asset backgrounds (Tier 1 + 2 golden tests observed passing).
    *Evidence.* Tier 1: `PlanVariationsUseCase.use-case.test.ts` "a fixed two-product brief yields a fixed policyHash and first three variants (golden)", "the same brief twice yields deep-equal plans"; `SeededRandom.vo.test.ts` mulberry32 / FNV-1a goldens. Tier 2: `NodeCanvasCompositor.goldens.test.ts` 12-cell sha256 map keyed `darwin-arm64` / `linux-x64` (skips with a named message elsewhere). GenAI tier: `FileSystemBackgroundCache.test.ts` (cache hit/miss by `(provider, model, prompt, ratio, seed)`), never pixel-golden (D4).
 3. A classic brief's report, paths, and compositor snapshots are byte-identical to before this plan.
-   *Evidence — partial by platform.* Darwin 12-cell goldens recorded at `6263f1d` (pre-refactor) and unchanged through #45, #49, #54. The linux map was recorded from CI *after* the 4.2 refactor, so it pins the FreeType output going forward but does not prove pre/post identity there. Zero insets: `NodeCanvasCompositor.test.ts` "omitted and all-zero safeInsets produce identical PNG bytes"; the inset pixel golden (`compositor-goldens-insets.json`) exists for `darwin-arm64` only — **linux inset golden not recorded**. Report shape: `report.test.ts` "isPersistedAsset requires the four string identity/path fields" (classic rows carry no `format`/`descriptor`/`variantIndex`/`seed`); `GenerateCampaignUseCase.use-case.test.ts` "produces the full product × ratio matrix for a single (default) treatment", "ignores variation-shaped targets on a classic run".
+   *Evidence — partial by platform.* Darwin 12-cell goldens recorded at `6263f1d` (pre-refactor) and unchanged through #45, #49, #54 (the fixture was re-keyed by platform-arch in #45, so a file diff shows churn while the darwin-arm64 hash set is identical). The linux map was recorded from CI *after* the 4.2 refactor, so it pins the FreeType output going forward but does not prove pre/post identity there. Zero insets: `NodeCanvasCompositor.test.ts` "omitted and all-zero safeInsets produce identical PNG bytes"; the inset pixel golden (`compositor-goldens-insets.json`) exists for `darwin-arm64` only — **linux inset golden not recorded**. Report shape: `report.test.ts` "isPersistedAsset requires the four string identity/path fields" (classic rows carry no `format`/`descriptor`/`variantIndex`/`seed`); `GenerateCampaignUseCase.use-case.test.ts` "produces the full product × ratio matrix for a single (default) treatment", "ignores variation-shaped targets on a classic run".
 4. An unsupported axis in a brief is rejected with a message naming it (D8).
    *Evidence.* `load-brief.test.ts` `parseBrief v2 fields` "rejects %s" cases: the motion axis, the duration axis, an unknown axis key, `axes.headline`, a `pool://` string under axes, the motion format; `PlanVariationsUseCase` "undersized axis product fails naming count and axisProductSize". After wave 5 the motion/duration/format cases become capability-gated (rejected with the probe's `reason` when `capabilities.motion` is false) and `headline: pool://copy` becomes the one accepted pool reference — lanes A/B carry the updated cases.
 5. Rejecting three variants and re-rolling replaces exactly three rows in the persisted report.
    *Evidence — one row proven, three by composition.* `report.test.ts` "merge of a re-rolled variation slot replaces exactly one row; siblings unchanged"; `GenerateCampaignUseCase.use-case.test.ts` "regenerateOnly + variantIndex calls replan with attempt and generates only those slots", "de-duplicates regenerateOnly targets by variantIndex", "re-roll keeps productId, aspectRatio, and outputPath of the slot"; `PlanVariationsUseCase` "replaces only the target slot and keeps distance versus the others"; `run-context.test.tsx` "re-roll of a variant asset sends productId, variantIndex, attempt and increments", "re-roll after a reload advances from the persisted asset.attempt". No test rejects exactly three and counts rows.
 6. `hexagen arch validate`, `yarn sync --check`, lint, typecheck, and tests are green on every merged PR; `.agents/tech-stack.md` lists `ffmpeg-static` before the first motion PR merges.
-   *Evidence.* `ci.yml` runs `yarn sync:check`, `yarn lint:arch`, `yarn build`, `yarn typecheck`, `yarn lint`, `yarn test:cov` (100 % statements/branches/functions/lines gate) on every PR; branch protection requires it. The `ffmpeg-static` row (GPL note) lands in the same PR as the first motion machinery (#54), not before it — a same-PR reading of D1, not a preceding one.
+   *Evidence.* `ci.yml` runs `yarn sync:check`, `yarn lint:arch`, `yarn build`, `yarn typecheck`, `yarn lint`, `yarn test:cov` (100 % statements/branches/functions/lines gate) on every PR; `ci.yml` runs on every PR (not enforced by branch protection). The `ffmpeg-static` row (GPL note) lands in the same PR as the first motion machinery (#54), not before it — a same-PR reading of D1, not a preceding one.
 7. (Motion train) The `drawCreative` refactor merged with zero snapshot diffs; a motion variant's sampled frames all pass brand density; the perf budget in 4.5 is recorded in this document.
-   *Evidence — partial.* 4.2 refactor: #45 with unchanged darwin goldens (see item 3 for the linux caveat); #54 adds "draw at `restT(kind)` is byte-identical to the still for every `MOTION_KINDS` kind" across the 12 cells. Perf budget: recorded in task 4.5. **Sampled-frame density**: `validateBrandColorDensity` over `sampledFrames` is wave 5 lane A (`feat/motion-generation`), in progress — no evidence on `main` yet.
+   *Evidence — partial.* 4.2 refactor: #45 with unchanged darwin goldens (see item 3 for the linux caveat); #54 adds "draw at `restT(kind)` is byte-identical to the still for every `MOTION_KINDS` kind" across the 12 cells. Perf budget: recorded in task 4.5. **Sampled-frame density**: #58 runs `validateBrandColorDensity` over every `sampledFrames` entry and records the minimum score (use-case tests with a fake video compositor: one failing frame fails the asset); `yarn generate --brief briefs/sample-motion.yaml` produces stills + 9:16 clips with posters.
 
 ### Deferred (not in any wave)
 

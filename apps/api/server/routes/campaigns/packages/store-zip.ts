@@ -111,18 +111,23 @@ export function storeZipStream<E extends ZipEntry>(
   entries: readonly E[],
   open: (entry: E) => Readable,
 ): Readable {
+  // Never yield a zero-length chunk: an empty Buffer pushed through
+  // Readable → web ReadableStream leaves the response open on Node 22 (observed
+  // in CI for an empty platform folder, whose central directory is 0 bytes).
   async function* chunks(): AsyncGenerator<Buffer> {
     const centrals: Buffer[] = [];
     let offset = 0;
     for (const entry of entries) {
       const local = localHeader(entry);
       yield local;
-      for await (const chunk of open(entry)) yield chunk as Buffer;
+      for await (const chunk of open(entry)) {
+        if ((chunk as Buffer).length > 0) yield chunk as Buffer;
+      }
       centrals.push(centralHeader(entry, offset));
       offset += local.length + entry.size;
     }
     const directory = Buffer.concat(centrals);
-    yield directory;
+    if (directory.length > 0) yield directory;
     yield endOfCentralDirectory(entries.length, directory.length, offset);
   }
   return Readable.from(chunks());

@@ -161,6 +161,47 @@ describe("copy pool routes", () => {
     expect(body.pool.model).toBe("openai/gpt-4o-mini");
   });
 
+  test("POST accepts an inline brief for an unsaved id, creates the pool dir, and hands the brief to the model", async () => {
+    const generator = fakeGenerator(["Stay wild"]);
+    copyGeneratorMock.mockReturnValue(generator);
+    const { generate, get } = await api();
+    const draft = {
+      id: "draft-brief",
+      targetRegion: "DE",
+      targetAudience: "a",
+      campaignMessage: "Hi",
+      products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "a.png" }],
+      mode: "variation",
+      variation: { count: 2 },
+    };
+    const res = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { brief: draft, count: 1 }));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { pool: { briefId: string; entries: unknown[] }; added: number };
+    expect(body.added).toBe(1);
+    expect(body.pool.briefId).toBe("draft-brief");
+    expect(generator.suggestHeadlines).toHaveBeenCalledWith({
+      brief: expect.objectContaining({ id: "draft-brief", campaignMessage: "Hi" }),
+      count: 1,
+    });
+    expect(existsSync(join(dir, "briefs", "draft-brief.yaml"))).toBe(false);
+    expect(JSON.parse(readFileSync(join(dir, "briefs", "draft-brief", "pools.json"), "utf8"))).toEqual(body.pool);
+    const fetched = await get()(new Request("http://x/campaigns/pools/draft-brief"));
+    expect(fetched.status).toBe(200);
+  });
+
+  test("POST validates an inline brief like generate (400 naming the problem)", async () => {
+    copyGeneratorMock.mockReturnValue(fakeGenerator(["Stay wild"]));
+    const { generate } = await api();
+    const res = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { brief: { id: "camp" } }));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/missing required field/);
+    const unsafe = await generate()(
+      jsonReq("http://x/campaigns/pools/copy", "POST", { brief: { id: "Bad Id", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", products: [] } }),
+    );
+    expect(unsafe.status).toBe(400);
+    expect(existsSync(join(dir, "briefs", "Bad Id"))).toBe(false);
+  });
+
   test("POST returns 404 when the brief is unknown", async () => {
     copyGeneratorMock.mockReturnValue(fakeGenerator(["Hi"]));
     const { generate } = await api();
@@ -278,6 +319,47 @@ describe("copy pool routes", () => {
     );
     expect(unknown.status).toBe(404);
     expect(await unknown.json()).toEqual({ error: 'Copy pool entry "nope" not found.' });
+  });
+
+  test("GET, PATCH and POST answer 422 naming the file when pools.json is hand-edited into an invalid shape", async () => {
+    copyGeneratorMock.mockReturnValue(fakeGenerator(["New angle"]));
+    const { get, patch, generate } = await api();
+    mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
+    writeFileSync(
+      join(dir, "briefs", "camp", "pools.json"),
+      JSON.stringify({ briefId: "camp", generatedAt: "t", model: "m", entries: [{ id: "h1", text: 42, status: "approved" }] }),
+    );
+    const error = "Copy pool briefs/camp/pools.json is invalid: entries[0].text must be a string.";
+
+    const fetched = await get()(new Request("http://x/campaigns/pools/camp"));
+    expect(fetched.status).toBe(422);
+    expect(await fetched.json()).toEqual({ error });
+
+    const patched = await patch()(
+      jsonReq("http://x/campaigns/pools/camp", "PATCH", { entries: [{ id: "h1", status: "approved" }] }),
+    );
+    expect(patched.status).toBe(422);
+    expect(await patched.json()).toEqual({ error });
+
+    const generated = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+    expect(generated.status).toBe(422);
+    expect(await generated.json()).toEqual({ error });
+    expect(readFileSync(join(dir, "briefs", "camp", "pools.json"), "utf8")).toContain('"text":42');
+  });
+
+  test("GET, PATCH and POST rethrow a non-shape read failure", async () => {
+    copyGeneratorMock.mockReturnValue(fakeGenerator(["New angle"]));
+    const { get, patch, generate } = await api();
+    mkdirSync(join(dir, "briefs", "camp", "pools.json"), { recursive: true });
+    expect((await get()(new Request("http://x/campaigns/pools/camp"))).status).toBe(500);
+    expect(
+      (
+        await patch()(
+          jsonReq("http://x/campaigns/pools/camp", "PATCH", { entries: [{ id: "h1", status: "approved" }] }),
+        )
+      ).status,
+    ).toBe(500);
+    expect((await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }))).status).toBe(500);
   });
 
   test("PATCH returns 404 when no pool exists", async () => {

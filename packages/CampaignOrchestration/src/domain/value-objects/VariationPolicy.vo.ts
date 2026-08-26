@@ -11,6 +11,9 @@ import { LAYOUT_VALUES, TONE_VALUES, type LayoutKind, type ToneKind } from "./Tr
 export const BACKGROUND_AXIS_SOURCES = ["procedural", "asset-pool", "genai"] as const;
 export type BackgroundAxisSource = (typeof BACKGROUND_AXIS_SOURCES)[number];
 
+/** The only supported pool reference for the `headline` axis. */
+export const HEADLINE_POOL_REF = "pool://copy";
+
 /** Hamming axes — a candidate must differ in at least `minDistance` of these. */
 export const DISTANCE_AXES = [
   "productId",
@@ -19,11 +22,21 @@ export const DISTANCE_AXES = [
   "tone",
   "backgroundSource",
   "paletteShift",
+  "headline",
 ] as const;
 
 const UINT32_MAX = 0xffffffff;
 const DEFAULT_BACKGROUND_SOURCES: readonly BackgroundAxisSource[] = ["procedural"];
 const DEFAULT_PALETTE_SHIFT: readonly number[] = [0];
+
+/**
+ * Plan-time inputs the brief cannot carry: `headlines` are the approved texts
+ * of the brief's copy pool, loaded by the caller when `axes.headline` is
+ * `pool://copy` (the domain never reads the file).
+ */
+export interface PlanInput {
+  readonly headlines?: readonly string[];
+}
 
 export interface VariationCoverage {
   readonly perProduct: number;
@@ -46,13 +59,15 @@ export class VariationPolicy {
     readonly tone: readonly ToneKind[],
     readonly backgroundSource: readonly BackgroundAxisSource[],
     readonly paletteShift: readonly number[],
+    /** Approved pool texts; empty when the brief has no headline axis. */
+    readonly headline: readonly string[],
     readonly productIds: readonly string[],
     readonly ratios: readonly AspectRatioValue[],
     readonly axisProductSize: number,
     readonly policyHash: string,
   ) {}
 
-  static fromBrief(brief: CampaignBrief): Result<VariationPolicy, Error> {
+  static fromBrief(brief: CampaignBrief, input: PlanInput = {}): Result<VariationPolicy, Error> {
     const variation = brief.variation;
     if (variation === undefined || variation.count === undefined) {
       return err(new Error('Variation policy requires "count".'));
@@ -66,12 +81,16 @@ export class VariationPolicy {
     if (!seedResult.success) return seedResult;
     const seed = seedResult.value;
 
-    const minDistanceResult = requireInteger(
-      variation.minDistance ?? 1,
-      "minDistance",
-      0,
-      DISTANCE_AXES.length,
-    );
+    const axes = variation.axes;
+    const headlineResult = resolveHeadline(brief, axes?.headline, input.headlines);
+    if (!headlineResult.success) return headlineResult;
+    const headline = headlineResult.value;
+
+    // A candidate can differ in at most the axes this brief activates: every
+    // DISTANCE_AXES entry except the optional ones that are off (headline here;
+    // motion/duration join the same count when they land).
+    const activeAxes = DISTANCE_AXES.filter((axis) => axis !== "headline" || headline.length > 0).length;
+    const minDistanceResult = requireInteger(variation.minDistance ?? 1, "minDistance", 0, activeAxes);
     if (!minDistanceResult.success) return minDistanceResult;
     const minDistance = minDistanceResult.value;
 
@@ -84,7 +103,6 @@ export class VariationPolicy {
       perRatio: perRatioResult.value,
     };
 
-    const axes = variation.axes;
     const layout = unique(
       axes?.layout !== undefined ? [...(axes.layout as readonly LayoutKind[])] : [...LAYOUT_VALUES],
     );
@@ -110,7 +128,8 @@ export class VariationPolicy {
       layout.length *
       tone.length *
       backgroundSource.length *
-      paletteShift.length;
+      paletteShift.length *
+      Math.max(1, headline.length);
 
     const policyHash = hashPolicy({
       axisProductSize,
@@ -124,6 +143,9 @@ export class VariationPolicy {
       ratios,
       seed,
       tone,
+      // Only briefs with the headline axis carry it in the hash, so every
+      // pre-existing policyHash (and golden) is unchanged.
+      ...(headline.length > 0 ? { headline } : {}),
     });
 
     return ok(
@@ -136,6 +158,7 @@ export class VariationPolicy {
         tone,
         backgroundSource,
         paletteShift,
+        headline,
         productIds,
         ratios,
         axisProductSize,
@@ -165,11 +188,61 @@ function requirePaletteShift(values: readonly number[]): Result<readonly number[
   return ok(values);
 }
 
+/**
+ * Canonical headline list: trimmed, blanks dropped, sorted by UTF-16 code unit
+ * (`Array.prototype.sort` with no comparator — locale-independent, so every
+ * machine agrees), then de-duplicated by normalised text (whitespace collapsed,
+ * lower-cased), keeping the first survivor in sorted order. The pool file's
+ * entry order therefore never reaches `policyHash` or the draw sequence.
+ */
+export function canonicalHeadlines(headlines: readonly string[]): readonly string[] {
+  const sorted = headlines
+    .map((text) => text.trim())
+    .filter((text) => text.length > 0)
+    .sort();
+  const seen = new Set<string>();
+  const texts: string[] = [];
+  for (const text of sorted) {
+    const key = text.replace(/\s+/g, " ").toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    texts.push(text);
+  }
+  return texts;
+}
+
+/**
+ * Resolve the headline axis: absent → no axis (empty). `pool://copy` → the
+ * caller-supplied approved texts (canonicalised, see `canonicalHeadlines`),
+ * which must be non-empty — a missing or fully-rejected pool fails loud,
+ * naming the pool file.
+ */
+function resolveHeadline(
+  brief: CampaignBrief,
+  ref: string | undefined,
+  headlines: readonly string[] | undefined,
+): Result<readonly string[], Error> {
+  if (ref === undefined) return ok([]);
+  if (ref !== HEADLINE_POOL_REF) {
+    return err(new Error(`Unsupported headline axis ${JSON.stringify(ref)} (expected "${HEADLINE_POOL_REF}").`));
+  }
+  const texts = canonicalHeadlines(headlines ?? []);
+  if (texts.length === 0) {
+    return err(
+      new Error(
+        `Headline axis "${HEADLINE_POOL_REF}" needs at least one approved entry in copy pool briefs/${brief.id}/pools.json.`,
+      ),
+    );
+  }
+  return ok(texts);
+}
+
 function hashPolicy(payload: {
   axisProductSize: number;
   backgroundSource: readonly string[];
   count: number;
   coverage: VariationCoverage;
+  headline?: readonly string[];
   layout: readonly string[];
   minDistance: number;
   paletteShift: readonly number[];

@@ -17,6 +17,8 @@ export interface Variant {
   readonly tone: ToneKind;
   readonly backgroundSource: BackgroundAxisSource;
   readonly paletteShift: number;
+  /** Drawn from the approved copy pool when the brief requests `headline: pool://copy`. */
+  readonly headline?: string;
 }
 
 /** Synthesized treatment label for display / classic-shaped paths. */

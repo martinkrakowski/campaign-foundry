@@ -566,6 +566,45 @@ To keep this file out of version control, add `.agents/session-log.md` to
 
 ---
 
+
+---
+
+## 2026-08-26 — Wave 4 lane A: video compositor machinery (PR 13)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `VideoCompositorPort` (`VideoCompositeRequest extends CompositeRequest` + `durationSec`/`fps`/`motion`/`sampleAt`; result = `video`/`poster`/`sampledFrames`/`logoApplied`) exported from the hand-maintained `ports/out/index.ts`.
+  - `NodeCanvasCompositor.draw(ctx, prepared, t, motion?)` animates the four `MOTION_KINDS` with easeOutCubic; solid accent band + logo static at every `t`; logo-overlap re-checked against the risen headline box per frame. Golden test proves byte-identity to the still at `restT(kind)` for every kind and cell.
+  - `CanvasFfmpegVideoCompositor`: raw RGBA → spawned `ffmpeg-static` (libx264/yuv420p/veryfast/crf 20, `-map_metadata -1`, mp4 to `pipe:1`), stdin back-pressure, poster at `restT`, sampled PNGs, `MAX_CONCURRENT_ENCODES = 2` gate, non-zero exit rejects with a redacted stderr tail.
+  - Boot probe: Nitro plugin `ffmpeg-check.ts` → `lib/capabilities.ts` `{ motion, reason? }` (warns, never throws; 5 s timeout); `bin/generate.ts` runs the same probe (log only). `.mp4 → video/mp4` on `GET /output/**`.
+  - `ffmpeg-static@5` added to CreativeGeneration and api; tech-stack row added.
+- **Decisions:**
+  - Ken-burns rest pose is the identity (scale 1.00 at `restT`): `in` eases 1.08→1.00, `out` 1.00→1.08. Anything else cannot be byte-identical to the still.
+  - `-movflags +faststart+empty_moov`: the plain mp4 muxer refuses a non-seekable `pipe:1` output; `empty_moov` puts `moov` up front so the stream stays pipe-friendly.
+  - `VideoCompositorPort` is **not** listed in `.architecture/manifest.yaml`: no existing port is, and listing it makes `hexagen sync` emit a duplicate `VideoCompositorPort.out-port.ts` stub (`VideoCompositorPortPort`).
+- **Left open:**
+  - Next wave: unlock `motion`/`duration`/`formats: motion` in the parser, wire the adapter into generation, and read `getCapabilities().motion` there. `GenerateCampaignUseCase`, `load-brief.ts`, the image chain and `apps/web` untouched here.
+
+---
+
+## 2026-08-26 — PR #54 review fixes (lane A, video compositor)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `CanvasFfmpegVideoCompositor` encodes to a `mkdtemp` file (`-movflags +faststart -fflags +bitexact`, `-y out.mp4`) and reads it back; the dir is removed in `finally`. Output is a finalized mp4: `ftyp moov free mdat`, mvhd duration > 0, `start: 0.000000` (was `empty_moov` fMP4 with duration 0). The integration test walks the boxes with a tiny ISO-BMFF parser.
+  - `ffmpeg-static` is now a static ESM import in the adapter and `capabilities.ts`; `resolveFfmpegBinary()` resolves it lazily and never throws (null export / missing / non-executable → `{ motion: false, reason }`). `nitro.config.ts` adds `externals.traceInclude: [require.resolve("ffmpeg-static")]` so the package + binary land in `.output/server/node_modules`. Verified locally: build, boot 3 s, `curl /` → 200 (previously died with `Cannot find module 'ffmpeg-static'`).
+  - Golden matrix tests carry `{ timeout: 60_000 }` (Vitest 4: options are the second argument) and draw the still from the same `prepare()` as the four rest-pose frames.
+  - Under `CI`, the real-binary suite asserts `ffmpegOk` instead of skipping; a new real-binary test spawns with `-not-a-real-flag` and checks the EPIPE path rejects cleanly and releases the gate.
+  - `encodeTimeoutMs` (default 120 s) + `killGraceMs` (default 2 s): SIGTERM at expiry, SIGKILL after grace, clear rejection; gate and temp dir released in `finally`. Tested with hung fakes.
+  - Logo overlap is resolved from the rest-pose headline box, so it is identical at every `t` for every motion kind (tests go red on the previous per-frame behaviour).
+  - Validation: `fps` integer in [1, 60], `durationSec` finite in (0, 60], `sampleAt` finite in [0, 1], de-duplicated and sorted; all throw `VideoCompositeValidationError`.
+  - Nits: `ffmpeg-static` pinned to exact 5.3.0 (both package.jsons + tech-stack row); path redaction matches absolute paths only (root + segment + separator) and the tail is taken after redaction; CLI probe capped at 2 s; `capabilities.ts` documents that Nitro does not await async plugins.
+- **Decisions:**
+  - `traceInclude` needs the resolved file path: a bare `"ffmpeg-static"` stays external in rollup and node-file-trace then looks for `apps/api/ffmpeg-static` and fails the build.
+  - Logo placement is derived from the rest-pose box in `draw` rather than cached in `prepare`: `layoutHeadline` needs a measuring context, and the rest-pose box is a pure function of the prepared creative, so the result is the same every frame.
+  - CLI probe is capped rather than gated on `output.formats: motion` — the parser still rejects `motion`, so the gate would be dead code until the next wave.
+- **Left open:**
+  - Next wave: unlock `motion` in the parser, wire the adapter into generation, gate the CLI probe on the brief.
 ## 2026-08-26 — wave 4 Lane C: review UI at N=100 + packaging (PR 11)
 
 - **Mode:** Implementer
@@ -658,3 +697,75 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Left open:**
   - Lanes A/B should re-run `yarn generate` on both samples and put the produced counts in their PR bodies; the verifier needs `briefs/sample-pooled/pools.json` as checked in here.
   - Linux inset golden and the Field Guide PDF refresh remain deferred.
+## 2026-08-26 — pooled headlines (wave 5 lane B, Phase 3.4–3.5, branch feat/pool-headlines)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Parser allowlists `variation.axes.headline: pool://copy` (`validateHeadlineAxis`,
+    the only pool reference; any other value is a 400 naming it). The generic
+    "pool:// under any axis" scan is gone — the per-axis allowlists reject it.
+  - `VariationPolicy.fromBrief(brief, input?)` / `PlanVariationsUseCase.plan(brief,
+    input?)` take `PlanInput { headlines }`; the policy gains `headline` (approved
+    texts, trimmed/de-duplicated), `axisProductSize` multiplies by its size, and
+    `headline` is the seventh `DISTANCE_AXES` entry. `Variant.headline?`;
+    `drawHeadline` draws last so briefs without the axis keep their goldens; the
+    hash carries `headline` only when non-empty (goldens byte-identical).
+  - API: `pools.ts` `planInputFor(brief)` (reads `briefs/<id>/pools.json` →
+    `approvedTexts`) and `pooledPlanner(input)`; `runCampaign` resolves the pool
+    before building the pipeline (failed job on generate); `/campaigns/plan`
+    passes it (422 naming the pool file) and reports `headline` per variant.
+  - Use case: one-line read `message: variant.headline ?? copy` (lane A's file).
+  - Wizard: Copy step "Headline pool" panel (load, Generate 10 suggestions,
+    approve/reject, inline edit → PATCH, 503 pins the API message and disables
+    generation); policy step `pool://copy` toggle, disabled with a message until
+    an entry is approved; `setPool` switches the axis off when approvals drop to
+    0; `briefs-api.ts` `getPool` / `generatePool` / `patchPool`. `minDistance`
+    bound 6 → 7 in the wizard validator.
+- **Decisions:**
+  - Pool loading stays at the API edge (`pools.ts`) and is bound into a
+    `VariationPlanner` wrapper rather than widening `GenerateCampaignDeps` — keeps
+    the use case (lane A's file) to the single agreed read.
+  - No `errors.headline` in validation: the reducer invariant makes an
+    on-but-empty axis unreachable, so the UI block is the disabled toggle.
+- **Left open:**
+  - `briefs/sample-randomized.yaml` header still says headline is rejected (lane
+    C's sample-pooled brief documents the syntax). `mockPipelineApi` does not
+    route PATCH; the wizard test wraps it locally.
+
+## 2026-08-26 — PR #57 review fixes (pooled headlines, branch feat/pool-headlines)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `pools.ts`: `isCopyPool` / `copyPoolProblem` shape guard at the persistence
+    boundary; `readPool` throws `InvalidCopyPoolError` naming the file and the
+    first problem (not-JSON included). GET/PATCH/POST pool routes and
+    `/campaigns/plan` map it to 422; `planInputFor` returns a `Result` so
+    `runCampaign` fails the generate job with the same message.
+  - `POST /campaigns/pools/copy` also accepts `{ brief, count? }` (parseBrief,
+    pool under `brief.id`); `briefs-api.generatePool(brief)` and the wizard send
+    the draft brief inline so Generate works before Save. README block updated.
+  - `VariationPolicy`: `canonicalHeadlines` — trim, code-unit sort (no comparator),
+    de-dup by normalised text — before `policyHash` and the draw; pool file order
+    no longer reaches either. `minDistance` is bounded by the active axis count
+    (`DISTANCE_AXES` minus optional axes that are off); wizard `maxMinDistance`
+    mirrors it (base 6 + 1 with the headline axis).
+  - `GeneratedAsset.descriptor.headline` carries the drawn pool text (report gets
+    it for free). Use case legal-gates every distinct pooled headline in the
+    (re)plan before rendering — same `ExecuteLegalGateCheck` halt as the message.
+  - `POST /campaigns/generate` pins a variation re-roll to the persisted report's
+    `policyHash` (`runCampaign(..., expectedPolicyHash)`); a changed plan fails
+    the job with "Plan changed since the last run (policyHash … ≠ …); run the
+    full campaign." instead of overlaying a slot onto a different base plan.
+  - Wizard: `headlineAxisDropped` in the reducer; the Copy step shows "No approved
+    headlines — the headline axis was turned off" until an entry is approved again.
+- **Decisions:**
+  - Sort is plain `Array.prototype.sort()` (UTF-16 code units), not
+    `localeCompare("en")` — no ICU dependency, byte-identical everywhere.
+  - The re-roll hash check lives in `runCampaign` (plans once with the pooled
+    planner, pure and cheap) rather than widening the use case; a missing
+    persisted report leaves the re-roll unpinned.
+  - The axis-dropped notice is reducer state, not panel state, so it survives
+    Next/Back between the Copy and policy steps.
+- **Left open:**
+  - The grid descriptor chip for `headline` (short, title-cased) is lane A's
+    one-line follow-up (`feat/motion-generation` owns the grid).

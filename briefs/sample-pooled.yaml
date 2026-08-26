@@ -1,3 +1,4 @@
+# Requires PR #57 (pool headlines) — merged 2026-08-26; `instagram-reel` visibility comes from #58.
 # Randomized sample with pooled headlines. `headline: pool://copy` is the only
 # supported pool reference: at plan time the planner draws each variant's headline
 # from the APPROVED entries of `briefs/sample-pooled/pools.json` (rejected entries
