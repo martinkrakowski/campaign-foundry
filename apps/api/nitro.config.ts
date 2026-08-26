@@ -1,4 +1,7 @@
+import { createRequire } from "node:module";
 import { defineNitroConfig } from "nitropack/config";
+
+const require = createRequire(import.meta.url);
 
 // https://nitro.build/config
 export default defineNitroConfig({
@@ -8,4 +11,12 @@ export default defineNitroConfig({
   // `server/` recursively for routes — without this it would bundle the *.test.ts
   // files (and run their top-level Vitest hooks) into the dev/build server.
   ignore: ["**/__tests__/**", "**/*.test.ts"],
+  // ffmpeg-static resolves its binary from __dirname at runtime, so the package
+  // (and the `ffmpeg` executable beside index.js) must be traced into
+  // `.output/server/node_modules`. Without this the production server dies at
+  // boot with "Cannot find module 'ffmpeg-static'" — before the warn-only probe
+  // in server/plugins/ffmpeg-check.ts can degrade motion gracefully. The entry
+  // is given as a resolved file path: a bare specifier stays external in
+  // rollup and node-file-trace then looks for `apps/api/ffmpeg-static`.
+  externals: { traceInclude: [require.resolve("ffmpeg-static")] },
 });

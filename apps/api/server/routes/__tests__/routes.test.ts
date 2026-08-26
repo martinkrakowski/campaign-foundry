@@ -333,6 +333,14 @@ describe("GET /output/**", () => {
     expect((await res.arrayBuffer()).byteLength).toBeGreaterThan(0);
   });
 
+  test("streams an mp4 with video/mp4 content type", async () => {
+    writeFileSync(resolve(dir, "clip.mp4"), "ftyp");
+    const res = await call("clip.mp4");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("video/mp4");
+    await res.arrayBuffer();
+  });
+
   test("falls back to octet-stream for an unknown extension", async () => {
     writeFileSync(resolve(dir, "data.bin"), "x");
     const res = await call("data.bin");
