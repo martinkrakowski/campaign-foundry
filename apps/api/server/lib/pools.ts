@@ -10,6 +10,7 @@ import {
   type PlanInput,
   type VariationPlanner,
 } from "@campaignfoundry/CampaignOrchestration";
+import { err, ok, type Result } from "@campaignfoundry/shared";
 import { briefsDir, isErrno } from "./brief-files.js";
 import { resolveConfined } from "./confined-path.js";
 
@@ -28,14 +29,75 @@ export async function isPoolDirSymlink(briefId: string): Promise<boolean> {
   }
 }
 
+/** Thrown by `readPool` for a pool file that parses but is not a `CopyPool`; routes map it to 422. */
+export class InvalidCopyPoolError extends Error {
+  constructor(briefId: string, detail: string) {
+    super(`Copy pool briefs/${briefId}/pools.json is invalid: ${detail}.`);
+    this.name = "InvalidCopyPoolError";
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** The first shape problem of a persisted entry, or undefined when it is a `CopyPoolEntry`. */
+function entryProblem(value: unknown, index: number, seen: Set<string>): string | undefined {
+  const at = `entries[${index}]`;
+  if (!isRecord(value)) return `${at} must be an object`;
+  if (typeof value.id !== "string" || value.id.length === 0) return `${at}.id must be a non-empty string`;
+  if (seen.has(value.id)) return `${at}.id "${value.id}" appears more than once`;
+  seen.add(value.id);
+  if (typeof value.text !== "string") return `${at}.text must be a string`;
+  if (value.status !== "approved" && value.status !== "rejected") {
+    return `${at}.status must be "approved" or "rejected"`;
+  }
+  if (value.reason !== undefined && typeof value.reason !== "string") return `${at}.reason must be a string`;
+  return undefined;
+}
+
+/** The first shape problem of a parsed pool file, or undefined when it is a `CopyPool`. */
+export function copyPoolProblem(value: unknown): string | undefined {
+  if (!isRecord(value)) return "must be an object";
+  for (const field of ["briefId", "generatedAt", "model"] as const) {
+    if (typeof value[field] !== "string") return `${field} must be a string`;
+  }
+  if (!Array.isArray(value.entries)) return "entries must be an array";
+  const seen = new Set<string>();
+  for (let i = 0; i < value.entries.length; i++) {
+    const problem = entryProblem(value.entries[i], i, seen);
+    if (problem !== undefined) return problem;
+  }
+  return undefined;
+}
+
+/** Shape guard for a parsed pool file — the persistence boundary, since the file is hand-editable. */
+export function isCopyPool(value: unknown): value is CopyPool {
+  return copyPoolProblem(value) === undefined;
+}
+
+/**
+ * Read `briefs/<briefId>/pools.json`; undefined when absent. A file that is not
+ * a `CopyPool` (hand-edited) throws `InvalidCopyPoolError` naming the problem,
+ * so a route answers 422 instead of a 500 from a bare `TypeError` downstream.
+ */
 export async function readPool(briefId: string): Promise<CopyPool | undefined> {
+  let raw: string;
   try {
-    const raw = await readFile(poolPath(briefId), "utf8");
-    return JSON.parse(raw) as CopyPool;
+    raw = await readFile(poolPath(briefId), "utf8");
   } catch (error) {
     if (isErrno(error, "ENOENT")) return undefined;
     throw error;
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new InvalidCopyPoolError(briefId, `not JSON (${error instanceof Error ? error.message : String(error)})`);
+  }
+  const problem = copyPoolProblem(parsed);
+  if (problem !== undefined) throw new InvalidCopyPoolError(briefId, problem);
+  return parsed as CopyPool;
 }
 
 /**
@@ -84,12 +146,19 @@ export function wantsHeadlinePool(brief: CampaignBrief): boolean {
 /**
  * Plan-time input for a brief: the approved texts of `briefs/<id>/pools.json`
  * when the brief requests `headline: pool://copy`, else nothing. A missing pool
- * yields no headlines — the planner then fails loud naming the pool file.
+ * yields no headlines — the planner then fails loud naming the pool file. An
+ * invalid pool file is an `err` carrying the `InvalidCopyPoolError` message, so
+ * plan and generate both fail loud with it.
  */
-export async function planInputFor(brief: CampaignBrief): Promise<PlanInput> {
-  if (!wantsHeadlinePool(brief)) return {};
-  const pool = await readPool(brief.id);
-  return { headlines: pool ? approvedTexts(pool) : [] };
+export async function planInputFor(brief: CampaignBrief): Promise<Result<PlanInput, Error>> {
+  if (!wantsHeadlinePool(brief)) return ok({});
+  try {
+    const pool = await readPool(brief.id);
+    return ok({ headlines: pool ? approvedTexts(pool) : [] });
+  } catch (error) {
+    if (error instanceof InvalidCopyPoolError) return err(error);
+    throw error;
+  }
 }
 
 /** The variation planner with `input` (the resolved pool) bound for every `plan` call. */

@@ -189,6 +189,14 @@ describe("POST /campaigns/plan with headline: pool://copy", () => {
     expect(((await res.json()) as { error: string }).error).toMatch(/briefs\/camp\/pools\.json/);
   });
 
+  test("returns 422 naming the pool file when the pool is hand-edited into an invalid shape", async () => {
+    const res = await post(await freshHandler([{ id: "h1", text: 42, status: "approved" }]), pooledBrief());
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({
+      error: "Copy pool briefs/camp/pools.json is invalid: entries[0].text must be a string.",
+    });
+  });
+
   test("plans with approved headlines and reports them per variant", async () => {
     const res = await post(
       await freshHandler([

@@ -280,6 +280,47 @@ describe("copy pool routes", () => {
     expect(await unknown.json()).toEqual({ error: 'Copy pool entry "nope" not found.' });
   });
 
+  test("GET, PATCH and POST answer 422 naming the file when pools.json is hand-edited into an invalid shape", async () => {
+    copyGeneratorMock.mockReturnValue(fakeGenerator(["New angle"]));
+    const { get, patch, generate } = await api();
+    mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
+    writeFileSync(
+      join(dir, "briefs", "camp", "pools.json"),
+      JSON.stringify({ briefId: "camp", generatedAt: "t", model: "m", entries: [{ id: "h1", text: 42, status: "approved" }] }),
+    );
+    const error = "Copy pool briefs/camp/pools.json is invalid: entries[0].text must be a string.";
+
+    const fetched = await get()(new Request("http://x/campaigns/pools/camp"));
+    expect(fetched.status).toBe(422);
+    expect(await fetched.json()).toEqual({ error });
+
+    const patched = await patch()(
+      jsonReq("http://x/campaigns/pools/camp", "PATCH", { entries: [{ id: "h1", status: "approved" }] }),
+    );
+    expect(patched.status).toBe(422);
+    expect(await patched.json()).toEqual({ error });
+
+    const generated = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+    expect(generated.status).toBe(422);
+    expect(await generated.json()).toEqual({ error });
+    expect(readFileSync(join(dir, "briefs", "camp", "pools.json"), "utf8")).toContain('"text":42');
+  });
+
+  test("GET, PATCH and POST rethrow a non-shape read failure", async () => {
+    copyGeneratorMock.mockReturnValue(fakeGenerator(["New angle"]));
+    const { get, patch, generate } = await api();
+    mkdirSync(join(dir, "briefs", "camp", "pools.json"), { recursive: true });
+    expect((await get()(new Request("http://x/campaigns/pools/camp"))).status).toBe(500);
+    expect(
+      (
+        await patch()(
+          jsonReq("http://x/campaigns/pools/camp", "PATCH", { entries: [{ id: "h1", status: "approved" }] }),
+        )
+      ).status,
+    ).toBe(500);
+    expect((await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }))).status).toBe(500);
+  });
+
   test("PATCH returns 404 when no pool exists", async () => {
     const { patch } = await api();
     const res = await patch()(

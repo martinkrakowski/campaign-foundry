@@ -117,6 +117,32 @@ describe("pipeline composition root", () => {
     }
   });
 
+  test("runCampaign fails loud naming the pool file when pools.json is hand-edited into an invalid shape", async () => {
+    const origRoot = process.env.PROJECT_ROOT;
+    try {
+      mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
+      writeFileSync(
+        join(dir, "briefs", "camp", "pools.json"),
+        JSON.stringify({ briefId: "camp", generatedAt: "t", model: "m", entries: [{ id: "h1", text: 42, status: "approved" }] }),
+      );
+      const pooled: CampaignBrief = {
+        ...brief,
+        mode: "variation",
+        variation: { count: 2, seed: 42, axes: { headline: "pool://copy" } },
+      };
+      const r = await (await freshRunCampaign())(pooled, "procedural");
+      expect(r.success).toBe(false);
+      if (!r.success) {
+        expect(r.error.message).toBe(
+          "Copy pool briefs/camp/pools.json is invalid: entries[0].text must be a string.",
+        );
+      }
+    } finally {
+      if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+      else process.env.PROJECT_ROOT = origRoot;
+    }
+  });
+
   test("runCampaign composites pooled headlines from briefs/<id>/pools.json", async () => {
     const origRoot = process.env.PROJECT_ROOT;
     try {

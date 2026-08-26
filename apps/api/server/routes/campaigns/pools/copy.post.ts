@@ -9,7 +9,7 @@ import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance
 import { findBriefById, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
 import { assertSafeId } from "../../../lib/load-brief.js";
 import { copyGenerator } from "../../../lib/pipeline.js";
-import { isPoolDirSymlink, readPool, withPoolLock, writePool } from "../../../lib/pools.js";
+import { InvalidCopyPoolError, isPoolDirSymlink, readPool, withPoolLock, writePool } from "../../../lib/pools.js";
 
 const DEFAULT_COUNT = 10;
 const MAX_COUNT = 25;
@@ -172,7 +172,14 @@ export default defineEventHandler(async (event) => {
   // The slow LLM call is done; read→merge→write is serialised per brief so a
   // concurrent request's entries are merged into, never overwritten.
   return withPoolLock(briefId, async () => {
-    const existing = await readPool(briefId);
+    let existing: CopyPool | undefined;
+    try {
+      existing = await readPool(briefId);
+    } catch (error) {
+      if (!(error instanceof InvalidCopyPoolError)) throw error;
+      setResponseStatus(event, 422);
+      return { error: error.message };
+    }
     const headlines = newTexts(usable, existing?.entries ?? []).slice(0, count);
     if (headlines.length === 0 && existing) {
       return { pool: existing, added: 0 };

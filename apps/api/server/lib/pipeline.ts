@@ -137,7 +137,8 @@ export async function runCampaign(
   regenerateOnly?: ReadonlyArray<RegenerationTarget>,
 ): Promise<Result<PipelineResult, Error>> {
   const planInput = await planInputFor(brief);
-  return buildPipeline(imageModel, planInput).execute(brief, regenerateOnly ? { regenerateOnly } : undefined);
+  if (!planInput.success) return planInput;
+  return buildPipeline(imageModel, planInput.value).execute(brief, regenerateOnly ? { regenerateOnly } : undefined);
 }
 
 /**
