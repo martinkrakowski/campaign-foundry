@@ -4,6 +4,7 @@ import type {
   CompositeRequest,
   CompositeResult,
   CompositorPort,
+  SafeInsets,
 } from "@campaignfoundry/CampaignOrchestration";
 import { hexToRgb, wrapText } from "./canvas-util.js";
 import { registerBundledFonts } from "../fonts.js";
@@ -41,6 +42,8 @@ interface PreparedCreative {
       }
     | undefined;
   readonly logoApplied: boolean;
+  /** Normalized safe-zone insets; zeros when the request omitted them. */
+  readonly insets: SafeInsets;
 }
 
 /**
@@ -71,10 +74,14 @@ export class NodeCanvasCompositor implements CompositorPort {
   /**
    * Paint a prepared creative onto `ctx`. `t` is accepted and currently ignored
    * by every layer — `t = 1` is the still's rest pose (motion is a later wave).
+   * When motion arrives, `t` will drive background + headline; the logo's inset
+   * offset stays in prepare so it is static across frames. Overlap-vs-headline
+   * is resolved here from the still layout and will need to re-run per frame
+   * once headline position depends on `t`.
    */
   static draw(ctx: SKRSContext2D, prepared: PreparedCreative, t: number): void {
     void t;
-    const { width, height, top, shadeAlpha, fontWeight, fontFamily } = prepared;
+    const { width, height, top, shadeAlpha } = prepared;
 
     // Layer 1 — background.
     ctx.drawImage(prepared.background, 0, 0, width, height);
@@ -111,29 +118,28 @@ export class NodeCanvasCompositor implements CompositorPort {
       ctx.fillRect(0, height - solidH - fadeH, width, fadeH);
     }
 
-    // Layer 4 — campaign copy (wrapped to width), anchored on the headline edge.
-    // Bundled font (default "Inter") for machine-independent rendering; weight
-    // comes from the treatment's tone. wrapText uses this ctx so metrics match
-    // the blit — wrapping is drawing-adjacent, not I/O.
-    const fontSize = Math.round(width * 0.06);
-    ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}, sans-serif`;
+    // Layer 4 — campaign copy, wrapped to the inset-reduced width and centred
+    // in the inset rectangle. wrapText uses this ctx so metrics match the blit.
+    const headline = layoutHeadline(ctx, prepared);
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
-    const lines = wrapText(ctx, prepared.message, width * 0.85);
-    const lineHeight = fontSize * 1.25;
-    let y = top
-      ? height * 0.1 + fontSize // first baseline near the top
-      : height - height * 0.08 - (lines.length - 1) * lineHeight; // last baseline near the bottom
-    for (const line of lines) {
-      ctx.fillText(line, width / 2, y);
-      y += lineHeight;
+    let y = headline.firstY;
+    for (const line of headline.lines) {
+      ctx.fillText(line, headline.centerX, y);
+      y += headline.lineHeight;
     }
 
     // Layer 5 — brand logo, anchored opposite the headline (top-right for a bottom
-    // headline, bottom-left for a top headline). Geometry was captured in prepare.
+    // headline, bottom-left for a top headline). Inset offset was captured in
+    // prepare; if the still headline block overlaps it, snap to an inset edge.
     if (prepared.logo) {
-      const { image, x, y: ly, width: lw, height: lh } = prepared.logo;
+      const { image, x, width: lw, height: lh } = prepared.logo;
+      let ly = prepared.logo.y;
+      const logoBox = { x, y: ly, width: lw, height: lh };
+      if (boxesOverlap(headline.box, logoBox)) {
+        ly = resolveOverlappingLogoY(prepared, headline.box, lw, lh, x);
+      }
       ctx.drawImage(image, x, ly, lw, lh);
     }
   }
@@ -148,6 +154,7 @@ export class NodeCanvasCompositor implements CompositorPort {
     const subtle = request.tone === "subtle";
     const shadeAlpha = subtle ? 0.4 : 0.7;
     const fontWeight = subtle ? "500" : "bold";
+    const insets = normalizeSafeInsets(request.safeInsets, width, height);
 
     const background = await loadImage(Buffer.from(request.background));
 
@@ -164,8 +171,13 @@ export class NodeCanvasCompositor implements CompositorPort {
         const scale = target / image.width;
         const logoH = image.height * scale;
         const margin = width * 0.04;
-        const lx = top ? margin : width - target - margin;
-        const ly = top ? height - logoH - margin : margin;
+        // Inset offset lives here so every still — and later every motion frame —
+        // reuses the same logo geometry (`t` does not move the logo). Same additive
+        // form as the pre-inset anchors so a no-op clamp stays bit-identical.
+        const rawX = (top ? margin : width - target - margin) + (top ? insets.left : -insets.right);
+        const rawY = (top ? height - logoH - margin : margin) + (top ? -insets.bottom : insets.top);
+        const lx = clampInRange(rawX, insets.left, width - insets.right - target);
+        const ly = clampInRange(rawY, insets.top, height - insets.bottom - logoH);
         logo = { image, x: lx, y: ly, width: target, height: logoH };
         logoApplied = true;
       } catch (error) {
@@ -192,6 +204,7 @@ export class NodeCanvasCompositor implements CompositorPort {
       background,
       logo,
       logoApplied,
+      insets,
     };
   }
 
@@ -202,4 +215,148 @@ export class NodeCanvasCompositor implements CompositorPort {
     NodeCanvasCompositor.draw(ctx, prepared, 1);
     return { image: canvas.toBuffer("image/png"), logoApplied: prepared.logoApplied };
   }
+}
+
+const ZERO_INSETS: SafeInsets = { top: 0, right: 0, bottom: 0, left: 0 };
+const SIDES = ["top", "right", "bottom", "left"] as const;
+const ELLIPSIS = "…";
+
+function normalizeSafeInsets(
+  raw: CompositeRequest["safeInsets"],
+  width: number,
+  height: number,
+): SafeInsets {
+  if (raw === undefined) return ZERO_INSETS;
+  const insets: SafeInsets = { top: raw.top, right: raw.right, bottom: raw.bottom, left: raw.left };
+  for (const side of SIDES) {
+    const value = insets[side];
+    if (!Number.isFinite(value) || value < 0) {
+      throw new Error(`safeInsets.${side} must be a finite number ≥ 0`);
+    }
+  }
+  if (insets.top + insets.bottom >= height) {
+    throw new Error("safeInsets.top + safeInsets.bottom must be < height");
+  }
+  if (insets.left + insets.right >= width) {
+    throw new Error("safeInsets.left + safeInsets.right must be < width");
+  }
+  return insets;
+}
+
+function clampInRange(raw: number, min: number, max: number): number {
+  return max < min ? min : Math.min(Math.max(raw, min), max);
+}
+
+interface Box {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+function boxesOverlap(a: Box, b: Box): boolean {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+function ellipsize(ctx: SKRSContext2D, text: string, maxWidth: number): string {
+  let base = text;
+  while (base.length > 0 && ctx.measureText(`${base}${ELLIPSIS}`).width > maxWidth) {
+    base = base.slice(0, -1);
+  }
+  return base.length > 0 ? `${base}${ELLIPSIS}` : ELLIPSIS;
+}
+
+interface HeadlineLayout {
+  readonly lines: readonly string[];
+  readonly fontSize: number;
+  readonly lineHeight: number;
+  readonly firstY: number;
+  readonly centerX: number;
+  readonly box: Box;
+}
+
+function layoutHeadline(ctx: SKRSContext2D, prepared: PreparedCreative): HeadlineLayout {
+  const { width, height, top, fontWeight, fontFamily, message, insets } = prepared;
+  const innerWidth = width - insets.left - insets.right;
+  const wrapWidth = innerWidth * 0.85;
+  const centerX = insets.left + innerWidth / 2;
+  const originalFontSize = Math.round(width * 0.06);
+  const floor = Math.round(originalFontSize * 0.4);
+
+  const trySize = (fontSize: number) => {
+    ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}, sans-serif`;
+    const lines = wrapText(ctx, message, wrapWidth);
+    const lineHeight = fontSize * 1.25;
+    const minFirst = insets.top + fontSize;
+    const maxLast = height - insets.bottom;
+    const span = (lines.length - 1) * lineHeight;
+    const fits = minFirst + span <= maxLast;
+    let firstY = top
+      ? height * 0.1 + fontSize + insets.top
+      : height - height * 0.08 - span - insets.bottom;
+    if (fits) {
+      firstY = Math.min(Math.max(firstY, minFirst), maxLast - span);
+    }
+    return { lines, fontSize, lineHeight, firstY, fits, minFirst, maxLast, span };
+  };
+
+  let fontSize = originalFontSize;
+  let attempt = trySize(fontSize);
+  while (!attempt.fits && fontSize > floor) {
+    fontSize = Math.max(floor, fontSize - 4);
+    attempt = trySize(fontSize);
+  }
+
+  if (!attempt.fits) {
+    const maxLines = Math.max(1, Math.floor((attempt.maxLast - attempt.minFirst) / attempt.lineHeight) + 1);
+    let lines = attempt.lines;
+    if (lines.length > maxLines) {
+      lines = lines.slice(0, maxLines);
+      lines[lines.length - 1] = ellipsize(ctx, lines[lines.length - 1], wrapWidth);
+    }
+    const span = (lines.length - 1) * attempt.lineHeight;
+    let firstY = top
+      ? height * 0.1 + attempt.fontSize + insets.top
+      : height - height * 0.08 - span - insets.bottom;
+    firstY = Math.min(Math.max(firstY, attempt.minFirst), attempt.maxLast - span);
+    attempt = { ...attempt, lines, firstY, span, fits: true };
+  }
+
+  return {
+    lines: attempt.lines,
+    fontSize: attempt.fontSize,
+    lineHeight: attempt.lineHeight,
+    firstY: attempt.firstY,
+    centerX,
+    box: {
+      x: centerX - wrapWidth / 2,
+      y: attempt.firstY - attempt.fontSize,
+      width: wrapWidth,
+      height: attempt.span + attempt.fontSize,
+    },
+  };
+}
+
+function flushLogoY(edge: "top" | "bottom", height: number, logoH: number, insets: SafeInsets): number {
+  return edge === "top" ? insets.top : height - insets.bottom - logoH;
+}
+
+function resolveOverlappingLogoY(
+  prepared: PreparedCreative,
+  headlineBox: Box,
+  logoW: number,
+  logoH: number,
+  logoX: number,
+): number {
+  const preferred: "top" | "bottom" = prepared.top ? "bottom" : "top";
+  const preferredY = flushLogoY(preferred, prepared.height, logoH, prepared.insets);
+  if (!boxesOverlap(headlineBox, { x: logoX, y: preferredY, width: logoW, height: logoH })) {
+    return preferredY;
+  }
+  const other: "top" | "bottom" = preferred === "top" ? "bottom" : "top";
+  const otherY = flushLogoY(other, prepared.height, logoH, prepared.insets);
+  if (!boxesOverlap(headlineBox, { x: logoX, y: otherY, width: logoW, height: logoH })) {
+    return otherY;
+  }
+  return preferredY;
 }
