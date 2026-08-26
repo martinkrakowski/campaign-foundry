@@ -1,6 +1,17 @@
 import type { AspectRatio } from "../../../domain/value-objects/AspectRatio.vo.js";
 import type { LayoutKind, ToneKind } from "../../../domain/value-objects/Treatment.vo.js";
 
+/**
+ * Platform safe-zone insets in px. All four sides are required when the
+ * field is present; omit `safeInsets` (or pass zeros) to keep classic geometry.
+ */
+export interface SafeInsets {
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly left: number;
+}
+
 /** A single compositing request — one creative to render. */
 export interface CompositeRequest {
   readonly background: Uint8Array;
@@ -15,10 +26,10 @@ export interface CompositeRequest {
   /** Treatment: visual intensity of the overlay. */
   readonly tone: ToneKind;
   /**
-   * Platform safe-zone insets in px. Absent or all-zero keeps today's
-   * geometry (classic callers omit the field).
+   * Platform safe-zone insets in px. All four sides required when present.
+   * Absent or all-zero keeps today's geometry (classic callers omit the field).
    */
-  readonly safeInsets?: { top: number; right: number; bottom: number; left: number };
+  readonly safeInsets?: SafeInsets;
 }
 
 /** The rendered creative plus the compositing signals the use case reports. */
