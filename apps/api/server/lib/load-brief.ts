@@ -99,9 +99,15 @@ function validateAxes(value: unknown): void {
       throw new Error(`Unsupported variation axis "${key}".`);
     }
   }
-  // Copy-pool refs are a headline-axis protocol and are not yet supported.
-  if (JSON.stringify(value).includes("pool://")) {
-    throw new Error('Unsupported variation axis "headline" (pool:// copy pools are not yet supported).');
+  // `pool://` refs (approved copy pools) are not yet supported on any axis — name the
+  // axis they were found under so the message points at the right line of the brief.
+  const poolAxis = Object.entries(value).find(([, axisValue]) =>
+    JSON.stringify(axisValue).includes("pool://"),
+  )?.[0];
+  if (poolAxis !== undefined) {
+    throw new Error(
+      `Unsupported variation axis "${poolAxis}" (pool:// copy pools are not yet supported).`,
+    );
   }
   if (value.layout !== undefined) {
     assertAllowedStringArray(value.layout, "variation.axes.layout", LAYOUT_VALUES);
@@ -233,6 +239,14 @@ export function parseBrief(data: unknown): CampaignBrief {
   validateMode(record.mode);
   validateVariation(record.variation);
   validateOutput(record.output);
+  // A randomized campaign has no meaning without a total: `count` is the planner's
+  // one required input (plan D13), so demand it up front rather than at run time.
+  if (record.mode === "variation") {
+    const variation = record.variation as Record<string, unknown> | undefined;
+    if (variation?.count === undefined) {
+      throw new Error('Campaign brief field "variation.count" is required when mode is "variation".');
+    }
+  }
   return record as unknown as CampaignBrief;
 }
 

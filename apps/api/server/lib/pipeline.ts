@@ -16,7 +16,7 @@ import {
 } from "@campaignfoundry/CreativeGeneration";
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
 import { FileSystemExporter } from "@campaignfoundry/Distribution";
-import type { Result } from "@campaignfoundry/shared";
+import { err, type Result } from "@campaignfoundry/shared";
 import { outputRoot } from "./config.js";
 
 // Load .env before any process.env read below. Called (not a bare side-effect
@@ -119,5 +119,14 @@ export function runCampaign(
   imageModel?: string,
   regenerateOnly?: ReadonlyArray<RegenerationTarget>,
 ): Promise<Result<PipelineResult, Error>> {
+  // Variation briefs parse (so they can be listed and edited) but cannot run yet: the
+  // planner that consumes `variation` lands in Phase 2. Refusing here — for the API
+  // and the CLI alike — keeps a randomized brief from silently producing the classic
+  // product × ratio × treatment matrix.
+  if (brief.mode === "variation") {
+    return Promise.resolve(
+      err(new Error('Variation mode is not executable in this version; use mode "brief".')),
+    );
+  }
   return buildPipeline(imageModel).execute(brief, regenerateOnly ? { regenerateOnly } : undefined);
 }
