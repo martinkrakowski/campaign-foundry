@@ -174,6 +174,8 @@ export class VariationPolicy {
     const productIds = unique(brief.products.map((product) => product.id));
     const ratios = AspectRatio.all().map((ratio) => ratio.value);
     const motionRatios = unique(input.motionRatios ?? ratios);
+    // A mixed plan adds exactly one still slot per base combination — the still
+    // carries no duration, so it is not multiplied by |duration|.
     const axisProductSize =
       productIds.length *
       ratios.length *
@@ -182,7 +184,7 @@ export class VariationPolicy {
       backgroundSource.length *
       paletteShift.length *
       Math.max(1, headline.length) *
-      (motionEnabled ? (motion.length + (mixStatic ? 1 : 0)) * duration.length : 1);
+      (motionEnabled ? motion.length * duration.length + (mixStatic ? 1 : 0) : 1);
 
     const policyHash = hashPolicy({
       axisProductSize,

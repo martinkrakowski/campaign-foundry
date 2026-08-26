@@ -309,7 +309,9 @@ output:
   requested format (`formats: [static]` + `instagram-reel`, or `[motion]` +
   `instagram-feed`, are 400s naming both).
 - **Draw.** With both formats the motion axis keeps one *still* slot, so a plan
-  mixes PNGs and clips; `motion` and `durationSec` are Hamming axes, and
+  mixes PNGs and clips — `axisProductSize` counts it once per base combination
+  (base × (|motion| × |duration| + 1)), never per duration; `motion` and
+  `durationSec` are Hamming axes, and
   `minDistance` is bounded by the axes the brief activates (6 for a static
   brief, 8 once motion is on). With `output.platforms` set, clips are drawn
   only for the ratios of the requested *motion* platforms (`instagram-reel` →

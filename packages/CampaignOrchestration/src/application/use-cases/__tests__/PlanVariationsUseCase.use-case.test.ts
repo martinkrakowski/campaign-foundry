@@ -504,7 +504,8 @@ describe("PlanVariationsUseCase — motion axes", () => {
       expect([4, 6]).toContain(v.durationSec);
     }
     for (const v of still) expect(v).not.toHaveProperty("durationSec");
-    expect(result.value.policy.axisProductSize).toBe(2 * 3 * 2 * 2 * 1 * 1 * 3 * 2);
+    // base × (|motion| × |duration| + one still slot) — the still is not multiplied by |duration|.
+    expect(result.value.policy.axisProductSize).toBe(2 * 3 * 2 * 2 * 1 * 1 * (2 * 2 + 1));
     expect(result.value.estimate.frames).toBe(motion.reduce((n, v) => n + (v.durationSec ?? 0) * 30, 0));
     const golden = planner().plan(brief());
     if (golden.success) expect(result.value.policyHash).not.toBe(golden.value.policyHash);

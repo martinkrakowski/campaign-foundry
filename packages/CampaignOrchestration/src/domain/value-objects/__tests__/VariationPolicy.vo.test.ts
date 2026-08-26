@@ -201,6 +201,21 @@ describe("VariationPolicy.fromBrief", () => {
     expect(clipsOnly.value.mixStatic).toBe(false);
   });
 
+  test("axisProductSize counts the mixed still slot once, not per duration", () => {
+    // base = 2 products × 3 ratios × 1 layout × 1 tone × 1 background × 1 shift = 6
+    const axes = { layout: ["headline-top"], tone: ["bold"], motion: ["ken-burns-in", "headline-rise"], duration: [4, 6] };
+    const mixed = VariationPolicy.fromBrief(
+      brief({ variation: { count: 1, axes }, output: { formats: ["static", "motion"] } }),
+    );
+    const clipsOnly = VariationPolicy.fromBrief(
+      brief({ variation: { count: 1, axes }, output: { formats: ["motion"] } }),
+    );
+    expect(mixed.success && clipsOnly.success).toBe(true);
+    if (!mixed.success || !clipsOnly.success) return;
+    expect(mixed.value.axisProductSize).toBe(6 * (2 * 2 + 1)); // 30, not 6 × 3 × 2 = 36
+    expect(clipsOnly.value.axisProductSize).toBe(6 * (2 * 2)); // 24
+  });
+
   test("motionRatios narrows to the plan input and joins the hash only for motion briefs", () => {
     const motion = brief({
       variation: { count: 1, axes: { motion: ["ken-burns-in"] } },
