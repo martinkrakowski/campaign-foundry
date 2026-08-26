@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Button, Input } from "@/components/ui";
 import { duplicateBrief, listBriefs, unknownErrorMessage, type BriefEntry } from "@/lib/briefs-api";
 import { useRun } from "@/lib/run-context";
+import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 
 // Mirrors CampaignOrchestration SAFE_ID_PATTERN. Value-importing the package
 // constant from source barrels fails the Next build (it resolves `.js` siblings).
@@ -18,7 +18,7 @@ const BRIEF_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
  */
 export function BriefPicker() {
   const { briefPickerOpen, closeBriefPicker, setBrief, brief: current } = useRun();
-  const router = useRouter();
+  const { guardedPush, isDirty } = useGuardedNavigation();
   const [entries, setEntries] = useState<BriefEntry[] | null>(null);
   const [error, setError] = useState(false);
   const [actionError, setActionError] = useState<string | undefined>();
@@ -88,13 +88,23 @@ export function BriefPicker() {
   if (!briefPickerOpen) return null;
 
   const select = (entry: BriefEntry) => {
+    if (isDirty) {
+      if (!window.confirm("You have unsaved changes. Are you sure you want to leave?")) {
+        return;
+      }
+    }
     setBrief(entry.brief);
     closeBriefPicker();
   };
 
   const createNew = () => {
+    if (isDirty) {
+      if (!window.confirm("You have unsaved changes. Are you sure you want to leave?")) {
+        return;
+      }
+    }
     closeBriefPicker();
-    router.push("/new");
+    guardedPush("/brief");
   };
 
   const confirmDuplicate = async () => {

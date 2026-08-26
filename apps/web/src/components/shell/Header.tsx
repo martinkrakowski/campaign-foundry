@@ -6,9 +6,9 @@ import { useCallback, useState } from "react";
 import { cn } from "@/lib/cn";
 import { ModelSelector } from "./ModelSelector";
 import { MobileMenu } from "./MobileMenu";
+import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 
 const TABS = [
-  { href: "/new", label: "New campaign" },
   { href: "/grid", label: "Grid" },
   { href: "/compliance", label: "Compliance" },
   { href: "/export", label: "Export" },
@@ -19,9 +19,20 @@ const TABS = [
 export function Header() {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
+  const { guardedPush, isDirty } = useGuardedNavigation();
   // Stable identity so MobileMenu's focus/scroll-lock effect only runs on open/close,
   // not on unrelated Header re-renders.
   const closeMenu = useCallback(() => setMenuOpen(false), []);
+
+  const handleTabClick = useCallback(
+    (e: React.MouseEvent, href: string) => {
+      if (isDirty) {
+        e.preventDefault();
+        guardedPush(href);
+      }
+    },
+    [isDirty, guardedPush]
+  );
 
   return (
     <header className="relative z-50 flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-4">
@@ -42,6 +53,7 @@ export function Header() {
             <Link
               key={tab.href}
               href={tab.href}
+              onClick={(e) => handleTabClick(e, tab.href)}
               className={cn(
                 "flex h-full items-center border-b-2 px-1 transition-colors",
                 active

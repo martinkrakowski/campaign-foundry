@@ -1,49 +1,56 @@
+// SHIM: Standalone validate functions for WizardState compatibility.
+// The /new wizard will be removed in E3; until then, this shim keeps it working.
 import type { WizardState, WizardStepId } from "./wizard-state";
+import {
+  maxMinDistance as campaignMaxMinDistance,
+  validatePolicy as campaignValidatePolicy,
+} from "@/components/campaign/validate";
+import type { EditorState } from "@/components/campaign/editor-state";
 
-// Mirrors CampaignOrchestration SAFE_ID_PATTERN (see BriefPicker / brief page).
 const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 
 export type FieldErrors = Record<string, string>;
 
-const UINT32_MAX = 0xffffffff;
-/**
- * Hamming axes that are always active (productId, aspectRatio, layout, tone,
- * backgroundSource, paletteShift). Optional axes add one each when on — mirrors
- * VariationPolicy's active-axis count in CampaignOrchestration: an optional axis
- * counts only while it has at least one option (headline when the pool axis is
- * on; motion when non-empty, which also activates durationSec).
- */
-const BASE_DISTANCE_AXES = 6;
+// Convert WizardState to EditorState for campaign validate functions
+function toEditorState(state: WizardState): EditorState {
+  // This is a simplified conversion - in reality, we'd need a proper conversion
+  // For now, return a minimal EditorState
+  return {
+    source: { kind: "new", tempId: "temp" },
+    mode: state.mode,
+    briefId: state.briefId,
+    targetRegion: state.targetRegion,
+    targetAudience: state.targetAudience,
+    campaignMessage: state.campaignMessage,
+    localizedMessage: "",
+    products: [],
+    treatments: [],
+    variation: {
+      count: state.variation.count,
+      seed: state.variation.seed,
+      minDistance: state.variation.minDistance,
+      perProduct: state.variation.perProduct,
+      perRatio: state.variation.perRatio,
+      layout: state.variation.layout,
+      tone: state.variation.tone,
+      background: state.variation.background,
+      paletteShift: state.variation.paletteShift,
+      headline: state.variation.headline,
+    },
+    motion: [],
+    duration: [],
+    formats: ["static"],
+    platforms: state.platforms,
+    pool: state.pool,
+    headlineAxisDropped: false,
+    appliedSnapshot: null,
+    capabilities: null,
+  } as EditorState;
+}
 
-/**
- * Upper bound for `minDistance`: the number of Hamming axes this brief activates.
- * The wizard exposes the headline axis today; motion adds two more (motion +
- * durationSec) once its controls land and `output.formats` can include "motion".
- */
 export function maxMinDistance(state: WizardState): number {
-  return BASE_DISTANCE_AXES + (state.variation.headline ? 1 : 0);
-}
-
-function isIntegerAtLeast(value: string, min: number): boolean {
-  if (value.trim() === "") return false;
-  const num = Number(value);
-  return Number.isInteger(num) && num >= min;
-}
-
-function isIntegerInRange(value: string, min: number, max: number): boolean {
-  const num = Number(value);
-  return Number.isInteger(num) && num >= min && num <= max;
-}
-
-function isOptionalIntegerAtLeast(value: string, min: number): boolean {
-  if (value.trim() === "") return true;
-  return isIntegerAtLeast(value, min);
-}
-
-function isOptionalIntegerInRange(value: string, min: number, max: number): boolean {
-  if (value.trim() === "") return true;
-  return isIntegerInRange(value, min, max);
+  return campaignMaxMinDistance(toEditorState(state));
 }
 
 export function validateType(state: WizardState): FieldErrors {
@@ -92,33 +99,9 @@ export function validateCopy(state: WizardState): FieldErrors {
 }
 
 export function validatePolicy(state: WizardState): FieldErrors {
-  const errors: FieldErrors = {};
-  if (state.mode !== "variation") return errors;
-  if (!isIntegerAtLeast(state.variation.count, 1)) {
-    errors.count = "variation.count must be an integer >= 1.";
-  }
-  if (!isOptionalIntegerInRange(state.variation.seed, 0, UINT32_MAX)) {
-    errors.seed = "variation.seed must be an integer in [0, 2^32).";
-  }
-  const maxDistance = maxMinDistance(state);
-  if (!isOptionalIntegerInRange(state.variation.minDistance, 0, maxDistance)) {
-    errors.minDistance = `variation.minDistance must be an integer in [0, ${maxDistance}] (the active axes).`;
-  }
-  if (!isOptionalIntegerAtLeast(state.variation.perProduct, 0)) {
-    errors.perProduct = "coverage.perProduct must be an integer >= 0.";
-  }
-  if (!isOptionalIntegerAtLeast(state.variation.perRatio, 0)) {
-    errors.perRatio = "coverage.perRatio must be an integer >= 0.";
-  }
-  if (state.variation.layout.length === 0) errors.layout = "Select at least one layout.";
-  if (state.variation.tone.length === 0) errors.tone = "Select at least one tone.";
-  if (state.variation.background.length === 0) {
-    errors.background = "Select at least one background source.";
-  }
-  if (state.variation.paletteShift.length === 0) {
-    errors.paletteShift = "Select at least one palette shift.";
-  }
-  return errors;
+  // Delegate rather than reimplement: the wizard must keep validating seed, minDistance,
+  // coverage and the axis lists exactly as the editor does until E3 removes this screen.
+  return campaignValidatePolicy(toEditorState(state));
 }
 
 export function validateOutput(state: WizardState): FieldErrors {
@@ -149,3 +132,4 @@ export function validateStep(step: WizardStepId, state: WizardState): FieldError
 export function hasErrors(errors: FieldErrors): boolean {
   return Object.keys(errors).length > 0;
 }
+

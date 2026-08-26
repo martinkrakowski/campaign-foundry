@@ -2,6 +2,7 @@ import { render, fireEvent } from "@testing-library/react";
 import { createElement, type ReactElement } from "react";
 import { vi, type Mock } from "vitest";
 import { API, RunProvider, type Asset } from "@/lib/run-context";
+import { EditorDirtyProvider } from "@/lib/editor-dirty-context";
 
 /**
  * Drive a modal's focus trap through every branch: forward-Tab wrap from the last
@@ -22,8 +23,8 @@ export const exerciseFocusTrap = (dialog: HTMLElement) => {
   fireEvent.keyDown(window, { key: "x" }); // non-Tab, non-Escape → early return
 };
 
-/** Render a UI tree wrapped in the shared RunProvider. */
-export const renderWithRun = (ui: ReactElement) => render(createElement(RunProvider, null, ui));
+/** Render a UI tree wrapped in the shared RunProvider and EditorDirtyProvider. */
+export const renderWithRun = (ui: ReactElement) => render(createElement(RunProvider, null, createElement(EditorDirtyProvider, null, ui)));
 
 export const makeAsset = (over: Partial<Asset> = {}): Asset => ({
   productId: "alpha",

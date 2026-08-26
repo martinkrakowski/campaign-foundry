@@ -2,10 +2,10 @@
 
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { SidebarContent, BrowseBriefsButton } from "./Sidebar";
+import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 
 interface NavTab {
   href: string;
@@ -26,8 +26,20 @@ interface MobileMenuProps {
  */
 export function MobileMenu({ open, onClose, tabs }: MobileMenuProps) {
   const pathname = usePathname();
+  const { guardedPush, isDirty } = useGuardedNavigation();
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+
+  const handleTabClick = (e: React.MouseEvent, href: string) => {
+    if (isDirty) {
+      e.preventDefault();
+      if (!window.confirm("You have unsaved changes. Are you sure you want to leave?")) {
+        return;
+      }
+    }
+    onClose();
+    guardedPush(href);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -105,17 +117,17 @@ export function MobileMenu({ open, onClose, tabs }: MobileMenuProps) {
           {tabs.map((tab) => {
             const active = pathname.startsWith(tab.href);
             return (
-              <Link
+              <a
                 key={tab.href}
                 href={tab.href}
-                onClick={onClose}
+                onClick={(e) => handleTabClick(e, tab.href)}
                 className={cn(
                   "rounded-lg px-3 py-3 text-[15px] font-medium transition-colors",
                   active ? "bg-surface-2 text-white" : "text-text-muted hover:bg-surface hover:text-white",
                 )}
               >
                 {tab.label}
-              </Link>
+              </a>
             );
           })}
         </nav>

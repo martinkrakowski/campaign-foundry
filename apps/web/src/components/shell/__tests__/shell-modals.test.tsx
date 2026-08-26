@@ -3,6 +3,10 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRun, exerciseFocusTrap, json, mockPipelineApi, EMPTY_REPORT } from "@/__tests__/helpers";
 import { ModelSelector } from "../ModelSelector";
+import { createElement, useEffect } from "react";
+import { RunProvider } from "@/lib/run-context";
+import { EditorDirtyProvider, useEditorDirty } from "@/lib/editor-dirty-context";
+import { render } from "@testing-library/react";
 import { BriefPicker } from "../BriefPicker";
 import { TelemetryDrawer } from "../TelemetryDrawer";
 
@@ -149,5 +153,99 @@ describe("TelemetryDrawer", () => {
     renderWithRun(<TelemetryDrawer open onClose={() => (closed = true)} />);
     await user.click(screen.getByLabelText("Close telemetry"));
     expect(closed).toBe(true);
+  });
+});
+
+describe("BriefPicker with unsaved editor changes", () => {
+  beforeEach(() => localStorage.removeItem("cf:brief-picked"));
+
+  /** Render inside the real providers with the dirty flag already raised. */
+  const renderDirty = () => {
+    const RaiseDirty = () => {
+      const { setDirty } = useEditorDirty();
+      useEffect(() => setDirty(true), [setDirty]);
+      return null;
+    };
+    return render(
+      createElement(
+        RunProvider,
+        null,
+        createElement(EditorDirtyProvider, null, createElement(RaiseDirty), createElement(BriefPicker)),
+      ),
+    );
+  };
+
+  const routeBriefs = (body: unknown) =>
+    mockPipelineApi({
+      result: (url) => (url.includes("/campaigns/briefs") ? json(body) : json(EMPTY_REPORT)),
+    });
+
+  test("refusing the prompt keeps the picker open and loads nothing", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.fn(() => false);
+    globalThis.confirm = confirm;
+    routeBriefs({ briefs: [{ file: "demo.yaml", brief: { id: "demo", targetRegion: "DE", products: [{ id: "a" }] } }] });
+    renderDirty();
+
+    await user.click(await screen.findByText("demo.yaml"));
+    expect(confirm).toHaveBeenCalled();
+    expect(screen.getByText("demo.yaml")).toBeTruthy();
+  });
+
+  test("refusing the prompt on Start from scratch also leaves the picker open", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.fn(() => false);
+    globalThis.confirm = confirm;
+    routeBriefs({ briefs: [] });
+    renderDirty();
+
+    await user.click(await screen.findByText("Create new"));
+    expect(confirm).toHaveBeenCalled();
+  });
+});
+
+describe("BriefPicker when the prompt is accepted", () => {
+  beforeEach(() => localStorage.removeItem("cf:brief-picked"));
+
+  const renderDirty = () => {
+    const RaiseDirty = () => {
+      const { setDirty } = useEditorDirty();
+      useEffect(() => setDirty(true), [setDirty]);
+      return null;
+    };
+    return render(
+      createElement(
+        RunProvider,
+        null,
+        createElement(EditorDirtyProvider, null, createElement(RaiseDirty), createElement(BriefPicker)),
+      ),
+    );
+  };
+
+  test("accepting loads the chosen brief and closes the picker", async () => {
+    const user = userEvent.setup();
+    globalThis.confirm = vi.fn(() => true);
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/briefs")
+          ? json({ briefs: [{ file: "demo.yaml", brief: { id: "demo", targetRegion: "DE", products: [{ id: "a" }] } }] })
+          : json(EMPTY_REPORT),
+    });
+    renderDirty();
+
+    await user.click(await screen.findByText("demo.yaml"));
+    await waitFor(() => expect(screen.queryByText("demo.yaml")).toBeNull());
+  });
+
+  test("accepting on Create new closes the picker too", async () => {
+    const user = userEvent.setup();
+    globalThis.confirm = vi.fn(() => true);
+    mockPipelineApi({
+      result: (url) => (url.includes("/campaigns/briefs") ? json({ briefs: [] }) : json(EMPTY_REPORT)),
+    });
+    renderDirty();
+
+    await user.click(await screen.findByText("Create new"));
+    await waitFor(() => expect(screen.queryByText("Create new")).toBeNull());
   });
 });

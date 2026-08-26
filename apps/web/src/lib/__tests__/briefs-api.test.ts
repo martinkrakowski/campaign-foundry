@@ -14,6 +14,7 @@ import {
   packageCampaign,
   planCampaign,
   unknownErrorMessage,
+  updateBrief,
   uploadAsset,
 } from "../briefs-api";
 
@@ -389,5 +390,40 @@ describe("copy pool calls", () => {
       return json({ pool });
     });
     expect(await patchPool("camp", entries)).toEqual(pool);
+  });
+});
+
+describe("updateBrief", () => {
+  test("appends the revision as the conditional-write guard, and omits it when absent", async () => {
+    const urls: string[] = [];
+    mockFetch((url) => {
+      urls.push(url);
+      return json({ file: "camp.yaml", brief, revision: "rev-2" });
+    });
+
+    await expect(updateBrief("camp", brief, { revision: "rev-1" })).resolves.toEqual({
+      file: "camp.yaml",
+      brief,
+      revision: "rev-2",
+    });
+    expect(urls[0]).toContain("?revision=rev-1");
+
+    await updateBrief("camp", brief);
+    expect(urls[1]).not.toContain("revision");
+  });
+
+  test("an entry without a revision is returned unchanged", async () => {
+    mockFetch(() => json({ file: "camp.yaml", brief }));
+    await expect(updateBrief("camp", brief)).resolves.toEqual({ file: "camp.yaml", brief });
+  });
+
+  test("the id is percent-encoded", async () => {
+    const urls: string[] = [];
+    mockFetch((url) => {
+      urls.push(url);
+      return json({ file: "a b.yaml", brief });
+    });
+    await updateBrief("a b", brief);
+    expect(urls[0]).toContain("a%20b");
   });
 });
