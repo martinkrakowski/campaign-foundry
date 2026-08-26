@@ -18,5 +18,18 @@ export default defineNitroConfig({
   // in server/plugins/ffmpeg-check.ts can degrade motion gracefully. The entry
   // is given as a resolved file path: a bare specifier stays external in
   // rollup and node-file-trace then looks for `apps/api/ffmpeg-static`.
-  externals: { traceInclude: [require.resolve("ffmpeg-static")] },
+  // Resolved lazily and optionally: a checkout that has not installed the
+  // package (or a platform ffmpeg-static does not ship) must still start —
+  // the boot probe then reports motion as unavailable instead of the config
+  // load throwing before Nitro even exists.
+  externals: { traceInclude: resolveOptional("ffmpeg-static") },
 });
+
+function resolveOptional(specifier: string): string[] {
+  try {
+    return [require.resolve(specifier)];
+  } catch {
+    console.warn(`[nitro] ${specifier} not installed — motion output will be unavailable`);
+    return [];
+  }
+}
