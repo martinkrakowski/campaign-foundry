@@ -4,7 +4,13 @@ import type { ChangeEvent, Dispatch, ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { Button, Input } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { planCampaign, unknownErrorMessage, uploadAsset, type PlanResult } from "@/lib/briefs-api";
+import {
+  isBriefsApiError,
+  planCampaign,
+  unknownErrorMessage,
+  uploadAsset,
+  type PlanResult,
+} from "@/lib/briefs-api";
 import { dumpBrief } from "./dump-brief";
 import type { FieldErrors } from "./validate";
 import {
@@ -106,21 +112,38 @@ export function CampaignTypeStep({ state, dispatch, errors }: StepProps) {
 
 export function ProductsStep({ state, dispatch, errors }: StepProps) {
   const [uploadError, setUploadError] = useState<string | undefined>();
+  const [uploadingKeys, setUploadingKeys] = useState<ReadonlySet<number>>(new Set());
 
-  const onLogoFile = async (index: number, event: ChangeEvent<HTMLInputElement>) => {
+  const onLogoFile = async (key: number, productId: string, event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     setUploadError(undefined);
+    setUploadingKeys((prev) => new Set(prev).add(key));
+    const name = assetFileName(file.name, productId);
     try {
       const contentBase64 = await fileToBase64(file);
       const { path } = await uploadAsset({
         briefId: state.briefId,
-        name: assetFileName(file.name),
+        name,
         contentBase64,
       });
-      dispatch({ type: "setProduct", index, patch: { logoPath: path } });
+      dispatch({ type: "setProduct", key, patch: { logoPath: path } });
     } catch (error) {
-      setUploadError(unknownErrorMessage(error, "Upload failed"));
+      if (isBriefsApiError(error) && error.status === 409) {
+        dispatch({
+          type: "setProduct",
+          key,
+          patch: { logoPath: `assets/inputs/${state.briefId}/${name}` },
+        });
+      } else {
+        setUploadError(unknownErrorMessage(error, "Upload failed"));
+      }
+    } finally {
+      setUploadingKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     }
     event.target.value = "";
   };
@@ -138,19 +161,23 @@ export function ProductsStep({ state, dispatch, errors }: StepProps) {
         </Button>
       </div>
       {state.products.map((product, index) => (
-        <div key={index} className="space-y-3 rounded-lg border border-border bg-surface p-4">
+        <div key={product.key} className="space-y-3 rounded-lg border border-border bg-surface p-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Name" error={errors[`product-${index}-name`]}>
               <Input
                 value={product.name}
-                onChange={(e) => dispatch({ type: "setProduct", index, patch: { name: e.target.value } })}
+                onChange={(e) =>
+                  dispatch({ type: "setProduct", key: product.key, patch: { name: e.target.value } })
+                }
                 invalid={Boolean(errors[`product-${index}-name`])}
               />
             </Field>
             <Field label="ID" error={errors[`product-${index}-id`]}>
               <Input
                 value={product.id}
-                onChange={(e) => dispatch({ type: "setProduct", index, patch: { id: e.target.value } })}
+                onChange={(e) =>
+                  dispatch({ type: "setProduct", key: product.key, patch: { id: e.target.value } })
+                }
                 invalid={Boolean(errors[`product-${index}-id`])}
               />
             </Field>
@@ -160,7 +187,11 @@ export function ProductsStep({ state, dispatch, errors }: StepProps) {
               <Input
                 value={product.primaryColor}
                 onChange={(e) =>
-                  dispatch({ type: "setProduct", index, patch: { primaryColor: e.target.value } })
+                  dispatch({
+                    type: "setProduct",
+                    key: product.key,
+                    patch: { primaryColor: e.target.value },
+                  })
                 }
                 invalid={Boolean(errors[`product-${index}-color`])}
               />
@@ -168,7 +199,9 @@ export function ProductsStep({ state, dispatch, errors }: StepProps) {
             <Field label="Logo Path" error={errors[`product-${index}-logo`]}>
               <Input
                 value={product.logoPath}
-                onChange={(e) => dispatch({ type: "setProduct", index, patch: { logoPath: e.target.value } })}
+                onChange={(e) =>
+                  dispatch({ type: "setProduct", key: product.key, patch: { logoPath: e.target.value } })
+                }
                 invalid={Boolean(errors[`product-${index}-logo`])}
               />
             </Field>
@@ -178,16 +211,23 @@ export function ProductsStep({ state, dispatch, errors }: StepProps) {
               type="file"
               accept="image/png,image/jpeg"
               className="block w-full text-[12px] text-text-muted file:mr-3 file:rounded-md file:border file:border-border file:bg-surface-2 file:px-3 file:py-1.5 file:text-[12px] file:text-text-primary"
-              onChange={(event) => void onLogoFile(index, event)}
+              onChange={(event) => void onLogoFile(product.key, product.id, event)}
             />
           </Field>
           <Field label="Input asset (optional)">
             <Input
               value={product.inputAsset}
-              onChange={(e) => dispatch({ type: "setProduct", index, patch: { inputAsset: e.target.value } })}
+              onChange={(e) =>
+                dispatch({ type: "setProduct", key: product.key, patch: { inputAsset: e.target.value } })
+              }
             />
           </Field>
-          <Button variant="ghost" size="sm" onClick={() => dispatch({ type: "removeProduct", index })}>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={uploadingKeys.has(product.key)}
+            onClick={() => dispatch({ type: "removeProduct", key: product.key })}
+          >
             Remove
           </Button>
         </div>
@@ -237,11 +277,13 @@ function AxisToggles({
   options,
   selected,
   onToggle,
+  error,
 }: {
   legend: string;
   options: readonly string[];
   selected: readonly string[];
   onToggle: (value: string) => void;
+  error?: string;
 }) {
   return (
     <fieldset className="space-y-2">
@@ -265,6 +307,7 @@ function AxisToggles({
           );
         })}
       </div>
+      {error ? <span className="block text-[11px] text-error">{error}</span> : null}
     </fieldset>
   );
 }
@@ -279,15 +322,17 @@ function EstimatePanel({ state }: { state: WizardState }) {
       return;
     }
     let cancelled = false;
+    const controller = new AbortController();
     setPlan(null);
     const timer = window.setTimeout(() => {
-      void planCampaign(toBrief(state)).then((result) => {
+      void planCampaign(toBrief(state), controller.signal).then((result) => {
         if (cancelled) return;
         setPlan(result);
       });
     }, PLAN_DEBOUNCE_MS);
     return () => {
       cancelled = true;
+      controller.abort();
       window.clearTimeout(timer);
     };
   }, [
@@ -382,18 +427,21 @@ export function PolicyStep({ state, dispatch, errors }: StepProps) {
         options={LAYOUT_OPTIONS}
         selected={state.variation.layout}
         onToggle={(value) => dispatch({ type: "toggleLayout", value })}
+        error={errors.layout}
       />
       <AxisToggles
         legend="Tone"
         options={TONE_OPTIONS}
         selected={state.variation.tone}
         onToggle={(value) => dispatch({ type: "toggleTone", value })}
+        error={errors.tone}
       />
       <AxisToggles
         legend="Background source"
         options={BACKGROUND_OPTIONS}
         selected={state.variation.background}
         onToggle={(value) => dispatch({ type: "toggleBackground", value })}
+        error={errors.background}
       />
       <fieldset className="space-y-2">
         <legend className="text-[11px] text-text-muted">Palette shift</legend>
@@ -416,6 +464,9 @@ export function PolicyStep({ state, dispatch, errors }: StepProps) {
             );
           })}
         </div>
+        {errors.paletteShift ? (
+          <span className="block text-[11px] text-error">{errors.paletteShift}</span>
+        ) : null}
       </fieldset>
       <EstimatePanel state={state} />
     </div>

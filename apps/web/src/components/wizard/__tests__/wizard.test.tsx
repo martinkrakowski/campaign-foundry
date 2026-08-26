@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach } from "vitest";
+import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { UserEvent } from "@testing-library/user-event";
@@ -16,17 +16,21 @@ beforeEach(() => {
 const estimate = { creatives: 12, axisProductSize: 36, feasible: true, genaiCalls: 0 };
 
 const routeWizardApi = (opts: {
-  plan?: () => Response | Promise<Response>;
+  plan?: (url: string, init: RequestInit) => Response | Promise<Response>;
   brief?: (url: string, init: RequestInit) => Response;
-  asset?: Response;
+  asset?: (url: string, init: RequestInit) => Response | Promise<Response>;
 } = {}) =>
   mockPipelineApi({
     post: (url, init) => {
       if (url.includes("/campaigns/plan")) {
-        return opts.plan ? opts.plan() : json({ policyHash: "h", seed: 1, estimate, variants: [] });
+        return opts.plan
+          ? opts.plan(url, init)
+          : json({ policyHash: "h", seed: 1, estimate, variants: [] });
       }
       if (url.includes("/campaigns/assets")) {
-        return opts.asset ?? json({ path: "assets/inputs/camp-one/logo.png" }, 201);
+        if (opts.asset) return opts.asset(url, init);
+        const body = JSON.parse(String(init.body)) as { briefId: string; name: string };
+        return json({ path: `assets/inputs/${body.briefId}/${body.name}` }, 201);
       }
       if (url.includes("/campaigns/briefs")) {
         return opts.brief
@@ -70,6 +74,26 @@ describe("NewCampaignPage", () => {
 });
 
 describe("Wizard", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test("marks the current step and moves focus to the heading after Next/Back", async () => {
+    const user = userEvent.setup();
+    renderWithRun(<Wizard />);
+    expect(screen.getByText("1. Campaign type").closest("li")?.getAttribute("aria-current")).toBe("step");
+    expect(document.activeElement).not.toBe(screen.getByRole("heading", { name: "Campaign type" }));
+    await fillType(user, "Classic");
+    const productsHeading = screen.getByRole("heading", { name: "Brand & products" });
+    expect(document.activeElement).toBe(productsHeading);
+    expect(screen.getByText("2. Brand & products").closest("li")?.getAttribute("aria-current")).toBe(
+      "step",
+    );
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Campaign type" }));
+    expect(screen.getByText("1. Campaign type").closest("li")?.getAttribute("aria-current")).toBe("step");
+  });
+
   test("blocks next on an invalid type step, then authors a classic brief", async () => {
     const user = userEvent.setup();
     routeWizardApi();
@@ -128,6 +152,33 @@ describe("Wizard", () => {
     await user.click(screen.getByRole("button", { name: "Next" }));
     expect(screen.getByText(/variation.count must be an integer/)).toBeTruthy();
     await user.type(screen.getByLabelText("Count"), "12");
+    await user.type(screen.getByLabelText("Seed (optional)"), "1.5");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText(/variation.seed must be an integer in \[0, 2\^32\)/)).toBeTruthy();
+    await user.clear(screen.getByLabelText("Seed (optional)"));
+    await user.clear(screen.getByLabelText("Min distance"));
+    await user.type(screen.getByLabelText("Min distance"), "7");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText(/variation.minDistance must be an integer in \[0, 6\]/)).toBeTruthy();
+    await user.clear(screen.getByLabelText("Min distance"));
+    await user.type(screen.getByLabelText("Min distance"), "2");
+    await user.click(screen.getByRole("button", { name: "headline-top" }));
+    await user.click(screen.getByRole("button", { name: "headline-bottom" }));
+    await user.click(screen.getByRole("button", { name: "bold" }));
+    await user.click(screen.getByRole("button", { name: "subtle" }));
+    await user.click(screen.getByRole("button", { name: "procedural" }));
+    await user.click(screen.getByRole("button", { name: "0" }));
+    await user.click(screen.getByRole("button", { name: "0.1" }));
+    await user.click(screen.getByRole("button", { name: "0.2" }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText(/Select at least one layout/)).toBeTruthy();
+    expect(screen.getByText(/Select at least one tone/)).toBeTruthy();
+    expect(screen.getByText(/Select at least one background source/)).toBeTruthy();
+    expect(screen.getByText(/Select at least one palette shift/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "headline-top" }));
+    await user.click(screen.getByRole("button", { name: "bold" }));
+    await user.click(screen.getByRole("button", { name: "procedural" }));
+    await user.click(screen.getByRole("button", { name: "0" }));
     await user.click(screen.getByRole("button", { name: "Next" }));
     await user.click(screen.getByLabelText("instagram-feed"));
     await user.click(screen.getByLabelText("linkedin"));
@@ -196,13 +247,19 @@ describe("Wizard", () => {
     expect(await screen.findByText("Fill required fields to estimate.")).toBeTruthy();
   });
 
-  test("does not crash when the plan request is aborted by leaving the step", async () => {
+  test("aborts the in-flight plan request when leaving the step", async () => {
     const user = userEvent.setup();
+    let captured: AbortSignal | undefined;
     let resolvePlan: ((value: Response) => void) | undefined;
     routeWizardApi({
-      plan: () => new Promise((resolve) => {
-        resolvePlan = resolve;
-      }),
+      plan: (_url, init) =>
+        new Promise((resolve, reject) => {
+          captured = init.signal ?? undefined;
+          init.signal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          );
+          resolvePlan = resolve;
+        }),
     });
     renderWithRun(<Wizard />);
     await fillType(user, "Randomized");
@@ -212,17 +269,27 @@ describe("Wizard", () => {
     await user.type(screen.getAllByLabelText("Logo Path")[0], "a.png");
     await user.type(screen.getAllByLabelText("Logo Path")[1], "b.png");
     await user.click(screen.getByRole("button", { name: "Next" }));
-    await fillCopy(user);
-    await screen.findByText("Estimating…");
-    await new Promise((r) => setTimeout(r, PLAN_DEBOUNCE_MS + 20));
-    await user.click(screen.getByRole("button", { name: "Back" }));
+    await user.type(screen.getByLabelText("Target Region"), "DE");
+    await user.type(screen.getByLabelText("Target Audience"), "fans");
+    await user.type(screen.getByLabelText("Campaign Message"), "Hello world");
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      expect(screen.getByText("Estimating…")).toBeTruthy();
+      await vi.advanceTimersByTimeAsync(PLAN_DEBOUNCE_MS);
+      expect(captured?.aborted).toBe(false);
+      fireEvent.click(screen.getByRole("button", { name: "Back" }));
+      expect(captured?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
     resolvePlan?.(json({ policyHash: "h", seed: 1, estimate, variants: [] }));
     expect(screen.getByText("Copy")).toBeTruthy();
   });
 
   test("uploads a logo, ignores an empty file list, and surfaces an upload error", async () => {
     const user = userEvent.setup();
-    routeWizardApi({ asset: json({ error: "too big" }, 413) });
+    routeWizardApi({ asset: () => json({ error: "too big" }, 413) });
     renderWithRun(<Wizard />);
     await fillType(user, "Classic");
     const fileInput = screen.getAllByLabelText("Logo file")[0] as HTMLInputElement;
@@ -235,9 +302,53 @@ describe("Wizard", () => {
     await user.upload(okInput, new File([new Uint8Array([1, 2, 3])], "Hydra Logo.PNG", { type: "image/png" }));
     await waitFor(() =>
       expect((screen.getAllByLabelText("Logo Path")[0] as HTMLInputElement).value).toBe(
-        "assets/inputs/camp-one/logo.png",
+        "assets/inputs/camp-one/product-hydra-logo.png",
       ),
     );
+  });
+
+  test("namespaces uploads by product id, treats a 409 as the existing path, and applies by key", async () => {
+    const user = userEvent.setup();
+    const namesPosted: string[] = [];
+    let resolveSecond: ((value: Response) => void) | undefined;
+    let secondStarted = false;
+    routeWizardApi({
+      asset: (_url, init) => {
+        const body = JSON.parse(String(init.body)) as { name: string };
+        namesPosted.push(body.name);
+        if (body.name.startsWith("beta-")) {
+          secondStarted = true;
+          return new Promise((resolve) => {
+            resolveSecond = resolve;
+          });
+        }
+        return json({ error: `Asset "assets/inputs/camp-one/${body.name}" already exists.` }, 409);
+      },
+    });
+    renderWithRun(<Wizard />);
+    await fillType(user, "Classic");
+    const names = screen.getAllByLabelText("Name");
+    await user.type(names[0], "Alpha");
+    await user.type(names[1], "Beta");
+    const fileInputs = screen.getAllByLabelText("Logo file") as HTMLInputElement[];
+    await user.upload(fileInputs[0], new File([new Uint8Array([1, 2, 3])], "logo.png", { type: "image/png" }));
+    await waitFor(() =>
+      expect((screen.getAllByLabelText("Logo Path")[0] as HTMLInputElement).value).toBe(
+        "assets/inputs/camp-one/alpha-logo.png",
+      ),
+    );
+
+    await user.upload(fileInputs[1], new File([new Uint8Array([1, 2, 3])], "logo.png", { type: "image/png" }));
+    await waitFor(() => expect(secondStarted).toBe(true));
+    expect((screen.getAllByText("Remove")[1] as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getAllByText("Remove")[0]);
+    resolveSecond?.(json({ path: "assets/inputs/camp-one/beta-logo.png" }, 201));
+    await waitFor(() =>
+      expect((screen.getAllByLabelText("Logo Path")[0] as HTMLInputElement).value).toBe(
+        "assets/inputs/camp-one/beta-logo.png",
+      ),
+    );
+    expect(namesPosted).toEqual(["alpha-logo.png", "beta-logo.png"]);
   });
 
   test("toggles remaining axes and saves a randomized brief, offering Replace on 409", async () => {

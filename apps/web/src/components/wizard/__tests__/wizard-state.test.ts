@@ -1,8 +1,7 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, afterEach, vi } from "vitest";
 import {
   assetFileName,
   canPlan,
-  emptyProduct,
   fileToBase64,
   initialWizardState,
   slugify,
@@ -26,18 +25,74 @@ describe("slugify / assetFileName", () => {
     expect(slugify("a".repeat(80))).toHaveLength(64);
   });
 
-  test("builds a path-safe asset basename", () => {
-    expect(assetFileName("My Logo.PNG")).toBe("my-logo.png");
-    expect(assetFileName("photo.JPEG")).toBe("photo.jpeg");
-    expect(assetFileName("...")).toBe("logo.png");
-    expect(assetFileName("no-ext")).toBe("no-ext.png");
+  test("namespaces the basename by product id so two logo.png files do not collide", () => {
+    expect(assetFileName("My Logo.PNG", "alpha")).toBe("alpha-my-logo.png");
+    expect(assetFileName("logo.png", "beta")).toBe("beta-logo.png");
+    expect(assetFileName("photo.JPEG", "gamma")).toBe("gamma-photo.jpeg");
+    expect(assetFileName("...", "delta")).toBe("delta-logo.png");
+    expect(assetFileName("no-ext", "epsilon")).toBe("epsilon-no-ext.png");
+    expect(assetFileName("logo.png", "")).toBe("product-logo.png");
+    expect(assetFileName("logo.png", "a".repeat(64))).toBe(`${"a".repeat(64)}.png`);
+    expect(assetFileName("logo.png", "a".repeat(63))).toBe(`${"a".repeat(63)}.png`);
   });
 });
 
 describe("fileToBase64", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   test("encodes the file bytes", async () => {
     const file = new File([new Uint8Array([104, 105])], "x.png", { type: "image/png" });
     expect(await fileToBase64(file)).toBe(btoa("hi"));
+  });
+
+  test("strips a data-URL prefix and falls back when FileReader returns a bare string", async () => {
+    class FakeReader {
+      result: string | ArrayBuffer | null = "data:image/png;base64,abc";
+      error: Error | null = null;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      readAsDataURL() {
+        this.onload?.();
+      }
+    }
+    vi.stubGlobal("FileReader", FakeReader);
+    expect(await fileToBase64(new File([""], "x.png"))).toBe("abc");
+
+    class BareReader extends FakeReader {
+      result = "not-a-data-url";
+    }
+    vi.stubGlobal("FileReader", BareReader);
+    expect(await fileToBase64(new File([""], "x.png"))).toBe("not-a-data-url");
+
+    class BufferReader extends FakeReader {
+      result: string | ArrayBuffer | null = new ArrayBuffer(0);
+    }
+    vi.stubGlobal("FileReader", BufferReader);
+    expect(await fileToBase64(new File([""], "x.png"))).toBe("");
+    vi.unstubAllGlobals();
+  });
+
+  test("rejects when FileReader fails", async () => {
+    class FailReader {
+      result = null;
+      error: Error | null = new Error("nope");
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      readAsDataURL() {
+        this.onerror?.();
+      }
+    }
+    vi.stubGlobal("FileReader", FailReader);
+    await expect(fileToBase64(new File([""], "x.png"))).rejects.toThrow("nope");
+
+    class SilentFailReader extends FailReader {
+      error = null;
+    }
+    vi.stubGlobal("FileReader", SilentFailReader);
+    await expect(fileToBase64(new File([""], "x.png"))).rejects.toThrow("read failed");
+    vi.unstubAllGlobals();
   });
 });
 
@@ -68,23 +123,33 @@ describe("wizardReducer", () => {
   });
 
   test("auto-slugs a product id until the id is touched", () => {
+    const key = initialWizardState.products[0].key;
     const named = wizardReducer(initialWizardState, {
       type: "setProduct",
-      index: 0,
+      key,
       patch: { name: "Hydra Bottle" },
     });
     expect(named.products[0].id).toBe("hydra-bottle");
-    const touched = wizardReducer(named, { type: "setProduct", index: 0, patch: { id: "custom" } });
+    const touched = wizardReducer(named, { type: "setProduct", key, patch: { id: "custom" } });
     expect(touched.products[0].idTouched).toBe(true);
-    const renamed = wizardReducer(touched, { type: "setProduct", index: 0, patch: { name: "Other" } });
+    const renamed = wizardReducer(touched, { type: "setProduct", key, patch: { name: "Other" } });
     expect(renamed.products[0].id).toBe("custom");
   });
 
-  test("adds and removes products", () => {
+  test("adds and removes products by stable key", () => {
     const added = wizardReducer(initialWizardState, { type: "addProduct" });
     expect(added.products).toHaveLength(3);
-    expect(added.products[2]).toEqual(emptyProduct());
-    expect(wizardReducer(added, { type: "removeProduct", index: 0 }).products).toHaveLength(2);
+    expect(added.products[2]).toMatchObject({
+      id: "",
+      name: "",
+      primaryColor: "#1473E6",
+      logoPath: "",
+      inputAsset: "",
+      idTouched: false,
+    });
+    expect(new Set(added.products.map((product) => product.key)).size).toBe(3);
+    const firstKey = added.products[0].key;
+    expect(wizardReducer(added, { type: "removeProduct", key: firstKey }).products).toHaveLength(2);
   });
 
   test("toggles axes and platforms, preserving allowlist order", () => {
@@ -118,6 +183,7 @@ describe("toBrief / canPlan", () => {
     localizedMessage: "Hallo",
     products: [
       {
+        key: 10,
         id: "alpha",
         name: "A",
         primaryColor: "#1473E6",
@@ -126,6 +192,7 @@ describe("toBrief / canPlan", () => {
         idTouched: true,
       },
       {
+        key: 11,
         id: "beta",
         name: "B",
         primaryColor: "#E0218A",
@@ -170,6 +237,7 @@ describe("toBrief / canPlan", () => {
       seed: 42,
       minDistance: 2,
       coverage: { perProduct: 1 },
+      axes: { layout: [], tone: [], background: { source: [] }, paletteShift: [] },
     });
     const ratioOnly = toBrief({
       ...filled,
@@ -186,7 +254,11 @@ describe("toBrief / canPlan", () => {
         paletteShift: [],
       },
     });
-    expect(ratioOnly.variation).toEqual({ count: 0, coverage: { perRatio: 1 } });
+    expect(ratioOnly.variation).toEqual({
+      count: 0,
+      coverage: { perRatio: 1 },
+      axes: { layout: [], tone: [], background: { source: [] }, paletteShift: [] },
+    });
     const noOptional = toBrief({
       ...filled,
       mode: "variation",

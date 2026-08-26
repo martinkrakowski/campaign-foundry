@@ -23,6 +23,8 @@ export const STATIC_PLATFORMS = ["instagram-feed", "linkedin", "x"] as const;
 export type CampaignMode = "brief" | "variation";
 
 export interface ProductDraft {
+  /** Stable identity for React keys and async upload dispatch (not the product id). */
+  key: number;
   id: string;
   name: string;
   primaryColor: string;
@@ -59,9 +61,9 @@ export type WizardAction =
   | { type: "back" }
   | { type: "setMode"; mode: CampaignMode }
   | { type: "patch"; patch: Partial<Pick<WizardState, "briefId" | "targetRegion" | "targetAudience" | "campaignMessage" | "localizedMessage">> }
-  | { type: "setProduct"; index: number; patch: Partial<ProductDraft> }
+  | { type: "setProduct"; key: number; patch: Partial<ProductDraft> }
   | { type: "addProduct" }
-  | { type: "removeProduct"; index: number }
+  | { type: "removeProduct"; key: number }
   | { type: "setVariation"; field: "count" | "seed" | "minDistance" | "perProduct" | "perRatio"; value: string }
   | { type: "toggleLayout"; value: string }
   | { type: "toggleTone"; value: string }
@@ -73,8 +75,13 @@ export function stepsFor(mode: CampaignMode): readonly WizardStepId[] {
   return mode === "variation" ? VARIATION_STEPS : CLASSIC_STEPS;
 }
 
+let nextProductKey = 1;
+
 export function emptyProduct(): ProductDraft {
+  const key = nextProductKey;
+  nextProductKey += 1;
   return {
+    key,
     id: "",
     name: "",
     primaryColor: "#1473E6",
@@ -116,21 +123,27 @@ export function slugify(value: string): string {
     .replace(/-+$/, "");
 }
 
-export function assetFileName(fileName: string): string {
+export function assetFileName(fileName: string, productId: string): string {
   const lower = fileName.toLowerCase();
   const match = lower.match(/\.(png|jpg|jpeg)$/);
   const ext = match?.[1] ?? "png";
   const stem = slugify(lower.replace(/\.[^.]+$/, "")) || "logo";
-  return `${stem.slice(0, 64)}.${ext}`;
+  const prefix = slugify(productId) || "product";
+  const combined = `${prefix}-${stem}`.slice(0, 64).replace(/-+$/, "");
+  return `${combined}.${ext}`;
 }
 
 export async function fileToBase64(file: File): Promise<string> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += 1) {
-    binary += String.fromCharCode(bytes[i] as number);
-  }
-  return btoa(binary);
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+    reader.readAsDataURL(file);
+  });
 }
 
 function toggleOrdered<T>(list: readonly T[], value: T, order: readonly T[]): T[] {
@@ -155,8 +168,8 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
     case "setProduct": {
       return {
         ...state,
-        products: state.products.map((product, index) => {
-          if (index !== action.index) return product;
+        products: state.products.map((product) => {
+          if (product.key !== action.key) return product;
           const next = { ...product, ...action.patch };
           if (action.patch.id !== undefined) next.idTouched = true;
           else if (action.patch.name !== undefined && !product.idTouched) next.id = slugify(action.patch.name);
@@ -167,7 +180,7 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
     case "addProduct":
       return { ...state, products: [...state.products, emptyProduct()] };
     case "removeProduct":
-      return { ...state, products: state.products.filter((_, index) => index !== action.index) };
+      return { ...state, products: state.products.filter((product) => product.key !== action.key) };
     case "setVariation":
       return { ...state, variation: { ...state.variation, [action.field]: action.value } };
     case "toggleLayout":
@@ -207,16 +220,11 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
   }
 }
 
-function parseOptionalNumber(value: string): number | undefined {
+function parseOptionalInt(value: string): number | undefined {
   const trimmed = value.trim();
   if (trimmed === "") return undefined;
   const num = Number(trimmed);
-  return Number.isFinite(num) ? num : undefined;
-}
-
-function parseOptionalInt(value: string): number | undefined {
-  const num = parseOptionalNumber(value);
-  return num !== undefined && Number.isInteger(num) ? num : undefined;
+  return Number.isInteger(num) ? num : undefined;
 }
 
 function toProduct(draft: ProductDraft): Product {
@@ -249,7 +257,7 @@ export function toBrief(state: WizardState): CampaignBrief {
   if (state.mode !== "variation") return withCopy;
 
   const count = parseOptionalInt(state.variation.count) ?? 0;
-  const seed = parseOptionalNumber(state.variation.seed);
+  const seed = parseOptionalInt(state.variation.seed);
   const minDistance = parseOptionalInt(state.variation.minDistance);
   const perProduct = parseOptionalInt(state.variation.perProduct);
   const perRatio = parseOptionalInt(state.variation.perRatio);
@@ -261,13 +269,13 @@ export function toBrief(state: WizardState): CampaignBrief {
           ...(perRatio !== undefined ? { perRatio } : {}),
         };
 
+  // Always emit the selected axes (including empty). Omitting an axis restores the
+  // planner defaults, which is the opposite of deselecting every option.
   const axes: NonNullable<NonNullable<CampaignBrief["variation"]>["axes"]> = {
-    ...(state.variation.layout.length > 0 ? { layout: [...state.variation.layout] } : {}),
-    ...(state.variation.tone.length > 0 ? { tone: [...state.variation.tone] } : {}),
-    ...(state.variation.background.length > 0
-      ? { background: { source: [...state.variation.background] } }
-      : {}),
-    ...(state.variation.paletteShift.length > 0 ? { paletteShift: [...state.variation.paletteShift] } : {}),
+    layout: [...state.variation.layout],
+    tone: [...state.variation.tone],
+    background: { source: [...state.variation.background] },
+    paletteShift: [...state.variation.paletteShift],
   };
 
   return {
@@ -277,7 +285,7 @@ export function toBrief(state: WizardState): CampaignBrief {
       ...(seed !== undefined ? { seed } : {}),
       ...(minDistance !== undefined ? { minDistance } : {}),
       ...(coverage !== undefined ? { coverage } : {}),
-      ...(Object.keys(axes).length > 0 ? { axes } : {}),
+      axes,
     },
   };
 }
