@@ -287,6 +287,35 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Left open:**
   - Follow-ups noted in the plan's wave-1 status: clock injection, one `mockPipelineApi` test fixture, real progress from `PipelineExecutionLog.totalOperations`. Worktrees `../cf-wt-*` remain until the PRs merge.
 
+## 2026-08-25 — platform packaging (Phase 5.1+5.3)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `PlatformProfile` table in Distribution (three canvases only; motion platforms hidden).
+  - `PackageStorePort` + `FileSystemPackageStore` + `PackageForPlatformUseCase`: copy matching-ratio statics under `output/<campaignId>/platforms/<id>/` and write `manifest.json`. Never re-renders.
+  - `POST /campaigns/package` wires the use case at the route; `readReport` helper shared with `GET /campaigns/result`.
+- **Decisions:**
+  - LinkedIn is 1:1 static (this wave's table wins over the long-form `1:1 | 16:9` note).
+  - `safeInsets` are zeros; `maxBytes` is 8 MiB static / 100 MiB motion (documented caps, not live APIs).
+  - Empty ratio selection still writes an empty-items manifest so the platform folder exists.
+  - Port/adapter omitted from the hexagen manifest: listing them emits `*.out-port.ts` / `*.adapter.ts` stubs that clash with neighbour names (`ExportPort.ts`, `FileSystemExporter.ts`). Hand-export the port from `application/ports/out/index.ts`.
+  - Distribution `src/index.ts` re-exports application + domain (hexagen modular-monolith mode does not refresh the package root barrel when new layers gain content).
+- **Left open:**
+  - Phase 5.2 (safe insets at generation) and 5.4 (export-page UI). Motion profiles stay `visible: false` until P4.
+
+## 2026-08-25 — PR #48 packaging review fixes
+
+- **Mode:** Implementer
+- **Changes:**
+  - Use case catches store errors per platform (`Platform "<id>": <reason>`, absolute paths stripped) and the route maps use-case `err` to 422.
+  - Adapter stages each platform in `<platformDir>.staging-<random>` then `rm -rf` + `rename` so a failure never leaves a mixed folder and a smaller re-package drops stale files.
+  - Packaging moved to `output/packages/<campaignId>/<platformId>/`. Shared `resolveSafe` helper; campaign root resolved in the adapter constructor; `readFile` Buffer returned as-is.
+  - Exported `isPersistedAsset` (productId/aspectRatio/treatment/outputPath); invalid rows skipped + counted on the manifest; non-array `assets` → 422. Duplicate platform ids de-duplicated in order.
+  - `packagedAt` ISO timestamp injected from the composition-root clock (no `new Date()` in the use case). Removed filled-layer `.gitkeep`s; `yarn sync` barrel-exported `safe-path.ts`.
+- **Decisions:**
+  - Refuted Qodo "old campaign packages newer bytes": renders are not campaign-namespaced; that is wave-3 identity/output-path work. The package is explicitly the current output for that report (`packagedAt` + route/README sentence).
+- **Left open:**
+  - Wave-3 campaign-namespaced output paths. Phase 5.2 / 5.4.
 ## 2026-08-25 — drawCreative extract (Phase 4.2)
 
 - **Mode:** Implementer

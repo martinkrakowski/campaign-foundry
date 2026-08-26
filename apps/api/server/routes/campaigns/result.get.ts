@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { outputRoot } from "../../lib/config.js";
-import { campaignReportPath, latestReportPath } from "../../lib/report.js";
+import { latestReportPath, readReport } from "../../lib/report.js";
 
 /** The empty "no run yet" result the UI treats as "never ran". */
 const EMPTY = { halted: false, assets: [], log: null };
@@ -16,20 +16,17 @@ export default defineEventHandler(async (event) => {
   const root = outputRoot();
   const campaignId = getQuery(event).campaignId;
 
-  let path: string | null;
   if (campaignId !== undefined) {
     // A present campaignId must be a single string. Repeated params yield string[] —
     // treat that (and any non-string) as an invalid id → empty, not a fall-through to
     // the latest run, matching the "unknown/unsafe id → empty result" contract.
     if (typeof campaignId !== "string") return EMPTY;
-    path = campaignReportPath(root, campaignId); // null for an unsafe/empty id
-    if (!path) return EMPTY;
-  } else {
-    path = latestReportPath(root);
+    const report = await readReport(root, campaignId);
+    return report === undefined ? EMPTY : report;
   }
 
   try {
-    return JSON.parse(await readFile(path, "utf8"));
+    return JSON.parse(await readFile(latestReportPath(root), "utf8"));
   } catch {
     return EMPTY;
   }
