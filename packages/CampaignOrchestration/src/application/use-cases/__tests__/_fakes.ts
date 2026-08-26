@@ -64,6 +64,7 @@ export const fakeVideoCompositor = (opts: { logoApplied?: boolean; frames?: numb
 export type RecordingExporter = ExportPort & {
   readonly saved: Array<{ path: string; bytes: number }>;
   readonly proofs: string[];
+  readonly removed: string[];
 };
 
 export const fakeVariant = (over: Partial<Variant> = {}): Variant => ({
@@ -105,14 +106,19 @@ export const fakePlanner = (plan: VariationPlan | Error = fakePlan([fakeVariant(
 export const recordingExporter = (): RecordingExporter => {
   const saved: Array<{ path: string; bytes: number }> = [];
   const proofs: string[] = [];
+  const removed: string[] = [];
   return {
     saved,
     proofs,
+    removed,
     saveToDirectory: vi.fn(async (buf: Uint8Array, path: string) => {
       saved.push({ path, bytes: buf.length });
     }),
     generatePrintProof: vi.fn(async (_buf: Uint8Array, path: string) => {
       proofs.push(path);
+    }),
+    remove: vi.fn(async (path: string) => {
+      removed.push(path);
     }),
   };
 };

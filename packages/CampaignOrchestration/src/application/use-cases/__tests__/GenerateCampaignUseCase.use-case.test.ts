@@ -564,6 +564,29 @@ describe("GenerateCampaignUseCase — variation", () => {
     });
   });
 
+  test("a static variation row keeps the pre-motion key order (reports stay byte-identical)", async () => {
+    const d = deps({ planner: fakePlanner(fakePlan([fakeVariant()])) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(Object.keys(result.value.assets[0])).toEqual([
+      "productId",
+      "aspectRatio",
+      "outputPath",
+      "proofPath",
+      "complianceScore",
+      "passedCompliance",
+      "logoApplied",
+      "treatment",
+      "backgroundSource",
+      "variantIndex",
+      "attempt",
+      "seed",
+      "format",
+      "descriptor",
+    ]);
+  });
+
   test("print proof is pinned to the first 1:1 variant of each product in plan order", async () => {
     const variants = [
       fakeVariant({ index: 0, aspectRatio: "16:9" }),

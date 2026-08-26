@@ -40,10 +40,21 @@ const MOTION_SAMPLE_AT: readonly number[] = [0, 0.25, 0.5, 0.75, 1];
 /** Planner default; a motion variant without `durationSec` (hand-built plan) encodes this. */
 const DEFAULT_DURATION_SEC = 6;
 
+/** Row identity + paths: the leading keys of every persisted asset row. */
+type VariationAssetIdentity = Pick<GeneratedAsset, "productId" | "aspectRatio" | "outputPath" | "proofPath">;
+/** Variation lineage: the keys that follow the compliance verdict in a persisted row. */
+type VariationAssetLineage = Pick<
+  GeneratedAsset,
+  "treatment" | "backgroundSource" | "variantIndex" | "attempt" | "seed"
+>;
 /** A variation asset before its compliance verdict — shared by the static and motion renders. */
-type VariationAssetBase = Omit<GeneratedAsset, "complianceScore" | "passedCompliance" | "logoApplied"> & {
+interface VariationAssetBase {
+  readonly identity: VariationAssetIdentity;
+  readonly lineage: VariationAssetLineage;
   readonly descriptor: VariantDescriptor;
-};
+  /** `<product>/<ratio>/v<index>.mp4` — written by a motion slot, removed by a still. */
+  readonly videoPath: string;
+}
 
 /**
  * Run `fn` over `items` with at most `limit` in flight at once, preserving input
@@ -436,27 +447,38 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     const treatment = variantTreatmentId(variant);
     const basePath = `${product.id}/${ratio.slug}/v${variant.index}`;
     const outputPath = `${basePath}.png`;
-    const base: VariationAssetBase = {
+    const videoPath = `${basePath}.mp4`;
+    const identity: VariationAssetIdentity = {
       productId: product.id,
       aspectRatio: ratio.value,
       outputPath,
       proofPath: `proofs/${product.id}.pdf`,
+    };
+    const lineage: VariationAssetLineage = {
       treatment,
       backgroundSource: background.source,
       variantIndex: variant.index,
       attempt,
       seed: variant.seed,
-      format: "static",
-      descriptor: {
-        layout: variant.layout,
-        tone: variant.tone,
-        backgroundSource: variant.backgroundSource,
-        paletteShift: variant.paletteShift,
-      },
+    };
+    const descriptor: VariantDescriptor = {
+      layout: variant.layout,
+      tone: variant.tone,
+      backgroundSource: variant.backgroundSource,
+      paletteShift: variant.paletteShift,
     };
 
     if (variant.motion !== undefined) {
-      return this.renderMotionVariant(variant, variant.motion, product, ratio, request, base, log, writeProof);
+      return this.renderMotionVariant(
+        variant,
+        variant.motion,
+        product,
+        ratio,
+        request,
+        { identity, lineage, descriptor, videoPath },
+        log,
+        writeProof,
+      );
     }
 
     const composite = await this.deps.compositor.compositeAsset(request);
@@ -468,11 +490,16 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
 
     await this.deps.exporter.saveToDirectory(composite.image, outputPath);
 
+    // Key order matches the classic/static row exactly, so static variation
+    // reports stay byte-identical to the pre-motion pipeline.
     const asset: GeneratedAsset = {
-      ...base,
+      ...identity,
       complianceScore: visual.score ?? 0,
       passedCompliance: visual.passed,
       logoApplied: composite.logoApplied,
+      ...lineage,
+      format: "static",
+      descriptor,
     };
     log.record(
       "CompositeVariations",
@@ -496,7 +523,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     product: Product,
     ratio: AspectRatio,
     request: CompositeRequest,
-    base: VariationAssetBase,
+    { identity, lineage, descriptor, videoPath }: VariationAssetBase,
     log: PipelineExecutionLog,
     writeProof: boolean,
   ): Promise<{ asset: GeneratedAsset; heroImage?: Uint8Array }> {
@@ -518,23 +545,23 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       minScore = Math.min(minScore, visual.score ?? 0);
     }
 
-    const videoPath = `${base.outputPath.slice(0, -".png".length)}.mp4`;
     await this.deps.exporter.saveToDirectory(video.video, videoPath);
-    await this.deps.exporter.saveToDirectory(video.poster, base.outputPath);
+    await this.deps.exporter.saveToDirectory(video.poster, identity.outputPath);
 
     const asset: GeneratedAsset = {
-      ...base,
-      videoPath,
-      durationSec,
+      ...identity,
       complianceScore: minScore,
       passedCompliance: passed,
       logoApplied: video.logoApplied,
+      ...lineage,
       format: "motion",
-      descriptor: { ...base.descriptor, motion, durationSec },
+      descriptor: { ...descriptor, motion, durationSec },
+      videoPath,
+      durationSec,
     };
     log.record(
       "CompositeVariations",
-      `${product.id} @ ${ratio.value} [v${variant.index} ${base.treatment} ${motion} ${durationSec}s] — min brand density over ${video.sampledFrames.length} frames ${minScore.toFixed(3)}${passed ? "" : " (below threshold)"}, logo ${video.logoApplied ? "present" : "missing"}`,
+      `${product.id} @ ${ratio.value} [v${variant.index} ${lineage.treatment} ${motion} ${durationSec}s] — min brand density over ${video.sampledFrames.length} frames ${minScore.toFixed(3)}${passed ? "" : " (below threshold)"}, logo ${video.logoApplied ? "present" : "missing"}`,
       passed && video.logoApplied ? "info" : "warn",
     );
     // The proof pin is by plan order and ratio; a pinned motion 1:1 hero proofs from its poster.
