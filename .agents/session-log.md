@@ -298,3 +298,13 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Module-level exports only (`PreparedCreative`, `drawCreative`, `prepareCreative` as a class method); no barrel/manifest change.
 - **Left open:**
   - Phase 4.3 motion (background + headline only; band and logo static across `t`).
+
+## 2026-08-25 — compositor goldens keyed by platform
+
+- **Mode:** Implementer
+- **Changes:**
+  - Keyed the 12-cell PNG sha256 fixture by `darwin` / `linux` so CI (FreeType) and local (CoreText) both assert byte-identity without changing draw/prepare.
+- **Decisions:**
+  - Missing `process.platform` fails the test (does not skip). Linux map recorded from CI of the same refactor, not a behaviour change.
+- **Left open:**
+  - none.

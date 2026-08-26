@@ -29,15 +29,24 @@ const cellKey = (layout: LayoutKind, tone: ToneKind, ratioValue: string) =>
 
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
-const goldens = JSON.parse(
+type GoldenMap = Record<string, string>;
+
+const fixture = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures/compositor-goldens.json"), "utf8"),
-) as Record<string, string>;
+) as Record<string, GoldenMap>;
 
 describe("NodeCanvasCompositor goldens", () => {
   const compositor = new NodeCanvasCompositor();
   const backgrounds = new ProceduralBackgroundGenerator();
 
   test("still PNG sha256 matches the committed matrix (both layouts × both tones × three ratios)", async () => {
+    // Font rasterization differs by OS (CoreText vs FreeType); maps are per-platform.
+    const goldens = fixture[process.platform] ?? {};
+    expect(
+      Object.keys(goldens),
+      `No compositor PNG goldens for platform "${process.platform}" (recorded: ${Object.keys(fixture).join(", ")})`,
+    ).toHaveLength(12);
+
     const observed: Record<string, string> = {};
     for (const layout of LAYOUTS) {
       for (const tone of TONES) {
