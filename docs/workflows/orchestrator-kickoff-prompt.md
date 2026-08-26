@@ -109,10 +109,32 @@ git worktree add "../wt-<lane>" -b "feat/<lane>" origin/<default-branch>
 - **Delegated:** write `/tmp/brief-<lane>.md` from **Template A** in the pipeline doc, filled
   from the plan, then launch the implement CLI **detached** so a harness timeout cannot kill it:
   `nohup zsh -c 'CLI … > /tmp/<lane>.log 2>&1; echo "EXIT $?" >> /tmp/<lane>.log' >/dev/null 2>&1 & disown`.
-  Respect the parallelism cap. Poll for the `EXIT` marker; a lane is done when it has opened a
-  PR and reported its URL, files changed, coverage line and deviations.
+  Respect the parallelism cap. Poll for the `EXIT` marker — then **derive** the lane's state
+  rather than reading its summary (see below). A lane is done when a PR exists and the gate
+  passes, both confirmed by you.
 - **Self:** do the same work yourself in that worktree, one lane at a time, and open the PR the
   same way — same gates, same Deviations section.
+
+**Lane status is derived, never asserted.** Before you believe any progress report — the
+implementer's, or your own from an earlier turn — run these three and let their output be the
+status:
+
+```bash
+lane=feat/<lane>; wt=../wt-<lane>
+gh pr list --head "$lane" --json number,url --jq '.[] | "#\(.number) \(.url)"'   # empty ⇒ stuck
+# --head lists OPEN prs only; add --state merged when checking a lane you already merged
+(cd "$wt" && <gate commands>); echo "gate exit: $?"                               # non-zero ⇒ not green
+git -C "$wt" status --porcelain=v1 -b && git -C "$wt" diff --stat origin/<default-branch>...HEAD
+```
+
+Read the diffstat's **deletions**, not just its file count: a tree removing test files whose
+sources still exist is a lane thrashing, not progressing. If the derived status contradicts the
+report, the derived status wins, and your summary says so instead of relaying the prose.
+
+A lane with **no PR has not started stage 2** — and stage 2 is the only stage that finds
+defects. Treat "nearly done, one test failing" with no pushed branch as *stuck*: stop the lane,
+park its tree with `git stash push -u` rather than discarding it, and diagnose from the last
+commit and the gate output.
 
 ## STAGE 2 — Review
 
@@ -180,5 +202,13 @@ it without a fresh go-ahead.
 After each stage, a few lines: what ran, what came back, what you decided, what is next. At the
 end, one table: `PR | branch | URL | gate | fixed | refuted`.
 
-Never claim a fix you have not verified, never report a lane as done without its PR URL, and
-never describe a merge as complete until the default branch contains it.
+**Every cell in that table is the output of a command, not a recollection.** Fill it from
+`gh pr list --head`, the gate's exit code, and `git log origin/<default-branch>..HEAD` — never
+from what a lane told you, including a lane you ran yourself. If you cannot produce the command
+output for a cell, the cell is **unknown**, and unknown is a valid answer; a confident wrong one
+is not.
+
+Never claim a fix you have not verified, never report a lane as done without a PR URL you have
+just listed, and never describe a merge as complete until you have confirmed the default branch
+contains it. When you are stuck, say **STUCK** and what blocks it — a stalled lane reported as
+progress costs far more than one reported as stuck.
