@@ -9,4 +9,6 @@ export interface ExportPort {
   saveToDirectory(imageBuffer: Uint8Array, relativePath: string): Promise<void>;
   /** Wrap a creative in a print-proof PDF and persist it at a relative path. */
   generatePrintProof(imageBuffer: Uint8Array, relativePath: string): Promise<void>;
+  /** Delete a previously persisted file; idempotent — a missing file is not an error. */
+  remove(relativePath: string): Promise<void>;
 }

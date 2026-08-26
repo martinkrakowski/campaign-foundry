@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createCanvas } from "@napi-rs/canvas";
@@ -41,6 +41,20 @@ describe("FileSystemExporter", () => {
   test("saveToDirectory refuses a path that escapes the output root", async () => {
     await expect(exporter.saveToDirectory(png(), "../escape.png")).rejects.toThrow(
       /Refusing to write outside the output root/,
+    );
+  });
+
+  test("remove deletes a persisted file and is a no-op when it is already gone", async () => {
+    await exporter.saveToDirectory(png(), "hydra-bottle/9x16/v0.mp4");
+    await exporter.remove("hydra-bottle/9x16/v0.mp4");
+    expect(existsSync(resolve(root, "hydra-bottle/9x16/v0.mp4"))).toBe(false);
+    await expect(exporter.remove("hydra-bottle/9x16/v0.mp4")).resolves.toBeUndefined();
+    await expect(exporter.remove("never/written.mp4")).resolves.toBeUndefined();
+  });
+
+  test("remove refuses a path that escapes the output root", async () => {
+    await expect(exporter.remove("../escape.mp4")).rejects.toThrow(
+      /Refusing to remove outside the output root/,
     );
   });
 

@@ -564,6 +564,15 @@ describe("GenerateCampaignUseCase — variation", () => {
     });
   });
 
+  test("a still removes the slot's mp4 (a re-rolled motion slot leaves no stale clip)", async () => {
+    const d = deps({ planner: fakePlanner(fakePlan([fakeVariant({ index: 0, aspectRatio: "9:16" })])) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [{ productId: "alpha", variantIndex: 0, attempt: 1 }],
+    });
+    expect(result.success).toBe(true);
+    expect((d.exporter as RecordingExporter).removed).toEqual(["alpha/9x16/v0.mp4"]);
+  });
+
   test("a static variation row keeps the pre-motion key order (reports stay byte-identical)", async () => {
     const d = deps({ planner: fakePlanner(fakePlan([fakeVariant()])) });
     const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
@@ -715,6 +724,8 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     });
     expect(result.value.assets[1]).toMatchObject({ format: "static" });
     expect(result.value.assets[1]).not.toHaveProperty("videoPath");
+    // Only the still slot clears a clip; the motion slot just wrote its own.
+    expect((d.exporter as RecordingExporter).removed).toEqual(["alpha/9x16/v1.mp4"]);
     // Every sampled frame was brand-checked (5) plus the one static composite.
     expect(d.compliance.validateBrandColorDensity).toHaveBeenCalledTimes(6);
     expect(result.value.log.entries.some((e) => /ken-burns-in 6s/.test(e.message) && e.level === "info")).toBe(true);

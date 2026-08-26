@@ -489,6 +489,9 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     );
 
     await this.deps.exporter.saveToDirectory(composite.image, outputPath);
+    // A re-roll of a former motion slot must not leave its clip behind: the grid,
+    // export and packaging key on the row, and a stale mp4 would still be served.
+    await this.deps.exporter.remove(videoPath);
 
     // Key order matches the classic/static row exactly, so static variation
     // reports stay byte-identical to the pre-motion pipeline.
