@@ -6,6 +6,7 @@ import type { VariationPlan } from "../../domain/value-objects/VariationPlan.vo.
 import {
   DISTANCE_AXES,
   VariationPolicy,
+  type PlanInput,
 } from "../../domain/value-objects/VariationPolicy.vo.js";
 
 /** Re-roll bound: 64 draws from `seedFrom(briefId, index, attempt)`. */
@@ -22,11 +23,12 @@ interface AxisDraw {
  * `plan` round-robins deficient coverage axes, then fills to `count`, greedy-accepting
  * at Hamming `minDistance`, with a hard cap of `count × 3` candidates. Coverage is
  * a property of the accepted set. `replan` replaces one slot without breaking
- * distance or coverage.
+ * distance or coverage. `input.headlines` (the approved copy pool) is resolved
+ * into the policy at plan time; the stored policy carries it for `replan`.
  */
 export class PlanVariationsUseCase {
-  plan(brief: CampaignBrief): Result<VariationPlan, Error> {
-    const policyResult = VariationPolicy.fromBrief(brief);
+  plan(brief: CampaignBrief, input: PlanInput = {}): Result<VariationPlan, Error> {
+    const policyResult = VariationPolicy.fromBrief(brief, input);
     if (!policyResult.success) return policyResult;
     const policy = policyResult.value;
 
@@ -152,7 +154,13 @@ function drawAxes(
     tone: rng.pick(policy.tone),
     backgroundSource: rng.pick(policy.backgroundSource),
     paletteShift: rng.pick(policy.paletteShift),
+    ...drawHeadline(rng, policy),
   };
+}
+
+/** Draw a pooled headline last, so briefs without the axis leave the rng sequence untouched. */
+function drawHeadline(rng: SeededRandom, policy: VariationPolicy): { headline?: string } {
+  return policy.headline.length === 0 ? {} : { headline: rng.pick(policy.headline) };
 }
 
 function hamming(a: Variant, b: Variant): number {

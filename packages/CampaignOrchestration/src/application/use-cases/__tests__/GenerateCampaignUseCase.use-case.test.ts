@@ -313,6 +313,17 @@ describe("GenerateCampaignUseCase — variation", () => {
     if (result.success) expect(result.value.assets).toHaveLength(2);
   });
 
+  test("composites a variant's pooled headline, else the resolved copy", async () => {
+    const variants = [fakeVariant({ headline: "Stay wild" }), fakeVariant({ index: 1, aspectRatio: "9:16" })];
+    const d = deps({ planner: fakePlanner(fakePlan(variants)) });
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({ localizedMessage: "Bleib wild" }),
+    );
+    expect(result.success).toBe(true);
+    const messages = vi.mocked(d.compositor.compositeAsset).mock.calls.map((call) => call[0].message);
+    expect(messages).toEqual(["Stay wild", "Bleib wild"]);
+  });
+
   test("classic still requires two products", async () => {
     const result = await new GenerateCampaignUseCase(deps()).execute(baseBrief({ products: [product("alpha")] }));
     expect(result.success).toBe(false);
