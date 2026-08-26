@@ -13,6 +13,7 @@ if it is not here (or is in "Never Suggest"), do not introduce it without asking
 | Vitest        | Test runner   | `import { describe, test, expect } from "vitest"`; `vi` for mocks. |
 | @testing-library/react | UI tests | Render/query components under happy-dom; assert with `expect`. |
 | happy-dom     | Test DOM      | Vitest `environment: "happy-dom"` for the web project.           |
+| ffmpeg-static | Video encode (motion creatives) | Pinned 5.3.0 (exact, both package.jsons); GPL-licensed binary — note for client distribution |
 
 > Keep this table accurate. When you add a dependency (or a Hexagen template
 > adds one), add its row here in the same change — a stale stack reference is

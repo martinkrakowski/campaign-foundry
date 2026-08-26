@@ -278,6 +278,14 @@ describe("store-zip", () => {
     expect(parseCentralDirectory(zip)).toEqual(entries);
   });
 
+  test("never emits a zero-length chunk (empty directory, empty file)", async () => {
+    const chunks: Buffer[] = [];
+    for await (const c of storeZipStream([], () => Readable.from([]))) chunks.push(c as Buffer);
+    const empty = { name: "e.txt", size: 0, crc: 0 };
+    for await (const c of storeZipStream([empty], () => Readable.from([Buffer.alloc(0)]))) chunks.push(c as Buffer);
+    expect(chunks.every((c) => c.length > 0)).toBe(true);
+  });
+
   test("storeZipStream of no entries is just an empty central directory", async () => {
     const zip = await collect(storeZipStream([], () => Readable.from([])));
     expect(zip.length).toBe(22);

@@ -2,6 +2,16 @@ import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { existsSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+
+const probeMock = vi.hoisted(() =>
+  vi.fn(async (): Promise<{ motion: boolean; reason?: string }> => ({ motion: true })),
+);
+
+vi.mock("../../server/lib/capabilities.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../server/lib/capabilities.js")>();
+  return { ...actual, probeFfmpeg: probeMock };
+});
+
 import { main } from "../generate.js";
 
 const KEYS = ["GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY"];
@@ -30,6 +40,8 @@ describe("generate CLI main()", () => {
       snap[k] = process.env[k];
       delete process.env[k]; // force the offline procedural path
     }
+    probeMock.mockReset();
+    probeMock.mockResolvedValue({ motion: true });
     dir = mkdtempSync(join(tmpdir(), "cf-cli-"));
     process.env.OUTPUT_DIR = dir;
     vi.spyOn(console, "log").mockImplementation(() => {});
@@ -79,6 +91,16 @@ describe("generate CLI main()", () => {
     writeFileSync(path, briefJson({ products: [{ id: "solo", name: "S", primaryColor: "#111111", logoPath: "x.png" }] }));
     await main(path);
     expect(process.exitCode).toBe(1);
+  });
+
+  test("warns on a failed ffmpeg probe without changing the exit code", async () => {
+    probeMock.mockResolvedValueOnce({ motion: false, reason: "no binary" });
+    const path = join(dir, "probe.json");
+    writeFileSync(path, briefJson());
+    await main(path);
+    expect(process.exitCode).not.toBe(1);
+    expect(probeMock).toHaveBeenCalledWith({ timeoutMs: 2_000 });
+    expect(vi.mocked(console.warn).mock.calls.flat().join(" ")).toMatch(/motion unavailable: no binary/);
   });
 
   test("warns and writes no creatives when the legal gate halts", async () => {
