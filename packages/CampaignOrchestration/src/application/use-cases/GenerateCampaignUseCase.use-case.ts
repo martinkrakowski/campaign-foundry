@@ -54,6 +54,7 @@ export interface GenerateCampaignDeps {
   readonly compositor: CompositorPort;
   readonly compliance: CompliancePort;
   readonly exporter: ExportPort;
+  readonly now: () => Date;
 }
 
 /**
@@ -70,7 +71,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     brief: CampaignBrief,
     options?: CampaignExecutionOptions,
   ): Promise<Result<PipelineResult, Error>> {
-    const log = new PipelineExecutionLog(brief.id);
+    const log = new PipelineExecutionLog(brief.id, this.deps.now);
 
     // 1. ValidateBriefIntegrity — MinimumProductsRule, before any port is called.
     const validation = this.validateBrief(brief);
