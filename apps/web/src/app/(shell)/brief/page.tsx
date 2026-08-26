@@ -2,7 +2,7 @@
 
 import type { CampaignBrief, Product } from "@campaignfoundry/CampaignOrchestration";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRun } from "@/lib/run-context";
 import { Button, Input } from "@/components/ui";
 import { createBrief, isBriefsApiError, unknownErrorMessage } from "@/lib/briefs-api";
@@ -21,25 +21,45 @@ const toDraft = (p: Product): ProductDraft => ({
   logoPath: p.logoPath,
 });
 
+const formFromBrief = (source: CampaignBrief) => ({
+  id: source.id,
+  targetRegion: source.targetRegion,
+  targetAudience: source.targetAudience,
+  campaignMessage: source.campaignMessage,
+  localizedMessage: source.localizedMessage ?? "",
+  products: source.products.map(toDraft),
+});
+
+/** Merge editor drafts onto the loaded products so optional fields (inputAsset, …) survive. */
+const mergeProducts = (originals: readonly Product[], drafts: readonly ProductDraft[]): Product[] =>
+  drafts.map((draft, index) => {
+    const original = originals.find((product) => product.id === draft.id) ?? originals[index];
+    return original ? { ...original, ...draft } : draft;
+  });
+
 /** HITL brief authoring — edits the brief the orchestrator runs against. */
 export default function BriefPage() {
   const { brief, setBrief } = useRun();
   const router = useRouter();
 
-  const [form, setForm] = useState({
-    id: brief.id,
-    targetRegion: brief.targetRegion,
-    targetAudience: brief.targetAudience,
-    campaignMessage: brief.campaignMessage,
-    localizedMessage: brief.localizedMessage ?? "",
-    products: brief.products.map(toDraft),
-  });
+  const [form, setForm] = useState(() => formFromBrief(brief));
   const [savedFile, setSavedFile] = useState<string | undefined>();
   const [persistError, setPersistError] = useState<string | undefined>();
   const [conflict, setConflict] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveAsId, setSaveAsId] = useState<string | null>(null);
   const [pendingAsId, setPendingAsId] = useState<string | undefined>();
+
+  useEffect(() => {
+    setForm(formFromBrief(brief));
+    setPersistError(undefined);
+    setConflict(false);
+    setSaveAsId(null);
+    setPendingAsId(undefined);
+    setSavedFile((file) => (file && file.startsWith(`${brief.id}.`) ? file : undefined));
+  }, [brief.id]); // identity of the loaded brief (picker switch), not per-keystroke edits
+
+  const draftStale = form.id !== brief.id;
 
   const setField = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
@@ -68,7 +88,7 @@ export default function BriefPage() {
     targetAudience: form.targetAudience,
     campaignMessage: form.campaignMessage,
     localizedMessage: form.localizedMessage || undefined,
-    products: form.products,
+    products: mergeProducts(brief.products, form.products),
   });
 
   const save = () => {
@@ -225,25 +245,25 @@ export default function BriefPage() {
       ) : null}
 
       <div className="flex flex-wrap gap-3">
-        <Button onClick={save} disabled={!idValid}>
+        <Button onClick={save} disabled={!idValid || draftStale}>
           Save brief
         </Button>
         <Button
           variant="secondary"
           onClick={() => void persist()}
-          disabled={!idValid || saving}
+          disabled={!idValid || saving || draftStale}
           isLoading={saving && pendingAsId === undefined}
         >
           Save to briefs/
         </Button>
-        <Button variant="secondary" onClick={() => setSaveAsId("")} disabled={!idValid || saving}>
+        <Button variant="secondary" onClick={() => setSaveAsId("")} disabled={!idValid || saving || draftStale}>
           Save as…
         </Button>
         {conflict ? (
           <Button
             variant="secondary"
             onClick={() => void persist({ replace: true, asId: pendingAsId })}
-            disabled={saving}
+            disabled={saving || draftStale}
           >
             Replace
           </Button>
