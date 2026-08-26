@@ -102,7 +102,8 @@ bounded_contexts:
     layers:
       domain:
         entities: []
-        value_objects: []
+        value_objects:
+          - SeededRandom
         domain_services: []
       application:
         use_cases: []
