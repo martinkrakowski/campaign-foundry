@@ -320,10 +320,11 @@ opencode --model opencode/nemotron-3-ultra-free
 
 ### 1 — Kick it off
 
-Fill in the four `INPUTS` at the top of
-[`orchestrator-kickoff-prompt.md`](orchestrator-kickoff-prompt.md) and paste the whole prompt
-into the orchestrator session — it carries the cast table, the per-stage commands, the
-invariants and the reporting contract, so no further instruction is needed until it reports.
+Paste [`orchestrator-kickoff-prompt.md`](orchestrator-kickoff-prompt.md) into the orchestrator
+session with nothing filled in: it detects the repo, plans and available CLIs, then asks one
+batch of questions (plan and wave, who implements, who reviews, who remediates, parallelism)
+with defaults you can accept wholesale, refuses a cast where the reviewer is also the
+implementer, and confirms the lanes before touching anything.
 
 ```bash
 sed -n '/^---$/,$p' docs/workflows/orchestrator-kickoff-prompt.md | tail -n +2 | pbcopy
