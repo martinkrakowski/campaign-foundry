@@ -21,17 +21,47 @@ const formatOf = (a: Asset): "static" | "motion" => a.format ?? "static";
 
 const uniqueSorted = (values: string[]): string[] => [...new Set(values)].sort();
 
+interface GridFilters {
+  product: string;
+  ratio: string;
+  format: string;
+  layout: string;
+  tone: string;
+  background: string;
+  page: number;
+}
+
+const DEFAULT_FILTERS: GridFilters = {
+  product: "",
+  ratio: "",
+  format: "",
+  layout: "",
+  tone: "",
+  background: "",
+  page: 1,
+};
+
+/** A stored filter value only applies while it is one of the current options; otherwise it is "All". */
+const effective = (value: string, options: string[]): string => (options.includes(value) ? value : "");
+
 /** Review grid — the HITL surface where a human approves or rejects creatives. */
 export default function GridPage() {
-  const { assets, decisions, decide, loading, assetVersion, regeneratingKeys } = useRun();
+  const { brief, assets, decisions, decide, loading, assetVersion, regeneratingKeys } = useRun();
   const [previewKey, setPreviewKey] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
-  const [productFilter, setProductFilter] = useState("");
-  const [ratioFilter, setRatioFilter] = useState("");
-  const [formatFilter, setFormatFilter] = useState("");
-  const [layoutFilter, setLayoutFilter] = useState("");
-  const [toneFilter, setToneFilter] = useState("");
-  const [backgroundFilter, setBackgroundFilter] = useState("");
+  // Filters and the page belong to one brief + run: a brief switch or a new run
+  // (assetVersion bump) drops them back to defaults instead of hiding the new
+  // creatives behind a stale selection. Keyed state, so no reset effect is needed.
+  const filtersKey = `${brief.id}:${assetVersion}`;
+  const [filterState, setFilterState] = useState({ key: filtersKey, filters: DEFAULT_FILTERS });
+  const filters = filterState.key === filtersKey ? filterState.filters : DEFAULT_FILTERS;
+  const updateFilters = useCallback(
+    (patch: Partial<GridFilters>) =>
+      setFilterState((prev) => ({
+        key: filtersKey,
+        filters: { ...(prev.key === filtersKey ? prev.filters : DEFAULT_FILTERS), ...patch },
+      })),
+    [filtersKey],
+  );
   const closePreview = useCallback(() => setPreviewKey(null), []);
   // Derive the previewed asset from the live list (not a snapshot), so its
   // compliance/logo metadata can never go stale against the cache-busted image; if
@@ -62,10 +92,20 @@ export default function GridPage() {
     [assets],
   );
 
-  const applyFilter = (setter: (value: string) => void) => (value: string) => {
-    setter(value);
-    setPage(1);
-  };
+  const applyFilter =
+    (name: keyof Omit<GridFilters, "page">) =>
+    (value: string) =>
+      updateFilters({ [name]: value, page: 1 });
+
+  // Each select's effective value is checked against the live options, so a value
+  // that no longer exists (e.g. a product missing from the new run) acts as "All".
+  const productFilter = effective(filters.product, filterOptions.products);
+  const ratioFilter = effective(filters.ratio, filterOptions.ratios);
+  const formatFilter = effective(filters.format, filterOptions.formats);
+  const layoutFilter = effective(filters.layout, filterOptions.layouts);
+  const toneFilter = effective(filters.tone, filterOptions.tones);
+  const backgroundFilter = effective(filters.background, filterOptions.backgrounds);
+  const page = filters.page;
 
   const filtered = useMemo(
     () =>
@@ -139,19 +179,19 @@ export default function GridPage() {
           label="Product"
           value={productFilter}
           options={filterOptions.products}
-          onChange={applyFilter(setProductFilter)}
+          onChange={applyFilter("product")}
         />
         <FilterSelect
           label="Ratio"
           value={ratioFilter}
           options={filterOptions.ratios}
-          onChange={applyFilter(setRatioFilter)}
+          onChange={applyFilter("ratio")}
         />
         <FilterSelect
           label="Format"
           value={formatFilter}
           options={filterOptions.formats}
-          onChange={applyFilter(setFormatFilter)}
+          onChange={applyFilter("format")}
         />
         {hasDescriptors && (
           <>
@@ -159,19 +199,19 @@ export default function GridPage() {
               label="Layout"
               value={layoutFilter}
               options={filterOptions.layouts}
-              onChange={applyFilter(setLayoutFilter)}
+              onChange={applyFilter("layout")}
             />
             <FilterSelect
               label="Tone"
               value={toneFilter}
               options={filterOptions.tones}
-              onChange={applyFilter(setToneFilter)}
+              onChange={applyFilter("tone")}
             />
             <FilterSelect
               label="Background source"
               value={backgroundFilter}
               options={filterOptions.backgrounds}
-              onChange={applyFilter(setBackgroundFilter)}
+              onChange={applyFilter("background")}
             />
           </>
         )}
@@ -217,7 +257,7 @@ export default function GridPage() {
       {canShowMore && (
         <button
           type="button"
-          onClick={() => setPage((n) => n + 1)}
+          onClick={() => updateFilters({ page: page + 1 })}
           className="self-center rounded-full border border-border bg-surface px-5 py-2 text-[13px] text-text-primary transition-colors hover:bg-border-hover"
         >
           Show more

@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach } from "vitest";
 import { screen, waitFor, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, Fragment } from "react";
-import { renderWithRun, seedPersistedRun, makeAsset, exerciseFocusTrap, mockPipelineApi, jobOk } from "@/__tests__/helpers";
+import { renderWithRun, seedPersistedRun, makeAsset, exerciseFocusTrap, mockPipelineApi, jobOk, json } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import GridPage from "../page";
 
@@ -204,6 +204,52 @@ describe("GridPage", () => {
     await user.selectOptions(screen.getByLabelText("Layout"), "headline-bottom");
     expect(await screen.findByText(/No creatives match the current filters/)).toBeTruthy();
     expect(screen.queryByText("Show more")).toBeNull();
+  });
+
+  test("a brief switch resets the filters and the page to defaults", async () => {
+    function Switch() {
+      const { setBrief, brief } = useRun();
+      return createElement(Fragment, null,
+        createElement("button", {
+          onClick: () =>
+            setBrief({
+              ...brief,
+              id: "other",
+              products: [{ id: "gamma", name: "Gamma", primaryColor: "#111111", logoPath: "g.png" }],
+            }),
+        }, "switch"),
+        createElement(GridPage, null),
+      );
+    }
+    const user = userEvent.setup();
+    const seedAssets = Array.from({ length: 30 }, (_, i) =>
+      makeAsset({ productId: i % 2 ? "alpha" : "beta", outputPath: `a-${i}.png`, treatment: `t${i}` }),
+    );
+    const otherAssets = [
+      makeAsset({ productId: "gamma", outputPath: "gamma/1x1.png" }),
+      makeAsset({ productId: "delta", outputPath: "delta/1x1.png" }),
+    ];
+    seedPersistedRun(seedAssets);
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("campaignId=other")
+          ? json({ halted: false, assets: otherAssets, log: { entries: [], campaignId: "other" } })
+          : json({ halted: false, assets: seedAssets, log: { entries: [], campaignId: "seed" } }),
+    });
+    renderWithRun(<Switch />);
+    expect(await screen.findByText(/Showing 24 of 30/)).toBeTruthy();
+    await user.click(screen.getByText("Show more"));
+    expect(await screen.findByText(/Showing 30 of 30/)).toBeTruthy();
+    await user.selectOptions(screen.getByLabelText("Product"), "alpha");
+    expect(await screen.findByText(/Showing 15 of 15/)).toBeTruthy();
+    expect((screen.getByLabelText("Product") as HTMLSelectElement).value).toBe("alpha");
+
+    await user.click(screen.getByText("switch"));
+    expect(await screen.findByText(/Showing 2 of 2/)).toBeTruthy();
+    expect((screen.getByLabelText("Product") as HTMLSelectElement).value).toBe("");
+    // The first change after the reset starts from the defaults, not the stale state.
+    await user.selectOptions(screen.getByLabelText("Product"), "gamma");
+    expect(await screen.findByText(/Showing 1 of 1/)).toBeTruthy();
   });
 
   test("omits axis filters when no asset has a descriptor", async () => {
