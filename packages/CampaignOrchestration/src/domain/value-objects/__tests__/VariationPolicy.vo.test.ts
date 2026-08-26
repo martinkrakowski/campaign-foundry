@@ -3,7 +3,13 @@ import { seedFrom } from "@campaignfoundry/shared";
 import type { CampaignBrief } from "../../entities/CampaignBrief.js";
 import type { Product } from "../../entities/Product.js";
 import { LAYOUT_VALUES, TONE_VALUES } from "../Treatment.vo.js";
-import { BACKGROUND_AXIS_SOURCES, DISTANCE_AXES, HEADLINE_POOL_REF, VariationPolicy } from "../VariationPolicy.vo.js";
+import {
+  BACKGROUND_AXIS_SOURCES,
+  canonicalHeadlines,
+  DISTANCE_AXES,
+  HEADLINE_POOL_REF,
+  VariationPolicy,
+} from "../VariationPolicy.vo.js";
 
 const product = (id: string): Product => ({
   id,
@@ -232,15 +238,28 @@ describe("VariationPolicy headline axis", () => {
     expect(HEADLINE_POOL_REF).toBe("pool://copy");
   });
 
-  test("resolves the pool texts (trimmed, de-duplicated, blanks dropped) and multiplies axisProductSize", () => {
+  test("resolves the pool texts (trimmed, de-duplicated, blanks dropped, sorted) and multiplies axisProductSize", () => {
     const result = VariationPolicy.fromBrief(pooled, { headlines: [" Stay wild ", "Stay wild", "", "Go far"] });
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.value.headline).toEqual(["Stay wild", "Go far"]);
+    expect(result.value.headline).toEqual(["Go far", "Stay wild"]);
     expect(result.value.axisProductSize).toBe(2 * 3 * 2 * 2 * 1 * 1 * 2);
     expect(result.value.policyHash).not.toBe(
       "7181107a6ce42df96357800416bf26bf89007fd3dbd2b9792aab83323adefcf9",
     );
+  });
+
+  test("the same approved set in any file order yields one canonical list and one policyHash", () => {
+    const a = VariationPolicy.fromBrief(pooled, { headlines: ["Stay wild", "Go far", "stay  WILD", "Drink up"] });
+    const b = VariationPolicy.fromBrief(pooled, { headlines: ["Drink up", "stay  WILD", "Go far", "Stay wild"] });
+    expect(a.success && b.success).toBe(true);
+    if (!a.success || !b.success) return;
+    expect(a.value.headline).toEqual(["Drink up", "Go far", "Stay wild"]);
+    expect(b.value.headline).toEqual(["Drink up", "Go far", "Stay wild"]);
+    expect(a.value.policyHash).toBe(b.value.policyHash);
+    // Code-unit order, not locale order: upper-case sorts before lower-case, so the
+    // de-duplication keeps "STAY WILD" when it is the first survivor in that order.
+    expect(canonicalHeadlines(["stay wild", "STAY WILD", "Zebra", "apple"])).toEqual(["STAY WILD", "Zebra", "apple"]);
   });
 
   test("briefs without the axis keep an empty headline list and the golden hash, even when headlines are supplied", () => {

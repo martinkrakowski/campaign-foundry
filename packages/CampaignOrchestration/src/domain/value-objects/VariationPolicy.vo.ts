@@ -189,9 +189,33 @@ function requirePaletteShift(values: readonly number[]): Result<readonly number[
 }
 
 /**
+ * Canonical headline list: trimmed, blanks dropped, sorted by UTF-16 code unit
+ * (`Array.prototype.sort` with no comparator — locale-independent, so every
+ * machine agrees), then de-duplicated by normalised text (whitespace collapsed,
+ * lower-cased), keeping the first survivor in sorted order. The pool file's
+ * entry order therefore never reaches `policyHash` or the draw sequence.
+ */
+export function canonicalHeadlines(headlines: readonly string[]): readonly string[] {
+  const sorted = headlines
+    .map((text) => text.trim())
+    .filter((text) => text.length > 0)
+    .sort();
+  const seen = new Set<string>();
+  const texts: string[] = [];
+  for (const text of sorted) {
+    const key = text.replace(/\s+/g, " ").toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    texts.push(text);
+  }
+  return texts;
+}
+
+/**
  * Resolve the headline axis: absent → no axis (empty). `pool://copy` → the
- * caller-supplied approved texts, which must be non-empty — a missing or
- * fully-rejected pool fails loud, naming the pool file.
+ * caller-supplied approved texts (canonicalised, see `canonicalHeadlines`),
+ * which must be non-empty — a missing or fully-rejected pool fails loud,
+ * naming the pool file.
  */
 function resolveHeadline(
   brief: CampaignBrief,
@@ -202,7 +226,7 @@ function resolveHeadline(
   if (ref !== HEADLINE_POOL_REF) {
     return err(new Error(`Unsupported headline axis ${JSON.stringify(ref)} (expected "${HEADLINE_POOL_REF}").`));
   }
-  const texts = unique((headlines ?? []).map((text) => text.trim()).filter((text) => text.length > 0));
+  const texts = canonicalHeadlines(headlines ?? []);
   if (texts.length === 0) {
     return err(
       new Error(

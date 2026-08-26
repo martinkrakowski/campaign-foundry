@@ -486,13 +486,23 @@ describe("PlanVariationsUseCase headline axis", () => {
     const result = planner().plan(pooled(), { headlines });
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.value.policy.headline).toEqual(headlines);
+    expect(result.value.policy.headline).toEqual([...headlines].sort());
     expect(result.value.estimate.axisProductSize).toBe(24 * 3);
     for (const variant of result.value.variants) {
       expect(headlines).toContain(variant.headline);
     }
     expect(new Set(result.value.variants.map((variant) => variant.headline)).size).toBeGreaterThan(1);
     expectDistanceHeld(result.value);
+  });
+
+  test("the same approved set in a different pool order yields an identical policyHash and plan", () => {
+    const shuffled = [headlines[2], headlines[0], headlines[1]];
+    const a = planner().plan(pooled(), { headlines });
+    const b = planner().plan(pooled(), { headlines: shuffled });
+    expect(a.success && b.success).toBe(true);
+    if (!a.success || !b.success) return;
+    expect(b.value.policyHash).toBe(a.value.policyHash);
+    expect(b.value).toEqual(a.value);
   });
 
   test("headline alone satisfies minDistance for otherwise identical variants", () => {
