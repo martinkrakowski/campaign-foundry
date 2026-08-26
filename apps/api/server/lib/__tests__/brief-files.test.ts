@@ -9,7 +9,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dumpBrief, isErrno, isExistsError, serializeBrief, SYMLINK_WRITE_ERROR } from "../brief-files.js";
+import { createHash } from "node:crypto";
+import { dumpBrief, hashFile, hashBytes, isErrno, isExistsError, serializeBrief, SYMLINK_WRITE_ERROR } from "../brief-files.js";
+import { parseBriefText } from "../load-brief.js";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 
 const origRoot = process.env.PROJECT_ROOT;
@@ -209,5 +211,218 @@ describe("brief file lookup and write", () => {
     const { briefYamlPath } = await filesFor(dir);
     expect(briefYamlPath("camp")).toBe(join(dir, "briefs", "camp.yaml"));
     expect(() => briefYamlPath("../escape")).toThrow(/Path escapes the allowed directory/);
+  });
+});
+
+describe("hashFile", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "cf-hash-"));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("returns SHA-256 hex digest of file bytes", async () => {
+    const path = join(dir, "test.txt");
+    writeFileSync(path, "hello");
+    const expected = createHash("sha256").update("hello").digest("hex");
+    expect(await hashFile(path)).toBe(expected);
+  });
+
+  test("different content produces different hashes", async () => {
+    const pathA = join(dir, "a.txt");
+    const pathB = join(dir, "b.txt");
+    writeFileSync(pathA, "hello");
+    writeFileSync(pathB, "world");
+    expect(await hashFile(pathA)).not.toBe(await hashFile(pathB));
+  });
+
+  test("hash changes when file content changes", async () => {
+    const path = join(dir, "mutable.txt");
+    writeFileSync(path, "v1");
+    const v1Hash = await hashFile(path);
+    writeFileSync(path, "v2");
+    const v2Hash = await hashFile(path);
+    expect(v1Hash).not.toBe(v2Hash);
+  });
+
+  test("hash matches raw bytes, not parsed content", async () => {
+    const path = join(dir, "brief.yaml");
+    writeFileSync(path, "id: camp\ncampaignMessage: Hi\n");
+    const hashWithoutSpace = await hashFile(path);
+    writeFileSync(path, "id: camp\ncampaignMessage: Hi  \n");
+    const hashWithSpace = await hashFile(path);
+    expect(hashWithoutSpace).not.toBe(hashWithSpace);
+  });
+});
+
+describe("hashBytes", () => {
+  test("returns SHA-256 hex digest of buffer", () => {
+    const buffer = Buffer.from("hello");
+    const expected = createHash("sha256").update("hello").digest("hex");
+    expect(hashBytes(buffer)).toBe(expected);
+  });
+
+  test("different buffers produce different hashes", () => {
+    expect(hashBytes(Buffer.from("hello"))).not.toBe(hashBytes(Buffer.from("world")));
+  });
+
+  test("matches hashFile for the same content", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cf-hash-bytes-"));
+    try {
+      const path = join(dir, "test.txt");
+      const content = "test-content";
+      writeFileSync(path, content);
+      const fromFile = await hashFile(path);
+      const fromBytes = hashBytes(Buffer.from(content, "utf8"));
+      expect(fromFile).toBe(fromBytes);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("parseBriefText", () => {
+  test("parses yaml format based on .yaml extension", () => {
+    const yaml = "id: camp\ntargetRegion: DE\ntargetAudience: a\ncampaignMessage: Hi\nproducts:\n  - id: alpha\n  - id: beta\n";
+    const brief = parseBriefText("camp.yaml", yaml);
+    expect(brief.id).toBe("camp");
+    expect(brief.campaignMessage).toBe("Hi");
+  });
+
+  test("parses yaml format based on .yml extension", () => {
+    const yaml = "id: camp\ntargetRegion: DE\ntargetAudience: a\ncampaignMessage: Hi\nproducts:\n  - id: alpha\n";
+    const brief = parseBriefText("camp.yml", yaml);
+    expect(brief.id).toBe("camp");
+  });
+
+  test("parses JSON format based on .json extension", () => {
+    const json = JSON.stringify(minimal);
+    const brief = parseBriefText("camp.json", json);
+    expect(brief.id).toBe("camp");
+  });
+
+  test("rejects invalid yaml with a clear error", () => {
+    expect(() => parseBriefText("camp.yaml", "id: 1\nproducts: not-an-array\n")).toThrow(/campaign brief|required field/i);
+  });
+
+  test("rejects invalid JSON with a clear error", () => {
+    expect(() => parseBriefText("camp.json", "{not-json}")).toThrow(/JSON|property name/i);
+  });
+});
+
+describe("withBriefLock", () => {
+  const filesFor = async (root: string) => {
+    vi.resetModules();
+    process.env.PROJECT_ROOT = root;
+    return import("../brief-files.js");
+  };
+
+  test("runs sections for one brief in order and does not block other briefs", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cf-lock-"));
+    try {
+      process.env.PROJECT_ROOT = dir;
+      const { withBriefLock } = await filesFor(dir);
+      const order: string[] = [];
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const first = withBriefLock("camp", async () => {
+        await gate;
+        order.push("first");
+        return 1;
+      });
+      const second = withBriefLock("camp", async () => {
+        order.push("second");
+        return 2;
+      });
+      const other = withBriefLock("other", async () => {
+        order.push("other");
+        return 3;
+      });
+      expect(await other).toBe(3);
+      expect(order).toEqual(["other"]);
+      release();
+      expect(await Promise.all([first, second])).toEqual([1, 2]);
+      expect(order).toEqual(["other", "first", "second"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+      else process.env.PROJECT_ROOT = origRoot;
+    }
+  });
+
+  test("keeps serving a brief after a section rejects", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cf-lock-err-"));
+    try {
+      process.env.PROJECT_ROOT = dir;
+      const { withBriefLock } = await filesFor(dir);
+      await expect(
+        withBriefLock("camp", async () => {
+          throw new Error("boom");
+        }),
+      ).rejects.toThrow("boom");
+      expect(await withBriefLock("camp", async () => "ok")).toBe("ok");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+      else process.env.PROJECT_ROOT = origRoot;
+    }
+  });
+});
+
+describe("concurrent write scenario", () => {
+  test("two conditional writes issued with the same revision, exactly one succeeds", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cf-concurrent-"));
+    try {
+      vi.resetModules();
+      process.env.PROJECT_ROOT = dir;
+      const { createBriefFile, withBriefLock, hashFile, rewriteBriefFile, briefYamlPath } = await import("../brief-files.js");
+      mkdirSync(join(dir, "briefs"), { recursive: true });
+
+      const path = briefYamlPath("camp");
+      await createBriefFile(path, minimal);
+      const revision = await hashFile(path);
+
+      let result1: boolean | undefined;
+      let result2: boolean | undefined;
+
+      const write1 = withBriefLock("camp", async () => {
+        const current = await hashFile(path);
+        if (current === revision) {
+          await rewriteBriefFile(path, { ...minimal, campaignMessage: "First" });
+          result1 = true;
+        } else {
+          result1 = false;
+        }
+      });
+
+      const write2 = withBriefLock("camp", async () => {
+        const current = await hashFile(path);
+        if (current === revision) {
+          await rewriteBriefFile(path, { ...minimal, campaignMessage: "Second" });
+          result2 = true;
+        } else {
+          result2 = false;
+        }
+      });
+
+      await Promise.all([write1, write2]);
+
+      // One should succeed, one should fail (because file changed)
+      expect([result1, result2]).toContain(true);
+      expect([result1, result2]).toContain(false);
+
+      // The file should contain one of the two messages
+      const content = readFileSync(path, "utf8");
+      expect(content).toMatch(/campaignMessage: (First|Second)/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+      else process.env.PROJECT_ROOT = origRoot;
+    }
   });
 });

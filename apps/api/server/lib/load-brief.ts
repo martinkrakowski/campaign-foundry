@@ -423,9 +423,18 @@ export function parseRegenerateOnly(value: unknown): RegenerationTarget[] | unde
   });
 }
 
+/**
+ * Parse a brief from bytes already read; `path` only selects the format
+ * (.json vs .yaml/.yml). The parsed brief is validated against the
+ * current capabilities.
+ */
+export function parseBriefText(path: string, raw: string, capabilities?: Capabilities): CampaignBrief {
+  const data = extname(path).toLowerCase() === ".json" ? JSON.parse(raw) : yaml.load(raw);
+  return parseBrief(data, capabilities);
+}
+
 /** Load and parse a brief from a .yaml / .yml / .json file. */
 export async function loadBrief(path: string, capabilities?: Capabilities): Promise<CampaignBrief> {
   const raw = await readFile(path, "utf8");
-  const data = extname(path).toLowerCase() === ".json" ? JSON.parse(raw) : yaml.load(raw);
-  return parseBrief(data, capabilities);
+  return parseBriefText(path, raw, capabilities);
 }
