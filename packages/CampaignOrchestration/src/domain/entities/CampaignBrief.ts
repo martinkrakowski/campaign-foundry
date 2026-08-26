@@ -22,4 +22,35 @@ export interface CampaignBrief {
    * are unchanged.
    */
   readonly treatments?: readonly Treatment[];
+  /**
+   * Optional run mode. Absent means classic brief behaviour so existing
+   * briefs are unchanged.
+   */
+  readonly mode?: "brief" | "variation";
+  /**
+   * Optional variation policy. Unsupported axes (headline, motion, duration)
+   * are rejected at parse time, not here.
+   */
+  readonly variation?: {
+    readonly count?: number;
+    readonly seed?: number;
+    readonly minDistance?: number;
+    readonly coverage?: {
+      readonly perProduct?: number;
+      readonly perRatio?: number;
+    };
+    readonly axes?: {
+      readonly layout?: readonly string[];
+      readonly tone?: readonly string[];
+      readonly background?: { readonly source?: readonly string[] };
+      readonly paletteShift?: readonly number[];
+    };
+  };
+  /**
+   * Optional output request. Absent formats keep today's static pipeline.
+   */
+  readonly output?: {
+    readonly formats?: readonly string[];
+    readonly platforms?: readonly string[];
+  };
 }
