@@ -324,31 +324,54 @@ describe("headline pool state", () => {
     expect(on.variation.headline).toBe(true);
     expect(wizardReducer(on, { type: "toggleHeadline" }).variation.headline).toBe(false);
 
-    const withPool = wizardReducer(on, { type: "setPool", pool: pool(["approved"]) });
+    const withPool = wizardReducer(on, { type: "setPool", briefId: "", pool: pool(["approved"]) });
     expect(withPool.pool?.entries).toHaveLength(1);
     expect(withPool.variation.headline).toBe(true);
 
-    const emptied = wizardReducer(withPool, { type: "setPool", pool: pool(["rejected"]) });
+    const emptied = wizardReducer(withPool, { type: "setPool", briefId: "", pool: pool(["rejected"]) });
     expect(emptied.variation.headline).toBe(false);
-    expect(wizardReducer(withPool, { type: "setPool", pool: null }).variation.headline).toBe(false);
+    expect(wizardReducer(withPool, { type: "setPool", briefId: "", pool: null }).variation.headline).toBe(false);
+  });
+
+  test("setPool ignores a response for a different brief; a new brief id clears the pool and its notice", () => {
+    const on = wizardReducer(
+      wizardReducer(initialWizardState, { type: "setPool", briefId: "", pool: pool(["approved"]) }),
+      { type: "toggleHeadline" },
+    );
+    const dropped = wizardReducer(on, { type: "setPool", briefId: "", pool: pool(["rejected"]) });
+    expect(dropped.headlineAxisDropped).toBe(true);
+
+    // A response captured for another id must not land — as a pool or as a notice.
+    const stale = wizardReducer(dropped, { type: "setPool", briefId: "other", pool: pool(["approved"]) });
+    expect(stale).toBe(dropped);
+
+    // Changing the id starts from nothing; other patches keep the pool.
+    const renamed = wizardReducer(on, { type: "patch", patch: { briefId: "other" } });
+    expect(renamed.pool).toBeNull();
+    expect(renamed.headlineAxisDropped).toBe(false);
+    expect(renamed.variation.headline).toBe(false);
+    const same = wizardReducer(on, { type: "patch", patch: { briefId: "", targetRegion: "DE" } });
+    expect(same.pool).toBe(on.pool);
+    expect(same.variation.headline).toBe(true);
+    expect(wizardReducer(on, { type: "patch", patch: { targetRegion: "DE" } }).pool).toBe(on.pool);
   });
 
   test("setPool remembers that it dropped the axis until an entry is approved again", () => {
     // Off axis: emptying the pool is silent.
-    const silent = wizardReducer(initialWizardState, { type: "setPool", pool: pool(["rejected"]) });
+    const silent = wizardReducer(initialWizardState, { type: "setPool", briefId: "", pool: pool(["rejected"]) });
     expect(silent.headlineAxisDropped).toBe(false);
 
     const on = wizardReducer(
-      wizardReducer(initialWizardState, { type: "setPool", pool: pool(["approved"]) }),
+      wizardReducer(initialWizardState, { type: "setPool", briefId: "", pool: pool(["approved"]) }),
       { type: "toggleHeadline" },
     );
-    const dropped = wizardReducer(on, { type: "setPool", pool: pool(["rejected"]) });
+    const dropped = wizardReducer(on, { type: "setPool", briefId: "", pool: pool(["rejected"]) });
     expect(dropped.variation.headline).toBe(false);
     expect(dropped.headlineAxisDropped).toBe(true);
     // Still nothing approved: the notice stays even though the axis is now off.
-    const still = wizardReducer(dropped, { type: "setPool", pool: pool(["rejected", "rejected"]) });
+    const still = wizardReducer(dropped, { type: "setPool", briefId: "", pool: pool(["rejected", "rejected"]) });
     expect(still.headlineAxisDropped).toBe(true);
-    const recovered = wizardReducer(still, { type: "setPool", pool: pool(["approved", "rejected"]) });
+    const recovered = wizardReducer(still, { type: "setPool", briefId: "", pool: pool(["approved", "rejected"]) });
     expect(recovered.headlineAxisDropped).toBe(false);
     expect(recovered.variation.headline).toBe(false);
   });

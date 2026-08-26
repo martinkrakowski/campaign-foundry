@@ -81,7 +81,8 @@ export type WizardAction =
   | { type: "toggleBackground"; value: string }
   | { type: "togglePalette"; value: number }
   | { type: "toggleHeadline" }
-  | { type: "setPool"; pool: CopyPool | null }
+  /** Tagged with the brief the response belongs to: a late reply for a previous id is dropped. */
+  | { type: "setPool"; briefId: string; pool: CopyPool | null }
   | { type: "togglePlatform"; value: string };
 
 export function stepsFor(mode: CampaignMode): readonly WizardStepId[] {
@@ -184,8 +185,18 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
       const steps = stepsFor(action.mode);
       return { ...state, mode: action.mode, stepIndex: Math.min(state.stepIndex, steps.length - 1) };
     }
-    case "patch":
-      return { ...state, ...action.patch };
+    case "patch": {
+      const next = { ...state, ...action.patch };
+      // The pool belongs to one brief: a new id starts from nothing (and drops the
+      // axis and its notice) rather than showing — or patching — the previous brief's entries.
+      if (action.patch.briefId === undefined || action.patch.briefId === state.briefId) return next;
+      return {
+        ...next,
+        pool: null,
+        headlineAxisDropped: false,
+        variation: { ...state.variation, headline: false },
+      };
+    }
     case "setProduct": {
       return {
         ...state,
@@ -239,6 +250,7 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
     case "toggleHeadline":
       return { ...state, variation: { ...state.variation, headline: !state.variation.headline } };
     case "setPool": {
+      if (action.briefId !== state.briefId) return state;
       // The axis is only meaningful with something to draw from: losing the last
       // approved entry switches it off rather than leaving a brief that cannot plan
       // — and remembers that it did, so the Copy step can say so.

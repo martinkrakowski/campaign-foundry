@@ -673,6 +673,69 @@ describe("Wizard", () => {
     expect(await screen.findByText("No headlines yet.")).toBeTruthy();
   });
 
+  test("headline pool: a new brief id clears the pool and drops responses requested for the old one", async () => {
+    const user = userEvent.setup();
+    const gets: Array<(r: Response) => void> = [];
+    const patches: Array<(r: Response) => void> = [];
+    const base = mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/pools")
+          ? new Promise<Response>((resolve) => {
+              gets.push(resolve);
+            })
+          : json({ halted: false, assets: [], log: null }),
+    });
+    const inner = base.getMockImplementation();
+    base.mockImplementation((url, init) =>
+      (init as RequestInit | undefined)?.method === "PATCH"
+        ? new Promise<Response>((resolve) => {
+            patches.push(resolve);
+          })
+        : inner!(url, init),
+    );
+    renderWithRun(<Wizard />);
+    await fillType(user, "Randomized");
+    await fillProducts(user);
+    await waitFor(() => expect(gets).toHaveLength(1));
+    // Nothing can be generated or patched until the brief's pool has loaded.
+    expect((screen.getByRole("button", { name: "Generate 10 suggestions" }) as HTMLButtonElement).disabled).toBe(true);
+    gets[0](json({ pool: poolOf([{ id: "h1", text: "Stay wild", status: "approved" }]) }));
+    expect(await screen.findByText("Headline pool (1 approved)")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Generate 10 suggestions" }) as HTMLButtonElement).disabled).toBe(false);
+
+    // A PATCH for camp-one is still in flight when the id changes.
+    await user.click(screen.getByRole("button", { name: "Reject h1" }));
+    await waitFor(() => expect(patches).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await user.clear(screen.getByLabelText("Brief ID"));
+    await user.type(screen.getByLabelText("Brief ID"), "camp-two");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+
+    // camp-one's entries are gone before camp-two's GET settles, and nothing is actionable meanwhile.
+    expect(screen.getByText("Headline pool (0 approved)")).toBeTruthy();
+    expect(screen.getByText("No headlines yet.")).toBeTruthy();
+    expect(screen.queryByText("Stay wild")).toBeNull();
+    expect((screen.getByRole("button", { name: "Generate 10 suggestions" }) as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => expect(gets).toHaveLength(2));
+
+    // The late PATCH (camp-one) and the slow GET (camp-one) both land after the switch and are ignored.
+    patches[0](json({ pool: poolOf([{ id: "h1", text: "Stay wild", status: "rejected" }]) }));
+    gets[0](json({ pool: poolOf([{ id: "h1", text: "Stay wild", status: "approved" }]) }));
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(gets).toHaveLength(3));
+    expect(screen.queryByText("Stay wild")).toBeNull();
+    expect(screen.getByText("Headline pool (0 approved)")).toBeTruthy();
+
+    // camp-two's own pool arrives and is shown.
+    gets[2](json({ pool: { ...poolOf([{ id: "h9", text: "Two", status: "approved" }]), briefId: "camp-two" } }));
+    expect(await screen.findByText("Two")).toBeTruthy();
+    expect(screen.getByText("Headline pool (1 approved)")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Generate 10 suggestions" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   test("surfaces a non-conflict save error", async () => {
     const user = userEvent.setup();
     routeWizardApi({

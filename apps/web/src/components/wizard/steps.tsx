@@ -361,18 +361,24 @@ const HEADLINE_AXIS_DROPPED = "No approved headlines — the headline axis was t
 function HeadlinePoolPanel({ state, dispatch }: { state: WizardState; dispatch: Dispatch<WizardAction> }) {
   const { briefId, pool } = state;
   const [busy, setBusy] = useState(false);
+  /** The GET for the current brief is in flight: nothing may be generated or patched yet. */
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
   const [unavailable, setUnavailable] = useState<string | undefined>();
 
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
+    setLoading(true);
     getPool(briefId, controller.signal)
       .then((loaded) => {
-        if (!cancelled) dispatch({ type: "setPool", pool: loaded });
+        if (!cancelled) dispatch({ type: "setPool", briefId, pool: loaded });
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(unknownErrorMessage(cause, "Could not load the headline pool"));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
@@ -380,12 +386,16 @@ function HeadlinePoolPanel({ state, dispatch }: { state: WizardState; dispatch: 
     };
   }, [briefId, dispatch]);
 
-  /** Apply one pool change; a 503 (no OPENROUTER_API_KEY) pins the API's message and disables generation. */
+  /**
+   * Apply one pool change; a 503 (no OPENROUTER_API_KEY) pins the API's message and
+   * disables generation. The response is tagged with the brief it was requested for,
+   * so one landing after the id changed is dropped by the reducer.
+   */
   const apply = async (change: () => Promise<CopyPool>): Promise<boolean> => {
     setBusy(true);
     setError(undefined);
     try {
-      dispatch({ type: "setPool", pool: await change() });
+      dispatch({ type: "setPool", briefId, pool: await change() });
       return true;
     } catch (cause) {
       if (isBriefsApiError(cause) && cause.status === 503) setUnavailable(cause.message);
@@ -408,7 +418,7 @@ function HeadlinePoolPanel({ state, dispatch }: { state: WizardState; dispatch: 
         <Button
           variant="secondary"
           size="sm"
-          disabled={busy || unavailable !== undefined}
+          disabled={busy || loading || unavailable !== undefined}
           isLoading={busy}
           onClick={() => void apply(async () => (await generatePool(toBrief(state))).pool)}
         >
@@ -433,7 +443,7 @@ function HeadlinePoolPanel({ state, dispatch }: { state: WizardState; dispatch: 
             <PoolEntryRow
               key={entry.id}
               entry={entry}
-              busy={busy}
+              busy={busy || loading}
               onStatus={(status) => void apply(() => patchPool(briefId, [{ id: entry.id, status }]))}
               onEdit={(text) => apply(() => patchPool(briefId, [{ id: entry.id, status: entry.status, text }]))}
             />
