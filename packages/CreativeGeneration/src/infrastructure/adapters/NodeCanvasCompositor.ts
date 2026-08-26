@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { createCanvas, loadImage } from "@napi-rs/canvas";
+import { createCanvas, loadImage, type Image, type SKRSContext2D } from "@napi-rs/canvas";
 import type {
   CompositeRequest,
   CompositeResult,
@@ -8,6 +8,40 @@ import type {
 import { hexToRgb, wrapText } from "./canvas-util.js";
 import { registerBundledFonts } from "../fonts.js";
 import { resolveAssetPath } from "../safe-path.js";
+
+/**
+ * Everything {@link NodeCanvasCompositor.draw} needs to blit a still (or a later
+ * motion frame). Images and logo geometry are loaded once in
+ * {@link NodeCanvasCompositor.prepare}; wrapping stays on the real drawing
+ * context so measureText matches the blit.
+ *
+ * Module-private: the `@generated` barrels `export *` this file, so exporting
+ * this type (or prepare/draw as free functions) would leak it — and through it
+ * `@napi-rs/canvas` `Image` / `SKRSContext2D` — from
+ * `@campaignfoundry/CreativeGeneration`. Hexagen has no non-barreled `internal`
+ * export path.
+ */
+interface PreparedCreative {
+  readonly width: number;
+  readonly height: number;
+  readonly top: boolean;
+  readonly shadeAlpha: number;
+  readonly fontWeight: string;
+  readonly fontFamily: string;
+  readonly message: string;
+  readonly brandColor: string;
+  readonly background: Image;
+  readonly logo:
+    | {
+        readonly image: Image;
+        readonly x: number;
+        readonly y: number;
+        readonly width: number;
+        readonly height: number;
+      }
+    | undefined;
+  readonly logoApplied: boolean;
+}
 
 /**
  * NodeCanvasCompositor — CompositorPort adapter.
@@ -25,25 +59,25 @@ import { resolveAssetPath } from "../safe-path.js";
  *
  * Copy is drawn in a bundled font (default "Inter") so headlines look identical
  * on every machine, independent of the reviewer's installed system fonts.
+ *
+ * Still path: {@link NodeCanvasCompositor.prepare} (I/O) →
+ * {@link NodeCanvasCompositor.draw} at `t = 1`.
  */
 export class NodeCanvasCompositor implements CompositorPort {
   constructor(private readonly fontFamily: string = "Inter") {
     registerBundledFonts();
   }
 
-  async compositeAsset(request: CompositeRequest): Promise<CompositeResult> {
-    const { width, height } = request.ratio;
-    const top = request.layout === "headline-top";
-    const subtle = request.tone === "subtle";
-    const shadeAlpha = subtle ? 0.4 : 0.7;
-    const fontWeight = subtle ? "500" : "bold";
-
-    const canvas = createCanvas(width, height);
-    const ctx = canvas.getContext("2d");
+  /**
+   * Paint a prepared creative onto `ctx`. `t` is accepted and currently ignored
+   * by every layer — `t = 1` is the still's rest pose (motion is a later wave).
+   */
+  static draw(ctx: SKRSContext2D, prepared: PreparedCreative, t: number): void {
+    void t;
+    const { width, height, top, shadeAlpha, fontWeight, fontFamily } = prepared;
 
     // Layer 1 — background.
-    const background = await loadImage(Buffer.from(request.background));
-    ctx.drawImage(background, 0, 0, width, height);
+    ctx.drawImage(prepared.background, 0, 0, width, height);
 
     // Layer 2 — contrast shade, darkest at the headline edge, fading into the image.
     const shade = top
@@ -57,7 +91,7 @@ export class NodeCanvasCompositor implements CompositorPort {
     // Layer 3 — brand-colour accent band: a solid base flush to the headline edge
     // plus a soft fade into the image. Solid stays opaque in every tone, and this
     // band — not the logo — is what guarantees the brand-density compliance floor.
-    const [ar, ag, ab] = hexToRgb(request.brandColor);
+    const [ar, ag, ab] = hexToRgb(prepared.brandColor);
     const solidH = height * 0.05;
     const fadeH = height * 0.06;
     ctx.fillStyle = `rgb(${ar}, ${ag}, ${ab})`;
@@ -79,13 +113,14 @@ export class NodeCanvasCompositor implements CompositorPort {
 
     // Layer 4 — campaign copy (wrapped to width), anchored on the headline edge.
     // Bundled font (default "Inter") for machine-independent rendering; weight
-    // comes from the treatment's tone.
+    // comes from the treatment's tone. wrapText uses this ctx so metrics match
+    // the blit — wrapping is drawing-adjacent, not I/O.
     const fontSize = Math.round(width * 0.06);
-    ctx.font = `${fontWeight} ${fontSize}px ${this.fontFamily}, sans-serif`;
+    ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}, sans-serif`;
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
-    const lines = wrapText(ctx, request.message, width * 0.85);
+    const lines = wrapText(ctx, prepared.message, width * 0.85);
     const lineHeight = fontSize * 1.25;
     let y = top
       ? height * 0.1 + fontSize // first baseline near the top
@@ -96,21 +131,42 @@ export class NodeCanvasCompositor implements CompositorPort {
     }
 
     // Layer 5 — brand logo, anchored opposite the headline (top-right for a bottom
-    // headline, bottom-left for a top headline). Whether it applies is a
-    // brand-compliance signal the use case records on the asset. The path is
-    // brief-supplied (untrusted), so it's resolved through resolveAssetPath.
+    // headline, bottom-left for a top headline). Geometry was captured in prepare.
+    if (prepared.logo) {
+      const { image, x, y: ly, width: lw, height: lh } = prepared.logo;
+      ctx.drawImage(image, x, ly, lw, lh);
+    }
+  }
+
+  /** Load background + logo and capture everything {@link NodeCanvasCompositor.draw} needs. */
+  static async prepare(
+    request: CompositeRequest,
+    fontFamily: string = "Inter",
+  ): Promise<PreparedCreative> {
+    const { width, height } = request.ratio;
+    const top = request.layout === "headline-top";
+    const subtle = request.tone === "subtle";
+    const shadeAlpha = subtle ? 0.4 : 0.7;
+    const fontWeight = subtle ? "500" : "bold";
+
+    const background = await loadImage(Buffer.from(request.background));
+
+    // Whether the logo applies is a brand-compliance signal the use case records
+    // on the asset. The path is brief-supplied (untrusted), so it's resolved
+    // through resolveAssetPath.
+    let logo: PreparedCreative["logo"];
     let logoApplied = false;
     const logoPath = resolveAssetPath(request.logoPath);
     if (logoPath) {
       try {
-        const logo = await loadImage(await readFile(logoPath));
+        const image = await loadImage(await readFile(logoPath));
         const target = width * 0.16;
-        const scale = target / logo.width;
-        const logoH = logo.height * scale;
+        const scale = target / image.width;
+        const logoH = image.height * scale;
         const margin = width * 0.04;
         const lx = top ? margin : width - target - margin;
         const ly = top ? height - logoH - margin : margin;
-        ctx.drawImage(logo, lx, ly, target, logoH);
+        logo = { image, x: lx, y: ly, width: target, height: logoH };
         logoApplied = true;
       } catch (error) {
         // A missing logo is optional — skip cleanly. A present-but-unreadable or
@@ -124,6 +180,26 @@ export class NodeCanvasCompositor implements CompositorPort {
       }
     }
 
-    return { image: canvas.toBuffer("image/png"), logoApplied };
+    return {
+      width,
+      height,
+      top,
+      shadeAlpha,
+      fontWeight,
+      fontFamily,
+      message: request.message,
+      brandColor: request.brandColor,
+      background,
+      logo,
+      logoApplied,
+    };
+  }
+
+  async compositeAsset(request: CompositeRequest): Promise<CompositeResult> {
+    const prepared = await NodeCanvasCompositor.prepare(request, this.fontFamily);
+    const canvas = createCanvas(prepared.width, prepared.height);
+    const ctx = canvas.getContext("2d");
+    NodeCanvasCompositor.draw(ctx, prepared, 1);
+    return { image: canvas.toBuffer("image/png"), logoApplied: prepared.logoApplied };
   }
 }

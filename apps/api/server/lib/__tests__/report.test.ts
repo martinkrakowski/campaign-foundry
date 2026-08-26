@@ -26,7 +26,7 @@ const asset = (over: Partial<GeneratedAsset> = {}): GeneratedAsset => ({
 const beta = (over: Partial<GeneratedAsset> = {}) => asset({ productId: "beta", outputPath: "beta/1x1.png", ...over });
 const result = (assets: GeneratedAsset[], campaignId = "camp"): PipelineResult => ({
   assets,
-  log: new PipelineExecutionLog(campaignId),
+  log: new PipelineExecutionLog(campaignId, () => new Date("2026-01-01T00:00:00.000Z")),
   halted: false,
 });
 const readAssets = (p: string): ReportAsset[] => (JSON.parse(readFileSync(p, "utf8")) as { assets: ReportAsset[] }).assets;

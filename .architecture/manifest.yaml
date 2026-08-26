@@ -179,11 +179,9 @@ bounded_contexts:
                 '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
               },
             },
-            // Deterministic core, widened to the use cases. PipelineExecutionLog is the one
-            // sanctioned wall-clock reader in the domain (it stamps the run log).
+            // Deterministic core, widened to the use cases.
             ...deterministicCore({
               extraFiles: ['src/application/use-cases/**/*.ts'],
-              ignores: ['src/domain/value-objects/PipelineExecutionLog.vo.ts'],
             }),
             {
               ignores: ['dist/**', 'node_modules/**'],

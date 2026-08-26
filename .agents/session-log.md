@@ -316,3 +316,72 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Refuted Qodo "old campaign packages newer bytes": renders are not campaign-namespaced; that is wave-3 identity/output-path work. The package is explicitly the current output for that report (`packagedAt` + route/README sentence).
 - **Left open:**
   - Wave-3 campaign-namespaced output paths. Phase 5.2 / 5.4.
+## 2026-08-25 — drawCreative extract (Phase 4.2)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Recorded 12-cell compositor PNG goldens (both layouts × both tones × three ratios, procedural hydra-bottle `#1473E6` background + bundled logo) from the pre-refactor compositor, then split `NodeCanvasCompositor.compositeAsset` into `prepareCreative` (I/O) and `drawCreative(ctx, prepared, t)` (pure blit; `t` ignored, stills pass `t = 1`).
+  - Golden sha256 fixture is the wave-3 safety net; hashes unchanged after the extract.
+- **Decisions:**
+  - wrapText stays in `drawCreative` on the real ctx (drawing-adjacent, not filesystem I/O) so measureText cannot drift.
+  - No barrel or manifest *file* was edited. The `@generated` barrels `export *` from `NodeCanvasCompositor.ts`, so the new module-level `PreparedCreative` / `drawCreative` exports still leaked from `@campaignfoundry/CreativeGeneration`'s root (and through them `@napi-rs/canvas` `Image` / `SKRSContext2D`). Hexagen has no non-barreled `internal` export path.
+- **Left open:**
+  - Phase 4.3 motion (background + headline only; band and logo static across `t`).
+
+## 2026-08-25 — compositor goldens keyed by platform
+
+- **Mode:** Implementer
+- **Changes:**
+  - Keyed the 12-cell PNG sha256 fixture by `darwin` / `linux` so CI (FreeType) and local (CoreText) both assert byte-identity without changing draw/prepare.
+- **Decisions:**
+  - Missing `process.platform` failed the test (did not skip) in this commit. See the following entry for arch-keyed maps and skip-on-missing.
+- **Left open:**
+  - none.
+
+## 2026-08-25 — PR #45 review: public surface, golden keying, evidence
+
+- **Mode:** Implementer
+- **Changes:**
+  - `NodeCanvasCompositor.prepare(request)` / `.draw(ctx, prepared, t)` are static members; `PreparedCreative` is module-private (not exported). The barrel surface stays the class. Dropped unused `PreparedCreative.subtle` — tone still drives `shadeAlpha` / `fontWeight` locally; draw path unchanged.
+  - Goldens keyed by `${process.platform}-${process.arch}` (`darwin-arm64`, `linux-x64`). Missing or empty map skips via `test.skipIf` with a message naming the key and how to record it. Key-resolution helper unit-tested.
+- **Decisions:**
+  - Darwin hashes were recorded at `6263f1d` (pre-refactor) and are unchanged through the refactor — proven identity on darwin. The linux map was recorded from CI *after* the refactor, so it pins the refactored output going forward but does not prove identity on the FreeType path.
+- **Left open:**
+  - none.
+## 2026-08-25 — shared mockPipelineApi helper
+
+- **Mode:** Implementer
+- **Changes:**
+  - Exported `json`, `jobOk`, and `mockPipelineApi({ report?, job?, post?, result? })` from `apps/web/src/__tests__/helpers.ts`.
+  - Wired the four fetch-router copies (vitest.setup `beforeEach`, `seedPersistedRun`, `seedSingle`, run-context `mockApi`) through that helper; removed duplicate local `json` helpers in coverage-gaps, run-context, grid, and shell-modals tests.
+- **Decisions:**
+  - Default POST jobId stays `job-1` (run-context); other call sites still passed `post` so `test-job` / `seed-job` (and pending POST) were unchanged in this first pass.
+  - `mockApi` is a thin wrapper that forwards `{ post, job, result }` so run-context call sites stay as they were.
+- **Left open:**
+  - Consolidation was not complete. Remaining hand-rolled `fetch` routers: `coverage-gaps.test.tsx` (POST → 500 "boom"; pending POST; telemetry `seedLog`), `grid.test.tsx` (pending POST, empty / one-asset report), `shell-modals.test.tsx` (`/campaigns/briefs` via GET, telemetry `seedLog`), `run-context.test.tsx` (`campaignId=…` routers, restore `mockResolvedValue` / `mockRejectedValue`). `mockApi` alias still present. Per-site `post` overrides still existed only to pick `seed-job` / `test-job`.
+
+---
+
+## 2026-08-25 — mockPipelineApi review findings
+
+- **Mode:** Implementer
+- **Changes:**
+  - Dropped the `mockApi` alias; run-context call sites use `mockPipelineApi`. Converted the remaining 1:1 hand-rolled fetch routers (coverage-gaps POST 500 / pending POST / telemetry seedLog; grid pending POST + empty/one-asset reports; shell-modals `/campaigns/briefs` via `result` + telemetry seedLog; run-context `campaignId=…` + restore resolve/reject) onto `{ post, job, result, report }`.
+  - One `EMPTY_REPORT` + `MockReport` type; job-GET default is `jobSnapshot` of that report (`log: { entries: [] }` when `log` is null). Optional `jobId`; dropped `test-job` / `seed-job` post overrides. `mockPipelineApi` spies `fetch` when it is not already a mock. Job route matches `${API}/campaigns/jobs/`. Fresh-Response comment lives on `json()`.
+- **Decisions:**
+  - `done/total = 0` when `halted` matches production `completeJob` (`apps/api/server/lib/jobs.ts`); the old inline fixture that used asset length on a halted job was wrong — left `jobOk` as-is.
+  - Remaining custom `post`/`job`/`result` callbacks are the helper's extension points (inspect POST body, hang a POST, toggle `posted`, poll sequencing) — not duplicate routers.
+- **Left open:**
+  - No hand-rolled `vi.mocked(globalThis.fetch).mockImplementation` routers remain.
+## 2026-08-25 — inject log clock (D14 follow-up)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `PipelineExecutionLog` constructor is now `(campaignId, now)`; `startedAt` / `record` / `complete` call `now()`. No default clock in the domain.
+  - `GenerateCampaignDeps.now` is required; `buildPipeline` supplies `() => new Date()`. Tests use a fixed/sequenced fake clock and assert exact timestamps.
+  - Dropped the CampaignOrchestration eslint ignore of `PipelineExecutionLog.vo.ts` (manifest template + `yarn sync`).
+- **Decisions:**
+  - No `now` default in the use case either — application/use-cases is under the same deterministic-core lint.
+  - Composition root is the only place that may close over `new Date()`.
+- **Left open:**
+  - none for this follow-up.

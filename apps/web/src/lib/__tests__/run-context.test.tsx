@@ -2,6 +2,7 @@ import { describe, test, expect, vi, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { RunProvider, useRun, assetKey, type Asset } from "@/lib/run-context";
+import { json, jobOk, mockPipelineApi, EMPTY_REPORT } from "@/__tests__/helpers";
 
 const wrapper = ({ children }: { children: ReactNode }) => createElement(RunProvider, null, children);
 const setup = () => renderHook(() => useRun(), { wrapper });
@@ -18,33 +19,6 @@ const asset = (over: Partial<Asset> = {}): Asset => ({
   ...over,
 });
 
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-const EMPTY = { halted: false, assets: [], log: null };
-
-const jobOk = (result: { halted?: boolean; assets?: unknown[]; log?: unknown }) => {
-  const n = result.halted ? 0 : (result.assets?.length ?? 0);
-  return json({ status: "completed", done: n, total: n, log: result.log ?? null, result });
-};
-
-/** POST → 202 { jobId }, GET job → completed (or override), GET result → EMPTY. */
-const mockApi = (opts: {
-  post?: (url: string, init: RequestInit) => Response | Promise<Response>;
-  job?: (url: string) => Response | Promise<Response>;
-  result?: (url: string) => Response | Promise<Response>;
-} = {}) =>
-  vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
-    const u = String(url);
-    const req = (init ?? {}) as RequestInit;
-    if (req.method === "POST") {
-      return Promise.resolve(opts.post ? opts.post(u, req) : json({ jobId: "job-1" }, 202));
-    }
-    if (u.includes("/campaigns/jobs/")) {
-      return Promise.resolve(opts.job ? opts.job(u) : jobOk({ halted: false, assets: [], log: { entries: [] } }));
-    }
-    return Promise.resolve(opts.result ? opts.result(u) : json(EMPTY));
-  });
-
 describe("useRun", () => {
   test("throws when used outside a RunProvider", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -58,7 +32,7 @@ describe("useRun", () => {
 
 describe("RunProvider — execute", () => {
   test("posts the brief and populates assets", async () => {
-    mockApi({ job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [] } }) });
+    mockPipelineApi({ job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [] } }) });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
@@ -70,7 +44,7 @@ describe("RunProvider — execute", () => {
 
   test("sends the selected model in the query string", async () => {
     const urls: string[] = [];
-    mockApi({
+    mockPipelineApi({
       post: (url) => {
         urls.push(url);
         return json({ jobId: "job-1" }, 202);
@@ -85,7 +59,7 @@ describe("RunProvider — execute", () => {
   });
 
   test("surfaces an actionable error on a non-ok, non-JSON response", async () => {
-    mockApi({ post: () => new Response("502 Bad Gateway", { status: 502 }) });
+    mockPipelineApi({ post: () => new Response("502 Bad Gateway", { status: 502 }) });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
@@ -94,7 +68,7 @@ describe("RunProvider — execute", () => {
   });
 
   test("surfaces a JSON error from a non-202 POST", async () => {
-    mockApi({ post: () => json({ error: "Invalid campaign brief" }, 400) });
+    mockPipelineApi({ post: () => json({ error: "Invalid campaign brief" }, 400) });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
@@ -104,7 +78,7 @@ describe("RunProvider — execute", () => {
 
   test("discards a run whose result lands after a brief switch", async () => {
     let resolvePost!: (r: Response) => void;
-    mockApi({
+    mockPipelineApi({
       post: () =>
         new Promise<Response>((res) => {
           resolvePost = res;
@@ -157,7 +131,7 @@ describe("RunProvider — review decisions", () => {
   });
 
   test("regenerateRejected is a no-op when nothing is rejected", async () => {
-    mockApi();
+    mockPipelineApi();
     const { result } = setup();
     const before = vi.mocked(globalThis.fetch).mock.calls.length;
     await act(async () => {
@@ -167,7 +141,7 @@ describe("RunProvider — review decisions", () => {
   });
 
   test("regenerateRejected re-rolls rejected cells and returns them to review", async () => {
-    mockApi({ job: () => jobOk({ halted: false, assets: [asset({ complianceScore: 0.9 })], log: { entries: [] } }) });
+    mockPipelineApi({ job: () => jobOk({ halted: false, assets: [asset({ complianceScore: 0.9 })], log: { entries: [] } }) });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
@@ -212,7 +186,7 @@ describe("RunProvider — brief picker & persistence", () => {
   });
 
   test("setBrief keeps the current run when the id already matches", async () => {
-    mockApi({
+    mockPipelineApi({
       job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [], campaignId: "summer-hydration-2026" } }),
     });
     const { result } = setup();
@@ -253,19 +227,18 @@ describe("RunProvider — brief picker & persistence", () => {
       "cf:brief",
       JSON.stringify({ id: "stored", targetRegion: "FR", targetAudience: "x", campaignMessage: "y", products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }] }),
     );
-    vi.mocked(globalThis.fetch).mockResolvedValue(json({ halted: false, assets: [asset()], log: { entries: [], campaignId: "stored" } }));
+    mockPipelineApi({ report: { halted: false, assets: [asset()], log: { entries: [], campaignId: "stored" } } });
     const { result } = setup();
     await waitFor(() => expect(result.current.assets).toHaveLength(1));
   });
 
   test("setBrief loads the target brief's own persisted run", async () => {
-    vi.mocked(globalThis.fetch).mockImplementation((url) =>
-      Promise.resolve(
-        String(url).includes("campaignId=other")
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("campaignId=other")
           ? json({ halted: false, assets: [asset({ productId: "beta" })], log: { entries: [], campaignId: "other" } })
-          : json(EMPTY),
-      ),
-    );
+          : json(EMPTY_REPORT),
+    });
     const { result } = setup();
     act(() =>
       result.current.setBrief({
@@ -322,7 +295,7 @@ describe("RunProvider — late results after a switch", () => {
 
   test("an errored run that resolves after a brief switch is dropped", async () => {
     let rejectPost!: (e: unknown) => void;
-    mockApi({
+    mockPipelineApi({
       post: () =>
         new Promise<Response>((_res, rej) => {
           rejectPost = rej;
@@ -342,7 +315,7 @@ describe("RunProvider — late results after a switch", () => {
   });
 
   test("regenerateRejected surfaces an error when the re-roll fails", async () => {
-    mockApi({
+    mockPipelineApi({
       post: (_url, init) => {
         const body = JSON.parse(init.body as string) as { regenerateOnly?: unknown };
         return body.regenerateOnly ? new Response("boom", { status: 500 }) : json({ jobId: "job-1" }, 202);
@@ -361,7 +334,7 @@ describe("RunProvider — late results after a switch", () => {
   });
 
   test("execute uses the generic message when a run rejects with a non-Error", async () => {
-    mockApi({ post: () => Promise.reject("plain string") });
+    mockPipelineApi({ post: () => Promise.reject("plain string") });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
@@ -370,7 +343,7 @@ describe("RunProvider — late results after a switch", () => {
   });
 
   test("regenerateRejected uses the generic message on a non-Error rejection", async () => {
-    mockApi({
+    mockPipelineApi({
       post: (_url, init) => {
         const body = JSON.parse(init.body as string) as { regenerateOnly?: unknown };
         if (body.regenerateOnly) return Promise.reject("plain string");
@@ -391,7 +364,7 @@ describe("RunProvider — late results after a switch", () => {
 
   test("a regenerate that resolves after a brief switch is dropped", async () => {
     let resolveRegen!: (r: Response) => void;
-    mockApi({
+    mockPipelineApi({
       post: (_url, init) => {
         const body = JSON.parse(init.body as string) as { regenerateOnly?: unknown };
         if (body.regenerateOnly) return new Promise<Response>((res) => (resolveRegen = res));
@@ -426,16 +399,16 @@ describe("RunProvider — log-only and superseded restores", () => {
       "cf:brief",
       JSON.stringify({ id: "halted", targetRegion: "FR", targetAudience: "x", campaignMessage: "y", products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }] }),
     );
-    vi.mocked(globalThis.fetch).mockResolvedValue(haltedRun("halted"));
+    mockPipelineApi({ report: { halted: true, assets: [], log: { entries: [], campaignId: "halted" } } });
     const { result } = setup();
     await waitFor(() => expect(result.current.halted).toBe(true));
     expect(result.current.assets).toHaveLength(0);
   });
 
   test("setBrief adopts a halted, log-only run for the target brief", async () => {
-    vi.mocked(globalThis.fetch).mockImplementation((url) =>
-      Promise.resolve(String(url).includes("campaignId=halt2") ? haltedRun("halt2") : json(EMPTY)),
-    );
+    mockPipelineApi({
+      result: (url) => (url.includes("campaignId=halt2") ? haltedRun("halt2") : json(EMPTY_REPORT)),
+    });
     const { result } = setup();
     act(() =>
       result.current.setBrief({
@@ -453,7 +426,7 @@ describe("RunProvider — log-only and superseded restores", () => {
   });
 
   test("swallows a failed restore fetch on mount", async () => {
-    vi.mocked(globalThis.fetch).mockRejectedValue(new Error("network down"));
+    mockPipelineApi({ result: () => Promise.reject(new Error("network down")) });
     const { result } = setup();
     await act(async () => {
       await Promise.resolve();
@@ -462,7 +435,7 @@ describe("RunProvider — log-only and superseded restores", () => {
   });
 
   test("swallows a failed run fetch triggered by setBrief", async () => {
-    vi.mocked(globalThis.fetch).mockRejectedValue(new Error("down"));
+    mockPipelineApi({ result: () => Promise.reject(new Error("down")) });
     const { result } = setup();
     await act(async () => {
       await Promise.resolve();
@@ -487,7 +460,7 @@ describe("RunProvider — log-only and superseded restores", () => {
 
   test("drops a regenerate that errors after a brief switch", async () => {
     let rejectRegen!: (e: unknown) => void;
-    mockApi({
+    mockPipelineApi({
       post: (_url, init) => {
         const body = JSON.parse(init.body as string) as { regenerateOnly?: unknown };
         if (body.regenerateOnly) return new Promise<Response>((_res, rej) => (rejectRegen = rej));
@@ -525,9 +498,11 @@ describe("RunProvider — log-only and superseded restores", () => {
 
   test("a superseding setBrief discards the earlier brief's in-flight run fetch", async () => {
     const resolvers: Array<(r: Response) => void> = [];
-    vi.mocked(globalThis.fetch).mockImplementation((url) => {
-      if (String(url).includes("campaignId=first")) return new Promise<Response>((res) => resolvers.push(res));
-      return Promise.resolve(json(EMPTY));
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("campaignId=first")) return new Promise<Response>((res) => resolvers.push(res));
+        return json(EMPTY_REPORT);
+      },
     });
     const mk = (id: string) => ({
       id,
@@ -559,7 +534,7 @@ describe("RunProvider — job polling", () => {
   test("polls until a running job completes", async () => {
     vi.useFakeTimers();
     let polls = 0;
-    mockApi({
+    mockPipelineApi({
       job: () => {
         polls += 1;
         if (polls === 1) return json({ status: "running", done: 0, total: 0, log: null });
@@ -581,7 +556,7 @@ describe("RunProvider — job polling", () => {
   });
 
   test("surfaces a failed job's error", async () => {
-    mockApi({ job: () => json({ status: "failed", done: 0, total: 0, log: null, error: "need two products" }) });
+    mockPipelineApi({ job: () => json({ status: "failed", done: 0, total: 0, log: null, error: "need two products" }) });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
@@ -590,7 +565,7 @@ describe("RunProvider — job polling", () => {
   });
 
   test("uses a generic message when a failed job has no error", async () => {
-    mockApi({ job: () => json({ status: "failed", done: 0, total: 0, log: null }) });
+    mockPipelineApi({ job: () => json({ status: "failed", done: 0, total: 0, log: null }) });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
@@ -599,7 +574,7 @@ describe("RunProvider — job polling", () => {
   });
 
   test("uses a generic message when a completed job has no result", async () => {
-    mockApi({ job: () => json({ status: "completed", done: 0, total: 0, log: null }) });
+    mockPipelineApi({ job: () => json({ status: "completed", done: 0, total: 0, log: null }) });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
@@ -609,7 +584,7 @@ describe("RunProvider — job polling", () => {
 
   test("a lost job shows the last saved result as such — no cache-bust, decisions kept", async () => {
     let posted = false;
-    mockApi({
+    mockPipelineApi({
       post: () => {
         posted = true;
         return json({ jobId: "job-1" }, 202);
@@ -618,7 +593,7 @@ describe("RunProvider — job polling", () => {
       result: (url) =>
         posted && String(url).includes("campaignId=summer-hydration-2026")
           ? json({ halted: false, assets: [asset()], log: { entries: [], campaignId: "summer-hydration-2026" } })
-          : json(EMPTY),
+          : json(EMPTY_REPORT),
     });
     const { result } = setup();
     act(() => result.current.decide("alpha/1:1/default", "rejected"));
@@ -635,7 +610,7 @@ describe("RunProvider — job polling", () => {
 
   test("a lost job with a halted log-only report on disk shows that report", async () => {
     let posted = false;
-    mockApi({
+    mockPipelineApi({
       post: () => {
         posted = true;
         return json({ jobId: "job-1" }, 202);
@@ -644,7 +619,7 @@ describe("RunProvider — job polling", () => {
       result: () =>
         posted
           ? json({ halted: true, assets: [], log: { entries: [], campaignId: "summer-hydration-2026" } })
-          : json(EMPTY),
+          : json(EMPTY_REPORT),
     });
     const { result } = setup();
     await act(async () => {
@@ -656,7 +631,7 @@ describe("RunProvider — job polling", () => {
   });
 
   test("a lost job with nothing on disk reports the interruption and keeps the grid empty", async () => {
-    mockApi({ job: () => json({ error: "not found" }, 404) });
+    mockPipelineApi({ job: () => json({ error: "not found" }, 404) });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
@@ -666,7 +641,7 @@ describe("RunProvider — job polling", () => {
   });
 
   test("a lost job whose restore fetch fails still reports the interruption", async () => {
-    mockApi({
+    mockPipelineApi({
       job: () => json({ error: "not found" }, 404),
       result: () => Promise.reject(new Error("down")),
     });
@@ -678,7 +653,7 @@ describe("RunProvider — job polling", () => {
   });
 
   test("never adopts another brief's persisted report after a lost job", async () => {
-    mockApi({
+    mockPipelineApi({
       job: () => json({ error: "not found" }, 404),
       result: () => json({ halted: false, assets: [asset()], log: { entries: [], campaignId: "other" } }),
     });
@@ -691,7 +666,7 @@ describe("RunProvider — job polling", () => {
   });
 
   test("a lost re-roll leaves the grid and the rejected decisions untouched", async () => {
-    mockApi({
+    mockPipelineApi({
       job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [], campaignId: "summer-hydration-2026" } }),
     });
     const { result } = setup();
@@ -699,7 +674,7 @@ describe("RunProvider — job polling", () => {
       await result.current.execute();
     });
     act(() => result.current.decide("alpha/1:1/default", "rejected"));
-    mockApi({ job: () => json({ error: "not found" }, 404) });
+    mockPipelineApi({ job: () => json({ error: "not found" }, 404) });
     const versionBefore = result.current.assetVersion;
     await act(async () => {
       await result.current.regenerateRejected();
@@ -713,7 +688,7 @@ describe("RunProvider — job polling", () => {
   test("tolerates transient poll failures with backoff, then gives up", async () => {
     vi.useFakeTimers();
     let polls = 0;
-    mockApi({
+    mockPipelineApi({
       job: () => {
         polls += 1;
         return new Response("<html>502</html>", { status: 502 });
@@ -736,7 +711,7 @@ describe("RunProvider — job polling", () => {
   test("a transient blip in the middle of a run does not abort it", async () => {
     vi.useFakeTimers();
     let polls = 0;
-    mockApi({
+    mockPipelineApi({
       job: () => {
         polls += 1;
         if (polls === 1) return json({ status: "running", done: 0, total: 0, log: null });
@@ -759,7 +734,7 @@ describe("RunProvider — job polling", () => {
 
   test("gives up with the API's JSON error after repeated non-ok polls", async () => {
     vi.useFakeTimers();
-    mockApi({ job: () => json({ error: "nope" }, 500) });
+    mockPipelineApi({ job: () => json({ error: "nope" }, 500) });
     const { result } = setup();
     let exec!: Promise<void>;
     await act(async () => {
@@ -775,7 +750,7 @@ describe("RunProvider — job polling", () => {
   test("polling backs off to the cap on a long run", async () => {
     vi.useFakeTimers();
     let polls = 0;
-    mockApi({
+    mockPipelineApi({
       job: () => {
         polls += 1;
         return polls < 8
@@ -798,7 +773,7 @@ describe("RunProvider — job polling", () => {
   });
 
   test("rejects a 2xx without a job id as a version mismatch", async () => {
-    mockApi({ post: () => json({}, 202) });
+    mockPipelineApi({ post: () => json({}, 202) });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
@@ -809,7 +784,7 @@ describe("RunProvider — job polling", () => {
   test("a brief switch aborts the poller between polls", async () => {
     vi.useFakeTimers();
     let polls = 0;
-    mockApi({ job: () => (polls += 1, json({ status: "running", done: 0, total: 0, log: null })) });
+    mockPipelineApi({ job: () => (polls += 1, json({ status: "running", done: 0, total: 0, log: null })) });
     const { result } = setup();
     let exec!: Promise<void>;
     await act(async () => {
@@ -840,7 +815,7 @@ describe("RunProvider — job polling", () => {
   test("a brief switch while a poll GET is in flight stops the loop before the next wait", async () => {
     let resolveJob!: (r: Response) => void;
     let polls = 0;
-    mockApi({
+    mockPipelineApi({
       job: () => {
         polls += 1;
         return new Promise<Response>((res) => (resolveJob = res));
@@ -874,7 +849,7 @@ describe("RunProvider — job polling", () => {
   test("a brief switch during lost-job recovery drops the stale restore", async () => {
     let resolveResult!: (r: Response) => void;
     let posted = false;
-    mockApi({
+    mockPipelineApi({
       post: () => {
         posted = true;
         return json({ jobId: "job-1" }, 202);
@@ -885,7 +860,7 @@ describe("RunProvider — job polling", () => {
       result: (url) =>
         posted && String(url).includes("campaignId=summer-hydration-2026")
           ? new Promise<Response>((res) => (resolveResult = res))
-          : json(EMPTY),
+          : json(EMPTY_REPORT),
     });
     const { result } = setup();
     let exec!: Promise<void>;
@@ -918,7 +893,7 @@ describe("RunProvider — job polling", () => {
   test("unmounting the provider aborts an in-flight poller", async () => {
     vi.useFakeTimers();
     let polls = 0;
-    mockApi({ job: () => (polls += 1, json({ status: "running", done: 0, total: 0, log: null })) });
+    mockPipelineApi({ job: () => (polls += 1, json({ status: "running", done: 0, total: 0, log: null })) });
     const { result, unmount } = setup();
     let exec!: Promise<void>;
     await act(async () => {
@@ -934,7 +909,7 @@ describe("RunProvider — job polling", () => {
 
   test("a brief switch during polling drops the stale job result", async () => {
     let resolveJob!: (r: Response) => void;
-    mockApi({
+    mockPipelineApi({
       job: () => new Promise<Response>((res) => (resolveJob = res)),
     });
     const { result } = setup();
