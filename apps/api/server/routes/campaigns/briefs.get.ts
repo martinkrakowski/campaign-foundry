@@ -1,7 +1,7 @@
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { errorMessage } from "@campaignfoundry/shared";
-import { BRIEF_SOURCE_EXTS, briefsDir } from "../../lib/brief-files.js";
+import { BRIEF_SOURCE_EXTS, briefsDir, hashFile } from "../../lib/brief-files.js";
 import { loadBrief } from "../../lib/load-brief.js";
 
 const BRIEF_PATTERN = new RegExp(
@@ -35,7 +35,12 @@ export default defineEventHandler(async () => {
   const briefs = [];
   for (const file of files) {
     try {
-      briefs.push({ file, brief: await loadBrief(resolve(dir, file)) });
+      const filePath = resolve(dir, file);
+      const [brief, revision] = await Promise.all([
+        loadBrief(filePath),
+        hashFile(filePath),
+      ]);
+      briefs.push({ file, brief, revision });
     } catch (error) {
       // Skip a malformed/invalid brief rather than failing the whole list — but log
       // it so a reviewer can see why their brief isn't appearing in the picker.

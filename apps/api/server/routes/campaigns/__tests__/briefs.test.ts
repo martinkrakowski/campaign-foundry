@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   mkdtempSync,
@@ -116,6 +117,18 @@ describe("GET /campaigns/briefs", () => {
     expect((await res.json()) as { briefs: unknown[] }).toEqual({ briefs: [] });
     expect(warn).toHaveBeenCalled();
   });
+
+  test("includes revision (content hash) on every entry", async () => {
+    mkdirSync(join(dir, "briefs"), { recursive: true });
+    writeFileSync(join(dir, "briefs", "good.yaml"), validBrief);
+    const res = await web(await handlerFor(dir))(new Request("http://x/campaigns/briefs"));
+    const json = (await res.json()) as { briefs: { file: string; brief: { id: string }; revision: string }[] };
+    expect(json.briefs).toHaveLength(1);
+    expect(json.briefs[0].revision).toBeDefined();
+    expect(json.briefs[0].revision).toMatch(/^[a-f0-9]{64}$/);
+    const expectedHash = createHash("sha256").update(validBrief).digest("hex");
+    expect(json.briefs[0].revision).toBe(expectedHash);
+  });
 });
 
 describe("authoring briefs", () => {
@@ -160,7 +173,8 @@ describe("authoring briefs", () => {
 
     const listed = await list()(new Request("http://x/campaigns/briefs"));
     const json = (await listed.json()) as { briefs: { file: string; brief: { id: string } }[] };
-    expect(json.briefs).toEqual([{ file: "camp.yaml", brief: payload }]);
+    expect(json.briefs).toMatchObject([{ file: "camp.yaml", brief: payload }]);
+    expect(json.briefs[0]).toHaveProperty("revision");
 
     const onDisk = await loadBrief(campYaml());
     expect(onDisk).toMatchObject({ id: "camp", localizedMessage: "Hallo" });
@@ -471,6 +485,105 @@ describe("authoring briefs", () => {
     } finally {
       g.readBody = original;
     }
+  });
+
+  test("POST ?replace=1 with stale revision returns 409 with current revision", async () => {
+    const { create } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const staleRevision = "stalehash";
+    const res = await create()(
+      jsonReq(
+        `http://x/campaigns/briefs?replace=1&revision=${staleRevision}`,
+        "POST",
+        brief({ campaignMessage: "Updated" }),
+      ),
+    );
+    expect(res.status).toBe(409);
+    const json = (await res.json()) as { error: string; revision: string };
+    expect(json.error).toBe("Brief was modified by another user.");
+    expect(json.revision).toBeDefined();
+    expect(json.revision).toMatch(/^[a-f0-9]{64}$/);
+    expect(json.revision).not.toBe(staleRevision);
+  });
+
+  test("POST ?replace=1 without revision succeeds (backward compatible)", async () => {
+    const { create } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const res = await create()(
+      jsonReq("http://x/campaigns/briefs?replace=1", "POST", brief({ campaignMessage: "Updated" })),
+    );
+    expect(res.status).toBe(201);
+    expect(await loadBrief(campYaml())).toMatchObject({ campaignMessage: "Updated" });
+  });
+
+  test("PUT with stale revision returns 409 with current revision", async () => {
+    const { create, update } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const staleRevision = "stalehash";
+    const res = await update()(
+      jsonReq(`http://x/campaigns/briefs/camp?revision=${staleRevision}`, "PUT", brief({ campaignMessage: "Edited" })),
+    );
+    expect(res.status).toBe(409);
+    const json = (await res.json()) as { error: string; revision: string };
+    expect(json.error).toBe("Brief was modified by another user.");
+    expect(json.revision).toBeDefined();
+    expect(json.revision).toMatch(/^[a-f0-9]{64}$/);
+    expect(json.revision).not.toBe(staleRevision);
+  });
+
+  test("PUT without revision succeeds (backward compatible)", async () => {
+    const { create, update } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const res = await update()(
+      jsonReq("http://x/campaigns/briefs/camp", "PUT", brief({ campaignMessage: "Edited" })),
+    );
+    expect(res.status).toBe(200);
+    expect(await loadBrief(campYaml())).toMatchObject({ campaignMessage: "Edited" });
+  });
+
+  test("PUT with current revision succeeds", async () => {
+    const { create, update } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const currentRevision = createHash("sha256").update(readFileSync(campYaml())).digest("hex");
+    const res = await update()(
+      jsonReq(
+        `http://x/campaigns/briefs/camp?revision=${currentRevision}`,
+        "PUT",
+        brief({ campaignMessage: "Edited" }),
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(await loadBrief(campYaml())).toMatchObject({ campaignMessage: "Edited" });
+  });
+
+  test("POST ?replace=1 with revision as array uses first value", async () => {
+    const { create } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const currentRevision = createHash("sha256").update(readFileSync(campYaml())).digest("hex");
+    const res = await create()(
+      jsonReq(
+        `http://x/campaigns/briefs?replace=1&revision=${currentRevision}&revision=stale`,
+        "POST",
+        brief({ campaignMessage: "Updated" }),
+      ),
+    );
+    expect(res.status).toBe(201);
+    expect(await loadBrief(campYaml())).toMatchObject({ campaignMessage: "Updated" });
+  });
+
+  test("PUT with revision as array uses first value", async () => {
+    const { create, update } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const currentRevision = createHash("sha256").update(readFileSync(campYaml())).digest("hex");
+    const res = await update()(
+      jsonReq(
+        `http://x/campaigns/briefs/camp?revision=${currentRevision}&revision=stale`,
+        "PUT",
+        brief({ campaignMessage: "Edited" }),
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(await loadBrief(campYaml())).toMatchObject({ campaignMessage: "Edited" });
   });
 
   test("duplicate copies products, changes id, and returns 201", async () => {

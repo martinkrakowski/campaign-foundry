@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { errorMessage } from "@campaignfoundry/shared";
-import { findBriefFileById, rewriteBriefFile, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
+import { findBriefFileById, hashFile, rewriteBriefFile, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
 import { assertSafeId, parseBrief } from "../../../lib/load-brief.js";
 
 /**
@@ -35,6 +35,16 @@ export default defineEventHandler(async (event) => {
   if (!filePath) {
     setResponseStatus(event, 404);
     return { error: `Brief "${id}" not found.` };
+  }
+
+  const rawRevision = getQuery(event).revision;
+  const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
+  if (expectedRevision) {
+    const currentRevision = await hashFile(filePath);
+    if (currentRevision !== expectedRevision) {
+      setResponseStatus(event, 409);
+      return { error: "Brief was modified by another user.", revision: currentRevision };
+    }
   }
 
   try {

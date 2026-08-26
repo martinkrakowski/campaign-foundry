@@ -1,4 +1,5 @@
-import { lstat, mkdir, readdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { lstat, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, extname, resolve } from "node:path";
 import * as yaml from "js-yaml";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
@@ -62,6 +63,12 @@ export function isExistsError(error: unknown): boolean {
 export function isBriefSourceName(name: string): boolean {
   const lower = name.toLowerCase();
   return BRIEF_SOURCE_EXTS.some((ext) => lower.endsWith(ext));
+}
+
+/** Compute SHA-256 hex digest of a file's raw bytes. */
+export async function hashFile(path: string): Promise<string> {
+  const bytes = await readFile(path);
+  return createHash("sha256").update(bytes).digest("hex");
 }
 
 /** True if anything (file, dir, symlink) exists at `path`. */

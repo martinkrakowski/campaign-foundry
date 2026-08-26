@@ -4,6 +4,7 @@ import {
   briefYamlPath,
   createBriefFile,
   findBriefFileById,
+  hashFile,
   isExistsError,
   replaceBriefFile,
   SYMLINK_WRITE_ERROR,
@@ -30,10 +31,20 @@ export default defineEventHandler(async (event) => {
 
   const rawReplace = getQuery(event).replace;
   const replace = (Array.isArray(rawReplace) ? rawReplace[0] : rawReplace) === "1";
+  const rawRevision = getQuery(event).revision;
+  const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
   const existing = await findBriefFileById(brief.id);
   if (existing && !replace) {
     setResponseStatus(event, 409);
     return { error: `Brief "${brief.id}" already exists.` };
+  }
+
+  if (replace && existing && expectedRevision) {
+    const currentRevision = await hashFile(existing);
+    if (currentRevision !== expectedRevision) {
+      setResponseStatus(event, 409);
+      return { error: "Brief was modified by another user.", revision: currentRevision };
+    }
   }
 
   const filePath = existing ?? briefYamlPath(brief.id);

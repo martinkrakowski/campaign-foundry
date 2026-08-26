@@ -9,7 +9,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dumpBrief, isErrno, isExistsError, serializeBrief, SYMLINK_WRITE_ERROR } from "../brief-files.js";
+import { createHash } from "node:crypto";
+import { dumpBrief, hashFile, isErrno, isExistsError, serializeBrief, SYMLINK_WRITE_ERROR } from "../brief-files.js";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 
 const origRoot = process.env.PROJECT_ROOT;
@@ -209,5 +210,49 @@ describe("brief file lookup and write", () => {
     const { briefYamlPath } = await filesFor(dir);
     expect(briefYamlPath("camp")).toBe(join(dir, "briefs", "camp.yaml"));
     expect(() => briefYamlPath("../escape")).toThrow(/Path escapes the allowed directory/);
+  });
+});
+
+describe("hashFile", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "cf-hash-"));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("returns SHA-256 hex digest of file bytes", async () => {
+    const path = join(dir, "test.txt");
+    writeFileSync(path, "hello");
+    const expected = createHash("sha256").update("hello").digest("hex");
+    expect(await hashFile(path)).toBe(expected);
+  });
+
+  test("different content produces different hashes", async () => {
+    const pathA = join(dir, "a.txt");
+    const pathB = join(dir, "b.txt");
+    writeFileSync(pathA, "hello");
+    writeFileSync(pathB, "world");
+    expect(await hashFile(pathA)).not.toBe(await hashFile(pathB));
+  });
+
+  test("hash changes when file content changes", async () => {
+    const path = join(dir, "mutable.txt");
+    writeFileSync(path, "v1");
+    const v1Hash = await hashFile(path);
+    writeFileSync(path, "v2");
+    const v2Hash = await hashFile(path);
+    expect(v1Hash).not.toBe(v2Hash);
+  });
+
+  test("hash matches raw bytes, not parsed content", async () => {
+    const path = join(dir, "brief.yaml");
+    writeFileSync(path, "id: camp\ncampaignMessage: Hi\n");
+    const hashWithoutSpace = await hashFile(path);
+    writeFileSync(path, "id: camp\ncampaignMessage: Hi  \n");
+    const hashWithSpace = await hashFile(path);
+    expect(hashWithoutSpace).not.toBe(hashWithSpace);
   });
 });
