@@ -49,12 +49,64 @@ export interface RunLog {
   entries: LogEntry[];
 }
 
-/** The result of a pipeline run (POST /campaigns/generate or GET /campaigns/result). */
+/** The result of a pipeline run (GET /campaigns/jobs/:id result, or GET /campaigns/result). */
 export interface RunResult {
   halted: boolean;
   assets: Asset[];
   log?: RunLog | null;
   error?: string;
+}
+
+/** Interval between job polls after the first immediate GET. Tests drive this with fake timers. */
+const JOB_POLL_MS = 250;
+
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+function parseJson(raw: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function pipelineUnreachable(status: number, error?: string): Error {
+  return new Error(
+    error ??
+      `Pipeline API unreachable (HTTP ${status}). Start the full stack with \`yarn dev\` from the repo root (it runs the API on :3001 alongside this UI).`,
+  );
+}
+
+/** Same restore rule as setBrief: a real run for this brief, else the job is gone. */
+async function recoverLostJob(campaignId: string): Promise<RunResult> {
+  try {
+    const res = await fetch(`${API}/campaigns/result?campaignId=${encodeURIComponent(campaignId)}`);
+    const d = (await res.json()) as RunResult;
+    if (d?.log?.campaignId === campaignId && (d.assets?.length || d.log)) return d;
+  } catch {
+    /* non-JSON / network — the in-memory job did not survive */
+  }
+  throw new Error("Job lost (API restarted). Reload to restore the last persisted run, or run again.");
+}
+
+async function pollJob(jobId: string, campaignId: string): Promise<RunResult> {
+  for (let attempt = 0; ; attempt++) {
+    if (attempt > 0) await wait(JOB_POLL_MS);
+    const res = await fetch(`${API}/campaigns/jobs/${encodeURIComponent(jobId)}`);
+    if (res.status === 404) return recoverLostJob(campaignId);
+    const data = parseJson(await res.text());
+    if (data?.status === "failed") {
+      throw new Error(typeof data.error === "string" ? data.error : "Generation failed");
+    }
+    if (data?.status === "completed") {
+      const result = data.result as RunResult | undefined;
+      if (!result) throw new Error("Generation failed");
+      return result;
+    }
+    if (!res.ok || !data) {
+      throw pipelineUnreachable(res.status, typeof data?.error === "string" ? data.error : undefined);
+    }
+  }
 }
 
 export type Decision = "approved" | "rejected";
@@ -315,10 +367,11 @@ export function RunProvider({ children }: { children: ReactNode }) {
   }, [decisions]);
 
   // Shared POST to the generate endpoint. The body is either a bare brief (full run)
-  // or a `{ brief, regenerateOnly }` envelope (selective re-roll). The pipeline API is
-  // reached through a same-origin proxy; when it isn't running the proxy returns a
-  // non-JSON 5xx, so parse defensively and surface an actionable message instead of a
-  // raw "Unexpected token" JSON error.
+  // or a `{ brief, regenerateOnly }` envelope (selective re-roll). A 202 `{ jobId }`
+  // is polled until the job completes or fails; a 404 on the job recovers from the
+  // persisted report. The pipeline API is reached through a same-origin proxy; when
+  // it isn't running the proxy returns a non-JSON 5xx, so parse defensively and
+  // surface an actionable message instead of a raw "Unexpected token" JSON error.
   const postGenerate = useCallback(
     async (body: unknown): Promise<RunResult> => {
       const url = selectedModel
@@ -329,22 +382,14 @@ export function RunProvider({ children }: { children: ReactNode }) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      const raw = await res.text();
-      let data: RunResult | null = null;
-      try {
-        data = JSON.parse(raw) as RunResult;
-      } catch {
-        data = null;
+      const data = parseJson(await res.text());
+      const jobId = typeof data?.jobId === "string" ? data.jobId : undefined;
+      if (res.status !== 202 || !jobId) {
+        throw pipelineUnreachable(res.status, typeof data?.error === "string" ? data.error : undefined);
       }
-      if (!res.ok || !data) {
-        throw new Error(
-          data?.error ??
-            `Pipeline API unreachable (HTTP ${res.status}). Start the full stack with \`yarn dev\` from the repo root (it runs the API on :3001 alongside this UI).`,
-        );
-      }
-      return data;
+      return pollJob(jobId, brief.id);
     },
-    [selectedModel],
+    [selectedModel, brief.id],
   );
 
   const execute = useCallback(async () => {

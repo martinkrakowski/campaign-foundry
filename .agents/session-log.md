@@ -195,3 +195,28 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Confirmed obsolete: 0.8.0 `sync --check` refuses a dirty tree ("use
     `--allow-dirty`") instead of the old `git reset --hard` — the rollback footgun
     flagged on 2026-06-09 is gone.
+
+---
+
+## 2026-08-25 — generate job handle (Phase J / D5)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `POST /campaigns/generate` returns `202 { jobId }` and continues the run
+    in-process; `writeReport` still happens on success. Invalid brief / unknown
+    `?model=` stay synchronous 400s. Business-rule failures mark the job
+    `failed` instead of HTTP 422.
+  - New in-memory job store (`apps/api/server/lib/jobs.ts`) and
+    `GET /campaigns/jobs/:id` poll surface (404 for unknown/missing — restart).
+  - Web `run-context` polls the job until completed/failed; GET 404 recovers
+    from `GET /campaigns/result?campaignId=`. Classic mode uses the same path.
+  - `apps/api/bin/generate.ts` unchanged.
+- **Decisions:**
+  - Jobs live at the API edge (hexagonal); no Prisma/BullMQ/SSE. Process
+    restart empties the Map → GET 404 → UI restores the last persisted report
+    or throws a clear "job lost" error.
+  - No pipeline progress hook: `done`/`total` stay 0 while running and equal
+    `assets.length` (or 0 if halted) on complete. Poll interval 250ms; first
+    GET is immediate.
+- **Left open:**
+  - SSE / persisted queue is a later optional train. N=100 still in-process.

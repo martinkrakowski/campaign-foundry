@@ -1,4 +1,4 @@
-import { describe, test, expect, vi, beforeEach } from "vitest";
+import { describe, test, expect, vi, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { RunProvider, useRun, assetKey, type Asset } from "@/lib/run-context";
@@ -22,11 +22,28 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const EMPTY = { halted: false, assets: [], log: null };
 
-/** Route fetch by method: GET (mount/restore) vs POST (generate). */
-const routeFetch = (onPost: () => Response | Promise<Response>) =>
-  vi.mocked(globalThis.fetch).mockImplementation((_url, init) =>
-    (init as RequestInit | undefined)?.method === "POST" ? Promise.resolve(onPost()) as Promise<Response> : Promise.resolve(json(EMPTY)),
-  );
+const jobOk = (result: { halted?: boolean; assets?: unknown[]; log?: unknown }) => {
+  const n = result.halted ? 0 : (result.assets?.length ?? 0);
+  return json({ status: "completed", done: n, total: n, log: result.log ?? null, result });
+};
+
+/** POST → 202 { jobId }, GET job → completed (or override), GET result → EMPTY. */
+const mockApi = (opts: {
+  post?: (url: string, init: RequestInit) => Response | Promise<Response>;
+  job?: (url: string) => Response | Promise<Response>;
+  result?: (url: string) => Response | Promise<Response>;
+} = {}) =>
+  vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+    const u = String(url);
+    const req = (init ?? {}) as RequestInit;
+    if (req.method === "POST") {
+      return Promise.resolve(opts.post ? opts.post(u, req) : json({ jobId: "job-1" }, 202));
+    }
+    if (u.includes("/campaigns/jobs/")) {
+      return Promise.resolve(opts.job ? opts.job(u) : jobOk({ halted: false, assets: [], log: { entries: [] } }));
+    }
+    return Promise.resolve(opts.result ? opts.result(u) : json(EMPTY));
+  });
 
 describe("useRun", () => {
   test("throws when used outside a RunProvider", () => {
@@ -41,7 +58,7 @@ describe("useRun", () => {
 
 describe("RunProvider — execute", () => {
   test("posts the brief and populates assets", async () => {
-    routeFetch(() => json({ halted: false, assets: [asset()], log: { entries: [] } }));
+    mockApi({ job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [] } }) });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
@@ -53,9 +70,11 @@ describe("RunProvider — execute", () => {
 
   test("sends the selected model in the query string", async () => {
     const urls: string[] = [];
-    vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
-      urls.push(String(url));
-      return Promise.resolve((init as RequestInit | undefined)?.method === "POST" ? json({ halted: false, assets: [], log: { entries: [] } }) : json(EMPTY));
+    mockApi({
+      post: (url) => {
+        urls.push(url);
+        return json({ jobId: "job-1" }, 202);
+      },
     });
     const { result } = setup();
     act(() => result.current.setSelectedModel("procedural"));
@@ -66,7 +85,7 @@ describe("RunProvider — execute", () => {
   });
 
   test("surfaces an actionable error on a non-ok, non-JSON response", async () => {
-    routeFetch(() => new Response("502 Bad Gateway", { status: 502 }));
+    mockApi({ post: () => new Response("502 Bad Gateway", { status: 502 }) });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
@@ -74,15 +93,24 @@ describe("RunProvider — execute", () => {
     expect(result.current.error).toMatch(/Pipeline API unreachable/);
   });
 
+  test("surfaces a JSON error from a non-202 POST", async () => {
+    mockApi({ post: () => json({ error: "Invalid campaign brief" }, 400) });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.error).toBe("Invalid campaign brief");
+  });
+
   test("discards a run whose result lands after a brief switch", async () => {
     let resolvePost!: (r: Response) => void;
-    vi.mocked(globalThis.fetch).mockImplementation((_url, init) =>
-      (init as RequestInit | undefined)?.method === "POST"
-        ? new Promise<Response>((res) => {
-            resolvePost = res;
-          })
-        : Promise.resolve(json(EMPTY)),
-    );
+    mockApi({
+      post: () =>
+        new Promise<Response>((res) => {
+          resolvePost = res;
+        }),
+      job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [] } }),
+    });
     const { result } = setup();
     let exec!: Promise<void>;
     act(() => {
@@ -102,7 +130,7 @@ describe("RunProvider — execute", () => {
       });
     });
     await act(async () => {
-      resolvePost(json({ halted: false, assets: [asset()], log: { entries: [] } }));
+      resolvePost(json({ jobId: "job-1" }, 202));
       await exec;
     });
     expect(result.current.assets).toHaveLength(0); // stale result dropped
@@ -129,7 +157,7 @@ describe("RunProvider — review decisions", () => {
   });
 
   test("regenerateRejected is a no-op when nothing is rejected", async () => {
-    routeFetch(() => json(EMPTY));
+    mockApi();
     const { result } = setup();
     const before = vi.mocked(globalThis.fetch).mock.calls.length;
     await act(async () => {
@@ -139,7 +167,7 @@ describe("RunProvider — review decisions", () => {
   });
 
   test("regenerateRejected re-rolls rejected cells and returns them to review", async () => {
-    routeFetch(() => json({ halted: false, assets: [asset({ complianceScore: 0.9 })], log: { entries: [] } }));
+    mockApi({ job: () => jobOk({ halted: false, assets: [asset({ complianceScore: 0.9 })], log: { entries: [] } }) });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
@@ -184,7 +212,9 @@ describe("RunProvider — brief picker & persistence", () => {
   });
 
   test("setBrief keeps the current run when the id already matches", async () => {
-    routeFetch(() => json({ halted: false, assets: [asset()], log: { entries: [], campaignId: "summer-hydration-2026" } }));
+    mockApi({
+      job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [], campaignId: "summer-hydration-2026" } }),
+    });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
@@ -292,13 +322,12 @@ describe("RunProvider — late results after a switch", () => {
 
   test("an errored run that resolves after a brief switch is dropped", async () => {
     let rejectPost!: (e: unknown) => void;
-    vi.mocked(globalThis.fetch).mockImplementation((_url, init) =>
-      (init as RequestInit | undefined)?.method === "POST"
-        ? new Promise<Response>((_res, rej) => {
-            rejectPost = rej;
-          })
-        : Promise.resolve(json(EMPTY)),
-    );
+    mockApi({
+      post: () =>
+        new Promise<Response>((_res, rej) => {
+          rejectPost = rej;
+        }),
+    });
     const { result } = setup();
     let exec!: Promise<void>;
     act(() => {
@@ -313,16 +342,12 @@ describe("RunProvider — late results after a switch", () => {
   });
 
   test("regenerateRejected surfaces an error when the re-roll fails", async () => {
-    vi.mocked(globalThis.fetch).mockImplementation((_url, init) => {
-      if ((init as RequestInit | undefined)?.method === "POST") {
-        const body = JSON.parse((init as RequestInit).body as string) as { regenerateOnly?: unknown };
-        return Promise.resolve(
-          body.regenerateOnly
-            ? new Response("boom", { status: 500 })
-            : json({ halted: false, assets: [asset()], log: { entries: [] } }),
-        );
-      }
-      return Promise.resolve(json(EMPTY));
+    mockApi({
+      post: (_url, init) => {
+        const body = JSON.parse(init.body as string) as { regenerateOnly?: unknown };
+        return body.regenerateOnly ? new Response("boom", { status: 500 }) : json({ jobId: "job-1" }, 202);
+      },
+      job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [] } }),
     });
     const { result } = setup();
     await act(async () => {
@@ -336,9 +361,7 @@ describe("RunProvider — late results after a switch", () => {
   });
 
   test("execute uses the generic message when a run rejects with a non-Error", async () => {
-    vi.mocked(globalThis.fetch).mockImplementation((_url, init) =>
-      (init as RequestInit | undefined)?.method === "POST" ? Promise.reject("plain string") : Promise.resolve(json(EMPTY)),
-    );
+    mockApi({ post: () => Promise.reject("plain string") });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
@@ -347,13 +370,13 @@ describe("RunProvider — late results after a switch", () => {
   });
 
   test("regenerateRejected uses the generic message on a non-Error rejection", async () => {
-    vi.mocked(globalThis.fetch).mockImplementation((_url, init) => {
-      if ((init as RequestInit | undefined)?.method === "POST") {
-        const body = JSON.parse((init as RequestInit).body as string) as { regenerateOnly?: unknown };
+    mockApi({
+      post: (_url, init) => {
+        const body = JSON.parse(init.body as string) as { regenerateOnly?: unknown };
         if (body.regenerateOnly) return Promise.reject("plain string");
-        return Promise.resolve(json({ halted: false, assets: [asset()], log: { entries: [] } }));
-      }
-      return Promise.resolve(json(EMPTY));
+        return json({ jobId: "job-1" }, 202);
+      },
+      job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [] } }),
     });
     const { result } = setup();
     await act(async () => {
@@ -368,13 +391,13 @@ describe("RunProvider — late results after a switch", () => {
 
   test("a regenerate that resolves after a brief switch is dropped", async () => {
     let resolveRegen!: (r: Response) => void;
-    vi.mocked(globalThis.fetch).mockImplementation((_url, init) => {
-      if ((init as RequestInit | undefined)?.method === "POST") {
-        const body = JSON.parse((init as RequestInit).body as string) as { regenerateOnly?: unknown };
+    mockApi({
+      post: (_url, init) => {
+        const body = JSON.parse(init.body as string) as { regenerateOnly?: unknown };
         if (body.regenerateOnly) return new Promise<Response>((res) => (resolveRegen = res));
-        return Promise.resolve(json({ halted: false, assets: [asset()], log: { entries: [] } }));
-      }
-      return Promise.resolve(json(EMPTY));
+        return json({ jobId: "job-1" }, 202);
+      },
+      job: () => jobOk({ halted: false, assets: [asset({ complianceScore: 0.1 })], log: { entries: [] } }),
     });
     const { result } = setup();
     await act(async () => {
@@ -387,7 +410,7 @@ describe("RunProvider — late results after a switch", () => {
     });
     act(() => result.current.setBrief(otherBrief)); // bumps the run token
     await act(async () => {
-      resolveRegen(json({ halted: false, assets: [asset({ complianceScore: 0.1 })], log: { entries: [] } }));
+      resolveRegen(json({ jobId: "job-1" }, 202));
       await regen;
     });
     // The switched brief has no run; the stale regenerate result was discarded.
@@ -464,13 +487,13 @@ describe("RunProvider — log-only and superseded restores", () => {
 
   test("drops a regenerate that errors after a brief switch", async () => {
     let rejectRegen!: (e: unknown) => void;
-    vi.mocked(globalThis.fetch).mockImplementation((_url, init) => {
-      if ((init as RequestInit | undefined)?.method === "POST") {
-        const body = JSON.parse((init as RequestInit).body as string) as { regenerateOnly?: unknown };
+    mockApi({
+      post: (_url, init) => {
+        const body = JSON.parse(init.body as string) as { regenerateOnly?: unknown };
         if (body.regenerateOnly) return new Promise<Response>((_res, rej) => (rejectRegen = rej));
-        return Promise.resolve(json({ halted: false, assets: [asset()], log: { entries: [] } }));
-      }
-      return Promise.resolve(json(EMPTY));
+        return json({ jobId: "job-1" }, 202);
+      },
+      job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [] } }),
     });
     const { result } = setup();
     await act(async () => {
@@ -525,5 +548,193 @@ describe("RunProvider — log-only and superseded restores", () => {
     });
     expect(result.current.brief.id).toBe("second");
     expect(result.current.assets).toHaveLength(0); // the stale 'first' run was ignored
+  });
+});
+
+describe("RunProvider — job polling", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test("polls until a running job completes", async () => {
+    vi.useFakeTimers();
+    let polls = 0;
+    mockApi({
+      job: () => {
+        polls += 1;
+        if (polls === 1) return json({ status: "running", done: 0, total: 0, log: null });
+        return jobOk({ halted: false, assets: [asset()], log: { entries: [] } });
+      },
+    });
+    const { result } = setup();
+    let exec!: Promise<void>;
+    await act(async () => {
+      exec = result.current.execute();
+    });
+    expect(result.current.loading).toBe(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+      await exec;
+    });
+    expect(result.current.assets).toHaveLength(1);
+    expect(polls).toBe(2);
+  });
+
+  test("surfaces a failed job's error", async () => {
+    mockApi({ job: () => json({ status: "failed", done: 0, total: 0, log: null, error: "need two products" }) });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.error).toBe("need two products");
+  });
+
+  test("uses a generic message when a failed job has no error", async () => {
+    mockApi({ job: () => json({ status: "failed", done: 0, total: 0, log: null }) });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.error).toBe("Generation failed");
+  });
+
+  test("uses a generic message when a completed job has no result", async () => {
+    mockApi({ job: () => json({ status: "completed", done: 0, total: 0, log: null }) });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.error).toBe("Generation failed");
+  });
+
+  test("recovers a lost job from the persisted report", async () => {
+    let posted = false;
+    mockApi({
+      post: () => {
+        posted = true;
+        return json({ jobId: "job-1" }, 202);
+      },
+      job: () => json({ error: "not found" }, 404),
+      result: (url) =>
+        posted && String(url).includes("campaignId=summer-hydration-2026")
+          ? json({ halted: false, assets: [asset()], log: { entries: [], campaignId: "summer-hydration-2026" } })
+          : json(EMPTY),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.assets).toHaveLength(1);
+  });
+
+  test("recovers a halted log-only report after a lost job", async () => {
+    let posted = false;
+    mockApi({
+      post: () => {
+        posted = true;
+        return json({ jobId: "job-1" }, 202);
+      },
+      job: () => json({ error: "not found" }, 404),
+      result: () =>
+        posted
+          ? json({ halted: true, assets: [], log: { entries: [], campaignId: "summer-hydration-2026" } })
+          : json(EMPTY),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.halted).toBe(true);
+    expect(result.current.assets).toHaveLength(0);
+  });
+
+  test("throws when a lost job has no persisted report", async () => {
+    mockApi({ job: () => json({ error: "not found" }, 404) });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.error).toMatch(/Job lost/);
+  });
+
+  test("throws when restoring the lost job fails", async () => {
+    mockApi({
+      job: () => json({ error: "not found" }, 404),
+      result: () => Promise.reject(new Error("down")),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.error).toMatch(/Job lost/);
+  });
+
+  test("treats a persisted report for another brief as a lost job", async () => {
+    mockApi({
+      job: () => json({ error: "not found" }, 404),
+      result: () => json({ halted: false, assets: [asset()], log: { entries: [], campaignId: "other" } }),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.error).toMatch(/Job lost/);
+  });
+
+  test("surfaces an unreachable error when the job GET is non-JSON", async () => {
+    mockApi({ job: () => new Response("nope", { status: 500 }) });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.error).toMatch(/Pipeline API unreachable/);
+  });
+
+  test("surfaces a JSON error from a non-ok job GET", async () => {
+    mockApi({ job: () => json({ error: "nope" }, 500) });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.error).toBe("nope");
+  });
+
+  test("rejects a 202 without a jobId", async () => {
+    mockApi({ post: () => json({}, 202) });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.error).toMatch(/Pipeline API unreachable/);
+  });
+
+  test("a brief switch during polling drops the stale job result", async () => {
+    let resolveJob!: (r: Response) => void;
+    mockApi({
+      job: () => new Promise<Response>((res) => (resolveJob = res)),
+    });
+    const { result } = setup();
+    let exec!: Promise<void>;
+    act(() => {
+      exec = result.current.execute();
+    });
+    await waitFor(() => expect(typeof resolveJob).toBe("function")); // POST 202, GET job hanging
+    act(() =>
+      result.current.setBrief({
+        id: "switched",
+        targetRegion: "US",
+        targetAudience: "x",
+        campaignMessage: "y",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" },
+          { id: "p2", name: "P2", primaryColor: "#222222", logoPath: "b.png" },
+        ],
+      }),
+    );
+    await act(async () => {
+      resolveJob(jobOk({ halted: false, assets: [asset()], log: { entries: [] } }));
+      await exec;
+    });
+    expect(result.current.assets).toHaveLength(0);
   });
 });

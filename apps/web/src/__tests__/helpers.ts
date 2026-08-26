@@ -59,12 +59,20 @@ export const seedPersistedRun = (assets: Asset[], opts: { halted?: boolean; id?:
       ],
     }),
   );
-  vi.mocked(globalThis.fetch).mockImplementation(async () =>
-    new Response(JSON.stringify({ halted: opts.halted ?? false, assets, log: { entries: [], campaignId: id } }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    }),
-  );
+  const report = { halted: opts.halted ?? false, assets, log: { entries: [], campaignId: id } };
+  vi.mocked(globalThis.fetch).mockImplementation(async (url, init) => {
+    const headers = { "content-type": "application/json" };
+    if ((init as RequestInit | undefined)?.method === "POST") {
+      return new Response(JSON.stringify({ jobId: "seed-job" }), { status: 202, headers });
+    }
+    if (String(url).includes("/campaigns/jobs/")) {
+      return new Response(
+        JSON.stringify({ status: "completed", done: assets.length, total: assets.length, log: report.log, result: report }),
+        { status: 200, headers },
+      );
+    }
+    return new Response(JSON.stringify(report), { status: 200, headers });
+  });
 };
 
 interface NextControls {
