@@ -376,6 +376,80 @@ treatments:
 ```
 `layout` ∈ `headline-bottom | headline-top`, `tone` ∈ `bold | subtle`.
 
+## Modes
+
+A brief runs in one of two modes, chosen by the optional `mode` field.
+
+**Classic** (`mode` absent or `brief`) is everything above: `products × three
+ratios × treatments`, identity `productId/aspectRatio/treatment`, at least two
+products. Existing briefs, reports, and output paths are unchanged.
+
+**Randomized** (`mode: variation`) hands the matrix to a seeded planner instead.
+The brief declares a *policy* and the planner draws `count` distinct variants
+from it — `count` is the **total** across all products and ratios, not a
+multiplier. One product is enough in this mode.
+
+```yaml
+mode: variation
+variation:
+  count: 12              # total variants across products × ratios
+  seed: 42               # optional; default seedFrom(id)
+  minDistance: 2         # Hamming distance over the discrete axes
+  coverage:              # optional minimums the planner satisfies first
+    perProduct: 1
+    perRatio: 1
+  axes:                  # a list per axis; omitted axes take defaults (see below)
+    layout: [headline-top, headline-bottom]
+    tone: [bold, subtle]
+    background: { source: [procedural] }   # procedural | asset-pool | genai
+    paletteShift: [0, 0.1, 0.2]            # enumerated steps; procedural only
+output:
+  formats: [static]
+  platforms: [instagram-feed, linkedin, x]
+```
+
+Omitted axes are **not** all locked to one value: `layout` and `tone` expand to every supported value, `background.source` defaults to `[procedural]`, `paletteShift` to `[0]`, `duration` to `[6]`, `motion` to every `MOTION_KINDS` entry when `output.formats` includes `motion` (otherwise off), and `headline` is off unless `pool://copy` is requested. Lock an axis by listing exactly one value.
+
+How a plan is built: coverage minimums are placed first, then seeded draws
+from one generator seeded by `seedFrom(briefId, seed)` are accepted greedily (each variant also carries a provenance seed `seedFrom(briefId, index, "0")`; the per-slot `seedFrom(briefId, index, attempt)` generator is used only by re-rolls) while each stays at
+least `minDistance` axis values away from every accepted variant. The planner
+over-generates to `count × 3`; if fewer than `count` survive, it **fails loud**
+with the shortfall and the axis-product size rather than emitting near-duplicates
+(so `count: 100` over 12 static combos is an error, not a silent 12). Any axis or
+format the parser does not support yet is a 400 naming it — a variation brief can
+never fall back to the classic matrix.
+
+Dry-run the planner without generating:
+
+```bash
+curl -X POST http://localhost:3001/campaigns/plan \
+  -H 'content-type: application/json' \
+  --data "$(yq -o=json briefs/sample-randomized.yaml)"   # body must be JSON (readBody); convert YAML first
+# → 200 { policyHash, seed, estimate: { creatives, feasibility, genaiCalls }, variants: [...] }
+#   422 when count cannot be reached (the message carries the shortfall); 400 if not a variation brief
+```
+
+The wizard's policy step and the command bar call this to show the estimate
+before **Run**.
+
+Identity and re-rolls: a variant is `productId/v<index>` (`seed` is provenance
+only) and renders to `output/<product>/<ratio>/v<index>.png`. Rejecting a cell
+and pressing **Regenerate Rejected** sends `regenerateOnly:
+[{ productId, variantIndex, attempt }]`; the planner re-draws just that slot at
+`seedFrom(id, index, attempt)`, re-checks distance against the rest, and the
+persisted report replaces exactly that row. `attempt` starts at `1` for the
+first re-roll and increments per re-roll of the same slot (it is stored on the
+asset, so a reload continues counting). Same brief + same seed + same attempts
+→ the same `policyHash` and the same plan; PNGs are byte-stable for procedural
+and reused backgrounds, GenAI backgrounds are cached by seed and attributed,
+and mp4 containers are frame-stable but not byte-stable across ffmpeg builds.
+
+Sample briefs:
+
+- [`briefs/sample-randomized.yaml`](briefs/sample-randomized.yaml) — static axes, 12 variants.
+- [`briefs/sample-motion.yaml`](briefs/sample-motion.yaml) — adds `motion` / `duration` axes and `formats: [static, motion]` (since #58; parses only when the ffmpeg capability is on).
+- [`briefs/sample-pooled.yaml`](briefs/sample-pooled.yaml) — (since #57) draws `headline` from the approved pool in [`briefs/sample-pooled/pools.json`](briefs/sample-pooled/pools.json).
+
 ## Example output
 
 Outputs are organized **by product, then aspect ratio**:
