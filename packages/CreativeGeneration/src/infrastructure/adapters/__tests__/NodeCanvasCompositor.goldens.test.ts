@@ -50,6 +50,8 @@ describe("NodeCanvasCompositor goldens", () => {
   test.skipIf(Boolean(skipReason))(
     skipReason ??
       "still PNG sha256 matches the committed matrix (both layouts × both tones × three ratios)",
+    // 12 cells × full-size raster: comfortably over Vitest's 5 s default on the CI runner.
+    { timeout: 60_000 },
     async () => {
       const map = resolveGoldenMap(fixture, key);
       if (!map) {
@@ -83,6 +85,8 @@ describe("NodeCanvasCompositor goldens", () => {
   test.skipIf(Boolean(skipReason))(
     skipReason ??
       "draw at restT(kind) is byte-identical to the still for every MOTION_KINDS kind",
+    // 12 cells × 5 full-size rasters (still + four kinds): well over the 5 s default.
+    { timeout: 60_000 },
     async () => {
       const map = resolveGoldenMap(fixture, key);
       if (!map) {
@@ -103,14 +107,16 @@ describe("NodeCanvasCompositor goldens", () => {
               layout,
               tone,
             };
-            const still = await compositor.compositeAsset(request);
-            const stillHash = sha256(still.image);
+            // One prepare per cell; the still and all four rest-pose frames share it
+            // (the still test above already proves compositeAsset matches the map).
+            const prepared = await NodeCanvasCompositor.prepare(request);
+            const canvas = createCanvas(prepared.width, prepared.height);
+            const ctx = canvas.getContext("2d");
+            NodeCanvasCompositor.draw(ctx, prepared, 1);
+            const stillHash = sha256(canvas.toBuffer("image/png"));
             expect(stillHash).toBe(map[cellKey(layout, tone, ratioValue)]);
 
-            const prepared = await NodeCanvasCompositor.prepare(request);
             for (const kind of MOTION_KINDS) {
-              const canvas = createCanvas(prepared.width, prepared.height);
-              const ctx = canvas.getContext("2d");
               NodeCanvasCompositor.draw(ctx, prepared, restT(kind), kind);
               expect(sha256(canvas.toBuffer("image/png"))).toBe(stillHash);
             }
