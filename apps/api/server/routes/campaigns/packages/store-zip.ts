@@ -1,4 +1,24 @@
+import { Readable } from "node:stream";
 import { crc32 } from "node:zlib";
+
+/** One file in the archive: sizes and CRC come from a first pass over the bytes. */
+export interface ZipEntry {
+  readonly name: string;
+  readonly size: number;
+  readonly crc: number;
+}
+
+const LOCAL_SIGNATURE = 0x04034b50;
+const CENTRAL_SIGNATURE = 0x02014b50;
+const EOCD_SIGNATURE = 0x06054b50;
+const VERSION = 20;
+/** General-purpose flag bit 11: file names are UTF-8. */
+const FLAG_UTF8 = 0x0800;
+const METHOD_STORE = 0;
+/** DOS time 00:00:00. */
+const DOS_TIME = 0;
+/** DOS date 1980-01-01 — the earliest valid value (year 0 since 1980, month 1, day 1). */
+const DOS_DATE = (0 << 9) | (1 << 5) | 1;
 
 function u16(n: number): Buffer {
   const b = Buffer.alloc(2);
@@ -13,66 +33,97 @@ function u32(n: number): Buffer {
 }
 
 /**
- * Store-only (no compression) zip. Local file header + central directory + EOCD.
- * CRC32 via node:zlib — no extra dependency.
+ * Measure a byte stream: total size and CRC-32 (node:zlib — no extra dependency),
+ * one chunk at a time. This is the first pass; the bytes are re-read when streamed.
  */
-export function buildStoreZip(files: readonly { name: string; data: Uint8Array }[]): Buffer {
-  const locals: Buffer[] = [];
-  const centrals: Buffer[] = [];
-  let offset = 0;
-  for (const file of files) {
-    const name = Buffer.from(file.name, "utf8");
-    const data = Buffer.from(file.data);
-    const crc = crc32(data) >>> 0;
-    const local = Buffer.concat([
-      u32(0x04034b50),
-      u16(20),
-      u16(0),
-      u16(0),
-      u16(0),
-      u16(0),
-      u32(crc),
-      u32(data.length),
-      u32(data.length),
-      u16(name.length),
-      u16(0),
-      name,
-      data,
-    ]);
-    locals.push(local);
-    const central = Buffer.concat([
-      u32(0x02014b50),
-      u16(20),
-      u16(20),
-      u16(0),
-      u16(0),
-      u16(0),
-      u16(0),
-      u32(crc),
-      u32(data.length),
-      u32(data.length),
-      u16(name.length),
-      u16(0),
-      u16(0),
-      u16(0),
-      u16(0),
-      u32(0),
-      u32(offset),
-      name,
-    ]);
-    centrals.push(central);
-    offset += local.length;
+export async function measure(chunks: AsyncIterable<Uint8Array>): Promise<{ size: number; crc: number }> {
+  let size = 0;
+  let crc = 0;
+  for await (const chunk of chunks) {
+    size += chunk.length;
+    crc = crc32(chunk, crc);
   }
-  const centralDir = Buffer.concat(centrals);
-  const eocd = Buffer.concat([
-    u32(0x06054b50),
+  return { size, crc: crc >>> 0 };
+}
+
+export function localHeader(entry: ZipEntry): Buffer {
+  const name = Buffer.from(entry.name, "utf8");
+  return Buffer.concat([
+    u32(LOCAL_SIGNATURE),
+    u16(VERSION),
+    u16(FLAG_UTF8),
+    u16(METHOD_STORE),
+    u16(DOS_TIME),
+    u16(DOS_DATE),
+    u32(entry.crc),
+    u32(entry.size),
+    u32(entry.size),
+    u16(name.length),
+    u16(0),
+    name,
+  ]);
+}
+
+export function centralHeader(entry: ZipEntry, localOffset: number): Buffer {
+  const name = Buffer.from(entry.name, "utf8");
+  return Buffer.concat([
+    u32(CENTRAL_SIGNATURE),
+    u16(VERSION),
+    u16(VERSION),
+    u16(FLAG_UTF8),
+    u16(METHOD_STORE),
+    u16(DOS_TIME),
+    u16(DOS_DATE),
+    u32(entry.crc),
+    u32(entry.size),
+    u32(entry.size),
+    u16(name.length),
     u16(0),
     u16(0),
-    u16(files.length),
-    u16(files.length),
-    u32(centralDir.length),
-    u32(offset),
+    u16(0),
+    u16(0),
+    u32(0),
+    u32(localOffset),
+    name,
+  ]);
+}
+
+export function endOfCentralDirectory(count: number, directorySize: number, directoryOffset: number): Buffer {
+  return Buffer.concat([
+    u32(EOCD_SIGNATURE),
+    u16(0),
+    u16(0),
+    u16(count),
+    u16(count),
+    u32(directorySize),
+    u32(directoryOffset),
     u16(0),
   ]);
-  return Buffer.concat([...locals, centralDir, eocd]);
+}
+
+/**
+ * Store-only (no compression) zip as a stream: each local header followed by the
+ * file's bytes from `open`, then the central directory and EOCD. Nothing is
+ * buffered beyond one chunk at a time; `entries` carry the sizes/CRCs so the
+ * local headers can be emitted before the bytes.
+ */
+export function storeZipStream<E extends ZipEntry>(
+  entries: readonly E[],
+  open: (entry: E) => Readable,
+): Readable {
+  async function* chunks(): AsyncGenerator<Buffer> {
+    const centrals: Buffer[] = [];
+    let offset = 0;
+    for (const entry of entries) {
+      const local = localHeader(entry);
+      yield local;
+      for await (const chunk of open(entry)) yield chunk as Buffer;
+      centrals.push(centralHeader(entry, offset));
+      offset += local.length + entry.size;
+    }
+    const directory = Buffer.concat(centrals);
+    yield directory;
+    yield endOfCentralDirectory(entries.length, directory.length, offset);
+  }
+  return Readable.from(chunks());
 }

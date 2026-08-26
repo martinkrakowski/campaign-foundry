@@ -1,13 +1,22 @@
-import { readdir, readFile, stat } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { send } from "h3";
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import { outputRoot } from "../../../../lib/config.js";
 import { resolveConfined } from "../../../../lib/confined-path.js";
-import { buildStoreZip } from "../store-zip.js";
+import { measure, storeZipStream, type ZipEntry } from "../store-zip.js";
 
-async function collectFiles(dir: string): Promise<Array<{ name: string; data: Buffer }>> {
-  const out: Array<{ name: string; data: Buffer }> = [];
+type FileEntry = ZipEntry & { readonly path: string };
+
+/** Packaging swaps the platform folder with rm + rename; a walk can land in that gap. */
+const isRewriteError = (error: unknown): boolean => {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+};
+
+/** First pass: walk the folder and take each file's size + CRC without holding the bytes. */
+async function collectEntries(dir: string): Promise<FileEntry[]> {
+  const out: FileEntry[] = [];
   async function walk(current: string, rel: string): Promise<void> {
     const entries = await readdir(current, { withFileTypes: true });
     for (const entry of entries) {
@@ -16,7 +25,7 @@ async function collectFiles(dir: string): Promise<Array<{ name: string; data: Bu
       if (entry.isDirectory()) {
         await walk(full, nextRel);
       } else if (entry.isFile()) {
-        out.push({ name: nextRel, data: await readFile(full) });
+        out.push({ name: nextRel, path: full, ...(await measure(createReadStream(full))) });
       }
     }
   }
@@ -27,7 +36,8 @@ async function collectFiles(dir: string): Promise<Array<{ name: string; data: Bu
 
 /**
  * GET /campaigns/packages/:campaignId/:platformId.zip — store-only zip of that
- * platform folder. 404 if the directory does not exist.
+ * platform folder, streamed. 404 if the directory does not exist; 409 if the
+ * folder disappears mid-walk (packaging is rewriting it — retry).
  */
 export default defineEventHandler(async (event) => {
   const campaignId = String(getRouterParam(event, "campaignId"));
@@ -59,8 +69,21 @@ export default defineEventHandler(async (event) => {
     return { error: "Not found" };
   }
 
-  const files = await collectFiles(platformDir);
-  const zip = buildStoreZip(files);
+  let files: FileEntry[];
+  try {
+    files = await collectEntries(platformDir);
+  } catch (error) {
+    if (isRewriteError(error)) {
+      setResponseStatus(event, 409);
+      return { error: "Package is being rewritten, retry" };
+    }
+    throw error;
+  }
+
+  setHeader(event, "content-type", "application/zip");
   setHeader(event, "content-disposition", `attachment; filename="${platformId}.zip"`);
-  return send(event, zip, "application/zip");
+  return sendStream(
+    event,
+    storeZipStream(files, (entry) => createReadStream(entry.path)),
+  );
 });
