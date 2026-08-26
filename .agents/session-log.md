@@ -286,3 +286,19 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Refused: clock injection into `PipelineExecutionLog` (D14 keeps the exemption for wave 1), a `JobStore` port at the composition root (edge concern, single implementation), `Result<T,E>` as the job wire shape, dropping `done/total` (agreed Phase J shape).
 - **Left open:**
   - Follow-ups noted in the plan's wave-1 status: clock injection, one `mockPipelineApi` test fixture, real progress from `PipelineExecutionLog.totalOperations`. Worktrees `../cf-wt-*` remain until the PRs merge.
+
+## 2026-08-25 — platform packaging (Phase 5.1+5.3)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `PlatformProfile` table in Distribution (three canvases only; motion platforms hidden).
+  - `PackageStorePort` + `FileSystemPackageStore` + `PackageForPlatformUseCase`: copy matching-ratio statics under `output/<campaignId>/platforms/<id>/` and write `manifest.json`. Never re-renders.
+  - `POST /campaigns/package` wires the use case at the route; `readReport` helper shared with `GET /campaigns/result`.
+- **Decisions:**
+  - LinkedIn is 1:1 static (this wave's table wins over the long-form `1:1 | 16:9` note).
+  - `safeInsets` are zeros; `maxBytes` is 8 MiB static / 100 MiB motion (documented caps, not live APIs).
+  - Empty ratio selection still writes an empty-items manifest so the platform folder exists.
+  - Port/adapter omitted from the hexagen manifest: listing them emits `*.out-port.ts` / `*.adapter.ts` stubs that clash with neighbour names (`ExportPort.ts`, `FileSystemExporter.ts`). Hand-export the port from `application/ports/out/index.ts`.
+  - Distribution `src/index.ts` re-exports application + domain (hexagen modular-monolith mode does not refresh the package root barrel when new layers gain content).
+- **Left open:**
+  - Phase 5.2 (safe insets at generation) and 5.4 (export-page UI). Motion profiles stay `visible: false` until P4.

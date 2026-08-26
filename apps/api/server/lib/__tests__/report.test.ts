@@ -7,7 +7,7 @@ import {
   type GeneratedAsset,
   type PipelineResult,
 } from "@campaignfoundry/CampaignOrchestration";
-import { campaignReportPath, latestReportPath, writeReport } from "../report.js";
+import { campaignReportPath, latestReportPath, readReport, writeReport } from "../report.js";
 
 type ReportAsset = GeneratedAsset & { brandCompliant: boolean };
 
@@ -53,6 +53,28 @@ describe("report persistence", () => {
 
   test("latestReportPath points at report.json", () => {
     expect(latestReportPath(root)).toBe(resolve(root, "report.json"));
+  });
+
+  test("readReport returns the parsed per-campaign report", async () => {
+    await writeReport(result([asset()]));
+    await expect(readReport(root, "camp")).resolves.toMatchObject({
+      halted: false,
+      assets: [expect.objectContaining({ productId: "alpha" })],
+    });
+  });
+
+  test("readReport returns undefined for an unsafe id", async () => {
+    await expect(readReport(root, "../evil")).resolves.toBeUndefined();
+  });
+
+  test("readReport returns undefined when the file is missing", async () => {
+    await expect(readReport(root, "camp")).resolves.toBeUndefined();
+  });
+
+  test("readReport returns undefined for invalid JSON", async () => {
+    mkdirSync(resolve(root, "reports"), { recursive: true });
+    writeFileSync(resolve(root, "reports", "camp.json"), "{not json");
+    await expect(readReport(root, "camp")).resolves.toBeUndefined();
   });
 
   test("writes per-campaign and latest, deriving brandCompliant (density AND logo)", async () => {

@@ -23,6 +23,21 @@ export function campaignReportPath(root: string, campaignId: string): string | n
   return resolve(root, "reports", `${campaignId}.json`);
 }
 
+/**
+ * Read a campaign's persisted report, or `undefined` when the id is unsafe or
+ * the file is missing / unreadable. A file that parses as JSON `null` returns
+ * `null` (distinct from missing). Does not merge or write.
+ */
+export async function readReport(root: string, campaignId: string): Promise<unknown> {
+  const path = campaignReportPath(root, campaignId);
+  if (!path) return undefined;
+  try {
+    return JSON.parse(await readFile(path, "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
 /** The "latest run" pointer — read by GET /campaigns/result when no campaignId is given. */
 export const latestReportPath = (root: string): string => resolve(root, "report.json");
 

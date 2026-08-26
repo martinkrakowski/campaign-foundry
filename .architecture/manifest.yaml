@@ -236,8 +236,8 @@ bounded_contexts:
   - name: Distribution
     type: core
     description: >
-      Driven context handling file persistence and print-proof generation. Owns
-      no domain logic and is pure infrastructure.
+      Driven context handling file persistence, print-proof generation, and
+      per-platform packaging of already-rendered creatives.
     depends_on:
       - shared
       - CampaignOrchestration
@@ -246,10 +246,12 @@ bounded_contexts:
     layers:
       domain:
         entities: []
-        value_objects: []
+        value_objects:
+          - PlatformProfile
         domain_services: []
       application:
-        use_cases: []
+        use_cases:
+          - PackageForPlatformUseCase
         ports:
           in: []
           out: []
