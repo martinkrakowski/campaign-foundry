@@ -346,6 +346,15 @@ export function RunProvider({ children }: { children: ReactNode }) {
   // The in-flight job poller. Starting a run, switching briefs, or unmounting aborts it
   // so an abandoned run never keeps hitting /campaigns/jobs/:id in the background.
   const pollAbort = useRef<AbortController | null>(null);
+  // Packaging shares the brief-identity guard: a package call captures brief.id and
+  // drops its result if the user has moved on, or if a newer package call has already
+  // completed (packageSeq). A brief switch aborts whatever is still in flight.
+  const packageAbort = useRef<AbortController | null>(null);
+  const packageSeq = useRef(0);
+  const packageSignal = (): AbortSignal => {
+    packageAbort.current ??= new AbortController();
+    return packageAbort.current.signal;
+  };
   const beginRun = (): { seq: number; signal: AbortSignal } => {
     pollAbort.current?.abort();
     const controller = new AbortController();
@@ -385,6 +394,8 @@ export function RunProvider({ children }: { children: ReactNode }) {
       // guard in execute/regenerateRejected) and the grid isn't stuck spinning.
       runSeq.current += 1;
       pollAbort.current?.abort();
+      packageAbort.current?.abort();
+      packageAbort.current = null;
       setLoading(false);
       setRegeneratingKeys(null);
       // (2)/(3) Clear, then adopt this brief's own persisted run if one exists. The API
@@ -624,30 +635,41 @@ export function RunProvider({ children }: { children: ReactNode }) {
 
   const packageSelected = useCallback(
     async (platforms: readonly string[], include?: readonly string[]) => {
+      const briefId = brief.id;
+      const seq = packageSeq.current;
       setPackaging(true);
       setPackageError(null);
       try {
-        const result = await packageCampaign(brief.id, platforms, { include });
+        const result = await packageCampaign(briefId, platforms, { include, signal: packageSignal() });
+        if (briefIdRef.current !== briefId || packageSeq.current !== seq) return; // superseded
+        packageSeq.current += 1;
         setPackages((prev) => {
           const byId = new Map(prev.map((p) => [p.platformId, p] as const));
           for (const p of result.platforms) byId.set(p.platformId, p);
           return [...byId.values()];
         });
       } catch (e) {
+        if (briefIdRef.current !== briefId) return; // aborted by a brief switch
         setPackageError(unknownErrorMessage(e, "Packaging failed"));
       } finally {
-        setPackaging(false);
+        if (briefIdRef.current === briefId) setPackaging(false);
       }
     },
     [brief.id],
   );
 
   const loadPackages = useCallback(async () => {
+    const briefId = brief.id;
+    const seq = packageSeq.current;
     try {
-      const result = await listPackages(brief.id);
+      const result = await listPackages(briefId, packageSignal());
+      // A listing that resolves after a brief switch, or after a package call completed
+      // in the meantime, is stale — the fresher state already on screen wins.
+      if (briefIdRef.current !== briefId || packageSeq.current !== seq) return;
       setPackages(result.platforms);
       setPackageError(null);
     } catch (e) {
+      if (briefIdRef.current !== briefId) return; // aborted by a brief switch
       setPackageError(unknownErrorMessage(e, "Failed to list packages"));
     }
   }, [brief.id]);

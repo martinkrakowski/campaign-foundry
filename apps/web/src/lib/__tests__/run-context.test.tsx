@@ -1196,6 +1196,168 @@ describe("RunProvider — estimate and packaging", () => {
     expect(result.current.estimateStatus).toBe("idle");
   });
 
+  const otherBrief = {
+    id: "other-camp",
+    targetRegion: "US",
+    targetAudience: "x",
+    campaignMessage: "y",
+    products: [
+      { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" },
+      { id: "p2", name: "P2", primaryColor: "#222222", logoPath: "b.png" },
+    ],
+  };
+
+  test("a brief switch aborts an in-flight package call and drops its result", async () => {
+    let resolvePost: ((r: Response) => void) | undefined;
+    let signal: AbortSignal | null | undefined;
+    mockPipelineApi({
+      packagePost: (_url, init) => {
+        signal = init.signal;
+        return new Promise<Response>((res) => {
+          resolvePost = res;
+        });
+      },
+    });
+    const { result } = setup();
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.packageSelected(["instagram-feed"]);
+    });
+    expect(result.current.packaging).toBe(true);
+    await waitFor(() => expect(resolvePost).toEqual(expect.any(Function)));
+    expect(signal?.aborted).toBe(false);
+    act(() => result.current.setBrief(otherBrief));
+    expect(signal?.aborted).toBe(true);
+    expect(result.current.packaging).toBe(false);
+    await act(async () => {
+      resolvePost?.(json({ platforms: [pkg("instagram-feed")] }));
+      await pending;
+    });
+    expect(result.current.packages).toHaveLength(0);
+    expect(result.current.packageError).toBeNull();
+  });
+
+  test("a package call that rejects after a brief switch sets no error", async () => {
+    let rejectPost: ((e: unknown) => void) | undefined;
+    mockPipelineApi({
+      packagePost: () =>
+        new Promise<Response>((_res, rej) => {
+          rejectPost = rej;
+        }),
+    });
+    const { result } = setup();
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.packageSelected(["instagram-feed"]);
+    });
+    await waitFor(() => expect(rejectPost).toEqual(expect.any(Function)));
+    act(() => result.current.setBrief(otherBrief));
+    await act(async () => {
+      rejectPost?.(new Error("aborted"));
+      await pending;
+    });
+    expect(result.current.packageError).toBeNull();
+  });
+
+  test("an older package call is discarded once a newer one completed", async () => {
+    const resolvers: Array<(r: Response) => void> = [];
+    mockPipelineApi({
+      packagePost: () =>
+        new Promise<Response>((res) => {
+          resolvers.push(res);
+        }),
+    });
+    const { result } = setup();
+    let first!: Promise<void>;
+    let second!: Promise<void>;
+    act(() => {
+      first = result.current.packageSelected(["instagram-feed"]);
+      second = result.current.packageSelected(["linkedin"]);
+    });
+    await waitFor(() => expect(resolvers).toHaveLength(2));
+    await act(async () => {
+      resolvers[1](json({ platforms: [pkg("linkedin")] }));
+      await second;
+    });
+    expect(result.current.packages.map((p) => p.platformId)).toEqual(["linkedin"]);
+    await act(async () => {
+      resolvers[0](json({ platforms: [pkg("instagram-feed")] }));
+      await first;
+    });
+    expect(result.current.packages.map((p) => p.platformId)).toEqual(["linkedin"]);
+    expect(result.current.packaging).toBe(false);
+  });
+
+  test("a stale package listing does not overwrite a newer package result", async () => {
+    let resolveList: ((r: Response) => void) | undefined;
+    mockPipelineApi({
+      packages: () =>
+        new Promise<Response>((res) => {
+          resolveList = res;
+        }),
+      packagePost: () => json({ platforms: [pkg("x")] }),
+    });
+    const { result } = setup();
+    let listing!: Promise<void>;
+    act(() => {
+      listing = result.current.loadPackages();
+    });
+    await waitFor(() => expect(resolveList).toEqual(expect.any(Function)));
+    await act(async () => {
+      await result.current.packageSelected(["x"]);
+    });
+    expect(result.current.packages.map((p) => p.platformId)).toEqual(["x"]);
+    await act(async () => {
+      resolveList?.(json({ platforms: [pkg("instagram-feed")] }));
+      await listing;
+    });
+    expect(result.current.packages.map((p) => p.platformId)).toEqual(["x"]);
+  });
+
+  test("a brief switch aborts an in-flight package listing and drops its result or error", async () => {
+    let resolveList: ((r: Response) => void) | undefined;
+    let rejectList: ((e: unknown) => void) | undefined;
+    mockPipelineApi({
+      packages: (url) => {
+        if (url.includes("other-camp")) return json({ error: "Not found" }, 404);
+        return new Promise<Response>((res, rej) => {
+          resolveList = res;
+          rejectList = rej;
+        });
+      },
+    });
+    const { result } = setup();
+    // fetch is mocked per-URL above; capture the signal through the spy's last call.
+    let listing!: Promise<void>;
+    act(() => {
+      listing = result.current.loadPackages();
+    });
+    await waitFor(() => expect(resolveList).toEqual(expect.any(Function)));
+    const signal = (vi.mocked(globalThis.fetch).mock.calls.at(-1)?.[1] as RequestInit | undefined)?.signal;
+    expect(signal?.aborted).toBe(false);
+    act(() => result.current.setBrief(otherBrief));
+    expect(signal?.aborted).toBe(true);
+    await act(async () => {
+      resolveList?.(json({ platforms: [pkg("instagram-feed")] }));
+      await listing;
+    });
+    expect(result.current.packages).toHaveLength(0);
+
+    // Same race, rejecting: the error is dropped too.
+    resolveList = undefined;
+    act(() => result.current.setBrief({ ...otherBrief, id: "summer-hydration-2026" }));
+    act(() => {
+      listing = result.current.loadPackages();
+    });
+    await waitFor(() => expect(rejectList).toEqual(expect.any(Function)));
+    act(() => result.current.setBrief(otherBrief));
+    await act(async () => {
+      rejectList?.(new Error("aborted"));
+      await listing;
+    });
+    expect(result.current.packageError).toBeNull();
+  });
+
   test("packageSelected uses a generic message for a non-Error rejection", async () => {
     mockPipelineApi({
       packagePost: () => Promise.reject("plain"),
