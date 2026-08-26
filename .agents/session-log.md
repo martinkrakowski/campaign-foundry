@@ -564,4 +564,22 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Left open:**
   - Webpack `extensionAlias` so the web app can re-export `assetIdentity` at runtime.
 
+---
+
+## 2026-08-26 — wave 4 Lane B: approved headline copy pools (Phase 3.1–3.3)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `CopyPool` VO (`approvedTexts`, `mergePool` by normalised text; no clock). Port `CopyGeneratorPort` (object input) in CampaignOrchestration; adapter `OpenRouterCopyGenerator` (chat completions, `openai/gpt-4o-mini`, injected `fetch`).
+  - Persistence `briefs/<briefId>/pools.json` (directory — briefs lister ignores it); atomic tmp+rename.
+  - Routes: `POST /campaigns/pools/copy` (generate + `validateLegalCopy` + persist), `GET`/`PATCH /campaigns/pools/:briefId`. Composition-root factory `copyGenerator()`; not wired into `GenerateCampaignUseCase`.
+  - README "Copy pools" block. Parser still rejects `pool://`.
+- **Decisions:**
+  - `CopyGeneratorPort.model` is on the port so routes persist provenance without importing the adapter.
+  - PATCH legal failures persist as `rejected` with a reason (HITL can see why), not 422.
+  - POST merges into an existing pool; existing entries win on normalised text.
+- **Left open:**
+  - Phase 3.4 allowlist `headline: pool://copy` and planner consumption.
+  - Wizard "Generate suggestions" control.
+
 

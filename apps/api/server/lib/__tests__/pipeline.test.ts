@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GenerateCampaignUseCase, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { ALLOWED_IMAGE_MODELS, buildPipeline, runCampaign } from "../pipeline.js";
+import { ALLOWED_IMAGE_MODELS, buildPipeline, copyGenerator, runCampaign } from "../pipeline.js";
 
 const brief: CampaignBrief = {
   id: "camp",
@@ -90,5 +90,14 @@ describe("pipeline composition root", () => {
     const r = await runCampaign(brief, "procedural", [{ productId: "alpha", aspectRatio: "1:1", treatment: "default" }]);
     expect(r.success).toBe(true);
     if (r.success) expect(r.value.assets.map((a) => a.outputPath)).toEqual(["alpha/1x1.png"]);
+  });
+
+  test("copyGenerator is undefined without OPENROUTER_API_KEY and constructed with it", () => {
+    expect(copyGenerator()).toBeUndefined();
+    process.env.OPENROUTER_API_KEY = "k";
+    const generator = copyGenerator();
+    expect(generator).toBeDefined();
+    expect(generator?.model).toBe("openai/gpt-4o-mini");
+    expect(typeof generator?.suggestHeadlines).toBe("function");
   });
 });

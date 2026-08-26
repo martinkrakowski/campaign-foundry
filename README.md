@@ -232,6 +232,33 @@ curl -X POST http://localhost:3001/campaigns/assets \
 format; they never create a sibling named `<id>.yaml`. Asset `name` is a slug
 plus `.png`/`.jpg`/`.jpeg`.
 
+### Copy pools
+
+Generate a legal-gated headline pool for a brief (Phase 3.1–3.3). Requires
+`OPENROUTER_API_KEY` (same key as the image adapter). The planner does **not**
+consume pools yet, and `pool://` in a brief is still rejected. Wizard "Generate
+suggestions" is out of scope.
+
+```bash
+# Generate headlines (default count 10, max 25), run the legal gate, persist
+curl -X POST http://localhost:3001/campaigns/pools/copy \
+  -H 'content-type: application/json' \
+  --data '{"briefId":"summer-hydration-2026","count":10}'
+# → 201 { "pool": { "briefId", "generatedAt", "model", "entries": [{ "id", "text", "status", "reason?" }] } }
+
+curl http://localhost:3001/campaigns/pools/summer-hydration-2026
+# → 200 { "pool": {…} }
+
+curl -X PATCH http://localhost:3001/campaigns/pools/summer-hydration-2026 \
+  -H 'content-type: application/json' \
+  --data '{"entries":[{"id":"h1","status":"approved"},{"id":"h2","status":"rejected","text":"Edited headline"}]}'
+```
+
+Persisted at `briefs/<briefId>/pools.json` (a directory, so the briefs lister
+ignores it). Every suggestion is run through `validateLegalCopy`; failures are
+stored as `rejected` with a reason and are not selectable later.
+
+
 `POST /campaigns/package` copies a run's already-rendered creatives into
 `output/packages/<campaignId>/<platformId>/` (never re-renders). The package is
 the current output for that report — renders are not campaign-namespaced;

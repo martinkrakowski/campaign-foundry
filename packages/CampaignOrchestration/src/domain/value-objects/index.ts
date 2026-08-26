@@ -3,6 +3,7 @@
 export * from "./AspectRatio.vo.js";
 export * from "./BackgroundSource.vo.js";
 export * from "./ComplianceResult.vo.js";
+export * from "./CopyPool.vo.js";
 export * from "./LogEntry.vo.js";
 export * from "./MotionKind.vo.js";
 export * from "./PipelineExecutionLog.vo.js";

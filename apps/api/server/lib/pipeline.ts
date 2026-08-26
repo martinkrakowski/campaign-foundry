@@ -4,6 +4,7 @@ import {
   GenerateCampaignUseCase,
   PlanVariationsUseCase,
   type CampaignBrief,
+  type CopyGeneratorPort,
   type ImageGeneratorPort,
   type PipelineResult,
   type RegenerationTarget,
@@ -14,6 +15,7 @@ import {
   FireflyImageGenerator,
   GeminiImageGenerator,
   NodeCanvasCompositor,
+  OpenRouterCopyGenerator,
   OpenRouterImageGenerator,
   ProceduralBackgroundGenerator,
 } from "@campaignfoundry/CreativeGeneration";
@@ -133,4 +135,14 @@ export function runCampaign(
   regenerateOnly?: ReadonlyArray<RegenerationTarget>,
 ): Promise<Result<PipelineResult, Error>> {
   return buildPipeline(imageModel).execute(brief, regenerateOnly ? { regenerateOnly } : undefined);
+}
+
+/**
+ * Copy-pool generator. Absent when OPENROUTER_API_KEY is unset — routes map that
+ * to 503. Never wired into GenerateCampaignUseCase (pools are built up front).
+ */
+export function copyGenerator(): CopyGeneratorPort | undefined {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return undefined;
+  return new OpenRouterCopyGenerator({ apiKey });
 }
