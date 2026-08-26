@@ -475,3 +475,22 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Left open:**
   - Lane A / later wave: union of platform-profile insets at generate time. Linux inset golden not recorded (skipIf).
 
+---
+
+## 2026-08-26 — PR #49 review: wrap, clamp, overlap, validation
+
+- **Mode:** Implementer
+- **Changes:**
+  - Exported `SafeInsets` (`readonly` top/right/bottom/left, all required) from `CompositorPort`. Example: `{ top: 120, right: 0, bottom: 200, left: 0 }`.
+  - Headline wrap width is `(width - left - right) * 0.85`; `fillText` centres at `left + (width - left - right) / 2`.
+  - After insets, the headline block is clamped (first baseline ≥ `top + fontSize`, last ≤ `height - bottom`). If it still cannot fit, `fontSize` drops by 4 px to 40 % of original, then lines truncate with `…`.
+  - Logo stays inside the inset rectangle (clamped in prepare). If the still headline box overlaps it, draw snaps the logo to the opposite inset edge, or the other edge if that is the only clear one.
+  - `prepare` throws an `Error` naming the side for NaN / non-finite / negative / over-size insets.
+  - `t` stays ignored (`void t`). Logo inset offset stays in prepare. Structural tests are the platform-independent guard; darwin-arm64 inset golden kept.
+- **Decisions:**
+  - Zero-inset / omitted path keeps the original wrap, centre, logo additive offset, and font size so PNG bytes stay identical (12-cell goldens unchanged).
+  - `Distribution.PlatformProfile.safeInsets` should adopt `SafeInsets` when generation wires profiles through — next wave, out of this lane.
+  - Inset pixel golden stays laptop-only until a linux map is recorded from CI (same caveat as #45).
+- **Left open:**
+  - Lane A / later wave: union of platform-profile insets at generate time; overlap-vs-headline must re-run per frame once headline position depends on `t`.
+
