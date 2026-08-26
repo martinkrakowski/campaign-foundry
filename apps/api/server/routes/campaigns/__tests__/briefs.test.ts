@@ -107,8 +107,8 @@ describe("GET /campaigns/briefs", () => {
     const res = await web(await handlerFor(dir))(new Request("http://x/campaigns/briefs"));
     const json = (await res.json()) as { briefs: { file: string }[] };
 
-    expect(json.briefs.map((entry) => entry.file)).toEqual(["good.yaml"]);
-    expect(warn.mock.calls.flat().join(" ")).toMatch(/skipped motion\.yaml: .*motion output is unavailable/);
+    expect(json.briefs.map((entry) => entry.file)).toEqual(["good.yaml", "motion.yaml"]);
+    expect(warn.mock.calls.flat().join(" ")).not.toMatch(/skipped motion\.yaml/);
   });
 
   test("returns an empty list when the briefs directory is missing", async () => {

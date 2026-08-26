@@ -337,9 +337,39 @@ function validateTreatments(value: unknown): void {
 /**
  * Structurally validate an untrusted value into a CampaignBrief. Business rules
  * live in the use case. `capabilities` gates the motion allowlist (D8); it defaults
- * to the boot probe's snapshot and is injectable so tests can flip it.
+  * to the boot probe's snapshot and is injectable so tests can flip it.
  */
-export function parseBrief(data: unknown, capabilities: Capabilities = getCapabilities()): CampaignBrief {
+type ParseBriefSecondArg = Capabilities | { capabilities?: Capabilities; enforceCapabilities?: boolean } | undefined;
+
+/**
+ * Structurally validate an untrusted value into a CampaignBrief.
+ *
+ * Two calling conventions:
+ * 1. Legacy: `parseBrief(data, capabilities)` — second arg is a Capabilities object (enforces capabilities, old behavior).
+ * 2. New: `parseBrief(data, { capabilities?, enforceCapabilities? })` — options object (enforceCapabilities defaults to false, authoring mode).
+ */
+export function parseBrief(data: unknown, capabilitiesOrOpts?: ParseBriefSecondArg): CampaignBrief {
+  const isCapabilities = (value: unknown): value is Capabilities => {
+    return typeof value === "object" && value !== null && typeof (value as Capabilities).motion === "boolean";
+  };
+
+  let capabilities: Capabilities;
+  let enforceCapabilities: boolean;
+
+  if (capabilitiesOrOpts !== undefined && isCapabilities(capabilitiesOrOpts)) {
+    // Legacy call: second argument is a Capabilities object, enforce capabilities (old behavior)
+    capabilities = capabilitiesOrOpts;
+    enforceCapabilities = true;
+  } else {
+    // New options object or undefined
+    const opts = (capabilitiesOrOpts as { capabilities?: Capabilities; enforceCapabilities?: boolean }) ?? {};
+    capabilities = opts.capabilities ?? getCapabilities();
+    enforceCapabilities = opts.enforceCapabilities ?? false;
+  }
+
+  // When not enforcing capabilities, pretend motion is available to skip capability checks
+  const effectiveCapabilities: Capabilities = enforceCapabilities ? capabilities : { motion: true };
+
   if (typeof data !== "object" || data === null) {
     throw new Error("Campaign brief must be an object.");
   }
@@ -361,8 +391,8 @@ export function parseBrief(data: unknown, capabilities: Capabilities = getCapabi
   }
   validateTreatments(record.treatments);
   validateMode(record.mode);
-  validateVariation(record.variation, capabilities);
-  validateOutput(record.output, capabilities);
+  validateVariation(record.variation, effectiveCapabilities);
+  validateOutput(record.output, effectiveCapabilities);
   validateMotionAxisRequested(record);
   // A randomized campaign has no meaning without a total: `count` is the planner's
   // one required input (plan D13), so demand it up front rather than at run time.
@@ -428,13 +458,14 @@ export function parseRegenerateOnly(value: unknown): RegenerationTarget[] | unde
  * (.json vs .yaml/.yml). The parsed brief is validated against the
  * current capabilities.
  */
-export function parseBriefText(path: string, raw: string, capabilities?: Capabilities): CampaignBrief {
+
+export function parseBriefText(path: string, raw: string, capabilitiesOrOpts?: ParseBriefSecondArg): CampaignBrief {
   const data = extname(path).toLowerCase() === ".json" ? JSON.parse(raw) : yaml.load(raw);
-  return parseBrief(data, capabilities);
+  return parseBrief(data, capabilitiesOrOpts);
 }
 
 /** Load and parse a brief from a .yaml / .yml / .json file. */
-export async function loadBrief(path: string, capabilities?: Capabilities): Promise<CampaignBrief> {
+export async function loadBrief(path: string, capabilitiesOrOpts?: ParseBriefSecondArg): Promise<CampaignBrief> {
   const raw = await readFile(path, "utf8");
-  return parseBriefText(path, raw, capabilities);
+  return parseBriefText(path, raw, capabilitiesOrOpts);
 }

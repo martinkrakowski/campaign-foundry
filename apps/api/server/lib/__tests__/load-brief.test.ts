@@ -12,6 +12,7 @@ import {
   SUPPORTED_AXES,
   SUPPORTED_FORMATS,
 } from "../load-brief.js";
+import type { Capabilities } from "../../lib/capabilities.js";
 
 const valid = {
   id: "camp",
@@ -316,12 +317,12 @@ describe("parseBrief motion allowlist (D8, gated on the ffmpeg capability)", () 
     ["the motion format", { ...valid, output: { formats: ["motion"] } }, /format "motion": motion output is unavailable \(ffmpeg -version exited 1\)/],
     ["a motion platform", { ...valid, output: { platforms: ["instagram-reel"] } }, /platform "instagram-reel": motion output is unavailable/],
   ])("rejects %s with the probe reason when the capability is off", (_label, input, message) => {
-    expect(() => parseBrief(input, MOTION_OFF)).toThrow(message);
+    expect(() => parseBrief(input, { capabilities: MOTION_OFF, enforceCapabilities: true })).toThrow(message);
   });
 
   test("the default accessor is the boot probe snapshot (not probed → off) and a reasonless flag has a fallback", () => {
-    expect(() => parseBrief(motionBrief())).toThrow(/motion output is unavailable \(not probed\)/);
-    expect(() => parseBrief(motionBrief(), { motion: false })).toThrow(/\(ffmpeg capability is off\)/);
+    expect(() => parseBrief(motionBrief(), { enforceCapabilities: true })).toThrow(/motion output is unavailable \(not probed\)/);
+    expect(() => parseBrief(motionBrief(), { capabilities: { motion: false }, enforceCapabilities: true })).toThrow(/\(ffmpeg capability is off\)/);
   });
 
   test.each([
@@ -385,10 +386,49 @@ describe("parseBrief motion allowlist (D8, gated on the ffmpeg capability)", () 
     try {
       const path = join(dir, "motion.json");
       writeFileSync(path, JSON.stringify(motionBrief()));
-      await expect(loadBrief(path)).rejects.toThrow(/motion output is unavailable/);
-      expect((await loadBrief(path, MOTION_ON)).output?.formats).toEqual(["static", "motion"]);
+      await expect(loadBrief(path, { enforceCapabilities: true })).rejects.toThrow(/motion output is unavailable/);
+      expect((await loadBrief(path, { capabilities: MOTION_ON, enforceCapabilities: true })).output?.formats).toEqual(["static", "motion"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("parseBrief D15 authoring vs enforcing mode", () => {
+  const MOTION_OFF: Capabilities = { motion: false, reason: "test off" };
+  const motionBriefWithAxis = motionBrief({ variation: { ...v2Brief.variation, axes: { motion: ["accent-wipe"] } } });
+  const motionBriefWithFormat = motionBrief({ variation: { ...v2Brief.variation }, output: { formats: ["motion"] } });
+  const motionPlatform = "instagram-reel"; // requires motion
+  const motionBriefWithPlatform = motionBrief({ variation: { ...v2Brief.variation }, output: { formats: ["motion"], platforms: [motionPlatform] } });
+
+  test("authoring mode (default) allows motion axis when capability is off", () => {
+    const parsed = parseBrief(motionBriefWithAxis, { enforceCapabilities: false });
+    expect(parsed.variation?.axes?.motion).toEqual(["accent-wipe"]);
+  });
+
+  test("authoring mode allows motion format when capability is off", () => {
+    const parsed = parseBrief(motionBriefWithFormat, { enforceCapabilities: false });
+    expect(parsed.output?.formats).toContain("motion");
+  });
+
+  test("authoring mode allows motion platform when capability is off", () => {
+    const parsed = parseBrief(motionBriefWithPlatform, { enforceCapabilities: false });
+    expect(parsed.output?.platforms).toContain(motionPlatform);
+  });
+
+  test("enforcing mode throws for motion axis when capability is off", () => {
+    expect(() => parseBrief(motionBriefWithAxis, { capabilities: MOTION_OFF, enforceCapabilities: true })).toThrow(/Unsupported variation axis "motion": motion output is unavailable/);
+  });
+
+  test("enforcing mode throws for motion format when capability is off", () => {
+    expect(() => parseBrief(motionBriefWithFormat, { capabilities: MOTION_OFF, enforceCapabilities: true })).toThrow(/Unsupported output format "motion": motion output is unavailable/);
+  });
+
+  test("enforcing mode throws for motion platform when capability is off", () => {
+    expect(() => parseBrief(motionBriefWithPlatform, { capabilities: MOTION_OFF, enforceCapabilities: true })).toThrow(/Unsupported output format "motion": motion output is unavailable/);
+  });
+
+  test("legacy call (Capabilities as second arg) enforces capabilities", () => {
+    expect(() => parseBrief(motionBriefWithAxis, MOTION_OFF)).toThrow(/Unsupported variation axis "motion"/);
   });
 });
