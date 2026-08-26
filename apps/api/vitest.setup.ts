@@ -9,6 +9,7 @@ const AUTO_IMPORTS = [
   "getQuery",
   "setResponseStatus",
   "getRouterParam",
+  "getRequestHeader",
   "setHeader",
   "sendStream",
 ] as const;

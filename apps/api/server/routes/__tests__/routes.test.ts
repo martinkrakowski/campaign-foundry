@@ -323,15 +323,62 @@ describe("GET /campaigns/result", () => {
 });
 
 describe("GET /output/**", () => {
-  const call = (path: string) =>
-    web("get", "/output/**:path", outputHandler)(new Request(`http://x/output/${path}`));
+  const call = (path: string, headers: Record<string, string> = {}) =>
+    web("get", "/output/**:path", outputHandler)(new Request(`http://x/output/${path}`, { headers }));
 
-  test("streams a generated file with the right content type", async () => {
-    writeFileSync(resolve(dir, "hero.png"), png());
+  test("streams a generated file with the right content type, length and Accept-Ranges", async () => {
+    const bytes = png();
+    writeFileSync(resolve(dir, "hero.png"), bytes);
     const res = await call("hero.png");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("image/png");
-    expect((await res.arrayBuffer()).byteLength).toBeGreaterThan(0);
+    expect(res.headers.get("accept-ranges")).toBe("bytes");
+    expect(res.headers.get("content-length")).toBe(String(bytes.length));
+    expect((await res.arrayBuffer()).byteLength).toBe(bytes.length);
+  });
+
+  test("206s a mid-file byte range with Content-Range and the sliced bytes", async () => {
+    writeFileSync(resolve(dir, "clip.mp4"), "0123456789");
+    const res = await call("clip.mp4", { range: "bytes=2-5" });
+    expect(res.status).toBe(206);
+    expect(res.headers.get("content-range")).toBe("bytes 2-5/10");
+    expect(res.headers.get("content-length")).toBe("4");
+    expect(res.headers.get("accept-ranges")).toBe("bytes");
+    expect(await res.text()).toBe("2345");
+  });
+
+  test("206s an open-ended range to the last byte and clamps an oversized end", async () => {
+    writeFileSync(resolve(dir, "clip.mp4"), "0123456789");
+    const open = await call("clip.mp4", { range: "bytes=7-" });
+    expect(open.status).toBe(206);
+    expect(open.headers.get("content-range")).toBe("bytes 7-9/10");
+    expect(await open.text()).toBe("789");
+    const clamped = await call("clip.mp4", { range: "bytes=8-99" });
+    expect(clamped.headers.get("content-range")).toBe("bytes 8-9/10");
+    expect(await clamped.text()).toBe("89");
+    const suffix = await call("clip.mp4", { range: "bytes=-3" });
+    expect(suffix.headers.get("content-range")).toBe("bytes 7-9/10");
+    expect(await suffix.text()).toBe("789");
+  });
+
+  test("416s a malformed or unsatisfiable range", async () => {
+    writeFileSync(resolve(dir, "clip.mp4"), "0123456789");
+    for (const range of ["bytes=10-", "bytes=5-2", "bytes=-", "bytes=-0", "items=0-1", "bytes=a-b"]) {
+      const res = await call("clip.mp4", { range });
+      expect(res.status, range).toBe(416);
+      expect(res.headers.get("content-range"), range).toBe("bytes */10");
+      expect(await res.json()).toEqual({ error: "Range not satisfiable" });
+    }
+    writeFileSync(resolve(dir, "empty.mp4"), "");
+    expect((await call("empty.mp4", { range: "bytes=-1" })).status).toBe(416);
+  });
+
+  test("serves the whole file (200) for a multi-range request", async () => {
+    writeFileSync(resolve(dir, "clip.mp4"), "0123456789");
+    const res = await call("clip.mp4", { range: "bytes=0-1, 4-5" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-range")).toBeNull();
+    expect(await res.text()).toBe("0123456789");
   });
 
   test("streams an mp4 with video/mp4 content type", async () => {
