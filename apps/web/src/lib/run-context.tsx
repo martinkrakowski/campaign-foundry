@@ -57,10 +57,30 @@ export interface RunResult {
   error?: string;
 }
 
-/** Interval between job polls after the first immediate GET. Tests drive this with fake timers. */
+/** First poll delay; each subsequent wait grows by JOB_POLL_BACKOFF up to JOB_POLL_MAX_MS. */
 const JOB_POLL_MS = 250;
+const JOB_POLL_BACKOFF = 1.5;
+const JOB_POLL_MAX_MS = 2_000;
+/** Consecutive non-OK / non-JSON polls tolerated before giving up on a running job. */
+const JOB_POLL_MAX_TRANSIENT = 5;
 
-const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+const LOST_JOB_MESSAGE =
+  "Run was interrupted (the pipeline API restarted before it finished). Showing the last saved result; run again to regenerate.";
+
+/** Sleep that resolves early (rejecting) when `signal` aborts, so a poller can't outlive its run. */
+const wait = (ms: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(new Error("aborted"));
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    function onAbort() {
+      clearTimeout(timer);
+      reject(new Error("aborted"));
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 
 function parseJson(raw: string): Record<string, unknown> | null {
   try {
@@ -77,35 +97,56 @@ function pipelineUnreachable(status: number, error?: string): Error {
   );
 }
 
-/** Same restore rule as setBrief: a real run for this brief, else the job is gone. */
-async function recoverLostJob(campaignId: string): Promise<RunResult> {
+/**
+ * The one "is there a real persisted run for this brief?" rule, shared by the mount
+ * restore, setBrief, and lost-job recovery. A present `log` marks a real run (a halted,
+ * log-only run counts); the API's "no run yet" default has assets:[] and log:null.
+ * The report must belong to this campaign — never adopt another brief's creatives.
+ */
+async function fetchPersistedRun(campaignId: string): Promise<RunResult | null> {
   try {
     const res = await fetch(`${API}/campaigns/result?campaignId=${encodeURIComponent(campaignId)}`);
     const d = (await res.json()) as RunResult;
     if (d?.log?.campaignId === campaignId && (d.assets?.length || d.log)) return d;
   } catch {
-    /* non-JSON / network — the in-memory job did not survive */
+    /* non-JSON / network — treat as "no persisted run" */
   }
-  throw new Error("Job lost (API restarted). Reload to restore the last persisted run, or run again.");
+  return null;
 }
 
-async function pollJob(jobId: string, campaignId: string): Promise<RunResult> {
-  for (let attempt = 0; ; attempt++) {
-    if (attempt > 0) await wait(JOB_POLL_MS);
-    const res = await fetch(`${API}/campaigns/jobs/${encodeURIComponent(jobId)}`);
-    if (res.status === 404) return recoverLostJob(campaignId);
+type PollOutcome = { kind: "completed"; result: RunResult } | { kind: "lost" };
+
+/**
+ * Poll a job until it settles. A 404 means the in-memory job is gone (API restart or
+ * TTL) — reported as `lost` so the caller decides what to show; it is never a result.
+ * Transient poll failures (proxy blips, non-JSON pages) are retried up to
+ * JOB_POLL_MAX_TRANSIENT times with backoff, because the server job keeps running.
+ */
+async function pollJob(jobId: string, signal: AbortSignal): Promise<PollOutcome> {
+  let delay = JOB_POLL_MS;
+  let transient = 0;
+  for (;;) {
+    const res = await fetch(`${API}/campaigns/jobs/${encodeURIComponent(jobId)}`, { signal });
+    if (res.status === 404) return { kind: "lost" };
     const data = parseJson(await res.text());
-    if (data?.status === "failed") {
+    if (res.ok && data?.status === "failed") {
       throw new Error(typeof data.error === "string" ? data.error : "Generation failed");
     }
-    if (data?.status === "completed") {
+    if (res.ok && data?.status === "completed") {
       const result = data.result as RunResult | undefined;
       if (!result) throw new Error("Generation failed");
-      return result;
+      return { kind: "completed", result };
     }
     if (!res.ok || !data) {
-      throw pipelineUnreachable(res.status, typeof data?.error === "string" ? data.error : undefined);
+      transient += 1;
+      if (transient >= JOB_POLL_MAX_TRANSIENT) {
+        throw pipelineUnreachable(res.status, typeof data?.error === "string" ? data.error : undefined);
+      }
+    } else {
+      transient = 0; // a well-formed "running" snapshot
     }
+    await wait(delay, signal);
+    delay = Math.min(delay * JOB_POLL_BACKOFF, JOB_POLL_MAX_MS);
   }
 }
 
@@ -237,6 +278,15 @@ export function RunProvider({ children }: { children: ReactNode }) {
   // only commit their results if it still matches — so a run that resolves after the
   // user switched briefs can't repopulate the grid with the previous brief's creatives.
   const runSeq = useRef(0);
+  // The in-flight job poller. Starting a run, switching briefs, or unmounting aborts it
+  // so an abandoned run never keeps hitting /campaigns/jobs/:id in the background.
+  const pollAbort = useRef<AbortController | null>(null);
+  const beginRun = (): { seq: number; signal: AbortSignal } => {
+    pollAbort.current?.abort();
+    const controller = new AbortController();
+    pollAbort.current = controller;
+    return { seq: (runSeq.current += 1), signal: controller.signal };
+  };
 
   // Loading or committing a brief swaps which run the grid should show. Only ever called
   // as a deliberate commit — the editor's Save and the picker's select — never per
@@ -263,6 +313,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       // "orchestrating" UI state, so a late-resolving run can't write back (the seq
       // guard in execute/regenerateRejected) and the grid isn't stuck spinning.
       runSeq.current += 1;
+      pollAbort.current?.abort();
       setLoading(false);
       setRegeneratingKeys(null);
       // (2)/(3) Clear, then adopt this brief's own persisted run if one exists. The API
@@ -271,16 +322,11 @@ export function RunProvider({ children }: { children: ReactNode }) {
       // in the "ready to run" state.
       setResult(null);
       setDecisions({});
-      fetch(`${API}/campaigns/result?campaignId=${encodeURIComponent(next.id)}`)
-        .then((r) => r.json() as Promise<RunResult>)
-        .then((d) => {
-          if (briefIdRef.current !== next.id) return; // superseded by a later switch
-          if (d?.log?.campaignId === next.id && (d.assets?.length || d.log)) {
-            setResult(d);
-            if (d.assets?.length) setAssetVersion((v) => v + 1);
-          }
-        })
-        .catch(() => undefined);
+      void fetchPersistedRun(next.id).then((d) => {
+        if (briefIdRef.current !== next.id || !d) return; // superseded, or no run on disk
+        setResult(d);
+        if (d.assets?.length) setAssetVersion((v) => v + 1);
+      });
     },
     [result],
   );
@@ -312,21 +358,17 @@ export function RunProvider({ children }: { children: ReactNode }) {
       briefIdRef.current = startBrief.id;
       setBriefState(startBrief);
     }
-    fetch(`${API}/campaigns/result?campaignId=${encodeURIComponent(startBrief.id)}`)
-      .then((r) => r.json() as Promise<RunResult>)
-      .then((d) => {
-        // Restore any real persisted run — including a halted / log-only run with no
-        // assets (a present `log` marks a real run; the empty "no run yet" default
-        // from the API has assets:[] and log:null, which we leave as "never ran").
-        // Guard against a brief switch racing this initial fetch.
-        if (active && briefIdRef.current === startBrief.id && (d.assets?.length || d.log)) {
-          setResult(d);
-          if (d.assets?.length) setAssetVersion((v) => v + 1);
-        }
-      })
-      .catch(() => undefined);
+    // Restore any real persisted run for the starting brief (fetchPersistedRun applies
+    // the shared "real run for this campaign" rule). Guard against a brief switch racing
+    // this initial fetch.
+    void fetchPersistedRun(startBrief.id).then((d) => {
+      if (!active || briefIdRef.current !== startBrief.id || !d) return;
+      setResult(d);
+      if (d.assets?.length) setAssetVersion((v) => v + 1);
+    });
     return () => {
       active = false;
+      pollAbort.current?.abort(); // unmount: no poller may outlive the provider
     };
   }, []);
 
@@ -373,7 +415,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
   // it isn't running the proxy returns a non-JSON 5xx, so parse defensively and
   // surface an actionable message instead of a raw "Unexpected token" JSON error.
   const postGenerate = useCallback(
-    async (body: unknown): Promise<RunResult> => {
+    async (body: unknown, signal: AbortSignal): Promise<PollOutcome> => {
       const url = selectedModel
         ? `${API}/campaigns/generate?model=${encodeURIComponent(selectedModel)}`
         : `${API}/campaigns/generate`;
@@ -384,22 +426,35 @@ export function RunProvider({ children }: { children: ReactNode }) {
       });
       const data = parseJson(await res.text());
       const jobId = typeof data?.jobId === "string" ? data.jobId : undefined;
-      if (res.status !== 202 || !jobId) {
-        throw pipelineUnreachable(res.status, typeof data?.error === "string" ? data.error : undefined);
+      if (res.status === 202 && jobId) return pollJob(jobId, signal);
+      if (res.ok) {
+        // A 2xx that is not a job handle: an API that predates the job protocol.
+        throw new Error(
+          `Unexpected response from the pipeline API (HTTP ${res.status}, expected 202 with a job id) — the API and UI versions differ.`,
+        );
       }
-      return pollJob(jobId, brief.id);
+      throw pipelineUnreachable(res.status, typeof data?.error === "string" ? data.error : undefined);
     },
-    [selectedModel, brief.id],
+    [selectedModel],
   );
 
   const execute = useCallback(async () => {
-    const seq = (runSeq.current += 1);
+    const { seq, signal } = beginRun();
     setLoading(true);
     setError(null);
     try {
-      const data = await postGenerate(brief);
+      const outcome = await postGenerate(brief, signal);
       if (runSeq.current !== seq) return; // a brief switch (or newer run) superseded this
-      setResult(data);
+      if (outcome.kind === "lost") {
+        // The job vanished mid-run. Whatever is on disk is the *previous* run, so show
+        // it without pretending it is new: no cache-bust, review decisions kept.
+        const persisted = await fetchPersistedRun(brief.id);
+        if (runSeq.current !== seq) return;
+        if (persisted) setResult(persisted);
+        setError(LOST_JOB_MESSAGE);
+        return;
+      }
+      setResult(outcome.result);
       setAssetVersion((v) => v + 1);
       setDecisions({});
     } catch (e) {
@@ -417,13 +472,20 @@ export function RunProvider({ children }: { children: ReactNode }) {
     if (targets.length === 0) return;
     const targetKeys = new Set(targets.map((t) => `${t.productId}/${t.aspectRatio}/${t.treatment}`));
 
-    const seq = (runSeq.current += 1);
+    const { seq, signal } = beginRun();
     setRegeneratingKeys(targetKeys);
     setLoading(true);
     setError(null);
     try {
-      const data = await postGenerate({ brief, regenerateOnly: targets });
+      const outcome = await postGenerate({ brief, regenerateOnly: targets }, signal);
       if (runSeq.current !== seq) return; // a brief switch (or newer run) superseded this
+      if (outcome.kind === "lost") {
+        // Nothing was regenerated that we can see: leave the grid and the rejected
+        // decisions exactly as they were and say so.
+        setError(LOST_JOB_MESSAGE);
+        return;
+      }
+      const data = outcome.result;
       // The response carries only the regenerated cells — overlay them onto the
       // existing set by identity so approved/pending creatives are preserved.
       setResult((prev) => {

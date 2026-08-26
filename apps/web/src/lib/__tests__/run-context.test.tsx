@@ -607,7 +607,7 @@ describe("RunProvider — job polling", () => {
     expect(result.current.error).toBe("Generation failed");
   });
 
-  test("recovers a lost job from the persisted report", async () => {
+  test("a lost job shows the last saved result as such — no cache-bust, decisions kept", async () => {
     let posted = false;
     mockApi({
       post: () => {
@@ -621,13 +621,19 @@ describe("RunProvider — job polling", () => {
           : json(EMPTY),
     });
     const { result } = setup();
+    act(() => result.current.decide("alpha/1:1/default", "rejected"));
+    const versionBefore = result.current.assetVersion;
     await act(async () => {
       await result.current.execute();
     });
     expect(result.current.assets).toHaveLength(1);
+    expect(result.current.error).toMatch(/Run was interrupted/);
+    expect(result.current.assetVersion).toBe(versionBefore);
+    expect(result.current.decisions["alpha/1:1/default"]).toBe("rejected");
+    expect(result.current.loading).toBe(false);
   });
 
-  test("recovers a halted log-only report after a lost job", async () => {
+  test("a lost job with a halted log-only report on disk shows that report", async () => {
     let posted = false;
     mockApi({
       post: () => {
@@ -646,18 +652,20 @@ describe("RunProvider — job polling", () => {
     });
     expect(result.current.halted).toBe(true);
     expect(result.current.assets).toHaveLength(0);
+    expect(result.current.error).toMatch(/Run was interrupted/);
   });
 
-  test("throws when a lost job has no persisted report", async () => {
+  test("a lost job with nothing on disk reports the interruption and keeps the grid empty", async () => {
     mockApi({ job: () => json({ error: "not found" }, 404) });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
     });
-    expect(result.current.error).toMatch(/Job lost/);
+    expect(result.current.error).toMatch(/Run was interrupted/);
+    expect(result.current.hasRun).toBe(false);
   });
 
-  test("throws when restoring the lost job fails", async () => {
+  test("a lost job whose restore fetch fails still reports the interruption", async () => {
     mockApi({
       job: () => json({ error: "not found" }, 404),
       result: () => Promise.reject(new Error("down")),
@@ -666,10 +674,10 @@ describe("RunProvider — job polling", () => {
     await act(async () => {
       await result.current.execute();
     });
-    expect(result.current.error).toMatch(/Job lost/);
+    expect(result.current.error).toMatch(/Run was interrupted/);
   });
 
-  test("treats a persisted report for another brief as a lost job", async () => {
+  test("never adopts another brief's persisted report after a lost job", async () => {
     mockApi({
       job: () => json({ error: "not found" }, 404),
       result: () => json({ halted: false, assets: [asset()], log: { entries: [], campaignId: "other" } }),
@@ -678,34 +686,250 @@ describe("RunProvider — job polling", () => {
     await act(async () => {
       await result.current.execute();
     });
-    expect(result.current.error).toMatch(/Job lost/);
+    expect(result.current.assets).toHaveLength(0);
+    expect(result.current.error).toMatch(/Run was interrupted/);
   });
 
-  test("surfaces an unreachable error when the job GET is non-JSON", async () => {
-    mockApi({ job: () => new Response("nope", { status: 500 }) });
+  test("a lost re-roll leaves the grid and the rejected decisions untouched", async () => {
+    mockApi({
+      job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [], campaignId: "summer-hydration-2026" } }),
+    });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
     });
-    expect(result.current.error).toMatch(/Pipeline API unreachable/);
+    act(() => result.current.decide("alpha/1:1/default", "rejected"));
+    mockApi({ job: () => json({ error: "not found" }, 404) });
+    const versionBefore = result.current.assetVersion;
+    await act(async () => {
+      await result.current.regenerateRejected();
+    });
+    expect(result.current.error).toMatch(/Run was interrupted/);
+    expect(result.current.decisions["alpha/1:1/default"]).toBe("rejected");
+    expect(result.current.assetVersion).toBe(versionBefore);
+    expect(result.current.regeneratingKeys).toBeNull();
   });
 
-  test("surfaces a JSON error from a non-ok job GET", async () => {
+  test("tolerates transient poll failures with backoff, then gives up", async () => {
+    vi.useFakeTimers();
+    let polls = 0;
+    mockApi({
+      job: () => {
+        polls += 1;
+        return new Response("<html>502</html>", { status: 502 });
+      },
+    });
+    const { result } = setup();
+    let exec!: Promise<void>;
+    await act(async () => {
+      exec = result.current.execute();
+    });
+    // 250 → 375 → 562.5 → 843.75 ms between the five attempts; total < 2.1 s.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_100);
+      await exec;
+    });
+    expect(polls).toBe(5);
+    expect(result.current.error).toMatch(/Pipeline API unreachable \(HTTP 502\)/);
+  });
+
+  test("a transient blip in the middle of a run does not abort it", async () => {
+    vi.useFakeTimers();
+    let polls = 0;
+    mockApi({
+      job: () => {
+        polls += 1;
+        if (polls === 1) return json({ status: "running", done: 0, total: 0, log: null });
+        if (polls === 2) return new Response("nope", { status: 500 });
+        return jobOk({ halted: false, assets: [asset()], log: { entries: [] } });
+      },
+    });
+    const { result } = setup();
+    let exec!: Promise<void>;
+    await act(async () => {
+      exec = result.current.execute();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+      await exec;
+    });
+    expect(result.current.assets).toHaveLength(1);
+    expect(result.current.error).toBeNull();
+  });
+
+  test("gives up with the API's JSON error after repeated non-ok polls", async () => {
+    vi.useFakeTimers();
     mockApi({ job: () => json({ error: "nope" }, 500) });
     const { result } = setup();
+    let exec!: Promise<void>;
     await act(async () => {
-      await result.current.execute();
+      exec = result.current.execute();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_100);
+      await exec;
     });
     expect(result.current.error).toBe("nope");
   });
 
-  test("rejects a 202 without a jobId", async () => {
+  test("polling backs off to the cap on a long run", async () => {
+    vi.useFakeTimers();
+    let polls = 0;
+    mockApi({
+      job: () => {
+        polls += 1;
+        return polls < 8
+          ? json({ status: "running", done: 0, total: 0, log: null })
+          : jobOk({ halted: false, assets: [asset()], log: { entries: [] } });
+      },
+    });
+    const { result } = setup();
+    let exec!: Promise<void>;
+    await act(async () => {
+      exec = result.current.execute();
+    });
+    // Delays: 250, 375, 562.5, 843.75, 1265.6, 1898.4, 2000 → cumulative ≈ 7.2 s.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(7_300);
+      await exec;
+    });
+    expect(polls).toBe(8);
+    expect(result.current.assets).toHaveLength(1);
+  });
+
+  test("rejects a 2xx without a job id as a version mismatch", async () => {
     mockApi({ post: () => json({}, 202) });
     const { result } = setup();
     await act(async () => {
       await result.current.execute();
     });
-    expect(result.current.error).toMatch(/Pipeline API unreachable/);
+    expect(result.current.error).toMatch(/expected 202 with a job id/);
+  });
+
+  test("a brief switch aborts the poller between polls", async () => {
+    vi.useFakeTimers();
+    let polls = 0;
+    mockApi({ job: () => (polls += 1, json({ status: "running", done: 0, total: 0, log: null })) });
+    const { result } = setup();
+    let exec!: Promise<void>;
+    await act(async () => {
+      exec = result.current.execute();
+    });
+    expect(polls).toBe(1);
+    act(() =>
+      result.current.setBrief({
+        id: "switched",
+        targetRegion: "US",
+        targetAudience: "x",
+        campaignMessage: "y",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" },
+          { id: "p2", name: "P2", primaryColor: "#222222", logoPath: "b.png" },
+        ],
+      }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+      await exec;
+    });
+    expect(polls).toBe(1); // the pending wait rejected on abort; no further GETs
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
+
+  test("a brief switch while a poll GET is in flight stops the loop before the next wait", async () => {
+    let resolveJob!: (r: Response) => void;
+    let polls = 0;
+    mockApi({
+      job: () => {
+        polls += 1;
+        return new Promise<Response>((res) => (resolveJob = res));
+      },
+    });
+    const { result } = setup();
+    let exec!: Promise<void>;
+    act(() => {
+      exec = result.current.execute();
+    });
+    await waitFor(() => expect(typeof resolveJob).toBe("function"));
+    act(() =>
+      result.current.setBrief({
+        id: "switched",
+        targetRegion: "US",
+        targetAudience: "x",
+        campaignMessage: "y",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" },
+          { id: "p2", name: "P2", primaryColor: "#222222", logoPath: "b.png" },
+        ],
+      }),
+    );
+    await act(async () => {
+      resolveJob(json({ status: "running", done: 0, total: 0, log: null }));
+      await exec;
+    });
+    expect(polls).toBe(1); // the wait saw the abort immediately; no second GET
+  });
+
+  test("a brief switch during lost-job recovery drops the stale restore", async () => {
+    let resolveResult!: (r: Response) => void;
+    let posted = false;
+    mockApi({
+      post: () => {
+        posted = true;
+        return json({ jobId: "job-1" }, 202);
+      },
+      job: () => json({ error: "not found" }, 404),
+      // Hang only the recovery fetch for the original brief; the switched brief's own
+      // restore fetch must resolve normally (or it would steal the resolver).
+      result: (url) =>
+        posted && String(url).includes("campaignId=summer-hydration-2026")
+          ? new Promise<Response>((res) => (resolveResult = res))
+          : json(EMPTY),
+    });
+    const { result } = setup();
+    let exec!: Promise<void>;
+    act(() => {
+      exec = result.current.execute();
+    });
+    await waitFor(() => expect(typeof resolveResult).toBe("function"));
+    act(() =>
+      result.current.setBrief({
+        id: "switched",
+        targetRegion: "US",
+        targetAudience: "x",
+        campaignMessage: "y",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" },
+          { id: "p2", name: "P2", primaryColor: "#222222", logoPath: "b.png" },
+        ],
+      }),
+    );
+    await act(async () => {
+      resolveResult(
+        json({ halted: false, assets: [asset()], log: { entries: [], campaignId: "summer-hydration-2026" } }),
+      );
+      await exec;
+    });
+    expect(result.current.assets).toHaveLength(0);
+    expect(result.current.error).toBeNull();
+  });
+
+  test("unmounting the provider aborts an in-flight poller", async () => {
+    vi.useFakeTimers();
+    let polls = 0;
+    mockApi({ job: () => (polls += 1, json({ status: "running", done: 0, total: 0, log: null })) });
+    const { result, unmount } = setup();
+    let exec!: Promise<void>;
+    await act(async () => {
+      exec = result.current.execute();
+    });
+    unmount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+      await exec;
+    });
+    expect(polls).toBe(1);
   });
 
   test("a brief switch during polling drops the stale job result", async () => {

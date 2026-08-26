@@ -1,5 +1,5 @@
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { completeJob, createJob, failJob, runJob } from "../../lib/jobs.js";
+import { completeJob, createJob, failJob, hasRunningJob, runJob } from "../../lib/jobs.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
 import { ALLOWED_IMAGE_MODELS, runCampaign } from "../../lib/pipeline.js";
 import { writeReport } from "../../lib/report.js";
@@ -40,7 +40,14 @@ export default defineEventHandler(async (event) => {
     return { error: `Unknown image model: ${imageModel}` };
   }
 
-  const jobId = createJob();
+  // One run per campaign at a time: a double-click or a retry after a poll blip must
+  // not start a second pipeline writing the same output paths and report.
+  if (hasRunningJob(brief.id)) {
+    setResponseStatus(event, 409);
+    return { error: `A run for campaign "${brief.id}" is already in progress.` };
+  }
+
+  const jobId = createJob(brief.id);
   runJob(jobId, async () => {
     const result = await runCampaign(brief, imageModel, regenerateOnly);
     if (!result.success) {

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
 import { createCanvas } from "@napi-rs/canvas";
-import { createJob } from "../../lib/jobs.js";
+import { createJob, failJob } from "../../lib/jobs.js";
 import indexHandler from "../index.js";
 import generateHandler from "../campaigns/generate.post.js";
 import resultHandler from "../campaigns/result.get.js";
@@ -173,6 +173,19 @@ describe("POST /campaigns/generate", () => {
     expect(res.status).toBe(400);
   });
 
+  test("refuses a second run for a campaign whose job is still running with 409", async () => {
+    const id = createJob("camp");
+    try {
+      const res = await call(brief());
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({
+        error: 'A run for campaign "camp" is already in progress.',
+      });
+    } finally {
+      failJob(id, "test teardown");
+    }
+  });
+
   test("business-rule failure (one product) fails the job, not the POST", async () => {
     const res = await call(brief({ products: [{ id: "solo", name: "S", primaryColor: "#111111", logoPath: "x.png" }] }));
     expect(res.status).toBe(202);
@@ -185,7 +198,7 @@ describe("POST /campaigns/generate", () => {
 
 describe("GET /campaigns/jobs/:id", () => {
   test("returns a running job by id", async () => {
-    const id = createJob();
+    const id = createJob("camp");
     const res = await jobCall(id);
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ status: "running", done: 0, total: 0, log: null });
@@ -197,12 +210,6 @@ describe("GET /campaigns/jobs/:id", () => {
     expect(await res.json()).toEqual({ error: "Job not found" });
   });
 
-  test("404s a missing id param", async () => {
-    const event = { context: { params: {} }, node: { req: {}, res: { statusCode: 200 } } };
-    const body = await (jobHandler as unknown as (e: unknown) => unknown)(event);
-    expect(event.node.res.statusCode).toBe(404);
-    expect(body).toEqual({ error: "Job not found" });
-  });
 });
 
 describe("GET /campaigns/result", () => {

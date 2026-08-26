@@ -167,7 +167,19 @@ yarn dev   # from the REPO ROOT — Turbo starts both servers together
 curl -X POST http://localhost:3001/campaigns/generate \
   -H 'content-type: application/json' \
   --data @briefs/sample-campaign.json
+# → 202 { "jobId": "…" }  — the run continues in the API process
+curl http://localhost:3001/campaigns/jobs/<jobId>
+# → { "status": "running" | "completed" | "failed", "result"?: {…}, "error"?: "…" }
 ```
+
+`POST /campaigns/generate` validates the brief synchronously (400 on a bad brief or
+unknown `?model=`, 409 if that campaign already has a run in progress) and returns a
+job handle; poll `GET /campaigns/jobs/:id` until `status` leaves `running`. A
+business-rule failure (e.g. one product) shows up as `status: "failed"` with the
+message in `error`. Jobs live in memory: an API restart (or ten minutes after a job
+settles) makes the id 404 — the persisted report is still at
+`GET /campaigns/result?campaignId=<id>`. The CLI (`yarn generate`) is unchanged and
+runs in-process.
 
 ---
 
