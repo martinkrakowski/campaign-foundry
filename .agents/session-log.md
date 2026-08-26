@@ -641,3 +641,20 @@ To keep this file out of version control, add `.agents/session-log.md` to
     `instanceof` sees the route's module instance.
 - **Left open:**
   - Phase 3.4 allowlist `headline: pool://copy`, planner consumption, wizard control.
+
+---
+
+## 2026-08-26 — wave 5 lane C: plan status, README modes, sample briefs (docs/plan-implemented)
+
+- **Mode:** Implementer (docs)
+- **Changes:**
+  - Plan `docs/planning/2026-08-25_randomized-campaigns-and-motion.md`: status line "Implemented through wave 5 (2026-08-26)"; **Wave status** table under §5 mapping every phase/task to PRs #39–#54 and the in-progress wave-5 lanes A (`feat/motion-generation`) and B (`feat/pool-headlines`); 4.5 perf-spike numbers recorded verbatim (30 fps default, veryfast, encode pool 2 — bottleneck is the pipe/encode, not canvas); §10 items annotated with the evidence that exists (test titles, routes, CI gates), partial where it is partial; a **Deferred** list (Phase 8 GenAI video, 4:5 ratio, SSE, real `done/total`, `withTempProjectRoot`, structured logger, linux inset golden, Field Guide PDF). D-ids untouched.
+  - README **Modes** section (classic vs randomized, policy fields, planner semantics, `POST /campaigns/plan`, identity `productId/v<index>`, `attempt` re-roll semantics, determinism tiers in plain words, links to the three sample briefs). Motion / Copy pools sections not touched.
+  - `briefs/sample-motion.yaml` (two products, `count: 8`, `seed: 3`, `motion: [ken-burns-in, headline-rise]`, `duration: [6]`, `formats: [static, motion]`, `platforms: [instagram-feed, instagram-reel]`), `briefs/sample-pooled.yaml` (`headline: pool://copy`, static platforms) and `briefs/sample-pooled/pools.json` (two approved, one rejected entry in the `CopyPool` shape).
+- **Decisions:**
+  - Samples keep their real `.yaml` names: no test parses `briefs/` (route tests use temp dirs), and `GET /campaigns/briefs` skips a non-parsing file with a warning instead of failing the list. Until lanes A/B merge, the two new samples are therefore skipped by the picker and rejected by `yarn generate`; their headers say so.
+  - DoD item 1 is recorded as partial on purpose: `count: 100` over static axes is infeasible by design (12 combos) and no automated 100-variant run exists.
+  - The 4.5 numbers went into the task row's own block rather than a footnote so §9 "Motion throughput" and D1 can point at one place.
+- **Left open:**
+  - Lanes A/B should re-run `yarn generate` on both samples and put the produced counts in their PR bodies; the verifier needs `briefs/sample-pooled/pools.json` as checked in here.
+  - Linux inset golden and the Field Guide PDF refresh remain deferred.
