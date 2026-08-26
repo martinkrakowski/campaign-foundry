@@ -67,6 +67,30 @@ describe("RunsPage", () => {
     expect(screen.getByText("seed")).toBeTruthy();
   });
 
+  test("shows policyHash and seed when present on the run result", async () => {
+    seedPersistedRun([makeAsset()], { policyHash: "abc123def", seed: 42 });
+    renderWithRun(<RunsPage />);
+    await waitFor(() => expect(screen.getByText("abc123def")).toBeTruthy());
+    expect(screen.getByText("42")).toBeTruthy();
+    expect(screen.getByText("Policy hash")).toBeTruthy();
+    expect(screen.getByText("Seed")).toBeTruthy();
+  });
+
+  test("shows policyHash alone when seed is absent", async () => {
+    seedPersistedRun([makeAsset()], { policyHash: "only-hash" });
+    renderWithRun(<RunsPage />);
+    expect(await screen.findByText("only-hash")).toBeTruthy();
+    expect(screen.queryByText("Seed")).toBeNull();
+  });
+
+  test("shows seed alone when policyHash is absent", async () => {
+    seedPersistedRun([makeAsset()], { seed: 7 });
+    renderWithRun(<RunsPage />);
+    expect(await screen.findByText("7")).toBeTruthy();
+    expect(screen.getByText("Seed")).toBeTruthy();
+    expect(screen.queryByText("Policy hash")).toBeNull();
+  });
+
   test("shows the halted badge for a halted run", async () => {
     seedPersistedRun([], { halted: true });
     renderWithRun(<RunsPage />);

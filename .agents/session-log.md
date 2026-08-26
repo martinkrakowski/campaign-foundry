@@ -460,3 +460,21 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Composition root is the only place that may close over `new Date()`.
 - **Left open:**
   - none for this follow-up.
+
+---
+
+## 2026-08-26 — generate variation campaigns from the planner
+
+- **Mode:** Implementer
+- **Changes:**
+  - `GenerateCampaignUseCase` consumes `PlanVariationsUseCase` when `mode: variation`; cells are plan variants; `MINIMUM_PRODUCTS` is 1 in that mode. Classic matrix/keys/paths unchanged.
+  - Variant identity `productId/v<index>` migrated across the use-case matcher, `RegenerationTarget`, `report.ts`, `parseRegenerateOnly`, `run-context` `assetKey`, grid/export/runs/compliance. `POST /campaigns/plan` dry-runs the planner.
+  - GenAI seed cache (`BackgroundCachePort` + `FileSystemBackgroundCache`); procedural `paletteShift` hue-shift. Sample randomized brief now generates 12 variants.
+- **Decisions:**
+  - Classic assets omit `format`/`descriptor`/`variantIndex`/`seed` so report JSON stays byte-identical.
+  - Web `assetKey` mirrors domain `assetIdentity` rather than re-exporting it: a client-bundle import of CampaignOrchestration fails webpack resolution of `.js` specifiers onto `.ts` sources (`transpilePackages` is not enough). Fixtures are pinned in tests.
+  - Hexagen `yarn sync` skipped existing adapter barrels; `FileSystemBackgroundCache` was added to the generated `adapters/index.ts` by hand so the package export exists.
+- **Left open:**
+  - Webpack `extensionAlias` for `.js` → `.ts` on `next.config.ts` (not this lane) would let the web app re-export `assetIdentity` at runtime.
+  - Packaging still types `PersistedAsset` with required `treatment`; variation rows without treatment pass the guard but are slightly unsound for `PackageableAsset`.
+

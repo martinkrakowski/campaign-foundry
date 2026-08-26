@@ -10,7 +10,7 @@ import { cn } from "@/lib/cn";
  * per-run persistence (see the plan's follow-ups).
  */
 export default function RunsPage() {
-  const { brief, assets, halted, hasRun, loading, decisions } = useRun();
+  const { brief, assets, halted, hasRun, loading, decisions, policyHash, seed } = useRun();
 
   const passed = useMemo(() => assets.filter((a) => a.passedCompliance).length, [assets]);
   const passRate = assets.length ? Math.round((passed / assets.length) * 100) : 0;
@@ -50,6 +50,12 @@ export default function RunsPage() {
             <Stat label="Rejected" value={String(review.rejected)} />
             <Stat label="Pending review" value={String(review.pending)} />
           </dl>
+          {(policyHash !== undefined || seed !== undefined) && (
+            <dl className="grid grid-cols-2 divide-x divide-border border-t border-border text-center">
+              {policyHash !== undefined && <Stat label="Policy hash" value={policyHash} />}
+              {seed !== undefined && <Stat label="Seed" value={String(seed)} />}
+            </dl>
+          )}
         </div>
       )}
     </div>

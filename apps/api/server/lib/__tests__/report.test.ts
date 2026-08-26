@@ -111,6 +111,52 @@ describe("report persistence", () => {
     expect(isPersistedAsset("nope")).toBe(false);
   });
 
+  test("isPersistedAsset accepts a variation row keyed by productId + variantIndex", () => {
+    expect(
+      isPersistedAsset({ productId: "alpha", variantIndex: 0, outputPath: "alpha/1x1/v0.png" }),
+    ).toBe(true);
+    expect(
+      isPersistedAsset({ productId: "alpha", variantIndex: 1.5, outputPath: "alpha/1x1/v1.png" }),
+    ).toBe(false);
+    expect(
+      isPersistedAsset({ productId: "alpha", variantIndex: -1, outputPath: "alpha/1x1/v0.png" }),
+    ).toBe(false);
+  });
+
+  test("merge of a re-rolled variation slot replaces exactly one row; siblings unchanged", async () => {
+    const v0 = asset({
+      variantIndex: 0,
+      outputPath: "alpha/1x1/v0.png",
+      treatment: "headline-bottom-bold",
+      seed: 1,
+      format: "static",
+    });
+    const v1 = asset({
+      productId: "beta",
+      variantIndex: 1,
+      outputPath: "beta/9x16/v1.png",
+      treatment: "headline-top-subtle",
+      seed: 2,
+      format: "static",
+    });
+    await writeReport({
+      ...result([v0, v1]),
+      policyHash: "abc",
+      seed: 42,
+    });
+    const path = await writeReport(
+      { ...result([asset({ ...v0, complianceScore: 0.9, seed: 99 })]), policyHash: "abc", seed: 42 },
+      { merge: true },
+    );
+    const per = readAssets(path);
+    expect(per).toHaveLength(2);
+    expect(per.find((a) => a.variantIndex === 0)?.complianceScore).toBe(0.9);
+    expect(per.find((a) => a.variantIndex === 1)?.outputPath).toBe("beta/9x16/v1.png");
+    const payload = JSON.parse(readFileSync(path, "utf8")) as { policyHash: string; seed: number };
+    expect(payload.policyHash).toBe("abc");
+    expect(payload.seed).toBe(42);
+  });
+
   test("merge drops unkeyable rows from a corrupt prior report, with a warning", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mkdirSync(resolve(root, "reports"), { recursive: true });

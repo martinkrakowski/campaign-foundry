@@ -230,12 +230,30 @@ describe("parseRegenerateOnly", () => {
 
   test("rejects entries with non-string fields", () => {
     expect(() => parseRegenerateOnly([{ productId: "p", aspectRatio: "1:1" }])).toThrow(/require string/);
+    expect(() => parseRegenerateOnly([null])).toThrow(/require string/);
   });
 
   test("maps valid targets", () => {
     expect(parseRegenerateOnly([{ productId: "p", aspectRatio: "1:1", treatment: "default" }])).toEqual([
       { productId: "p", aspectRatio: "1:1", treatment: "default" },
     ]);
+  });
+
+  test("maps variation targets with optional attempt", () => {
+    expect(parseRegenerateOnly([{ productId: "p", variantIndex: 0 }])).toEqual([
+      { productId: "p", variantIndex: 0 },
+    ]);
+    expect(parseRegenerateOnly([{ productId: "p", variantIndex: 2, attempt: 1 }])).toEqual([
+      { productId: "p", variantIndex: 2, attempt: 1 },
+    ]);
+  });
+
+  test("rejects invalid variantIndex and attempt", () => {
+    expect(() => parseRegenerateOnly([{ productId: "p", variantIndex: -1 }])).toThrow(/variantIndex/);
+    expect(() => parseRegenerateOnly([{ productId: "p", variantIndex: 1.5 }])).toThrow(/variantIndex/);
+    expect(() => parseRegenerateOnly([{ variantIndex: 0 }])).toThrow(/productId/);
+    expect(() => parseRegenerateOnly([{ productId: "p", variantIndex: 0, attempt: -1 }])).toThrow(/attempt/);
+    expect(() => parseRegenerateOnly([{ productId: "p", variantIndex: 0, attempt: 1.2 }])).toThrow(/attempt/);
   });
 });
 

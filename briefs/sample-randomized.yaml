@@ -1,8 +1,8 @@
 # Randomized static-axes sample. `mode: variation` with layout, tone, procedural
 # background, and paletteShift only — headline, motion, duration, and
-# `formats: motion` are rejected at parse time. Two products keep the classic
-# minimum; generation still follows the existing product × ratio × treatments
-# matrix until later phases consume these fields.
+# `formats: motion` are rejected at parse time. `yarn generate --brief` of this
+# file produces `variation.count` variants from the planner (not the classic
+# product × ratio × treatments matrix).
 id: sample-randomized
 targetRegion: DE
 targetAudience: Urban outdoor enthusiasts, 25-40

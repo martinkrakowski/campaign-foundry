@@ -75,10 +75,15 @@ describe("pipeline composition root", () => {
     }
   });
 
-  test("runCampaign refuses a variation brief until the planner exists", async () => {
-    const r = await runCampaign({ ...brief, mode: "variation", variation: { count: 4 } }, "procedural");
-    expect(r.success).toBe(false);
-    if (!r.success) expect(r.error.message).toMatch(/Variation mode is not executable/);
+  test("runCampaign generates a variation brief from the planner", async () => {
+    const r = await runCampaign({ ...brief, mode: "variation", variation: { count: 4, seed: 42 } }, "procedural");
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.value.assets).toHaveLength(4);
+      expect(r.value.assets.every((a) => a.outputPath.includes("/v") && a.format === "static")).toBe(true);
+      expect(r.value.policyHash).toEqual(expect.any(String));
+      expect(r.value.seed).toBe(42);
+    }
   });
 
   test("runCampaign forwards regenerateOnly targets", async () => {

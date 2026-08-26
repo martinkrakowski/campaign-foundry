@@ -1,11 +1,13 @@
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import type {
   AspectRatio,
+  BackgroundCachePort,
   BackgroundContext,
   BackgroundResult,
   ImageGeneratorPort,
   Product,
 } from "@campaignfoundry/CampaignOrchestration";
+import { resolveCachedBackground } from "./FileSystemBackgroundCache.js";
 
 const ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 /** A different provider from Imagen by default, so it's a real second source. */
@@ -38,6 +40,8 @@ export interface OpenRouterImageGeneratorOptions {
   readonly model?: string;
   /** Used on any failure so a run never aborts. */
   readonly fallback?: ImageGeneratorPort;
+  /** Optional seed cache; used only when `context.seed` is present. */
+  readonly cache?: BackgroundCachePort;
 }
 
 /**
@@ -50,11 +54,13 @@ export class OpenRouterImageGenerator implements ImageGeneratorPort {
   private readonly apiKey: string;
   private readonly model: string;
   private readonly fallback?: ImageGeneratorPort;
+  private readonly cache?: BackgroundCachePort;
 
   constructor(options: OpenRouterImageGeneratorOptions) {
     this.apiKey = options.apiKey;
     this.model = options.model && options.model.length > 0 ? options.model : DEFAULT_MODEL;
     this.fallback = options.fallback;
+    this.cache = options.cache;
   }
 
   async resolveBackground(
@@ -65,22 +71,29 @@ export class OpenRouterImageGenerator implements ImageGeneratorPort {
     const prompt = this.buildPrompt(product, context);
     const aspect = ASPECT_RATIO[ratio.value] ?? "1:1";
     try {
-      // Image-only output (Grok Imagine, Flux, …). Text+image models (Nano Banana,
-      // GPT Image) reject that and need ["image","text"] — so retry once on the
-      // specific modality mismatch rather than requiring per-model config.
-      let dataUrl: string | undefined;
-      try {
-        dataUrl = await this.request(prompt, aspect, ["image"]);
-      } catch (error) {
-        if (error instanceof Error && error.message.includes("modalities")) {
-          dataUrl = await this.request(prompt, aspect, ["image", "text"]);
-        } else {
-          throw error;
-        }
-      }
-      if (!dataUrl) throw new Error("OpenRouter returned no image data");
-      const cover = await this.coverFit(this.decodeDataUrl(dataUrl), ratio);
-      return { image: cover, source: "openrouter" };
+      return await resolveCachedBackground(
+        this.cache,
+        context.seed,
+        { provider: "openrouter", model: this.model, prompt, ratio: ratio.value },
+        async () => {
+          // Image-only output (Grok Imagine, Flux, …). Text+image models (Nano Banana,
+          // GPT Image) reject that and need ["image","text"] — so retry once on the
+          // specific modality mismatch rather than requiring per-model config.
+          let dataUrl: string | undefined;
+          try {
+            dataUrl = await this.request(prompt, aspect, ["image"]);
+          } catch (error) {
+            if (error instanceof Error && error.message.includes("modalities")) {
+              dataUrl = await this.request(prompt, aspect, ["image", "text"]);
+            } else {
+              throw error;
+            }
+          }
+          if (!dataUrl) throw new Error("OpenRouter returned no image data");
+          return this.coverFit(this.decodeDataUrl(dataUrl), ratio);
+        },
+        "openrouter",
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (this.fallback) {

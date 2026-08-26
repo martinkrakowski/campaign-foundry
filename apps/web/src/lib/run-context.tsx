@@ -28,6 +28,15 @@ export interface Asset {
   treatment: string;
   /** Background provenance: Firefly, Imagen, OpenRouter, the procedural fallback, or a reused asset. */
   backgroundSource: "firefly" | "imagen" | "openrouter" | "procedural" | "reused";
+  variantIndex?: number;
+  seed?: number;
+  format?: "static";
+  descriptor?: {
+    layout: string;
+    tone: string;
+    backgroundSource: string;
+    paletteShift: number;
+  };
 }
 
 export type LogLevel = "info" | "warn" | "error";
@@ -55,6 +64,8 @@ export interface RunResult {
   assets: Asset[];
   log?: RunLog | null;
   error?: string;
+  policyHash?: string;
+  seed?: number;
 }
 
 /** First poll delay; each subsequent wait grows by JOB_POLL_BACKOFF up to JOB_POLL_MAX_MS. */
@@ -152,8 +163,13 @@ async function pollJob(jobId: string, signal: AbortSignal): Promise<PollOutcome>
 
 export type Decision = "approved" | "rejected";
 
-/** Stable key for an asset across its product × aspect-ratio × treatment identity. */
-export const assetKey = (a: Asset): string => `${a.productId}/${a.aspectRatio}/${a.treatment}`;
+/**
+ * Stable key — classic triple, or `productId/v<index>` in variation mode.
+ * Mirrors domain `assetIdentity` (same fixtures; a runtime re-export of the
+ * package hits webpack's inability to map `.js` specifiers onto `.ts` sources).
+ */
+export const assetKey = (a: Pick<Asset, "productId" | "aspectRatio" | "treatment" | "variantIndex">): string =>
+  a.variantIndex !== undefined ? `${a.productId}/v${a.variantIndex}` : `${a.productId}/${a.aspectRatio}/${a.treatment}`;
 
 /** localStorage key for persisted HITL approve/reject decisions. */
 const DECISIONS_KEY = "cf:decisions";
@@ -224,6 +240,10 @@ interface RunContextValue {
    * Lets the grid spin only the affected tiles during a selective re-roll.
    */
   regeneratingKeys: ReadonlySet<string> | null;
+  /** Variation-plan hash, when the current run produced one. */
+  policyHash?: string;
+  /** Variation-plan seed, when the current run produced one. */
+  seed?: number;
   /**
    * Bumped each time a run completes. Appended to creative image URLs as a cache
    * buster — runs overwrite the same output paths, so without it the browser
@@ -281,6 +301,8 @@ export function RunProvider({ children }: { children: ReactNode }) {
   // The in-flight job poller. Starting a run, switching briefs, or unmounting aborts it
   // so an abandoned run never keeps hitting /campaigns/jobs/:id in the background.
   const pollAbort = useRef<AbortController | null>(null);
+  // Prior re-roll counts per variation slot (`assetKey` → attempt). Classic cells ignore this.
+  const attemptByKey = useRef(new Map<string, number>());
   const beginRun = (): { seq: number; signal: AbortSignal } => {
     pollAbort.current?.abort();
     const controller = new AbortController();
@@ -314,6 +336,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       // guard in execute/regenerateRejected) and the grid isn't stuck spinning.
       runSeq.current += 1;
       pollAbort.current?.abort();
+      attemptByKey.current = new Map();
       setLoading(false);
       setRegeneratingKeys(null);
       // (2)/(3) Clear, then adopt this brief's own persisted run if one exists. The API
@@ -454,6 +477,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
         setError(LOST_JOB_MESSAGE);
         return;
       }
+      attemptByKey.current = new Map();
       setResult(outcome.result);
       setAssetVersion((v) => v + 1);
       setDecisions({});
@@ -466,11 +490,18 @@ export function RunProvider({ children }: { children: ReactNode }) {
   }, [brief, postGenerate]);
 
   const regenerateRejected = useCallback(async () => {
-    const targets = (result?.assets ?? [])
-      .filter((a) => decisions[assetKey(a)] === "rejected")
-      .map((a) => ({ productId: a.productId, aspectRatio: a.aspectRatio, treatment: a.treatment }));
-    if (targets.length === 0) return;
-    const targetKeys = new Set(targets.map((t) => `${t.productId}/${t.aspectRatio}/${t.treatment}`));
+    const rejected = (result?.assets ?? []).filter((a) => decisions[assetKey(a)] === "rejected");
+    if (rejected.length === 0) return;
+    const targetKeys = new Set(rejected.map(assetKey));
+    const targets = rejected.map((a) =>
+      a.variantIndex !== undefined
+        ? {
+            productId: a.productId,
+            variantIndex: a.variantIndex,
+            attempt: attemptByKey.current.get(assetKey(a)) ?? 0,
+          }
+        : { productId: a.productId, aspectRatio: a.aspectRatio, treatment: a.treatment },
+    );
 
     const { seq, signal } = beginRun();
     setRegeneratingKeys(targetKeys);
@@ -493,8 +524,20 @@ export function RunProvider({ children }: { children: ReactNode }) {
         const existing = prev?.assets ?? [];
         const byKey = new Map(existing.map((a) => [assetKey(a), a] as const));
         for (const a of data.assets) byKey.set(assetKey(a), a);
-        return { halted: data.halted, assets: [...byKey.values()], log: data.log };
+        return {
+          halted: data.halted,
+          assets: [...byKey.values()],
+          log: data.log,
+          policyHash: data.policyHash ?? prev?.policyHash,
+          seed: data.seed ?? prev?.seed,
+        };
       });
+      for (const a of rejected) {
+        if (a.variantIndex !== undefined) {
+          const key = assetKey(a);
+          attemptByKey.current.set(key, (attemptByKey.current.get(key) ?? 0) + 1);
+        }
+      }
       setAssetVersion((v) => v + 1);
       // Regenerated creatives return to review: clear their (rejected) decisions.
       setDecisions((prev) => {
@@ -537,6 +580,8 @@ export function RunProvider({ children }: { children: ReactNode }) {
       execute,
       regenerateRejected,
       regeneratingKeys,
+      policyHash: result?.policyHash,
+      seed: result?.seed,
       assetVersion,
       selectedModel,
       setSelectedModel,

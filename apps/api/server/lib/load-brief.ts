@@ -263,11 +263,28 @@ export function parseRegenerateOnly(value: unknown): RegenerationTarget[] | unde
     throw new Error('"regenerateOnly" must contain at least one target (omit it for a full run).');
   }
   return value.map((entry) => {
-    const rec = entry as Record<string, unknown>;
+    const rec =
+      typeof entry === "object" && entry !== null ? (entry as Record<string, unknown>) : {};
+    if (rec.variantIndex !== undefined) {
+      if (typeof rec.productId !== "string") {
+        throw new Error(
+          '"regenerateOnly" variation entries require string productId and integer variantIndex >= 0.',
+        );
+      }
+      if (!isFiniteInteger(rec.variantIndex) || rec.variantIndex < 0) {
+        throw new Error('"regenerateOnly" variantIndex must be an integer >= 0.');
+      }
+      if (rec.attempt !== undefined && (!isFiniteInteger(rec.attempt) || rec.attempt < 0)) {
+        throw new Error('"regenerateOnly" attempt must be an integer >= 0.');
+      }
+      return rec.attempt === undefined
+        ? { productId: rec.productId, variantIndex: rec.variantIndex }
+        : { productId: rec.productId, variantIndex: rec.variantIndex, attempt: rec.attempt };
+    }
     if (
-      typeof rec?.productId !== "string" ||
-      typeof rec?.aspectRatio !== "string" ||
-      typeof rec?.treatment !== "string"
+      typeof rec.productId !== "string" ||
+      typeof rec.aspectRatio !== "string" ||
+      typeof rec.treatment !== "string"
     ) {
       throw new Error(
         '"regenerateOnly" entries require string productId, aspectRatio, and treatment.',

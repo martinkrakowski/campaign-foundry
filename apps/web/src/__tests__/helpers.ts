@@ -42,7 +42,13 @@ export const makeAsset = (over: Partial<Asset> = {}): Asset => ({
 export const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-export type MockReport = { halted?: boolean; assets?: unknown[]; log?: unknown };
+export type MockReport = {
+  halted?: boolean;
+  assets?: unknown[];
+  log?: unknown;
+  policyHash?: string;
+  seed?: number;
+};
 
 export const EMPTY_REPORT: MockReport = { halted: false, assets: [], log: null };
 
@@ -92,7 +98,10 @@ export const mockPipelineApi = (
  * Seed a persisted run that RunProvider restores on mount: stores a brief (so the
  * picker won't auto-open) and points the default fetch at a report with `assets`.
  */
-export const seedPersistedRun = (assets: Asset[], opts: { halted?: boolean; id?: string } = {}) => {
+export const seedPersistedRun = (
+  assets: Asset[],
+  opts: { halted?: boolean; id?: string; policyHash?: string; seed?: number } = {},
+) => {
   const id = opts.id ?? "seed";
   localStorage.setItem("cf:brief-picked", "1");
   localStorage.setItem(
@@ -110,7 +119,13 @@ export const seedPersistedRun = (assets: Asset[], opts: { halted?: boolean; id?:
     }),
   );
   mockPipelineApi({
-    report: { halted: opts.halted ?? false, assets, log: { entries: [], campaignId: id } },
+    report: {
+      halted: opts.halted ?? false,
+      assets,
+      log: { entries: [], campaignId: id },
+      ...(opts.policyHash !== undefined ? { policyHash: opts.policyHash } : {}),
+      ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
+    },
   });
 };
 

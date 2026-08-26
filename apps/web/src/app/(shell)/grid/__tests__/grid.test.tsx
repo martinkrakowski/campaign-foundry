@@ -53,6 +53,25 @@ describe("GridPage", () => {
     expect(screen.getByText(/✓ 0 approved/)).toBeTruthy();
   });
 
+  test("shows a descriptor chip on variation cells", async () => {
+    seedPersistedRun([
+      makeAsset({
+        variantIndex: 0,
+        treatment: "headline-top-subtle",
+        descriptor: { layout: "headline-top", tone: "subtle", backgroundSource: "procedural", paletteShift: 0.1 },
+      }),
+    ]);
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText("headline-top · subtle · procedural")).toBeTruthy();
+  });
+
+  test("omits the descriptor chip when a variant has no descriptor", async () => {
+    seedPersistedRun([makeAsset({ variantIndex: 1, treatment: "headline-bottom-bold" })]);
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText("headline-bottom-bold")).toBeTruthy();
+    expect(screen.queryByText(/headline-bottom ·/)).toBeNull();
+  });
+
   test("approve and reject toggle a creative's decision", async () => {
     const user = userEvent.setup();
     seedPersistedRun([makeAsset()]);

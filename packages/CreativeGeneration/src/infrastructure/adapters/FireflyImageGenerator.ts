@@ -1,11 +1,13 @@
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import type {
   AspectRatio,
+  BackgroundCachePort,
   BackgroundContext,
   BackgroundResult,
   ImageGeneratorPort,
   Product,
 } from "@campaignfoundry/CampaignOrchestration";
+import { resolveCachedBackground } from "./FileSystemBackgroundCache.js";
 
 /** Adobe IMS token endpoint (server-to-server client-credentials flow). */
 const IMS_TOKEN_ENDPOINT = "https://ims-na1.adobelogin.com/ims/token/v3";
@@ -27,6 +29,9 @@ interface FireflyGenerateResponse {
   outputs?: Array<{ image?: { url?: string } }>;
 }
 
+/** Stable model id hashed into the seed cache key (Firefly v3 generate). */
+const FIREFLY_MODEL = "v3";
+
 export interface FireflyImageGeneratorOptions {
   /** Adobe IMS client id (also sent as the `x-api-key` header). */
   readonly clientId: string;
@@ -35,6 +40,8 @@ export interface FireflyImageGeneratorOptions {
   readonly scope?: string;
   /** Used on any failure (auth, generation, network) so a run never aborts. */
   readonly fallback?: ImageGeneratorPort;
+  /** Optional seed cache; used only when `context.seed` is present. */
+  readonly cache?: BackgroundCachePort;
 }
 
 /**
@@ -53,6 +60,7 @@ export class FireflyImageGenerator implements ImageGeneratorPort {
   private readonly clientSecret: string;
   private readonly scope: string;
   private readonly fallback?: ImageGeneratorPort;
+  private readonly cache?: BackgroundCachePort;
   /** Bearer token reused across generations until shortly before its expiry. */
   private cachedToken?: { token: string; expiresAt: number };
   /** In-flight IMS grant shared by concurrent generations (a run resolves up to 8 cells at once). */
@@ -63,6 +71,7 @@ export class FireflyImageGenerator implements ImageGeneratorPort {
     this.clientSecret = options.clientSecret;
     this.scope = options.scope && options.scope.length > 0 ? options.scope : DEFAULT_SCOPE;
     this.fallback = options.fallback;
+    this.cache = options.cache;
   }
 
   async resolveBackground(
@@ -71,10 +80,18 @@ export class FireflyImageGenerator implements ImageGeneratorPort {
     context: BackgroundContext,
   ): Promise<BackgroundResult> {
     try {
-      const token = await this.authenticate();
-      const url = await this.generate(token, this.buildPrompt(product, context), ratio);
-      const cover = await this.coverFit(await this.fetchImage(url), ratio);
-      return { image: cover, source: "firefly" };
+      const prompt = this.buildPrompt(product, context);
+      return await resolveCachedBackground(
+        this.cache,
+        context.seed,
+        { provider: "firefly", model: FIREFLY_MODEL, prompt, ratio: ratio.value },
+        async () => {
+          const token = await this.authenticate();
+          const url = await this.generate(token, prompt, ratio);
+          return this.coverFit(await this.fetchImage(url), ratio);
+        },
+        "firefly",
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (this.fallback) {

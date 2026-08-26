@@ -31,6 +31,8 @@ SYNC-MIGRATION-REPORT.md
 # Generated creative output (binaries; see README) — anchored so the Nitro
 # `server/routes/output/` source dir is NOT ignored.
 /output/
+# GenAI seed cache (sha256-keyed PNGs). Safe to delete; covered by /output/ already.
+/output/cache/
 /apps/api/output/
 
 # Keep per-template env examples tracked

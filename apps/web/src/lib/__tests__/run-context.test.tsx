@@ -1,6 +1,7 @@
 import { describe, test, expect, vi, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
+import { assetIdentity } from "@campaignfoundry/CampaignOrchestration";
 import { RunProvider, useRun, assetKey, type Asset } from "@/lib/run-context";
 import { json, jobOk, mockPipelineApi, EMPTY_REPORT } from "@/__tests__/helpers";
 
@@ -27,6 +28,20 @@ describe("useRun", () => {
 
   test("assetKey combines product, ratio and treatment", () => {
     expect(assetKey(asset({ productId: "p", aspectRatio: "9:16", treatment: "t" }))).toBe("p/9:16/t");
+  });
+
+  test("web assetKey and domain assetIdentity share classic and variation fixtures", () => {
+    const classic = asset({ productId: "p", aspectRatio: "9:16", treatment: "t" });
+    const variation = asset({
+      productId: "p",
+      aspectRatio: "1:1",
+      treatment: "headline-top-bold",
+      variantIndex: 3,
+    });
+    expect(assetKey(classic)).toBe(assetIdentity(classic));
+    expect(assetKey(variation)).toBe(assetIdentity(variation));
+    expect(assetIdentity(classic)).toBe("p/9:16/t");
+    expect(assetIdentity(variation)).toBe("p/v3");
   });
 });
 
@@ -152,6 +167,44 @@ describe("RunProvider — review decisions", () => {
     });
     expect(result.current.assets[0].complianceScore).toBe(0.9);
     expect(result.current.decisions["alpha/1:1/default"]).toBeUndefined(); // cleared, back to review
+  });
+
+  test("re-roll of a variant asset sends productId, variantIndex, attempt and increments", async () => {
+    const bodies: unknown[] = [];
+    const variant = asset({
+      variantIndex: 2,
+      treatment: "headline-top-subtle",
+      outputPath: "alpha/1x1/v2.png",
+    });
+    mockPipelineApi({
+      post: (_url, init) => {
+        bodies.push(JSON.parse(init.body as string));
+        return json({ jobId: "job-1" }, 202);
+      },
+      job: () => jobOk({ halted: false, assets: [variant], log: { entries: [] } }),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    act(() => result.current.decide("alpha/v2", "rejected"));
+    await act(async () => {
+      await result.current.regenerateRejected();
+    });
+    expect(bodies[1]).toEqual(
+      expect.objectContaining({
+        regenerateOnly: [{ productId: "alpha", variantIndex: 2, attempt: 0 }],
+      }),
+    );
+    act(() => result.current.decide("alpha/v2", "rejected"));
+    await act(async () => {
+      await result.current.regenerateRejected();
+    });
+    expect(bodies[2]).toEqual(
+      expect.objectContaining({
+        regenerateOnly: [{ productId: "alpha", variantIndex: 2, attempt: 1 }],
+      }),
+    );
   });
 });
 

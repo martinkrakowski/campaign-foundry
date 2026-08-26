@@ -205,6 +205,11 @@ function Artboard({
         <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-text-primary">
           {asset.treatment}
         </span>
+        {asset.variantIndex !== undefined && asset.descriptor && (
+          <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-text-muted">
+            {asset.descriptor.layout} · {asset.descriptor.tone} · {asset.descriptor.backgroundSource}
+          </span>
+        )}
         <SourceBadge source={asset.backgroundSource} />
         <ComplianceBadge asset={asset} />
       </div>

@@ -7,6 +7,8 @@ export interface JobResult {
   halted: boolean;
   assets: PipelineResult["assets"];
   log: PipelineResult["log"];
+  policyHash?: string;
+  seed?: number;
 }
 
 export interface Job {

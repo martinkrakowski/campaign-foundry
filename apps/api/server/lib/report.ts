@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
+import { assetIdentity, SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import type { GeneratedAsset, PipelineResult } from "@campaignfoundry/CampaignOrchestration";
 import { outputRoot } from "./config.js";
 
@@ -8,7 +8,7 @@ import { outputRoot } from "./config.js";
 type ReportAsset = GeneratedAsset & { brandCompliant: boolean };
 
 /** Asset identity within the campaign matrix (matches the review UI's key). */
-const keyOf = (a: GeneratedAsset): string => `${a.productId}/${a.aspectRatio}/${a.treatment}`;
+const keyOf = (a: GeneratedAsset): string => assetIdentity(a);
 
 /**
  * Resolve the per-campaign report path under `<output>/reports/<campaignId>.json`,
@@ -41,27 +41,31 @@ export async function readReport(root: string, campaignId: string): Promise<unkn
 /** The "latest run" pointer — read by GET /campaigns/result when no campaignId is given. */
 export const latestReportPath = (root: string): string => resolve(root, "report.json");
 
-/** The four string fields a persisted report row must have to be keyed or packaged. */
+/**
+ * A persisted report row that can be keyed. Classic rows need the triple + path.
+ * Variation rows need productId + numeric variantIndex + path; treatment may be
+ * absent at runtime (the type keeps the four strings so packaging still compiles).
+ */
 export type PersistedAsset = {
   productId: string;
   aspectRatio: string;
   treatment: string;
   outputPath: string;
+  variantIndex?: number;
 };
 
 /**
  * Guard for a persisted report row — used by both the merge path and packaging.
- * Rows missing any of the four string fields are skipped (never thrown on).
+ * Rows missing identity + path are skipped (never thrown on).
  */
 export function isPersistedAsset(a: unknown): a is PersistedAsset {
-  return (
-    typeof a === "object" &&
-    a !== null &&
-    typeof (a as PersistedAsset).productId === "string" &&
-    typeof (a as PersistedAsset).aspectRatio === "string" &&
-    typeof (a as PersistedAsset).treatment === "string" &&
-    typeof (a as PersistedAsset).outputPath === "string"
-  );
+  if (typeof a !== "object" || a === null) return false;
+  const rec = a as Record<string, unknown>;
+  if (typeof rec.productId !== "string" || typeof rec.outputPath !== "string") return false;
+  if (typeof rec.variantIndex === "number") {
+    return Number.isInteger(rec.variantIndex) && rec.variantIndex >= 0;
+  }
+  return typeof rec.aspectRatio === "string" && typeof rec.treatment === "string";
 }
 
 /**
@@ -131,7 +135,17 @@ export async function writeReport(
     assets = [...byKey.values()];
   }
 
-  const payload = JSON.stringify({ halted: result.halted, assets, log: result.log }, null, 2);
+  const payload = JSON.stringify(
+    {
+      halted: result.halted,
+      assets,
+      log: result.log,
+      ...(result.policyHash !== undefined ? { policyHash: result.policyHash } : {}),
+      ...(result.seed !== undefined ? { seed: result.seed } : {}),
+    },
+    null,
+    2,
+  );
   if (perCampaign) await writeFile(perCampaign, payload);
   await writeFile(latest, payload);
   return perCampaign ?? latest;
