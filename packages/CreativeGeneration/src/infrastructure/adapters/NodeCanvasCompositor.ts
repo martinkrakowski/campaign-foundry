@@ -75,8 +75,9 @@ export class NodeCanvasCompositor implements CompositorPort {
   /**
    * Paint a prepared creative onto `ctx`. With no `motion`, `t` is ignored and
    * the blit matches the still path. With `motion`, `t` ∈ [0, 1] drives that
-   * kind; the solid accent and logo stay put. Headline overlap is re-checked
-   * each frame because a rising headline moves its box.
+   * kind; the solid accent and logo stay put. Logo placement (including the
+   * headline-overlap snap) is resolved from the rest-pose headline box, so a
+   * rising headline can never make the logo jump between edges mid-clip.
    */
   static draw(ctx: SKRSContext2D, prepared: PreparedCreative, t: number, motion?: MotionKind): void {
     const { width, height, top, shadeAlpha } = prepared;
@@ -157,14 +158,14 @@ export class NodeCanvasCompositor implements CompositorPort {
 
     // Layer 5 — brand logo, anchored opposite the headline (top-right for a bottom
     // headline, bottom-left for a top headline). Inset offset was captured in
-    // prepare; if the (possibly risen) headline block overlaps it, snap to an inset edge.
-    const headlineBox = dy === 0 ? headline.box : { ...headline.box, y: headline.box.y + dy };
+    // prepare; if the rest-pose headline block overlaps it, snap to an inset edge.
+    // The rest-pose box (not the translated one) keeps the logo static across `t`.
     if (prepared.logo) {
       const { image, x, width: lw, height: lh } = prepared.logo;
       let ly = prepared.logo.y;
       const logoBox = { x, y: ly, width: lw, height: lh };
-      if (boxesOverlap(headlineBox, logoBox)) {
-        ly = resolveOverlappingLogoY(prepared, headlineBox, lw, lh, x);
+      if (boxesOverlap(headline.box, logoBox)) {
+        ly = resolveOverlappingLogoY(prepared, headline.box, lw, lh, x);
       }
       ctx.drawImage(image, x, ly, lw, lh);
     }

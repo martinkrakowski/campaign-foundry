@@ -1,6 +1,6 @@
 import { describe, test, expect } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
-import { AspectRatio, type CompositeRequest, type MotionKind } from "@campaignfoundry/CampaignOrchestration";
+import { AspectRatio, MOTION_KINDS, type CompositeRequest, type MotionKind } from "@campaignfoundry/CampaignOrchestration";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
 const ratio = (v = "1:1") => {
@@ -35,6 +35,8 @@ interface DrawSpy {
   translates: number[][];
   fillRects: number[][];
   alphas: number[];
+  /** (x, y) of every drawImage call; the logo is the last one. */
+  images: number[][];
   width: number;
   height: number;
 }
@@ -47,6 +49,12 @@ async function spyDraw(req: CompositeRequest, t: number, motion?: MotionKind): P
   const translates: number[][] = [];
   const fillRects: number[][] = [];
   const alphas: number[] = [];
+  const images: number[][] = [];
+  const origDrawImage = ctx.drawImage.bind(ctx);
+  ctx.drawImage = ((...args: Parameters<typeof origDrawImage>) => {
+    images.push([Number(args[1]), Number(args[2])]);
+    return origDrawImage(...args);
+  }) as typeof ctx.drawImage;
   const origScale = ctx.scale.bind(ctx);
   const origTranslate = ctx.translate.bind(ctx);
   const origFill = ctx.fillRect.bind(ctx);
@@ -75,7 +83,7 @@ async function spyDraw(req: CompositeRequest, t: number, motion?: MotionKind): P
     },
   });
   NodeCanvasCompositor.draw(ctx, prepared, t, motion);
-  return { scales, translates, fillRects, alphas, width: prepared.width, height: prepared.height };
+  return { scales, translates, fillRects, alphas, images, width: prepared.width, height: prepared.height };
 }
 
 describe("NodeCanvasCompositor.draw motion", () => {
@@ -141,21 +149,38 @@ describe("NodeCanvasCompositor.draw motion", () => {
     else expect(fade).toEqual([0, solidH, width, fadeH * wipe]);
   });
 
-  test("headline-rise re-runs logo overlap against the translated headline box", async () => {
+  test("headline-rise keeps the logo where the rest pose put it while the headline is translated", async () => {
+    // Deep insets on 16:9: the rest-pose box clears the bottom-left logo, but the
+    // risen box (t = 0) reaches it — per-frame resolution used to snap the logo
+    // to the other edge for the first frames, so it visibly jumped mid-clip.
     const insets = { top: 200, right: 0, bottom: 200, left: 0 };
     const r = ratio("16:9");
-    const message = "Stay wild, stay hydrated, and never stop exploring the trail ahead of you today";
-    const rest = await spyDraw(
-      request({ layout: "headline-top", ratio: r, message, safeInsets: insets }),
-      1,
-      "headline-rise",
-    );
-    const rising = await spyDraw(
-      request({ layout: "headline-top", ratio: r, message, safeInsets: insets }),
-      0,
-      "headline-rise",
-    );
+    const req = request({ layout: "headline-top", ratio: r, safeInsets: insets });
+    const rest = await spyDraw(req, 1, "headline-rise");
+    const rising = await spyDraw(req, 0, "headline-rise");
+    const midway = await spyDraw(req, 0.5, "headline-rise");
     expect(rising.translates).toContainEqual([0, 0.12 * r.height]);
     expect(rest.translates.filter((p) => p[0] === 0 && p[1] !== 0)).toEqual([]);
+    const logoAt = (spy: DrawSpy) => spy.images[spy.images.length - 1];
+    expect(logoAt(rising)).toEqual(logoAt(rest));
+    expect(logoAt(midway)).toEqual(logoAt(rest));
   });
+
+  test.each(["headline-top", "headline-bottom"] as const)(
+    "logo position is identical at every t for every motion kind (%s)",
+    async (layout) => {
+      // Overlong copy + deep insets: the overlap snap fires in both layouts.
+      const message =
+        "Stay wild, stay hydrated, and never stop exploring the trail ahead of you today and tomorrow and every single day after that too";
+      const req = request({ layout, message, safeInsets: { top: 200, right: 0, bottom: 200, left: 0 } });
+      const still = await spyDraw(req, 1);
+      const stillLogo = still.images[still.images.length - 1];
+      for (const kind of MOTION_KINDS) {
+        for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+          const spy = await spyDraw(req, t, kind);
+          expect(spy.images[spy.images.length - 1]).toEqual(stillLogo);
+        }
+      }
+    },
+  );
 });
