@@ -1,6 +1,6 @@
 "use client";
 
-import { assetKey, useRun } from "@/lib/run-context";
+import { assetKey, assetLabel, useRun } from "@/lib/run-context";
 import { cn } from "@/lib/cn";
 
 /** Automated compliance report — one row per generated asset. */
@@ -35,7 +35,7 @@ export default function CompliancePage() {
               assets.map((asset) => (
                 <tr key={assetKey(asset)}>
                   <td className="p-4 font-mono">
-                    {asset.productId} @ {asset.aspectRatio} · {asset.treatment}
+                    {assetLabel(asset)}
                   </td>
                   <td className="p-4">Brand Density + Logo</td>
                   <td className="p-4 text-text-muted">

@@ -29,6 +29,8 @@ export interface Asset {
   /** Background provenance: Firefly, Imagen, OpenRouter, the procedural fallback, or a reused asset. */
   backgroundSource: "firefly" | "imagen" | "openrouter" | "procedural" | "reused";
   variantIndex?: number;
+  /** Re-roll counter. Variation originals are 0; omitted on classic assets. */
+  attempt?: number;
   seed?: number;
   format?: "static";
   descriptor?: {
@@ -171,6 +173,14 @@ export type Decision = "approved" | "rejected";
 export const assetKey = (a: Pick<Asset, "productId" | "aspectRatio" | "treatment" | "variantIndex">): string =>
   a.variantIndex !== undefined ? `${a.productId}/v${a.variantIndex}` : `${a.productId}/${a.aspectRatio}/${a.treatment}`;
 
+/** Human-readable label — includes `v<index>` in variation mode so duplicate layouts are distinct. */
+export const assetLabel = (
+  a: Pick<Asset, "productId" | "aspectRatio" | "treatment" | "variantIndex">,
+): string =>
+  a.variantIndex !== undefined
+    ? `${a.productId} @ ${a.aspectRatio} · v${a.variantIndex} · ${a.treatment}`
+    : `${a.productId} @ ${a.aspectRatio} · ${a.treatment}`;
+
 /** localStorage key for persisted HITL approve/reject decisions. */
 const DECISIONS_KEY = "cf:decisions";
 
@@ -301,8 +311,6 @@ export function RunProvider({ children }: { children: ReactNode }) {
   // The in-flight job poller. Starting a run, switching briefs, or unmounting aborts it
   // so an abandoned run never keeps hitting /campaigns/jobs/:id in the background.
   const pollAbort = useRef<AbortController | null>(null);
-  // Prior re-roll counts per variation slot (`assetKey` → attempt). Classic cells ignore this.
-  const attemptByKey = useRef(new Map<string, number>());
   const beginRun = (): { seq: number; signal: AbortSignal } => {
     pollAbort.current?.abort();
     const controller = new AbortController();
@@ -336,7 +344,6 @@ export function RunProvider({ children }: { children: ReactNode }) {
       // guard in execute/regenerateRejected) and the grid isn't stuck spinning.
       runSeq.current += 1;
       pollAbort.current?.abort();
-      attemptByKey.current = new Map();
       setLoading(false);
       setRegeneratingKeys(null);
       // (2)/(3) Clear, then adopt this brief's own persisted run if one exists. The API
@@ -477,7 +484,6 @@ export function RunProvider({ children }: { children: ReactNode }) {
         setError(LOST_JOB_MESSAGE);
         return;
       }
-      attemptByKey.current = new Map();
       setResult(outcome.result);
       setAssetVersion((v) => v + 1);
       setDecisions({});
@@ -498,7 +504,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
         ? {
             productId: a.productId,
             variantIndex: a.variantIndex,
-            attempt: attemptByKey.current.get(assetKey(a)) ?? 0,
+            attempt: (a.attempt ?? 0) + 1,
           }
         : { productId: a.productId, aspectRatio: a.aspectRatio, treatment: a.treatment },
     );
@@ -532,14 +538,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
           seed: data.seed ?? prev?.seed,
         };
       });
-      for (const a of rejected) {
-        if (a.variantIndex !== undefined) {
-          const key = assetKey(a);
-          attemptByKey.current.set(key, (attemptByKey.current.get(key) ?? 0) + 1);
-        }
-      }
       setAssetVersion((v) => v + 1);
       // Regenerated creatives return to review: clear their (rejected) decisions.
+      // The identity key is unchanged on a variation re-roll (productId/v<index>),
+      // so the tile updates in place.
       setDecisions((prev) => {
         const next = { ...prev };
         for (const key of targetKeys) delete next[key];

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { API, assetKey, useRun, type Asset } from "@/lib/run-context";
+import { API, assetKey, assetLabel, useRun, type Asset } from "@/lib/run-context";
 import { ASPECT_RATIOS } from "@/lib/aspect-ratios";
 import { cn } from "@/lib/cn";
 
@@ -203,7 +203,7 @@ function Artboard({
     >
       <div className="flex items-center gap-2 font-mono text-xs text-text-muted">
         <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-text-primary">
-          {asset.treatment}
+          {assetLabel(asset)}
         </span>
         {asset.variantIndex !== undefined && asset.descriptor && (
           <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-text-muted">
@@ -218,7 +218,7 @@ function Artboard({
         {/* Plain <img>: the pipeline serves arbitrarily-sized PNGs via the API proxy. */}
         <img
           src={assetSrc(asset, version)}
-          alt={`${asset.productId} ${asset.aspectRatio} ${asset.treatment}`}
+          alt={assetLabel(asset)}
           loading="lazy"
           className="block h-auto w-full"
         />
@@ -340,7 +340,7 @@ function PreviewModal({
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label={`${asset.productId} ${asset.aspectRatio} ${asset.treatment} preview`}
+      aria-label={`${assetLabel(asset)} preview`}
     >
       <button
         ref={closeRef}
@@ -356,7 +356,7 @@ function PreviewModal({
 
       <img
         src={assetSrc(asset, version)}
-        alt={`${asset.productId} ${asset.aspectRatio} ${asset.treatment}`}
+        alt={assetLabel(asset)}
         onClick={(e) => e.stopPropagation()}
         className="max-h-[85vh] max-w-[90vw] rounded-lg border border-border object-contain shadow-2xl"
       />
@@ -366,7 +366,7 @@ function PreviewModal({
         onClick={(e) => e.stopPropagation()}
       >
         <span className="text-text-primary">
-          {asset.productId} · {asset.aspectRatio} · {asset.treatment}
+          {assetLabel(asset)}
         </span>
         <SourceBadge source={asset.backgroundSource} />
         <ComplianceBadge asset={asset} />

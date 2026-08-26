@@ -2,7 +2,7 @@ import { describe, test, expect, vi, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { assetIdentity } from "@campaignfoundry/CampaignOrchestration";
-import { RunProvider, useRun, assetKey, type Asset } from "@/lib/run-context";
+import { RunProvider, useRun, assetKey, assetLabel, type Asset } from "@/lib/run-context";
 import { json, jobOk, mockPipelineApi, EMPTY_REPORT } from "@/__tests__/helpers";
 
 const wrapper = ({ children }: { children: ReactNode }) => createElement(RunProvider, null, children);
@@ -42,6 +42,13 @@ describe("useRun", () => {
     expect(assetKey(variation)).toBe(assetIdentity(variation));
     expect(assetIdentity(classic)).toBe("p/9:16/t");
     expect(assetIdentity(variation)).toBe("p/v3");
+  });
+
+  test("assetLabel includes v<index> for variation cells", () => {
+    expect(assetLabel(asset({ productId: "p", aspectRatio: "9:16", treatment: "t" }))).toBe("p @ 9:16 · t");
+    expect(
+      assetLabel(asset({ productId: "hydra-bottle", aspectRatio: "1:1", treatment: "headline-top-bold", variantIndex: 4 })),
+    ).toBe("hydra-bottle @ 1:1 · v4 · headline-top-bold");
   });
 });
 
@@ -171,6 +178,57 @@ describe("RunProvider — review decisions", () => {
 
   test("re-roll of a variant asset sends productId, variantIndex, attempt and increments", async () => {
     const bodies: unknown[] = [];
+    let servedAttempt = 0;
+    const variant = asset({
+      variantIndex: 2,
+      treatment: "headline-top-subtle",
+      outputPath: "alpha/1x1/v2.png",
+      attempt: 0,
+    });
+    mockPipelineApi({
+      post: (_url, init) => {
+        const body = JSON.parse(init.body as string) as { regenerateOnly?: Array<{ attempt?: number }> };
+        bodies.push(body);
+        if (body.regenerateOnly?.[0]?.attempt !== undefined) servedAttempt = body.regenerateOnly[0].attempt;
+        return json({ jobId: "job-1" }, 202);
+      },
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [{ ...variant, attempt: servedAttempt, treatment: servedAttempt === 0 ? variant.treatment : "headline-bottom-bold" }],
+          log: { entries: [] },
+        }),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    act(() => result.current.decide("alpha/v2", "rejected"));
+    await act(async () => {
+      await result.current.regenerateRejected();
+    });
+    expect(bodies[1]).toEqual(
+      expect.objectContaining({
+        regenerateOnly: [{ productId: "alpha", variantIndex: 2, attempt: 1 }],
+      }),
+    );
+    expect(result.current.assets).toHaveLength(1);
+    expect(result.current.assets[0].outputPath).toBe("alpha/1x1/v2.png");
+    expect(result.current.decisions["alpha/v2"]).toBeUndefined();
+    expect(result.current.assets[0].treatment).toBe("headline-bottom-bold");
+    act(() => result.current.decide("alpha/v2", "rejected"));
+    await act(async () => {
+      await result.current.regenerateRejected();
+    });
+    expect(bodies[2]).toEqual(
+      expect.objectContaining({
+        regenerateOnly: [{ productId: "alpha", variantIndex: 2, attempt: 2 }],
+      }),
+    );
+  });
+
+  test("re-roll treats a missing asset.attempt as 0", async () => {
+    const bodies: unknown[] = [];
     const variant = asset({
       variantIndex: 2,
       treatment: "headline-top-subtle",
@@ -193,16 +251,47 @@ describe("RunProvider — review decisions", () => {
     });
     expect(bodies[1]).toEqual(
       expect.objectContaining({
-        regenerateOnly: [{ productId: "alpha", variantIndex: 2, attempt: 0 }],
+        regenerateOnly: [{ productId: "alpha", variantIndex: 2, attempt: 1 }],
       }),
     );
+  });
+
+  test("re-roll after a reload advances from the persisted asset.attempt", async () => {
+    const bodies: unknown[] = [];
+    const variant = asset({
+      variantIndex: 2,
+      attempt: 3,
+      treatment: "headline-top-subtle",
+      outputPath: "alpha/1x1/v2.png",
+    });
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem(
+      "cf:brief",
+      JSON.stringify({
+        id: "seed",
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "Hi",
+        products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
+      }),
+    );
+    mockPipelineApi({
+      report: { halted: false, assets: [variant], log: { entries: [], campaignId: "seed" } },
+      post: (_url, init) => {
+        bodies.push(JSON.parse(init.body as string));
+        return json({ jobId: "job-1" }, 202);
+      },
+      job: () => jobOk({ halted: false, assets: [{ ...variant, attempt: 4 }], log: { entries: [] } }),
+    });
+    const { result } = setup();
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
     act(() => result.current.decide("alpha/v2", "rejected"));
     await act(async () => {
       await result.current.regenerateRejected();
     });
-    expect(bodies[2]).toEqual(
+    expect(bodies[0]).toEqual(
       expect.objectContaining({
-        regenerateOnly: [{ productId: "alpha", variantIndex: 2, attempt: 1 }],
+        regenerateOnly: [{ productId: "alpha", variantIndex: 2, attempt: 4 }],
       }),
     );
   });

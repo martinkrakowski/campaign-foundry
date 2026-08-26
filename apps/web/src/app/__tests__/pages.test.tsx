@@ -30,6 +30,18 @@ describe("CompliancePage", () => {
     expect(screen.getByText("PASS")).toBeTruthy();
     expect(screen.getByText("FAIL")).toBeTruthy();
   });
+
+  test("variation rows include v<index> in the asset target", async () => {
+    seedPersistedRun([
+      makeAsset({
+        variantIndex: 4,
+        treatment: "headline-top-bold",
+        outputPath: "alpha/1x1/v4.png",
+      }),
+    ]);
+    renderWithRun(<CompliancePage />);
+    expect(await screen.findByText("alpha @ 1:1 · v4 · headline-top-bold")).toBeTruthy();
+  });
 });
 
 describe("ExportPage", () => {
@@ -51,6 +63,19 @@ describe("ExportPage", () => {
     await waitFor(() => expect(screen.getByText(/1 of 2 creatives approved/)).toBeTruthy());
     expect(screen.getByText("proofs/alpha.pdf")).toBeTruthy();
   });
+
+  test("variation labels include v<index>", async () => {
+    localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/v4": "approved" }));
+    seedPersistedRun([
+      makeAsset({
+        variantIndex: 4,
+        treatment: "headline-top-bold",
+        outputPath: "alpha/1x1/v4.png",
+      }),
+    ]);
+    renderWithRun(<ExportPage />);
+    expect(await screen.findByText("alpha @ 1:1 · v4 · headline-top-bold")).toBeTruthy();
+  });
 });
 
 describe("RunsPage", () => {
@@ -65,6 +90,19 @@ describe("RunsPage", () => {
     renderWithRun(<RunsPage />);
     await waitFor(() => expect(screen.getByText("complete")).toBeTruthy());
     expect(screen.getByText("seed")).toBeTruthy();
+    expect(screen.getByText("alpha @ 1:1 · default")).toBeTruthy();
+  });
+
+  test("variation rows include v<index> in the run asset list", async () => {
+    seedPersistedRun([
+      makeAsset({
+        variantIndex: 4,
+        treatment: "headline-top-bold",
+        outputPath: "alpha/1x1/v4.png",
+      }),
+    ]);
+    renderWithRun(<RunsPage />);
+    expect(await screen.findByText("alpha @ 1:1 · v4 · headline-top-bold")).toBeTruthy();
   });
 
   test("shows policyHash and seed when present on the run result", async () => {

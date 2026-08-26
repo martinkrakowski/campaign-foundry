@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { assetKey, useRun } from "@/lib/run-context";
+import { assetKey, assetLabel, useRun } from "@/lib/run-context";
 import { cn } from "@/lib/cn";
 
 /**
@@ -55,6 +55,15 @@ export default function RunsPage() {
               {policyHash !== undefined && <Stat label="Policy hash" value={policyHash} />}
               {seed !== undefined && <Stat label="Seed" value={String(seed)} />}
             </dl>
+          )}
+          {assets.length > 0 && (
+            <ul className="divide-y divide-border border-t border-border">
+              {assets.map((asset) => (
+                <li key={assetKey(asset)} className="truncate px-4 py-2 font-mono text-[12px] text-text-muted">
+                  {assetLabel(asset)}
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       )}

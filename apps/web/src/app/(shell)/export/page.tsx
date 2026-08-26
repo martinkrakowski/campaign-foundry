@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { API, assetKey, useRun } from "@/lib/run-context";
+import { API, assetKey, assetLabel, useRun } from "@/lib/run-context";
 
 /** Print export queue — the HITL-approved creatives + their proofs, ready to ship. */
 export default function ExportPage() {
@@ -77,7 +77,7 @@ export default function ExportPage() {
           {approved.map((asset) => (
             <Row
               key={assetKey(asset)}
-              label={`${asset.productId} @ ${asset.aspectRatio} · ${asset.treatment}`}
+              label={assetLabel(asset)}
               sub={asset.outputPath}
               href={`${API}/output/${asset.outputPath}`}
               cta="Download .PNG"
