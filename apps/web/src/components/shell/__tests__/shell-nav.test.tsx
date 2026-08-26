@@ -1,5 +1,6 @@
-import { describe, test, expect, beforeEach } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { describe, test, expect, beforeEach, vi } from "vitest";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import { createElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRun, seedPersistedRun, nextMock, exerciseFocusTrap } from "@/__tests__/helpers";
 import { RunProvider } from "@/lib/run-context";
@@ -120,5 +121,21 @@ describe("MobileMenu", () => {
     nextMock().nav.pathname = "/export"; // navigate away
     rerender(<RunProvider>{<MobileMenu open onClose={onClose} tabs={tabs} />}</RunProvider>);
     await waitFor(() => expect(closed).toBe(true));
+  });
+});
+
+describe("Create new", () => {
+  test("the sidebar's Create new button navigates to the wizard", async () => {
+    const { BrowseBriefsButton } = await import("../Sidebar");
+    const onActivate = vi.fn();
+    render(createElement(RunProvider, null, createElement(BrowseBriefsButton, { onActivate })));
+    await userEvent.setup().click(screen.getByRole("button", { name: /create new/i }));
+    expect(onActivate).toHaveBeenCalled();
+    expect(nextMock().router.push).toHaveBeenCalledWith("/new");
+  });
+
+  test("the header exposes a New campaign tab", async () => {
+    render(createElement(RunProvider, null, createElement(Header)));
+    expect(screen.getAllByRole("link", { name: "New campaign" })[0].getAttribute("href")).toBe("/new");
   });
 });

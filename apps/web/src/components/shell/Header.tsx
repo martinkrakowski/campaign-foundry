@@ -8,6 +8,7 @@ import { ModelSelector } from "./ModelSelector";
 import { MobileMenu } from "./MobileMenu";
 
 const TABS = [
+  { href: "/new", label: "New campaign" },
   { href: "/grid", label: "Grid" },
   { href: "/compliance", label: "Compliance" },
   { href: "/export", label: "Export" },
