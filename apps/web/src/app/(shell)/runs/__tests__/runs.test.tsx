@@ -52,6 +52,18 @@ describe("RunsPage — estimate summary", () => {
           { onClick: () => setEstimate({ status: "loading" }) },
           "seed-loading",
         ),
+        createElement(
+          "button",
+          {
+            onClick: () =>
+              setEstimate({
+                status: "ok",
+                estimate: { creatives: 8, axisProductSize: 96, feasible: true, genaiCalls: 0, frames: 11_000 },
+                error: null,
+              }),
+          },
+          "seed-motion",
+        ),
         createElement(RunsPage, null),
       );
     }
@@ -71,5 +83,10 @@ describe("RunsPage — estimate summary", () => {
     await user.click(screen.getByText("seed-loading"));
     expect(await screen.findByText("estimating…")).toBeTruthy();
     expect(screen.queryByText("shortfall: accepted 4 of 100")).toBeNull();
+    // Motion plans add frames + an encode estimate (frames × 7 ms).
+    await user.click(screen.getByText("seed-motion"));
+    expect(await screen.findByText("Frames")).toBeTruthy();
+    expect(screen.getByText("11000")).toBeTruthy();
+    expect(screen.getByText("≈ 1.3 min")).toBeTruthy();
   });
 });

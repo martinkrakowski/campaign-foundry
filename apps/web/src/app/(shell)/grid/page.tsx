@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { API, assetKey, assetLabel, useRun, type Asset } from "@/lib/run-context";
 import { ASPECT_RATIOS } from "@/lib/aspect-ratios";
 import { cn } from "@/lib/cn";
@@ -15,11 +15,30 @@ const ratioRank = (r: string): number => {
 const assetSrc = (a: Asset, version: number): string =>
   `${API}/output/${a.outputPath}?v=${version}`;
 
+/** Motion clip URL (same cache-buster); the PNG above is its poster. */
+const videoSrc = (a: Asset & { videoPath: string }, version: number): string =>
+  `${API}/output/${a.videoPath}?v=${version}`;
+
+const isMotion = (a: Asset): a is Asset & { videoPath: string } => typeof a.videoPath === "string";
+
+/** Start playback without surfacing the autoplay rejection browsers raise on unmuted media. */
+const startPlayback = (video: HTMLVideoElement): void => {
+  const pending = video.play();
+  if (pending !== undefined) void pending.catch(() => {});
+};
+
+const stopPlayback = (video: HTMLVideoElement): void => {
+  video.pause();
+  video.currentTime = 0;
+};
+
 const PAGE_SIZE = 24;
 
 const formatOf = (a: Asset): "static" | "motion" => a.format ?? "static";
 
 const uniqueSorted = (values: string[]): string[] => [...new Set(values)].sort();
+
+const TILE_CLASS = "relative w-[240px] overflow-hidden rounded border border-border bg-black shadow-2xl";
 
 interface GridFilters {
   product: string;
@@ -375,6 +394,60 @@ function Artboard({
   onDecide: (decision: "approved" | "rejected") => void;
   onPreview: () => void;
 }) {
+  // Hover actions + the in-flight indicator, shared by the still and motion tiles. The
+  // motion tile keeps the scrim light so the clip stays visible while it plays.
+  const overlay = (
+    <>
+      <div
+        className={cn(
+          "absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 opacity-0 transition-opacity group-hover:opacity-100",
+          isMotion(asset) ? "bg-black/40" : "bg-black/80 backdrop-blur-sm",
+        )}
+      >
+        <button
+          type="button"
+          onClick={onPreview}
+          className="w-full rounded-full bg-white py-2 text-center text-sm font-semibold text-black transition-colors hover:bg-gray-200"
+        >
+          Preview
+        </button>
+        {isMotion(asset) && (
+          <a
+            href={videoSrc(asset, version)}
+            download
+            className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-white transition-colors hover:bg-border-hover"
+          >
+            Download .MP4
+          </a>
+        )}
+        <a
+          href={assetSrc(asset, version)}
+          download
+          className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-white transition-colors hover:bg-border-hover"
+        >
+          {isMotion(asset) ? "Download poster .PNG" : "Download .PNG"}
+        </a>
+        {asset.proofPath && (
+          <a
+            href={`${API}/output/${asset.proofPath}`}
+            download
+            className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-white transition-colors hover:bg-border-hover"
+          >
+            Print Proof (.PDF)
+          </a>
+        )}
+      </div>
+
+      {/* Regeneration indicator — shown over each creative while a run is in flight. */}
+      {loading && (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/60 backdrop-blur-sm">
+          <span className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
+          <span className="text-[11px] font-medium text-white">Regenerating…</span>
+        </div>
+      )}
+    </>
+  );
+
   return (
     <figure
       className={cn(
@@ -401,55 +474,31 @@ function Artboard({
             {typeof asset.descriptor.paletteShift === "number" && (
               <DescriptorChip>{`shift ${asset.descriptor.paletteShift}`}</DescriptorChip>
             )}
+            {asset.descriptor.motion !== undefined && (
+              <DescriptorChip>{`${asset.descriptor.motion} · ${asset.descriptor.durationSec ?? asset.durationSec ?? "?"}s`}</DescriptorChip>
+            )}
           </>
         )}
         <SourceBadge source={asset.backgroundSource} />
         <ComplianceBadge asset={asset} />
       </div>
 
-      <div className="relative w-[240px] overflow-hidden rounded border border-border bg-black shadow-2xl">
-        {/* Plain <img>: the pipeline serves arbitrarily-sized PNGs via the API proxy. */}
-        <img
-          src={assetSrc(asset, version)}
-          alt={assetLabel(asset)}
-          loading="lazy"
-          className="block h-auto w-full"
-        />
-
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/80 p-6 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
-          <button
-            type="button"
-            onClick={onPreview}
-            className="w-full rounded-full bg-white py-2 text-center text-sm font-semibold text-black transition-colors hover:bg-gray-200"
-          >
-            Preview
-          </button>
-          <a
-            href={assetSrc(asset, version)}
-            download
-            className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-white transition-colors hover:bg-border-hover"
-          >
-            Download .PNG
-          </a>
-          {asset.proofPath && (
-            <a
-              href={`${API}/output/${asset.proofPath}`}
-              download
-              className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-white transition-colors hover:bg-border-hover"
-            >
-              Print Proof (.PDF)
-            </a>
-          )}
+      {isMotion(asset) ? (
+        <MotionCell asset={asset} version={version}>
+          {overlay}
+        </MotionCell>
+      ) : (
+        <div className={TILE_CLASS}>
+          {/* Plain <img>: the pipeline serves arbitrarily-sized PNGs via the API proxy. */}
+          <img
+            src={assetSrc(asset, version)}
+            alt={assetLabel(asset)}
+            loading="lazy"
+            className="block h-auto w-full"
+          />
+          {overlay}
         </div>
-
-        {/* Regeneration indicator — shown over each creative while a run is in flight. */}
-        {loading && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/60 backdrop-blur-sm">
-            <span className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
-            <span className="text-[11px] font-medium text-white">Regenerating…</span>
-          </div>
-        )}
-      </div>
+      )}
 
       <figcaption className="flex gap-2">
         <button
@@ -478,6 +527,66 @@ function Artboard({
         </button>
       </figcaption>
     </figure>
+  );
+}
+
+/**
+ * Motion cell: the poster shows until the reviewer hovers (or presses the play
+ * control, for keyboard users); leaving the tile rewinds. Muted and
+ * `preload="metadata"` so a 100-cell grid does not pull 100 clips.
+ */
+function MotionCell({
+  asset,
+  version,
+  children,
+}: {
+  asset: Asset & { videoPath: string };
+  version: number;
+  children: ReactNode;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const label = assetLabel(asset);
+
+  const play = () => {
+    const video = videoRef.current;
+    /* istanbul ignore next -- the ref is bound as soon as the video mounts */
+    if (!video) return;
+    startPlayback(video);
+    setPlaying(true);
+  };
+  const stop = () => {
+    const video = videoRef.current;
+    /* istanbul ignore next -- the ref is bound as soon as the video mounts */
+    if (!video) return;
+    stopPlayback(video);
+    setPlaying(false);
+  };
+
+  return (
+    <div className={TILE_CLASS} onMouseEnter={play} onMouseLeave={stop}>
+      <video
+        ref={videoRef}
+        src={videoSrc(asset, version)}
+        poster={assetSrc(asset, version)}
+        muted
+        loop
+        playsInline
+        preload="metadata"
+        aria-label={label}
+        className="block h-auto w-full"
+      />
+      {children}
+      <button
+        type="button"
+        onClick={playing ? stop : play}
+        aria-pressed={playing}
+        aria-label={`${playing ? "Pause" : "Play"} ${label}`}
+        className="absolute bottom-2 right-2 z-20 rounded-full border border-border bg-black/70 px-2 py-1 font-mono text-[10px] text-white"
+      >
+        {playing ? "❚❚" : "▶"} {asset.durationSec !== undefined ? `${asset.durationSec}s` : "clip"}
+      </button>
+    </div>
   );
 }
 
@@ -547,12 +656,27 @@ function PreviewModal({
         </svg>
       </button>
 
-      <img
-        src={assetSrc(asset, version)}
-        alt={assetLabel(asset)}
-        onClick={(e) => e.stopPropagation()}
-        className="max-h-[85vh] max-w-[90vw] rounded-lg border border-border object-contain shadow-2xl"
-      />
+      {isMotion(asset) ? (
+        <video
+          src={videoSrc(asset, version)}
+          poster={assetSrc(asset, version)}
+          controls
+          autoPlay
+          muted
+          loop
+          playsInline
+          aria-label={assetLabel(asset)}
+          onClick={(e) => e.stopPropagation()}
+          className="max-h-[85vh] max-w-[90vw] rounded-lg border border-border object-contain shadow-2xl"
+        />
+      ) : (
+        <img
+          src={assetSrc(asset, version)}
+          alt={assetLabel(asset)}
+          onClick={(e) => e.stopPropagation()}
+          className="max-h-[85vh] max-w-[90vw] rounded-lg border border-border object-contain shadow-2xl"
+        />
+      )}
 
       <div
         className="flex items-center gap-2 font-mono text-xs text-text-muted"

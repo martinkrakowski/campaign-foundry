@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { assetKey, assetLabel, useRun } from "@/lib/run-context";
+import { assetKey, assetLabel, encodeMinutes, useRun } from "@/lib/run-context";
 import { cn } from "@/lib/cn";
 
 /**
@@ -63,6 +63,12 @@ export default function RunsPage() {
               <Stat label="axisProductSize" value={String(estimate.axisProductSize)} />
               <Stat label="Feasible" value={estimate.feasible ? "yes" : "no"} />
               <Stat label="genaiCalls" value={String(estimate.genaiCalls)} />
+            </dl>
+          )}
+          {estimateStatus === "ok" && estimate?.frames !== undefined && (
+            <dl className="grid grid-cols-2 divide-x divide-border border-t border-border text-center">
+              <Stat label="Frames" value={String(estimate.frames)} />
+              <Stat label="Encode" value={encodeMinutes(estimate.frames)} />
             </dl>
           )}
           {estimateStatus === "loading" && (

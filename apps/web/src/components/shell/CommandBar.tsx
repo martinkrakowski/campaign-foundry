@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { assetKey, useRun } from "@/lib/run-context";
+import { assetKey, encodeMinutes, useRun } from "@/lib/run-context";
 import { ASPECT_RATIOS } from "@/lib/aspect-ratios";
 import { planCampaign, type PlanResult } from "@/lib/briefs-api";
 
@@ -237,6 +237,18 @@ function EstimateSummary({ plan }: { plan: PlanResult | null }) {
               <dt className="text-text-muted">genaiCalls</dt>
               <dd>{plan.estimate.genaiCalls}</dd>
             </div>
+            {plan.estimate.frames !== undefined && (
+              <>
+                <div>
+                  <dt className="text-text-muted">frames</dt>
+                  <dd>{plan.estimate.frames}</dd>
+                </div>
+                <div>
+                  <dt className="text-text-muted">encode</dt>
+                  <dd>{encodeMinutes(plan.estimate.frames)}</dd>
+                </div>
+              </>
+            )}
           </dl>
           {plan.estimate.genaiCalls > 0 && (
             <p className="mt-1 text-[12px] text-warning">

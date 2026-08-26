@@ -17,6 +17,8 @@ export interface PlanEstimate {
   axisProductSize: number;
   feasible: boolean;
   genaiCalls: number;
+  /** Frames to encode — motion plans only. */
+  frames?: number;
 }
 
 export type PlanResult =
@@ -180,10 +182,13 @@ export interface PackageItem {
   productId: string;
   aspectRatio: string;
   treatment: string;
+  format?: "static" | "motion";
   source: string;
   packagedPath: string;
+  posterPath?: string;
+  durationSec?: number;
   bytes: number;
-  checks: { size: "pass" | "fail" };
+  checks: { size: "pass" | "fail"; duration?: "pass" | "fail" };
 }
 
 /** One platform's package, from POST /campaigns/package or GET /campaigns/packages/:id. */
