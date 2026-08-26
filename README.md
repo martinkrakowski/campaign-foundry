@@ -237,9 +237,14 @@ plus `.png`/`.jpg`/`.jpeg`.
 
 Generate a legal-gated headline pool for a brief (Phase 3.1–3.3). Requires
 `OPENROUTER_API_KEY` (same key as the image adapter); `OPENROUTER_COPY_MODEL`
-picks the text model (default `openai/gpt-4o-mini`). The planner does **not**
-consume pools yet, and `pool://` in a brief is still rejected. Wizard "Generate
-suggestions" is out of scope.
+picks the text model (default `openai/gpt-4o-mini`). A randomized brief draws
+headlines from the pool with `variation.axes.headline: pool://copy` (the only
+supported pool reference); the planner resolves the approved texts at plan time
+and `headline` becomes a Hamming axis. A missing or fully-rejected pool is a
+422 on `POST /campaigns/plan` and a failed job on generate, naming
+`briefs/<id>/pools.json`. The wizard's Copy step curates the pool (generate,
+approve/reject, edit) and the policy step unlocks the axis once one entry is
+approved.
 
 ```bash
 # Generate headlines (default count 10, max 25), run the legal gate, persist

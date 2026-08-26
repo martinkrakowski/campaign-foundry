@@ -1,11 +1,13 @@
 import { PlanVariationsUseCase } from "@campaignfoundry/CampaignOrchestration";
 import { parseBrief } from "../../lib/load-brief.js";
+import { planInputFor } from "../../lib/pools.js";
 
 /**
  * POST /campaigns/plan — dry-run the variation planner (no generation).
  *
  * Body is a campaign brief. 200 returns the plan summary the wizard estimates
- * from; planner errors are 422; parse failures are 400 (same as generate).
+ * from; planner errors are 422 (including a missing/empty copy pool when the
+ * brief requests `headline: pool://copy`); parse failures are 400 (same as generate).
  */
 export default defineEventHandler(async (event) => {
   let brief;
@@ -21,7 +23,7 @@ export default defineEventHandler(async (event) => {
     return { error: "not a variation brief" };
   }
 
-  const planned = new PlanVariationsUseCase().plan(brief);
+  const planned = new PlanVariationsUseCase().plan(brief, await planInputFor(brief));
   if (!planned.success) {
     setResponseStatus(event, 422);
     return { error: planned.error.message };
@@ -40,6 +42,7 @@ export default defineEventHandler(async (event) => {
       tone: variant.tone,
       backgroundSource: variant.backgroundSource,
       paletteShift: variant.paletteShift,
+      ...(variant.headline === undefined ? {} : { headline: variant.headline }),
     })),
   };
 });

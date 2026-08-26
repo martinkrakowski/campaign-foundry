@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CopyPool } from "@campaignfoundry/CampaignOrchestration";
+import type { CampaignBrief, CopyPool } from "@campaignfoundry/CampaignOrchestration";
 import { isBriefSourceName } from "../brief-files.js";
 
 const origRoot = process.env.PROJECT_ROOT;
@@ -155,5 +155,66 @@ describe("copy pool persistence", () => {
     symlinkSync(join(dir, "briefs", "camp"), join(dir, "briefs", "linked"));
     expect(await isPoolDirSymlink("linked")).toBe(true);
     await expect(isPoolDirSymlink("../escape")).rejects.toThrow(/Path escapes the allowed directory/);
+  });
+});
+
+describe("planInputFor / pooledPlanner", () => {
+  let dir: string;
+  const brief = (over: Partial<CampaignBrief> = {}): CampaignBrief => ({
+    id: "camp",
+    targetRegion: "DE",
+    targetAudience: "a",
+    campaignMessage: "Hi",
+    products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "a.png" }],
+    mode: "variation",
+    variation: { count: 2, seed: 1, axes: { headline: "pool://copy" } },
+    ...over,
+  });
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "cf-pools-plan-"));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+    else process.env.PROJECT_ROOT = origRoot;
+  });
+
+  test("returns nothing for briefs without the headline axis, without touching the pool", async () => {
+    const { planInputFor, wantsHeadlinePool } = await filesFor(dir);
+    const plain = brief({ variation: { count: 2 } });
+    expect(wantsHeadlinePool(plain)).toBe(false);
+    expect(await planInputFor(plain)).toEqual({});
+    expect(await planInputFor(brief({ variation: undefined }))).toEqual({});
+  });
+
+  test("returns the approved texts when the brief draws from pool://copy, or an empty list without a pool", async () => {
+    const { planInputFor, wantsHeadlinePool, writePool } = await filesFor(dir);
+    expect(wantsHeadlinePool(brief())).toBe(true);
+    expect(await planInputFor(brief())).toEqual({ headlines: [] });
+    await writePool(
+      pool({
+        entries: [
+          { id: "h1", text: "Stay wild", status: "approved" },
+          { id: "h2", text: "A miracle", status: "rejected", reason: "legal" },
+          { id: "h3", text: "Go far", status: "approved" },
+        ],
+      }),
+    );
+    expect(await planInputFor(brief())).toEqual({ headlines: ["Stay wild", "Go far"] });
+  });
+
+  test("pooledPlanner binds the input to plan and forwards replan", async () => {
+    const { pooledPlanner } = await filesFor(dir);
+    const planner = pooledPlanner({ headlines: ["Stay wild", "Go far"] });
+    const planned = planner.plan(brief());
+    expect(planned.success).toBe(true);
+    if (!planned.success) return;
+    expect(planned.value.variants.map((v) => v.headline).every((h) => h === "Stay wild" || h === "Go far")).toBe(true);
+    const replanned = planner.replan(planned.value, 0, 1);
+    expect(replanned.success).toBe(true);
+    const bad = planner.replan(planned.value, 9, 1);
+    expect(bad.success).toBe(false);
+    expect(pooledPlanner({}).plan(brief()).success).toBe(false);
   });
 });

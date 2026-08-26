@@ -1,7 +1,15 @@
 import { randomBytes } from "node:crypto";
 import { lstat, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { CopyPool } from "@campaignfoundry/CampaignOrchestration";
+import {
+  approvedTexts,
+  HEADLINE_POOL_REF,
+  PlanVariationsUseCase,
+  type CampaignBrief,
+  type CopyPool,
+  type PlanInput,
+  type VariationPlanner,
+} from "@campaignfoundry/CampaignOrchestration";
 import { briefsDir, isErrno } from "./brief-files.js";
 import { resolveConfined } from "./confined-path.js";
 
@@ -66,4 +74,29 @@ export function withPoolLock<T>(briefId: string, fn: () => Promise<T>): Promise<
     if (chains.get(briefId) === settled) chains.delete(briefId);
   });
   return run;
+}
+
+/** True when the brief draws headlines from its approved copy pool. */
+export function wantsHeadlinePool(brief: CampaignBrief): boolean {
+  return brief.variation?.axes?.headline === HEADLINE_POOL_REF;
+}
+
+/**
+ * Plan-time input for a brief: the approved texts of `briefs/<id>/pools.json`
+ * when the brief requests `headline: pool://copy`, else nothing. A missing pool
+ * yields no headlines — the planner then fails loud naming the pool file.
+ */
+export async function planInputFor(brief: CampaignBrief): Promise<PlanInput> {
+  if (!wantsHeadlinePool(brief)) return {};
+  const pool = await readPool(brief.id);
+  return { headlines: pool ? approvedTexts(pool) : [] };
+}
+
+/** The variation planner with `input` (the resolved pool) bound for every `plan` call. */
+export function pooledPlanner(input: PlanInput): VariationPlanner {
+  const planner = new PlanVariationsUseCase();
+  return {
+    plan: (brief) => planner.plan(brief, input),
+    replan: (plan, index, attempt) => planner.replan(plan, index, attempt),
+  };
 }

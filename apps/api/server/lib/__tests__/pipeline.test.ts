@@ -1,5 +1,5 @@
-import { describe, test, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GenerateCampaignUseCase, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
@@ -90,6 +90,57 @@ describe("pipeline composition root", () => {
       expect(r.value.assets.every((a) => a.outputPath.includes("/v") && a.format === "static" && a.attempt === 0)).toBe(true);
       expect(r.value.policyHash).toEqual(expect.any(String));
       expect(r.value.seed).toBe(42);
+    }
+  });
+
+  // projectRoot() memoizes per process: re-import the pipeline so PROJECT_ROOT points at `dir`.
+  const freshRunCampaign = async (): Promise<typeof runCampaign> => {
+    vi.resetModules();
+    process.env.PROJECT_ROOT = dir;
+    return (await import("../pipeline.js")).runCampaign;
+  };
+
+  test("runCampaign fails loud when headline: pool://copy has no approved pool", async () => {
+    const origRoot = process.env.PROJECT_ROOT;
+    try {
+      const pooled: CampaignBrief = {
+        ...brief,
+        mode: "variation",
+        variation: { count: 2, seed: 42, axes: { headline: "pool://copy" } },
+      };
+      const r = await (await freshRunCampaign())(pooled, "procedural");
+      expect(r.success).toBe(false);
+      if (!r.success) expect(r.error.message).toMatch(/briefs\/camp\/pools\.json/);
+    } finally {
+      if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+      else process.env.PROJECT_ROOT = origRoot;
+    }
+  });
+
+  test("runCampaign composites pooled headlines from briefs/<id>/pools.json", async () => {
+    const origRoot = process.env.PROJECT_ROOT;
+    try {
+      mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
+      writeFileSync(
+        join(dir, "briefs", "camp", "pools.json"),
+        JSON.stringify({
+          briefId: "camp",
+          generatedAt: "2026-01-01T00:00:00.000Z",
+          model: "m",
+          entries: [{ id: "h1", text: "Stay wild", status: "approved" }],
+        }),
+      );
+      const pooled: CampaignBrief = {
+        ...brief,
+        mode: "variation",
+        variation: { count: 2, seed: 42, axes: { headline: "pool://copy" } },
+      };
+      const r = await (await freshRunCampaign())(pooled, "procedural");
+      expect(r.success).toBe(true);
+      if (r.success) expect(r.value.assets).toHaveLength(2);
+    } finally {
+      if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+      else process.env.PROJECT_ROOT = origRoot;
     }
   });
 

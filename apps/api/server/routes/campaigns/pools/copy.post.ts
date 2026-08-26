@@ -117,8 +117,8 @@ function mapGeneratorError(error: CopyGeneratorError): HttpFailure {
  * only repeated known headlines. 404 unknown brief, 503 without
  * OPENROUTER_API_KEY, 422 if the generator returned nothing usable at all.
  * Upstream failures: 502 auth/other, 429 (+ Retry-After) or 503 rate limit,
- * 503 network/timeout, 422 unreadable body. Planner / `pool://` consumption is
- * out of scope.
+ * 503 network/timeout, 422 unreadable body. Approved entries feed the planner
+ * when a brief sets `variation.axes.headline: pool://copy` (see lib/pools.ts).
  */
 export default defineEventHandler(async (event) => {
   let briefId: string;

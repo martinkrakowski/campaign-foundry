@@ -1,4 +1,7 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, afterEach, vi } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
 import planHandler from "../plan.post.js";
 
@@ -122,5 +125,93 @@ describe("POST /campaigns/plan", () => {
     } finally {
       g.readBody = original;
     }
+  });
+});
+
+describe("POST /campaigns/plan with headline: pool://copy", () => {
+  const origRoot = process.env.PROJECT_ROOT;
+  let dir: string | undefined;
+
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+    if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+    else process.env.PROJECT_ROOT = origRoot;
+  });
+
+  const pooledBrief = () =>
+    variationBrief({
+      variation: {
+        count: 4,
+        seed: 42,
+        minDistance: 1,
+        axes: { layout: ["headline-top"], tone: ["bold"], headline: "pool://copy" },
+      },
+    });
+
+  const freshHandler = async (entries: unknown[] | undefined) => {
+    dir = mkdtempSync(join(tmpdir(), "cf-plan-pool-"));
+    process.env.PROJECT_ROOT = dir;
+    if (entries !== undefined) {
+      mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
+      writeFileSync(
+        join(dir, "briefs", "camp", "pools.json"),
+        JSON.stringify({ briefId: "camp", generatedAt: "2026-01-01T00:00:00.000Z", model: "m", entries }),
+      );
+    }
+    vi.resetModules();
+    return web((await import("../plan.post.js")).default as EventHandler);
+  };
+
+  const post = (handler: ReturnType<typeof web>, body: unknown) =>
+    handler(
+      new Request("http://x/campaigns/plan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    );
+
+  test("returns 422 naming the pool file when no pool exists", async () => {
+    const res = await post(await freshHandler(undefined), pooledBrief());
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({
+      error: 'Headline axis "pool://copy" needs at least one approved entry in copy pool briefs/camp/pools.json.',
+    });
+  });
+
+  test("returns 422 when the pool has no approved entry", async () => {
+    const res = await post(
+      await freshHandler([{ id: "h1", text: "A miracle", status: "rejected", reason: "legal" }]),
+      pooledBrief(),
+    );
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { error: string }).error).toMatch(/briefs\/camp\/pools\.json/);
+  });
+
+  test("plans with approved headlines and reports them per variant", async () => {
+    const res = await post(
+      await freshHandler([
+        { id: "h1", text: "Stay wild", status: "approved" },
+        { id: "h2", text: "Go far", status: "approved" },
+      ]),
+      pooledBrief(),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      estimate: { axisProductSize: number };
+      variants: Array<{ headline?: string }>;
+    };
+    expect(body.estimate.axisProductSize).toBe(2 * 3 * 1 * 1 * 1 * 1 * 2);
+    expect(body.variants).toHaveLength(4);
+    for (const variant of body.variants) expect(["Stay wild", "Go far"]).toContain(variant.headline);
+  });
+
+  test("returns 400 naming the value for any other headline reference", async () => {
+    const res = await call(
+      variationBrief({ variation: { count: 1, axes: { headline: "pool://other" } } }),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/variation.axes.headline.*"pool:\/\/other"/);
   });
 });
