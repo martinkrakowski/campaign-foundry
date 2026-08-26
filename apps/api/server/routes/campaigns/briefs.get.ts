@@ -36,9 +36,12 @@ export default defineEventHandler(async () => {
   for (const file of files) {
     try {
       const filePath = resolve(dir, file);
-      const raw = await readFile(filePath, "utf8");
-      const brief = parseBriefText(filePath, raw);
-      const revision = hashBytes(Buffer.from(raw, "utf8"));
+      // Hash the bytes as they are on disk, not a re-encoded decode of them: the
+      // write path hashes raw bytes, and a file that is not valid UTF-8 would
+      // otherwise get a listing revision no conditional write could ever match.
+      const bytes = await readFile(filePath);
+      const revision = hashBytes(bytes);
+      const brief = parseBriefText(filePath, bytes.toString("utf8"));
       briefs.push({ file, brief, revision });
     } catch (error) {
       // Skip a malformed/invalid brief rather than failing the whole list — but log

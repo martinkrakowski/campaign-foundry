@@ -802,4 +802,51 @@ describe("authoring briefs", () => {
     );
     expect(res.status).toBe(500);
   });
+
+  test("two conditional PUTs with the same revision: exactly one wins, the other gets 409", async () => {
+    const { create, update, list } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const listed = (await (await list()(new Request("http://x/campaigns/briefs"))).json()) as {
+      briefs: { revision: string }[];
+    };
+    const revision = listed.briefs[0].revision;
+
+    // Both requests are issued against the same handler instance and awaited together,
+    // so they overlap exactly the way two browser tabs would. Without the per-brief lock
+    // both pass the hash comparison and the later write silently discards the earlier.
+    const put = update();
+    const [first, second] = await Promise.all([
+      put(jsonReq(`http://x/campaigns/briefs/camp?revision=${revision}`, "PUT", brief({ campaignMessage: "A" }))),
+      put(jsonReq(`http://x/campaigns/briefs/camp?revision=${revision}`, "PUT", brief({ campaignMessage: "B" }))),
+    ]);
+
+    expect([first.status, second.status].sort()).toEqual([200, 409]);
+    // The loser must not have written: the file holds exactly the winner's message.
+    expect(await loadBrief(campYaml())).toMatchObject({
+      campaignMessage: first.status === 200 ? "A" : "B",
+    });
+  });
+
+  test("the listing revision matches the write path's hash for a non-UTF-8 file", async () => {
+    const { list } = await api();
+    mkdirSync(join(dir, "briefs"), { recursive: true });
+    // A lone 0xFF byte is not valid UTF-8. Decoding to a string and re-encoding replaces
+    // it with U+FFFD and changes the digest, so the listing would hand out a revision no
+    // conditional write could ever match — a 409 the client can never clear.
+    writeFileSync(
+      campYaml(),
+      Buffer.concat([
+        Buffer.from('id: camp\ntargetRegion: DE\ntargetAudience: a\ncampaignMessage: "hi '),
+        Buffer.from([0xff]),
+        Buffer.from('"\nproducts:\n  - id: alpha\n  - id: beta\n'),
+      ]),
+    );
+
+    const listed = (await (await list()(new Request("http://x/campaigns/briefs"))).json()) as {
+      briefs: { revision: string }[];
+    };
+    const { hashFile } = await import("../../../lib/brief-files.js");
+    expect(listed.briefs).toHaveLength(1);
+    expect(listed.briefs[0].revision).toBe(await hashFile(campYaml()));
+  });
 });
