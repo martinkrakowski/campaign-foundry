@@ -146,13 +146,25 @@ export default function ExportPage() {
           >
             {packaging ? "Packaging…" : "Package"}
           </button>
-          <a
-            href={`${API}/campaigns/packages/${encodeURIComponent(brief.id)}/${platform}.zip`}
-            download
-            className="rounded-full border border-border bg-surface-2 px-4 py-1.5 text-[13px] text-white transition-colors hover:bg-border-hover"
-          >
-            Download zip
-          </a>
+          {selected ? (
+            <a
+              href={`${API}/campaigns/packages/${encodeURIComponent(brief.id)}/${platform}.zip`}
+              download
+              className="rounded-full border border-border bg-surface-2 px-4 py-1.5 text-[13px] text-white transition-colors hover:bg-border-hover"
+            >
+              Download zip
+            </a>
+          ) : (
+            // No package on disk for this platform yet — the zip route would 404.
+            <button
+              type="button"
+              disabled
+              title="Package this platform first"
+              className="rounded-full border border-border px-4 py-1.5 text-[13px] text-text-muted disabled:cursor-not-allowed"
+            >
+              Download zip
+            </button>
+          )}
         </div>
         {packageError && <p className="mt-2 text-[13px] text-error">{packageError}</p>}
         {selected && selected.items.length > 0 && (

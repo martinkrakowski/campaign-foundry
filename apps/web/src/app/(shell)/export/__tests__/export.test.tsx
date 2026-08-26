@@ -45,18 +45,23 @@ describe("ExportPage — platform packaging", () => {
     expect(screen.getByRole("tab", { name: "instagram-feed" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "linkedin" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "x" })).toBeTruthy();
-    const zip = screen.getByText("Download zip") as HTMLAnchorElement;
-    expect(zip.getAttribute("href")).toBe(`${API}/campaigns/packages/seed/instagram-feed.zip`);
+    // Nothing packaged yet: the download is a disabled hint, not a link that would 404.
+    const placeholder = screen.getByRole("button", { name: "Download zip" }) as HTMLButtonElement;
+    expect(placeholder.disabled).toBe(true);
+    expect(placeholder.title).toBe("Package this platform first");
+    expect(screen.queryByRole("link", { name: "Download zip" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Package" }));
     expect(await screen.findByText("packages/seed/instagram-feed/alpha/1x1.png")).toBeTruthy();
     expect(screen.getByText("PASS")).toBeTruthy();
     expect(screen.getByText("FAIL")).toBeTruthy();
+    const zip = screen.getByRole("link", { name: "Download zip" });
+    expect(zip.getAttribute("href")).toBe(`${API}/campaigns/packages/seed/instagram-feed.zip`);
 
+    // linkedin has no package: back to the disabled hint.
     await user.click(screen.getByRole("tab", { name: "linkedin" }));
-    expect((screen.getByText("Download zip") as HTMLAnchorElement).getAttribute("href")).toBe(
-      `${API}/campaigns/packages/seed/linkedin.zip`,
-    );
+    expect(screen.queryByRole("link", { name: "Download zip" })).toBeNull();
+    expect((screen.getByRole("button", { name: "Download zip" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   test("sends the approved asset keys as include, and omits include with no decisions", async () => {
@@ -154,5 +159,8 @@ describe("ExportPage — platform packaging", () => {
     renderWithRun(<ExportPage />);
     expect(await screen.findByText("PASS")).toBeTruthy();
     expect(screen.getByText("packages/seed/instagram-feed/alpha/1x1.png")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Download zip" }).getAttribute("href")).toBe(
+      `${API}/campaigns/packages/seed/instagram-feed.zip`,
+    );
   });
 });
