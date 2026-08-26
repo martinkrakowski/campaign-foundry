@@ -511,4 +511,24 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Left open:**
   - Lane A / later wave: union of platform-profile insets at generate time; overlap-vs-headline must re-run per frame once headline position depends on `t`.
 
+---
+
+## 2026-08-26 — PR #50 review fixes (lane A)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Merged `origin/main` (#49 safe insets); session-log kept both sides.
+  - Replan pins `productId` + `aspectRatio`; rejects `attempt < 1`. Variation assets stamp `attempt` (0 originals). Web derives next attempt from the loaded asset; `attemptByKey` removed.
+  - Variation `regenerateOnly`: productId must match the planned slot, index in range, duplicates de-duped; classic-only targets err "targets do not match the brief mode".
+  - Print proof pinned to the first 1:1 variant per product in plan order.
+  - Background cache: failed `set` still returns bytes + warns; get validates PNG magic + length and deletes junk; atomic tmp+rename; in-flight set de-dupe. `GET /output/**` 404s `cache/*`; dropped redundant `/output/cache/` gitignore.
+  - `isPersistedAsset` requires the four strings always; variation rows also need integer `variantIndex` and `attempt` ≥ 0.
+  - `POST /campaigns/plan` 400 unless `mode === "variation"`.
+  - Grid/export/compliance/runs labels include `v<index>`; re-roll updates the tile in place and clears its decision.
+- **Decisions:**
+  - Omitted re-roll `attempt` defaults to 1 (first re-roll), never 0. Generate still surfaces use-case err as a failed job (Phase J), not a synchronous 422.
+  - Qodo #6 (failed variation batch overwrites earlier outputs) is inherited classic behaviour — noted, not changed.
+- **Left open:**
+  - Webpack `extensionAlias` so the web app can re-export `assetIdentity` at runtime.
+
 
