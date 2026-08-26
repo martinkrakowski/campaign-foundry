@@ -437,6 +437,8 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         tone: variant.tone,
         backgroundSource: variant.backgroundSource,
         paletteShift: variant.paletteShift,
+        // Provenance: which pool text this slot rendered (report + grid chip).
+        ...(variant.headline === undefined ? {} : { headline: variant.headline }),
       },
     };
     log.record(

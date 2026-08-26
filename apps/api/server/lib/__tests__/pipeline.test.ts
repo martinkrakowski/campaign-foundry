@@ -100,6 +100,12 @@ describe("pipeline composition root", () => {
     return (await import("../pipeline.js")).runCampaign;
   };
 
+  /** Spy on the compositor the freshly imported pipeline will construct (same module registry). */
+  const spyCompositor = async () => {
+    const { NodeCanvasCompositor } = await import("@campaignfoundry/CreativeGeneration");
+    return vi.spyOn(NodeCanvasCompositor.prototype, "compositeAsset");
+  };
+
   test("runCampaign fails loud when headline: pool://copy has no approved pool", async () => {
     const origRoot = process.env.PROJECT_ROOT;
     try {
@@ -161,10 +167,19 @@ describe("pipeline composition root", () => {
         mode: "variation",
         variation: { count: 2, seed: 42, axes: { headline: "pool://copy" } },
       };
-      const r = await (await freshRunCampaign())(pooled, "procedural");
+      const run = await freshRunCampaign();
+      const compositeAsset = await spyCompositor();
+      const r = await run(pooled, "procedural");
       expect(r.success).toBe(true);
-      if (r.success) expect(r.value.assets).toHaveLength(2);
+      if (r.success) {
+        expect(r.value.assets).toHaveLength(2);
+        expect(r.value.assets.map((a) => a.descriptor?.headline)).toEqual(["Stay wild", "Stay wild"]);
+      }
+      // The compositor rendered the pool text, not the campaign message.
+      expect(compositeAsset).toHaveBeenCalledTimes(2);
+      expect(compositeAsset.mock.calls.map((call) => call[0].message)).toEqual(["Stay wild", "Stay wild"]);
     } finally {
+      vi.restoreAllMocks();
       if (origRoot === undefined) delete process.env.PROJECT_ROOT;
       else process.env.PROJECT_ROOT = origRoot;
     }

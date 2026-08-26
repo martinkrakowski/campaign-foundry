@@ -322,6 +322,10 @@ describe("GenerateCampaignUseCase — variation", () => {
     expect(result.success).toBe(true);
     const messages = vi.mocked(d.compositor.compositeAsset).mock.calls.map((call) => call[0].message);
     expect(messages).toEqual(["Stay wild", "Bleib wild"]);
+    // Provenance: the drawn headline is stamped on the descriptor (and so the report); absent otherwise.
+    if (!result.success) return;
+    expect(result.value.assets[0].descriptor).toMatchObject({ headline: "Stay wild" });
+    expect(result.value.assets[1].descriptor).not.toHaveProperty("headline");
   });
 
   test("classic still requires two products", async () => {
