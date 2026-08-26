@@ -237,9 +237,15 @@ plus `.png`/`.jpg`/`.jpeg`.
 
 Generate a legal-gated headline pool for a brief (Phase 3.1–3.3). Requires
 `OPENROUTER_API_KEY` (same key as the image adapter); `OPENROUTER_COPY_MODEL`
-picks the text model (default `openai/gpt-4o-mini`). The planner does **not**
-consume pools yet, and `pool://` in a brief is still rejected. Wizard "Generate
-suggestions" is out of scope.
+picks the text model (default `openai/gpt-4o-mini`). A randomized brief draws
+headlines from the pool with `variation.axes.headline: pool://copy` (the only
+supported pool reference); the planner resolves the approved texts at plan time
+and `headline` becomes a Hamming axis. A missing or fully-rejected pool is a
+422 on `POST /campaigns/plan` and a failed job on generate, naming
+`briefs/<id>/pools.json`. The wizard's Copy step curates the pool (generate,
+approve/reject, edit) and the policy step unlocks the axis once one entry is
+approved. The wizard sends its draft brief inline, so Generate works before
+Save; on Save the pool already exists under that id.
 
 ```bash
 # Generate headlines (default count 10, max 25), run the legal gate, persist
@@ -248,6 +254,11 @@ curl -X POST http://localhost:3001/campaigns/pools/copy \
   --data '{"briefId":"summer-hydration-2026","count":10}'
 # → 201 { "pool": { "briefId", "generatedAt", "model", "entries": [{ "id", "text", "status", "reason?" }] }, "added": 10 }
 #   200 + "added": 0 when the model only repeated headlines already in the pool
+
+# Or pass an unsaved brief inline (validated like generate; pool stored under brief.id)
+curl -X POST http://localhost:3001/campaigns/pools/copy \
+  -H 'content-type: application/json' \
+  --data '{"brief":{"id":"draft-2026","targetRegion":"DE","targetAudience":"…","campaignMessage":"…","products":[…],"mode":"variation","variation":{"count":12}},"count":10}'
 
 curl http://localhost:3001/campaigns/pools/summer-hydration-2026
 # → 200 { "pool": {…} }
@@ -261,7 +272,9 @@ Persisted at `briefs/<briefId>/pools.json` (a directory, so the briefs lister
 ignores it). Suggestions are capped at `count` and 60 characters, then run
 through `validateLegalCopy`; failures are stored as `rejected` with a reason and
 are not selectable later. A PATCH edit whose text duplicates another entry is a
-422. Upstream failures map to 502 (bad key / other error), 429 + `Retry-After`
+422, and so is a hand-edited `pools.json` that no longer has the pool shape
+(the error names the file and the first problem; plan and generate fail the
+same way). Upstream failures map to 502 (bad key / other error), 429 + `Retry-After`
 or 503 (rate limit), 503 (network / 30 s timeout), 422 (unreadable reply).
 
 

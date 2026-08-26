@@ -5,7 +5,10 @@ import {
   BriefsApiError,
   createBrief,
   duplicateBrief,
+  generatePool,
+  getPool,
   isBriefsApiError,
+  patchPool,
   listBriefs,
   listPackages,
   packageCampaign,
@@ -311,5 +314,80 @@ describe("packageCampaign / listPackages", () => {
       message: "Campaign report not found",
       status: 404,
     });
+  });
+});
+
+describe("copy pool calls", () => {
+  const pool = {
+    briefId: "camp",
+    generatedAt: "2026-01-01T00:00:00.000Z",
+    model: "m",
+    entries: [{ id: "h1", text: "Stay wild", status: "approved" }],
+  };
+
+  test("getPool returns the pool, null on 404, and throws on other failures", async () => {
+    mockFetch((url) => {
+      expect(url).toBe(`${API}/campaigns/pools/camp%2Fx`);
+      return json({ pool });
+    });
+    expect(await getPool("camp/x")).toEqual(pool);
+
+    mockFetch(() => json({ error: "nope" }, 404));
+    expect(await getPool("camp")).toBeNull();
+
+    mockFetch(() => json({ error: "boom" }, 500));
+    await expect(getPool("camp")).rejects.toMatchObject({ status: 500, message: "boom" });
+
+    mockFetch(() => {
+      throw new Error("offline");
+    });
+    await expect(getPool("camp")).rejects.toMatchObject({ status: 0, message: "Network error" });
+
+    mockFetch(() => json({ pool: { entries: "x" } }));
+    await expect(getPool("camp")).rejects.toMatchObject({ message: "Invalid response" });
+    mockFetch(() => json(null));
+    await expect(getPool("camp")).rejects.toMatchObject({ message: "Invalid response" });
+  });
+
+  test("generatePool posts the brief inline with count and returns pool + added", async () => {
+    const brief = {
+      id: "camp",
+      targetRegion: "DE",
+      targetAudience: "a",
+      campaignMessage: "Hi",
+      products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "a.png" }],
+      mode: "variation" as const,
+      variation: { count: 2 },
+    };
+    mockFetch((url, init) => {
+      expect(url).toBe(`${API}/campaigns/pools/copy`);
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(String(init.body))).toEqual({ brief, count: 10 });
+      return json({ pool, added: 1 }, 201);
+    });
+    expect(await generatePool(brief)).toEqual({ pool, added: 1 });
+
+    mockFetch((_url, init) => {
+      expect(JSON.parse(String(init.body))).toEqual({ brief, count: 3 });
+      return json({ pool });
+    });
+    expect(await generatePool(brief, 3)).toEqual({ pool, added: 0 });
+
+    mockFetch(() => json({ error: "OPENROUTER_API_KEY is not set" }, 503));
+    await expect(generatePool(brief)).rejects.toMatchObject({
+      status: 503,
+      message: "OPENROUTER_API_KEY is not set",
+    });
+  });
+
+  test("patchPool sends entries and returns the updated pool", async () => {
+    const entries = [{ id: "h1", status: "rejected" as const, text: "Go far" }];
+    mockFetch((url, init) => {
+      expect(url).toBe(`${API}/campaigns/pools/camp`);
+      expect(init.method).toBe("PATCH");
+      expect(JSON.parse(String(init.body))).toEqual({ entries });
+      return json({ pool });
+    });
+    expect(await patchPool("camp", entries)).toEqual(pool);
   });
 });

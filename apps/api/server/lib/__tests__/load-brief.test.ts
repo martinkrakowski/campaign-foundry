@@ -98,10 +98,15 @@ const v2Brief = {
 
 describe("parseBrief v2 fields", () => {
   test("SUPPORTED_AXES and SUPPORTED_FORMATS lock the P0 allowlist; motion is a gated extension", () => {
-    expect(SUPPORTED_AXES).toEqual(["layout", "tone", "background", "paletteShift"]);
+    expect(SUPPORTED_AXES).toEqual(["layout", "tone", "background", "paletteShift", "headline"]);
     expect(SUPPORTED_FORMATS).toEqual(["static"]);
     expect(MOTION_AXES).toEqual(["motion", "duration"]);
     expect(MOTION_FORMAT).toBe("motion");
+  });
+
+  test("accepts headline: pool://copy — the only supported pool reference", () => {
+    const parsed = parseBrief({ ...valid, variation: { axes: { headline: "pool://copy" } } });
+    expect(parsed.variation?.axes?.headline).toBe("pool://copy");
   });
 
   test("classic briefs omit v2 fields — they are not required", () => {
@@ -176,8 +181,9 @@ describe("parseBrief v2 fields", () => {
     ["the motion axis", { ...valid, variation: { axes: { motion: ["ken-burns-in"] } } }, /motion/],
     ["the duration axis", { ...valid, variation: { axes: { duration: [6] } } }, /duration/],
     ["an unknown axis key", { ...valid, variation: { axes: { flavour: ["x"] } } }, /flavour/],
-    ["axes.headline", { ...valid, variation: { axes: { headline: "pool://copy" } } }, /headline/],
-    ["a pool:// string under axes", { ...valid, variation: { axes: { layout: ["pool://copy"] } } }, /axis "layout".*pool/],
+    ["axes.headline with another pool", { ...valid, variation: { axes: { headline: "pool://other" } } }, /variation.axes.headline.*"pool:\/\/other"/],
+    ["axes.headline as a list", { ...valid, variation: { axes: { headline: ["pool://copy"] } } }, /variation.axes.headline/],
+    ["a pool:// string under another axis", { ...valid, variation: { axes: { layout: ["pool://copy"] } } }, /variation.axes.layout.*pool/],
     ["mode variation without a count", { ...valid, mode: "variation", variation: { axes: {} } }, /variation.count.*required/],
     ["mode variation without a variation block", { ...valid, mode: "variation" }, /variation.count.*required/],
     ["a non-array layout", { ...valid, variation: { axes: { layout: "headline-top" } } }, /layout/],

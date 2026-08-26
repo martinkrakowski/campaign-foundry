@@ -339,6 +339,11 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       variants = plan.variants;
     }
 
+    // Pooled headlines are copy too: gate every distinct text the (re)plan will
+    // render, halting exactly like a prohibited campaignMessage would.
+    const headlines = [...new Set(plan.variants.flatMap((v) => (v.headline === undefined ? [] : [v.headline])))];
+    if (await this.haltsOnProhibitedCopy(headlines, log)) return ok({ assets: [], log, halted: true });
+
     log.totalOperations = variants.length;
     log.record(
       "PlanVariations",
@@ -435,7 +440,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
 
     const request: CompositeRequest = {
       background: background.image,
-      message: copy,
+      message: variant.headline ?? copy,
       brandColor: product.primaryColor,
       logoPath: product.logoPath,
       ratio,
@@ -466,6 +471,8 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       tone: variant.tone,
       backgroundSource: variant.backgroundSource,
       paletteShift: variant.paletteShift,
+      // Provenance: which pool text this slot rendered (report + grid chip).
+      ...(variant.headline === undefined ? {} : { headline: variant.headline }),
     };
 
     if (variant.motion !== undefined) {
@@ -626,7 +633,14 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     const checks = [brief.campaignMessage, brief.localizedMessage].filter(
       (t): t is string => typeof t === "string" && t.length > 0,
     );
-    for (const text of checks) {
+    if (await this.haltsOnProhibitedCopy(checks, log)) return true;
+    log.record("ExecuteLegalGateCheck", "Legal gate passed");
+    return false;
+  }
+
+  /** Legal-gate each text; on the first failure record the halt (same stage/shape) and return true. */
+  private async haltsOnProhibitedCopy(texts: readonly string[], log: PipelineExecutionLog): Promise<boolean> {
+    for (const text of texts) {
       const result = await this.deps.compliance.validateLegalCopy(text);
       if (!result.passed) {
         log.record(
@@ -638,7 +652,6 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         return true;
       }
     }
-    log.record("ExecuteLegalGateCheck", "Legal gate passed");
     return false;
   }
 }

@@ -11,18 +11,18 @@ const UINT32_MAX = 0xffffffff;
  * Hamming axes that are always active (productId, aspectRatio, layout, tone,
  * backgroundSource, paletteShift). Optional axes add one each when on — mirrors
  * VariationPolicy's active-axis count in CampaignOrchestration: an optional axis
- * counts only while it has at least one option (headline when non-empty; motion
- * when non-empty, which also activates durationSec).
+ * counts only while it has at least one option (headline when the pool axis is
+ * on; motion when non-empty, which also activates durationSec).
  */
 const BASE_DISTANCE_AXES = 6;
 
 /**
  * Upper bound for `minDistance`: the number of Hamming axes this brief activates.
- * The wizard exposes no optional axis yet (headline and motion add one each once
- * their controls land), so every brief it writes activates exactly the base axes.
+ * The wizard exposes the headline axis today; motion adds two more (motion +
+ * durationSec) once its controls land and `output.formats` can include "motion".
  */
-export function maxMinDistance(_state: WizardState): number {
-  return BASE_DISTANCE_AXES;
+export function maxMinDistance(state: WizardState): number {
+  return BASE_DISTANCE_AXES + (state.variation.headline ? 1 : 0);
 }
 
 function isIntegerAtLeast(value: string, min: number): boolean {

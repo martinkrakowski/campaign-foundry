@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import * as yaml from "js-yaml";
 import {
+  HEADLINE_POOL_REF,
   LAYOUT_VALUES,
   MOTION_KINDS,
   SAFE_ID_PATTERN,
@@ -23,8 +24,8 @@ export function assertSafeId(value: unknown, label: string): asserts value is st
   }
 }
 
-/** P0 variation axes — always accepted. `headline` fails parse. */
-export const SUPPORTED_AXES = ["layout", "tone", "background", "paletteShift"] as const;
+/** Supported variation axes — always accepted (`headline` only as `pool://copy`). */
+export const SUPPORTED_AXES = ["layout", "tone", "background", "paletteShift", "headline"] as const;
 
 /** Motion axes — accepted only while the ffmpeg capability is on (D8). */
 export const MOTION_AXES = ["motion", "duration"] as const;
@@ -144,6 +145,19 @@ function validateMotionAxes(value: Record<string, unknown>, capabilities: Capabi
   }
 }
 
+/**
+ * `headline` is a pool reference, not a value list: the only supported pool is
+ * the brief's approved copy pool (`pool://copy`). Anything else names the value.
+ */
+function validateHeadlineAxis(value: unknown): void {
+  if (value === undefined) return;
+  if (value !== HEADLINE_POOL_REF) {
+    throw new Error(
+      `Campaign brief field "variation.axes.headline" must be "${HEADLINE_POOL_REF}"; got ${JSON.stringify(value)}.`,
+    );
+  }
+}
+
 function validateAxes(value: unknown, capabilities: Capabilities): void {
   if (!isPlainObject(value)) {
     throw new Error('Campaign brief field "variation.axes" must be an object.');
@@ -157,16 +171,7 @@ function validateAxes(value: unknown, capabilities: Capabilities): void {
     }
   }
   validateMotionAxes(value, capabilities);
-  // `pool://` refs (approved copy pools) are not yet supported on any axis — name the
-  // axis they were found under so the message points at the right line of the brief.
-  const poolAxis = Object.entries(value).find(([, axisValue]) =>
-    JSON.stringify(axisValue).includes("pool://"),
-  )?.[0];
-  if (poolAxis !== undefined) {
-    throw new Error(
-      `Unsupported variation axis "${poolAxis}" (pool:// copy pools are not yet supported).`,
-    );
-  }
+  validateHeadlineAxis(value.headline);
   if (value.layout !== undefined) {
     assertAllowedStringArray(value.layout, "variation.axes.layout", LAYOUT_VALUES);
   }

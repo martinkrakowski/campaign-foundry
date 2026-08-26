@@ -27,7 +27,7 @@ const brief = (over: Partial<CampaignBrief> = {}): CampaignBrief => ({
 const planner = (): PlanVariationsUseCase => new PlanVariationsUseCase();
 
 const hamming = (a: Variant, b: Variant): number => {
-  const axes = ["productId", "aspectRatio", "layout", "tone", "backgroundSource", "paletteShift"] as const;
+  const axes = ["productId", "aspectRatio", "layout", "tone", "backgroundSource", "paletteShift", "headline", "motion", "durationSec"] as const;
   return axes.reduce((distance, axis) => distance + (a[axis] !== b[axis] ? 1 : 0), 0);
 };
 
@@ -477,8 +477,6 @@ describe("PlanVariationsUseCase.replan", () => {
   });
 });
 
-const ZERO = { top: 0, right: 0, bottom: 0, left: 0 };
-
 const motionBrief = (over: Partial<CampaignBrief> = {}): CampaignBrief =>
   brief({
     variation: {
@@ -542,17 +540,13 @@ describe("PlanVariationsUseCase — motion axes", () => {
     if (!nine.success) expect(nine.error.message).toMatch(/minDistance/);
   });
 
-  test("draws motion only for the ratios of the requested motion platforms", () => {
-    const zones = {
-      "instagram-feed": { ratio: "1:1", formats: ["static"], safeInsets: ZERO },
-      "instagram-reel": { ratio: "9:16", formats: ["motion"], safeInsets: ZERO },
-    } as const;
-    const withPlatforms = new PlanVariationsUseCase((id) => zones[id as keyof typeof zones]);
-    const result = withPlatforms.plan(
+  test("draws motion only for the ratios in input.motionRatios (the requested motion platforms)", () => {
+    const result = planner().plan(
       motionBrief({
         variation: { count: 12, seed: 7, minDistance: 1, axes: { motion: ["ken-burns-in"], duration: [4] } },
         output: { formats: ["static", "motion"], platforms: ["instagram-feed", "instagram-reel", "myspace"] },
       }),
+      { motionRatios: ["9:16"] },
     );
     expect(result.success).toBe(true);
     if (!result.success) return;
@@ -563,8 +557,9 @@ describe("PlanVariationsUseCase — motion axes", () => {
     expect(result.value.estimate.frames).toBe(clips.length * 4 * 30);
 
     // Every requested platform is static: no ratio can ship a clip, so none is drawn.
-    const staticOnly = withPlatforms.plan(
+    const staticOnly = planner().plan(
       motionBrief({ output: { formats: ["motion"], platforms: ["instagram-feed"] } }),
+      { motionRatios: [] },
     );
     expect(staticOnly.success).toBe(true);
     if (!staticOnly.success) return;
@@ -572,28 +567,57 @@ describe("PlanVariationsUseCase — motion axes", () => {
     expect(staticOnly.value.variants.every((v) => v.motion === undefined)).toBe(true);
     expect(staticOnly.value.estimate.frames).toBe(0);
 
-    // No platforms, or a planner without the resolver, keeps every ratio eligible.
-    const unrestricted = withPlatforms.plan(motionBrief());
-    const noResolver = planner().plan(motionBrief({ output: { formats: ["motion"], platforms: ["instagram-feed"] } }));
-    expect(unrestricted.success && noResolver.success).toBe(true);
-    if (!unrestricted.success || !noResolver.success) return;
+    // No motionRatios in the input keeps every ratio eligible.
+    const unrestricted = planner().plan(motionBrief());
+    expect(unrestricted.success).toBe(true);
+    if (!unrestricted.success) return;
     expect(unrestricted.value.policy.motionRatios).toEqual(["1:1", "9:16", "16:9"]);
-    expect(noResolver.value.variants.some((v) => v.motion !== undefined && v.aspectRatio !== "9:16")).toBe(true);
+    expect(unrestricted.value.variants.some((v) => v.motion !== undefined && v.aspectRatio !== "9:16")).toBe(true);
   });
 
   test("replan of a ratio no motion platform packages stays a still", () => {
-    const zones = { "instagram-reel": { ratio: "9:16", formats: ["motion"], safeInsets: ZERO } } as const;
-    const withPlatforms = new PlanVariationsUseCase((id) => zones[id as keyof typeof zones]);
-    const planned = withPlatforms.plan(
+    const planned = planner().plan(
       motionBrief({ output: { formats: ["motion"], platforms: ["instagram-reel"] } }),
+      { motionRatios: ["9:16"] },
     );
     expect(planned.success).toBe(true);
     if (!planned.success) return;
     const index = planned.value.variants.findIndex((v) => v.aspectRatio !== "9:16");
     expect(index).toBeGreaterThanOrEqual(0);
-    const next = withPlatforms.replan(planned.value, index, 1);
+    const next = planner().replan(planned.value, index, 1);
     expect(next.success).toBe(true);
     if (next.success) expect(next.value.variants[index].motion).toBeUndefined();
+  });
+
+  test("a brief with both the headline and motion axes draws both and bounds minDistance at 9", () => {
+    const headlines = ["Stay wild", "Go far"];
+    const both = motionBrief({
+      variation: {
+        count: 12,
+        seed: 7,
+        minDistance: 1,
+        axes: { motion: ["ken-burns-in"], duration: [4], headline: "pool://copy" },
+      },
+      output: { formats: ["motion"] },
+    });
+    const result = planner().plan(both, { headlines });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    for (const v of result.value.variants) {
+      expect(headlines).toContain(v.headline);
+      expect(v.motion).toBe("ken-burns-in");
+    }
+    expect(result.value.policy.axisProductSize).toBe(2 * 3 * 2 * 2 * 1 * 1 * 2 * 1 * 1);
+    const nine = planner().plan(
+      { ...both, variation: { ...both.variation, count: 1, minDistance: 9 } },
+      { headlines },
+    );
+    expect(nine.success).toBe(true);
+    const ten = planner().plan(
+      { ...both, variation: { ...both.variation, count: 1, minDistance: 10 } },
+      { headlines },
+    );
+    expect(ten.success).toBe(false);
   });
 
   test("replan keeps the frames estimate in step with the re-drawn slot", () => {
@@ -619,5 +643,88 @@ describe("PlanVariationsUseCase — motion axes", () => {
       expect(bad.success).toBe(false);
       if (!bad.success) expect(bad.error.message).toBe("Invalid duration.");
     }
+  });
+});
+
+describe("PlanVariationsUseCase headline axis", () => {
+  const pooled = (count = 12): CampaignBrief =>
+    brief({ variation: { count, seed: 7, minDistance: 1, axes: { headline: "pool://copy" } } });
+  const headlines = ["Stay wild", "Go far", "Drink up"];
+
+  test("draws every variant's headline from the approved pool and keeps distance", () => {
+    const result = planner().plan(pooled(), { headlines });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.policy.headline).toEqual([...headlines].sort());
+    expect(result.value.estimate.axisProductSize).toBe(24 * 3);
+    for (const variant of result.value.variants) {
+      expect(headlines).toContain(variant.headline);
+    }
+    expect(new Set(result.value.variants.map((variant) => variant.headline)).size).toBeGreaterThan(1);
+    expectDistanceHeld(result.value);
+  });
+
+  test("the same approved set in a different pool order yields an identical policyHash and plan", () => {
+    const shuffled = [headlines[2], headlines[0], headlines[1]];
+    const a = planner().plan(pooled(), { headlines });
+    const b = planner().plan(pooled(), { headlines: shuffled });
+    expect(a.success && b.success).toBe(true);
+    if (!a.success || !b.success) return;
+    expect(b.value.policyHash).toBe(a.value.policyHash);
+    expect(b.value).toEqual(a.value);
+  });
+
+  test("headline alone satisfies minDistance for otherwise identical variants", () => {
+    const result = planner().plan(
+      brief({
+        products: [product("alpha")],
+        variation: {
+          count: 3,
+          seed: 7,
+          minDistance: 1,
+          coverage: { perRatio: 0 },
+          axes: {
+            layout: ["headline-top"],
+            tone: ["bold"],
+            paletteShift: [0],
+            headline: "pool://copy",
+          },
+        },
+      }),
+      { headlines },
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expectDistanceHeld(result.value);
+    expect(result.value.estimate.axisProductSize).toBe(1 * 3 * 1 * 1 * 1 * 1 * 3);
+  });
+
+  test("fails naming the pool when pool://copy is requested without approved headlines", () => {
+    const missing = planner().plan(pooled());
+    expect(missing.success).toBe(false);
+    if (!missing.success) expect(missing.error.message).toMatch(/briefs\/golden\/pools\.json/);
+    const empty = planner().plan(pooled(), { headlines: [] });
+    expect(empty.success).toBe(false);
+  });
+
+  test("briefs without the axis are byte-identical to the golden with or without headlines supplied", () => {
+    const plain = planner().plan(brief());
+    const withInput = planner().plan(brief(), { headlines });
+    expect(plain.success && withInput.success).toBe(true);
+    if (!plain.success || !withInput.success) return;
+    expect(withInput.value).toEqual(plain.value);
+    expect(plain.value.policyHash).toBe("7181107a6ce42df96357800416bf26bf89007fd3dbd2b9792aab83323adefcf9");
+    expect(plain.value.variants.every((variant) => !("headline" in variant))).toBe(true);
+  });
+
+  test("replan re-draws the headline from the stored policy", () => {
+    const planned = planner().plan(pooled(), { headlines });
+    expect(planned.success).toBe(true);
+    if (!planned.success) return;
+    const result = planner().replan(planned.value, 1, 1);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(headlines).toContain(result.value.variants[1].headline);
+    expectDistanceHeld(result.value);
   });
 });

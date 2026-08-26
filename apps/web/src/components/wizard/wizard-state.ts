@@ -1,4 +1,4 @@
-import type { CampaignBrief, Product } from "@campaignfoundry/CampaignOrchestration";
+import type { CampaignBrief, CopyPool, Product } from "@campaignfoundry/CampaignOrchestration";
 
 export const WIZARD_STEPS = ["type", "products", "copy", "policy", "output", "review"] as const;
 export type WizardStepId = (typeof WIZARD_STEPS)[number];
@@ -17,6 +17,8 @@ export const LAYOUT_OPTIONS = ["headline-top", "headline-bottom"] as const;
 export const TONE_OPTIONS = ["bold", "subtle"] as const;
 export const BACKGROUND_OPTIONS = ["procedural", "asset-pool", "genai"] as const;
 export const PALETTE_SHIFT_OPTIONS = [0, 0.1, 0.2] as const;
+/** The only pool reference the parser accepts for the `headline` axis (mirrors HEADLINE_POOL_REF). */
+export const HEADLINE_POOL_REF = "pool://copy";
 /** PLATFORM_PROFILES hides motion platforms until a later wave — there is no fetch route. */
 export const STATIC_PLATFORMS = ["instagram-feed", "linkedin", "x"] as const;
 
@@ -52,8 +54,17 @@ export interface WizardState {
     tone: string[];
     background: string[];
     paletteShift: number[];
+    /** Draw headlines from the approved copy pool (`headline: pool://copy`). */
+    headline: boolean;
   };
   platforms: string[];
+  /** The brief's copy pool as last fetched/edited in the Copy step; null until one exists. */
+  pool: CopyPool | null;
+  /**
+   * True after a pool change removed the last approved entry while the headline
+   * axis was on (the reducer turned it off); cleared once an entry is approved again.
+   */
+  headlineAxisDropped: boolean;
 }
 
 export type WizardAction =
@@ -69,6 +80,9 @@ export type WizardAction =
   | { type: "toggleTone"; value: string }
   | { type: "toggleBackground"; value: string }
   | { type: "togglePalette"; value: number }
+  | { type: "toggleHeadline" }
+  /** Tagged with the brief the response belongs to: a late reply for a previous id is dropped. */
+  | { type: "setPool"; briefId: string; pool: CopyPool | null }
   | { type: "togglePlatform"; value: string };
 
 export function stepsFor(mode: CampaignMode): readonly WizardStepId[] {
@@ -110,9 +124,17 @@ export const initialWizardState: WizardState = {
     tone: [...TONE_OPTIONS],
     background: ["procedural"],
     paletteShift: [...PALETTE_SHIFT_OPTIONS],
+    headline: false,
   },
   platforms: [...STATIC_PLATFORMS],
+  pool: null,
+  headlineAxisDropped: false,
 };
+
+/** Number of approved entries in the wizard's pool (0 without a pool). */
+export function approvedHeadlines(pool: CopyPool | null): number {
+  return pool === null ? 0 : pool.entries.filter((entry) => entry.status === "approved").length;
+}
 
 export function slugify(value: string): string {
   return value
@@ -163,8 +185,18 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
       const steps = stepsFor(action.mode);
       return { ...state, mode: action.mode, stepIndex: Math.min(state.stepIndex, steps.length - 1) };
     }
-    case "patch":
-      return { ...state, ...action.patch };
+    case "patch": {
+      const next = { ...state, ...action.patch };
+      // The pool belongs to one brief: a new id starts from nothing (and drops the
+      // axis and its notice) rather than showing — or patching — the previous brief's entries.
+      if (action.patch.briefId === undefined || action.patch.briefId === state.briefId) return next;
+      return {
+        ...next,
+        pool: null,
+        headlineAxisDropped: false,
+        variation: { ...state.variation, headline: false },
+      };
+    }
     case "setProduct": {
       return {
         ...state,
@@ -215,6 +247,24 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
           paletteShift: toggleOrdered(state.variation.paletteShift, action.value, PALETTE_SHIFT_OPTIONS),
         },
       };
+    case "toggleHeadline":
+      return { ...state, variation: { ...state.variation, headline: !state.variation.headline } };
+    case "setPool": {
+      if (action.briefId !== state.briefId) return state;
+      // The axis is only meaningful with something to draw from: losing the last
+      // approved entry switches it off rather than leaving a brief that cannot plan
+      // — and remembers that it did, so the Copy step can say so.
+      const none = approvedHeadlines(action.pool) === 0;
+      return {
+        ...state,
+        pool: action.pool,
+        headlineAxisDropped: none && (state.headlineAxisDropped || state.variation.headline),
+        variation: {
+          ...state.variation,
+          headline: state.variation.headline && !none,
+        },
+      };
+    }
     case "togglePlatform":
       return { ...state, platforms: toggleOrdered(state.platforms, action.value, STATIC_PLATFORMS) };
   }
@@ -276,6 +326,7 @@ export function toBrief(state: WizardState): CampaignBrief {
     tone: [...state.variation.tone],
     background: { source: [...state.variation.background] },
     paletteShift: [...state.variation.paletteShift],
+    ...(state.variation.headline ? { headline: HEADLINE_POOL_REF } : {}),
   };
 
   return {

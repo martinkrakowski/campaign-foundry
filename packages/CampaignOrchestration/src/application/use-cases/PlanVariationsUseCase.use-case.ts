@@ -4,12 +4,7 @@ import type { Variant } from "../../domain/entities/Variant.js";
 import type { AspectRatioValue } from "../../domain/value-objects/AspectRatio.vo.js";
 import type { MotionKind } from "../../domain/value-objects/MotionKind.vo.js";
 import type { VariationPlan } from "../../domain/value-objects/VariationPlan.vo.js";
-import {
-  DISTANCE_AXES,
-  type PlanInput,
-  VariationPolicy,
-} from "../../domain/value-objects/VariationPolicy.vo.js";
-import type { PlatformSafeZoneResolver } from "../ports/out/PlatformProfilePort.js";
+import { DISTANCE_AXES, VariationPolicy, type PlanInput } from "../../domain/value-objects/VariationPolicy.vo.js";
 
 /** Re-roll bound: 64 draws from `seedFrom(briefId, index, attempt)`. */
 const REPLAN_MAX_DRAWS = 64;
@@ -28,17 +23,14 @@ interface AxisDraw {
  * `plan` round-robins deficient coverage axes, then fills to `count`, greedy-accepting
  * at Hamming `minDistance`, with a hard cap of `count × 3` candidates. Coverage is
  * a property of the accepted set. `replan` replaces one slot without breaking
- * distance or coverage.
+ * distance or coverage. `input` carries what the brief cannot: `headlines` (the
+ * approved copy pool) and `motionRatios` (the ratios the requested motion
+ * platforms package) — both resolved into the policy at plan time; the stored
+ * policy carries them for `replan`.
  */
 export class PlanVariationsUseCase {
-  /** `platformZones` (the composition root's profile resolver) narrows motion draws to packageable ratios. */
-  constructor(private readonly platformZones?: PlatformSafeZoneResolver) {}
-
   plan(brief: CampaignBrief, input: PlanInput = {}): Result<VariationPlan, Error> {
-    const policyResult = VariationPolicy.fromBrief(brief, {
-      ...input,
-      ...motionRatiosInput(brief.output?.platforms, this.platformZones),
-    });
+    const policyResult = VariationPolicy.fromBrief(brief, input);
     if (!policyResult.success) return policyResult;
     const policy = policyResult.value;
 
@@ -167,8 +159,15 @@ function drawAxes(
     tone: rng.pick(policy.tone),
     backgroundSource: rng.pick(policy.backgroundSource),
     paletteShift: rng.pick(policy.paletteShift),
+    // Optional axes draw last, each only when on, so briefs without them keep their goldens.
+    ...drawHeadline(rng, policy),
     ...drawMotion(rng, policy, aspectRatio),
   };
+}
+
+/** Draw a pooled headline, so briefs without the axis leave the rng sequence untouched. */
+function drawHeadline(rng: SeededRandom, policy: VariationPolicy): Pick<Variant, "headline"> {
+  return policy.headline.length === 0 ? {} : { headline: rng.pick(policy.headline) };
 }
 
 /**
@@ -189,25 +188,6 @@ function drawMotion(
   const motion = rng.pick(slots);
   if (motion === undefined) return {};
   return { motion, durationSec: rng.pick(policy.duration) };
-}
-
-/**
- * Ratios a clip can be packaged for: those of the requested motion-capable
- * platforms. No `output.platforms` (or no resolver) leaves the draw unrestricted;
- * platforms that are all static yield `[]`, so a brief that cannot ship a clip
- * anywhere never renders one.
- */
-function motionRatiosInput(
-  platformIds: readonly string[] | undefined,
-  resolve: PlatformSafeZoneResolver | undefined,
-): Pick<PlanInput, "motionRatios"> {
-  if (!platformIds || !resolve) return {};
-  const motionRatios = new Set<AspectRatioValue>();
-  for (const id of platformIds) {
-    const zone = resolve(id);
-    if (zone?.formats.includes("motion")) motionRatios.add(zone.ratio);
-  }
-  return { motionRatios: [...motionRatios] };
 }
 
 function hamming(a: Variant, b: Variant): number {

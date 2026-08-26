@@ -3,7 +3,13 @@ import { seedFrom } from "@campaignfoundry/shared";
 import type { CampaignBrief } from "../../entities/CampaignBrief.js";
 import type { Product } from "../../entities/Product.js";
 import { LAYOUT_VALUES, TONE_VALUES } from "../Treatment.vo.js";
-import { BACKGROUND_AXIS_SOURCES, VariationPolicy } from "../VariationPolicy.vo.js";
+import {
+  BACKGROUND_AXIS_SOURCES,
+  canonicalHeadlines,
+  DISTANCE_AXES,
+  HEADLINE_POOL_REF,
+  VariationPolicy,
+} from "../VariationPolicy.vo.js";
 
 const product = (id: string): Product => ({
   id,
@@ -268,5 +274,92 @@ describe("VariationPolicy.fromBrief", () => {
     if (!result.success) return;
     expect(result.value.productIds).toEqual(["alpha", "beta"]);
     expect(result.value.axisProductSize).toBe(2 * 3 * 1 * 1 * 1 * 1);
+  });
+});
+
+describe("VariationPolicy headline axis", () => {
+  const pooled = brief({ variation: { count: 12, seed: 7, minDistance: 1, axes: { headline: "pool://copy" } } });
+
+  test("headline is a Hamming axis and pool://copy is the only pool reference", () => {
+    expect(DISTANCE_AXES).toContain("headline");
+    expect(HEADLINE_POOL_REF).toBe("pool://copy");
+  });
+
+  test("resolves the pool texts (trimmed, de-duplicated, blanks dropped, sorted) and multiplies axisProductSize", () => {
+    const result = VariationPolicy.fromBrief(pooled, { headlines: [" Stay wild ", "Stay wild", "", "Go far"] });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.headline).toEqual(["Go far", "Stay wild"]);
+    expect(result.value.axisProductSize).toBe(2 * 3 * 2 * 2 * 1 * 1 * 2);
+    expect(result.value.policyHash).not.toBe(
+      "7181107a6ce42df96357800416bf26bf89007fd3dbd2b9792aab83323adefcf9",
+    );
+  });
+
+  test("the same approved set in any file order yields one canonical list and one policyHash", () => {
+    const a = VariationPolicy.fromBrief(pooled, { headlines: ["Stay wild", "Go far", "stay  WILD", "Drink up"] });
+    const b = VariationPolicy.fromBrief(pooled, { headlines: ["Drink up", "stay  WILD", "Go far", "Stay wild"] });
+    expect(a.success && b.success).toBe(true);
+    if (!a.success || !b.success) return;
+    expect(a.value.headline).toEqual(["Drink up", "Go far", "Stay wild"]);
+    expect(b.value.headline).toEqual(["Drink up", "Go far", "Stay wild"]);
+    expect(a.value.policyHash).toBe(b.value.policyHash);
+    // Code-unit order, not locale order: upper-case sorts before lower-case, so the
+    // de-duplication keeps "STAY WILD" when it is the first survivor in that order.
+    expect(canonicalHeadlines(["stay wild", "STAY WILD", "Zebra", "apple"])).toEqual(["STAY WILD", "Zebra", "apple"]);
+  });
+
+  test("minDistance may reach the seventh axis only when the headline axis is active", () => {
+    const seven = { count: 1, seed: 7, minDistance: 7 };
+    const without = VariationPolicy.fromBrief(brief({ variation: seven }));
+    expect(without.success).toBe(false);
+    if (!without.success) expect(without.error.message).toBe("Invalid minDistance.");
+    const withPool = VariationPolicy.fromBrief(
+      brief({ variation: { ...seven, axes: { headline: "pool://copy" } } }),
+      { headlines: ["Stay wild"] },
+    );
+    expect(withPool.success).toBe(true);
+    if (withPool.success) expect(withPool.value.minDistance).toBe(7);
+    const eight = VariationPolicy.fromBrief(
+      brief({ variation: { ...seven, minDistance: 8, axes: { headline: "pool://copy" } } }),
+      { headlines: ["Stay wild"] },
+    );
+    expect(eight.success).toBe(false);
+  });
+
+  test("briefs without the axis keep an empty headline list and the golden hash, even when headlines are supplied", () => {
+    const result = VariationPolicy.fromBrief(brief({ variation: { count: 12, seed: 7, minDistance: 1 } }), {
+      headlines: ["Ignored"],
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.headline).toEqual([]);
+    expect(result.value.axisProductSize).toBe(24);
+    expect(result.value.policyHash).toBe(
+      "7181107a6ce42df96357800416bf26bf89007fd3dbd2b9792aab83323adefcf9",
+    );
+  });
+
+  test.each([
+    ["no input", undefined],
+    ["an empty pool", []],
+    ["only blank texts", ["  "]],
+  ])("fails naming the pool file when pool://copy is requested with %s", (_label, headlines) => {
+    const result = VariationPolicy.fromBrief(pooled, headlines === undefined ? undefined : { headlines });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toBe(
+        'Headline axis "pool://copy" needs at least one approved entry in copy pool briefs/golden/pools.json.',
+      );
+    }
+  });
+
+  test("rejects any other headline reference", () => {
+    const result = VariationPolicy.fromBrief(
+      brief({ variation: { count: 1, axes: { headline: "pool://other" } } }),
+      { headlines: ["x"] },
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/Unsupported headline axis "pool:\/\/other"/);
   });
 });

@@ -2,12 +2,11 @@ import { join } from "node:path";
 import { loadEnv } from "./env.js";
 import {
   GenerateCampaignUseCase,
-  PlanVariationsUseCase,
   type CampaignBrief,
   type CopyGeneratorPort,
   type ImageGeneratorPort,
   type PipelineResult,
-  type PlatformSafeZoneResolver,
+  type PlanInput,
   type RegenerationTarget,
 } from "@campaignfoundry/CampaignOrchestration";
 import {
@@ -22,9 +21,13 @@ import {
   ProceduralBackgroundGenerator,
 } from "@campaignfoundry/CreativeGeneration";
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
-import { FileSystemExporter, platformProfile } from "@campaignfoundry/Distribution";
-import type { Result } from "@campaignfoundry/shared";
+import { FileSystemExporter } from "@campaignfoundry/Distribution";
+import { err, type Result } from "@campaignfoundry/shared";
 import { outputRoot } from "./config.js";
+import { platformZones } from "./platform-zones.js";
+import { planInputFor, pooledPlanner } from "./pools.js";
+
+export { platformZones } from "./platform-zones.js";
 
 // Load .env before any process.env read below. Called (not a bare side-effect
 // import) so Nitro's bundler can't tree-shake it — that was leaving GEMINI_API_KEY
@@ -112,12 +115,14 @@ function imageGenerator(selected?: string): ImageGeneratorPort {
 /**
  * Composition root — the one place that knows concrete adapters. Wires them into
  * the use case via constructor injection; everything above depends only on ports.
+ * `planInput` carries the brief's approved copy pool and the ratios its motion
+ * platforms package (both resolved by `runCampaign` via `planInputFor`).
  */
-export function buildPipeline(imageModel?: string): GenerateCampaignUseCase {
+export function buildPipeline(imageModel?: string, planInput: PlanInput = {}): GenerateCampaignUseCase {
   return new GenerateCampaignUseCase({
     imageGenerator: imageGenerator(imageModel),
     proceduralGenerator: new ProceduralBackgroundGenerator(),
-    planner: new PlanVariationsUseCase(platformZones),
+    planner: pooledPlanner(planInput),
     compositor: new NodeCanvasCompositor(process.env.MESSAGE_FONT),
     // Motion variants only; the parser has already gated them on the ffmpeg probe.
     videoCompositor: new CanvasFfmpegVideoCompositor({ fontFamily: process.env.MESSAGE_FONT }),
@@ -130,27 +135,35 @@ export function buildPipeline(imageModel?: string): GenerateCampaignUseCase {
 }
 
 /**
- * Distribution's profile table as orchestration sees it: the generator reads the
- * safe insets (D11), the planner the ratio + formats (motion draws only where a
- * requested platform can package a clip).
- */
-export const platformZones: PlatformSafeZoneResolver = (platformId) => {
-  const profile = platformProfile(platformId);
-  return profile ? { ratio: profile.ratio, safeInsets: profile.safeInsets, formats: profile.formats } : undefined;
-};
-
-/**
  * Run a campaign. `imageModel` (from `?model=`) selects *which* provider; the
  * `genai` axis decides *whether* GenAI is used for a cell.
  * `regenerateOnly` (the HITL re-roll) restricts the run to just those
- * creatives, leaving every other cell untouched.
+ * creatives, leaving every other cell untouched. `expectedPolicyHash` (the
+ * persisted report's hash, passed with a variation re-roll) refuses the run
+ * when the freshly planned hash differs — the pool or policy changed since the
+ * last run, so a single re-rolled slot would be overlaid onto a different base
+ * plan; the caller must run the full campaign instead.
  */
-export function runCampaign(
+export async function runCampaign(
   brief: CampaignBrief,
   imageModel?: string,
   regenerateOnly?: ReadonlyArray<RegenerationTarget>,
+  expectedPolicyHash?: string,
 ): Promise<Result<PipelineResult, Error>> {
-  return buildPipeline(imageModel).execute(brief, regenerateOnly ? { regenerateOnly } : undefined);
+  const planInput = await planInputFor(brief);
+  if (!planInput.success) return planInput;
+  if (expectedPolicyHash !== undefined) {
+    const planned = pooledPlanner(planInput.value).plan(brief);
+    if (!planned.success) return planned;
+    if (planned.value.policyHash !== expectedPolicyHash) {
+      return err(
+        new Error(
+          `Plan changed since the last run (policyHash ${expectedPolicyHash} ≠ ${planned.value.policyHash}); run the full campaign.`,
+        ),
+      );
+    }
+  }
+  return buildPipeline(imageModel, planInput.value).execute(brief, regenerateOnly ? { regenerateOnly } : undefined);
 }
 
 /**

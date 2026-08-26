@@ -3,7 +3,7 @@ import { errorMessage } from "@campaignfoundry/shared";
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
 import { SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
 import { assertSafeId } from "../../../lib/load-brief.js";
-import { isPoolDirSymlink, readPool, withPoolLock, writePool } from "../../../lib/pools.js";
+import { InvalidCopyPoolError, isPoolDirSymlink, readPool, withPoolLock, writePool } from "../../../lib/pools.js";
 
 interface EntryPatch {
   readonly id: string;
@@ -81,7 +81,8 @@ function collidingId(entries: readonly CopyPoolEntry[], id: string, text: string
  * PATCH /campaigns/pools/:briefId — HITL approve/reject/edit by entry id.
  * Edited or newly-approved text is re-run through the legal gate; a legal
  * failure is persisted as rejected with a reason (not 422) so HITL can see why.
- * An edit that duplicates another entry's text is a 422 naming that entry.
+ * An edit that duplicates another entry's text is a 422 naming that entry, and
+ * a hand-edited pool file that is not a pool is a 422 naming the file.
  */
 export default defineEventHandler(async (event) => {
   let briefId: string;
@@ -107,7 +108,14 @@ export default defineEventHandler(async (event) => {
   }
 
   return withPoolLock(briefId, async () => {
-    const pool = await readPool(briefId);
+    let pool;
+    try {
+      pool = await readPool(briefId);
+    } catch (error) {
+      if (!(error instanceof InvalidCopyPoolError)) throw error;
+      setResponseStatus(event, 422);
+      return { error: error.message };
+    }
     if (!pool) {
       setResponseStatus(event, 404);
       return { error: `Copy pool for brief "${briefId}" not found.` };

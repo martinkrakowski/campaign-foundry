@@ -18,6 +18,8 @@ export interface Variant {
   readonly tone: ToneKind;
   readonly backgroundSource: BackgroundAxisSource;
   readonly paletteShift: number;
+  /** Drawn from the approved copy pool when the brief requests `headline: pool://copy`. */
+  readonly headline?: string;
   /** Motion kind — present only on motion variants (formats include "motion" and the axis drew a kind). */
   readonly motion?: MotionKind;
   /** Clip length in whole seconds — present only alongside `motion`. */

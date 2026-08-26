@@ -12,6 +12,9 @@ import { MOTION_KINDS, type MotionKind } from "./MotionKind.vo.js";
 export const BACKGROUND_AXIS_SOURCES = ["procedural", "asset-pool", "genai"] as const;
 export type BackgroundAxisSource = (typeof BACKGROUND_AXIS_SOURCES)[number];
 
+/** The only supported pool reference for the `headline` axis. */
+export const HEADLINE_POOL_REF = "pool://copy";
+
 /** Hamming axes — a candidate must differ in at least `minDistance` of these. */
 export const DISTANCE_AXES = [
   "productId",
@@ -20,6 +23,7 @@ export const DISTANCE_AXES = [
   "tone",
   "backgroundSource",
   "paletteShift",
+  "headline",
   "motion",
   "durationSec",
 ] as const;
@@ -35,12 +39,16 @@ const MIN_DURATION_SEC = 2;
 const MAX_DURATION_SEC = 30;
 
 /**
- * Plan-time inputs the brief cannot carry: `motionRatios` are the canvas
- * ratios of the requested motion-capable platforms, resolved by the caller
- * from `output.platforms` (the domain never reads the profile table). Absent →
- * every ratio may carry a clip; empty → none can be packaged, so none is drawn.
+ * Plan-time inputs the brief cannot carry (the domain never reads files or
+ * the profile table):
+ * - `headlines` are the approved texts of the brief's copy pool, loaded by
+ *   the caller when `axes.headline` is `pool://copy`.
+ * - `motionRatios` are the canvas ratios of the requested motion-capable
+ *   platforms, resolved by the caller from `output.platforms`. Absent → every
+ *   ratio may carry a clip; empty → none can be packaged, so none is drawn.
  */
 export interface PlanInput {
+  readonly headlines?: readonly string[];
   readonly motionRatios?: readonly AspectRatioValue[];
 }
 
@@ -65,6 +73,8 @@ export class VariationPolicy {
     readonly tone: readonly ToneKind[],
     readonly backgroundSource: readonly BackgroundAxisSource[],
     readonly paletteShift: readonly number[],
+    /** Approved pool texts; empty when the brief has no headline axis. */
+    readonly headline: readonly string[],
     readonly productIds: readonly string[],
     readonly ratios: readonly AspectRatioValue[],
     readonly axisProductSize: number,
@@ -115,14 +125,20 @@ export class VariationPolicy {
     const motionEnabled = formats.includes("motion") && motion.length > 0;
     const mixStatic = motionEnabled && formats.includes("static");
 
+    const headlineResult = resolveHeadline(brief, axes?.headline, input.headlines);
+    if (!headlineResult.success) return headlineResult;
+    const headline = headlineResult.value;
+
     // A candidate can differ in at most the axes this brief activates: every
     // DISTANCE_AXES entry except the optional ones that are off. An optional axis
-    // counts only while it has at least one drawable option (motion here; headline
-    // joins the same rule); `durationSec` is drawn only on motion slots, so it
-    // follows the motion axis.
-    const activeAxes = DISTANCE_AXES.filter(
-      (axis) => (axis !== "motion" && axis !== "durationSec") || motionEnabled,
-    ).length;
+    // counts only while it has at least one drawable option: `headline` when the
+    // pool resolved to at least one text, `motion` when the axis is enabled —
+    // and `durationSec` is drawn only on motion slots, so it follows `motion`.
+    const activeAxes = DISTANCE_AXES.filter((axis) => {
+      if (axis === "headline") return headline.length > 0;
+      if (axis === "motion" || axis === "durationSec") return motionEnabled;
+      return true;
+    }).length;
     const minDistanceResult = requireInteger(variation.minDistance ?? 1, "minDistance", 0, activeAxes);
     if (!minDistanceResult.success) return minDistanceResult;
     const minDistance = minDistanceResult.value;
@@ -153,6 +169,7 @@ export class VariationPolicy {
       tone.length *
       backgroundSource.length *
       paletteShift.length *
+      Math.max(1, headline.length) *
       (motionEnabled ? (motion.length + (mixStatic ? 1 : 0)) * duration.length : 1);
 
     const policyHash = hashPolicy({
@@ -169,6 +186,9 @@ export class VariationPolicy {
       tone,
       // Static briefs hash exactly as before the motion axes existed (golden-stable).
       ...(motionEnabled ? { duration, mixStatic, motion, motionRatios } : {}),
+      // Only briefs with the headline axis carry it in the hash, so every
+      // pre-existing policyHash (and golden) is unchanged.
+      ...(headline.length > 0 ? { headline } : {}),
     });
 
     return ok(
@@ -181,6 +201,7 @@ export class VariationPolicy {
         tone,
         backgroundSource,
         paletteShift,
+        headline,
         productIds,
         ratios,
         axisProductSize,
@@ -233,11 +254,61 @@ function requireDuration(values: readonly number[]): Result<readonly number[], E
   return ok(values);
 }
 
+/**
+ * Canonical headline list: trimmed, blanks dropped, sorted by UTF-16 code unit
+ * (`Array.prototype.sort` with no comparator — locale-independent, so every
+ * machine agrees), then de-duplicated by normalised text (whitespace collapsed,
+ * lower-cased), keeping the first survivor in sorted order. The pool file's
+ * entry order therefore never reaches `policyHash` or the draw sequence.
+ */
+export function canonicalHeadlines(headlines: readonly string[]): readonly string[] {
+  const sorted = headlines
+    .map((text) => text.trim())
+    .filter((text) => text.length > 0)
+    .sort();
+  const seen = new Set<string>();
+  const texts: string[] = [];
+  for (const text of sorted) {
+    const key = text.replace(/\s+/g, " ").toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    texts.push(text);
+  }
+  return texts;
+}
+
+/**
+ * Resolve the headline axis: absent → no axis (empty). `pool://copy` → the
+ * caller-supplied approved texts (canonicalised, see `canonicalHeadlines`),
+ * which must be non-empty — a missing or fully-rejected pool fails loud,
+ * naming the pool file.
+ */
+function resolveHeadline(
+  brief: CampaignBrief,
+  ref: string | undefined,
+  headlines: readonly string[] | undefined,
+): Result<readonly string[], Error> {
+  if (ref === undefined) return ok([]);
+  if (ref !== HEADLINE_POOL_REF) {
+    return err(new Error(`Unsupported headline axis ${JSON.stringify(ref)} (expected "${HEADLINE_POOL_REF}").`));
+  }
+  const texts = canonicalHeadlines(headlines ?? []);
+  if (texts.length === 0) {
+    return err(
+      new Error(
+        `Headline axis "${HEADLINE_POOL_REF}" needs at least one approved entry in copy pool briefs/${brief.id}/pools.json.`,
+      ),
+    );
+  }
+  return ok(texts);
+}
+
 function hashPolicy(payload: {
   axisProductSize: number;
   backgroundSource: readonly string[];
   count: number;
   coverage: VariationCoverage;
+  headline?: readonly string[];
   layout: readonly string[];
   minDistance: number;
   paletteShift: readonly number[];

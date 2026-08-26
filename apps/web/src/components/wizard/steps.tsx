@@ -5,21 +5,29 @@ import { useEffect, useState } from "react";
 import { Button, Input } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
+  generatePool,
+  getPool,
   isBriefsApiError,
+  patchPool,
   planCampaign,
   unknownErrorMessage,
   uploadAsset,
+  POOL_SUGGESTION_COUNT,
+  type CopyPool,
+  type CopyPoolEntry,
   type PlanResult,
 } from "@/lib/briefs-api";
 import { dumpBrief } from "./dump-brief";
 import type { FieldErrors } from "./validate";
 import {
   BACKGROUND_OPTIONS,
+  HEADLINE_POOL_REF,
   LAYOUT_OPTIONS,
   PALETTE_SHIFT_OPTIONS,
   PLAN_DEBOUNCE_MS,
   STATIC_PLATFORMS,
   TONE_OPTIONS,
+  approvedHeadlines,
   assetFileName,
   canPlan,
   fileToBase64,
@@ -268,6 +276,180 @@ export function CopyStep({ state, dispatch, errors }: StepProps) {
           onChange={(e) => dispatch({ type: "patch", patch: { localizedMessage: e.target.value } })}
         />
       </Field>
+      {state.mode === "variation" ? <HeadlinePoolPanel state={state} dispatch={dispatch} /> : null}
+    </div>
+  );
+}
+
+function PoolEntryRow({
+  entry,
+  busy,
+  onStatus,
+  onEdit,
+}: {
+  entry: CopyPoolEntry;
+  busy: boolean;
+  onStatus: (status: CopyPoolEntry["status"]) => void;
+  onEdit: (text: string) => Promise<boolean>;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const approved = entry.status === "approved";
+
+  const save = async (text: string) => {
+    if (await onEdit(text)) setDraft(null);
+  };
+
+  return (
+    <li className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface-2 px-3 py-2">
+      {draft === null ? (
+        <span className="min-w-0 flex-1 text-[13px] text-text-primary">{entry.text}</span>
+      ) : (
+        <Input
+          aria-label={`Edit ${entry.id}`}
+          className="min-w-0 flex-1"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+        />
+      )}
+      <span
+        className={cn(
+          "font-mono text-[11px] uppercase tracking-widest",
+          approved ? "text-success" : "text-error",
+        )}
+      >
+        {entry.status}
+      </span>
+      {entry.reason ? <span className="text-[11px] text-text-muted">{entry.reason}</span> : null}
+      {draft === null ? (
+        <>
+          <Button
+            variant="secondary"
+            size="sm"
+            aria-pressed={approved}
+            aria-label={`${approved ? "Reject" : "Approve"} ${entry.id}`}
+            disabled={busy}
+            onClick={() => onStatus(approved ? "rejected" : "approved")}
+          >
+            {approved ? "Reject" : "Approve"}
+          </Button>
+          <Button variant="ghost" size="sm" aria-label={`Edit ${entry.id}`} disabled={busy} onClick={() => setDraft(entry.text)}>
+            Edit
+          </Button>
+        </>
+      ) : (
+        <>
+          <Button size="sm" aria-label={`Save ${entry.id}`} disabled={busy || draft.trim() === ""} onClick={() => void save(draft)}>
+            Save
+          </Button>
+          <Button variant="ghost" size="sm" aria-label={`Cancel ${entry.id}`} disabled={busy} onClick={() => setDraft(null)}>
+            Cancel
+          </Button>
+        </>
+      )}
+    </li>
+  );
+}
+
+/** Shown on the Copy step after a pool change removed the last approved entry while the axis was on. */
+const HEADLINE_AXIS_DROPPED = "No approved headlines — the headline axis was turned off";
+
+/**
+ * Headline pool — the HITL surface for `headline: pool://copy`. Loads the
+ * brief's pool, lets the user generate suggestions (legal-gated server-side),
+ * approve/reject, and edit (an edit re-runs the legal gate on the API).
+ */
+function HeadlinePoolPanel({ state, dispatch }: { state: WizardState; dispatch: Dispatch<WizardAction> }) {
+  const { briefId, pool } = state;
+  const [busy, setBusy] = useState(false);
+  /** The GET for the current brief is in flight: nothing may be generated or patched yet. */
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | undefined>();
+  const [unavailable, setUnavailable] = useState<string | undefined>();
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    setLoading(true);
+    getPool(briefId, controller.signal)
+      .then((loaded) => {
+        if (!cancelled) dispatch({ type: "setPool", briefId, pool: loaded });
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) setError(unknownErrorMessage(cause, "Could not load the headline pool"));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [briefId, dispatch]);
+
+  /**
+   * Apply one pool change; a 503 (no OPENROUTER_API_KEY) pins the API's message and
+   * disables generation. The response is tagged with the brief it was requested for,
+   * so one landing after the id changed is dropped by the reducer.
+   */
+  const apply = async (change: () => Promise<CopyPool>): Promise<boolean> => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      dispatch({ type: "setPool", briefId, pool: await change() });
+      return true;
+    } catch (cause) {
+      if (isBriefsApiError(cause) && cause.status === 503) setUnavailable(cause.message);
+      else setError(unknownErrorMessage(cause, "Headline pool update failed"));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const entries = pool?.entries ?? [];
+  const approved = approvedHeadlines(pool);
+
+  return (
+    <div className="space-y-3 rounded-lg border border-border bg-surface p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 className="font-mono text-[11px] uppercase tracking-widest text-text-muted">
+          Headline pool ({approved} approved)
+        </h4>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={busy || loading || unavailable !== undefined}
+          isLoading={busy}
+          onClick={() => void apply(async () => (await generatePool(toBrief(state))).pool)}
+        >
+          Generate {POOL_SUGGESTION_COUNT} suggestions
+        </Button>
+      </div>
+      <p className="text-[12px] text-text-muted">
+        Approved entries become the <code>headline: {HEADLINE_POOL_REF}</code> axis in the policy step.
+      </p>
+      {unavailable ? <p className="text-[13px] text-warning">{unavailable}</p> : null}
+      {state.headlineAxisDropped ? (
+        <p role="status" className="text-[13px] text-warning">
+          {HEADLINE_AXIS_DROPPED}
+        </p>
+      ) : null}
+      {error ? <p className="text-[13px] text-error">{error}</p> : null}
+      {entries.length === 0 ? (
+        <p className="text-[13px] text-text-muted">No headlines yet.</p>
+      ) : (
+        <ul className="space-y-2">
+          {entries.map((entry) => (
+            <PoolEntryRow
+              key={entry.id}
+              entry={entry}
+              busy={busy || loading}
+              onStatus={(status) => void apply(() => patchPool(briefId, [{ id: entry.id, status }]))}
+              onEdit={(text) => apply(() => patchPool(briefId, [{ id: entry.id, status: entry.status, text }]))}
+            />
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -346,6 +528,7 @@ function EstimatePanel({ state }: { state: WizardState }) {
     state.campaignMessage,
     state.localizedMessage,
     state.platforms,
+    state.pool,
   ]);
 
   return (
@@ -372,6 +555,43 @@ function EstimatePanel({ state }: { state: WizardState }) {
         <p className="mt-2 text-[13px] text-text-muted">estimate unavailable</p>
       )}
     </div>
+  );
+}
+
+/** Shown while the headline axis is blocked for want of an approved entry. */
+const HEADLINE_POOL_EMPTY =
+  "The headline pool has no approved entries — approve at least one in the Copy step.";
+
+/**
+ * The `headline` axis: on only when the pool has an approved entry to draw from.
+ * No field error is needed — the reducer switches the axis off whenever the pool
+ * loses its last approved entry, so an on-but-empty state cannot reach validation.
+ */
+function HeadlineAxisToggle({ state, dispatch }: { state: WizardState; dispatch: Dispatch<WizardAction> }) {
+  const approved = approvedHeadlines(state.pool);
+  const blocked = approved === 0;
+  const on = state.variation.headline;
+  return (
+    <fieldset className="space-y-2">
+      <legend className="text-[11px] text-text-muted">Headline</legend>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          aria-pressed={on}
+          disabled={blocked}
+          onClick={() => dispatch({ type: "toggleHeadline" })}
+          className={cn(
+            "rounded-md border px-3 py-1.5 font-mono text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+            on ? "border-brand-primary bg-surface-2 text-white" : "border-border text-text-muted",
+          )}
+        >
+          {HEADLINE_POOL_REF}
+        </button>
+        <span className="text-[11px] text-text-muted">
+          {blocked ? HEADLINE_POOL_EMPTY : `${approved} approved headline${approved === 1 ? "" : "s"}`}
+        </span>
+      </div>
+    </fieldset>
   );
 }
 
@@ -468,6 +688,7 @@ export function PolicyStep({ state, dispatch, errors }: StepProps) {
           <span className="block text-[11px] text-error">{errors.paletteShift}</span>
         ) : null}
       </fieldset>
+      <HeadlineAxisToggle state={state} dispatch={dispatch} />
       <EstimatePanel state={state} />
     </div>
   );

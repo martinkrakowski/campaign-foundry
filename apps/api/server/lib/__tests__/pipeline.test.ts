@@ -1,5 +1,5 @@
-import { describe, test, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GenerateCampaignUseCase, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
@@ -91,6 +91,160 @@ describe("pipeline composition root", () => {
       expect(r.value.policyHash).toEqual(expect.any(String));
       expect(r.value.seed).toBe(42);
     }
+  });
+
+  // projectRoot() memoizes per process: re-import the pipeline so PROJECT_ROOT points at `dir`.
+  const freshRunCampaign = async (): Promise<typeof runCampaign> => {
+    vi.resetModules();
+    process.env.PROJECT_ROOT = dir;
+    return (await import("../pipeline.js")).runCampaign;
+  };
+
+  /** Spy on the compositor the freshly imported pipeline will construct (same module registry). */
+  const spyCompositor = async () => {
+    const { NodeCanvasCompositor } = await import("@campaignfoundry/CreativeGeneration");
+    return vi.spyOn(NodeCanvasCompositor.prototype, "compositeAsset");
+  };
+
+  test("runCampaign fails loud when headline: pool://copy has no approved pool", async () => {
+    const origRoot = process.env.PROJECT_ROOT;
+    try {
+      const pooled: CampaignBrief = {
+        ...brief,
+        mode: "variation",
+        variation: { count: 2, seed: 42, axes: { headline: "pool://copy" } },
+      };
+      const r = await (await freshRunCampaign())(pooled, "procedural");
+      expect(r.success).toBe(false);
+      if (!r.success) expect(r.error.message).toMatch(/briefs\/camp\/pools\.json/);
+    } finally {
+      if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+      else process.env.PROJECT_ROOT = origRoot;
+    }
+  });
+
+  test("runCampaign fails loud naming the pool file when pools.json is hand-edited into an invalid shape", async () => {
+    const origRoot = process.env.PROJECT_ROOT;
+    try {
+      mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
+      writeFileSync(
+        join(dir, "briefs", "camp", "pools.json"),
+        JSON.stringify({ briefId: "camp", generatedAt: "t", model: "m", entries: [{ id: "h1", text: 42, status: "approved" }] }),
+      );
+      const pooled: CampaignBrief = {
+        ...brief,
+        mode: "variation",
+        variation: { count: 2, seed: 42, axes: { headline: "pool://copy" } },
+      };
+      const r = await (await freshRunCampaign())(pooled, "procedural");
+      expect(r.success).toBe(false);
+      if (!r.success) {
+        expect(r.error.message).toBe(
+          "Copy pool briefs/camp/pools.json is invalid: entries[0].text must be a string.",
+        );
+      }
+    } finally {
+      if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+      else process.env.PROJECT_ROOT = origRoot;
+    }
+  });
+
+  test("runCampaign composites pooled headlines from briefs/<id>/pools.json", async () => {
+    const origRoot = process.env.PROJECT_ROOT;
+    try {
+      mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
+      writeFileSync(
+        join(dir, "briefs", "camp", "pools.json"),
+        JSON.stringify({
+          briefId: "camp",
+          generatedAt: "2026-01-01T00:00:00.000Z",
+          model: "m",
+          entries: [{ id: "h1", text: "Stay wild", status: "approved" }],
+        }),
+      );
+      const pooled: CampaignBrief = {
+        ...brief,
+        mode: "variation",
+        variation: { count: 2, seed: 42, axes: { headline: "pool://copy" } },
+      };
+      const run = await freshRunCampaign();
+      const compositeAsset = await spyCompositor();
+      const r = await run(pooled, "procedural");
+      expect(r.success).toBe(true);
+      if (r.success) {
+        expect(r.value.assets).toHaveLength(2);
+        expect(r.value.assets.map((a) => a.descriptor?.headline)).toEqual(["Stay wild", "Stay wild"]);
+      }
+      // The compositor rendered the pool text, not the campaign message.
+      expect(compositeAsset).toHaveBeenCalledTimes(2);
+      expect(compositeAsset.mock.calls.map((call) => call[0].message)).toEqual(["Stay wild", "Stay wild"]);
+    } finally {
+      vi.restoreAllMocks();
+      if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+      else process.env.PROJECT_ROOT = origRoot;
+    }
+  });
+
+  test("runCampaign halts when an approved pool headline fails the legal gate", async () => {
+    const origRoot = process.env.PROJECT_ROOT;
+    try {
+      mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
+      writeFileSync(
+        join(dir, "briefs", "camp", "pools.json"),
+        JSON.stringify({
+          briefId: "camp",
+          generatedAt: "2026-01-01T00:00:00.000Z",
+          model: "m",
+          entries: [
+            { id: "h1", text: "Stay wild", status: "approved" },
+            { id: "h2", text: "A miracle cure", status: "approved" },
+          ],
+        }),
+      );
+      const pooled: CampaignBrief = {
+        ...brief,
+        mode: "variation",
+        variation: { count: 4, seed: 42, axes: { headline: "pool://copy" } },
+      };
+      const r = await (await freshRunCampaign())(pooled, "procedural");
+      expect(r.success).toBe(true);
+      if (r.success) {
+        expect(r.value.halted).toBe(true);
+        expect(r.value.assets).toEqual([]);
+        expect(r.value.log.entries.at(-1)).toMatchObject({
+          stage: "ExecuteLegalGateCheck",
+          level: "error",
+          message: "Pipeline halted — Prohibited terminology: miracle, cure",
+        });
+      }
+    } finally {
+      if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+      else process.env.PROJECT_ROOT = origRoot;
+    }
+  });
+
+  test("runCampaign pins a re-roll to expectedPolicyHash", async () => {
+    const vbrief: CampaignBrief = { ...brief, mode: "variation", variation: { count: 4, seed: 42 } };
+    const first = await runCampaign(vbrief, "procedural");
+    expect(first.success).toBe(true);
+    if (!first.success) return;
+    const hash = first.value.policyHash as string;
+    const target = [{ productId: first.value.assets[0].productId, variantIndex: 0 }];
+
+    const same = await runCampaign(vbrief, "procedural", target, hash);
+    expect(same.success).toBe(true);
+    if (same.success) expect(same.value.assets).toHaveLength(1);
+
+    const changed = await runCampaign({ ...vbrief, variation: { count: 4, seed: 43 } }, "procedural", target, hash);
+    expect(changed.success).toBe(false);
+    if (!changed.success) {
+      expect(changed.error.message).toMatch(/^Plan changed since the last run \(policyHash [0-9a-f]{64} ≠ [0-9a-f]{64}\); run the full campaign\.$/);
+      expect(changed.error.message).toContain(hash);
+    }
+
+    const unplannable = await runCampaign({ ...vbrief, variation: { count: 999, seed: 42 } }, "procedural", target, hash);
+    expect(unplannable.success).toBe(false);
+    if (!unplannable.success) expect(unplannable.error.message).toMatch(/exceeds axisProductSize/);
   });
 
   test("runCampaign forwards regenerateOnly targets", async () => {

@@ -1,5 +1,7 @@
 import { describe, test, expect, afterEach, vi } from "vitest";
+import type { CopyPool } from "@campaignfoundry/CampaignOrchestration";
 import {
+  approvedHeadlines,
   assetFileName,
   canPlan,
   fileToBase64,
@@ -230,6 +232,7 @@ describe("toBrief / canPlan", () => {
         tone: [],
         background: [],
         paletteShift: [],
+        headline: false,
       },
     });
     expect(randomized.variation).toEqual({
@@ -252,6 +255,7 @@ describe("toBrief / canPlan", () => {
         tone: [],
         background: [],
         paletteShift: [],
+        headline: false,
       },
     });
     expect(ratioOnly.variation).toEqual({
@@ -272,6 +276,7 @@ describe("toBrief / canPlan", () => {
         tone: ["bold"],
         background: ["procedural"],
         paletteShift: [0],
+        headline: false,
       },
     });
     expect(noOptional.variation).toEqual({
@@ -285,11 +290,89 @@ describe("toBrief / canPlan", () => {
     });
   });
 
+  test("emits headline: pool://copy only when the axis is on", () => {
+    const on = toBrief({ ...filled, mode: "variation", variation: { ...filled.variation, headline: true } });
+    expect(on.variation?.axes?.headline).toBe("pool://copy");
+    const off = toBrief({ ...filled, mode: "variation" });
+    expect(off.variation?.axes).not.toHaveProperty("headline");
+  });
+
   test("canPlan requires variation mode, an id, a product id, and count >= 1", () => {
     expect(canPlan(initialWizardState)).toBe(false);
     expect(canPlan({ ...filled, mode: "variation" })).toBe(true);
     expect(canPlan({ ...filled, mode: "variation", variation: { ...filled.variation, count: "0" } })).toBe(
       false,
     );
+  });
+});
+
+describe("headline pool state", () => {
+  const pool = (statuses: readonly ("approved" | "rejected")[]): CopyPool => ({
+    briefId: "camp",
+    generatedAt: "2026-01-01T00:00:00.000Z",
+    model: "m",
+    entries: statuses.map((status, i) => ({ id: `h${i + 1}`, text: `Line ${i + 1}`, status })),
+  });
+
+  test("approvedHeadlines counts approved entries and is 0 without a pool", () => {
+    expect(approvedHeadlines(null)).toBe(0);
+    expect(approvedHeadlines(pool(["approved", "rejected", "approved"]))).toBe(2);
+  });
+
+  test("toggleHeadline flips the axis; setPool stores the pool and drops the axis when nothing is approved", () => {
+    const on = wizardReducer(initialWizardState, { type: "toggleHeadline" });
+    expect(on.variation.headline).toBe(true);
+    expect(wizardReducer(on, { type: "toggleHeadline" }).variation.headline).toBe(false);
+
+    const withPool = wizardReducer(on, { type: "setPool", briefId: "", pool: pool(["approved"]) });
+    expect(withPool.pool?.entries).toHaveLength(1);
+    expect(withPool.variation.headline).toBe(true);
+
+    const emptied = wizardReducer(withPool, { type: "setPool", briefId: "", pool: pool(["rejected"]) });
+    expect(emptied.variation.headline).toBe(false);
+    expect(wizardReducer(withPool, { type: "setPool", briefId: "", pool: null }).variation.headline).toBe(false);
+  });
+
+  test("setPool ignores a response for a different brief; a new brief id clears the pool and its notice", () => {
+    const on = wizardReducer(
+      wizardReducer(initialWizardState, { type: "setPool", briefId: "", pool: pool(["approved"]) }),
+      { type: "toggleHeadline" },
+    );
+    const dropped = wizardReducer(on, { type: "setPool", briefId: "", pool: pool(["rejected"]) });
+    expect(dropped.headlineAxisDropped).toBe(true);
+
+    // A response captured for another id must not land — as a pool or as a notice.
+    const stale = wizardReducer(dropped, { type: "setPool", briefId: "other", pool: pool(["approved"]) });
+    expect(stale).toBe(dropped);
+
+    // Changing the id starts from nothing; other patches keep the pool.
+    const renamed = wizardReducer(on, { type: "patch", patch: { briefId: "other" } });
+    expect(renamed.pool).toBeNull();
+    expect(renamed.headlineAxisDropped).toBe(false);
+    expect(renamed.variation.headline).toBe(false);
+    const same = wizardReducer(on, { type: "patch", patch: { briefId: "", targetRegion: "DE" } });
+    expect(same.pool).toBe(on.pool);
+    expect(same.variation.headline).toBe(true);
+    expect(wizardReducer(on, { type: "patch", patch: { targetRegion: "DE" } }).pool).toBe(on.pool);
+  });
+
+  test("setPool remembers that it dropped the axis until an entry is approved again", () => {
+    // Off axis: emptying the pool is silent.
+    const silent = wizardReducer(initialWizardState, { type: "setPool", briefId: "", pool: pool(["rejected"]) });
+    expect(silent.headlineAxisDropped).toBe(false);
+
+    const on = wizardReducer(
+      wizardReducer(initialWizardState, { type: "setPool", briefId: "", pool: pool(["approved"]) }),
+      { type: "toggleHeadline" },
+    );
+    const dropped = wizardReducer(on, { type: "setPool", briefId: "", pool: pool(["rejected"]) });
+    expect(dropped.variation.headline).toBe(false);
+    expect(dropped.headlineAxisDropped).toBe(true);
+    // Still nothing approved: the notice stays even though the axis is now off.
+    const still = wizardReducer(dropped, { type: "setPool", briefId: "", pool: pool(["rejected", "rejected"]) });
+    expect(still.headlineAxisDropped).toBe(true);
+    const recovered = wizardReducer(still, { type: "setPool", briefId: "", pool: pool(["approved", "rejected"]) });
+    expect(recovered.headlineAxisDropped).toBe(false);
+    expect(recovered.variation.headline).toBe(false);
   });
 });
