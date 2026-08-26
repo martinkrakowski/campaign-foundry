@@ -79,3 +79,50 @@ describe("NodeCanvasCompositor goldens", () => {
     },
   );
 });
+
+const INSET_CELL = "headline-top/bold/9:16";
+const INSET_INSETS = { top: 120, right: 0, bottom: 200, left: 0 } as const;
+
+const insetFixture = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures/compositor-goldens-insets.json"), "utf8"),
+) as GoldenFixture;
+
+// Pixel goldens are keyed by platform-arch (darwin-arm64 on the laptop today).
+// Structural tests in NodeCanvasCompositor.test.ts are the platform-independent
+// guard for offsets, wrap width, clamping, overlap, and validation. Record a
+// linux map from CI before un-skipping this cell there (same caveat as #45).
+describe("NodeCanvasCompositor inset goldens", () => {
+  const compositor = new NodeCanvasCompositor();
+  const backgrounds = new ProceduralBackgroundGenerator();
+  const key = compositorGoldenKey();
+  const goldens = resolveGoldenMap(insetFixture, key);
+  const recorded = Object.keys(insetFixture);
+  const skipReason = goldens
+    ? undefined
+    : `No compositor inset PNG goldens for "${key}" (recorded: ${recorded.length > 0 ? recorded.join(", ") : "none"}). Record the ${INSET_CELL} cell into fixtures/compositor-goldens-insets.json["${key}"].`;
+
+  test.skipIf(Boolean(skipReason))(
+    skipReason ?? `still PNG sha256 with non-zero safeInsets matches ${INSET_CELL}`,
+    async () => {
+      const map = resolveGoldenMap(insetFixture, key);
+      if (!map) {
+        throw new Error(`unreachable: skipped when inset goldens missing for "${key}"`);
+      }
+
+      const r = ratio("9:16");
+      const bg = await backgrounds.resolveBackground(product, r, bgCtx);
+      const request: CompositeRequest = {
+        background: bg.image,
+        message: MESSAGE,
+        brandColor: BRAND,
+        logoPath: LOGO,
+        ratio: r,
+        layout: "headline-top",
+        tone: "bold",
+        safeInsets: { ...INSET_INSETS },
+      };
+      const out = await compositor.compositeAsset(request);
+      expect({ [INSET_CELL]: sha256(out.image) }).toEqual(map);
+    },
+  );
+});
