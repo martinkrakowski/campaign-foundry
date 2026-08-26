@@ -583,3 +583,24 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - `VideoCompositorPort` is **not** listed in `.architecture/manifest.yaml`: no existing port is, and listing it makes `hexagen sync` emit a duplicate `VideoCompositorPort.out-port.ts` stub (`VideoCompositorPortPort`).
 - **Left open:**
   - Next wave: unlock `motion`/`duration`/`formats: motion` in the parser, wire the adapter into generation, and read `getCapabilities().motion` there. `GenerateCampaignUseCase`, `load-brief.ts`, the image chain and `apps/web` untouched here.
+
+---
+
+## 2026-08-26 — PR #54 review fixes (lane A, video compositor)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `CanvasFfmpegVideoCompositor` encodes to a `mkdtemp` file (`-movflags +faststart -fflags +bitexact`, `-y out.mp4`) and reads it back; the dir is removed in `finally`. Output is a finalized mp4: `ftyp moov free mdat`, mvhd duration > 0, `start: 0.000000` (was `empty_moov` fMP4 with duration 0). The integration test walks the boxes with a tiny ISO-BMFF parser.
+  - `ffmpeg-static` is now a static ESM import in the adapter and `capabilities.ts`; `resolveFfmpegBinary()` resolves it lazily and never throws (null export / missing / non-executable → `{ motion: false, reason }`). `nitro.config.ts` adds `externals.traceInclude: [require.resolve("ffmpeg-static")]` so the package + binary land in `.output/server/node_modules`. Verified locally: build, boot 3 s, `curl /` → 200 (previously died with `Cannot find module 'ffmpeg-static'`).
+  - Golden matrix tests carry `{ timeout: 60_000 }` (Vitest 4: options are the second argument) and draw the still from the same `prepare()` as the four rest-pose frames.
+  - Under `CI`, the real-binary suite asserts `ffmpegOk` instead of skipping; a new real-binary test spawns with `-not-a-real-flag` and checks the EPIPE path rejects cleanly and releases the gate.
+  - `encodeTimeoutMs` (default 120 s) + `killGraceMs` (default 2 s): SIGTERM at expiry, SIGKILL after grace, clear rejection; gate and temp dir released in `finally`. Tested with hung fakes.
+  - Logo overlap is resolved from the rest-pose headline box, so it is identical at every `t` for every motion kind (tests go red on the previous per-frame behaviour).
+  - Validation: `fps` integer in [1, 60], `durationSec` finite in (0, 60], `sampleAt` finite in [0, 1], de-duplicated and sorted; all throw `VideoCompositeValidationError`.
+  - Nits: `ffmpeg-static` pinned to exact 5.3.0 (both package.jsons + tech-stack row); path redaction matches absolute paths only (root + segment + separator) and the tail is taken after redaction; CLI probe capped at 2 s; `capabilities.ts` documents that Nitro does not await async plugins.
+- **Decisions:**
+  - `traceInclude` needs the resolved file path: a bare `"ffmpeg-static"` stays external in rollup and node-file-trace then looks for `apps/api/ffmpeg-static` and fails the build.
+  - Logo placement is derived from the rest-pose box in `draw` rather than cached in `prepare`: `layoutHeadline` needs a measuring context, and the rest-pose box is a pure function of the prepared creative, so the result is the same every frame.
+  - CLI probe is capped rather than gated on `output.formats: motion` — the parser still rejects `motion`, so the gate would be dead code until the next wave.
+- **Left open:**
+  - Next wave: unlock `motion` in the parser, wire the adapter into generation, gate the CLI probe on the brief.
