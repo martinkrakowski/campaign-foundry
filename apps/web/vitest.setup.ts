@@ -20,15 +20,29 @@ const memoryStorage = ((): Storage => {
 Object.defineProperty(globalThis, "localStorage", { value: memoryStorage, configurable: true });
 
 // Default benign fetch so RunProvider's mount effects (restore-run) resolve to an
-// empty "no run yet" result instead of hitting the network. Tests override as needed.
+// empty "no run yet" result instead of hitting the network. POST generate returns
+// 202 { jobId } and the job GET completes immediately so UI execute() still works.
 beforeEach(() => {
   // A fresh Response per call — a Response body can only be read once.
-  vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
-    new Response(JSON.stringify({ halted: false, assets: [], log: null }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    }),
-  );
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+    const headers = { "content-type": "application/json" };
+    if ((init as RequestInit | undefined)?.method === "POST") {
+      return new Response(JSON.stringify({ jobId: "test-job" }), { status: 202, headers });
+    }
+    if (String(url).includes("/campaigns/jobs/")) {
+      return new Response(
+        JSON.stringify({
+          status: "completed",
+          done: 0,
+          total: 0,
+          log: { entries: [] },
+          result: { halted: false, assets: [], log: { entries: [] } },
+        }),
+        { status: 200, headers },
+      );
+    }
+    return new Response(JSON.stringify({ halted: false, assets: [], log: null }), { status: 200, headers });
+  });
 });
 
 // Unmount any rendered tree and restore mocks so happy-dom/localStorage state never

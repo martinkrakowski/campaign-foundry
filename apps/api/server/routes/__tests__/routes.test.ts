@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
 import { createCanvas } from "@napi-rs/canvas";
+import { createJob, failJob } from "../../lib/jobs.js";
 import indexHandler from "../index.js";
 import generateHandler from "../campaigns/generate.post.js";
 import resultHandler from "../campaigns/result.get.js";
+import jobHandler from "../campaigns/jobs/[id].get.js";
 import outputHandler from "../output/[...path].get.js";
 
 /** Mount one handler and return a `Request → Response` web handler. */
@@ -66,6 +68,29 @@ describe("GET /", () => {
   });
 });
 
+type JobBody = {
+  status: "running" | "completed" | "failed";
+  done: number;
+  total: number;
+  log: unknown;
+  result?: { halted: boolean; assets: { outputPath: string }[]; log: unknown };
+  error?: string;
+};
+
+const jobCall = (id: string) =>
+  web("get", "/campaigns/jobs/:id", jobHandler)(new Request(`http://x/campaigns/jobs/${id}`));
+
+async function awaitJob(jobId: string): Promise<{ res: Response; body: JobBody }> {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    const res = await jobCall(jobId);
+    const body = (await res.json()) as JobBody;
+    if (body.status === "completed" || body.status === "failed") return { res, body };
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error(`timed out waiting for job ${jobId}`);
+}
+
 describe("POST /campaigns/generate", () => {
   const call = (body: unknown, query = "?model=procedural") =>
     web("post", "/campaigns/generate", generateHandler)(
@@ -78,10 +103,19 @@ describe("POST /campaigns/generate", () => {
 
   test("runs a bare brief (no ?model → default chain) and persists a report", async () => {
     const res = await call(brief(), ""); // no model query → covers the default-model path
-    const json = (await res.json()) as { halted: boolean; assets: unknown[] };
-    expect(res.status).toBe(200);
-    expect(json.halted).toBe(false);
-    expect(json.assets).toHaveLength(6);
+    expect(res.status).toBe(202);
+    const { jobId } = (await res.json()) as { jobId: string };
+    expect(jobId).toEqual(expect.any(String));
+    const { body } = await awaitJob(jobId);
+    expect(body.status).toBe("completed");
+    expect(body.result?.halted).toBe(false);
+    expect(body.result?.assets).toHaveLength(6);
+    expect(body.done).toBe(6);
+    expect(body.total).toBe(6);
+    const report = await web("get", "/campaigns/result", resultHandler)(
+      new Request("http://x/campaigns/result?campaignId=camp"),
+    );
+    expect(((await report.json()) as { assets: unknown[] }).assets).toHaveLength(6);
   });
 
   test("returns 400 with a default message when body parsing throws a non-Error", async () => {
@@ -106,20 +140,26 @@ describe("POST /campaigns/generate", () => {
   });
 
   test("accepts a { brief, regenerateOnly } envelope and merges", async () => {
-    await call(brief()); // seed a full report
+    const seed = await call(brief()); // seed a full report
+    await awaitJob(((await seed.json()) as { jobId: string }).jobId);
     const res = await call({
       brief: brief(),
       regenerateOnly: [{ productId: "alpha", aspectRatio: "1:1", treatment: "default" }],
     });
-    const json = (await res.json()) as { assets: { outputPath: string }[] };
-    expect(json.assets.map((a) => a.outputPath)).toEqual(["alpha/1x1.png"]);
+    expect(res.status).toBe(202);
+    const { body } = await awaitJob(((await res.json()) as { jobId: string }).jobId);
+    expect(body.result?.assets.map((a) => a.outputPath)).toEqual(["alpha/1x1.png"]);
   });
 
   test("halts on prohibited copy", async () => {
     const res = await call(brief({ campaignMessage: "A guaranteed miracle cure" }));
-    const json = (await res.json()) as { halted: boolean; assets: unknown[] };
-    expect(json.halted).toBe(true);
-    expect(json.assets).toHaveLength(0);
+    expect(res.status).toBe(202);
+    const { body } = await awaitJob(((await res.json()) as { jobId: string }).jobId);
+    expect(body.status).toBe("completed");
+    expect(body.result?.halted).toBe(true);
+    expect(body.result?.assets).toHaveLength(0);
+    expect(body.done).toBe(0);
+    expect(body.total).toBe(0);
   });
 
   test("rejects an invalid brief with 400", async () => {
@@ -133,10 +173,43 @@ describe("POST /campaigns/generate", () => {
     expect(res.status).toBe(400);
   });
 
-  test("returns 422 on a business-rule failure (one product)", async () => {
-    const res = await call(brief({ products: [{ id: "solo", name: "S", primaryColor: "#111111", logoPath: "x.png" }] }));
-    expect(res.status).toBe(422);
+  test("refuses a second run for a campaign whose job is still running with 409", async () => {
+    const id = createJob("camp");
+    try {
+      const res = await call(brief());
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({
+        error: 'A run for campaign "camp" is already in progress.',
+      });
+    } finally {
+      failJob(id, "test teardown");
+    }
   });
+
+  test("business-rule failure (one product) fails the job, not the POST", async () => {
+    const res = await call(brief({ products: [{ id: "solo", name: "S", primaryColor: "#111111", logoPath: "x.png" }] }));
+    expect(res.status).toBe(202);
+    const { body } = await awaitJob(((await res.json()) as { jobId: string }).jobId);
+    expect(body.status).toBe("failed");
+    expect(body.error).toEqual(expect.any(String));
+    expect(body.result).toBeUndefined();
+  });
+});
+
+describe("GET /campaigns/jobs/:id", () => {
+  test("returns a running job by id", async () => {
+    const id = createJob("camp");
+    const res = await jobCall(id);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ status: "running", done: 0, total: 0, log: null });
+  });
+
+  test("404s an unknown id", async () => {
+    const res = await jobCall("00000000-0000-0000-0000-000000000000");
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Job not found" });
+  });
+
 });
 
 describe("GET /campaigns/result", () => {

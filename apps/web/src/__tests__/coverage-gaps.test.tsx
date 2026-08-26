@@ -19,9 +19,15 @@ beforeEach(() => localStorage.setItem("cf:brief-picked", "1"));
 
 const seedSingle = (assets: ReturnType<typeof makeAsset>[], postPending = false) => {
   localStorage.setItem("cf:brief", JSON.stringify({ id: "seed", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }] }));
-  vi.mocked(globalThis.fetch).mockImplementation((_url, init) => {
-    if ((init as RequestInit | undefined)?.method === "POST") return postPending ? new Promise<Response>(() => {}) : Promise.resolve(json({ halted: false, assets, log: { entries: [], campaignId: "seed" } }));
-    return Promise.resolve(json({ halted: false, assets, log: { entries: [], campaignId: "seed" } }));
+  const report = { halted: false, assets, log: { entries: [], campaignId: "seed" } };
+  vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+    if ((init as RequestInit | undefined)?.method === "POST") {
+      return postPending ? new Promise<Response>(() => {}) : Promise.resolve(json({ jobId: "seed-job" }, 202));
+    }
+    if (String(url).includes("/campaigns/jobs/")) {
+      return Promise.resolve(json({ status: "completed", done: assets.length, total: assets.length, log: report.log, result: report }));
+    }
+    return Promise.resolve(json(report));
   });
 };
 
