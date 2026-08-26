@@ -286,3 +286,15 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Refused: clock injection into `PipelineExecutionLog` (D14 keeps the exemption for wave 1), a `JobStore` port at the composition root (edge concern, single implementation), `Result<T,E>` as the job wire shape, dropping `done/total` (agreed Phase J shape).
 - **Left open:**
   - Follow-ups noted in the plan's wave-1 status: clock injection, one `mockPipelineApi` test fixture, real progress from `PipelineExecutionLog.totalOperations`. Worktrees `../cf-wt-*` remain until the PRs merge.
+
+## 2026-08-25 — drawCreative extract (Phase 4.2)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Recorded 12-cell compositor PNG goldens (both layouts × both tones × three ratios, procedural hydra-bottle `#1473E6` background + bundled logo) from the pre-refactor compositor, then split `NodeCanvasCompositor.compositeAsset` into `prepareCreative` (I/O) and `drawCreative(ctx, prepared, t)` (pure blit; `t` ignored, stills pass `t = 1`).
+  - Golden sha256 fixture is the wave-3 safety net; hashes unchanged after the extract.
+- **Decisions:**
+  - wrapText stays in `drawCreative` on the real ctx (drawing-adjacent, not filesystem I/O) so measureText cannot drift.
+  - Module-level exports only (`PreparedCreative`, `drawCreative`, `prepareCreative` as a class method); no barrel/manifest change.
+- **Left open:**
+  - Phase 4.3 motion (background + headline only; band and logo static across `t`).
