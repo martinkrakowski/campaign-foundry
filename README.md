@@ -109,6 +109,7 @@ FIREFLY_CLIENT_SECRET=...     # — server-to-server IMS credentials
 # optional overrides:
 IMAGEN_MODEL=imagen-4.0-generate-001
 OPENROUTER_IMAGE_MODEL=x-ai/grok-imagine-image-quality   # default
+OPENROUTER_COPY_MODEL=openai/gpt-4o-mini                 # default (copy pools)
 ```
 
 **Adobe Firefly Services** is a first-class provider: select the `firefly` model (UI
@@ -235,7 +236,8 @@ plus `.png`/`.jpg`/`.jpeg`.
 ### Copy pools
 
 Generate a legal-gated headline pool for a brief (Phase 3.1–3.3). Requires
-`OPENROUTER_API_KEY` (same key as the image adapter). The planner does **not**
+`OPENROUTER_API_KEY` (same key as the image adapter); `OPENROUTER_COPY_MODEL`
+picks the text model (default `openai/gpt-4o-mini`). The planner does **not**
 consume pools yet, and `pool://` in a brief is still rejected. Wizard "Generate
 suggestions" is out of scope.
 
@@ -244,7 +246,8 @@ suggestions" is out of scope.
 curl -X POST http://localhost:3001/campaigns/pools/copy \
   -H 'content-type: application/json' \
   --data '{"briefId":"summer-hydration-2026","count":10}'
-# → 201 { "pool": { "briefId", "generatedAt", "model", "entries": [{ "id", "text", "status", "reason?" }] } }
+# → 201 { "pool": { "briefId", "generatedAt", "model", "entries": [{ "id", "text", "status", "reason?" }] }, "added": 10 }
+#   200 + "added": 0 when the model only repeated headlines already in the pool
 
 curl http://localhost:3001/campaigns/pools/summer-hydration-2026
 # → 200 { "pool": {…} }
@@ -255,8 +258,11 @@ curl -X PATCH http://localhost:3001/campaigns/pools/summer-hydration-2026 \
 ```
 
 Persisted at `briefs/<briefId>/pools.json` (a directory, so the briefs lister
-ignores it). Every suggestion is run through `validateLegalCopy`; failures are
-stored as `rejected` with a reason and are not selectable later.
+ignores it). Suggestions are capped at `count` and 60 characters, then run
+through `validateLegalCopy`; failures are stored as `rejected` with a reason and
+are not selectable later. A PATCH edit whose text duplicates another entry is a
+422. Upstream failures map to 502 (bad key / other error), 429 + `Retry-After`
+or 503 (rate limit), 503 (network / 30 s timeout), 422 (unreadable reply).
 
 
 `POST /campaigns/package` copies a run's already-rendered creatives into

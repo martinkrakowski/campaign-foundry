@@ -1,13 +1,20 @@
-import { mergePool, type CopyPool, type CopyPoolEntry } from "@campaignfoundry/CampaignOrchestration";
+import {
+  CopyGeneratorError,
+  mergePool,
+  type CopyPool,
+  type CopyPoolEntry,
+} from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
-import { findBriefById } from "../../../lib/brief-files.js";
+import { findBriefById, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
 import { assertSafeId } from "../../../lib/load-brief.js";
 import { copyGenerator } from "../../../lib/pipeline.js";
-import { readPool, writePool } from "../../../lib/pools.js";
+import { isPoolDirSymlink, readPool, withPoolLock, writePool } from "../../../lib/pools.js";
 
 const DEFAULT_COUNT = 10;
 const MAX_COUNT = 25;
+/** Longest headline the compositor is briefed for; the model is told the same. */
+const MAX_HEADLINE_CHARS = 60;
 
 function parseCount(value: unknown): number {
   const count = value === undefined ? DEFAULT_COUNT : value;
@@ -51,26 +58,67 @@ function normalisedText(text: string): string {
   return text.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-function usableTexts(headlines: readonly string[], existing: readonly { text: string }[]): string[] {
-  const taken = new Set(existing.map((entry) => normalisedText(entry.text)));
+/** Trimmed, non-empty, ≤ 60 chars, de-duplicated by normalised text. */
+function usableTexts(headlines: readonly string[]): string[] {
+  const seen = new Set<string>();
   const unique: string[] = [];
   for (const raw of headlines) {
     const text = raw.trim();
-    if (!text) continue;
+    if (!text || text.length > MAX_HEADLINE_CHARS) continue;
     const key = normalisedText(text);
-    if (taken.has(key)) continue;
-    taken.add(key);
+    if (seen.has(key)) continue;
+    seen.add(key);
     unique.push(text);
   }
   return unique;
 }
 
+/** Drop texts already in the pool (same normalised identity `mergePool` uses). */
+function newTexts(texts: readonly string[], existing: readonly { text: string }[]): string[] {
+  const taken = new Set(existing.map((entry) => normalisedText(entry.text)));
+  return texts.filter((text) => !taken.has(normalisedText(text)));
+}
+
+interface HttpFailure {
+  readonly status: number;
+  readonly body: { error: string };
+  readonly retryAfterSeconds?: number;
+}
+
+/** Map a generator failure to a sanitised HTTP reply — never echo upstream bodies. */
+function mapGeneratorError(error: CopyGeneratorError): HttpFailure {
+  switch (error.kind) {
+    case "missing_key":
+      return { status: 503, body: { error: "OPENROUTER_API_KEY is not set" } };
+    case "auth":
+      return { status: 502, body: { error: "OpenRouter rejected the configured API key" } };
+    case "rate_limited":
+      return error.retryAfterSeconds === undefined
+        ? { status: 503, body: { error: "OpenRouter is rate limiting copy generation" } }
+        : {
+            status: 429,
+            body: { error: "OpenRouter is rate limiting copy generation" },
+            retryAfterSeconds: error.retryAfterSeconds,
+          };
+    case "network":
+      return { status: 503, body: { error: "OpenRouter could not be reached" } };
+    case "malformed":
+      return { status: 422, body: { error: "Copy generator returned an unreadable response" } };
+    case "upstream":
+      return { status: 502, body: { error: "OpenRouter returned an error" } };
+  }
+}
+
 /**
  * POST /campaigns/pools/copy — generate headlines, legal-gate each, persist the pool.
  *
- * Body `{ briefId, count? }`. Default count 10, max 25. 404 unknown brief, 503
- * without OPENROUTER_API_KEY, 422 if the generator returns nothing usable.
- * Planner / `pool://` consumption is out of scope.
+ * Body `{ briefId, count? }`. Default count 10, max 25. Reply `{ pool, added }`:
+ * 201 when new entries were persisted, 200 (`added: 0`, no write) when the model
+ * only repeated known headlines. 404 unknown brief, 503 without
+ * OPENROUTER_API_KEY, 422 if the generator returned nothing usable at all.
+ * Upstream failures: 502 auth/other, 429 (+ Retry-After) or 503 rate limit,
+ * 503 network/timeout, 422 unreadable body. Planner / `pool://` consumption is
+ * out of scope.
  */
 export default defineEventHandler(async (event) => {
   let briefId: string;
@@ -94,6 +142,10 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 404);
     return { error: `Brief "${briefId}" not found.` };
   }
+  if (await isPoolDirSymlink(briefId)) {
+    setResponseStatus(event, 400);
+    return { error: SYMLINK_WRITE_ERROR };
+  }
 
   const generator = copyGenerator();
   if (!generator) {
@@ -101,24 +153,39 @@ export default defineEventHandler(async (event) => {
     return { error: "OPENROUTER_API_KEY is not set" };
   }
 
-  const existing = await readPool(briefId);
-  const headlines = usableTexts(
-    await generator.suggestHeadlines({ brief: found.brief, count }),
-    existing?.entries ?? [],
-  );
-  if (headlines.length === 0) {
+  let suggested: readonly string[];
+  try {
+    suggested = await generator.suggestHeadlines({ brief: found.brief, count });
+  } catch (error) {
+    if (!(error instanceof CopyGeneratorError)) throw error;
+    const failure = mapGeneratorError(error);
+    setResponseStatus(event, failure.status);
+    if (failure.retryAfterSeconds !== undefined) setHeader(event, "retry-after", failure.retryAfterSeconds);
+    return failure.body;
+  }
+  const usable = usableTexts(suggested);
+  if (usable.length === 0) {
     setResponseStatus(event, 422);
     return { error: "Copy generator returned no usable headlines" };
   }
 
-  const incoming: CopyPool = {
-    briefId,
-    generatedAt: new Date().toISOString(),
-    model: generator.model,
-    entries: await gateEntries(headlines, new Set(existing?.entries.map((entry) => entry.id) ?? [])),
-  };
-  const next = mergePool(existing ?? incoming, incoming);
-  await writePool(next);
-  setResponseStatus(event, 201);
-  return { pool: next };
+  // The slow LLM call is done; read→merge→write is serialised per brief so a
+  // concurrent request's entries are merged into, never overwritten.
+  return withPoolLock(briefId, async () => {
+    const existing = await readPool(briefId);
+    const headlines = newTexts(usable, existing?.entries ?? []).slice(0, count);
+    if (headlines.length === 0 && existing) {
+      return { pool: existing, added: 0 };
+    }
+    const incoming: CopyPool = {
+      briefId,
+      generatedAt: new Date().toISOString(),
+      model: generator.model,
+      entries: await gateEntries(headlines, new Set(existing?.entries.map((entry) => entry.id) ?? [])),
+    };
+    const next = mergePool(existing ?? incoming, incoming);
+    await writePool(next);
+    setResponseStatus(event, 201);
+    return { pool: next, added: headlines.length };
+  });
 });
