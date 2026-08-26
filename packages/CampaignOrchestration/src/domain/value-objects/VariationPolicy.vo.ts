@@ -11,6 +11,17 @@ import { LAYOUT_VALUES, TONE_VALUES, type LayoutKind, type ToneKind } from "./Tr
 export const BACKGROUND_AXIS_SOURCES = ["procedural", "asset-pool", "genai"] as const;
 export type BackgroundAxisSource = (typeof BACKGROUND_AXIS_SOURCES)[number];
 
+/** Hamming axes — a candidate must differ in at least `minDistance` of these. */
+export const DISTANCE_AXES = [
+  "productId",
+  "aspectRatio",
+  "layout",
+  "tone",
+  "backgroundSource",
+  "paletteShift",
+] as const;
+
+const UINT32_MAX = 0xffffffff;
 const DEFAULT_BACKGROUND_SOURCES: readonly BackgroundAxisSource[] = ["procedural"];
 const DEFAULT_PALETTE_SHIFT: readonly number[] = [0];
 
@@ -46,19 +57,52 @@ export class VariationPolicy {
     if (variation === undefined || variation.count === undefined) {
       return err(new Error('Variation policy requires "count".'));
     }
-    const count = variation.count;
+
+    const countResult = requireInteger(variation.count, "count", 1);
+    if (!countResult.success) return countResult;
+    const count = countResult.value;
+
+    const seedResult = requireInteger(variation.seed ?? seedFrom(brief.id), "seed", 0, UINT32_MAX);
+    if (!seedResult.success) return seedResult;
+    const seed = seedResult.value;
+
+    const minDistanceResult = requireInteger(
+      variation.minDistance ?? 1,
+      "minDistance",
+      0,
+      DISTANCE_AXES.length,
+    );
+    if (!minDistanceResult.success) return minDistanceResult;
+    const minDistance = minDistanceResult.value;
+
+    const perProductResult = requireInteger(variation.coverage?.perProduct ?? 0, "coverage.perProduct", 0);
+    if (!perProductResult.success) return perProductResult;
+    const perRatioResult = requireInteger(variation.coverage?.perRatio ?? 0, "coverage.perRatio", 0);
+    if (!perRatioResult.success) return perRatioResult;
+    const coverage: VariationCoverage = {
+      perProduct: perProductResult.value,
+      perRatio: perRatioResult.value,
+    };
+
     const axes = variation.axes;
-    const layout: readonly LayoutKind[] =
-      axes?.layout !== undefined ? [...(axes.layout as readonly LayoutKind[])] : [...LAYOUT_VALUES];
-    const tone: readonly ToneKind[] =
-      axes?.tone !== undefined ? [...(axes.tone as readonly ToneKind[])] : [...TONE_VALUES];
-    const backgroundSource: readonly BackgroundAxisSource[] =
+    const layout = unique(
+      axes?.layout !== undefined ? [...(axes.layout as readonly LayoutKind[])] : [...LAYOUT_VALUES],
+    );
+    const tone = unique(
+      axes?.tone !== undefined ? [...(axes.tone as readonly ToneKind[])] : [...TONE_VALUES],
+    );
+    const backgroundSource = unique(
       axes?.background?.source !== undefined
         ? [...(axes.background.source as readonly BackgroundAxisSource[])]
-        : [...DEFAULT_BACKGROUND_SOURCES];
-    const paletteShift: readonly number[] =
-      axes?.paletteShift !== undefined ? [...axes.paletteShift] : [...DEFAULT_PALETTE_SHIFT];
-    const productIds = brief.products.map((product) => product.id);
+        : [...DEFAULT_BACKGROUND_SOURCES],
+    );
+    const paletteShift = unique(
+      axes?.paletteShift !== undefined ? [...axes.paletteShift] : [...DEFAULT_PALETTE_SHIFT],
+    );
+    const paletteShiftResult = requirePaletteShift(paletteShift);
+    if (!paletteShiftResult.success) return paletteShiftResult;
+
+    const productIds = unique(brief.products.map((product) => product.id));
     const ratios = AspectRatio.all().map((ratio) => ratio.value);
     const axisProductSize =
       productIds.length *
@@ -67,13 +111,6 @@ export class VariationPolicy {
       tone.length *
       backgroundSource.length *
       paletteShift.length;
-
-    const seed = variation.seed ?? seedFrom(brief.id);
-    const minDistance = variation.minDistance ?? 1;
-    const coverage: VariationCoverage = {
-      perProduct: variation.coverage?.perProduct ?? 0,
-      perRatio: variation.coverage?.perRatio ?? 0,
-    };
 
     const policyHash = hashPolicy({
       axisProductSize,
@@ -106,6 +143,26 @@ export class VariationPolicy {
       ),
     );
   }
+}
+
+function unique<T>(values: readonly T[]): T[] {
+  return [...new Set(values)];
+}
+
+function requireInteger(value: number, field: string, min: number, max?: number): Result<number, Error> {
+  if (!Number.isInteger(value) || value < min || (max !== undefined && value > max)) {
+    return err(new Error(`Invalid ${field}.`));
+  }
+  return ok(value);
+}
+
+function requirePaletteShift(values: readonly number[]): Result<readonly number[], Error> {
+  for (const shift of values) {
+    if (typeof shift !== "number" || !Number.isFinite(shift) || shift < 0 || shift > 1) {
+      return err(new Error("Invalid paletteShift."));
+    }
+  }
+  return ok(values);
 }
 
 function hashPolicy(payload: {

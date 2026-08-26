@@ -134,4 +134,92 @@ describe("VariationPolicy.fromBrief", () => {
   test("BACKGROUND_AXIS_SOURCES is the brief-parser set", () => {
     expect(BACKGROUND_AXIS_SOURCES).toEqual(["procedural", "asset-pool", "genai"]);
   });
+
+  test.each([
+    [{ count: 0 }, /count/],
+    [{ count: -1 }, /count/],
+    [{ count: 1.5 }, /count/],
+    [{ count: Number.POSITIVE_INFINITY }, /count/],
+    [{ count: Number.NaN }, /count/],
+    [{ count: 1, minDistance: -1 }, /minDistance/],
+    [{ count: 1, minDistance: 7 }, /minDistance/],
+    [{ count: 1, minDistance: 1.5 }, /minDistance/],
+    [{ count: 1, minDistance: Number.POSITIVE_INFINITY }, /minDistance/],
+    [{ count: 1, coverage: { perProduct: -1 } }, /coverage\.perProduct/],
+    [{ count: 1, coverage: { perProduct: 0.5 } }, /coverage\.perProduct/],
+    [{ count: 1, coverage: { perProduct: Number.NaN } }, /coverage\.perProduct/],
+    [{ count: 1, coverage: { perRatio: -1 } }, /coverage\.perRatio/],
+    [{ count: 1, coverage: { perRatio: 1.5 } }, /coverage\.perRatio/],
+    [{ count: 1, coverage: { perRatio: Number.POSITIVE_INFINITY } }, /coverage\.perRatio/],
+    [{ count: 1, seed: -1 }, /seed/],
+    [{ count: 1, seed: 0.5 }, /seed/],
+    [{ count: 1, seed: 2 ** 32 }, /seed/],
+    [{ count: 1, seed: Number.NaN }, /seed/],
+    [{ count: 1, axes: { paletteShift: [-0.1] } }, /paletteShift/],
+    [{ count: 1, axes: { paletteShift: [1.1] } }, /paletteShift/],
+    [{ count: 1, axes: { paletteShift: [Number.NaN] } }, /paletteShift/],
+    [{ count: 1, axes: { paletteShift: [Number.POSITIVE_INFINITY] } }, /paletteShift/],
+  ] as const)("rejects invalid %j", (variation, pattern) => {
+    const result = VariationPolicy.fromBrief(brief({ variation: { ...variation } }));
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(pattern);
+  });
+
+  test.each([
+    [{ count: 1, minDistance: 0 }, "minDistance", 0],
+    [{ count: 1, minDistance: 6 }, "minDistance", 6],
+    [{ count: 1, seed: 0 }, "seed", 0],
+    [{ count: 1, seed: 0xffffffff }, "seed", 0xffffffff],
+  ] as const)("accepts boundary %j", (variation, field, expected) => {
+    const result = VariationPolicy.fromBrief(brief({ variation: { ...variation } }));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value[field]).toBe(expected);
+  });
+
+  test("rejects a non-numeric paletteShift", () => {
+    const result = VariationPolicy.fromBrief(
+      brief({
+        variation: { count: 1, axes: { paletteShift: ["nope"] as unknown as number[] } },
+      }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/paletteShift/);
+  });
+
+  test("accepts paletteShift endpoints 0 and 1", () => {
+    const result = VariationPolicy.fromBrief(
+      brief({ variation: { count: 1, axes: { paletteShift: [0, 1] } } }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.paletteShift).toEqual([0, 1]);
+  });
+
+  test("canonicalises duplicate layout values before hashing", () => {
+    const duplicated = VariationPolicy.fromBrief(
+      brief({ variation: { count: 1, seed: 7, axes: { layout: ["bold", "bold"] } } }),
+    );
+    const once = VariationPolicy.fromBrief(
+      brief({ variation: { count: 1, seed: 7, axes: { layout: ["bold"] } } }),
+    );
+    expect(duplicated.success && once.success).toBe(true);
+    if (!duplicated.success || !once.success) return;
+    expect(duplicated.value.layout).toEqual(["bold"]);
+    expect(duplicated.value.axisProductSize).toBe(once.value.axisProductSize);
+    expect(duplicated.value.policyHash).toBe(once.value.policyHash);
+  });
+
+  test("canonicalises duplicate product ids before axisProductSize", () => {
+    const result = VariationPolicy.fromBrief(
+      brief({
+        products: [product("alpha"), product("alpha"), product("beta")],
+        variation: { count: 1, seed: 7, axes: { layout: ["headline-top"], tone: ["bold"] } },
+      }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.productIds).toEqual(["alpha", "beta"]);
+    expect(result.value.axisProductSize).toBe(2 * 3 * 1 * 1 * 1 * 1);
+  });
 });
