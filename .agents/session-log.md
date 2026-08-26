@@ -300,3 +300,23 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - `perRatio` coverage is one walk of ratios after the product pass (skip if already ≥ perRatio).
 - **Left open:**
   - Phase 2.4 consume the planner from `GenerateCampaignUseCase`; identity migration (2.5); GenAI cache (2.6).
+
+## 2026-08-25 — variation planner review fixes (PR #46)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Coverage is now a property of the accepted set: round-robin deficient
+    products/ratios (retry distance rejects), then fill to `count`; fail up
+    front when `perProduct × |products|` or `perRatio × |ratios|` exceeds
+    `count`; `err` naming the first unmet product/ratio after planning.
+  - `replan` refuses a substitute that would break coverage; bounded redraw.
+  - `VariationPolicy.fromBrief` validates count/minDistance/coverage/seed/
+    paletteShift and canonicalises option lists before `axisProductSize` and
+    `policyHash`. Shortfall messages include `accepted` and `minDistance`.
+- **Decisions:**
+  - Hamming axes live on the policy VO (`DISTANCE_AXES`) so `minDistance`
+    cannot exceed the axis count. Planner stays pure (no clock / Math.random).
+  - Golden `policyHash` and first-three-variant literals did not change
+    (zero coverage + unique lists are identity for the golden brief).
+- **Left open:**
+  - Phase 2.4 consume the planner from `GenerateCampaignUseCase`.
