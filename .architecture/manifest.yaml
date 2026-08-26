@@ -20,6 +20,27 @@ monorepo:
         emitDeclarationOnly: true
         declarationMap: true
         tsBuildInfoFile: ./dist/.tsbuildinfo
+    eslint:
+      template: |
+        import eslint from '@eslint/js';
+        import tseslint from 'typescript-eslint';
+        import deterministicCore from '../../eslint.deterministic-core.js';
+
+        export default tseslint.config(
+          eslint.configs.recommended,
+          ...tseslint.configs.recommended,
+          {
+            rules: {
+              '@typescript-eslint/no-explicit-any': 'warn',
+              '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+            },
+          },
+          // Deterministic core: no ambient randomness or wall clock in src/domain/**.
+          ...deterministicCore(),
+          {
+            ignores: ['dist/**', 'node_modules/**'],
+          },
+        );
     packageJson:
       scripts:
         build: tsc
@@ -112,50 +133,6 @@ bounded_contexts:
           out: []
       infrastructure:
         adapters: []
-    generator:
-      eslint:
-        template: |
-          import eslint from '@eslint/js';
-          import tseslint from 'typescript-eslint';
-
-          export default tseslint.config(
-            eslint.configs.recommended,
-            ...tseslint.configs.recommended,
-            {
-              rules: {
-                '@typescript-eslint/no-explicit-any': 'warn',
-                '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
-              },
-            },
-            {
-              files: ['src/domain/**/*.ts', 'src/domain/**/*.tsx'],
-              rules: {
-                'no-restricted-properties': [
-                  'error',
-                  {
-                    object: 'Math',
-                    property: 'random',
-                    message: 'Use SeededRandom instead of Math.random in the deterministic core.',
-                  },
-                  {
-                    object: 'Date',
-                    property: 'now',
-                    message: 'Do not use the wall clock in the deterministic core; use SeededRandom.',
-                  },
-                ],
-                'no-restricted-syntax': [
-                  'error',
-                  {
-                    selector: "NewExpression[callee.name='Date']",
-                    message: 'Do not use the wall clock in the deterministic core; use SeededRandom.',
-                  },
-                ],
-              },
-            },
-            {
-              ignores: ['dist/**', 'node_modules/**'],
-            },
-          );
   - name: CampaignOrchestration
     type: core
     description: >
@@ -191,6 +168,7 @@ bounded_contexts:
         template: |
           import eslint from '@eslint/js';
           import tseslint from 'typescript-eslint';
+          import deterministicCore from '../../eslint.deterministic-core.js';
 
           export default tseslint.config(
             eslint.configs.recommended,
@@ -201,53 +179,12 @@ bounded_contexts:
                 '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
               },
             },
-            {
-              files: [
-                'src/domain/**/*.ts',
-                'src/domain/**/*.tsx',
-                'src/application/use-cases/PlanVariationsUseCase.use-case.ts',
-              ],
-              rules: {
-                'no-restricted-properties': [
-                  'error',
-                  {
-                    object: 'Math',
-                    property: 'random',
-                    message: 'Use SeededRandom instead of Math.random in the deterministic core.',
-                  },
-                ],
-              },
-            },
-            {
-              files: [
-                'src/domain/**/*.ts',
-                'src/domain/**/*.tsx',
-                'src/application/use-cases/PlanVariationsUseCase.use-case.ts',
-              ],
+            // Deterministic core, widened to the use cases. PipelineExecutionLog is the one
+            // sanctioned wall-clock reader in the domain (it stamps the run log).
+            ...deterministicCore({
+              extraFiles: ['src/application/use-cases/**/*.ts'],
               ignores: ['src/domain/value-objects/PipelineExecutionLog.vo.ts'],
-              rules: {
-                'no-restricted-properties': [
-                  'error',
-                  {
-                    object: 'Math',
-                    property: 'random',
-                    message: 'Use SeededRandom instead of Math.random in the deterministic core.',
-                  },
-                  {
-                    object: 'Date',
-                    property: 'now',
-                    message: 'Do not use the wall clock in the deterministic core; use SeededRandom.',
-                  },
-                ],
-                'no-restricted-syntax': [
-                  'error',
-                  {
-                    selector: "NewExpression[callee.name='Date']",
-                    message: 'Do not use the wall clock in the deterministic core; use SeededRandom.',
-                  },
-                ],
-              },
-            },
+            }),
             {
               ignores: ['dist/**', 'node_modules/**'],
             },
