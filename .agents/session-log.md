@@ -302,3 +302,17 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Distribution `src/index.ts` re-exports application + domain (hexagen modular-monolith mode does not refresh the package root barrel when new layers gain content).
 - **Left open:**
   - Phase 5.2 (safe insets at generation) and 5.4 (export-page UI). Motion profiles stay `visible: false` until P4.
+
+## 2026-08-25 — PR #48 packaging review fixes
+
+- **Mode:** Implementer
+- **Changes:**
+  - Use case catches store errors per platform (`Platform "<id>": <reason>`, absolute paths stripped) and the route maps use-case `err` to 422.
+  - Adapter stages each platform in `<platformDir>.staging-<random>` then `rm -rf` + `rename` so a failure never leaves a mixed folder and a smaller re-package drops stale files.
+  - Packaging moved to `output/packages/<campaignId>/<platformId>/`. Shared `resolveSafe` helper; campaign root resolved in the adapter constructor; `readFile` Buffer returned as-is.
+  - Exported `isPersistedAsset` (productId/aspectRatio/treatment/outputPath); invalid rows skipped + counted on the manifest; non-array `assets` → 422. Duplicate platform ids de-duplicated in order.
+  - `packagedAt` ISO timestamp injected from the composition-root clock (no `new Date()` in the use case). Removed filled-layer `.gitkeep`s; `yarn sync` barrel-exported `safe-path.ts`.
+- **Decisions:**
+  - Refuted Qodo "old campaign packages newer bytes": renders are not campaign-namespaced; that is wave-3 identity/output-path work. The package is explicitly the current output for that report (`packagedAt` + route/README sentence).
+- **Left open:**
+  - Wave-3 campaign-namespaced output paths. Phase 5.2 / 5.4.
