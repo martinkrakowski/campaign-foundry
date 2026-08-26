@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { AspectRatio, type CompositeRequest } from "@campaignfoundry/CampaignOrchestration";
 import { projectRoot } from "@campaignfoundry/shared";
+import * as CreativeGeneration from "@campaignfoundry/CreativeGeneration";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
 const ratio = (v = "1:1") => {
@@ -41,6 +42,19 @@ describe("NodeCanvasCompositor", () => {
   beforeAll(() => writeFileSync(corruptLogo, "not a real image"));
   afterAll(() => rmSync(corruptLogo, { force: true }));
   afterEach(() => vi.restoreAllMocks());
+
+  test("does not leak prepare/draw from the package root", () => {
+    expect(CreativeGeneration).not.toHaveProperty("drawCreative");
+    expect(CreativeGeneration).not.toHaveProperty("prepareCreative");
+    expect(CreativeGeneration).not.toHaveProperty("PreparedCreative");
+    expect(typeof CreativeGeneration.NodeCanvasCompositor.prepare).toBe("function");
+    expect(typeof CreativeGeneration.NodeCanvasCompositor.draw).toBe("function");
+  });
+
+  test("static prepare defaults the font family to Inter", async () => {
+    const prepared = await NodeCanvasCompositor.prepare(request());
+    expect(prepared.fontFamily).toBe("Inter");
+  });
 
   test("renders a PNG at the requested ratio's exact dimensions", async () => {
     for (const value of ["1:1", "9:16", "16:9"] as const) {

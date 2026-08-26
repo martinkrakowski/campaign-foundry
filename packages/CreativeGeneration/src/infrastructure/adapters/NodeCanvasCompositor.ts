@@ -10,15 +10,21 @@ import { registerBundledFonts } from "../fonts.js";
 import { resolveAssetPath } from "../safe-path.js";
 
 /**
- * Everything {@link drawCreative} needs to blit a still (or a later motion
- * frame). Images and logo geometry are loaded once in {@link NodeCanvasCompositor.prepareCreative};
- * wrapping stays on the real drawing context so measureText matches the blit.
+ * Everything {@link NodeCanvasCompositor.draw} needs to blit a still (or a later
+ * motion frame). Images and logo geometry are loaded once in
+ * {@link NodeCanvasCompositor.prepare}; wrapping stays on the real drawing
+ * context so measureText matches the blit.
+ *
+ * Module-private: the `@generated` barrels `export *` this file, so exporting
+ * this type (or prepare/draw as free functions) would leak it — and through it
+ * `@napi-rs/canvas` `Image` / `SKRSContext2D` — from
+ * `@campaignfoundry/CreativeGeneration`. Hexagen has no non-barreled `internal`
+ * export path.
  */
-export interface PreparedCreative {
+interface PreparedCreative {
   readonly width: number;
   readonly height: number;
   readonly top: boolean;
-  readonly subtle: boolean;
   readonly shadeAlpha: number;
   readonly fontWeight: string;
   readonly fontFamily: string;
@@ -38,76 +44,6 @@ export interface PreparedCreative {
 }
 
 /**
- * Paint a prepared creative onto `ctx`. `t` is accepted and currently ignored
- * by every layer — `t = 1` is the still's rest pose (motion is a later wave).
- */
-export function drawCreative(ctx: SKRSContext2D, prepared: PreparedCreative, t: number): void {
-  void t;
-  const { width, height, top, shadeAlpha, fontWeight, fontFamily } = prepared;
-
-  // Layer 1 — background.
-  ctx.drawImage(prepared.background, 0, 0, width, height);
-
-  // Layer 2 — contrast shade, darkest at the headline edge, fading into the image.
-  const shade = top
-    ? ctx.createLinearGradient(0, height * 0.55, 0, 0)
-    : ctx.createLinearGradient(0, height * 0.45, 0, height);
-  shade.addColorStop(0, "rgba(0, 0, 0, 0)");
-  shade.addColorStop(1, `rgba(0, 0, 0, ${shadeAlpha})`);
-  ctx.fillStyle = shade;
-  ctx.fillRect(0, 0, width, height);
-
-  // Layer 3 — brand-colour accent band: a solid base flush to the headline edge
-  // plus a soft fade into the image. Solid stays opaque in every tone, and this
-  // band — not the logo — is what guarantees the brand-density compliance floor.
-  const [ar, ag, ab] = hexToRgb(prepared.brandColor);
-  const solidH = height * 0.05;
-  const fadeH = height * 0.06;
-  ctx.fillStyle = `rgb(${ar}, ${ag}, ${ab})`;
-  if (top) {
-    ctx.fillRect(0, 0, width, solidH);
-    const fade = ctx.createLinearGradient(0, solidH, 0, solidH + fadeH);
-    fade.addColorStop(0, `rgb(${ar}, ${ag}, ${ab})`);
-    fade.addColorStop(1, `rgba(${ar}, ${ag}, ${ab}, 0)`);
-    ctx.fillStyle = fade;
-    ctx.fillRect(0, solidH, width, fadeH);
-  } else {
-    ctx.fillRect(0, height - solidH, width, solidH);
-    const fade = ctx.createLinearGradient(0, height - solidH - fadeH, 0, height - solidH);
-    fade.addColorStop(0, `rgba(${ar}, ${ag}, ${ab}, 0)`);
-    fade.addColorStop(1, `rgb(${ar}, ${ag}, ${ab})`);
-    ctx.fillStyle = fade;
-    ctx.fillRect(0, height - solidH - fadeH, width, fadeH);
-  }
-
-  // Layer 4 — campaign copy (wrapped to width), anchored on the headline edge.
-  // Bundled font (default "Inter") for machine-independent rendering; weight
-  // comes from the treatment's tone. wrapText uses this ctx so metrics match
-  // the blit — wrapping is drawing-adjacent, not I/O.
-  const fontSize = Math.round(width * 0.06);
-  ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}, sans-serif`;
-  ctx.fillStyle = "#ffffff";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "alphabetic";
-  const lines = wrapText(ctx, prepared.message, width * 0.85);
-  const lineHeight = fontSize * 1.25;
-  let y = top
-    ? height * 0.1 + fontSize // first baseline near the top
-    : height - height * 0.08 - (lines.length - 1) * lineHeight; // last baseline near the bottom
-  for (const line of lines) {
-    ctx.fillText(line, width / 2, y);
-    y += lineHeight;
-  }
-
-  // Layer 5 — brand logo, anchored opposite the headline (top-right for a bottom
-  // headline, bottom-left for a top headline). Geometry was captured in prepare.
-  if (prepared.logo) {
-    const { image, x, y: ly, width: lw, height: lh } = prepared.logo;
-    ctx.drawImage(image, x, ly, lw, lh);
-  }
-}
-
-/**
  * NodeCanvasCompositor — CompositorPort adapter.
  *
  * Renders one creative with deterministic, treatment-driven layer stacking:
@@ -124,15 +60,89 @@ export function drawCreative(ctx: SKRSContext2D, prepared: PreparedCreative, t: 
  * Copy is drawn in a bundled font (default "Inter") so headlines look identical
  * on every machine, independent of the reviewer's installed system fonts.
  *
- * Still path: {@link prepareCreative} (I/O) → {@link drawCreative} at `t = 1`.
+ * Still path: {@link NodeCanvasCompositor.prepare} (I/O) →
+ * {@link NodeCanvasCompositor.draw} at `t = 1`.
  */
 export class NodeCanvasCompositor implements CompositorPort {
   constructor(private readonly fontFamily: string = "Inter") {
     registerBundledFonts();
   }
 
-  /** Load background + logo and capture everything {@link drawCreative} needs. */
-  async prepareCreative(request: CompositeRequest): Promise<PreparedCreative> {
+  /**
+   * Paint a prepared creative onto `ctx`. `t` is accepted and currently ignored
+   * by every layer — `t = 1` is the still's rest pose (motion is a later wave).
+   */
+  static draw(ctx: SKRSContext2D, prepared: PreparedCreative, t: number): void {
+    void t;
+    const { width, height, top, shadeAlpha, fontWeight, fontFamily } = prepared;
+
+    // Layer 1 — background.
+    ctx.drawImage(prepared.background, 0, 0, width, height);
+
+    // Layer 2 — contrast shade, darkest at the headline edge, fading into the image.
+    const shade = top
+      ? ctx.createLinearGradient(0, height * 0.55, 0, 0)
+      : ctx.createLinearGradient(0, height * 0.45, 0, height);
+    shade.addColorStop(0, "rgba(0, 0, 0, 0)");
+    shade.addColorStop(1, `rgba(0, 0, 0, ${shadeAlpha})`);
+    ctx.fillStyle = shade;
+    ctx.fillRect(0, 0, width, height);
+
+    // Layer 3 — brand-colour accent band: a solid base flush to the headline edge
+    // plus a soft fade into the image. Solid stays opaque in every tone, and this
+    // band — not the logo — is what guarantees the brand-density compliance floor.
+    const [ar, ag, ab] = hexToRgb(prepared.brandColor);
+    const solidH = height * 0.05;
+    const fadeH = height * 0.06;
+    ctx.fillStyle = `rgb(${ar}, ${ag}, ${ab})`;
+    if (top) {
+      ctx.fillRect(0, 0, width, solidH);
+      const fade = ctx.createLinearGradient(0, solidH, 0, solidH + fadeH);
+      fade.addColorStop(0, `rgb(${ar}, ${ag}, ${ab})`);
+      fade.addColorStop(1, `rgba(${ar}, ${ag}, ${ab}, 0)`);
+      ctx.fillStyle = fade;
+      ctx.fillRect(0, solidH, width, fadeH);
+    } else {
+      ctx.fillRect(0, height - solidH, width, solidH);
+      const fade = ctx.createLinearGradient(0, height - solidH - fadeH, 0, height - solidH);
+      fade.addColorStop(0, `rgba(${ar}, ${ag}, ${ab}, 0)`);
+      fade.addColorStop(1, `rgb(${ar}, ${ag}, ${ab})`);
+      ctx.fillStyle = fade;
+      ctx.fillRect(0, height - solidH - fadeH, width, fadeH);
+    }
+
+    // Layer 4 — campaign copy (wrapped to width), anchored on the headline edge.
+    // Bundled font (default "Inter") for machine-independent rendering; weight
+    // comes from the treatment's tone. wrapText uses this ctx so metrics match
+    // the blit — wrapping is drawing-adjacent, not I/O.
+    const fontSize = Math.round(width * 0.06);
+    ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}, sans-serif`;
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    const lines = wrapText(ctx, prepared.message, width * 0.85);
+    const lineHeight = fontSize * 1.25;
+    let y = top
+      ? height * 0.1 + fontSize // first baseline near the top
+      : height - height * 0.08 - (lines.length - 1) * lineHeight; // last baseline near the bottom
+    for (const line of lines) {
+      ctx.fillText(line, width / 2, y);
+      y += lineHeight;
+    }
+
+    // Layer 5 — brand logo, anchored opposite the headline (top-right for a bottom
+    // headline, bottom-left for a top headline). Geometry was captured in prepare.
+    if (prepared.logo) {
+      const { image, x, y: ly, width: lw, height: lh } = prepared.logo;
+      ctx.drawImage(image, x, ly, lw, lh);
+    }
+  }
+
+  /** Load background + logo and capture everything {@link NodeCanvasCompositor.draw} needs. */
+  static async prepare(
+    request: CompositeRequest,
+    fontFamily: string = "Inter",
+  ): Promise<PreparedCreative> {
     const { width, height } = request.ratio;
     const top = request.layout === "headline-top";
     const subtle = request.tone === "subtle";
@@ -174,10 +184,9 @@ export class NodeCanvasCompositor implements CompositorPort {
       width,
       height,
       top,
-      subtle,
       shadeAlpha,
       fontWeight,
-      fontFamily: this.fontFamily,
+      fontFamily,
       message: request.message,
       brandColor: request.brandColor,
       background,
@@ -187,10 +196,10 @@ export class NodeCanvasCompositor implements CompositorPort {
   }
 
   async compositeAsset(request: CompositeRequest): Promise<CompositeResult> {
-    const prepared = await this.prepareCreative(request);
+    const prepared = await NodeCanvasCompositor.prepare(request, this.fontFamily);
     const canvas = createCanvas(prepared.width, prepared.height);
     const ctx = canvas.getContext("2d");
-    drawCreative(ctx, prepared, 1);
+    NodeCanvasCompositor.draw(ctx, prepared, 1);
     return { image: canvas.toBuffer("image/png"), logoApplied: prepared.logoApplied };
   }
 }
