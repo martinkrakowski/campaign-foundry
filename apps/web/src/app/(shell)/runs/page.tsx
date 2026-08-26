@@ -65,6 +65,9 @@ export default function RunsPage() {
               <Stat label="genaiCalls" value={String(estimate.genaiCalls)} />
             </dl>
           )}
+          {estimateStatus === "loading" && (
+            <p className="border-t border-border px-4 py-3 text-[13px] text-text-muted">estimating…</p>
+          )}
           {estimateStatus === "infeasible" && estimateError && (
             <p className="border-t border-border px-4 py-3 text-[13px] text-error">{estimateError}</p>
           )}

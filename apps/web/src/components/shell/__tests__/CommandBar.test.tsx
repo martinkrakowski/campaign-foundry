@@ -168,8 +168,51 @@ describe("CommandBar", () => {
     expect(calls).toBe(1);
     await user.click(screen.getByText("tweak"));
     await waitFor(() => expect(calls).toBe(2));
+    await waitFor(() => expect(screen.queryByText("Estimating…")).toBeNull());
     expect(screen.getByText("12")).toBeTruthy();
-    expect(screen.queryByText("Estimating…")).toBeNull();
+  });
+
+  test("a brief change disables Execute until the new estimate arrives", async () => {
+    function Tweak() {
+      const { setBrief, brief, estimateStatus } = useRun();
+      return createElement(Fragment, null,
+        createElement("button", {
+          onClick: () => setBrief({ ...brief, campaignMessage: "Stay wilder" }),
+        }, "tweak"),
+        createElement("span", null, `status:${estimateStatus}`),
+        createElement(CommandBar, { onToggleTelemetry: () => {} }),
+      );
+    }
+    const user = userEvent.setup();
+    seedVariation();
+    let calls = 0;
+    let resolveSecond: ((r: Response) => void) | undefined;
+    mockPipelineApi({
+      plan: () => {
+        calls += 1;
+        if (calls === 1) return okPlan();
+        return new Promise<Response>((res) => {
+          resolveSecond = res;
+        });
+      },
+    });
+    renderWithRun(<Tweak />);
+    expect(await screen.findByText("12")).toBeTruthy();
+    expect(screen.getByText("status:ok")).toBeTruthy();
+    const execute = () => screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement;
+    expect(execute().disabled).toBe(false);
+    await user.click(screen.getByText("tweak"));
+    // Immediately — before the debounce fires — the stale plan is gone and Run is blocked.
+    expect(screen.getByText("Estimating…")).toBeTruthy();
+    expect(screen.getByText("status:loading")).toBeTruthy();
+    expect(execute().disabled).toBe(true);
+    expect(calls).toBe(1);
+    await waitFor(() => expect(resolveSecond).toEqual(expect.any(Function)));
+    expect(execute().disabled).toBe(true);
+    resolveSecond?.(okPlan({ policyHash: "h2", estimate: { ...okEstimate, creatives: 7 } }));
+    expect(await screen.findByText("7")).toBeTruthy();
+    expect(screen.getByText("status:ok")).toBeTruthy();
+    expect(execute().disabled).toBe(false);
   });
 
   test("replaces a cached ok estimate when a later plan is infeasible", async () => {
@@ -202,16 +245,21 @@ describe("CommandBar", () => {
   test("aborts an in-flight plan on unmount", async () => {
     seedVariation();
     let resolvePlan: ((r: Response) => void) | undefined;
+    let signal: AbortSignal | null | undefined;
     mockPipelineApi({
-      plan: () =>
-        new Promise<Response>((res) => {
+      plan: (_url, init) => {
+        signal = init.signal;
+        return new Promise<Response>((res) => {
           resolvePlan = res;
-        }),
+        });
+      },
     });
     const { unmount } = renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
     expect(screen.getByText("Estimating…")).toBeTruthy();
     await waitFor(() => expect(resolvePlan).toEqual(expect.any(Function)));
+    expect(signal?.aborted).toBe(false);
     unmount();
+    expect(signal?.aborted).toBe(true);
     resolvePlan?.(okPlan());
     await waitFor(() => expect(screen.queryByText("Estimating…")).toBeNull());
   });

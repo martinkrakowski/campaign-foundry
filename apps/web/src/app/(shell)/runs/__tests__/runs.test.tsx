@@ -47,6 +47,11 @@ describe("RunsPage — estimate summary", () => {
           },
           "seed-bad",
         ),
+        createElement(
+          "button",
+          { onClick: () => setEstimate({ status: "loading" }) },
+          "seed-loading",
+        ),
         createElement(RunsPage, null),
       );
     }
@@ -63,5 +68,8 @@ describe("RunsPage — estimate summary", () => {
     expect(await screen.findByText("no")).toBeTruthy();
     await user.click(screen.getByText("seed-bad"));
     expect(await screen.findByText("shortfall: accepted 4 of 100")).toBeTruthy();
+    await user.click(screen.getByText("seed-loading"));
+    expect(await screen.findByText("estimating…")).toBeTruthy();
+    expect(screen.queryByText("shortfall: accepted 4 of 100")).toBeNull();
   });
 });

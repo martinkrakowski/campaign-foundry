@@ -38,17 +38,19 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
       setEstimate({ status: "idle" });
       return;
     }
+    // The previous estimate no longer describes this brief: clear it at once so
+    // Execute stays disabled until the new one lands (the Runs page shows "estimating…").
+    setPlan(null);
+    setEstimate({ status: "loading" });
     let cancelled = false;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       void planCampaign(brief, controller.signal).then((result) => {
         if (cancelled) return;
-        if (result.kind === "ok" && result.policyHash === shownHashRef.current) {
-          setPlan(result);
-          return;
-        }
-        shownHashRef.current = result.kind === "ok" ? result.policyHash : null;
         setPlan(result);
+        // Same policyHash as the estimate already on the context: skip the redundant write.
+        if (result.kind === "ok" && result.policyHash === shownHashRef.current) return;
+        shownHashRef.current = result.kind === "ok" ? result.policyHash : null;
         if (result.kind === "ok") {
           setEstimate({ status: "ok", estimate: result.estimate, error: null });
         } else if (result.kind === "infeasible") {
