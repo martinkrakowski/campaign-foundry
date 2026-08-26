@@ -181,6 +181,45 @@ settles) makes the id 404 — the persisted report is still at
 `GET /campaigns/result?campaignId=<id>`. The CLI (`yarn generate`) is unchanged and
 runs in-process.
 
+### Authoring briefs via the API
+
+Local authoring tool — writes stay under `briefs/` and `assets/inputs/<briefId>/`.
+The same `parseBrief` validator as generate applies; ids are path-safe slugs.
+
+```bash
+# Create (409 if briefs/<id>.yaml exists, unless ?replace=1)
+curl -X POST http://localhost:3001/campaigns/briefs \
+  -H 'content-type: application/json' \
+  --data @briefs/sample-campaign.json
+# → 201 { "file": "summer-hydration-2026.yaml", "brief": {…} }
+
+curl -X POST 'http://localhost:3001/campaigns/briefs?replace=1' \
+  -H 'content-type: application/json' \
+  --data @briefs/sample-campaign.json
+
+# Update an existing YAML brief (404 if missing; path id must equal brief.id)
+curl -X PUT http://localhost:3001/campaigns/briefs/summer-hydration-2026 \
+  -H 'content-type: application/json' \
+  --data @briefs/sample-campaign.json
+# → 200 { "file": "summer-hydration-2026.yaml", "brief": {…} }
+
+# Duplicate (404 source missing, 409 if briefs/<newId>.yaml exists)
+curl -X POST http://localhost:3001/campaigns/briefs/summer-hydration-2026/duplicate \
+  -H 'content-type: application/json' \
+  --data '{"newId":"summer-hydration-copy"}'
+# → 201 { "file": "summer-hydration-copy.yaml", "brief": {…} }
+
+# Upload a PNG/JPEG (≤ 2 MiB) into assets/inputs/<briefId>/
+curl -X POST http://localhost:3001/campaigns/assets \
+  -H 'content-type: application/json' \
+  --data '{"briefId":"summer-hydration-2026","name":"logo.png","contentBase64":"..."}'
+# → 201 { "path": "assets/inputs/summer-hydration-2026/logo.png" }
+```
+
+`GET /campaigns/briefs` lists anything POST/PUT/duplicate wrote. PUT only rewrites
+an existing `.yaml`/`.yml`; a JSON-only brief is replaced via `POST ?replace=1`
+(writes `<id>.yaml`). Asset `name` is a slug plus `.png`/`.jpg`/`.jpeg`.
+
 ---
 
 ## Example input
