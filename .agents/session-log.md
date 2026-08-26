@@ -565,3 +565,21 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Webpack `extensionAlias` so the web app can re-export `assetIdentity` at runtime.
 
 
+
+---
+
+## 2026-08-26 — Wave 4 lane A: video compositor machinery (PR 13)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `VideoCompositorPort` (`VideoCompositeRequest extends CompositeRequest` + `durationSec`/`fps`/`motion`/`sampleAt`; result = `video`/`poster`/`sampledFrames`/`logoApplied`) exported from the hand-maintained `ports/out/index.ts`.
+  - `NodeCanvasCompositor.draw(ctx, prepared, t, motion?)` animates the four `MOTION_KINDS` with easeOutCubic; solid accent band + logo static at every `t`; logo-overlap re-checked against the risen headline box per frame. Golden test proves byte-identity to the still at `restT(kind)` for every kind and cell.
+  - `CanvasFfmpegVideoCompositor`: raw RGBA → spawned `ffmpeg-static` (libx264/yuv420p/veryfast/crf 20, `-map_metadata -1`, mp4 to `pipe:1`), stdin back-pressure, poster at `restT`, sampled PNGs, `MAX_CONCURRENT_ENCODES = 2` gate, non-zero exit rejects with a redacted stderr tail.
+  - Boot probe: Nitro plugin `ffmpeg-check.ts` → `lib/capabilities.ts` `{ motion, reason? }` (warns, never throws; 5 s timeout); `bin/generate.ts` runs the same probe (log only). `.mp4 → video/mp4` on `GET /output/**`.
+  - `ffmpeg-static@5` added to CreativeGeneration and api; tech-stack row added.
+- **Decisions:**
+  - Ken-burns rest pose is the identity (scale 1.00 at `restT`): `in` eases 1.08→1.00, `out` 1.00→1.08. Anything else cannot be byte-identical to the still.
+  - `-movflags +faststart+empty_moov`: the plain mp4 muxer refuses a non-seekable `pipe:1` output; `empty_moov` puts `moov` up front so the stream stays pipe-friendly.
+  - `VideoCompositorPort` is **not** listed in `.architecture/manifest.yaml`: no existing port is, and listing it makes `hexagen sync` emit a duplicate `VideoCompositorPort.out-port.ts` stub (`VideoCompositorPortPort`).
+- **Left open:**
+  - Next wave: unlock `motion`/`duration`/`formats: motion` in the parser, wire the adapter into generation, and read `getCapabilities().motion` there. `GenerateCampaignUseCase`, `load-brief.ts`, the image chain and `apps/web` untouched here.
