@@ -847,3 +847,16 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - The domain still tolerates `formats: [motion]` + all-static platforms via
     `motionRatios: []` (every variant a still) — unreachable through the parser
     now, kept as the documented domain edge.
+
+## 2026-08-26 — waves 2–5 orchestration, review and merge (PRs #43–#58)
+
+- **Mode:** Reviewer (orchestrating implementers: Grok for waves 2–3 and the first half of wave 4; Claude subagents after Grok's balance was exhausted mid-wave 4)
+- **Changes:**
+  - Wave 2 (#43 clock injection, #44 test fixture, #45 prepare/draw refactor, #46 planner, #47 briefs API, #48 packaging), wave 3 (#49 safe insets, #50 generate-from-plan + identity migration, #51 wizard), wave 4 (#52 copy pools, #53 review UI scale, #54 video compositor + boot probe, #55 empty-zip hotfix), wave 5 (#57 pool headlines, #58 motion generation, #56 docs) — every PR independently reviewed at high effort against the branch diff, every bot thread (Qodo, CodeRabbit) verified against the code and answered; fix rounds pushed to each branch before merge; each PR squash-merged after CI on the refreshed head.
+  - `main` went red once (#53's empty-zip stream hung on the Node 22 runner) and was hotfixed by #55 within the same session.
+- **Decisions:**
+  - Grok `-p` truncates long prompts — `--prompt-file` from wave 2 on; Grok runs must be launched detached (`nohup`) — the harness's task timeout killed one wave-4 attempt.
+  - When Grok's balance ran out (402) the remaining lanes were finished by Claude subagents rather than waiting; the plan's file-ownership tables kept parallel lanes disjoint, and the two deliberate seams (`Variant`, `DISTANCE_AXES`, the `minDistance` bound, `load-brief` allowlists, `PlanInput`) were merged by hand once.
+  - Refuted across the sweep, with reasons on each PR: structured-logger findings (no logger installed; `env.ts` precedent), `Result<T,E>` as an HTTP wire shape, a `JobStore` port at the composition root, "failed batch overwrites earlier outputs" (inherited classic behaviour), "old campaign packages newer bytes" (pre-namespaced render paths, mitigated by `packagedAt`).
+- **Left open:**
+  - Deferred by design (plan §Deferred): Phase 8 GenAI video backgrounds, 4:5 ratio, SSE progress, real `done/total`, `withTempProjectRoot`, a structured logger; linux inset golden still unrecorded; wizard has no motion controls yet (bound adds motion axes once they land); grid headline chip.
