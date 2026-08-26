@@ -316,25 +316,15 @@ cd /path/to/repo
 opencode --model opencode/nemotron-3-ultra-free
 ```
 
-### 1 — Kick it off (paste this one message)
+### 1 — Kick it off
 
-```
-You are the ORCHESTRATOR. Follow docs/workflows/delegated-implementation-pipeline.md exactly.
+Fill in the four `INPUTS` at the top of
+[`orchestrator-kickoff-prompt.md`](orchestrator-kickoff-prompt.md) and paste the whole prompt
+into the orchestrator session — it carries the cast table, the per-stage commands, the
+invariants and the reporting contract, so no further instruction is needed until it reports.
 
-Plan:        docs/planning/2026-08-26_unified-campaign-editor.md
-Wave:        E1 (see the plan's phase table for lanes, ownership and acceptance)
-Implementer: grok  --prompt-file <brief> --always-approve --effort high \
-                   --output-format plain --max-turns 600
-Reviewer:    claude -p "$(cat <brief>)" --model claude-opus-4-8 --output-format text \
-                   --disallowedTools "Edit Write NotebookEdit"
-Remediator:  claude -p "$(cat <brief>)" --model claude-opus-4-8 --output-format text \
-                   --permission-mode acceptEdits
-Merge:       scripts/merge-prs.sh
-
-Rules: you write no feature code yourself; one worktree+branch+PR per lane; launch every CLI
-detached with nohup; review each PR against its BRANCH DIFF, never the working tree; verify
-every bot finding against the code before acting on it; reply to and resolve or refute every
-thread; merge sequentially only when CI is green on the refreshed head. Report after each stage.
+```bash
+sed -n '/^---$/,$p' docs/workflows/orchestrator-kickoff-prompt.md | tail -n +2 | pbcopy
 ```
 
 ### 2 — What the orchestrator then runs
