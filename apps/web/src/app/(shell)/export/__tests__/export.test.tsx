@@ -2,8 +2,18 @@ import { describe, test, expect, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRun, seedPersistedRun, makeAsset, makeMotionAsset, json, mockPipelineApi } from "@/__tests__/helpers";
-import { API } from "@/lib/run-context";
+import { API, useRun } from "@/lib/run-context";
 import ExportPage from "../page";
+
+/** Test-only control: adopt a different brief, as the picker's select does. */
+function SwitchToOther() {
+  const { brief, setBrief } = useRun();
+  return (
+    <button type="button" onClick={() => setBrief({ ...brief, id: "other" })}>
+      switch run
+    </button>
+  );
+}
 
 beforeEach(() => localStorage.setItem("cf:brief-picked", "1"));
 
@@ -230,5 +240,47 @@ describe("ExportPage — motion", () => {
     renderWithRun(<ExportPage />);
     expect(await screen.findByRole("group", { name: "Platforms" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "instagram-reel" })).toBeNull();
+  });
+
+  test("a run switch that hides the selected motion platform drops the selection and disables Package", async () => {
+    const user = userEvent.setup();
+    const motionRun = { halted: false, assets: [makeMotionAsset()], log: { entries: [], campaignId: "seed" } };
+    const staticRun = { halted: false, assets: [makeAsset()], log: { entries: [], campaignId: "other" } };
+    seedPersistedRun(motionRun.assets);
+    const bodies: unknown[] = [];
+    mockPipelineApi({
+      result: (url) => json(url.includes("campaignId=other") ? staticRun : motionRun),
+      packages: () => json({ platforms: [] }, 404),
+      packagePost: (_url, init) => {
+        bodies.push(JSON.parse(String(init.body)));
+        return json({ platforms: [] });
+      },
+    });
+    renderWithRun(
+      <>
+        <ExportPage />
+        <SwitchToOther />
+      </>,
+    );
+    await user.click(await screen.findByRole("button", { name: "instagram-reel" }));
+    expect(screen.getByRole("button", { name: "instagram-reel", pressed: true })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "switch run" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "instagram-reel" })).toBeNull());
+    // No visible platform is selected any more.
+    for (const id of ["instagram-feed", "linkedin", "x"]) {
+      expect(screen.getByRole("button", { name: id, pressed: false })).toBeTruthy();
+    }
+    const packageButton = screen.getByRole("button", { name: "Package" }) as HTMLButtonElement;
+    expect(packageButton.disabled).toBe(true);
+    expect(packageButton.title).toBe("Select a platform first");
+    await user.click(packageButton);
+    expect(bodies).toEqual([]);
+
+    // Picking a visible platform re-enables packaging for exactly that platform.
+    await user.click(screen.getByRole("button", { name: "linkedin" }));
+    await user.click(screen.getByRole("button", { name: "Package" }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]).toMatchObject({ campaignId: "other", platforms: ["linkedin"] });
   });
 });

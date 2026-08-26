@@ -55,6 +55,10 @@ export default function ExportPage() {
   // Motion platforms join the picker once the run contains a motion creative.
   const hasMotion = assets.some((a) => a.format === "motion");
   const platforms: readonly string[] = hasMotion ? [...STATIC_PLATFORMS, ...MOTION_PLATFORMS] : STATIC_PLATFORMS;
+  // A selection made while a motion platform was visible must not survive a run
+  // switch that hides it: nothing hidden is ever packaged, and with no visible
+  // selection there is nothing to package.
+  const activePlatform = platforms.includes(platform) ? platform : null;
 
   // One proof PDF per product that has at least one approved creative; dedupe by path.
   const proofs = useMemo(() => {
@@ -74,7 +78,7 @@ export default function ExportPage() {
     );
   }
 
-  const selected = packages.find((p) => p.platformId === platform);
+  const selected = activePlatform === null ? undefined : packages.find((p) => p.platformId === activePlatform);
 
   return (
     <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col gap-8 p-4 pb-12 sm:p-8">
@@ -147,10 +151,10 @@ export default function ExportPage() {
             <button
               key={id}
               type="button"
-              aria-pressed={platform === id}
+              aria-pressed={activePlatform === id}
               onClick={() => setPlatform(id)}
               className={
-                platform === id
+                activePlatform === id
                   ? "rounded-full border border-brand-primary bg-surface-2 px-3 py-1.5 font-mono text-[12px] text-white"
                   : "rounded-full border border-border px-3 py-1.5 font-mono text-[12px] text-text-muted"
               }
@@ -162,15 +166,18 @@ export default function ExportPage() {
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => void packageSelected([platform], hasDecisions ? approvedKeys : undefined)}
-            disabled={packaging}
+            onClick={() =>
+              activePlatform !== null && void packageSelected([activePlatform], hasDecisions ? approvedKeys : undefined)
+            }
+            disabled={packaging || activePlatform === null}
+            title={activePlatform === null ? "Select a platform first" : undefined}
             className="rounded-full bg-white px-4 py-1.5 text-[13px] font-semibold text-black transition-colors hover:bg-gray-200 disabled:bg-surface-2 disabled:text-text-muted"
           >
             {packaging ? "Packaging…" : "Package"}
           </button>
           {selected ? (
             <a
-              href={`${API}/campaigns/packages/${encodeURIComponent(brief.id)}/${platform}.zip`}
+              href={`${API}/campaigns/packages/${encodeURIComponent(brief.id)}/${selected.platformId}.zip`}
               download
               className="rounded-full border border-border bg-surface-2 px-4 py-1.5 text-[13px] text-white transition-colors hover:bg-border-hover"
             >

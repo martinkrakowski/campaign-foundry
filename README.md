@@ -332,8 +332,10 @@ output:
   item copies the mp4 and poster, records `format`, `durationSec`, and a
   `duration` check against the profile's cap; static profiles ignore clips.
 - **Review.** Grid cells render the clip over its poster (hover to play, or the
-  play control for keyboard users); the estimate panel adds `frames` and an
-  encode estimate of ≈ 7 ms per frame.
+  play control for keyboard users; a refused `play()` keeps the play control and
+  shows "can't play"); the estimate panel adds `frames` and an encode estimate of
+  ≈ 7 ms per frame. Export offers motion platforms only while the loaded run
+  holds a clip — a selection that a run switch hides is dropped.
 
 `yarn generate --brief briefs/sample-motion.yaml` runs the sample end-to-end.
 
