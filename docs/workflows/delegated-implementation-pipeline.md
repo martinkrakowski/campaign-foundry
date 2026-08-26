@@ -26,12 +26,16 @@ packaging, copy pools, motion generation — with a 100 % coverage gate held thr
 
 ## 1. Roles and CLIs
 
-| Role | What it does | Runs as |
-|---|---|---|
-| **Orchestrator** | Writes lane briefs, reviews PRs, sweeps bot comments, merges, keeps the log | The interactive session (Claude Code here) |
-| **Implementer** | One lane = one branch = one PR, inside its own git worktree | Any agent CLI, headless |
-| **Reviewer** | Adversarial read-only pass per PR, against the branch diff | Orchestrator subagents |
-| **Remediator** | Applies a fix brief to an existing branch | Same CLI as the implementer |
+| Role | Stage | What it does | Runs as |
+|---|---|---|---|
+| **Orchestrator** | 1, 4, 5 | Writes lane briefs, sweeps bot threads, merges, keeps the log | The interactive session you are typing in |
+| **Implementer** | 1 | One lane = one branch = one PR, inside its own git worktree | An agent CLI, headless, one process per lane |
+| **Reviewer** | 2 | Adversarial read-only pass per PR, against the branch diff | Orchestrator subagents **or** a separate CLI (see below) |
+| **Remediator** | 3 | Applies a fix brief to an existing branch | An agent CLI, headless — usually the reviewer's |
+
+Any CLI can play any role; they are interchangeable and can differ per stage. Mixing them
+is often the point: a cheap long-context model orchestrates, a fast one implements, a
+strong one reviews.
 
 ### Verified headless invocations
 
@@ -53,6 +57,28 @@ disown
 ```
 
 `setsid` does not exist on macOS — `nohup … & disown` is the portable form.
+
+### Which CLI at which stage
+
+| Stage | Who runs it | Command shape | Notes |
+|---|---|---|---|
+| **1 Delegate** | Implementer CLI, one process per lane, detached | `CLI <brief> --<auto-approve> --<high effort> --max-turns 400-600` | Long-running (10–40 min). Needs write access and a generous turn budget. |
+| **2 Review** | Orchestrator subagents, **or** a CLI in read-only mode | `claude -p "$(cat review-brief.md)" --model <strong> --disallowedTools "Edit Write NotebookEdit"` | Deny the edit tools — a reviewer that can patch will "helpfully" fix instead of reporting. |
+| **3 Remediate** | Implementer or reviewer CLI, same worktree | same as stage 1 with `--max-turns 200-300` | Smaller budget: the brief is explicit, so a long run means it is thrashing. |
+| **4 Sweep** | Orchestrator only | `gh api …` (no agent CLI) | Judgement about refuting a finding stays with the orchestrator. |
+| **5 Merge** | Orchestrator only | `scripts/merge-prs.sh …` | Never delegate a merge. |
+
+**Choosing, and falling back.** Pick the implementer for throughput and the reviewer for
+rigour, and keep them on *different models* — a model reviewing its own output rationalises
+it. When a CLI dies mid-wave (quota, auth, crash), the brief is the unit of portability:
+hand the same file to another CLI and re-run the lane. Lanes that already pushed keep their
+PRs. Record the handover in the session log so the PR history stays explicable.
+
+**Reviewer independence trade-off.** Orchestrator subagents inherit the whole session's
+context, so their reviews are cheap and well-informed but share the orchestrator's blind
+spots. A separate CLI costs a cold read of the diff and repo conventions, and buys a genuinely
+independent opinion. Use subagents for routine lanes; use a separate CLI for the lane that
+carries the most risk.
 
 ---
 
@@ -271,7 +297,94 @@ Never resolve a thread you did not answer, and never claim a fix you have not ve
 
 ---
 
-## 6. Adapting to another repo
+## 6. Worked example — three CLIs, one wave
+
+A concrete run: **opencode** hosts the orchestrator on Nemotron 3 Ultra, **grok** implements
+the lanes, **Claude Opus 4.8** reviews and remediates. Model ids below were taken from
+`opencode models` and verified against each CLI on 2026-08-26.
+
+| Stage | Tool | Model | Why this one |
+|---|---|---|---|
+| 1 Delegate, 4 Sweep, 5 Merge | `opencode` interactive | `opencode/nemotron-3-ultra-free` | Orchestration is read-heavy and long-lived: many diffs, logs and threads, little generation. |
+| 1 Implement (per lane) | `grok` headless | default | Fast, high turn budget, comfortable in a worktree. |
+| 2 Review, 3 Remediate | `claude` headless | `claude-opus-4-8` | Different model from both the orchestrator and the implementer, so neither reviews its own reasoning. |
+
+### 0 — Start the orchestrator
+
+```bash
+cd /path/to/repo
+opencode --model opencode/nemotron-3-ultra-free
+```
+
+### 1 — Kick it off (paste this one message)
+
+```
+You are the ORCHESTRATOR. Follow docs/workflows/delegated-implementation-pipeline.md exactly.
+
+Plan:        docs/planning/2026-08-26_unified-campaign-editor.md
+Wave:        E1 (see the plan's phase table for lanes, ownership and acceptance)
+Implementer: grok  --prompt-file <brief> --always-approve --effort high \
+                   --output-format plain --max-turns 600
+Reviewer:    claude -p "$(cat <brief>)" --model claude-opus-4-8 --output-format text \
+                   --disallowedTools "Edit Write NotebookEdit"
+Remediator:  claude -p "$(cat <brief>)" --model claude-opus-4-8 --output-format text \
+                   --permission-mode acceptEdits
+Merge:       scripts/merge-prs.sh
+
+Rules: you write no feature code yourself; one worktree+branch+PR per lane; launch every CLI
+detached with nohup; review each PR against its BRANCH DIFF, never the working tree; verify
+every bot finding against the code before acting on it; reply to and resolve or refute every
+thread; merge sequentially only when CI is green on the refreshed head. Report after each stage.
+```
+
+### 2 — What the orchestrator then runs
+
+```bash
+# Stage 1 — one worktree + one detached grok per lane
+git fetch origin main
+for lane in editor-shell editor-selector; do
+  git worktree add "../wt-$lane" -b "feat/$lane" origin/main
+  (cd "../wt-$lane" && yarn install --immutable)
+  nohup zsh -c "cd ../wt-$lane && grok --prompt-file /tmp/brief-$lane.md \
+      --always-approve --effort high --output-format plain --max-turns 600 \
+      > /tmp/$lane.log 2>&1; echo \"EXIT \$?\" >> /tmp/$lane.log" >/dev/null 2>&1 &
+  disown
+done
+
+# Stage 2 — independent review of each PR, read-only
+claude -p "$(cat /tmp/review-65.md)" --model claude-opus-4-8 --output-format text \
+  --disallowedTools "Edit Write NotebookEdit" > /tmp/review-65.json
+
+# Stage 3 — remediation on the same branch, smaller turn budget
+nohup zsh -c "cd ../wt-editor-shell && claude -p \"$(cat /tmp/fix-65.md)\" \
+    --model claude-opus-4-8 --permission-mode acceptEdits --output-format text \
+    > /tmp/fix-65.log 2>&1; echo \"EXIT \$?\" >> /tmp/fix-65.log" >/dev/null 2>&1 &
+disown
+
+# Stage 4 — sweep (orchestrator itself, no agent CLI)
+gh api repos/OWNER/REPO/pulls/65/comments --jq '.[] | "\(.id) \(.path):\(.line)"'
+gh api -X POST repos/OWNER/REPO/pulls/65/comments/$ID/replies -f body="Resolved in <sha> — …"
+
+# Stage 5 — merge
+scripts/merge-prs.sh "65|../wt-editor-shell|feat/editor-shell" \
+                     "66|../wt-editor-selector|feat/editor-selector"
+```
+
+### Swapping the cast
+
+The stages are defined by role, not by vendor, so any row of the table in §1 can take any
+seat. Two swaps worth knowing:
+
+- **Claude Code as the host.** Run the orchestrator interactively and use its subagents for
+  stage 2 instead of a separate `claude -p` — cheaper and context-rich, at the cost of
+  reviewer independence (§1).
+- **agy as implementer.** `agy --print "$(cat brief.md)" --dangerously-skip-permissions
+  --effort high --print-timeout 60m` — it has no `--prompt-file`, and the default 5-minute
+  print timeout will truncate a lane, so raise it explicitly.
+
+---
+
+## 7. Adapting to another repo
 
 Replace: the gate commands (§0.2), the append-only file list (`APPEND_ONLY` in
 `scripts/merge-prs.sh`), the plan path convention, and the Co-Authored-By trailer. Everything
