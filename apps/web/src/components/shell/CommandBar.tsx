@@ -4,6 +4,10 @@ import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } 
 import { createPortal } from "react-dom";
 import { assetKey, useRun } from "@/lib/run-context";
 import { ASPECT_RATIOS } from "@/lib/aspect-ratios";
+import { planCampaign, type PlanResult } from "@/lib/briefs-api";
+
+/** Match wizard PLAN_DEBOUNCE_MS without importing wizard-state. */
+const PLAN_DEBOUNCE_MS = 250;
 
 interface CommandBarProps {
   onToggleTelemetry: () => void;
@@ -14,14 +18,55 @@ type Confirm = "run" | "regenerate";
 
 /** Floating bottom orchestrator bar: status, telemetry toggle, regenerate, Execute. */
 export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
-  const { execute, regenerateRejected, loading, error, hasRun, halted, brief, assets, decisions } =
+  const { execute, regenerateRejected, loading, error, hasRun, halted, brief, assets, decisions, setEstimate } =
     useRun();
   const [confirm, setConfirm] = useState<Confirm | null>(null);
+  const [plan, setPlan] = useState<PlanResult | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
+  const shownHashRef = useRef<string | null>(null);
+
+  const isVariation = brief.mode === "variation";
 
   // What a full run will (re)generate: products × aspect ratios × treatments.
   const expectedCount =
     brief.products.length * ASPECT_RATIOS.length * (brief.treatments?.length ?? 1);
+
+  useEffect(() => {
+    if (!isVariation) {
+      shownHashRef.current = null;
+      setPlan(null);
+      setEstimate({ status: "idle" });
+      return;
+    }
+    let cancelled = false;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void planCampaign(brief, controller.signal).then((result) => {
+        if (cancelled) return;
+        if (result.kind === "ok" && result.policyHash === shownHashRef.current) {
+          setPlan(result);
+          return;
+        }
+        shownHashRef.current = result.kind === "ok" ? result.policyHash : null;
+        setPlan(result);
+        if (result.kind === "ok") {
+          setEstimate({ status: "ok", estimate: result.estimate, error: null });
+        } else if (result.kind === "infeasible") {
+          setEstimate({ status: "infeasible", estimate: null, error: result.error });
+        } else {
+          setEstimate({ status: "unavailable", estimate: null, error: null });
+        }
+      });
+    }, PLAN_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [brief, isVariation, setEstimate]);
+
+  const variationBlocked = isVariation && (plan === null || plan.kind === "infeasible");
+  const creativeCount = plan?.kind === "ok" ? plan.estimate.creatives : expectedCount;
 
   const rejectedCount = useMemo(
     () => assets.filter((a) => decisions[assetKey(a)] === "rejected").length,
@@ -50,8 +95,11 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
           description: (
             <>
               This {hasRun ? "regenerates" : "generates"} all{" "}
-              <span className="text-text-primary">{expectedCount} creatives</span> (every product ×
-              aspect ratio × treatment) and may consume GenAI quota/credits.
+              <span className="text-text-primary">{creativeCount} creatives</span>
+              {isVariation
+                ? " from the variation plan"
+                : " (every product × aspect ratio × treatment)"}{" "}
+              and may consume GenAI quota/credits.
             </>
           ),
         }
@@ -84,6 +132,7 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
         </span>
         <span className={`truncate text-right text-[12px] ${statusColor}`}>{status}</span>
       </div>
+      {isVariation && <EstimateSummary plan={plan} />}
       <div className="flex items-center justify-between gap-2 px-2 pt-2">
         <button
           type="button"
@@ -119,7 +168,7 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
           <button
             type="button"
             onClick={() => setConfirm("run")}
-            disabled={loading}
+            disabled={loading || variationBlocked}
             aria-busy={loading || undefined}
             aria-haspopup="dialog"
             className="flex shrink-0 items-center space-x-2 rounded-full bg-white px-4 py-1.5 text-[13px] font-semibold text-black transition-colors hover:bg-gray-200 disabled:bg-surface-2 disabled:text-text-muted sm:px-6"
@@ -157,6 +206,47 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
           />,
           document.body,
         )}
+    </div>
+  );
+}
+
+function EstimateSummary({ plan }: { plan: PlanResult | null }) {
+  return (
+    <div className="border-b border-border px-2 py-2">
+      <h3 className="font-mono text-[11px] uppercase tracking-widest text-text-muted">Estimate</h3>
+      {plan === null ? (
+        <p className="mt-1 text-[12px] text-text-muted">Estimating…</p>
+      ) : plan.kind === "ok" ? (
+        <>
+          <dl className="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5 text-[12px] text-text-primary sm:grid-cols-4">
+            <div>
+              <dt className="text-text-muted">creatives</dt>
+              <dd>{plan.estimate.creatives}</dd>
+            </div>
+            <div>
+              <dt className="text-text-muted">axisProductSize</dt>
+              <dd>{plan.estimate.axisProductSize}</dd>
+            </div>
+            <div>
+              <dt className="text-text-muted">feasible</dt>
+              <dd>{plan.estimate.feasible ? "yes" : "no"}</dd>
+            </div>
+            <div>
+              <dt className="text-text-muted">genaiCalls</dt>
+              <dd>{plan.estimate.genaiCalls}</dd>
+            </div>
+          </dl>
+          {plan.estimate.genaiCalls > 0 && (
+            <p className="mt-1 text-[12px] text-warning">
+              Cost warning: this plan makes {plan.estimate.genaiCalls} GenAI calls.
+            </p>
+          )}
+        </>
+      ) : plan.kind === "infeasible" ? (
+        <p className="mt-1 text-[12px] text-error">{plan.error}</p>
+      ) : (
+        <p className="mt-1 text-[12px] text-text-muted">estimate unavailable</p>
+      )}
     </div>
   );
 }

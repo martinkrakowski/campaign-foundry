@@ -1079,3 +1079,143 @@ describe("RunProvider — job polling", () => {
     expect(result.current.assets).toHaveLength(0);
   });
 });
+
+describe("RunProvider — estimate and packaging", () => {
+  const pkg = (platformId: string) => ({
+    platformId,
+    items: [
+      {
+        productId: "alpha",
+        aspectRatio: "1:1",
+        treatment: "default",
+        source: "alpha/1x1.png",
+        packagedPath: `packages/summer-hydration-2026/${platformId}/alpha/1x1.png`,
+        bytes: 12,
+        checks: { size: "pass" as const },
+      },
+    ],
+  });
+
+  test("setEstimate stores ok, infeasible, unavailable, and idle", () => {
+    const { result } = setup();
+    act(() =>
+      result.current.setEstimate({
+        status: "ok",
+        estimate: { creatives: 12, axisProductSize: 36, feasible: true, genaiCalls: 0 },
+        error: null,
+      }),
+    );
+    expect(result.current.estimateStatus).toBe("ok");
+    expect(result.current.estimate?.creatives).toBe(12);
+    act(() => result.current.setEstimate({ status: "infeasible", estimate: null, error: "nope" }));
+    expect(result.current.estimateError).toBe("nope");
+    act(() => result.current.setEstimate({ status: "unavailable", estimate: null, error: null }));
+    expect(result.current.estimateStatus).toBe("unavailable");
+    act(() => result.current.setEstimate({ status: "loading" }));
+    expect(result.current.estimateStatus).toBe("loading");
+    act(() => result.current.setEstimate({ status: "idle" }));
+    expect(result.current.estimate).toBeNull();
+    expect(result.current.estimateError).toBeNull();
+    expect(result.current.estimateStatus).toBe("idle");
+  });
+
+  test("packageSelected merges platforms and records an error", async () => {
+    mockPipelineApi({
+      packagePost: (_url, init) => {
+        const body = JSON.parse(String(init.body)) as { platforms: string[] };
+        if (body.platforms[0] === "x") return json({ error: "unknown" }, 422);
+        return json({ platforms: [pkg(body.platforms[0])] });
+      },
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.packageSelected(["instagram-feed"]);
+    });
+    expect(result.current.packages.map((p) => p.platformId)).toEqual(["instagram-feed"]);
+    await act(async () => {
+      await result.current.packageSelected(["linkedin"]);
+    });
+    expect(result.current.packages.map((p) => p.platformId).sort()).toEqual(["instagram-feed", "linkedin"]);
+    await act(async () => {
+      await result.current.packageSelected(["x"]);
+    });
+    expect(result.current.packageError).toBe("unknown");
+    expect(result.current.packages).toHaveLength(2);
+  });
+
+  test("loadPackages hydrates, treats 404 as empty, and surfaces other errors", async () => {
+    mockPipelineApi({
+      packages: () => json({ platforms: [pkg("instagram-feed")] }),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.loadPackages();
+    });
+    expect(result.current.packages).toHaveLength(1);
+    mockPipelineApi({ packages: () => json({ error: "Not found" }, 404) });
+    await act(async () => {
+      await result.current.loadPackages();
+    });
+    expect(result.current.packages).toHaveLength(0);
+    mockPipelineApi({ packages: () => json({ error: "boom" }, 500) });
+    await act(async () => {
+      await result.current.loadPackages();
+    });
+    expect(result.current.packageError).toBe("boom");
+  });
+
+  test("switching briefs clears estimate and packages", async () => {
+    mockPipelineApi({
+      packagePost: () => json({ platforms: [pkg("instagram-feed")] }),
+    });
+    const { result } = setup();
+    act(() =>
+      result.current.setEstimate({
+        status: "ok",
+        estimate: { creatives: 1, axisProductSize: 1, feasible: true, genaiCalls: 0 },
+        error: null,
+      }),
+    );
+    await act(async () => {
+      await result.current.packageSelected(["instagram-feed"]);
+    });
+    act(() =>
+      result.current.setBrief({
+        id: "other-camp",
+        targetRegion: "US",
+        targetAudience: "x",
+        campaignMessage: "y",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" },
+          { id: "p2", name: "P2", primaryColor: "#222222", logoPath: "b.png" },
+        ],
+      }),
+    );
+    expect(result.current.estimate).toBeNull();
+    expect(result.current.packages).toHaveLength(0);
+    expect(result.current.estimateStatus).toBe("idle");
+  });
+
+  test("packageSelected uses a generic message for a non-Error rejection", async () => {
+    mockPipelineApi({
+      packagePost: () => Promise.reject("plain"),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.packageSelected(["instagram-feed"]);
+    });
+    expect(result.current.packageError).toBe("Network error");
+  });
+
+  test("loadPackages uses a generic message for a non-Error rejection", async () => {
+    mockPipelineApi({
+      packages: () => Promise.reject("plain"),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.loadPackages();
+    });
+    expect(result.current.packageError).toBe("Network error");
+  });
+});
+

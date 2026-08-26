@@ -11,6 +11,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import {
+  listPackages,
+  packageCampaign,
+  unknownErrorMessage,
+  type PackagedPlatform,
+  type PlanEstimate,
+} from "./briefs-api";
 
 /** Base path for the Nitro pipeline API (proxied by next.config rewrites). */
 export const API = "/api/pipeline";
@@ -32,7 +39,7 @@ export interface Asset {
   /** Re-roll counter. Variation originals are 0; omitted on classic assets. */
   attempt?: number;
   seed?: number;
-  format?: "static";
+  format?: "static" | "motion";
   descriptor?: {
     layout: string;
     tone: string;
@@ -165,6 +172,10 @@ async function pollJob(jobId: string, signal: AbortSignal): Promise<PollOutcome>
 
 export type Decision = "approved" | "rejected";
 
+export type EstimateStatus = "idle" | "loading" | "ok" | "infeasible" | "unavailable";
+
+export type { PackagedPlatform, PlanEstimate };
+
 /**
  * Stable key — classic triple, or `productId/v<index>` in variation mode.
  * Mirrors domain `assetIdentity` (same fixtures; a runtime re-export of the
@@ -271,6 +282,20 @@ interface RunContextValue {
   briefPickerOpen: boolean;
   openBriefPicker: () => void;
   closeBriefPicker: () => void;
+  /** Last settled variation-plan estimate (CommandBar writes; Runs reads). */
+  estimate: PlanEstimate | null;
+  estimateError: string | null;
+  estimateStatus: EstimateStatus;
+  setEstimate: (next: {
+    status: EstimateStatus;
+    estimate?: PlanEstimate | null;
+    error?: string | null;
+  }) => void;
+  packaging: boolean;
+  packageError: string | null;
+  packages: PackagedPlatform[];
+  packageSelected: (platforms: readonly string[]) => Promise<void>;
+  loadPackages: () => Promise<void>;
 }
 
 const EMPTY_LOG: LogEntry[] = [];
@@ -287,6 +312,12 @@ export function RunProvider({ children }: { children: ReactNode }) {
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [regeneratingKeys, setRegeneratingKeys] = useState<ReadonlySet<string> | null>(null);
   const [briefPickerOpen, setBriefPickerOpen] = useState(false);
+  const [estimate, setEstimateData] = useState<PlanEstimate | null>(null);
+  const [estimateError, setEstimateError] = useState<string | null>(null);
+  const [estimateStatus, setEstimateStatus] = useState<EstimateStatus>("idle");
+  const [packaging, setPackaging] = useState(false);
+  const [packageError, setPackageError] = useState<string | null>(null);
+  const [packages, setPackages] = useState<PackagedPlatform[]>([]);
 
   // Brief picker: auto-open once on first visit so a reviewer sees they can load
   // their own spec; remember the dismissal so reloads don't re-prompt. Reopenable
@@ -339,6 +370,12 @@ export function RunProvider({ children }: { children: ReactNode }) {
       }
       // (1) Already showing this brief's run — leave the grid (and decisions) intact.
       if (result?.log?.campaignId === next.id) return;
+      setEstimateData(null);
+      setEstimateError(null);
+      setEstimateStatus("idle");
+      setPackages([]);
+      setPackageError(null);
+      setPackaging(false);
       // Switching to a different brief invalidates any in-flight run and leaves the
       // "orchestrating" UI state, so a late-resolving run can't write back (the seq
       // guard in execute/regenerateRejected) and the grid isn't stuck spinning.
@@ -567,6 +604,50 @@ export function RunProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const setEstimate = useCallback(
+    (next: { status: EstimateStatus; estimate?: PlanEstimate | null; error?: string | null }) => {
+      setEstimateStatus(next.status);
+      if (next.status === "idle") {
+        setEstimateData(null);
+        setEstimateError(null);
+        return;
+      }
+      if (next.estimate !== undefined) setEstimateData(next.estimate);
+      if (next.error !== undefined) setEstimateError(next.error);
+    },
+    [],
+  );
+
+  const packageSelected = useCallback(
+    async (platforms: readonly string[]) => {
+      setPackaging(true);
+      setPackageError(null);
+      try {
+        const result = await packageCampaign(brief.id, platforms);
+        setPackages((prev) => {
+          const byId = new Map(prev.map((p) => [p.platformId, p] as const));
+          for (const p of result.platforms) byId.set(p.platformId, p);
+          return [...byId.values()];
+        });
+      } catch (e) {
+        setPackageError(unknownErrorMessage(e, "Packaging failed"));
+      } finally {
+        setPackaging(false);
+      }
+    },
+    [brief.id],
+  );
+
+  const loadPackages = useCallback(async () => {
+    try {
+      const result = await listPackages(brief.id);
+      setPackages(result.platforms);
+      setPackageError(null);
+    } catch (e) {
+      setPackageError(unknownErrorMessage(e, "Failed to list packages"));
+    }
+  }, [brief.id]);
+
   const value = useMemo<RunContextValue>(
     () => ({
       brief,
@@ -590,6 +671,15 @@ export function RunProvider({ children }: { children: ReactNode }) {
       briefPickerOpen,
       openBriefPicker,
       closeBriefPicker,
+      estimate,
+      estimateError,
+      estimateStatus,
+      setEstimate,
+      packaging,
+      packageError,
+      packages,
+      packageSelected,
+      loadPackages,
     }),
     [
       brief,
@@ -607,6 +697,15 @@ export function RunProvider({ children }: { children: ReactNode }) {
       briefPickerOpen,
       openBriefPicker,
       closeBriefPicker,
+      estimate,
+      estimateError,
+      estimateStatus,
+      setEstimate,
+      packaging,
+      packageError,
+      packages,
+      packageSelected,
+      loadPackages,
     ],
   );
 

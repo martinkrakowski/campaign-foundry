@@ -15,10 +15,23 @@ const ratioRank = (r: string): number => {
 const assetSrc = (a: Asset, version: number): string =>
   `${API}/output/${a.outputPath}?v=${version}`;
 
+const PAGE_SIZE = 24;
+
+const formatOf = (a: Asset): "static" | "motion" => a.format ?? "static";
+
+const uniqueSorted = (values: string[]): string[] => [...new Set(values)].sort();
+
 /** Review grid — the HITL surface where a human approves or rejects creatives. */
 export default function GridPage() {
   const { assets, decisions, decide, loading, assetVersion, regeneratingKeys } = useRun();
   const [previewKey, setPreviewKey] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [productFilter, setProductFilter] = useState("");
+  const [ratioFilter, setRatioFilter] = useState("");
+  const [formatFilter, setFormatFilter] = useState("");
+  const [layoutFilter, setLayoutFilter] = useState("");
+  const [toneFilter, setToneFilter] = useState("");
+  const [backgroundFilter, setBackgroundFilter] = useState("");
   const closePreview = useCallback(() => setPreviewKey(null), []);
   // Derive the previewed asset from the live list (not a snapshot), so its
   // compliance/logo metadata can never go stale against the cache-busted image; if
@@ -33,11 +46,49 @@ export default function GridPage() {
     if (loading) setPreviewKey(null);
   }, [loading]);
 
+  const hasDescriptors = assets.some((a) => a.descriptor);
+
+  const filterOptions = useMemo(
+    () => ({
+      products: uniqueSorted(assets.map((a) => a.productId)),
+      ratios: uniqueSorted(assets.map((a) => a.aspectRatio)),
+      formats: uniqueSorted(assets.map((a) => formatOf(a))),
+      layouts: uniqueSorted(assets.flatMap((a) => (a.descriptor ? [a.descriptor.layout] : []))),
+      tones: uniqueSorted(assets.flatMap((a) => (a.descriptor ? [a.descriptor.tone] : []))),
+      backgrounds: uniqueSorted(
+        assets.flatMap((a) => (a.descriptor ? [a.descriptor.backgroundSource] : [])),
+      ),
+    }),
+    [assets],
+  );
+
+  const applyFilter = (setter: (value: string) => void) => (value: string) => {
+    setter(value);
+    setPage(1);
+  };
+
+  const filtered = useMemo(
+    () =>
+      assets.filter((a) => {
+        if (productFilter && a.productId !== productFilter) return false;
+        if (ratioFilter && a.aspectRatio !== ratioFilter) return false;
+        if (formatFilter && formatOf(a) !== formatFilter) return false;
+        if (layoutFilter && a.descriptor?.layout !== layoutFilter) return false;
+        if (toneFilter && a.descriptor?.tone !== toneFilter) return false;
+        if (backgroundFilter && a.descriptor?.backgroundSource !== backgroundFilter) return false;
+        return true;
+      }),
+    [assets, productFilter, ratioFilter, formatFilter, layoutFilter, toneFilter, backgroundFilter],
+  );
+
+  const visible = filtered.slice(0, page * PAGE_SIZE);
+  const canShowMore = visible.length < filtered.length;
+
   // Pivot: product → ratio → [treatment variants]. The matrix is the story —
   // each ratio slot shows its treatments side-by-side for direct comparison.
   const products = useMemo(() => {
     const byProduct = new Map<string, Map<string, Asset[]>>();
-    for (const a of assets) {
+    for (const a of visible) {
       const ratios = byProduct.get(a.productId) ?? new Map<string, Asset[]>();
       ratios.set(a.aspectRatio, [...(ratios.get(a.aspectRatio) ?? []), a]);
       byProduct.set(a.productId, ratios);
@@ -46,7 +97,7 @@ export default function GridPage() {
       productId,
       ratios: [...ratios.entries()].sort((a, b) => ratioRank(a[0]) - ratioRank(b[0])),
     }));
-  }, [assets]);
+  }, [visible]);
 
   const review = useMemo(() => {
     let approved = 0;
@@ -83,41 +134,137 @@ export default function GridPage() {
           Approved creatives are what the Export tab ships.
         </span>
       </div>
-      {products.map(({ productId, ratios }) => (
-        <section key={productId}>
-          <h2 className="mb-5 font-mono text-[11px] uppercase tracking-widest text-text-muted">
-            {productId}
-          </h2>
-          <div className="flex flex-col gap-8">
-            {ratios.map(([ratio, items]) => (
-              <div key={ratio}>
-                <h3 className="mb-3 font-mono text-[11px] text-text-muted">{ratio}</h3>
-                <div className="flex flex-wrap justify-center gap-6">
-                  {items.map((asset) => (
-                    <Artboard
-                      key={assetKey(asset)}
-                      asset={asset}
-                      version={assetVersion}
-                      loading={
-                        loading &&
-                        (regeneratingKeys === null || regeneratingKeys.has(assetKey(asset)))
-                      }
-                      decision={decisions[assetKey(asset)]}
-                      onDecide={(d) => decide(assetKey(asset), d)}
-                      onPreview={() => setPreviewKey(assetKey(asset))}
-                    />
-                  ))}
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface px-4 py-2">
+        <FilterSelect
+          label="Product"
+          value={productFilter}
+          options={filterOptions.products}
+          onChange={applyFilter(setProductFilter)}
+        />
+        <FilterSelect
+          label="Ratio"
+          value={ratioFilter}
+          options={filterOptions.ratios}
+          onChange={applyFilter(setRatioFilter)}
+        />
+        <FilterSelect
+          label="Format"
+          value={formatFilter}
+          options={filterOptions.formats}
+          onChange={applyFilter(setFormatFilter)}
+        />
+        {hasDescriptors && (
+          <>
+            <FilterSelect
+              label="Layout"
+              value={layoutFilter}
+              options={filterOptions.layouts}
+              onChange={applyFilter(setLayoutFilter)}
+            />
+            <FilterSelect
+              label="Tone"
+              value={toneFilter}
+              options={filterOptions.tones}
+              onChange={applyFilter(setToneFilter)}
+            />
+            <FilterSelect
+              label="Background source"
+              value={backgroundFilter}
+              options={filterOptions.backgrounds}
+              onChange={applyFilter(setBackgroundFilter)}
+            />
+          </>
+        )}
+        <span className="ml-auto font-mono text-[11px] text-text-muted">
+          Showing {visible.length} of {filtered.length}
+        </span>
+      </div>
+      {products.length === 0 ? (
+        <p className="text-[13px] text-text-muted">No creatives match the current filters.</p>
+      ) : (
+        products.map(({ productId, ratios }) => (
+          <section key={productId}>
+            <h2 className="mb-5 font-mono text-[11px] uppercase tracking-widest text-text-muted">
+              {productId}
+            </h2>
+            <div className="flex flex-col gap-8">
+              {ratios.map(([ratio, items]) => (
+                <div key={ratio}>
+                  <h3 className="mb-3 font-mono text-[11px] text-text-muted">{ratio}</h3>
+                  <div className="flex flex-wrap justify-center gap-6">
+                    {items.map((asset) => (
+                      <Artboard
+                        key={assetKey(asset)}
+                        asset={asset}
+                        version={assetVersion}
+                        loading={
+                          loading &&
+                          (regeneratingKeys === null || regeneratingKeys.has(assetKey(asset)))
+                        }
+                        decision={decisions[assetKey(asset)]}
+                        onDecide={(d) => decide(assetKey(asset), d)}
+                        onPreview={() => setPreviewKey(assetKey(asset))}
+                      />
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      ))}
+              ))}
+            </div>
+          </section>
+        ))
+      )}
+
+      {canShowMore && (
+        <button
+          type="button"
+          onClick={() => setPage((n) => n + 1)}
+          className="self-center rounded-full border border-border bg-surface px-5 py-2 text-[13px] text-text-primary transition-colors hover:bg-border-hover"
+        >
+          Show more
+        </button>
+      )}
 
       {previewAsset && (
         <PreviewModal asset={previewAsset} version={assetVersion} onClose={closePreview} />
       )}
     </div>
+  );
+}
+
+function FilterSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 font-mono text-[11px] text-text-muted">
+      {label}
+      <select
+        aria-label={label}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="rounded border border-border bg-surface-2 px-2 py-1 text-text-primary"
+      >
+        <option value="">All</option>
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function DescriptorChip({ children }: { children: string }) {
+  return (
+    <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-text-muted">{children}</span>
   );
 }
 
@@ -193,7 +340,8 @@ function Artboard({
       className={cn(
         // Surface tile matching the sidebar; only the border colour signals the
         // review decision (green = approved, red = rejected), default = sidebar border.
-        "group flex flex-col items-center gap-3 rounded-xl border bg-surface p-3 transition-colors",
+        // content-visibility skips offscreen paint at N=100 without a virtualization lib.
+        "group flex flex-col items-center gap-3 rounded-xl border bg-surface p-3 transition-colors [contain-intrinsic-size:280px_400px] [content-visibility:auto]",
         decision === "approved"
           ? "border-success"
           : decision === "rejected"
@@ -205,10 +353,15 @@ function Artboard({
         <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-text-primary">
           {assetLabel(asset)}
         </span>
-        {asset.variantIndex !== undefined && asset.descriptor && (
-          <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-text-muted">
-            {asset.descriptor.layout} · {asset.descriptor.tone} · {asset.descriptor.backgroundSource}
-          </span>
+        {asset.descriptor && (
+          <>
+            <DescriptorChip>{asset.descriptor.layout}</DescriptorChip>
+            <DescriptorChip>{asset.descriptor.tone}</DescriptorChip>
+            <DescriptorChip>{asset.descriptor.backgroundSource}</DescriptorChip>
+            {typeof asset.descriptor.paletteShift === "number" && (
+              <DescriptorChip>{`shift ${asset.descriptor.paletteShift}`}</DescriptorChip>
+            )}
+          </>
         )}
         <SourceBadge source={asset.backgroundSource} />
         <ComplianceBadge asset={asset} />

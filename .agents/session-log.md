@@ -564,4 +564,22 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Left open:**
   - Webpack `extensionAlias` so the web app can re-export `assetIdentity` at runtime.
 
+---
+
+## 2026-08-26 — wave 4 Lane C: review UI at N=100 + packaging (PR 11)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Grid: product/ratio/format filters, descriptor-axis filters when present, descriptor chips, `content-visibility: auto` + paged sections of 24 (no virtualization lib).
+  - CommandBar: debounced `POST /campaigns/plan` estimate for variation briefs (cache by policyHash, 422 message verbatim, Execute disabled while infeasible/unknown); classic still uses product × ratio × treatment.
+  - run-context: additive estimate + packaging state (`setEstimate`, `packageSelected`, `loadPackages`).
+  - Runs: estimate summary when present. Export: static platform tabs, Package POST, zip download link.
+  - API: `GET /campaigns/packages/:campaignId` listing + store-only zip (`zlib.crc32`, no new dep). Did not touch `package.post.ts`.
+- **Decisions:**
+  - Hard-coded `STATIC_PLATFORMS` in Export (same three ids as the wizard) — do not import Distribution into Next.
+  - briefs-api owns `API` as a local constant so RunProvider can import package helpers without a cycle.
+  - Global page of 24 across the filtered list (not per product section).
+- **Left open:**
+  - Motion platforms stay hidden; zip is store-only (no compression). This lane does not touch compositor/parser/generation/pools.
+
 

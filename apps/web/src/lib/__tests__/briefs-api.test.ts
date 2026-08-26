@@ -7,6 +7,8 @@ import {
   duplicateBrief,
   isBriefsApiError,
   listBriefs,
+  listPackages,
+  packageCampaign,
   planCampaign,
   unknownErrorMessage,
   uploadAsset,
@@ -195,6 +197,105 @@ describe("planCampaign", () => {
     await expect(planCampaign(brief)).resolves.toEqual({
       kind: "infeasible",
       error: "Plan failed (HTTP 400)",
+    });
+  });
+});
+
+describe("packageCampaign / listPackages", () => {
+  const item = {
+    productId: "alpha",
+    aspectRatio: "1:1",
+    treatment: "default",
+    source: "alpha/1x1.png",
+    packagedPath: "packages/camp/instagram-feed/alpha/1x1.png",
+    bytes: 12,
+    checks: { size: "pass" as const },
+  };
+
+  test("POSTs { campaignId, platforms } and returns packaged platforms", async () => {
+    mockFetch((url, init) => {
+      expect(url).toBe(`${API}/campaigns/package`);
+      expect(JSON.parse(String(init.body))).toEqual({ campaignId: "camp", platforms: ["instagram-feed"] });
+      return json({
+        platforms: [{ platformId: "instagram-feed", items: [item], skipped: 0, manifestPath: "packages/camp/instagram-feed/manifest.json" }],
+      });
+    });
+    await expect(packageCampaign("camp", ["instagram-feed"])).resolves.toEqual({
+      platforms: [
+        {
+          platformId: "instagram-feed",
+          items: [item],
+          skipped: 0,
+          manifestPath: "packages/camp/instagram-feed/manifest.json",
+        },
+      ],
+    });
+  });
+
+  test("drops malformed platforms and items", async () => {
+    mockFetch(() =>
+      json({
+        platforms: [
+          null,
+          1,
+          { platformId: 1, items: [] },
+          { platformId: "x" },
+          {
+            platformId: "ok",
+            items: [
+              item,
+              { ...item, checks: { size: "fail" }, packagedPath: "fail.png" },
+              { productId: "nope" },
+              { ...item, checks: null },
+              { ...item, checks: { size: "maybe" } },
+              { ...item, bytes: "12" },
+              { ...item, productId: 1 },
+              null,
+            ],
+          },
+        ],
+      }),
+    );
+    await expect(packageCampaign("camp", ["x"])).resolves.toEqual({
+      platforms: [
+        {
+          platformId: "ok",
+          items: [item, { ...item, checks: { size: "fail" }, packagedPath: "fail.png" }],
+        },
+      ],
+    });
+    mockFetch(() => json(null));
+    await expect(packageCampaign("camp", ["x"])).resolves.toEqual({ platforms: [] });
+    mockFetch(() => json({ platforms: "nope" }));
+    await expect(packageCampaign("camp", ["x"])).resolves.toEqual({ platforms: [] });
+  });
+
+  test("listPackages returns the manifests and treats 404 as empty", async () => {
+    mockFetch((url) => {
+      expect(url).toBe(`${API}/campaigns/packages/camp`);
+      return json({ platforms: [{ platformId: "instagram-feed", items: [item] }] });
+    });
+    await expect(listPackages("camp")).resolves.toEqual({
+      platforms: [{ platformId: "instagram-feed", items: [item] }],
+    });
+    mockFetch(() => json({ error: "No packages found" }, 404));
+    await expect(listPackages("camp")).resolves.toEqual({ platforms: [] });
+  });
+
+  test("listPackages throws on network failure and non-404 errors", async () => {
+    vi.mocked(globalThis.fetch).mockRejectedValue(new TypeError("offline"));
+    await expect(listPackages("camp")).rejects.toMatchObject({ message: "Network error", status: 0 });
+    mockFetch(() => json({ error: "boom" }, 500));
+    await expect(listPackages("camp")).rejects.toMatchObject({ message: "boom", status: 500 });
+    mockFetch(() => new Response("", { status: 500 }));
+    await expect(listPackages("camp")).rejects.toMatchObject({ message: "Request failed (HTTP 500)", status: 500 });
+  });
+
+  test("packageCampaign throws on a failed POST", async () => {
+    mockFetch(() => json({ error: "Campaign report not found" }, 404));
+    await expect(packageCampaign("camp", ["instagram-feed"])).rejects.toMatchObject({
+      message: "Campaign report not found",
+      status: 404,
     });
   });
 });

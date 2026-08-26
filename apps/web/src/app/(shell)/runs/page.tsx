@@ -10,7 +10,8 @@ import { cn } from "@/lib/cn";
  * per-run persistence (see the plan's follow-ups).
  */
 export default function RunsPage() {
-  const { brief, assets, halted, hasRun, loading, decisions, policyHash, seed } = useRun();
+  const { brief, assets, halted, hasRun, loading, decisions, policyHash, seed, estimate, estimateStatus, estimateError } =
+    useRun();
 
   const passed = useMemo(() => assets.filter((a) => a.passedCompliance).length, [assets]);
   const passRate = assets.length ? Math.round((passed / assets.length) * 100) : 0;
@@ -55,6 +56,17 @@ export default function RunsPage() {
               {policyHash !== undefined && <Stat label="Policy hash" value={policyHash} />}
               {seed !== undefined && <Stat label="Seed" value={String(seed)} />}
             </dl>
+          )}
+          {estimateStatus === "ok" && estimate && (
+            <dl className="grid grid-cols-2 divide-x divide-border border-t border-border text-center sm:grid-cols-4">
+              <Stat label="Creatives" value={String(estimate.creatives)} />
+              <Stat label="axisProductSize" value={String(estimate.axisProductSize)} />
+              <Stat label="Feasible" value={estimate.feasible ? "yes" : "no"} />
+              <Stat label="genaiCalls" value={String(estimate.genaiCalls)} />
+            </dl>
+          )}
+          {estimateStatus === "infeasible" && estimateError && (
+            <p className="border-t border-border px-4 py-3 text-[13px] text-error">{estimateError}</p>
           )}
           {assets.length > 0 && (
             <ul className="divide-y divide-border border-t border-border">
