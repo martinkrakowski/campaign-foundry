@@ -27,7 +27,7 @@ const brief = (over: Partial<CampaignBrief> = {}): CampaignBrief => ({
 const planner = (): PlanVariationsUseCase => new PlanVariationsUseCase();
 
 const hamming = (a: Variant, b: Variant): number => {
-  const axes = ["productId", "aspectRatio", "layout", "tone", "backgroundSource", "paletteShift"] as const;
+  const axes = ["productId", "aspectRatio", "layout", "tone", "backgroundSource", "paletteShift", "headline"] as const;
   return axes.reduce((distance, axis) => distance + (a[axis] !== b[axis] ? 1 : 0), 0);
 };
 
@@ -474,5 +474,88 @@ describe("PlanVariationsUseCase.replan", () => {
     const result = planner().replan(plan, 0, 1);
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error.message).toMatch(/exhausted 64 draws/);
+  });
+});
+
+describe("PlanVariationsUseCase headline axis", () => {
+  const pooled = (count = 12): CampaignBrief =>
+    brief({ variation: { count, seed: 7, minDistance: 1, axes: { headline: "pool://copy" } } });
+  const headlines = ["Stay wild", "Go far", "Drink up"];
+
+  test("draws every variant's headline from the approved pool and keeps distance", () => {
+    const result = planner().plan(pooled(), { headlines });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.policy.headline).toEqual([...headlines].sort());
+    expect(result.value.estimate.axisProductSize).toBe(24 * 3);
+    for (const variant of result.value.variants) {
+      expect(headlines).toContain(variant.headline);
+    }
+    expect(new Set(result.value.variants.map((variant) => variant.headline)).size).toBeGreaterThan(1);
+    expectDistanceHeld(result.value);
+  });
+
+  test("the same approved set in a different pool order yields an identical policyHash and plan", () => {
+    const shuffled = [headlines[2], headlines[0], headlines[1]];
+    const a = planner().plan(pooled(), { headlines });
+    const b = planner().plan(pooled(), { headlines: shuffled });
+    expect(a.success && b.success).toBe(true);
+    if (!a.success || !b.success) return;
+    expect(b.value.policyHash).toBe(a.value.policyHash);
+    expect(b.value).toEqual(a.value);
+  });
+
+  test("headline alone satisfies minDistance for otherwise identical variants", () => {
+    const result = planner().plan(
+      brief({
+        products: [product("alpha")],
+        variation: {
+          count: 3,
+          seed: 7,
+          minDistance: 1,
+          coverage: { perRatio: 0 },
+          axes: {
+            layout: ["headline-top"],
+            tone: ["bold"],
+            paletteShift: [0],
+            headline: "pool://copy",
+          },
+        },
+      }),
+      { headlines },
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expectDistanceHeld(result.value);
+    expect(result.value.estimate.axisProductSize).toBe(1 * 3 * 1 * 1 * 1 * 1 * 3);
+  });
+
+  test("fails naming the pool when pool://copy is requested without approved headlines", () => {
+    const missing = planner().plan(pooled());
+    expect(missing.success).toBe(false);
+    if (!missing.success) expect(missing.error.message).toMatch(/briefs\/golden\/pools\.json/);
+    const empty = planner().plan(pooled(), { headlines: [] });
+    expect(empty.success).toBe(false);
+  });
+
+  test("briefs without the axis are byte-identical to the golden with or without headlines supplied", () => {
+    const plain = planner().plan(brief());
+    const withInput = planner().plan(brief(), { headlines });
+    expect(plain.success && withInput.success).toBe(true);
+    if (!plain.success || !withInput.success) return;
+    expect(withInput.value).toEqual(plain.value);
+    expect(plain.value.policyHash).toBe("7181107a6ce42df96357800416bf26bf89007fd3dbd2b9792aab83323adefcf9");
+    expect(plain.value.variants.every((variant) => !("headline" in variant))).toBe(true);
+  });
+
+  test("replan re-draws the headline from the stored policy", () => {
+    const planned = planner().plan(pooled(), { headlines });
+    expect(planned.success).toBe(true);
+    if (!planned.success) return;
+    const result = planner().replan(planned.value, 1, 1);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(headlines).toContain(result.value.variants[1].headline);
+    expectDistanceHeld(result.value);
   });
 });

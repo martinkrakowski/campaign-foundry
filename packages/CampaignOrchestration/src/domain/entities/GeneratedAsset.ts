@@ -28,6 +28,8 @@ export interface VariantDescriptor {
   readonly tone: ToneKind;
   readonly backgroundSource: BackgroundAxisSource;
   readonly paletteShift: number;
+  /** The pooled headline this slot drew (`headline: pool://copy`); omitted otherwise. */
+  readonly headline?: string;
 }
 
 /**

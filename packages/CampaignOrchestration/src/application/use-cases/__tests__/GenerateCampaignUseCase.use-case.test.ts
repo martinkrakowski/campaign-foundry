@@ -313,6 +313,52 @@ describe("GenerateCampaignUseCase — variation", () => {
     if (result.success) expect(result.value.assets).toHaveLength(2);
   });
 
+  test("composites a variant's pooled headline, else the resolved copy", async () => {
+    const variants = [fakeVariant({ headline: "Stay wild" }), fakeVariant({ index: 1, aspectRatio: "9:16" })];
+    const d = deps({ planner: fakePlanner(fakePlan(variants)) });
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({ localizedMessage: "Bleib wild" }),
+    );
+    expect(result.success).toBe(true);
+    const messages = vi.mocked(d.compositor.compositeAsset).mock.calls.map((call) => call[0].message);
+    expect(messages).toEqual(["Stay wild", "Bleib wild"]);
+    // Provenance: the drawn headline is stamped on the descriptor (and so the report); absent otherwise.
+    if (!result.success) return;
+    expect(result.value.assets[0].descriptor).toMatchObject({ headline: "Stay wild" });
+    expect(result.value.assets[1].descriptor).not.toHaveProperty("headline");
+  });
+
+  test("legal-gates every distinct pooled headline and halts like a prohibited campaign message", async () => {
+    const compliance = {
+      validateLegalCopy: vi.fn(async (text: string) =>
+        text.includes("miracle") ? { passed: false, reason: "Prohibited terminology: miracle" } : { passed: true },
+      ),
+      validateBrandColorDensity: vi.fn(async () => ({ passed: true, score: 0.5 })),
+    };
+    const variants = [
+      fakeVariant({ headline: "Stay wild" }),
+      fakeVariant({ index: 1, aspectRatio: "9:16", headline: "A miracle cure" }),
+      fakeVariant({ index: 2, aspectRatio: "16:9", headline: "Stay wild" }),
+    ];
+    const d = deps({ compliance, planner: fakePlanner(fakePlan(variants)) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value).toMatchObject({ halted: true, assets: [] });
+    expect(result.value.policyHash).toBeUndefined();
+    // Campaign copy first, then each distinct pooled headline once.
+    expect(compliance.validateLegalCopy.mock.calls.map((call) => call[0])).toEqual([
+      "Hello",
+      "Stay wild",
+      "A miracle cure",
+    ]);
+    expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
+    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+    const halt = result.value.log.entries.filter((e) => e.stage === "ExecuteLegalGateCheck").at(-1);
+    expect(halt).toMatchObject({ level: "error", message: "Pipeline halted — Prohibited terminology: miracle" });
+    expect(result.value.log.completedAt).toBeDefined();
+  });
+
   test("classic still requires two products", async () => {
     const result = await new GenerateCampaignUseCase(deps()).execute(baseBrief({ products: [product("alpha")] }));
     expect(result.success).toBe(false);

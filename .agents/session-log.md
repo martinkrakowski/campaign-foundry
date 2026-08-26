@@ -680,3 +680,76 @@ To keep this file out of version control, add `.agents/session-log.md` to
     `instanceof` sees the route's module instance.
 - **Left open:**
   - Phase 3.4 allowlist `headline: pool://copy`, planner consumption, wizard control.
+
+## 2026-08-26 — pooled headlines (wave 5 lane B, Phase 3.4–3.5, branch feat/pool-headlines)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Parser allowlists `variation.axes.headline: pool://copy` (`validateHeadlineAxis`,
+    the only pool reference; any other value is a 400 naming it). The generic
+    "pool:// under any axis" scan is gone — the per-axis allowlists reject it.
+  - `VariationPolicy.fromBrief(brief, input?)` / `PlanVariationsUseCase.plan(brief,
+    input?)` take `PlanInput { headlines }`; the policy gains `headline` (approved
+    texts, trimmed/de-duplicated), `axisProductSize` multiplies by its size, and
+    `headline` is the seventh `DISTANCE_AXES` entry. `Variant.headline?`;
+    `drawHeadline` draws last so briefs without the axis keep their goldens; the
+    hash carries `headline` only when non-empty (goldens byte-identical).
+  - API: `pools.ts` `planInputFor(brief)` (reads `briefs/<id>/pools.json` →
+    `approvedTexts`) and `pooledPlanner(input)`; `runCampaign` resolves the pool
+    before building the pipeline (failed job on generate); `/campaigns/plan`
+    passes it (422 naming the pool file) and reports `headline` per variant.
+  - Use case: one-line read `message: variant.headline ?? copy` (lane A's file).
+  - Wizard: Copy step "Headline pool" panel (load, Generate 10 suggestions,
+    approve/reject, inline edit → PATCH, 503 pins the API message and disables
+    generation); policy step `pool://copy` toggle, disabled with a message until
+    an entry is approved; `setPool` switches the axis off when approvals drop to
+    0; `briefs-api.ts` `getPool` / `generatePool` / `patchPool`. `minDistance`
+    bound 6 → 7 in the wizard validator.
+- **Decisions:**
+  - Pool loading stays at the API edge (`pools.ts`) and is bound into a
+    `VariationPlanner` wrapper rather than widening `GenerateCampaignDeps` — keeps
+    the use case (lane A's file) to the single agreed read.
+  - No `errors.headline` in validation: the reducer invariant makes an
+    on-but-empty axis unreachable, so the UI block is the disabled toggle.
+- **Left open:**
+  - `briefs/sample-randomized.yaml` header still says headline is rejected (lane
+    C's sample-pooled brief documents the syntax). `mockPipelineApi` does not
+    route PATCH; the wizard test wraps it locally.
+
+## 2026-08-26 — PR #57 review fixes (pooled headlines, branch feat/pool-headlines)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `pools.ts`: `isCopyPool` / `copyPoolProblem` shape guard at the persistence
+    boundary; `readPool` throws `InvalidCopyPoolError` naming the file and the
+    first problem (not-JSON included). GET/PATCH/POST pool routes and
+    `/campaigns/plan` map it to 422; `planInputFor` returns a `Result` so
+    `runCampaign` fails the generate job with the same message.
+  - `POST /campaigns/pools/copy` also accepts `{ brief, count? }` (parseBrief,
+    pool under `brief.id`); `briefs-api.generatePool(brief)` and the wizard send
+    the draft brief inline so Generate works before Save. README block updated.
+  - `VariationPolicy`: `canonicalHeadlines` — trim, code-unit sort (no comparator),
+    de-dup by normalised text — before `policyHash` and the draw; pool file order
+    no longer reaches either. `minDistance` is bounded by the active axis count
+    (`DISTANCE_AXES` minus optional axes that are off); wizard `maxMinDistance`
+    mirrors it (base 6 + 1 with the headline axis).
+  - `GeneratedAsset.descriptor.headline` carries the drawn pool text (report gets
+    it for free). Use case legal-gates every distinct pooled headline in the
+    (re)plan before rendering — same `ExecuteLegalGateCheck` halt as the message.
+  - `POST /campaigns/generate` pins a variation re-roll to the persisted report's
+    `policyHash` (`runCampaign(..., expectedPolicyHash)`); a changed plan fails
+    the job with "Plan changed since the last run (policyHash … ≠ …); run the
+    full campaign." instead of overlaying a slot onto a different base plan.
+  - Wizard: `headlineAxisDropped` in the reducer; the Copy step shows "No approved
+    headlines — the headline axis was turned off" until an entry is approved again.
+- **Decisions:**
+  - Sort is plain `Array.prototype.sort()` (UTF-16 code units), not
+    `localeCompare("en")` — no ICU dependency, byte-identical everywhere.
+  - The re-roll hash check lives in `runCampaign` (plans once with the pooled
+    planner, pure and cheap) rather than widening the use case; a missing
+    persisted report leaves the re-roll unpinned.
+  - The axis-dropped notice is reducer state, not panel state, so it survives
+    Next/Back between the Copy and policy steps.
+- **Left open:**
+  - The grid descriptor chip for `headline` (short, title-cased) is lane A's
+    one-line follow-up (`feat/motion-generation` owns the grid).
