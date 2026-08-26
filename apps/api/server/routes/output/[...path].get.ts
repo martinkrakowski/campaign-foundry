@@ -13,6 +13,12 @@ const CONTENT_TYPES: Record<string, string> = {
 /** GET /output/** — stream a generated creative/proof from the output root (path-traversal guarded). */
 export default defineEventHandler(async (event) => {
   const relative = getRouterParam(event, "path") ?? "";
+  const posix = relative.replace(/\\/g, "/");
+  // The GenAI seed cache lives under output/cache but is not a downloadable creative.
+  if (posix === "cache" || posix.startsWith("cache/")) {
+    setResponseStatus(event, 404);
+    return { error: "Not found" };
+  }
   const root = resolve(outputRoot());
   let target: string;
   if (relative === "") {
