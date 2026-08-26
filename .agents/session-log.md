@@ -286,3 +286,17 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Refused: clock injection into `PipelineExecutionLog` (D14 keeps the exemption for wave 1), a `JobStore` port at the composition root (edge concern, single implementation), `Result<T,E>` as the job wire shape, dropping `done/total` (agreed Phase J shape).
 - **Left open:**
   - Follow-ups noted in the plan's wave-1 status: clock injection, one `mockPipelineApi` test fixture, real progress from `PipelineExecutionLog.totalOperations`. Worktrees `../cf-wt-*` remain until the PRs merge.
+
+## 2026-08-25 — variation planner (Phase 2.1–2.3)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Added `VariationPolicy`, `VariationPlan`, `Variant` (`variantTreatmentId`), and `MotionKind` (`restT` table) in CampaignOrchestration.
+  - Added pure `PlanVariationsUseCase.plan` / `replan` with seeded draws, coverage minimums, Hamming `minDistance`, `count×3` candidate cap, and a 64-draw replan bound.
+  - Manifest + `yarn sync` barrels. Golden tests pin `policyHash` and the first three variants. Did not touch `GenerateCampaignUseCase` or `pipeline.ts`.
+- **Decisions:**
+  - Stored `policy` and `briefId` on the plan so `replan` does not need the original brief.
+  - Background axis values are `procedural | asset-pool | genai` (brief parser), not the rendered-asset `BackgroundSource`.
+  - `perRatio` coverage is one walk of ratios after the product pass (skip if already ≥ perRatio).
+- **Left open:**
+  - Phase 2.4 consume the planner from `GenerateCampaignUseCase`; identity migration (2.5); GenAI cache (2.6).
