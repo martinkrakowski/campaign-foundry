@@ -1,0 +1,42 @@
+# Randomized motion sample. Same static axes as sample-randomized.yaml plus the
+# `motion` and `duration` axes and `formats: [static, motion]`, so the planner
+# mixes still PNGs with silent mp4 variants (poster + sampled frames checked for
+# brand density). `instagram-reel` is a 9:16 motion platform, so only 9:16
+# variants can become clips; `instagram-feed` keeps the 1:1 stills. This brief
+# parses ONLY when the ffmpeg capability is on
+# (the API's boot probe / `yarn generate` log `[ffmpeg]`); without it the parser
+# rejects `motion`, `duration`, and `formats: motion` with the probe's reason,
+# and the briefs picker skips this file with a warning.
+id: sample-motion
+targetRegion: DE
+targetAudience: Urban outdoor enthusiasts, 25-40
+campaignMessage: Stay wild. Stay hydrated.
+localizedMessage: Bleib wild. Bleib hydriert.
+products:
+  - id: hydra-bottle
+    name: Hydra Bottle
+    primaryColor: "#1473E6"
+    logoPath: assets/inputs/hydra-logo.png
+  - id: trail-pack
+    name: Trail Pack
+    primaryColor: "#E0218A"
+    logoPath: assets/inputs/trail-logo.png
+mode: variation
+variation:
+  count: 8
+  seed: 3
+  minDistance: 2
+  coverage:
+    perProduct: 1
+    perRatio: 1
+  axes:
+    layout: [headline-top, headline-bottom]
+    tone: [bold, subtle]
+    background:
+      source: [procedural]
+    paletteShift: [0, 0.1]
+    motion: [ken-burns-in, headline-rise]   # subset of MOTION_KINDS; accent band and logo never move
+    duration: [6]                           # seconds, integers in [2, 30]; 30 fps
+output:
+  formats: [static, motion]
+  platforms: [instagram-feed, instagram-reel]

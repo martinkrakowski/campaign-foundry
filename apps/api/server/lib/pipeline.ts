@@ -11,6 +11,7 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import {
   AssetReusingImageGenerator,
+  CanvasFfmpegVideoCompositor,
   FileSystemBackgroundCache,
   FireflyImageGenerator,
   GeminiImageGenerator,
@@ -23,7 +24,10 @@ import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance
 import { FileSystemExporter } from "@campaignfoundry/Distribution";
 import { err, type Result } from "@campaignfoundry/shared";
 import { outputRoot } from "./config.js";
+import { platformZones } from "./platform-zones.js";
 import { planInputFor, pooledPlanner } from "./pools.js";
+
+export { platformZones } from "./platform-zones.js";
 
 // Load .env before any process.env read below. Called (not a bare side-effect
 // import) so Nitro's bundler can't tree-shake it — that was leaving GEMINI_API_KEY
@@ -111,7 +115,8 @@ function imageGenerator(selected?: string): ImageGeneratorPort {
 /**
  * Composition root — the one place that knows concrete adapters. Wires them into
  * the use case via constructor injection; everything above depends only on ports.
- * `planInput` carries the brief's approved copy pool (resolved by `runCampaign`).
+ * `planInput` carries the brief's approved copy pool and the ratios its motion
+ * platforms package (both resolved by `runCampaign` via `planInputFor`).
  */
 export function buildPipeline(imageModel?: string, planInput: PlanInput = {}): GenerateCampaignUseCase {
   return new GenerateCampaignUseCase({
@@ -119,9 +124,13 @@ export function buildPipeline(imageModel?: string, planInput: PlanInput = {}): G
     proceduralGenerator: new ProceduralBackgroundGenerator(),
     planner: pooledPlanner(planInput),
     compositor: new NodeCanvasCompositor(process.env.MESSAGE_FONT),
+    // Motion variants only; the parser has already gated them on the ffmpeg probe.
+    videoCompositor: new CanvasFfmpegVideoCompositor({ fontFamily: process.env.MESSAGE_FONT }),
     compliance: new BrandComplianceChecker(),
     exporter: new FileSystemExporter(outputRoot()),
     now: () => new Date(),
+    // D11: safe insets come from Distribution's profile table; orchestration only sees a resolver.
+    platformSafeZones: platformZones,
   });
 }
 

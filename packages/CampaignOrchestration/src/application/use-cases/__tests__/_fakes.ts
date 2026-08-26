@@ -8,6 +8,7 @@ import type {
   CompositorPort,
   ExportPort,
   ImageGeneratorPort,
+  VideoCompositorPort,
 } from "../../../index.js";
 import type { VariationPlanner } from "../GenerateCampaignUseCase.use-case.js";
 
@@ -31,23 +32,39 @@ export interface FakeComplianceOptions {
   legalReason?: string;
   /** Brand-colour density score 0..1 (default 0.5 → passes the 0.02 floor). */
   density?: number;
+  /** Per-call density scores (sampled motion frames); falls back to `density` once exhausted. */
+  densities?: readonly number[];
   /** When true, the density check returns no numeric score (covers the `?? 0` path). */
   scoreless?: boolean;
 }
 
 export const fakeCompliance = (opts: FakeComplianceOptions = {}): CompliancePort => {
   const { legalPass = true, legalReason = "Prohibited terminology: guaranteed", density = 0.5, scoreless = false } = opts;
+  let call = 0;
   return {
     validateLegalCopy: vi.fn(async () => (legalPass ? { passed: true } : { passed: false, reason: legalReason })),
-    validateBrandColorDensity: vi.fn(async () =>
-      scoreless ? { passed: true } : { passed: density >= 0.02, score: density },
-    ),
+    validateBrandColorDensity: vi.fn(async () => {
+      const score = opts.densities?.[call] ?? density;
+      call += 1;
+      return scoreless ? { passed: true } : { passed: score >= 0.02, score };
+    }),
   };
 };
+
+/** Motion port fake: `frames` sampled frames (default 5, one byte each so tests can tell them apart). */
+export const fakeVideoCompositor = (opts: { logoApplied?: boolean; frames?: number } = {}): VideoCompositorPort => ({
+  compositeVideo: vi.fn(async () => ({
+    video: new Uint8Array([7, 8, 9, 10]),
+    poster: new Uint8Array([4, 5, 6]),
+    sampledFrames: Array.from({ length: opts.frames ?? 5 }, (_, i) => new Uint8Array([i])),
+    logoApplied: opts.logoApplied ?? true,
+  })),
+});
 
 export type RecordingExporter = ExportPort & {
   readonly saved: Array<{ path: string; bytes: number }>;
   readonly proofs: string[];
+  readonly removed: string[];
 };
 
 export const fakeVariant = (over: Partial<Variant> = {}): Variant => ({
@@ -89,14 +106,19 @@ export const fakePlanner = (plan: VariationPlan | Error = fakePlan([fakeVariant(
 export const recordingExporter = (): RecordingExporter => {
   const saved: Array<{ path: string; bytes: number }> = [];
   const proofs: string[] = [];
+  const removed: string[] = [];
   return {
     saved,
     proofs,
+    removed,
     saveToDirectory: vi.fn(async (buf: Uint8Array, path: string) => {
       saved.push({ path, bytes: buf.length });
     }),
     generatePrintProof: vi.fn(async (_buf: Uint8Array, path: string) => {
       proofs.push(path);
+    }),
+    remove: vi.fn(async (path: string) => {
+      removed.push(path);
     }),
   };
 };

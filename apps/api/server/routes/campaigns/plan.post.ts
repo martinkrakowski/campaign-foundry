@@ -48,6 +48,8 @@ export default defineEventHandler(async (event) => {
       backgroundSource: variant.backgroundSource,
       paletteShift: variant.paletteShift,
       ...(variant.headline === undefined ? {} : { headline: variant.headline }),
+      // Motion slots only — static plans serialize exactly as before.
+      ...(variant.motion !== undefined ? { motion: variant.motion, durationSec: variant.durationSec } : {}),
     })),
   };
 });

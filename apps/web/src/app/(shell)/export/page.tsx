@@ -3,10 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { API, assetKey, assetLabel, useRun } from "@/lib/run-context";
 
-/** Visible PLATFORM_PROFILES (static). Motion platforms stay hidden until a later wave — same list as wizard STATIC_PLATFORMS. */
+/** Always-visible PLATFORM_PROFILES (static) — same list as wizard STATIC_PLATFORMS. */
 const STATIC_PLATFORMS = ["instagram-feed", "linkedin", "x"] as const;
 
-type StaticPlatform = (typeof STATIC_PLATFORMS)[number];
+/**
+ * Motion PLATFORM_PROFILES. Offered once the run holds a motion creative: the
+ * API only produces those while its ffmpeg probe is on, so the run is the proof.
+ */
+const MOTION_PLATFORMS = ["instagram-story", "instagram-reel", "tiktok", "youtube-short"] as const;
+
+/** Clip length shown on motion export rows, in whole seconds (the brief's `duration` axis). */
+const formatDuration = (seconds: number): string => `${seconds}s`;
 
 /** Print export queue — the HITL-approved creatives + their proofs, ready to ship. */
 export default function ExportPage() {
@@ -21,7 +28,7 @@ export default function ExportPage() {
     packageSelected,
     loadPackages,
   } = useRun();
-  const [platform, setPlatform] = useState<StaticPlatform>(STATIC_PLATFORMS[0]);
+  const [platform, setPlatform] = useState<string>(STATIC_PLATFORMS[0]);
 
   useEffect(() => {
     void loadPackages();
@@ -45,6 +52,14 @@ export default function ExportPage() {
   const hasDecisions = pending < assets.length;
   const approvedKeys = useMemo(() => approved.map(assetKey), [approved]);
 
+  // Motion platforms join the picker once the run contains a motion creative.
+  const hasMotion = assets.some((a) => a.format === "motion");
+  const platforms: readonly string[] = hasMotion ? [...STATIC_PLATFORMS, ...MOTION_PLATFORMS] : STATIC_PLATFORMS;
+  // A selection made while a motion platform was visible must not survive a run
+  // switch that hides it: nothing hidden is ever packaged, and with no visible
+  // selection there is nothing to package.
+  const activePlatform = platforms.includes(platform) ? platform : null;
+
   // One proof PDF per product that has at least one approved creative; dedupe by path.
   const proofs = useMemo(() => {
     const map = new Map<string, string>();
@@ -63,7 +78,7 @@ export default function ExportPage() {
     );
   }
 
-  const selected = packages.find((p) => p.platformId === platform);
+  const selected = activePlatform === null ? undefined : packages.find((p) => p.platformId === activePlatform);
 
   return (
     <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col gap-8 p-4 pb-12 sm:p-8">
@@ -100,15 +115,25 @@ export default function ExportPage() {
               Approved renders ({approved.length})
             </h3>
             <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
-              {approved.map((asset) => (
-                <Row
-                  key={assetKey(asset)}
-                  label={assetLabel(asset)}
-                  sub={asset.outputPath}
-                  href={`${API}/output/${asset.outputPath}`}
-                  cta="Download .PNG"
-                />
-              ))}
+              {approved.map((asset) =>
+                asset.videoPath !== undefined ? (
+                  <Row
+                    key={assetKey(asset)}
+                    label={`${assetLabel(asset)}${asset.durationSec !== undefined ? ` · ${formatDuration(asset.durationSec)}` : ""}`}
+                    sub={`${asset.videoPath} · poster ${asset.outputPath}`}
+                    href={`${API}/output/${asset.videoPath}`}
+                    cta="Download .MP4"
+                  />
+                ) : (
+                  <Row
+                    key={assetKey(asset)}
+                    label={assetLabel(asset)}
+                    sub={asset.outputPath}
+                    href={`${API}/output/${asset.outputPath}`}
+                    cta="Download .PNG"
+                  />
+                ),
+              )}
             </div>
           </section>
         </>
@@ -122,14 +147,14 @@ export default function ExportPage() {
         {/* Toggle buttons (aria-pressed), not the tabs pattern: the list below is a
             plain section, not a tabpanel, and arrow-key roving would be overkill here. */}
         <div role="group" aria-label="Platforms" className="mt-4 flex flex-wrap gap-2">
-          {STATIC_PLATFORMS.map((id) => (
+          {platforms.map((id) => (
             <button
               key={id}
               type="button"
-              aria-pressed={platform === id}
+              aria-pressed={activePlatform === id}
               onClick={() => setPlatform(id)}
               className={
-                platform === id
+                activePlatform === id
                   ? "rounded-full border border-brand-primary bg-surface-2 px-3 py-1.5 font-mono text-[12px] text-white"
                   : "rounded-full border border-border px-3 py-1.5 font-mono text-[12px] text-text-muted"
               }
@@ -141,15 +166,18 @@ export default function ExportPage() {
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => void packageSelected([platform], hasDecisions ? approvedKeys : undefined)}
-            disabled={packaging}
+            onClick={() =>
+              activePlatform !== null && void packageSelected([activePlatform], hasDecisions ? approvedKeys : undefined)
+            }
+            disabled={packaging || activePlatform === null}
+            title={activePlatform === null ? "Select a platform first" : undefined}
             className="rounded-full bg-white px-4 py-1.5 text-[13px] font-semibold text-black transition-colors hover:bg-gray-200 disabled:bg-surface-2 disabled:text-text-muted"
           >
             {packaging ? "Packaging…" : "Package"}
           </button>
           {selected ? (
             <a
-              href={`${API}/campaigns/packages/${encodeURIComponent(brief.id)}/${platform}.zip`}
+              href={`${API}/campaigns/packages/${encodeURIComponent(brief.id)}/${selected.platformId}.zip`}
               download
               className="rounded-full border border-border bg-surface-2 px-4 py-1.5 text-[13px] text-white transition-colors hover:bg-border-hover"
             >
@@ -178,17 +206,13 @@ export default function ExportPage() {
                 <div className="min-w-0">
                   <div className="truncate text-[13px] text-text-primary">
                     {item.productId} @ {item.aspectRatio} · {item.treatment}
+                    {item.format === "motion" && item.durationSec !== undefined && ` · ${formatDuration(item.durationSec)}`}
                   </div>
                   <div className="truncate font-mono text-[11px] text-text-muted">{item.packagedPath}</div>
                 </div>
-                <span
-                  className={
-                    item.checks.size === "pass"
-                      ? "rounded border border-success/50 bg-success/20 px-2 py-0.5 text-[10px] text-success"
-                      : "rounded border border-error/50 bg-error/20 px-2 py-0.5 text-[10px] text-error"
-                  }
-                >
-                  {item.checks.size === "pass" ? "PASS" : "FAIL"}
+                <span className="flex shrink-0 gap-1">
+                  <CheckBadge label="size" verdict={item.checks.size} />
+                  {item.checks.duration !== undefined && <CheckBadge label="duration" verdict={item.checks.duration} />}
                 </span>
               </div>
             ))}
@@ -196,6 +220,21 @@ export default function ExportPage() {
         )}
       </section>
     </div>
+  );
+}
+
+function CheckBadge({ label, verdict }: { label: string; verdict: "pass" | "fail" }) {
+  return (
+    <span
+      title={label}
+      className={
+        verdict === "pass"
+          ? "rounded border border-success/50 bg-success/20 px-2 py-0.5 text-[10px] text-success"
+          : "rounded border border-error/50 bg-error/20 px-2 py-0.5 text-[10px] text-error"
+      }
+    >
+      {verdict === "pass" ? "PASS" : "FAIL"}
+    </span>
   );
 }
 

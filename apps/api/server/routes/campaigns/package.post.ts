@@ -1,4 +1,5 @@
 import { FileSystemPackageStore, PackageForPlatformUseCase } from "@campaignfoundry/Distribution";
+import { getCapabilities } from "../../lib/capabilities.js";
 import { outputRoot } from "../../lib/config.js";
 import { isPersistedAsset, type PersistedAsset, readReport } from "../../lib/report.js";
 
@@ -104,6 +105,8 @@ export default defineEventHandler(async (event) => {
     packagedAt: new Date().toISOString(),
     skipped: parsed.skipped,
     include,
+    // Motion platforms are packageable only while the ffmpeg probe says so.
+    capabilities: { motion: getCapabilities().motion },
   });
   if (!result.success) {
     setResponseStatus(event, 422);

@@ -1,6 +1,7 @@
 import type { AspectRatioValue } from "../value-objects/AspectRatio.vo.js";
 import type { BackgroundSource } from "../value-objects/BackgroundSource.vo.js";
 import type { LayoutKind, ToneKind } from "../value-objects/Treatment.vo.js";
+import type { MotionKind } from "../value-objects/MotionKind.vo.js";
 import type { BackgroundAxisSource } from "../value-objects/VariationPolicy.vo.js";
 
 /**
@@ -30,6 +31,10 @@ export interface VariantDescriptor {
   readonly paletteShift: number;
   /** The pooled headline this slot drew (`headline: pool://copy`); omitted otherwise. */
   readonly headline?: string;
+  /** Motion kind — motion variants only. */
+  readonly motion?: MotionKind;
+  /** Clip length in seconds — motion variants only. */
+  readonly durationSec?: number;
 }
 
 /**
@@ -39,8 +44,12 @@ export interface VariantDescriptor {
 export interface GeneratedAsset {
   readonly productId: string;
   readonly aspectRatio: AspectRatioValue;
-  /** Relative path of the saved PNG, e.g. "hydra-bottle/1x1.png". */
+  /** Relative path of the saved PNG (the poster, for motion), e.g. "hydra-bottle/1x1.png". */
   readonly outputPath: string;
+  /** Relative path of the saved mp4. Motion variants only; static/classic omit it. */
+  readonly videoPath?: string;
+  /** Clip length in seconds. Motion variants only. */
+  readonly durationSec?: number;
   /** Relative path of the print-proof PDF, when one was generated. */
   readonly proofPath?: string;
   /** Brand-colour pixel-density score in the range 0..1. */
@@ -68,8 +77,8 @@ export interface GeneratedAsset {
   readonly attempt?: number;
   /** Provenance seed from the plan. Variation assets only. */
   readonly seed?: number;
-  /** Output format. Variation assets set `"static"`; classic omits it. */
-  readonly format?: "static";
+  /** Output format. Variation assets set `"static"` or `"motion"`; classic omits it. */
+  readonly format?: "static" | "motion";
   /** Planned axes for this slot. Variation assets only. */
   readonly descriptor?: VariantDescriptor;
 }

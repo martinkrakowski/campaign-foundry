@@ -681,6 +681,44 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Left open:**
   - Phase 3.4 allowlist `headline: pool://copy`, planner consumption, wizard control.
 
+## 2026-08-26 — wave 5 Lane A: motion generation end-to-end (Phase 4.7–4.9, 5.1–5.2, D11, D12)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Parser (`load-brief.ts`): `motion` (⊆ `MOTION_KINDS`), `duration` (integers in [2, 30]), `formats: motion`, and every `PLATFORM_PROFILES` id whose formats the host can produce are accepted only while `capabilities.motion` is true; otherwise rejected with the probe `reason`. `parseBrief(data, capabilities = getCapabilities())` / `loadBrief(path, capabilities?)` are the injectable accessor. Unknown platform ids now fail at parse (`Unknown output platform`), not at package time.
+  - Planner: `VariationPolicy` gains `motion` (default `[]`), `duration` (default `[6]`), `motionEnabled`, `mixStatic`; `Variant.motion?` / `durationSec?`; `DISTANCE_AXES` += `motion`, `durationSec` (minDistance ≤ 8); `drawMotion()` consumes no draws on static briefs, keeps one still slot when both formats are requested; `estimate.frames` on motion plans. Static goldens and `policyHash` unchanged (motion fields join the hash only when enabled).
+  - Generation: `GenerateCampaignDeps.videoCompositor` + optional `platformSafeZones` resolver; motion variants call `compositeVideo({ …, durationSec, fps: 30, motion, sampleAt: [0, .25, .5, .75, 1] })`, save `v<i>.mp4` + poster `v<i>.png`, brand-check every sampled frame (all must pass; min score recorded; zero frames fails), `GeneratedAsset.videoPath` / `durationSec` / `format: "motion"` / descriptor `motion` + `durationSec`. D11: with `output.platforms`, the per-ratio max-per-side union of the profiles' insets is passed as `safeInsets`; classic / no-platform paths pass nothing.
+  - Distribution: motion profiles carry real 9:16 insets and `maxDurationSec`; `visible` replaced by `isPlatformVisible(profile, capabilities)` / `visiblePlatformIds(capabilities)`; packaging copies mp4 + poster for motion profiles with `format`, `durationSec`, and `checks.duration`; static profiles ignore clips. `package.post.ts` passes the probe flag.
+  - Web: grid motion cells are `<video muted preload="metadata" poster>` with hover-to-play and an `aria-pressed` play control; motion chip; mp4 + poster downloads; preview modal plays with controls; export rows show duration and link the mp4, motion platforms join the picker once the run holds a motion asset; estimate panel and Runs show `frames` + `≈ frames × 7 ms`. `briefs-api.ts`: additive `frames?` and motion item fields.
+  - `briefs/sample-motion.yaml` (from `docs/plan-implemented`), README **Motion** section, CLI prints `v<i>.mp4 (+poster)`.
+- **Decisions:**
+  - `Distribution.SafeInsets` stays a structural copy: `lint:arch` forbids a domain import of another package; the test asserts `expectTypeOf<SafeInsets>().toEqualTypeOf<PortSafeInsets>()`.
+  - Orchestration never imports Distribution (would be a cycle): insets arrive through a `PlatformSafeZoneResolver` injected at the composition root.
+  - With `formats: [static, motion]` the motion draw includes an explicit still slot so a plan mixes PNGs and mp4s; `formats: [motion]` alone makes every variant a clip.
+  - The web offers motion platforms when the run contains a motion asset (there is no capabilities endpoint; a motion run is proof the probe was on).
+- **Verification:** `yarn generate --brief briefs/sample-motion.yaml` → 8 PNG + 5 MP4 (11 s, ffmpeg-static 5.3.0 on this machine); coverage 100 % lines/branches/functions/statements.
+- **Left open:**
+  - `GET /campaigns/capabilities` for the wizard / export picker; the wizard's `STATIC_PLATFORMS` still hides motion platforms (lane B owns the wizard).
+  - Lane B's `variant.headline` read in `GenerateCampaignUseCase` (coordinated: B adds it, or A on rebase).
+
+## 2026-08-26 — PR #58 review fixes (lane A, motion generation)
+
+- **Mode:** Implementer
+- **Changes:**
+  - CLI integration test guarded like the adapter tests (`test.skipIf(!ffmpegOk)` + the CI-must-run assertion).
+  - `VariationPolicy` bounds `minDistance` by the active Hamming axes (6 static, 8 with motion on: `motion` + `durationSec` count only while `motionEnabled`); wizard `maxMinDistance(state)` mirrors the rule (base 6, optional axes add one each). Hash/goldens unchanged.
+  - `ExportPort.remove(relativePath)` (idempotent) — `FileSystemExporter` deletes under the confined root with `rm({ force })`; a variation still always removes `<product>/<ratio>/v<i>.mp4` so a re-roll of a motion slot leaves no stale clip.
+  - `PlatformSafeZone` moved to `ports/out/PlatformProfilePort.ts` and gains `formats`; `PlanVariationsUseCase(platformZones)` resolves `output.platforms` into `PlanInput.motionRatios`, `VariationPolicy.motionRatios` (hashed only on motion briefs) and `drawMotion` skips ratios no requested motion platform packages. `pipeline.platformZones` is the one resolver (generator + planner + `POST /campaigns/plan`).
+  - Grid `MotionCell` binds the `<video>` through a callback-ref state — no `istanbul ignore` null guards.
+  - `GET /output/**`: `Accept-Ranges: bytes` + `Content-Length` on 200; single `Range: bytes=…` → 206 + `Content-Range`; malformed/unsatisfiable → 416; multi-range → whole file. `getRequestHeader` added to the vitest h3 globals.
+  - Static variation rows are built in the pre-motion key order (reports byte-identical); `formatDuration` doc fixed; briefs GET test for a motion brief while the capability is off.
+- **Decisions:**
+  - The motion axes count as active only when `motionEnabled` (motion listed *and* `formats: motion`), not merely non-empty — a motion axis that cannot be drawn must not widen the bound.
+  - Platforms that are all static with `formats: [motion]` yield `motionRatios: []` → every variant a still (nothing could ship the clip) rather than an error.
+- **Verification:** `yarn generate --brief briefs/sample-motion.yaml` → 8 creatives: 6 stills + 2 clips (both `trail-pack/9x16`), i.e. 8 PNG (incl. 2 posters) + 2 MP4; coverage 100 % on every axis.
+- **Left open:**
+  - Wizard motion/headline controls (the `maxMinDistance` optional-axis count is a stub until they land).
+
 ## 2026-08-26 — pooled headlines (wave 5 lane B, Phase 3.4–3.5, branch feat/pool-headlines)
 
 - **Mode:** Implementer
@@ -753,3 +791,43 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Left open:**
   - The grid descriptor chip for `headline` (short, title-cased) is lane A's
     one-line follow-up (`feat/motion-generation` owns the grid).
+
+## 2026-08-26 — PR #58 Qodo review fixes, round 2 (motion generation, branch feat/motion-generation)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `VariationPolicy`: with `formats: motion` an absent `axes.motion` defaults to
+    every `MOTION_KINDS` entry; an explicitly empty axis is an `err` ("select at
+    least one motion kind"). The parser rejects the same contradiction with a 400
+    (`validateMotionAxisRequested`). Static briefs are untouched.
+  - Parser `validateFormatPlatformCompatibility`: every requested format needs a
+    platform that packages it and every platform needs a requested format
+    (`formats` defaults to `[static]`); the 400 names both sides.
+  - `axisProductSize` for mixed plans is base × (|motion| × |duration| +
+    (mixStatic ? 1 : 0)) — the still slot is no longer multiplied by |duration|.
+  - `CanvasFfmpegVideoCompositor`: on timeout the gate is released and the work
+    dir removed only after the child's `close` (SIGTERM → SIGKILL still
+    escalates), so ffmpeg processes never exceed `MAX_CONCURRENT_ENCODES`.
+  - `isPersistedAsset`: `format` ∈ {absent, static, motion}; motion rows need a
+    string `videoPath` and a finite `durationSec`; unknown formats are skipped
+    and counted (never packaged as stills).
+  - Export page: a selected platform counts only while visible; nothing visible
+    selected → Package disabled ("Select a platform first"); the zip link follows
+    the packaged platform.
+  - Grid `MotionCell`: `playing` flips only after `video.play()` resolves; a
+    rejection keeps the play control and shows a "can't play" status that clears
+    on the next successful start.
+  - README Motion section documents the formats rule, the compatibility check,
+    the corrected size formula, and the review/export behaviour.
+- **Decisions:**
+  - The empty-axis rejection is scoped to briefs whose `formats` include motion;
+    `motion: []` on a static brief stays inert (nothing to contradict).
+  - The compatibility check runs whenever `output.platforms` is set, so a
+    platform list without `formats` is checked against the static default —
+    `platforms: [instagram-reel]` alone is a 400, not a silent all-stills run.
+  - Waiting on `close` after SIGKILL is unbounded on purpose: the kernel
+    guarantees the exit, and a bounded wait would reintroduce the race.
+- **Left open:**
+  - The domain still tolerates `formats: [motion]` + all-static platforms via
+    `motionRatios: []` (every variant a still) — unreachable through the parser
+    now, kept as the documented domain edge.

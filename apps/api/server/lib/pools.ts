@@ -13,6 +13,7 @@ import {
 import { err, errorMessage, ok, type Result } from "@campaignfoundry/shared";
 import { briefsDir, isErrno } from "./brief-files.js";
 import { resolveConfined } from "./confined-path.js";
+import { motionRatiosFor } from "./platform-zones.js";
 
 /** Confined path `briefs/<briefId>/pools.json` — a directory, invisible to the briefs lister. */
 export function poolPath(briefId: string): string {
@@ -144,24 +145,28 @@ export function wantsHeadlinePool(brief: CampaignBrief): boolean {
 }
 
 /**
- * Plan-time input for a brief: the approved texts of `briefs/<id>/pools.json`
- * when the brief requests `headline: pool://copy`, else nothing. A missing pool
- * yields no headlines — the planner then fails loud naming the pool file. An
- * invalid pool file is an `err` carrying the `InvalidCopyPoolError` message, so
- * plan and generate both fail loud with it.
+ * Plan-time input for a brief — everything the brief itself cannot carry:
+ * - `headlines`: the approved texts of `briefs/<id>/pools.json` when the brief
+ *   requests `headline: pool://copy`. A missing pool yields no headlines — the
+ *   planner then fails loud naming the pool file. An invalid pool file is an
+ *   `err` carrying the `InvalidCopyPoolError` message, so plan and generate
+ *   both fail loud with it.
+ * - `motionRatios`: the ratios of the requested motion platforms (see
+ *   `motionRatiosFor`), present only when the brief lists `output.platforms`.
  */
 export async function planInputFor(brief: CampaignBrief): Promise<Result<PlanInput, Error>> {
-  if (!wantsHeadlinePool(brief)) return ok({});
+  const motion = motionRatiosFor(brief.output?.platforms);
+  if (!wantsHeadlinePool(brief)) return ok(motion);
   try {
     const pool = await readPool(brief.id);
-    return ok({ headlines: pool ? approvedTexts(pool) : [] });
+    return ok({ headlines: pool ? approvedTexts(pool) : [], ...motion });
   } catch (error) {
     if (error instanceof InvalidCopyPoolError) return err(error);
     throw error;
   }
 }
 
-/** The variation planner with `input` (the resolved pool) bound for every `plan` call. */
+/** The variation planner with `input` (the resolved pool + platform ratios) bound for every `plan` call. */
 export function pooledPlanner(input: PlanInput): VariationPlanner {
   const planner = new PlanVariationsUseCase();
   return {

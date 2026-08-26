@@ -94,6 +94,22 @@ describe("GET /campaigns/briefs", () => {
     expect(warn).toHaveBeenCalled(); // logged the skipped malformed brief
   });
 
+  test("warns and skips a motion brief while the ffmpeg capability is off", async () => {
+    mkdirSync(join(dir, "briefs"), { recursive: true });
+    writeFileSync(join(dir, "briefs", "good.yaml"), validBrief);
+    writeFileSync(
+      join(dir, "briefs", "motion.yaml"),
+      `${validBrief.replace("id: good", "id: clip")}mode: variation\nvariation:\n  count: 1\n  axes:\n    motion: [ken-burns-in]\noutput:\n  formats: [static, motion]\n`,
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const res = await web(await handlerFor(dir))(new Request("http://x/campaigns/briefs"));
+    const json = (await res.json()) as { briefs: { file: string }[] };
+
+    expect(json.briefs.map((entry) => entry.file)).toEqual(["good.yaml"]);
+    expect(warn.mock.calls.flat().join(" ")).toMatch(/skipped motion\.yaml: .*motion output is unavailable/);
+  });
+
   test("returns an empty list when the briefs directory is missing", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const res = await web(await handlerFor(dir))(new Request("http://x/campaigns/briefs")); // no briefs/ dir

@@ -14,8 +14,8 @@ function arg(flag: string): string | undefined {
 }
 
 export async function main(briefPathArg?: string): Promise<void> {
-  // The brief parser still rejects `formats: motion`, so there is nothing to gate
-  // the probe on yet; cap it instead so a wedged binary cannot stall the CLI.
+  // The parser gates `motion`/`duration`/`formats: motion` on this probe; cap it so
+  // a wedged binary cannot stall the CLI.
   const cap = await probeFfmpeg({ timeoutMs: CLI_PROBE_TIMEOUT_MS });
   setCapabilities(cap);
   if (!cap.motion) {
@@ -42,8 +42,9 @@ export async function main(briefPathArg?: string): Promise<void> {
     // brandCompliant is derived (density gate AND logo present).
     const mark = asset.passedCompliance && asset.logoApplied ? "ok " : "warn";
     const logo = asset.logoApplied ? "logo ok" : "logo missing";
+    const path = asset.videoPath ? `${asset.videoPath} (+poster)` : asset.outputPath;
     console.log(
-      `  [${mark}] ${asset.outputPath}   ${asset.treatment.padEnd(12)} brand-density ${asset.complianceScore.toFixed(3)}   ${logo}`,
+      `  [${mark}] ${path}   ${asset.treatment.padEnd(12)} brand-density ${asset.complianceScore.toFixed(3)}   ${logo}`,
     );
   }
   const reportPath = await writeReport(result.value);

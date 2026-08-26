@@ -3,6 +3,7 @@ import { err, ok, seedFrom, type Result } from "@campaignfoundry/shared";
 import type { CampaignBrief } from "../entities/CampaignBrief.js";
 import { AspectRatio, type AspectRatioValue } from "./AspectRatio.vo.js";
 import { LAYOUT_VALUES, TONE_VALUES, type LayoutKind, type ToneKind } from "./Treatment.vo.js";
+import { MOTION_KINDS, type MotionKind } from "./MotionKind.vo.js";
 
 /**
  * Background *axis* values from the brief parser (`procedural` | `asset-pool` | `genai`).
@@ -23,19 +24,36 @@ export const DISTANCE_AXES = [
   "backgroundSource",
   "paletteShift",
   "headline",
+  "motion",
+  "durationSec",
 ] as const;
 
 const UINT32_MAX = 0xffffffff;
 const DEFAULT_BACKGROUND_SOURCES: readonly BackgroundAxisSource[] = ["procedural"];
 const DEFAULT_PALETTE_SHIFT: readonly number[] = [0];
+/**
+ * Motion axis default when `output.formats` requests "motion" but the brief
+ * lists no `axes.motion`: every kind. A brief that asks for clips gets clips;
+ * a static brief (no motion format) draws no motion kinds at all.
+ */
+const DEFAULT_MOTION: readonly MotionKind[] = MOTION_KINDS;
+/** Clip length in whole seconds; the parser bounds it to [2, 30]. */
+const DEFAULT_DURATION: readonly number[] = [6];
+const MIN_DURATION_SEC = 2;
+const MAX_DURATION_SEC = 30;
 
 /**
- * Plan-time inputs the brief cannot carry: `headlines` are the approved texts
- * of the brief's copy pool, loaded by the caller when `axes.headline` is
- * `pool://copy` (the domain never reads the file).
+ * Plan-time inputs the brief cannot carry (the domain never reads files or
+ * the profile table):
+ * - `headlines` are the approved texts of the brief's copy pool, loaded by
+ *   the caller when `axes.headline` is `pool://copy`.
+ * - `motionRatios` are the canvas ratios of the requested motion-capable
+ *   platforms, resolved by the caller from `output.platforms`. Absent → every
+ *   ratio may carry a clip; empty → none can be packaged, so none is drawn.
  */
 export interface PlanInput {
   readonly headlines?: readonly string[];
+  readonly motionRatios?: readonly AspectRatioValue[];
 }
 
 export interface VariationCoverage {
@@ -65,6 +83,14 @@ export class VariationPolicy {
     readonly ratios: readonly AspectRatioValue[],
     readonly axisProductSize: number,
     readonly policyHash: string,
+    readonly motion: readonly MotionKind[],
+    readonly duration: readonly number[],
+    /** True iff `output.formats` includes "motion" and the motion axis is non-empty. */
+    readonly motionEnabled: boolean,
+    /** True iff `output.formats` also includes "static": the motion draw keeps a still slot. */
+    readonly mixStatic: boolean,
+    /** Ratios a motion slot may be drawn for (every ratio unless `output.platforms` narrows it). */
+    readonly motionRatios: readonly AspectRatioValue[],
   ) {}
 
   static fromBrief(brief: CampaignBrief, input: PlanInput = {}): Result<VariationPolicy, Error> {
@@ -81,19 +107,6 @@ export class VariationPolicy {
     if (!seedResult.success) return seedResult;
     const seed = seedResult.value;
 
-    const axes = variation.axes;
-    const headlineResult = resolveHeadline(brief, axes?.headline, input.headlines);
-    if (!headlineResult.success) return headlineResult;
-    const headline = headlineResult.value;
-
-    // A candidate can differ in at most the axes this brief activates: every
-    // DISTANCE_AXES entry except the optional ones that are off (headline here;
-    // motion/duration join the same count when they land).
-    const activeAxes = DISTANCE_AXES.filter((axis) => axis !== "headline" || headline.length > 0).length;
-    const minDistanceResult = requireInteger(variation.minDistance ?? 1, "minDistance", 0, activeAxes);
-    if (!minDistanceResult.success) return minDistanceResult;
-    const minDistance = minDistanceResult.value;
-
     const perProductResult = requireInteger(variation.coverage?.perProduct ?? 0, "coverage.perProduct", 0);
     if (!perProductResult.success) return perProductResult;
     const perRatioResult = requireInteger(variation.coverage?.perRatio ?? 0, "coverage.perRatio", 0);
@@ -102,6 +115,45 @@ export class VariationPolicy {
       perProduct: perProductResult.value,
       perRatio: perRatioResult.value,
     };
+
+    const axes = variation.axes;
+    const formats = brief.output?.formats ?? ["static"];
+    const wantsMotion = formats.includes("motion");
+    // Absent axis + motion format → all kinds; an explicit empty axis with the
+    // motion format is a contradiction the parser rejects and the domain refuses
+    // too, so a brief that asks for clips can never silently render stills.
+    const motion = unique(
+      axes?.motion !== undefined
+        ? [...(axes.motion as readonly MotionKind[])]
+        : wantsMotion
+          ? [...DEFAULT_MOTION]
+          : [],
+    );
+    const motionResult = requireMotion(motion, wantsMotion);
+    if (!motionResult.success) return motionResult;
+    const duration = unique(axes?.duration !== undefined ? [...axes.duration] : [...DEFAULT_DURATION]);
+    const durationResult = requireDuration(duration);
+    if (!durationResult.success) return durationResult;
+    const motionEnabled = wantsMotion && motion.length > 0;
+    const mixStatic = motionEnabled && formats.includes("static");
+
+    const headlineResult = resolveHeadline(brief, axes?.headline, input.headlines);
+    if (!headlineResult.success) return headlineResult;
+    const headline = headlineResult.value;
+
+    // A candidate can differ in at most the axes this brief activates: every
+    // DISTANCE_AXES entry except the optional ones that are off. An optional axis
+    // counts only while it has at least one drawable option: `headline` when the
+    // pool resolved to at least one text, `motion` when the axis is enabled —
+    // and `durationSec` is drawn only on motion slots, so it follows `motion`.
+    const activeAxes = DISTANCE_AXES.filter((axis) => {
+      if (axis === "headline") return headline.length > 0;
+      if (axis === "motion" || axis === "durationSec") return motionEnabled;
+      return true;
+    }).length;
+    const minDistanceResult = requireInteger(variation.minDistance ?? 1, "minDistance", 0, activeAxes);
+    if (!minDistanceResult.success) return minDistanceResult;
+    const minDistance = minDistanceResult.value;
 
     const layout = unique(
       axes?.layout !== undefined ? [...(axes.layout as readonly LayoutKind[])] : [...LAYOUT_VALUES],
@@ -119,9 +171,11 @@ export class VariationPolicy {
     );
     const paletteShiftResult = requirePaletteShift(paletteShift);
     if (!paletteShiftResult.success) return paletteShiftResult;
-
     const productIds = unique(brief.products.map((product) => product.id));
     const ratios = AspectRatio.all().map((ratio) => ratio.value);
+    const motionRatios = unique(input.motionRatios ?? ratios);
+    // A mixed plan adds exactly one still slot per base combination — the still
+    // carries no duration, so it is not multiplied by |duration|.
     const axisProductSize =
       productIds.length *
       ratios.length *
@@ -129,7 +183,8 @@ export class VariationPolicy {
       tone.length *
       backgroundSource.length *
       paletteShift.length *
-      Math.max(1, headline.length);
+      Math.max(1, headline.length) *
+      (motionEnabled ? motion.length * duration.length + (mixStatic ? 1 : 0) : 1);
 
     const policyHash = hashPolicy({
       axisProductSize,
@@ -143,6 +198,8 @@ export class VariationPolicy {
       ratios,
       seed,
       tone,
+      // Static briefs hash exactly as before the motion axes existed (golden-stable).
+      ...(motionEnabled ? { duration, mixStatic, motion, motionRatios } : {}),
       // Only briefs with the headline axis carry it in the hash, so every
       // pre-existing policyHash (and golden) is unchanged.
       ...(headline.length > 0 ? { headline } : {}),
@@ -163,6 +220,11 @@ export class VariationPolicy {
         ratios,
         axisProductSize,
         policyHash,
+        motion,
+        duration,
+        motionEnabled,
+        mixStatic,
+        motionRatios,
       ),
     );
   }
@@ -183,6 +245,27 @@ function requirePaletteShift(values: readonly number[]): Result<readonly number[
   for (const shift of values) {
     if (typeof shift !== "number" || !Number.isFinite(shift) || shift < 0 || shift > 1) {
       return err(new Error("Invalid paletteShift."));
+    }
+  }
+  return ok(values);
+}
+
+function requireMotion(values: readonly MotionKind[], wantsMotion: boolean): Result<readonly MotionKind[], Error> {
+  if (wantsMotion && values.length === 0) {
+    return err(new Error('Invalid motion: select at least one motion kind when output.formats includes "motion".'));
+  }
+  for (const kind of values) {
+    if (!(MOTION_KINDS as readonly string[]).includes(kind)) {
+      return err(new Error("Invalid motion."));
+    }
+  }
+  return ok(values);
+}
+
+function requireDuration(values: readonly number[]): Result<readonly number[], Error> {
+  for (const seconds of values) {
+    if (!Number.isInteger(seconds) || seconds < MIN_DURATION_SEC || seconds > MAX_DURATION_SEC) {
+      return err(new Error("Invalid duration."));
     }
   }
   return ok(values);
@@ -250,6 +333,10 @@ function hashPolicy(payload: {
   ratios: readonly string[];
   seed: number;
   tone: readonly string[];
+  duration?: readonly number[];
+  mixStatic?: boolean;
+  motion?: readonly string[];
+  motionRatios?: readonly string[];
 }): string {
   return createHash("sha256").update(canonicalJson(payload)).digest("hex");
 }

@@ -3,6 +3,7 @@ import { seedFrom } from "@campaignfoundry/shared";
 import type { CampaignBrief } from "../../entities/CampaignBrief.js";
 import type { Product } from "../../entities/Product.js";
 import { LAYOUT_VALUES, TONE_VALUES } from "../Treatment.vo.js";
+import { MOTION_KINDS } from "../MotionKind.vo.js";
 import {
   BACKGROUND_AXIS_SOURCES,
   canonicalHeadlines,
@@ -51,6 +52,11 @@ describe("VariationPolicy.fromBrief", () => {
     expect(policy.tone).toEqual([...TONE_VALUES]);
     expect(policy.backgroundSource).toEqual(["procedural"]);
     expect(policy.paletteShift).toEqual([0]);
+    expect(policy.motion).toEqual([]);
+    expect(policy.duration).toEqual([6]);
+    expect(policy.motionEnabled).toBe(false);
+    expect(policy.mixStatic).toBe(false);
+    expect(policy.motionRatios).toEqual(["1:1", "9:16", "16:9"]);
     expect(policy.productIds).toEqual(["alpha", "beta"]);
     expect(policy.ratios).toEqual(["1:1", "9:16", "16:9"]);
     expect(policy.axisProductSize).toBe(2 * 3 * 2 * 2 * 1 * 1);
@@ -135,6 +141,101 @@ describe("VariationPolicy.fromBrief", () => {
     const b = VariationPolicy.fromBrief(input);
     expect(a.success && b.success).toBe(true);
     if (a.success && b.success) expect(a.value.policyHash).toBe(b.value.policyHash);
+  });
+
+  test("minDistance is bounded by the active axes: 6 for a static brief, 8 once motion is on", () => {
+    const motionOn = (minDistance: number) =>
+      VariationPolicy.fromBrief(
+        brief({
+          variation: { count: 1, minDistance, axes: { motion: ["ken-burns-in"] } },
+          output: { formats: ["motion"] },
+        }),
+      );
+    // A motion axis that cannot be drawn (no motion format) does not count.
+    const motionOff = (minDistance: number) =>
+      VariationPolicy.fromBrief(
+        brief({ variation: { count: 1, minDistance, axes: { motion: ["ken-burns-in"] } } }),
+      );
+    expect(VariationPolicy.fromBrief(brief({ variation: { count: 1, minDistance: 6 } })).success).toBe(true);
+    expect(motionOn(8).success).toBe(true);
+    expect(motionOn(9).success).toBe(false);
+    expect(motionOff(6).success).toBe(true);
+    expect(motionOff(7).success).toBe(false);
+  });
+
+  test("formats: motion with no motion axis defaults to every MOTION_KINDS entry (every variant a clip)", () => {
+    const result = VariationPolicy.fromBrief(
+      brief({ variation: { count: 1 }, output: { formats: ["motion"] } }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.motion).toEqual([...MOTION_KINDS]);
+    expect(result.value.motionEnabled).toBe(true);
+    expect(result.value.mixStatic).toBe(false);
+  });
+
+  test("formats: motion with an explicitly empty motion axis is rejected", () => {
+    const result = VariationPolicy.fromBrief(
+      brief({ variation: { count: 1, axes: { motion: [] } }, output: { formats: ["motion"] } }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/select at least one motion kind/);
+  });
+
+  test("an empty motion axis without the motion format stays a static policy", () => {
+    const result = VariationPolicy.fromBrief(brief({ variation: { count: 1, axes: { motion: [] } } }));
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.value.motionEnabled).toBe(false);
+  });
+
+  test("formats: [static, motion] mixes (still slot kept); [motion] alone does not", () => {
+    const mixed = VariationPolicy.fromBrief(
+      brief({ variation: { count: 1, axes: { motion: ["ken-burns-in"] } }, output: { formats: ["static", "motion"] } }),
+    );
+    const clipsOnly = VariationPolicy.fromBrief(
+      brief({ variation: { count: 1, axes: { motion: ["ken-burns-in"] } }, output: { formats: ["motion"] } }),
+    );
+    expect(mixed.success && clipsOnly.success).toBe(true);
+    if (!mixed.success || !clipsOnly.success) return;
+    expect(mixed.value.mixStatic).toBe(true);
+    expect(clipsOnly.value.mixStatic).toBe(false);
+  });
+
+  test("axisProductSize counts the mixed still slot once, not per duration", () => {
+    // base = 2 products × 3 ratios × 1 layout × 1 tone × 1 background × 1 shift = 6
+    const axes = { layout: ["headline-top"], tone: ["bold"], motion: ["ken-burns-in", "headline-rise"], duration: [4, 6] };
+    const mixed = VariationPolicy.fromBrief(
+      brief({ variation: { count: 1, axes }, output: { formats: ["static", "motion"] } }),
+    );
+    const clipsOnly = VariationPolicy.fromBrief(
+      brief({ variation: { count: 1, axes }, output: { formats: ["motion"] } }),
+    );
+    expect(mixed.success && clipsOnly.success).toBe(true);
+    if (!mixed.success || !clipsOnly.success) return;
+    expect(mixed.value.axisProductSize).toBe(6 * (2 * 2 + 1)); // 30, not 6 × 3 × 2 = 36
+    expect(clipsOnly.value.axisProductSize).toBe(6 * (2 * 2)); // 24
+  });
+
+  test("motionRatios narrows to the plan input and joins the hash only for motion briefs", () => {
+    const motion = brief({
+      variation: { count: 1, axes: { motion: ["ken-burns-in"] } },
+      output: { formats: ["motion"] },
+    });
+    const all = VariationPolicy.fromBrief(motion);
+    const vertical = VariationPolicy.fromBrief(motion, { motionRatios: ["9:16", "9:16"] });
+    const none = VariationPolicy.fromBrief(motion, { motionRatios: [] });
+    expect(all.success && vertical.success && none.success).toBe(true);
+    if (!all.success || !vertical.success || !none.success) return;
+    expect(all.value.motionRatios).toEqual(["1:1", "9:16", "16:9"]);
+    expect(vertical.value.motionRatios).toEqual(["9:16"]);
+    expect(none.value.motionRatios).toEqual([]);
+    expect(vertical.value.policyHash).not.toBe(all.value.policyHash);
+
+    const still = brief({ variation: { count: 12, seed: 7, minDistance: 1 } });
+    const golden = VariationPolicy.fromBrief(still);
+    const narrowed = VariationPolicy.fromBrief(still, { motionRatios: ["9:16"] });
+    expect(golden.success && narrowed.success).toBe(true);
+    if (golden.success && narrowed.success) expect(narrowed.value.policyHash).toBe(golden.value.policyHash);
   });
 
   test("BACKGROUND_AXIS_SOURCES is the brief-parser set", () => {

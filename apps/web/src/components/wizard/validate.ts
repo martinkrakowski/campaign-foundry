@@ -10,11 +10,17 @@ const UINT32_MAX = 0xffffffff;
 /**
  * Hamming axes that are always active (productId, aspectRatio, layout, tone,
  * backgroundSource, paletteShift). Optional axes add one each when on — mirrors
- * VariationPolicy's active-axis count in CampaignOrchestration.
+ * VariationPolicy's active-axis count in CampaignOrchestration: an optional axis
+ * counts only while it has at least one option (headline when the pool axis is
+ * on; motion when non-empty, which also activates durationSec).
  */
 const BASE_DISTANCE_AXES = 6;
 
-/** Upper bound for `minDistance`: the number of Hamming axes this brief activates. */
+/**
+ * Upper bound for `minDistance`: the number of Hamming axes this brief activates.
+ * The wizard exposes the headline axis today; motion adds two more (motion +
+ * durationSec) once its controls land and `output.formats` can include "motion".
+ */
 export function maxMinDistance(state: WizardState): number {
   return BASE_DISTANCE_AXES + (state.variation.headline ? 1 : 0);
 }

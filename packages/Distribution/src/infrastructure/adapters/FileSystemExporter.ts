@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { PDFDocument, StandardFonts, type PDFPage } from "pdf-lib";
 import type { ExportPort } from "@campaignfoundry/CampaignOrchestration";
@@ -41,6 +41,12 @@ export class FileSystemExporter implements ExportPort {
     const target = resolveSafe(this.outputRoot, relativePath, "write");
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, await pdf.save());
+  }
+
+  /** Idempotent: `force` swallows ENOENT, so a slot that never had a clip is a no-op. */
+  async remove(relativePath: string): Promise<void> {
+    const target = resolveSafe(this.outputRoot, relativePath, "remove");
+    await rm(target, { force: true });
   }
 
   private drawCropMarks(page: PDFPage, x: number, y: number, w: number, h: number): void {

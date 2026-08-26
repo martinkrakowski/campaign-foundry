@@ -109,6 +109,15 @@ describe("CommandBar", () => {
     expect(within(await screen.findByRole("dialog")).getByText(/from the variation plan/)).toBeTruthy();
   });
 
+  test("shows frames and the encode estimate for a motion plan", async () => {
+    seedVariation();
+    mockPipelineApi({ plan: () => okPlan({ estimate: { ...okEstimate, frames: 3600 } }) });
+    renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
+    expect(await screen.findByText("3600")).toBeTruthy();
+    expect(screen.getByText("frames")).toBeTruthy();
+    expect(screen.getByText("≈ 0.4 min")).toBeTruthy();
+  });
+
   test("shows an infeasible 422 message verbatim and disables Execute", async () => {
     seedVariation();
     mockPipelineApi({
