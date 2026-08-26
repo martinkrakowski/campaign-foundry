@@ -287,6 +287,31 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Left open:**
   - Follow-ups noted in the plan's wave-1 status: clock injection, one `mockPipelineApi` test fixture, real progress from `PipelineExecutionLog.totalOperations`. Worktrees `../cf-wt-*` remain until the PRs merge.
 
+## 2026-08-25 — shared mockPipelineApi helper
+
+- **Mode:** Implementer
+- **Changes:**
+  - Exported `json`, `jobOk`, and `mockPipelineApi({ report?, job?, post?, result? })` from `apps/web/src/__tests__/helpers.ts`.
+  - Wired the four fetch-router copies (vitest.setup `beforeEach`, `seedPersistedRun`, `seedSingle`, run-context `mockApi`) through that helper; removed duplicate local `json` helpers in coverage-gaps, run-context, grid, and shell-modals tests.
+- **Decisions:**
+  - Default POST jobId stays `job-1` (run-context); other call sites still passed `post` so `test-job` / `seed-job` (and pending POST) were unchanged in this first pass.
+  - `mockApi` is a thin wrapper that forwards `{ post, job, result }` so run-context call sites stay as they were.
+- **Left open:**
+  - Consolidation was not complete. Remaining hand-rolled `fetch` routers: `coverage-gaps.test.tsx` (POST → 500 "boom"; pending POST; telemetry `seedLog`), `grid.test.tsx` (pending POST, empty / one-asset report), `shell-modals.test.tsx` (`/campaigns/briefs` via GET, telemetry `seedLog`), `run-context.test.tsx` (`campaignId=…` routers, restore `mockResolvedValue` / `mockRejectedValue`). `mockApi` alias still present. Per-site `post` overrides still existed only to pick `seed-job` / `test-job`.
+
+---
+
+## 2026-08-25 — mockPipelineApi review findings
+
+- **Mode:** Implementer
+- **Changes:**
+  - Dropped the `mockApi` alias; run-context call sites use `mockPipelineApi`. Converted the remaining 1:1 hand-rolled fetch routers (coverage-gaps POST 500 / pending POST / telemetry seedLog; grid pending POST + empty/one-asset reports; shell-modals `/campaigns/briefs` via `result` + telemetry seedLog; run-context `campaignId=…` + restore resolve/reject) onto `{ post, job, result, report }`.
+  - One `EMPTY_REPORT` + `MockReport` type; job-GET default is `jobSnapshot` of that report (`log: { entries: [] }` when `log` is null). Optional `jobId`; dropped `test-job` / `seed-job` post overrides. `mockPipelineApi` spies `fetch` when it is not already a mock. Job route matches `${API}/campaigns/jobs/`. Fresh-Response comment lives on `json()`.
+- **Decisions:**
+  - `done/total = 0` when `halted` matches production `completeJob` (`apps/api/server/lib/jobs.ts`); the old inline fixture that used asset length on a halted job was wrong — left `jobOk` as-is.
+  - Remaining custom `post`/`job`/`result` callbacks are the helper's extension points (inspect POST body, hang a POST, toggle `posted`, poll sequencing) — not duplicate routers.
+- **Left open:**
+  - No hand-rolled `vi.mocked(globalThis.fetch).mockImplementation` routers remain.
 ## 2026-08-25 — inject log clock (D14 follow-up)
 
 - **Mode:** Implementer
