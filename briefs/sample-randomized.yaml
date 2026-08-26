@@ -1,0 +1,36 @@
+# Randomized static-axes sample. `mode: variation` with layout, tone, procedural
+# background, and paletteShift only — headline, motion, duration, and
+# `formats: motion` are rejected at parse time. Two products keep the classic
+# minimum; generation still follows the existing product × ratio × treatments
+# matrix until later phases consume these fields.
+id: sample-randomized
+targetRegion: DE
+targetAudience: Urban outdoor enthusiasts, 25-40
+campaignMessage: Stay wild. Stay hydrated.
+localizedMessage: Bleib wild. Bleib hydriert.
+products:
+  - id: hydra-bottle
+    name: Hydra Bottle
+    primaryColor: "#1473E6"
+    logoPath: assets/inputs/hydra-logo.png
+  - id: trail-pack
+    name: Trail Pack
+    primaryColor: "#E0218A"
+    logoPath: assets/inputs/trail-logo.png
+mode: variation
+variation:
+  count: 12
+  seed: 42
+  minDistance: 2
+  coverage:
+    perProduct: 1
+    perRatio: 1
+  axes:
+    layout: [headline-top, headline-bottom]
+    tone: [bold, subtle]
+    background:
+      source: [procedural]   # static only in this sample; genai is allowlisted but not required here
+    paletteShift: [0, 0.1, 0.2]
+output:
+  formats: [static]
+  platforms: [instagram-feed, linkedin, x]
