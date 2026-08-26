@@ -10,7 +10,7 @@ import {
   type PlanInput,
   type VariationPlanner,
 } from "@campaignfoundry/CampaignOrchestration";
-import { err, ok, type Result } from "@campaignfoundry/shared";
+import { err, errorMessage, ok, type Result } from "@campaignfoundry/shared";
 import { briefsDir, isErrno } from "./brief-files.js";
 import { resolveConfined } from "./confined-path.js";
 
@@ -93,7 +93,7 @@ export async function readPool(briefId: string): Promise<CopyPool | undefined> {
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
-    throw new InvalidCopyPoolError(briefId, `not JSON (${error instanceof Error ? error.message : String(error)})`);
+    throw new InvalidCopyPoolError(briefId, `not JSON (${errorMessage(error)})`);
   }
   const problem = copyPoolProblem(parsed);
   if (problem !== undefined) throw new InvalidCopyPoolError(briefId, problem);
