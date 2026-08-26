@@ -287,6 +287,48 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Left open:**
   - Follow-ups noted in the plan's wave-1 status: clock injection, one `mockPipelineApi` test fixture, real progress from `PipelineExecutionLog.totalOperations`. Worktrees `../cf-wt-*` remain until the PRs merge.
 
+## 2026-08-25 — briefs API (Phase 1.1–1.2)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `POST /campaigns/briefs` (409 unless `?replace=1`), `PUT /campaigns/briefs/:id`,
+    `POST /campaigns/briefs/:id/duplicate`, `POST /campaigns/assets`.
+  - Write helpers: confined path resolve, yaml dump in sample key order, asset
+    name/magic/size checks. README authoring curl block. Route tests under
+    `mkdtemp` `PROJECT_ROOT`.
+- **Decisions:**
+  - PUT rewrites existing `.yaml`/`.yml` only (404 on JSON-only); JSON is
+    replaced via `POST ?replace=1` which writes `<id>.yaml`.
+  - Asset `name` is `SAFE_ID_PATTERN` plus `.(png|jpg|jpeg)`. Writes only under
+    `assets/inputs/<briefId>/` (demo logos at `assets/inputs/*.png` cannot be
+    overwritten). Local-tool trust model in the route doc.
+  - Decoded size is capped at 2 MiB (413) before magic so a huge payload is
+    rejected without a header scan.
+- **Left open:**
+  - Phase 1.3–1.6 UI (Save to briefs/, BriefPicker create/duplicate, wizard).
+
+## 2026-08-25 — briefs API review fixes (PR #47)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `findBriefFileById`: POST/PUT/duplicate key off `brief.id` (filename may differ)
+    and rewrite the found file in its own format (JSON vs yaml). README examples
+    use `summer-hydration-2026` / `winter-summit-2026`.
+  - Creates use `writeFile(..., { flag: "wx" })` (EEXIST → 409). Rewrites `lstat`
+    and 400 if the target is a symlink. Asset uploads 413 on encoded size before
+    decode as well as after.
+  - `dumpBrief` orders known keys then emits remaining ones. `?replace=1` uses
+    the first query value when repeated.
+  - Shared `assertSafeId`, `errorMessage` on the new routes, `briefs.get.ts`
+    uses `briefsDir()` + `BRIEF_SOURCE_EXTS`, output GET uses `resolveConfined`.
+    Dropped `briefFileName` and the JSON-only PUT 404.
+- **Decisions:**
+  - PUT rewrites json in place (dropped "JSON briefs must be replaced via POST").
+  - YAML comments lost on PUT is inherent to re-serialising — documented on PUT.
+  - Left as-is: duplicate keeps source `logoPath` (shared inputs), YAML scalar
+    coercion, `withTempProjectRoot` test helper.
+- **Left open:**
+  - Phase 1.3–1.6 UI.
 ## 2026-08-25 — variation planner (Phase 2.1–2.3)
 
 - **Mode:** Implementer

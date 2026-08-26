@@ -181,6 +181,57 @@ settles) makes the id 404 — the persisted report is still at
 `GET /campaigns/result?campaignId=<id>`. The CLI (`yarn generate`) is unchanged and
 runs in-process.
 
+### Authoring briefs via the API
+
+Local authoring tool — writes stay under `briefs/` and `assets/inputs/<briefId>/`.
+The same `parseBrief` validator as generate applies; ids are path-safe slugs.
+Lookup is by `brief.id`, not filename: `sample-campaign.yaml` is
+`summer-hydration-2026`, `sample-campaign.json` is `winter-summit-2026`.
+
+```bash
+# Create (409 if any briefs/ file already has that id, unless ?replace=1)
+curl -X POST http://localhost:3001/campaigns/briefs \
+  -H 'content-type: application/json' \
+  --data '{"id":"new-campaign-2026","targetRegion":"DE","targetAudience":"a","campaignMessage":"Hi","products":[{"id":"alpha"},{"id":"beta"}]}'
+# → 201 { "file": "new-campaign-2026.yaml", "brief": {…} }
+
+# Replace the file that owns this id, in that file's format (yaml dump or JSON).
+# Repeated `replace=1` still means replace. A symlink at the target is refused (400).
+curl -X POST 'http://localhost:3001/campaigns/briefs?replace=1' \
+  -H 'content-type: application/json' \
+  --data @briefs/sample-campaign.json
+# → 201 { "file": "sample-campaign.json", "brief": {…} }  # id winter-summit-2026
+
+# Update the file that contains this id (yaml or json; 404 if none does).
+# Path id must equal brief.id. YAML comments are lost — the brief is re-serialised.
+curl -X PUT http://localhost:3001/campaigns/briefs/summer-hydration-2026 \
+  -H 'content-type: application/json' \
+  --data '{"id":"summer-hydration-2026","targetRegion":"DE","targetAudience":"a","campaignMessage":"Stay wild. Stay hydrated.","products":[{"id":"hydra-bottle"},{"id":"trail-pack"}]}'
+# → 200 { "file": "sample-campaign.yaml", "brief": {…} }
+
+curl -X PUT http://localhost:3001/campaigns/briefs/winter-summit-2026 \
+  -H 'content-type: application/json' \
+  --data @briefs/sample-campaign.json
+# → 200 { "file": "sample-campaign.json", "brief": {…} }
+
+# Duplicate (404 source missing, 409 if any file already has newId)
+curl -X POST http://localhost:3001/campaigns/briefs/summer-hydration-2026/duplicate \
+  -H 'content-type: application/json' \
+  --data '{"newId":"summer-hydration-copy"}'
+# → 201 { "file": "summer-hydration-copy.yaml", "brief": {…} }
+
+# Upload a PNG/JPEG (≤ 2 MiB) into assets/inputs/<briefId>/
+curl -X POST http://localhost:3001/campaigns/assets \
+  -H 'content-type: application/json' \
+  --data '{"briefId":"summer-hydration-2026","name":"logo.png","contentBase64":"..."}'
+# → 201 { "path": "assets/inputs/summer-hydration-2026/logo.png" }
+```
+
+`GET /campaigns/briefs` lists anything POST/PUT/duplicate wrote. PUT and
+`POST ?replace=1` rewrite the existing file (`.yaml`/`.yml`/`.json`) in its own
+format; they never create a sibling named `<id>.yaml`. Asset `name` is a slug
+plus `.png`/`.jpg`/`.jpeg`.
+
 `POST /campaigns/package` copies a run's already-rendered creatives into
 `output/packages/<campaignId>/<platformId>/` (never re-renders). The package is
 the current output for that report — renders are not campaign-namespaced;
