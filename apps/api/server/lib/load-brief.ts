@@ -11,6 +11,15 @@ import {
 
 const REQUIRED_FIELDS = ["id", "targetRegion", "targetAudience", "campaignMessage", "products"] as const;
 
+/** Throw unless `value` is a path-safe slug. `label` names the field in the error. */
+export function assertSafeId(value: unknown, label: string): asserts value is string {
+  if (typeof value !== "string" || !SAFE_ID_PATTERN.test(value)) {
+    throw new Error(
+      `${label} must be a path-safe slug (lowercase letters, digits, hyphens; max 64 chars); got ${JSON.stringify(value)}.`,
+    );
+  }
+}
+
 /** P0 variation axes. Unsupported keys (headline, motion, duration) fail parse. */
 export const SUPPORTED_AXES = ["layout", "tone", "background", "paletteShift"] as const;
 
@@ -187,11 +196,7 @@ function validateTreatments(value: unknown): void {
   const seen = new Set<string>();
   for (const t of value) {
     const rec = t as Record<string, unknown>;
-    if (typeof rec?.id !== "string" || !SAFE_ID_PATTERN.test(rec.id)) {
-      throw new Error(
-        `Treatment id must be a path-safe slug (lowercase letters, digits, hyphens; max 64 chars); got ${JSON.stringify(rec?.id)}.`,
-      );
-    }
+    assertSafeId(rec?.id, "Treatment id");
     if (seen.has(rec.id)) {
       throw new Error(`Duplicate treatment id "${rec.id}" — ids must be unique within a brief.`);
     }
@@ -219,21 +224,12 @@ export function parseBrief(data: unknown): CampaignBrief {
   // The brief id is the campaign's persisted-report filename (per-campaign reload), so
   // enforce the same path-safe slug as product/treatment ids — an unsafe id would run
   // but never persist/reload per-campaign.
-  if (typeof record.id !== "string" || !SAFE_ID_PATTERN.test(record.id)) {
-    throw new Error(
-      `Campaign id must be a path-safe slug (lowercase letters, digits, hyphens; max 64 chars); got ${JSON.stringify(record.id)}.`,
-    );
-  }
+  assertSafeId(record.id, "Campaign id");
   if (!Array.isArray(record.products)) {
     throw new Error('Campaign brief field "products" must be an array.');
   }
   for (const p of record.products) {
-    const id = (p as Record<string, unknown>)?.id;
-    if (typeof id !== "string" || !SAFE_ID_PATTERN.test(id)) {
-      throw new Error(
-        `Product id must be a path-safe slug (lowercase letters, digits, hyphens; max 64 chars); got ${JSON.stringify(id)}.`,
-      );
-    }
+    assertSafeId((p as Record<string, unknown>)?.id, "Product id");
   }
   validateTreatments(record.treatments);
   validateMode(record.mode);

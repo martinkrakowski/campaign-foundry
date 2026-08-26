@@ -1,7 +1,8 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import { extname, resolve, sep } from "node:path";
+import { extname, resolve } from "node:path";
 import { outputRoot } from "../../lib/config.js";
+import { resolveConfined } from "../../lib/confined-path.js";
 
 const CONTENT_TYPES: Record<string, string> = {
   ".png": "image/png",
@@ -13,10 +14,17 @@ const CONTENT_TYPES: Record<string, string> = {
 export default defineEventHandler(async (event) => {
   const relative = getRouterParam(event, "path") ?? "";
   const root = resolve(outputRoot());
-  const target = resolve(root, relative);
-  if (target !== root && !target.startsWith(root + sep)) {
-    setResponseStatus(event, 400);
-    return { error: "Invalid path" };
+  let target: string;
+  if (relative === "") {
+    // resolveConfined rejects the base itself; GET /output/ is the root path and 404s via stat.
+    target = root;
+  } else {
+    try {
+      target = resolveConfined(root, relative);
+    } catch {
+      setResponseStatus(event, 400);
+      return { error: "Invalid path" };
+    }
   }
   try {
     await stat(target);

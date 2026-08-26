@@ -6,6 +6,7 @@ import {
   parseBrief,
   parseRegenerateOnly,
   loadBrief,
+  assertSafeId,
   SUPPORTED_AXES,
   SUPPORTED_FORMATS,
 } from "../load-brief.js";
@@ -17,6 +18,17 @@ const valid = {
   campaignMessage: "Hello",
   products: [{ id: "alpha" }, { id: "beta" }],
 };
+
+describe("assertSafeId", () => {
+  test("accepts a path-safe slug", () => {
+    expect(() => assertSafeId("camp", "Campaign id")).not.toThrow();
+  });
+
+  test("rejects a non-slug with the field label", () => {
+    expect(() => assertSafeId("Bad", "Campaign id")).toThrow(/Campaign id must be a path-safe/);
+    expect(() => assertSafeId(1, "briefId")).toThrow(/briefId must be a path-safe/);
+  });
+});
 
 describe("parseBrief", () => {
   test("accepts a structurally valid brief", () => {

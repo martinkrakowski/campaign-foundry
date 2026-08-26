@@ -1,29 +1,28 @@
-import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
+import { basename } from "node:path";
 import { errorMessage } from "@campaignfoundry/shared";
 import {
-  BRIEF_SOURCE_EXTS,
-  briefFileName,
   briefYamlPath,
-  findBriefFile,
-  pathExists,
-  writeBriefFile,
+  createBriefFile,
+  findBriefById,
+  isExistsError,
 } from "../../../../lib/brief-files.js";
-import { loadBrief } from "../../../../lib/load-brief.js";
+import { assertSafeId } from "../../../../lib/load-brief.js";
 
 /**
  * POST /campaigns/briefs/:id/duplicate — copy a yaml/yml/json brief to `briefs/<newId>.yaml`.
  *
- * Body `{ newId }` must be path-safe. 404 if the source is missing, 409 if the
- * target yaml already exists. The copy gets `id: newId`; writes stay under
- * `projectRoot()/briefs/`.
+ * Body `{ newId }` must be path-safe. Source is looked up by `brief.id` (filename
+ * may differ). 404 if the source is missing, 409 if any file already has `newId`.
+ * The copy gets `id: newId`; writes stay under `projectRoot()/briefs/`.
  */
 export default defineEventHandler(async (event) => {
-  const id = String(getRouterParam(event, "id"));
-  if (!SAFE_ID_PATTERN.test(id)) {
+  let id: string;
+  try {
+    id = String(getRouterParam(event, "id"));
+    assertSafeId(id, "Campaign id");
+  } catch (error) {
     setResponseStatus(event, 400);
-    return {
-      error: `Campaign id must be a path-safe slug (lowercase letters, digits, hyphens; max 64 chars); got ${JSON.stringify(id)}.`,
-    };
+    return { error: errorMessage(error) };
   }
 
   let newId: string;
@@ -31,38 +30,37 @@ export default defineEventHandler(async (event) => {
     const body: unknown = await readBody(event);
     const value =
       typeof body === "object" && body !== null ? (body as { newId?: unknown }).newId : undefined;
-    if (typeof value !== "string" || !SAFE_ID_PATTERN.test(value)) {
-      throw new Error(
-        `newId must be a path-safe slug (lowercase letters, digits, hyphens; max 64 chars); got ${JSON.stringify(value)}.`,
-      );
-    }
+    assertSafeId(value, "newId");
     newId = value;
-  } catch (error) {
-    setResponseStatus(event, 400);
-    return { error: error instanceof Error ? error.message : "Invalid duplicate request" };
-  }
-
-  const sourcePath = await findBriefFile(id, BRIEF_SOURCE_EXTS);
-  if (!sourcePath) {
-    setResponseStatus(event, 404);
-    return { error: `Brief "${id}" not found.` };
-  }
-
-  const destPath = briefYamlPath(newId);
-  if (await pathExists(destPath)) {
-    setResponseStatus(event, 409);
-    return { error: `Brief "${newId}.yaml" already exists.` };
-  }
-
-  let brief;
-  try {
-    brief = { ...(await loadBrief(sourcePath)), id: newId };
   } catch (error) {
     setResponseStatus(event, 400);
     return { error: errorMessage(error) };
   }
 
-  await writeBriefFile(destPath, brief);
+  const source = await findBriefById(id);
+  if (!source) {
+    setResponseStatus(event, 404);
+    return { error: `Brief "${id}" not found.` };
+  }
+
+  if (await findBriefById(newId)) {
+    setResponseStatus(event, 409);
+    return { error: `Brief "${newId}" already exists.` };
+  }
+
+  const brief = { ...source.brief, id: newId };
+
+  const destPath = briefYamlPath(newId);
+  try {
+    await createBriefFile(destPath, brief);
+  } catch (error) {
+    if (isExistsError(error)) {
+      setResponseStatus(event, 409);
+      return { error: `Brief "${newId}" already exists.` };
+    }
+    throw error;
+  }
+
   setResponseStatus(event, 201);
-  return { file: briefFileName(destPath), brief };
+  return { file: basename(destPath), brief };
 });

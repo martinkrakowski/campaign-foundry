@@ -74,11 +74,14 @@ describe("POST /campaigns/assets", () => {
   test("returns 409 when the asset already exists", async () => {
     const handler = await web(dir);
     expect((await post(handler, upload())).status).toBe(201);
+    const dest = join(dir, "assets", "inputs", "camp", "logo.png");
+    const original = readFileSync(dest);
     const again = await post(handler, upload());
     expect(again.status).toBe(409);
     expect(await again.json()).toEqual({
       error: 'Asset "assets/inputs/camp/logo.png" already exists.',
     });
+    expect(readFileSync(dest)).toEqual(original);
   });
 
   test("returns 400 for invalid image magic", async () => {
@@ -88,12 +91,22 @@ describe("POST /campaigns/assets", () => {
     );
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "Asset must be a PNG or JPEG image." });
+    expect(existsSync(join(dir, "assets", "inputs", "camp", "logo.png"))).toBe(false);
   });
 
   test("returns 400 for bad base64", async () => {
     const res = await post(await web(dir), upload({ contentBase64: "not-base64!!" }));
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "contentBase64 must be standard base64." });
+    expect(existsSync(join(dir, "assets", "inputs", "camp", "logo.png"))).toBe(false);
+  });
+
+  test("returns 413 before decode when the base64 string is over the encoded cap", async () => {
+    const tooLong = "!".repeat(Math.ceil(MAX_ASSET_BYTES / 3) * 4 + 1);
+    const res = await post(await web(dir), upload({ contentBase64: tooLong }));
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: "Asset exceeds the 2 MiB size limit." });
+    expect(existsSync(join(dir, "assets", "inputs", "camp", "logo.png"))).toBe(false);
   });
 
   test("returns 413 when the decoded payload exceeds 2 MiB", async () => {
@@ -104,6 +117,7 @@ describe("POST /campaigns/assets", () => {
     const res = await post(await web(dir), upload({ contentBase64: oversized.toString("base64") }));
     expect(res.status).toBe(413);
     expect(await res.json()).toEqual({ error: "Asset exceeds the 2 MiB size limit." });
+    expect(existsSync(join(dir, "assets", "inputs", "camp", "logo.png"))).toBe(false);
   });
 
   test("accepts an asset at the 2 MiB cap", async () => {
@@ -135,6 +149,7 @@ describe("POST /campaigns/assets", () => {
     expect(res.status).toBe(400);
     expect(readFileSync(join(dir, "assets", "inputs", "hydra-logo.png"), "utf8")).toBe("DEMO-LOGO");
     expect(existsSync(join(dir, "assets", "inputs", "hydra-logo.png"))).toBe(true);
+    expect(existsSync(join(dir, "assets", "inputs", "camp", "logo.png"))).toBe(false);
   });
 
   test("a valid hydra-logo.png name writes beside the demo logo, not over it", async () => {
@@ -143,6 +158,18 @@ describe("POST /campaigns/assets", () => {
     expect(await res.json()).toEqual({ path: "assets/inputs/camp/hydra-logo.png" });
     expect(readFileSync(join(dir, "assets", "inputs", "hydra-logo.png"), "utf8")).toBe("DEMO-LOGO");
     expect(readFileSync(join(dir, "assets", "inputs", "camp", "hydra-logo.png"))).toEqual(png);
+  });
+
+  test("surfaces an unexpected write error", async () => {
+    const handler = await web(dir);
+    const assetFiles = await import("../../../lib/asset-files.js");
+    const spy = vi
+      .spyOn(assetFiles, "writeAssetFile")
+      .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+    const res = await post(handler, upload());
+    expect(res.status).toBe(500);
+    expect(existsSync(join(dir, "assets", "inputs", "camp", "logo.png"))).toBe(false);
+    spy.mockRestore();
   });
 
   test("returns 400 with a default message when body parsing throws a non-Error", async () => {
@@ -155,7 +182,8 @@ describe("POST /campaigns/assets", () => {
     try {
       const res = await post(handler, upload());
       expect(res.status).toBe(400);
-      expect(await res.json()).toEqual({ error: "Invalid asset upload" });
+      expect(await res.json()).toEqual({ error: "non-error parse failure" });
+      expect(existsSync(join(dir, "assets", "inputs", "camp", "logo.png"))).toBe(false);
     } finally {
       g.readBody = original;
     }

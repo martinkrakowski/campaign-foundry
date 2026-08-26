@@ -96,4 +96,12 @@ describe("asset paths", () => {
       /Path escapes the allowed directory/,
     );
   });
+
+  test("writeAssetFile is exclusive — a second write does not overwrite", async () => {
+    const { assetAbsPath, writeAssetFile } = await filesFor(dir);
+    const dest = assetAbsPath("camp", "logo.png");
+    await writeAssetFile(dest, png);
+    await expect(writeAssetFile(dest, Buffer.from("nope"))).rejects.toMatchObject({ code: "EEXIST" });
+    expect(readFileSync(dest)).toEqual(png);
+  });
 });

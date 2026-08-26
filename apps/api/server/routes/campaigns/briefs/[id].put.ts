@@ -1,21 +1,21 @@
-import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
-import { BRIEF_YAML_EXTS, briefFileName, findBriefFile, writeBriefFile } from "../../../lib/brief-files.js";
-import { parseBrief } from "../../../lib/load-brief.js";
+import { basename } from "node:path";
+import { errorMessage } from "@campaignfoundry/shared";
+import { findBriefFileById, rewriteBriefFile, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
+import { assertSafeId, parseBrief } from "../../../lib/load-brief.js";
 
 /**
- * PUT /campaigns/briefs/:id — replace an existing YAML brief (`<id>.yaml` or `<id>.yml`).
- *
- * Path id must equal `brief.id`. 404 unless a yaml/yml file exists (JSON-only briefs
- * are updated via POST ?replace=1, which writes `<id>.yaml`). Writes stay under
- * `projectRoot()/briefs/`.
+ * PUT /campaigns/briefs/:id — replace the briefs/ file whose `brief.id` equals the
+ * path id (yaml, yml, or json). Path id must equal `brief.id`. 404 if no file has
+ * that id. The file is rewritten in its own format; YAML comments are lost.
  */
 export default defineEventHandler(async (event) => {
-  const id = String(getRouterParam(event, "id"));
-  if (!SAFE_ID_PATTERN.test(id)) {
+  let id: string;
+  try {
+    id = String(getRouterParam(event, "id"));
+    assertSafeId(id, "Campaign id");
+  } catch (error) {
     setResponseStatus(event, 400);
-    return {
-      error: `Campaign id must be a path-safe slug (lowercase letters, digits, hyphens; max 64 chars); got ${JSON.stringify(id)}.`,
-    };
+    return { error: errorMessage(error) };
   }
 
   let brief;
@@ -23,7 +23,7 @@ export default defineEventHandler(async (event) => {
     brief = parseBrief(await readBody(event));
   } catch (error) {
     setResponseStatus(event, 400);
-    return { error: error instanceof Error ? error.message : "Invalid campaign brief" };
+    return { error: errorMessage(error) };
   }
 
   if (id !== brief.id) {
@@ -31,12 +31,21 @@ export default defineEventHandler(async (event) => {
     return { error: `Path id "${id}" does not match brief.id "${brief.id}".` };
   }
 
-  const filePath = await findBriefFile(id, BRIEF_YAML_EXTS);
+  const filePath = await findBriefFileById(id);
   if (!filePath) {
     setResponseStatus(event, 404);
     return { error: `Brief "${id}" not found.` };
   }
 
-  await writeBriefFile(filePath, brief);
-  return { file: briefFileName(filePath), brief };
+  try {
+    await rewriteBriefFile(filePath, brief);
+  } catch (error) {
+    if (errorMessage(error) === SYMLINK_WRITE_ERROR) {
+      setResponseStatus(event, 400);
+      return { error: errorMessage(error) };
+    }
+    throw error;
+  }
+
+  return { file: basename(filePath), brief };
 });

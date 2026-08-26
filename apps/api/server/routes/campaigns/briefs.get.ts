@@ -1,10 +1,13 @@
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { errorMessage, projectRoot } from "@campaignfoundry/shared";
+import { errorMessage } from "@campaignfoundry/shared";
+import { BRIEF_SOURCE_EXTS, briefsDir } from "../../lib/brief-files.js";
 import { loadBrief } from "../../lib/load-brief.js";
 
-/** Brief formats the CLI/loader understands. */
-const BRIEF_PATTERN = /\.(ya?ml|json)$/i;
+const BRIEF_PATTERN = new RegExp(
+  `(?:${BRIEF_SOURCE_EXTS.map((ext) => ext.replace(".", "\\.")).join("|")})$`,
+  "i",
+);
 
 /**
  * GET /campaigns/briefs — list the campaign briefs available under `<repo>/briefs`,
@@ -13,7 +16,7 @@ const BRIEF_PATTERN = /\.(ya?ml|json)$/i;
  * the list). Directory is fixed (no user input), so there's no traversal surface.
  */
 export default defineEventHandler(async () => {
-  const dir = resolve(projectRoot(), "briefs");
+  const dir = briefsDir();
   let files: string[];
   try {
     // withFileTypes + isFile() lists only regular files; symlinks (isFile() is false

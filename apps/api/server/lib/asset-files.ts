@@ -47,5 +47,5 @@ export function assetAbsPath(briefId: string, name: string): string {
 
 export async function writeAssetFile(path: string, bytes: Buffer): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, bytes);
+  await writeFile(path, bytes, { flag: "wx" });
 }

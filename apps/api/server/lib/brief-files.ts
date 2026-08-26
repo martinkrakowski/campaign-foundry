@@ -1,14 +1,15 @@
-import { lstat, mkdir, writeFile } from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
+import { lstat, mkdir, readdir, writeFile } from "node:fs/promises";
+import { dirname, extname, resolve } from "node:path";
 import * as yaml from "js-yaml";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { projectRoot } from "@campaignfoundry/shared";
 import { resolveConfined } from "./confined-path.js";
+import { loadBrief } from "./load-brief.js";
 
-/** YAML sources PUT will rewrite in place. */
-export const BRIEF_YAML_EXTS = [".yaml", ".yml"] as const;
-/** Formats the loader understands — duplicate/load look these up in this order. */
+/** Formats the loader understands — listing and id lookup accept these (case-insensitive). */
 export const BRIEF_SOURCE_EXTS = [".yaml", ".yml", ".json"] as const;
+
+export const SYMLINK_WRITE_ERROR = "Refusing to write through a symlink.";
 
 const BRIEF_KEY_ORDER = [
   "id",
@@ -23,7 +24,7 @@ const BRIEF_KEY_ORDER = [
   "output",
 ] as const;
 
-/** Serialize a brief with the sample-campaign key order. */
+/** Serialize a brief with the sample-campaign key order, then any remaining keys. */
 export function dumpBrief(brief: CampaignBrief): string {
   const source = brief as unknown as Record<string, unknown>;
   const ordered: Record<string, unknown> = {};
@@ -31,20 +32,36 @@ export function dumpBrief(brief: CampaignBrief): string {
     const value = source[key];
     if (value !== undefined) ordered[key] = value;
   }
+  for (const key of Object.keys(source)) {
+    if (!(key in ordered) && source[key] !== undefined) ordered[key] = source[key];
+  }
   return yaml.dump(ordered, { lineWidth: -1, noRefs: true });
+}
+
+export function serializeBrief(path: string, brief: CampaignBrief): string {
+  return extname(path).toLowerCase() === ".json" ? JSON.stringify(brief, null, 2) : dumpBrief(brief);
 }
 
 export function briefsDir(): string {
   return resolve(projectRoot(), "briefs");
 }
 
-/** Confined path for the canonical write target `briefs/<id>.yaml`. */
+/** Confined path for the canonical create target `briefs/<id>.yaml`. */
 export function briefYamlPath(id: string): string {
   return resolveConfined(briefsDir(), `${id}.yaml`);
 }
 
-export function briefFileName(path: string): string {
-  return basename(path);
+export function isErrno(error: unknown, code: string): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === code;
+}
+
+export function isExistsError(error: unknown): boolean {
+  return isErrno(error, "EEXIST");
+}
+
+export function isBriefSourceName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return BRIEF_SOURCE_EXTS.some((ext) => lower.endsWith(ext));
 }
 
 /** True if anything (file, dir, symlink) exists at `path`. */
@@ -78,7 +95,68 @@ export async function findBriefFile(
   return undefined;
 }
 
-export async function writeBriefFile(path: string, brief: CampaignBrief): Promise<void> {
+/**
+ * Regular briefs/ source whose parsed `brief.id` equals `id`.
+ * Filename may differ from the id (e.g. `sample-campaign.yaml` / `summer-hydration-2026`).
+ * Unparseable files and non-files are skipped, matching GET /campaigns/briefs.
+ */
+export async function findBriefById(
+  id: string,
+): Promise<{ path: string; brief: CampaignBrief } | undefined> {
+  const dir = briefsDir();
+  let names: string[];
+  try {
+    const entries = await readdir(dir, { withFileTypes: true });
+    names = entries
+      .filter((e) => e.isFile() && isBriefSourceName(e.name))
+      .map((e) => e.name)
+      .sort();
+  } catch {
+    return undefined;
+  }
+  for (const name of names) {
+    const filePath = resolve(dir, name);
+    try {
+      const brief = await loadBrief(filePath);
+      if (brief.id === id) return { path: filePath, brief };
+    } catch {
+      // skip a malformed brief rather than treating it as a match
+    }
+  }
+  return undefined;
+}
+
+export async function findBriefFileById(id: string): Promise<string | undefined> {
+  return (await findBriefById(id))?.path;
+}
+
+/** Exclusive create — fails with EEXIST if anything is already at `path`. */
+export async function createBriefFile(path: string, brief: CampaignBrief): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, dumpBrief(brief), "utf8");
+  await writeFile(path, serializeBrief(path, brief), { encoding: "utf8", flag: "wx" });
+}
+
+/** Overwrite an existing regular file in its own format; refuse a symlink. */
+export async function rewriteBriefFile(path: string, brief: CampaignBrief): Promise<void> {
+  const st = await lstat(path);
+  if (st.isSymbolicLink()) {
+    throw new Error(SYMLINK_WRITE_ERROR);
+  }
+  await writeFile(path, serializeBrief(path, brief), "utf8");
+}
+
+/**
+ * Replace an existing file at `path`, or create it if missing.
+ * Used by POST `?replace=1`. Symlinks are refused; a racing create is EEXIST.
+ */
+export async function replaceBriefFile(path: string, brief: CampaignBrief): Promise<void> {
+  try {
+    await rewriteBriefFile(path, brief);
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) {
+      await createBriefFile(path, brief);
+      return;
+    }
+    throw error;
+  }
 }
