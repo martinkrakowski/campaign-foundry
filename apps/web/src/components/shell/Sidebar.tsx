@@ -1,9 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { Accordion } from "./Accordion";
-import { useRouter } from "next/navigation";
 import { useRun } from "@/lib/run-context";
+import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 
 /**
  * Floating left panel: the campaign brief (read-only) and the project asset bin.
@@ -24,14 +23,19 @@ export function Sidebar() {
  */
 export function BrowseBriefsButton({ onActivate }: { onActivate?: () => void }) {
   const { openBriefPicker } = useRun();
-  const router = useRouter();
+  const { guardedPush, isDirty } = useGuardedNavigation();
   return (
     <div className="flex shrink-0 gap-2 border-t border-border p-3">
       <button
         type="button"
         onClick={() => {
           onActivate?.();
-          router.push("/new");
+          if (isDirty) {
+            if (!window.confirm("You have unsaved changes. Are you sure you want to leave?")) {
+              return;
+            }
+          }
+          guardedPush("/brief");
         }}
         className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-primary px-3 py-2 text-[12px] font-medium text-white transition-colors hover:bg-brand-primary-hover"
       >
@@ -67,20 +71,32 @@ export function BrowseBriefsButton({ onActivate }: { onActivate?: () => void }) 
  */
 export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { brief } = useRun();
+  const { guardedPush, isDirty } = useGuardedNavigation();
   const aspectsLabel = "1:1, 9:16, 16:9";
+
+  const handleEditClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    onNavigate?.();
+    if (isDirty) {
+      if (!window.confirm("You have unsaved changes. Are you sure you want to leave?")) {
+        return;
+      }
+    }
+    guardedPush("/brief");
+  };
 
   return (
     <div className="flex-1 space-y-5 overflow-y-auto p-4">
         <Accordion
           title="Campaign Brief"
           aside={
-            <Link
+            <a
               href="/brief"
-              onClick={onNavigate}
+              onClick={handleEditClick}
               className="text-[11px] font-medium text-text-muted transition-colors hover:text-white"
             >
               Edit
-            </Link>
+            </a>
           }
         >
           <Field label="Brief ID">

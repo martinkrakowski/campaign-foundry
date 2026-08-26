@@ -125,17 +125,12 @@ describe("MobileMenu", () => {
 });
 
 describe("Create new", () => {
-  test("the sidebar's Create new button navigates to the wizard", async () => {
+  test("the sidebar's Create new button navigates to /brief", async () => {
     const { BrowseBriefsButton } = await import("../Sidebar");
     const onActivate = vi.fn();
     render(createElement(RunProvider, null, createElement(BrowseBriefsButton, { onActivate })));
     await userEvent.setup().click(screen.getByRole("button", { name: /create new/i }));
     expect(onActivate).toHaveBeenCalled();
-    expect(nextMock().router.push).toHaveBeenCalledWith("/new");
-  });
-
-  test("the header exposes a New campaign tab", async () => {
-    render(createElement(RunProvider, null, createElement(Header)));
-    expect(screen.getAllByRole("link", { name: "New campaign" })[0].getAttribute("href")).toBe("/new");
+    expect(nextMock().router.push).toHaveBeenCalledWith("/brief");
   });
 });

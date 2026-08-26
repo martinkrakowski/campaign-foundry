@@ -117,6 +117,15 @@ export async function createBrief(
   return asBriefEntry(await requestJson(`${API}/campaigns/briefs${query}`, jsonInit("POST", brief)));
 }
 
+export async function updateBrief(
+  id: string,
+  brief: CampaignBrief,
+  opts: { revision?: string } = {},
+): Promise<BriefEntry> {
+  const query = opts.revision ? `?revision=${opts.revision}` : "";
+  return asBriefEntry(await requestJson(`${API}/campaigns/briefs/${encodeURIComponent(id)}${query}`, jsonInit("PUT", brief)));
+}
+
 export async function duplicateBrief(id: string, newId: string): Promise<BriefEntry> {
   return asBriefEntry(
     await requestJson(
