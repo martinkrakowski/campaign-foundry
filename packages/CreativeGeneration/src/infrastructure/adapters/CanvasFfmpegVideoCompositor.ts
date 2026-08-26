@@ -1,7 +1,6 @@
 import { spawn as defaultSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Writable } from "node:stream";
@@ -12,10 +11,10 @@ import type {
   VideoCompositorPort,
 } from "@campaignfoundry/CampaignOrchestration";
 import { restT } from "@campaignfoundry/CampaignOrchestration";
+// Static import (not createRequire) so bundlers such as Nitro trace the package
+// and its binary into the production output.
+import ffmpegStatic from "ffmpeg-static";
 import { NodeCanvasCompositor } from "./NodeCanvasCompositor.js";
-
-const require = createRequire(import.meta.url);
-const ffmpegStatic = require("ffmpeg-static") as string | null;
 
 /** Encode pool size — canvas raster is the bottleneck, not ffmpeg. */
 export const MAX_CONCURRENT_ENCODES = 2;

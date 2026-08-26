@@ -1,5 +1,10 @@
 import { spawn as defaultSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
-import { createRequire } from "node:module";
+import { accessSync, constants } from "node:fs";
+// Static ESM import on purpose: `nitro build` traces static imports into
+// `.output/server/node_modules`, but a `createRequire(import.meta.url)(...)` was
+// invisible to the tracer, so production boot died with "Cannot find module
+// 'ffmpeg-static'" before the probe below could warn. See nitro.config.ts.
+import ffmpegStatic from "ffmpeg-static";
 
 export type Capabilities = { motion: boolean; reason?: string };
 
@@ -9,14 +14,38 @@ export type ProbeSpawn = (
   options?: SpawnOptions,
 ) => ChildProcess;
 
-const require = createRequire(import.meta.url);
-const ffmpegStatic = require("ffmpeg-static") as string | null;
 const DEFAULT_TIMEOUT_MS = 5_000;
+const UNAVAILABLE = "ffmpeg-static binary is not available";
 
+// Nitro does not await async plugins before serving, so a request that arrives
+// while `ffmpeg-check` is still probing sees this initial "not probed" snapshot.
 let current: Capabilities = { motion: false, reason: "not probed" };
 
 export function getCapabilities(): Capabilities {
   return current;
+}
+
+export type FfmpegBinary = { path: string; reason?: undefined } | { path: null; reason: string };
+
+/**
+ * Resolve the ffmpeg-static binary lazily and never throw: a null export
+ * (unsupported platform), a missing file, or a non-executable one all degrade
+ * to a reason the probe surfaces as `{ motion: false, reason }`.
+ */
+export function resolveFfmpegBinary(
+  candidate: string | null = ffmpegStatic,
+  check: (path: string) => void = (path) => accessSync(path, constants.X_OK),
+): FfmpegBinary {
+  if (typeof candidate !== "string" || candidate.length === 0) {
+    return { path: null, reason: UNAVAILABLE };
+  }
+  try {
+    check(candidate);
+    return { path: candidate };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return { path: null, reason: `${UNAVAILABLE}: ${redactAbsolutePaths(detail, [candidate])}` };
+  }
 }
 
 export function setCapabilities(c: Capabilities): void {
@@ -28,13 +57,14 @@ export async function probeFfmpeg(opts?: {
   timeoutMs?: number;
   ffmpegPath?: string | null;
 }): Promise<Capabilities> {
-  const ffmpegPath = opts?.ffmpegPath !== undefined ? opts.ffmpegPath : ffmpegStatic;
+  const binary = opts?.ffmpegPath !== undefined ? resolveFfmpegBinary(opts.ffmpegPath, () => {}) : resolveFfmpegBinary();
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const spawnFn = opts?.spawn ?? defaultSpawn;
 
-  if (!ffmpegPath) {
-    return { motion: false, reason: "ffmpeg-static binary is not available" };
+  if (binary.path === null) {
+    return { motion: false, reason: binary.reason };
   }
+  const ffmpegPath = binary.path;
 
   return await new Promise((resolve) => {
     let settled = false;
