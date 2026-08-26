@@ -148,16 +148,21 @@ bounded_contexts:
           - CampaignBrief
           - GeneratedAsset
           - Product
+          - Variant
         value_objects:
           - AspectRatio
           - ComplianceResult
           - PipelineExecutionLog
           - LogEntry
           - PipelineResult
+          - VariationPolicy
+          - VariationPlan
+          - MotionKind
         domain_services: []
       application:
         use_cases:
           - GenerateCampaignUseCase
+          - PlanVariationsUseCase
         ports:
           in: []
           out: []

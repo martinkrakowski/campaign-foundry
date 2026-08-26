@@ -3,3 +3,4 @@
 export * from "./CampaignBrief.js";
 export * from "./GeneratedAsset.js";
 export * from "./Product.js";
+export * from "./Variant.js";
