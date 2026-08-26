@@ -38,7 +38,7 @@ tersely ("1 = …, 3 = default") or reply "defaults" to accept them all:
 |---|---|---|
 | 1 | **Plan and wave** — which plan file, and which phase/wave of it? | the newest plan in `docs/planning/`, its first unstarted phase |
 | 2 | **Implement** — who writes the lane code? `self`, or a CLI command | the strongest non-self CLI detected; `self` if none |
-| 3 | **Review** — who reviews each PR? A CLI command, or `self` | a detected CLI that is **not** the implementer |
+| 3 | **Review** — who reviews each PR? A CLI command, or `self (fresh context)` | a detected CLI that is **not** the implementer; if none is available, `self (fresh context)` — see the tiers below |
 | 4 | **Remediate** — who applies the fix briefs? | same as review |
 | 5 | **Sweep** — who answers and resolves review threads? | `self` (fixed — judgement about refuting stays with you) |
 | 6 | **Merge** — who merges? | `self` (fixed — never delegate a merge) |
@@ -59,9 +59,17 @@ tool name silently denies nothing.
 
 **Two rules you enforce during intake, not after:**
 
-1. **The reviewer must not be the implementer.** If both are `self`, or the same CLI *and*
-   the same model, stop and say so: a model reviewing its own output rationalises it, and
-   stage 2 becomes a self-check. Offer the detected alternatives.
+1. **The reviewer must be independent of the implementer**, in the strongest form available.
+   Resolve to the best tier that the detected set allows, and **say which tier you are on**:
+
+   | Tier | Cast | Assurance |
+   |---|---|---|
+   | A (preferred) | a different CLI, or a different model | independent reasoning; catches what the implementer's assumptions hid |
+   | B (acceptable) | same agent, **fresh context**: a subagent or new session given only the branch diff, the acceptance criteria and a read-only brief — no implementation history | catches most defects; shares the model's blind spots |
+   | C (refuse) | the same session that wrote the code, continuing to review it | not a review; it will rationalise its own output |
+
+   Tier B is the default when only one agent is installed, so "defaults" always resolves.
+   Never tier C — if the environment forces it, stop and tell me rather than pretend.
 2. **A reviewer that can edit will fix instead of report.** If the chosen review CLI has no
    tool-deny flag, say so and put "read-only, report findings as JSON, change no files" in
    the review brief as the compensating control.
