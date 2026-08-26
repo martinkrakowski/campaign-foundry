@@ -7,7 +7,7 @@ import {
   type GeneratedAsset,
   type PipelineResult,
 } from "@campaignfoundry/CampaignOrchestration";
-import { campaignReportPath, latestReportPath, readReport, writeReport } from "../report.js";
+import { campaignReportPath, isPersistedAsset, latestReportPath, readReport, writeReport } from "../report.js";
 
 type ReportAsset = GeneratedAsset & { brandCompliant: boolean };
 
@@ -101,12 +101,24 @@ describe("report persistence", () => {
     expect(readAssets(path)).toHaveLength(1);
   });
 
+  test("isPersistedAsset requires the four string identity/path fields", () => {
+    expect(isPersistedAsset({ productId: "alpha", aspectRatio: "1:1" })).toBe(false);
+    expect(isPersistedAsset({ productId: "alpha", aspectRatio: "1:1", treatment: "default" })).toBe(false);
+    expect(
+      isPersistedAsset({ productId: "alpha", aspectRatio: "1:1", treatment: "default", outputPath: "alpha/1x1.png" }),
+    ).toBe(true);
+    expect(isPersistedAsset(null)).toBe(false);
+    expect(isPersistedAsset("nope")).toBe(false);
+  });
+
   test("merge drops unkeyable rows from a corrupt prior report, with a warning", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mkdirSync(resolve(root, "reports"), { recursive: true });
     writeFileSync(
       resolve(root, "reports", "camp.json"),
-      JSON.stringify({ assets: [null, { productId: "x" }, beta()] }),
+      JSON.stringify({
+        assets: [null, { productId: "x" }, { productId: "alpha", aspectRatio: "1:1", treatment: "default" }, beta()],
+      }),
     );
     const path = await writeReport(result([asset()]), { merge: true });
 

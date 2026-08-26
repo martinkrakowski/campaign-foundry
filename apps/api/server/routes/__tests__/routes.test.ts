@@ -350,15 +350,18 @@ describe("POST /campaigns/package", () => {
     expect(body.platforms.every((p) => p.items.every((i) => i.checks.size === "pass"))).toBe(true);
 
     const feedManifest = JSON.parse(
-      readFileSync(resolve(dir, "camp/platforms/instagram-feed/manifest.json"), "utf8"),
-    ) as { items: Array<{ checks: { size: string } }> };
-    const xManifest = JSON.parse(readFileSync(resolve(dir, "camp/platforms/x/manifest.json"), "utf8")) as {
+      readFileSync(resolve(dir, "packages/camp/instagram-feed/manifest.json"), "utf8"),
+    ) as { items: Array<{ checks: { size: string } }>; packagedAt: string; skipped: number };
+    const xManifest = JSON.parse(readFileSync(resolve(dir, "packages/camp/x/manifest.json"), "utf8")) as {
       items: Array<{ checks: { size: string } }>;
     };
     expect(feedManifest.items.every((i) => i.checks.size === "pass")).toBe(true);
     expect(xManifest.items.every((i) => i.checks.size === "pass")).toBe(true);
-    expect(existsSync(resolve(dir, "camp/platforms/instagram-feed/alpha/1x1.png"))).toBe(true);
-    expect(existsSync(resolve(dir, "camp/platforms/x/alpha/16x9.png"))).toBe(true);
+    expect(feedManifest.skipped).toBe(0);
+    expect(typeof feedManifest.packagedAt).toBe("string");
+    expect(Number.isNaN(Date.parse(feedManifest.packagedAt))).toBe(false);
+    expect(existsSync(resolve(dir, "packages/camp/instagram-feed/alpha/1x1.png"))).toBe(true);
+    expect(existsSync(resolve(dir, "packages/camp/x/alpha/16x9.png"))).toBe(true);
   });
 
   test("returns 400 when campaignId is missing", async () => {
@@ -436,51 +439,102 @@ describe("POST /campaigns/package", () => {
     expect(await res.json()).toEqual({ error: "Campaign report not found" });
   });
 
-  test("returns 400 naming tiktok when a hidden platform is requested", async () => {
+  test("returns 422 naming tiktok when a hidden platform is requested", async () => {
     seedReport();
     const res = await call({ campaignId: "camp", platforms: ["tiktok"] });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     expect((await res.json() as { error: string }).error).toMatch(/tiktok/);
   });
 
-  test("returns 400 for an unknown platform", async () => {
+  test("returns 422 for an unknown platform", async () => {
     seedReport();
     const res = await call({ campaignId: "camp", platforms: ["myspace"] });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
     expect(await res.json()).toEqual({ error: 'Unknown platform "myspace"' });
   });
 
-  test("packages empty items when the report has no assets array", async () => {
+  test("de-duplicates platform ids, preserving order", async () => {
+    seedPng("alpha/1x1.png");
+    seedReport([reportAsset()]);
+    const res = await call({
+      campaignId: "camp",
+      platforms: ["instagram-feed", "linkedin", "instagram-feed"],
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { platforms: Array<{ platformId: string }> };
+    expect(body.platforms.map((p) => p.platformId)).toEqual(["instagram-feed", "linkedin"]);
+  });
+
+  test("skips a GET-result-shaped row and counts it on the manifest", async () => {
+    seedPng("alpha/1x1.png");
+    seedReport([{ productId: "alpha", aspectRatio: "1:1" }, reportAsset()]);
+    const res = await call({ campaignId: "camp", platforms: ["instagram-feed"] });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { platforms: Array<{ items: unknown[]; skipped: number }> };
+    expect(body.platforms[0].items).toHaveLength(1);
+    expect(body.platforms[0].skipped).toBe(1);
+    const onDisk = JSON.parse(
+      readFileSync(resolve(dir, "packages/camp/instagram-feed/manifest.json"), "utf8"),
+    ) as { skipped: number; items: unknown[] };
+    expect(onDisk.skipped).toBe(1);
+    expect(onDisk.items).toHaveLength(1);
+  });
+
+  test("returns 422 when a source PNG is missing, without leaking the server path", async () => {
+    seedReport([reportAsset()]);
+    const res = await call({ campaignId: "camp", platforms: ["instagram-feed"] });
+    expect(res.status).toBe(422);
+    const { error } = (await res.json()) as { error: string };
+    expect(error).toMatch(/^Platform "instagram-feed":/);
+    expect(error).not.toContain(dir);
+    expect(error).not.toMatch(/(?:^|[\s'"])\//);
+  });
+
+  test("a failed later platform does not mix the earlier platform's directory", async () => {
+    seedPng("alpha/1x1.png");
+    seedReport([
+      reportAsset(),
+      reportAsset({ aspectRatio: "16:9", outputPath: "alpha/16x9.png" }),
+    ]);
+    const res = await call({ campaignId: "camp", platforms: ["instagram-feed", "x"] });
+    expect(res.status).toBe(422);
+    const { error } = (await res.json()) as { error: string };
+    expect(error).toMatch(/^Platform "x":/);
+    expect(error).not.toContain(dir);
+    expect(existsSync(resolve(dir, "packages/camp/instagram-feed/manifest.json"))).toBe(true);
+    expect(existsSync(resolve(dir, "packages/camp/instagram-feed/alpha/1x1.png"))).toBe(true);
+    expect(existsSync(resolve(dir, "packages/camp/x"))).toBe(false);
+  });
+
+  test("returns 422 when the report has no assets array", async () => {
     mkdirSync(resolve(dir, "reports"), { recursive: true });
     writeFileSync(resolve(dir, "reports", "camp.json"), JSON.stringify({ halted: false, log: { campaignId: "camp" } }));
     const res = await call({ campaignId: "camp", platforms: ["instagram-feed"] });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { platforms: Array<{ items: unknown[] }> };
-    expect(body.platforms[0].items).toEqual([]);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: "Campaign report assets must be an array" });
   });
 
-  test("packages empty items when the report JSON is an array", async () => {
+  test("returns 422 when the report JSON is an array", async () => {
     mkdirSync(resolve(dir, "reports"), { recursive: true });
     writeFileSync(resolve(dir, "reports", "camp.json"), "[]");
     const res = await call({ campaignId: "camp", platforms: ["linkedin"] });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { platforms: Array<{ platformId: string; items: unknown[] }> };
-    expect(body.platforms[0]).toMatchObject({ platformId: "linkedin", items: [] });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: "Campaign report assets must be an array" });
   });
 
-  test("packages empty items when the report JSON is a primitive", async () => {
+  test("returns 422 when the report JSON is a primitive", async () => {
     mkdirSync(resolve(dir, "reports"), { recursive: true });
     writeFileSync(resolve(dir, "reports", "camp.json"), "5");
     const res = await call({ campaignId: "camp", platforms: ["instagram-feed"] });
-    expect(res.status).toBe(200);
-    expect(((await res.json()) as { platforms: Array<{ items: unknown[] }> }).platforms[0].items).toEqual([]);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: "Campaign report assets must be an array" });
   });
 
-  test("packages empty items when the report JSON is null", async () => {
+  test("returns 422 when the report JSON is null", async () => {
     mkdirSync(resolve(dir, "reports"), { recursive: true });
     writeFileSync(resolve(dir, "reports", "camp.json"), "null");
     const res = await call({ campaignId: "camp", platforms: ["instagram-feed"] });
-    expect(res.status).toBe(200);
-    expect(((await res.json()) as { platforms: Array<{ items: unknown[] }> }).platforms[0].items).toEqual([]);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: "Campaign report assets must be an array" });
   });
 });

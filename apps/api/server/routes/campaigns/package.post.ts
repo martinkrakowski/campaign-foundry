@@ -1,7 +1,6 @@
-import type { GeneratedAsset } from "@campaignfoundry/CampaignOrchestration";
 import { FileSystemPackageStore, PackageForPlatformUseCase } from "@campaignfoundry/Distribution";
 import { outputRoot } from "../../lib/config.js";
-import { readReport } from "../../lib/report.js";
+import { isPersistedAsset, type PersistedAsset, readReport } from "../../lib/report.js";
 
 function parsePackageRequest(body: unknown): { campaignId: string; platforms: readonly string[] } {
   if (typeof body !== "object" || body === null) {
@@ -18,18 +17,36 @@ function parsePackageRequest(body: unknown): { campaignId: string; platforms: re
   ) {
     throw new Error("platforms must be a non-empty array of strings");
   }
-  return { campaignId: record.campaignId, platforms: record.platforms };
+  const seen = new Set<string>();
+  const platforms: string[] = [];
+  for (const platform of record.platforms) {
+    if (seen.has(platform)) continue;
+    seen.add(platform);
+    platforms.push(platform);
+  }
+  return { campaignId: record.campaignId, platforms };
 }
 
-function assetsFrom(report: unknown): GeneratedAsset[] {
-  if (typeof report !== "object" || report === null) return [];
+function persistedAssetsFrom(
+  report: unknown,
+): { assets: PersistedAsset[]; skipped: number } | { error: string } {
+  if (typeof report !== "object" || report === null) {
+    return { error: "Campaign report assets must be an array" };
+  }
   const assets = (report as { assets?: unknown }).assets;
-  return Array.isArray(assets) ? (assets as GeneratedAsset[]) : [];
+  if (!Array.isArray(assets)) {
+    return { error: "Campaign report assets must be an array" };
+  }
+  const valid = assets.filter(isPersistedAsset);
+  return { assets: valid, skipped: assets.length - valid.length };
 }
 
 /**
  * POST /campaigns/package — copy a run's already-rendered creatives into
- * per-platform folders. Never re-renders. Body: `{ campaignId, platforms }`.
+ * per-platform folders under `output/packages/<campaignId>/<platformId>/`.
+ * Never re-renders. The package is the current output for that report
+ * (renders are not campaign-namespaced; `packagedAt` records when this copy
+ * was taken). Body: `{ campaignId, platforms }`.
  */
 export default defineEventHandler(async (event) => {
   let campaignId: string;
@@ -49,13 +66,21 @@ export default defineEventHandler(async (event) => {
     return { error: "Campaign report not found" };
   }
 
+  const parsed = persistedAssetsFrom(report);
+  if ("error" in parsed) {
+    setResponseStatus(event, 422);
+    return { error: parsed.error };
+  }
+
   const result = await new PackageForPlatformUseCase(new FileSystemPackageStore(root, campaignId)).execute({
     campaignId,
-    assets: assetsFrom(report),
+    assets: parsed.assets,
     platforms,
+    packagedAt: new Date().toISOString(),
+    skipped: parsed.skipped,
   });
   if (!result.success) {
-    setResponseStatus(event, 400);
+    setResponseStatus(event, 422);
     return { error: result.error.message };
   }
   return result.value;

@@ -41,14 +41,26 @@ export async function readReport(root: string, campaignId: string): Promise<unkn
 /** The "latest run" pointer — read by GET /campaigns/result when no campaignId is given. */
 export const latestReportPath = (root: string): string => resolve(root, "report.json");
 
-/** A persisted entry we can safely key for merging — guards against a corrupt report.json. */
-function isKeyable(a: unknown): a is ReportAsset {
+/** The four string fields a persisted report row must have to be keyed or packaged. */
+export type PersistedAsset = {
+  productId: string;
+  aspectRatio: string;
+  treatment: string;
+  outputPath: string;
+};
+
+/**
+ * Guard for a persisted report row — used by both the merge path and packaging.
+ * Rows missing any of the four string fields are skipped (never thrown on).
+ */
+export function isPersistedAsset(a: unknown): a is PersistedAsset {
   return (
     typeof a === "object" &&
     a !== null &&
-    typeof (a as ReportAsset).productId === "string" &&
-    typeof (a as ReportAsset).aspectRatio === "string" &&
-    typeof (a as ReportAsset).treatment === "string"
+    typeof (a as PersistedAsset).productId === "string" &&
+    typeof (a as PersistedAsset).aspectRatio === "string" &&
+    typeof (a as PersistedAsset).treatment === "string" &&
+    typeof (a as PersistedAsset).outputPath === "string"
   );
 }
 
@@ -62,13 +74,13 @@ async function readPersistedAssets(path: string): Promise<ReportAsset[]> {
     const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
     const assets = (parsed as { assets?: unknown })?.assets;
     if (!Array.isArray(assets)) return [];
-    const keyable = assets.filter(isKeyable);
-    if (keyable.length !== assets.length) {
+    const persisted = assets.filter(isPersistedAsset) as ReportAsset[];
+    if (persisted.length !== assets.length) {
       console.warn(
-        `[report] dropped ${assets.length - keyable.length} unkeyable asset(s) from report.json during merge`,
+        `[report] dropped ${assets.length - persisted.length} invalid persisted asset(s) from report.json during merge`,
       );
     }
-    return keyable;
+    return persisted;
   } catch {
     return [];
   }
