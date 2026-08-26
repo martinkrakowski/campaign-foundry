@@ -641,3 +641,38 @@ To keep this file out of version control, add `.agents/session-log.md` to
     `instanceof` sees the route's module instance.
 - **Left open:**
   - Phase 3.4 allowlist `headline: pool://copy`, planner consumption, wizard control.
+
+## 2026-08-26 — pooled headlines (wave 5 lane B, Phase 3.4–3.5, branch feat/pool-headlines)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Parser allowlists `variation.axes.headline: pool://copy` (`validateHeadlineAxis`,
+    the only pool reference; any other value is a 400 naming it). The generic
+    "pool:// under any axis" scan is gone — the per-axis allowlists reject it.
+  - `VariationPolicy.fromBrief(brief, input?)` / `PlanVariationsUseCase.plan(brief,
+    input?)` take `PlanInput { headlines }`; the policy gains `headline` (approved
+    texts, trimmed/de-duplicated), `axisProductSize` multiplies by its size, and
+    `headline` is the seventh `DISTANCE_AXES` entry. `Variant.headline?`;
+    `drawHeadline` draws last so briefs without the axis keep their goldens; the
+    hash carries `headline` only when non-empty (goldens byte-identical).
+  - API: `pools.ts` `planInputFor(brief)` (reads `briefs/<id>/pools.json` →
+    `approvedTexts`) and `pooledPlanner(input)`; `runCampaign` resolves the pool
+    before building the pipeline (failed job on generate); `/campaigns/plan`
+    passes it (422 naming the pool file) and reports `headline` per variant.
+  - Use case: one-line read `message: variant.headline ?? copy` (lane A's file).
+  - Wizard: Copy step "Headline pool" panel (load, Generate 10 suggestions,
+    approve/reject, inline edit → PATCH, 503 pins the API message and disables
+    generation); policy step `pool://copy` toggle, disabled with a message until
+    an entry is approved; `setPool` switches the axis off when approvals drop to
+    0; `briefs-api.ts` `getPool` / `generatePool` / `patchPool`. `minDistance`
+    bound 6 → 7 in the wizard validator.
+- **Decisions:**
+  - Pool loading stays at the API edge (`pools.ts`) and is bound into a
+    `VariationPlanner` wrapper rather than widening `GenerateCampaignDeps` — keeps
+    the use case (lane A's file) to the single agreed read.
+  - No `errors.headline` in validation: the reducer invariant makes an
+    on-but-empty axis unreachable, so the UI block is the disabled toggle.
+- **Left open:**
+  - `briefs/sample-randomized.yaml` header still says headline is rejected (lane
+    C's sample-pooled brief documents the syntax). `mockPipelineApi` does not
+    route PATCH; the wizard test wraps it locally.
