@@ -92,11 +92,11 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
   }
 
   async compositeVideo(request: VideoCompositeRequest): Promise<VideoCompositeResult> {
+    const sampleAt = validateRequest(request);
     const frames = Math.round(request.durationSec * request.fps);
-    if (!Number.isFinite(frames) || frames < 2) {
-      throw new Error("durationSec * fps must yield at least 2 frames");
+    if (frames < 2) {
+      throw new VideoCompositeValidationError("durationSec * fps must yield at least 2 frames");
     }
-    assertSampleAt(request.sampleAt);
     if (!this.ffmpegPath) {
       throw new Error("ffmpeg-static binary is not available");
     }
@@ -110,7 +110,7 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
     NodeCanvasCompositor.draw(ctx, prepared, restT(request.motion), request.motion);
     const poster = new Uint8Array(canvas.toBuffer("image/png"));
 
-    const sampledFrames = request.sampleAt.map((t) => {
+    const sampledFrames = sampleAt.map((t) => {
       NodeCanvasCompositor.draw(ctx, prepared, t, request.motion);
       return new Uint8Array(canvas.toBuffer("image/png"));
     });
@@ -273,12 +273,34 @@ async function writeWithBackpressure(stdin: Writable, data: Buffer): Promise<voi
   }
 }
 
-function assertSampleAt(sampleAt: readonly number[]): void {
+/** Thrown for a request outside the adapter's contract; the message names the field. */
+export class VideoCompositeValidationError extends Error {
+  override readonly name = "VideoCompositeValidationError";
+}
+
+export const MAX_FPS = 60;
+export const MAX_DURATION_SEC = 60;
+
+/** Validate fps / durationSec / sampleAt; returns sampleAt de-duplicated and sorted ascending. */
+function validateRequest(request: VideoCompositeRequest): readonly number[] {
+  const { fps, durationSec, sampleAt } = request;
+  if (!Number.isInteger(fps) || fps < 1 || fps > MAX_FPS) {
+    throw new VideoCompositeValidationError(`fps must be an integer in [1, ${MAX_FPS}] (got ${String(fps)})`);
+  }
+  if (typeof durationSec !== "number" || !Number.isFinite(durationSec) || durationSec <= 0 || durationSec > MAX_DURATION_SEC) {
+    throw new VideoCompositeValidationError(
+      `durationSec must be a finite number in (0, ${MAX_DURATION_SEC}] (got ${String(durationSec)})`,
+    );
+  }
+  if (!Array.isArray(sampleAt)) {
+    throw new VideoCompositeValidationError("sampleAt must be an array of numbers in [0, 1]");
+  }
   for (const t of sampleAt) {
     if (typeof t !== "number" || !Number.isFinite(t) || t < 0 || t > 1) {
-      throw new Error(`sampleAt values must be finite numbers in [0, 1] (got ${String(t)})`);
+      throw new VideoCompositeValidationError(`sampleAt values must be finite numbers in [0, 1] (got ${String(t)})`);
     }
   }
+  return [...new Set(sampleAt)].sort((a, b) => a - b);
 }
 
 function formatFfmpegFailure(detail: string, ffmpegPath: string): string {

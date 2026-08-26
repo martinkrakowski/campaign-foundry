@@ -16,6 +16,9 @@ import {
   DEFAULT_ENCODE_TIMEOUT_MS,
   DEFAULT_KILL_GRACE_MS,
   MAX_CONCURRENT_ENCODES,
+  MAX_DURATION_SEC,
+  MAX_FPS,
+  VideoCompositeValidationError,
   type FfmpegSpawn,
 } from "../CanvasFfmpegVideoCompositor.js";
 
@@ -262,18 +265,60 @@ describe("CanvasFfmpegVideoCompositor", () => {
     );
   });
 
-  test("rejects a non-finite frame count", async () => {
-    const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
-    await expect(compositor.compositeVideo(videoRequest({ fps: Number.POSITIVE_INFINITY }))).rejects.toThrow(
-      /at least 2 frames/,
-    );
-  });
+  test.each([0, 61, 12.5, Number.POSITIVE_INFINITY, Number.NaN, "12"] as const)(
+    "rejects fps %s with a named validation error",
+    async (fps) => {
+      const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
+      await expect(compositor.compositeVideo(videoRequest({ fps: fps as unknown as number }))).rejects.toSatisfy(
+        (error: unknown) => {
+          expect(error).toBeInstanceOf(VideoCompositeValidationError);
+          expect((error as Error).name).toBe("VideoCompositeValidationError");
+          expect((error as Error).message).toMatch(/fps must be an integer in \[1, 60\]/);
+          return true;
+        },
+      );
+    },
+  );
+
+  test.each([0, -1, 60.5, Number.POSITIVE_INFINITY, Number.NaN, "2"] as const)(
+    "rejects durationSec %s",
+    async (durationSec) => {
+      const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
+      await expect(
+        compositor.compositeVideo(videoRequest({ durationSec: durationSec as unknown as number })),
+      ).rejects.toThrow(/durationSec must be a finite number in \(0, 60\]/);
+    },
+  );
 
   test.each([2, -0.1, Number.NaN, "x"] as const)("rejects sampleAt value %s", async (t) => {
     const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
     await expect(
       compositor.compositeVideo(videoRequest({ sampleAt: [t as unknown as number] })),
     ).rejects.toThrow(/sampleAt values must be finite numbers in \[0, 1\]/);
+  });
+
+  test("rejects a non-array sampleAt", async () => {
+    const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
+    await expect(
+      compositor.compositeVideo(videoRequest({ sampleAt: 0.5 as unknown as number[] })),
+    ).rejects.toThrow(/sampleAt must be an array/);
+  });
+
+  test("de-duplicates and sorts sampleAt before sampling frames", async () => {
+    const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
+    const out = await compositor.compositeVideo(videoRequest({ sampleAt: [1, 0.5, 0, 0.5, 1] }));
+    expect(out.sampledFrames).toHaveLength(3);
+    const sorted = await compositor.compositeVideo(videoRequest({ sampleAt: [0, 0.5, 1] }));
+    expect(out.sampledFrames.map((f) => Buffer.from(f).toString("hex"))).toEqual(
+      sorted.sampledFrames.map((f) => Buffer.from(f).toString("hex")),
+    );
+  });
+
+  test("accepts the boundary values fps 60 and durationSec 60", async () => {
+    const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
+    await expect(compositor.compositeVideo(videoRequest({ fps: 1, durationSec: 60, sampleAt: [] }))).resolves.toBeTruthy();
+    expect(MAX_FPS).toBe(60);
+    expect(MAX_DURATION_SEC).toBe(60);
   });
 
   test("rejects when ffmpeg-static path is missing", async () => {
