@@ -339,33 +339,25 @@ function validateTreatments(value: unknown): void {
  * live in the use case. `capabilities` gates the motion allowlist (D8); it defaults
   * to the boot probe's snapshot and is injectable so tests can flip it.
  */
-type ParseBriefSecondArg = Capabilities | { capabilities?: Capabilities; enforceCapabilities?: boolean } | undefined;
+/** How a brief is validated: authoring accepts what this host cannot run (D7/D12/D15). */
+export interface ParseBriefOptions {
+  /** Probe snapshot to validate against; defaults to the boot probe. */
+  capabilities?: Capabilities;
+  /** Enforce the motion capability. Authoring (listing, persistence) leaves this false. */
+  enforceCapabilities?: boolean;
+}
 
 /**
- * Structurally validate an untrusted value into a CampaignBrief.
+ * Structurally validate an untrusted value into a CampaignBrief. Business rules live in
+ * the use case.
  *
- * Two calling conventions:
- * 1. Legacy: `parseBrief(data, capabilities)` — second arg is a Capabilities object (enforces capabilities, old behavior).
- * 2. New: `parseBrief(data, { capabilities?, enforceCapabilities? })` — options object (enforceCapabilities defaults to false, authoring mode).
+ * `enforceCapabilities` defaults to **false**: a brief that names motion is structurally
+ * valid everywhere, so it can be listed and saved on a host with no ffmpeg (D7/D12/D15).
+ * The run paths — plan and generate — pass `true` and refuse what this host cannot make.
  */
-export function parseBrief(data: unknown, capabilitiesOrOpts?: ParseBriefSecondArg): CampaignBrief {
-  const isCapabilities = (value: unknown): value is Capabilities => {
-    return typeof value === "object" && value !== null && typeof (value as Capabilities).motion === "boolean";
-  };
-
-  let capabilities: Capabilities;
-  let enforceCapabilities: boolean;
-
-  if (capabilitiesOrOpts !== undefined && isCapabilities(capabilitiesOrOpts)) {
-    // Legacy call: second argument is a Capabilities object, enforce capabilities (old behavior)
-    capabilities = capabilitiesOrOpts;
-    enforceCapabilities = true;
-  } else {
-    // New options object or undefined
-    const opts = (capabilitiesOrOpts as { capabilities?: Capabilities; enforceCapabilities?: boolean }) ?? {};
-    capabilities = opts.capabilities ?? getCapabilities();
-    enforceCapabilities = opts.enforceCapabilities ?? false;
-  }
+export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): CampaignBrief {
+  const capabilities = opts.capabilities ?? getCapabilities();
+  const enforceCapabilities = opts.enforceCapabilities ?? false;
 
   // When not enforcing capabilities, pretend motion is available to skip capability checks
   const effectiveCapabilities: Capabilities = enforceCapabilities ? capabilities : { motion: true };
@@ -455,17 +447,16 @@ export function parseRegenerateOnly(value: unknown): RegenerationTarget[] | unde
 
 /**
  * Parse a brief from bytes already read; `path` only selects the format
- * (.json vs .yaml/.yml). The parsed brief is validated against the
- * current capabilities.
+ * (.json vs .yaml/.yml). Validation follows `opts` — authoring by default.
  */
 
-export function parseBriefText(path: string, raw: string, capabilitiesOrOpts?: ParseBriefSecondArg): CampaignBrief {
+export function parseBriefText(path: string, raw: string, opts: ParseBriefOptions = {}): CampaignBrief {
   const data = extname(path).toLowerCase() === ".json" ? JSON.parse(raw) : yaml.load(raw);
-  return parseBrief(data, capabilitiesOrOpts);
+  return parseBrief(data, opts);
 }
 
 /** Load and parse a brief from a .yaml / .yml / .json file. */
-export async function loadBrief(path: string, capabilitiesOrOpts?: ParseBriefSecondArg): Promise<CampaignBrief> {
+export async function loadBrief(path: string, opts: ParseBriefOptions = {}): Promise<CampaignBrief> {
   const raw = await readFile(path, "utf8");
-  return parseBriefText(path, raw, capabilitiesOrOpts);
+  return parseBriefText(path, raw, opts);
 }
