@@ -185,6 +185,68 @@ describe("pipeline composition root", () => {
     }
   });
 
+  test("runCampaign halts when an approved pool headline fails the legal gate", async () => {
+    const origRoot = process.env.PROJECT_ROOT;
+    try {
+      mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
+      writeFileSync(
+        join(dir, "briefs", "camp", "pools.json"),
+        JSON.stringify({
+          briefId: "camp",
+          generatedAt: "2026-01-01T00:00:00.000Z",
+          model: "m",
+          entries: [
+            { id: "h1", text: "Stay wild", status: "approved" },
+            { id: "h2", text: "A miracle cure", status: "approved" },
+          ],
+        }),
+      );
+      const pooled: CampaignBrief = {
+        ...brief,
+        mode: "variation",
+        variation: { count: 4, seed: 42, axes: { headline: "pool://copy" } },
+      };
+      const r = await (await freshRunCampaign())(pooled, "procedural");
+      expect(r.success).toBe(true);
+      if (r.success) {
+        expect(r.value.halted).toBe(true);
+        expect(r.value.assets).toEqual([]);
+        expect(r.value.log.entries.at(-1)).toMatchObject({
+          stage: "ExecuteLegalGateCheck",
+          level: "error",
+          message: "Pipeline halted — Prohibited terminology: miracle, cure",
+        });
+      }
+    } finally {
+      if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+      else process.env.PROJECT_ROOT = origRoot;
+    }
+  });
+
+  test("runCampaign pins a re-roll to expectedPolicyHash", async () => {
+    const vbrief: CampaignBrief = { ...brief, mode: "variation", variation: { count: 4, seed: 42 } };
+    const first = await runCampaign(vbrief, "procedural");
+    expect(first.success).toBe(true);
+    if (!first.success) return;
+    const hash = first.value.policyHash as string;
+    const target = [{ productId: first.value.assets[0].productId, variantIndex: 0 }];
+
+    const same = await runCampaign(vbrief, "procedural", target, hash);
+    expect(same.success).toBe(true);
+    if (same.success) expect(same.value.assets).toHaveLength(1);
+
+    const changed = await runCampaign({ ...vbrief, variation: { count: 4, seed: 43 } }, "procedural", target, hash);
+    expect(changed.success).toBe(false);
+    if (!changed.success) {
+      expect(changed.error.message).toMatch(/^Plan changed since the last run \(policyHash [0-9a-f]{64} ≠ [0-9a-f]{64}\); run the full campaign\.$/);
+      expect(changed.error.message).toContain(hash);
+    }
+
+    const unplannable = await runCampaign({ ...vbrief, variation: { count: 999, seed: 42 } }, "procedural", target, hash);
+    expect(unplannable.success).toBe(false);
+    if (!unplannable.success) expect(unplannable.error.message).toMatch(/exceeds axisProductSize/);
+  });
+
   test("runCampaign forwards regenerateOnly targets", async () => {
     const r = await runCampaign(brief, "procedural", [{ productId: "alpha", aspectRatio: "1:1", treatment: "default" }]);
     expect(r.success).toBe(true);
