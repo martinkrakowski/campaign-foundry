@@ -1,7 +1,7 @@
 import { render, fireEvent } from "@testing-library/react";
 import { createElement, type ReactElement } from "react";
 import { vi, type Mock } from "vitest";
-import { RunProvider, type Asset } from "@/lib/run-context";
+import { API, RunProvider, type Asset } from "@/lib/run-context";
 
 /**
  * Drive a modal's focus trap through every branch: forward-Tab wrap from the last
@@ -38,10 +38,15 @@ export const makeAsset = (over: Partial<Asset> = {}): Asset => ({
   ...over,
 });
 
+/** A fresh Response per call — a Response body can only be read once. */
 export const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-export const jobOk = (result: { halted?: boolean; assets?: unknown[]; log?: unknown }) => {
+export type MockReport = { halted?: boolean; assets?: unknown[]; log?: unknown };
+
+export const EMPTY_REPORT: MockReport = { halted: false, assets: [], log: null };
+
+export const jobOk = (result: MockReport) => {
   const n = result.halted ? 0 : (result.assets?.length ?? 0);
   return json({ status: "completed", done: n, total: n, log: result.log ?? null, result });
 };
@@ -49,32 +54,39 @@ export const jobOk = (result: { halted?: boolean; assets?: unknown[]; log?: unkn
 type PostFn = (url: string, init: RequestInit) => Response | Promise<Response>;
 type GetFn = (url: string) => Response | Promise<Response>;
 
+const jobSnapshot = (report: MockReport): MockReport => ({
+  ...report,
+  log: report.log ?? { entries: [] },
+});
+
 /**
- * Shared pipeline fetch router. Default POST is 202 { jobId: "job-1" }; GET
- * `/campaigns/jobs/` is a completed snapshot from `report` (empty job if omitted);
- * any other GET returns `report` (or `{ halted: false, assets: [], log: null }`).
+ * Shared pipeline fetch router. Default POST is 202 `{ jobId }` (`job-1` unless
+ * `jobId` is set); GET `${API}/campaigns/jobs/` is a completed snapshot of
+ * `report` (empty job if omitted); any other GET returns `report` (or `EMPTY_REPORT`).
  */
 export const mockPipelineApi = (
   opts: {
-    report?: { halted?: boolean; assets?: unknown[]; log?: unknown };
+    report?: MockReport;
+    jobId?: string;
     post?: PostFn;
     job?: GetFn;
     result?: GetFn;
   } = {},
-) =>
-  vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+) => {
+  if (!vi.isMockFunction(globalThis.fetch)) vi.spyOn(globalThis, "fetch");
+  const report = opts.report ?? EMPTY_REPORT;
+  return vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
     const u = String(url);
     const req = (init ?? {}) as RequestInit;
     if (req.method === "POST") {
-      return Promise.resolve(opts.post ? opts.post(u, req) : json({ jobId: "job-1" }, 202));
+      return Promise.resolve(opts.post ? opts.post(u, req) : json({ jobId: opts.jobId ?? "job-1" }, 202));
     }
-    if (u.includes("/campaigns/jobs/")) {
-      return Promise.resolve(opts.job ? opts.job(u) : jobOk(opts.report ?? { halted: false, assets: [], log: { entries: [] } }));
+    if (u.includes(`${API}/campaigns/jobs/`)) {
+      return Promise.resolve(opts.job ? opts.job(u) : jobOk(jobSnapshot(report)));
     }
-    return Promise.resolve(opts.result ? opts.result(u) : json(opts.report ?? { halted: false, assets: [], log: null }));
+    return Promise.resolve(opts.result ? opts.result(u) : json(report));
   });
-
-export const mockApi = (opts: { post?: PostFn; job?: GetFn; result?: GetFn } = {}) => mockPipelineApi(opts);
+};
 
 /**
  * Seed a persisted run that RunProvider restores on mount: stores a brief (so the
@@ -99,7 +111,6 @@ export const seedPersistedRun = (assets: Asset[], opts: { halted?: boolean; id?:
   );
   mockPipelineApi({
     report: { halted: opts.halted ?? false, assets, log: { entries: [], campaignId: id } },
-    post: () => json({ jobId: "seed-job" }, 202),
   });
 };
 

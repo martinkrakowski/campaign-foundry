@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
-import { json, mockPipelineApi } from "@/__tests__/helpers";
+import { mockPipelineApi } from "@/__tests__/helpers";
 
 // happy-dom v20 refuses to initialize localStorage without a file path, so swap in a
 // simple in-memory implementation (the run state persistence the app relies on).
@@ -24,9 +24,8 @@ Object.defineProperty(globalThis, "localStorage", { value: memoryStorage, config
 // empty "no run yet" result instead of hitting the network. POST generate returns
 // 202 { jobId } and the job GET completes immediately so UI execute() still works.
 beforeEach(() => {
-  // A fresh Response per call — a Response body can only be read once.
   vi.spyOn(globalThis, "fetch");
-  mockPipelineApi({ post: () => json({ jobId: "test-job" }, 202) });
+  mockPipelineApi();
 });
 
 // Unmount any rendered tree and restore mocks so happy-dom/localStorage state never

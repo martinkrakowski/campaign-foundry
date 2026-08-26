@@ -1,7 +1,7 @@
 import { describe, test, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderWithRun, exerciseFocusTrap, json } from "@/__tests__/helpers";
+import { renderWithRun, exerciseFocusTrap, json, mockPipelineApi, EMPTY_REPORT } from "@/__tests__/helpers";
 import { ModelSelector } from "../ModelSelector";
 import { BriefPicker } from "../BriefPicker";
 import { TelemetryDrawer } from "../TelemetryDrawer";
@@ -45,9 +45,9 @@ describe("BriefPicker", () => {
   beforeEach(() => localStorage.removeItem("cf:brief-picked")); // let it auto-open
 
   const routeBriefs = (body: unknown, ok = true) =>
-    vi.mocked(globalThis.fetch).mockImplementation((url) =>
-      Promise.resolve(String(url).includes("/campaigns/briefs") ? json(body, ok ? 200 : 500) : json({ halted: false, assets: [], log: null })),
-    );
+    mockPipelineApi({
+      result: (url) => (url.includes("/campaigns/briefs") ? json(body, ok ? 200 : 500) : json(EMPTY_REPORT)),
+    });
 
   test("lists briefs, marks the current one, and selecting one loads it", async () => {
     const user = userEvent.setup();
@@ -66,13 +66,12 @@ describe("BriefPicker", () => {
   });
 
   test("shows an error state when the request returns a non-JSON 5xx", async () => {
-    vi.mocked(globalThis.fetch).mockImplementation((url) =>
-      Promise.resolve(
-        String(url).includes("/campaigns/briefs")
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/briefs")
           ? new Response("<html>502</html>", { status: 502 }) // non-JSON → JSON.parse throws
-          : json({ halted: false, assets: [], log: null }),
-      ),
-    );
+          : json(EMPTY_REPORT),
+    });
     renderWithRun(<BriefPicker />);
     expect(await screen.findByText(/Could not load briefs/)).toBeTruthy();
   });
@@ -101,9 +100,9 @@ describe("TelemetryDrawer", () => {
       "cf:brief",
       JSON.stringify({ id: "log", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }] }),
     );
-    vi.mocked(globalThis.fetch).mockResolvedValue(
-      json({ halted: false, assets: [], log: { campaignId: "log", entries: [{ timestamp: "2026-01-01T10:00:00Z", stage: "Stage", message: "hello", level: "warn" }] } }),
-    );
+    mockPipelineApi({
+      report: { halted: false, assets: [], log: { campaignId: "log", entries: [{ timestamp: "2026-01-01T10:00:00Z", stage: "Stage", message: "hello", level: "warn" }] } },
+    });
   };
 
   test("shows the idle message when there are no log entries", () => {
@@ -116,9 +115,9 @@ describe("TelemetryDrawer", () => {
       "cf:brief",
       JSON.stringify({ id: "log2", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }] }),
     );
-    vi.mocked(globalThis.fetch).mockImplementation(async () =>
-      json({ halted: false, assets: [], log: { campaignId: "log2", entries: [{ timestamp: "not-a-date", stage: "S", message: "m", level: "info" }] } }),
-    );
+    mockPipelineApi({
+      report: { halted: false, assets: [], log: { campaignId: "log2", entries: [{ timestamp: "not-a-date", stage: "S", message: "m", level: "info" }] } },
+    });
     renderWithRun(<TelemetryDrawer open onClose={() => {}} />);
     expect(await screen.findByText("--:--:--")).toBeTruthy();
   });
