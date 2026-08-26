@@ -1,5 +1,7 @@
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { API } from "./run-context";
+
+/** Same path as run-context `API`. Local so RunProvider can import these helpers without a cycle. */
+const API = "/api/pipeline";
 
 export interface BriefEntry {
   file: string;
@@ -171,4 +173,99 @@ export async function planCampaign(brief: CampaignBrief, signal?: AbortSignal): 
     estimate: rec.estimate,
     variants: Array.isArray(rec.variants) ? rec.variants : [],
   };
+}
+
+/** One copied creative in a platform package (mirrors Distribution PackageManifestItem). */
+export interface PackageItem {
+  productId: string;
+  aspectRatio: string;
+  treatment: string;
+  source: string;
+  packagedPath: string;
+  bytes: number;
+  checks: { size: "pass" | "fail" };
+}
+
+/** One platform's package, from POST /campaigns/package or GET /campaigns/packages/:id. */
+export interface PackagedPlatform {
+  platformId: string;
+  items: PackageItem[];
+  skipped?: number;
+  manifestPath?: string;
+}
+
+function isPackageItem(value: unknown): value is PackageItem {
+  if (typeof value !== "object" || value === null) return false;
+  const rec = value as Record<string, unknown>;
+  const checks = rec.checks;
+  if (typeof checks !== "object" || checks === null) return false;
+  const size = (checks as { size?: unknown }).size;
+  return (
+    typeof rec.productId === "string" &&
+    typeof rec.aspectRatio === "string" &&
+    typeof rec.treatment === "string" &&
+    typeof rec.source === "string" &&
+    typeof rec.packagedPath === "string" &&
+    typeof rec.bytes === "number" &&
+    (size === "pass" || size === "fail")
+  );
+}
+
+function asPackagedPlatforms(data: unknown): PackagedPlatform[] {
+  if (typeof data !== "object" || data === null) return [];
+  const platforms = (data as { platforms?: unknown }).platforms;
+  if (!Array.isArray(platforms)) return [];
+  const out: PackagedPlatform[] = [];
+  for (const entry of platforms) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const rec = entry as Record<string, unknown>;
+    if (typeof rec.platformId !== "string" || !Array.isArray(rec.items)) continue;
+    const platform: PackagedPlatform = {
+      platformId: rec.platformId,
+      items: rec.items.filter(isPackageItem),
+    };
+    if (typeof rec.skipped === "number") platform.skipped = rec.skipped;
+    if (typeof rec.manifestPath === "string") platform.manifestPath = rec.manifestPath;
+    out.push(platform);
+  }
+  return out;
+}
+
+/**
+ * Copy a run's renders into per-platform folders. Never re-renders. `include`
+ * is the list of approved asset keys; omitted packages every asset.
+ */
+export async function packageCampaign(
+  campaignId: string,
+  platforms: readonly string[],
+  opts: { include?: readonly string[]; signal?: AbortSignal } = {},
+): Promise<{ platforms: PackagedPlatform[] }> {
+  const body = opts.include === undefined ? { campaignId, platforms } : { campaignId, platforms, include: opts.include };
+  const data = await requestJson(`${API}/campaigns/package`, {
+    ...jsonInit("POST", body),
+    signal: opts.signal,
+  });
+  return { platforms: asPackagedPlatforms(data) };
+}
+
+/**
+ * List persisted platform manifests for a campaign. 404 (nothing packaged yet)
+ * is an empty list, not an error.
+ */
+export async function listPackages(
+  campaignId: string,
+  signal?: AbortSignal,
+): Promise<{ platforms: PackagedPlatform[] }> {
+  let res: Response;
+  try {
+    res = await fetch(`${API}/campaigns/packages/${encodeURIComponent(campaignId)}`, { signal });
+  } catch {
+    throw new BriefsApiError("Network error", 0);
+  }
+  if (res.status === 404) return { platforms: [] };
+  const data = await parseJsonBody(res);
+  if (!res.ok) {
+    throw new BriefsApiError(errorFrom(data, `Request failed (HTTP ${res.status})`), res.status);
+  }
+  return { platforms: asPackagedPlatforms(data) };
 }

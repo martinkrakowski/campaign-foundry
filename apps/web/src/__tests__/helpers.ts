@@ -60,6 +60,10 @@ export const jobOk = (result: MockReport) => {
 type PostFn = (url: string, init: RequestInit) => Response | Promise<Response>;
 type GetFn = (url: string) => Response | Promise<Response>;
 
+const isPlanUrl = (u: string) => u.includes("/campaigns/plan");
+const isPackagePostUrl = (u: string) => /\/campaigns\/package(?:\?|$)/.test(u);
+const isPackagesGetUrl = (u: string) => u.includes("/campaigns/packages");
+
 const jobSnapshot = (report: MockReport): MockReport => ({
   ...report,
   log: report.log ?? { entries: [] },
@@ -77,6 +81,9 @@ export const mockPipelineApi = (
     post?: PostFn;
     job?: GetFn;
     result?: GetFn;
+    plan?: PostFn;
+    packagePost?: PostFn;
+    packages?: GetFn;
   } = {},
 ) => {
   if (!vi.isMockFunction(globalThis.fetch)) vi.spyOn(globalThis, "fetch");
@@ -85,10 +92,23 @@ export const mockPipelineApi = (
     const u = String(url);
     const req = (init ?? {}) as RequestInit;
     if (req.method === "POST") {
+      if (isPlanUrl(u)) {
+        if (opts.plan) return Promise.resolve(opts.plan(u, req));
+        if (opts.post) return Promise.resolve(opts.post(u, req));
+        return Promise.resolve(json({ error: "not a variation brief" }, 400));
+      }
+      if (isPackagePostUrl(u)) {
+        if (opts.packagePost) return Promise.resolve(opts.packagePost(u, req));
+        if (opts.post) return Promise.resolve(opts.post(u, req));
+        return Promise.resolve(json({ platforms: [] }));
+      }
       return Promise.resolve(opts.post ? opts.post(u, req) : json({ jobId: opts.jobId ?? "job-1" }, 202));
     }
     if (u.includes(`${API}/campaigns/jobs/`)) {
       return Promise.resolve(opts.job ? opts.job(u) : jobOk(jobSnapshot(report)));
+    }
+    if (isPackagesGetUrl(u)) {
+      return Promise.resolve(opts.packages ? opts.packages(u) : json({ error: "Not found" }, 404));
     }
     return Promise.resolve(opts.result ? opts.result(u) : json(report));
   });

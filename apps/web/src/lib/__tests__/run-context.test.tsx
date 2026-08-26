@@ -1079,3 +1079,305 @@ describe("RunProvider — job polling", () => {
     expect(result.current.assets).toHaveLength(0);
   });
 });
+
+describe("RunProvider — estimate and packaging", () => {
+  const pkg = (platformId: string) => ({
+    platformId,
+    items: [
+      {
+        productId: "alpha",
+        aspectRatio: "1:1",
+        treatment: "default",
+        source: "alpha/1x1.png",
+        packagedPath: `packages/summer-hydration-2026/${platformId}/alpha/1x1.png`,
+        bytes: 12,
+        checks: { size: "pass" as const },
+      },
+    ],
+  });
+
+  test("setEstimate stores ok, infeasible, unavailable, and idle", () => {
+    const { result } = setup();
+    act(() =>
+      result.current.setEstimate({
+        status: "ok",
+        estimate: { creatives: 12, axisProductSize: 36, feasible: true, genaiCalls: 0 },
+        error: null,
+      }),
+    );
+    expect(result.current.estimateStatus).toBe("ok");
+    expect(result.current.estimate?.creatives).toBe(12);
+    act(() => result.current.setEstimate({ status: "infeasible", estimate: null, error: "nope" }));
+    expect(result.current.estimateError).toBe("nope");
+    act(() => result.current.setEstimate({ status: "unavailable", estimate: null, error: null }));
+    expect(result.current.estimateStatus).toBe("unavailable");
+    act(() => result.current.setEstimate({ status: "loading" }));
+    expect(result.current.estimateStatus).toBe("loading");
+    act(() => result.current.setEstimate({ status: "idle" }));
+    expect(result.current.estimate).toBeNull();
+    expect(result.current.estimateError).toBeNull();
+    expect(result.current.estimateStatus).toBe("idle");
+  });
+
+  test("packageSelected merges platforms and records an error", async () => {
+    mockPipelineApi({
+      packagePost: (_url, init) => {
+        const body = JSON.parse(String(init.body)) as { platforms: string[] };
+        if (body.platforms[0] === "x") return json({ error: "unknown" }, 422);
+        return json({ platforms: [pkg(body.platforms[0])] });
+      },
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.packageSelected(["instagram-feed"]);
+    });
+    expect(result.current.packages.map((p) => p.platformId)).toEqual(["instagram-feed"]);
+    await act(async () => {
+      await result.current.packageSelected(["linkedin"]);
+    });
+    expect(result.current.packages.map((p) => p.platformId).sort()).toEqual(["instagram-feed", "linkedin"]);
+    await act(async () => {
+      await result.current.packageSelected(["x"]);
+    });
+    expect(result.current.packageError).toBe("unknown");
+    expect(result.current.packages).toHaveLength(2);
+  });
+
+  test("loadPackages hydrates, treats 404 as empty, and surfaces other errors", async () => {
+    mockPipelineApi({
+      packages: () => json({ platforms: [pkg("instagram-feed")] }),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.loadPackages();
+    });
+    expect(result.current.packages).toHaveLength(1);
+    mockPipelineApi({ packages: () => json({ error: "Not found" }, 404) });
+    await act(async () => {
+      await result.current.loadPackages();
+    });
+    expect(result.current.packages).toHaveLength(0);
+    mockPipelineApi({ packages: () => json({ error: "boom" }, 500) });
+    await act(async () => {
+      await result.current.loadPackages();
+    });
+    expect(result.current.packageError).toBe("boom");
+  });
+
+  test("switching briefs clears estimate and packages", async () => {
+    mockPipelineApi({
+      packagePost: () => json({ platforms: [pkg("instagram-feed")] }),
+    });
+    const { result } = setup();
+    act(() =>
+      result.current.setEstimate({
+        status: "ok",
+        estimate: { creatives: 1, axisProductSize: 1, feasible: true, genaiCalls: 0 },
+        error: null,
+      }),
+    );
+    await act(async () => {
+      await result.current.packageSelected(["instagram-feed"]);
+    });
+    act(() =>
+      result.current.setBrief({
+        id: "other-camp",
+        targetRegion: "US",
+        targetAudience: "x",
+        campaignMessage: "y",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" },
+          { id: "p2", name: "P2", primaryColor: "#222222", logoPath: "b.png" },
+        ],
+      }),
+    );
+    expect(result.current.estimate).toBeNull();
+    expect(result.current.packages).toHaveLength(0);
+    expect(result.current.estimateStatus).toBe("idle");
+  });
+
+  const otherBrief = {
+    id: "other-camp",
+    targetRegion: "US",
+    targetAudience: "x",
+    campaignMessage: "y",
+    products: [
+      { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" },
+      { id: "p2", name: "P2", primaryColor: "#222222", logoPath: "b.png" },
+    ],
+  };
+
+  test("a brief switch aborts an in-flight package call and drops its result", async () => {
+    let resolvePost: ((r: Response) => void) | undefined;
+    let signal: AbortSignal | null | undefined;
+    mockPipelineApi({
+      packagePost: (_url, init) => {
+        signal = init.signal;
+        return new Promise<Response>((res) => {
+          resolvePost = res;
+        });
+      },
+    });
+    const { result } = setup();
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.packageSelected(["instagram-feed"]);
+    });
+    expect(result.current.packaging).toBe(true);
+    await waitFor(() => expect(resolvePost).toEqual(expect.any(Function)));
+    expect(signal?.aborted).toBe(false);
+    act(() => result.current.setBrief(otherBrief));
+    expect(signal?.aborted).toBe(true);
+    expect(result.current.packaging).toBe(false);
+    await act(async () => {
+      resolvePost?.(json({ platforms: [pkg("instagram-feed")] }));
+      await pending;
+    });
+    expect(result.current.packages).toHaveLength(0);
+    expect(result.current.packageError).toBeNull();
+  });
+
+  test("a package call that rejects after a brief switch sets no error", async () => {
+    let rejectPost: ((e: unknown) => void) | undefined;
+    mockPipelineApi({
+      packagePost: () =>
+        new Promise<Response>((_res, rej) => {
+          rejectPost = rej;
+        }),
+    });
+    const { result } = setup();
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.packageSelected(["instagram-feed"]);
+    });
+    await waitFor(() => expect(rejectPost).toEqual(expect.any(Function)));
+    act(() => result.current.setBrief(otherBrief));
+    await act(async () => {
+      rejectPost?.(new Error("aborted"));
+      await pending;
+    });
+    expect(result.current.packageError).toBeNull();
+  });
+
+  test("an older package call is discarded once a newer one completed", async () => {
+    const resolvers: Array<(r: Response) => void> = [];
+    mockPipelineApi({
+      packagePost: () =>
+        new Promise<Response>((res) => {
+          resolvers.push(res);
+        }),
+    });
+    const { result } = setup();
+    let first!: Promise<void>;
+    let second!: Promise<void>;
+    act(() => {
+      first = result.current.packageSelected(["instagram-feed"]);
+      second = result.current.packageSelected(["linkedin"]);
+    });
+    await waitFor(() => expect(resolvers).toHaveLength(2));
+    await act(async () => {
+      resolvers[1](json({ platforms: [pkg("linkedin")] }));
+      await second;
+    });
+    expect(result.current.packages.map((p) => p.platformId)).toEqual(["linkedin"]);
+    await act(async () => {
+      resolvers[0](json({ platforms: [pkg("instagram-feed")] }));
+      await first;
+    });
+    expect(result.current.packages.map((p) => p.platformId)).toEqual(["linkedin"]);
+    expect(result.current.packaging).toBe(false);
+  });
+
+  test("a stale package listing does not overwrite a newer package result", async () => {
+    let resolveList: ((r: Response) => void) | undefined;
+    mockPipelineApi({
+      packages: () =>
+        new Promise<Response>((res) => {
+          resolveList = res;
+        }),
+      packagePost: () => json({ platforms: [pkg("x")] }),
+    });
+    const { result } = setup();
+    let listing!: Promise<void>;
+    act(() => {
+      listing = result.current.loadPackages();
+    });
+    await waitFor(() => expect(resolveList).toEqual(expect.any(Function)));
+    await act(async () => {
+      await result.current.packageSelected(["x"]);
+    });
+    expect(result.current.packages.map((p) => p.platformId)).toEqual(["x"]);
+    await act(async () => {
+      resolveList?.(json({ platforms: [pkg("instagram-feed")] }));
+      await listing;
+    });
+    expect(result.current.packages.map((p) => p.platformId)).toEqual(["x"]);
+  });
+
+  test("a brief switch aborts an in-flight package listing and drops its result or error", async () => {
+    let resolveList: ((r: Response) => void) | undefined;
+    let rejectList: ((e: unknown) => void) | undefined;
+    mockPipelineApi({
+      packages: (url) => {
+        if (url.includes("other-camp")) return json({ error: "Not found" }, 404);
+        return new Promise<Response>((res, rej) => {
+          resolveList = res;
+          rejectList = rej;
+        });
+      },
+    });
+    const { result } = setup();
+    // fetch is mocked per-URL above; capture the signal through the spy's last call.
+    let listing!: Promise<void>;
+    act(() => {
+      listing = result.current.loadPackages();
+    });
+    await waitFor(() => expect(resolveList).toEqual(expect.any(Function)));
+    const signal = (vi.mocked(globalThis.fetch).mock.calls.at(-1)?.[1] as RequestInit | undefined)?.signal;
+    expect(signal?.aborted).toBe(false);
+    act(() => result.current.setBrief(otherBrief));
+    expect(signal?.aborted).toBe(true);
+    await act(async () => {
+      resolveList?.(json({ platforms: [pkg("instagram-feed")] }));
+      await listing;
+    });
+    expect(result.current.packages).toHaveLength(0);
+
+    // Same race, rejecting: the error is dropped too.
+    resolveList = undefined;
+    act(() => result.current.setBrief({ ...otherBrief, id: "summer-hydration-2026" }));
+    act(() => {
+      listing = result.current.loadPackages();
+    });
+    await waitFor(() => expect(rejectList).toEqual(expect.any(Function)));
+    act(() => result.current.setBrief(otherBrief));
+    await act(async () => {
+      rejectList?.(new Error("aborted"));
+      await listing;
+    });
+    expect(result.current.packageError).toBeNull();
+  });
+
+  test("packageSelected uses a generic message for a non-Error rejection", async () => {
+    mockPipelineApi({
+      packagePost: () => Promise.reject("plain"),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.packageSelected(["instagram-feed"]);
+    });
+    expect(result.current.packageError).toBe("Network error");
+  });
+
+  test("loadPackages uses a generic message for a non-Error rejection", async () => {
+    mockPipelineApi({
+      packages: () => Promise.reject("plain"),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.loadPackages();
+    });
+    expect(result.current.packageError).toBe("Network error");
+  });
+});
+

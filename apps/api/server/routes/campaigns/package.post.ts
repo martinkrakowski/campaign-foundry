@@ -2,11 +2,31 @@ import { FileSystemPackageStore, PackageForPlatformUseCase } from "@campaignfoun
 import { outputRoot } from "../../lib/config.js";
 import { isPersistedAsset, type PersistedAsset, readReport } from "../../lib/report.js";
 
-function parsePackageRequest(body: unknown): { campaignId: string; platforms: readonly string[] } {
+/** Upper bound on `include` entries — a run is at most a few hundred creatives. */
+const MAX_INCLUDE = 1000;
+
+interface PackageRequest {
+  campaignId: string;
+  platforms: readonly string[];
+  include?: readonly string[];
+}
+
+function parseInclude(include: unknown): readonly string[] | undefined {
+  if (include === undefined) return undefined;
+  if (!Array.isArray(include) || include.some((k) => typeof k !== "string")) {
+    throw new Error("include must be an array of strings");
+  }
+  if (include.length > MAX_INCLUDE) {
+    throw new Error(`include must have at most ${MAX_INCLUDE} entries`);
+  }
+  return include as string[];
+}
+
+function parsePackageRequest(body: unknown): PackageRequest {
   if (typeof body !== "object" || body === null) {
     throw new Error("Request body must be an object");
   }
-  const record = body as { campaignId?: unknown; platforms?: unknown };
+  const record = body as { campaignId?: unknown; platforms?: unknown; include?: unknown };
   if (typeof record.campaignId !== "string" || record.campaignId.length === 0) {
     throw new Error("campaignId is required");
   }
@@ -24,7 +44,10 @@ function parsePackageRequest(body: unknown): { campaignId: string; platforms: re
     seen.add(platform);
     platforms.push(platform);
   }
-  return { campaignId: record.campaignId, platforms };
+  const include = parseInclude(record.include);
+  return include === undefined
+    ? { campaignId: record.campaignId, platforms }
+    : { campaignId: record.campaignId, platforms, include };
 }
 
 function persistedAssetsFrom(
@@ -46,14 +69,16 @@ function persistedAssetsFrom(
  * per-platform folders under `output/packages/<campaignId>/<platformId>/`.
  * Never re-renders. The package is the current output for that report
  * (renders are not campaign-namespaced; `packagedAt` records when this copy
- * was taken). Body: `{ campaignId, platforms }`.
+ * was taken). Body: `{ campaignId, platforms, include? }` — `include` is the
+ * list of asset identities the reviewer approved; omitted packages every asset.
  */
 export default defineEventHandler(async (event) => {
   let campaignId: string;
   let platforms: readonly string[];
+  let include: readonly string[] | undefined;
   try {
     const body: unknown = await readBody(event);
-    ({ campaignId, platforms } = parsePackageRequest(body));
+    ({ campaignId, platforms, include } = parsePackageRequest(body));
   } catch (error) {
     setResponseStatus(event, 400);
     return { error: error instanceof Error ? error.message : "Invalid package request" };
@@ -78,6 +103,7 @@ export default defineEventHandler(async (event) => {
     platforms,
     packagedAt: new Date().toISOString(),
     skipped: parsed.skipped,
+    include,
   });
   if (!result.success) {
     setResponseStatus(event, 422);

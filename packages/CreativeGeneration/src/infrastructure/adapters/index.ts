@@ -7,5 +7,6 @@ export * from "./FileSystemBackgroundCache.js";
 export * from "./FireflyImageGenerator.js";
 export * from "./GeminiImageGenerator.js";
 export * from "./NodeCanvasCompositor.js";
+export * from "./OpenRouterCopyGenerator.js";
 export * from "./OpenRouterImageGenerator.js";
 export * from "./ProceduralBackgroundGenerator.js";
