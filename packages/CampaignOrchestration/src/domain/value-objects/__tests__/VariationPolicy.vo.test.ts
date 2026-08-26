@@ -148,7 +148,7 @@ describe("VariationPolicy.fromBrief", () => {
     [{ count: Number.POSITIVE_INFINITY }, /count/],
     [{ count: Number.NaN }, /count/],
     [{ count: 1, minDistance: -1 }, /minDistance/],
-    [{ count: 1, minDistance: 8 }, /minDistance/],
+    [{ count: 1, minDistance: 7 }, /minDistance/],
     [{ count: 1, minDistance: 1.5 }, /minDistance/],
     [{ count: 1, minDistance: Number.POSITIVE_INFINITY }, /minDistance/],
     [{ count: 1, coverage: { perProduct: -1 } }, /coverage\.perProduct/],
@@ -260,6 +260,24 @@ describe("VariationPolicy headline axis", () => {
     // Code-unit order, not locale order: upper-case sorts before lower-case, so the
     // de-duplication keeps "STAY WILD" when it is the first survivor in that order.
     expect(canonicalHeadlines(["stay wild", "STAY WILD", "Zebra", "apple"])).toEqual(["STAY WILD", "Zebra", "apple"]);
+  });
+
+  test("minDistance may reach the seventh axis only when the headline axis is active", () => {
+    const seven = { count: 1, seed: 7, minDistance: 7 };
+    const without = VariationPolicy.fromBrief(brief({ variation: seven }));
+    expect(without.success).toBe(false);
+    if (!without.success) expect(without.error.message).toBe("Invalid minDistance.");
+    const withPool = VariationPolicy.fromBrief(
+      brief({ variation: { ...seven, axes: { headline: "pool://copy" } } }),
+      { headlines: ["Stay wild"] },
+    );
+    expect(withPool.success).toBe(true);
+    if (withPool.success) expect(withPool.value.minDistance).toBe(7);
+    const eight = VariationPolicy.fromBrief(
+      brief({ variation: { ...seven, minDistance: 8, axes: { headline: "pool://copy" } } }),
+      { headlines: ["Stay wild"] },
+    );
+    expect(eight.success).toBe(false);
   });
 
   test("briefs without the axis keep an empty headline list and the golden hash, even when headlines are supplied", () => {

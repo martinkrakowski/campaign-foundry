@@ -220,7 +220,7 @@ describe("Wizard", () => {
     await user.clear(screen.getByLabelText("Min distance"));
     await user.type(screen.getByLabelText("Min distance"), "8");
     await user.click(screen.getByRole("button", { name: "Next" }));
-    expect(screen.getByText(/variation.minDistance must be an integer in \[0, 7\]/)).toBeTruthy();
+    expect(screen.getByText(/variation.minDistance must be an integer in \[0, 6\]/)).toBeTruthy();
     await user.clear(screen.getByLabelText("Min distance"));
     await user.type(screen.getByLabelText("Min distance"), "2");
     await user.click(screen.getByRole("button", { name: "headline-top" }));

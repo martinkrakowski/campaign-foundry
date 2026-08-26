@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest";
-import { hasErrors, validateStep } from "../validate";
+import { hasErrors, maxMinDistance, validateStep } from "../validate";
 import { emptyProduct, initialWizardState, type WizardState } from "../wizard-state";
 
 const validProducts = (): WizardState["products"] => [
@@ -92,15 +92,25 @@ describe("validateStep", () => {
     expect(
       validateStep("policy", { ...base, variation: { ...base.variation, seed: "4294967296" } }).seed,
     ).toMatch(/2\^32/);
+    // The bound follows the active axes: six without the headline axis, seven with it.
     expect(
       validateStep("policy", { ...base, variation: { ...base.variation, minDistance: "-1" } }).minDistance,
-    ).toMatch(/\[0, 7\]/);
-    expect(
-      validateStep("policy", { ...base, variation: { ...base.variation, minDistance: "8" } }).minDistance,
-    ).toMatch(/\[0, 7\]/);
+    ).toMatch(/\[0, 6\]/);
     expect(
       validateStep("policy", { ...base, variation: { ...base.variation, minDistance: "7" } }).minDistance,
+    ).toMatch(/\[0, 6\]/);
+    expect(
+      validateStep("policy", { ...base, variation: { ...base.variation, minDistance: "6" } }).minDistance,
     ).toBeUndefined();
+    expect(maxMinDistance(base)).toBe(6);
+    const pooled: WizardState = { ...base, variation: { ...base.variation, headline: true } };
+    expect(maxMinDistance(pooled)).toBe(7);
+    expect(
+      validateStep("policy", { ...pooled, variation: { ...pooled.variation, minDistance: "7" } }).minDistance,
+    ).toBeUndefined();
+    expect(
+      validateStep("policy", { ...pooled, variation: { ...pooled.variation, minDistance: "8" } }).minDistance,
+    ).toMatch(/\[0, 7\]/);
 
     expect(
       validateStep("policy", { ...base, variation: { ...base.variation, perProduct: "1.5" } }).perProduct,

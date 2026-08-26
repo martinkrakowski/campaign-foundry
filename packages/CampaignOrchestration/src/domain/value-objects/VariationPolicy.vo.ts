@@ -81,12 +81,16 @@ export class VariationPolicy {
     if (!seedResult.success) return seedResult;
     const seed = seedResult.value;
 
-    const minDistanceResult = requireInteger(
-      variation.minDistance ?? 1,
-      "minDistance",
-      0,
-      DISTANCE_AXES.length,
-    );
+    const axes = variation.axes;
+    const headlineResult = resolveHeadline(brief, axes?.headline, input.headlines);
+    if (!headlineResult.success) return headlineResult;
+    const headline = headlineResult.value;
+
+    // A candidate can differ in at most the axes this brief activates: every
+    // DISTANCE_AXES entry except the optional ones that are off (headline here;
+    // motion/duration join the same count when they land).
+    const activeAxes = DISTANCE_AXES.filter((axis) => axis !== "headline" || headline.length > 0).length;
+    const minDistanceResult = requireInteger(variation.minDistance ?? 1, "minDistance", 0, activeAxes);
     if (!minDistanceResult.success) return minDistanceResult;
     const minDistance = minDistanceResult.value;
 
@@ -99,7 +103,6 @@ export class VariationPolicy {
       perRatio: perRatioResult.value,
     };
 
-    const axes = variation.axes;
     const layout = unique(
       axes?.layout !== undefined ? [...(axes.layout as readonly LayoutKind[])] : [...LAYOUT_VALUES],
     );
@@ -116,9 +119,6 @@ export class VariationPolicy {
     );
     const paletteShiftResult = requirePaletteShift(paletteShift);
     if (!paletteShiftResult.success) return paletteShiftResult;
-    const headlineResult = resolveHeadline(brief, axes?.headline, input.headlines);
-    if (!headlineResult.success) return headlineResult;
-    const headline = headlineResult.value;
 
     const productIds = unique(brief.products.map((product) => product.id));
     const ratios = AspectRatio.all().map((ratio) => ratio.value);

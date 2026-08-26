@@ -7,8 +7,17 @@ export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 export type FieldErrors = Record<string, string>;
 
 const UINT32_MAX = 0xffffffff;
-/** DISTANCE_AXES.length in CampaignOrchestration (copied; the seven Hamming axes incl. headline). */
-const MIN_DISTANCE_MAX = 7;
+/**
+ * Hamming axes that are always active (productId, aspectRatio, layout, tone,
+ * backgroundSource, paletteShift). Optional axes add one each when on — mirrors
+ * VariationPolicy's active-axis count in CampaignOrchestration.
+ */
+const BASE_DISTANCE_AXES = 6;
+
+/** Upper bound for `minDistance`: the number of Hamming axes this brief activates. */
+export function maxMinDistance(state: WizardState): number {
+  return BASE_DISTANCE_AXES + (state.variation.headline ? 1 : 0);
+}
 
 function isIntegerAtLeast(value: string, min: number): boolean {
   if (value.trim() === "") return false;
@@ -85,8 +94,9 @@ export function validatePolicy(state: WizardState): FieldErrors {
   if (!isOptionalIntegerInRange(state.variation.seed, 0, UINT32_MAX)) {
     errors.seed = "variation.seed must be an integer in [0, 2^32).";
   }
-  if (!isOptionalIntegerInRange(state.variation.minDistance, 0, MIN_DISTANCE_MAX)) {
-    errors.minDistance = "variation.minDistance must be an integer in [0, 7].";
+  const maxDistance = maxMinDistance(state);
+  if (!isOptionalIntegerInRange(state.variation.minDistance, 0, maxDistance)) {
+    errors.minDistance = `variation.minDistance must be an integer in [0, ${maxDistance}] (the active axes).`;
   }
   if (!isOptionalIntegerAtLeast(state.variation.perProduct, 0)) {
     errors.perProduct = "coverage.perProduct must be an integer >= 0.";
