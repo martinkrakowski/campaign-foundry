@@ -1,4 +1,4 @@
-import type { CampaignBrief, CopyPool, Product } from "@campaignfoundry/CampaignOrchestration";
+import type { CampaignBrief, CopyPool, Product, VariationPolicy } from "@campaignfoundry/CampaignOrchestration";
 import type { ProductDraft, CampaignMode } from "./editor-state";
 import {
   slugify,
@@ -253,9 +253,9 @@ export function toBrief(state: WizardState): CampaignBrief {
     (isNaN(perProduct) && isNaN(perRatio)) ? undefined : ({
       ...(!isNaN(perProduct) ? { perProduct } : {}),
       ...(!isNaN(perRatio) ? { perRatio } : {}),
-    } as any);
+    } as VariationPolicy["coverage"]);
 
-  const axes: any = {
+  const axes = {
     layout: [...state.variation.layout],
     tone: [...state.variation.tone],
     background: { source: [...state.variation.background] },

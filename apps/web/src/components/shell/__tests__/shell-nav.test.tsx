@@ -1,12 +1,12 @@
 import { describe, test, expect, beforeEach, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
-import { createElement } from "react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import { createElement, useEffect, type ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
-import { renderWithRun, seedPersistedRun, nextMock, exerciseFocusTrap } from "@/__tests__/helpers";
+import { renderWithRun, seedPersistedRun, nextMock, exerciseFocusTrap, makeAsset } from "@/__tests__/helpers";
 import { RunProvider } from "@/lib/run-context";
-import { EditorDirtyProvider } from "@/lib/editor-dirty-context";
+import { EditorDirtyProvider, useEditorDirty } from "@/lib/editor-dirty-context";
 import { Accordion } from "../Accordion";
-import { Sidebar } from "../Sidebar";
+import { Sidebar, BrowseBriefsButton, SidebarContent } from "../Sidebar";
 import { Header } from "../Header";
 import { MobileMenu } from "../MobileMenu";
 
@@ -139,5 +139,97 @@ describe("Create new", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: /create new/i }));
     expect(onActivate).toHaveBeenCalled();
     expect(nextMock().router.push).toHaveBeenCalledWith("/brief");
+  });
+});
+
+describe("guarded navigation when the editor is dirty", () => {
+  /** Renders `ui` inside the real providers with the dirty flag already raised. */
+  const renderDirty = (ui: ReactElement) => {
+    const RaiseDirty = () => {
+      const { setDirty } = useEditorDirty();
+      useEffect(() => setDirty(true), [setDirty]);
+      return null;
+    };
+    return render(
+      createElement(
+        RunProvider,
+        null,
+        createElement(EditorDirtyProvider, null, createElement(RaiseDirty), ui),
+      ),
+    );
+  };
+
+  beforeEach(() => {
+    nextMock().router.push.mockClear();
+  });
+
+  test("the sidebar's Create new button asks once before leaving, and stays put if refused", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.fn(() => false);
+    globalThis.confirm = confirm;
+    renderDirty(createElement(BrowseBriefsButton, {}));
+
+    await user.click(screen.getByRole("button", { name: /Create new/ }));
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+  });
+
+  test("accepting the prompt navigates", async () => {
+    const user = userEvent.setup();
+    globalThis.confirm = vi.fn(() => true);
+    const onActivate = vi.fn();
+    renderDirty(createElement(BrowseBriefsButton, { onActivate }));
+
+    await user.click(screen.getByRole("button", { name: /Create new/ }));
+    expect(onActivate).toHaveBeenCalled();
+    expect(nextMock().router.push).toHaveBeenCalledWith("/brief");
+  });
+
+  test("the sidebar's Edit link routes through the guard and dismisses the overlay", async () => {
+    const user = userEvent.setup();
+    globalThis.confirm = vi.fn(() => true);
+    const onNavigate = vi.fn();
+    seedPersistedRun([makeAsset()]);
+    renderDirty(createElement(SidebarContent, { onNavigate }));
+
+    await user.click(screen.getByText("Edit"));
+    expect(onNavigate).toHaveBeenCalled();
+    expect(nextMock().router.push).toHaveBeenCalledWith("/brief");
+  });
+
+  test("a header tab click is intercepted and routed through the guard", async () => {
+    const user = userEvent.setup();
+    globalThis.confirm = vi.fn(() => true);
+    renderDirty(createElement(Header));
+
+    await user.click(screen.getByRole("link", { name: "Compliance" }));
+    expect(nextMock().router.push).toHaveBeenCalledWith("/compliance");
+  });
+
+  test("a header tab click is not intercepted while clean", async () => {
+    const user = userEvent.setup();
+    render(createElement(RunProvider, null, createElement(EditorDirtyProvider, null, createElement(Header))));
+
+    await user.click(screen.getByRole("link", { name: "Compliance" }));
+    // no guard, so the Link navigates on its own rather than through router.push
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+  });
+
+  test("a mobile tab click is blocked when the prompt is refused, and allowed when accepted", async () => {
+    const user = userEvent.setup();
+    const tabs = [{ href: "/grid", label: "Grid" }] as const;
+
+    globalThis.confirm = vi.fn(() => false);
+    const refused = renderDirty(
+      createElement(MobileMenu, { open: true, onClose: () => {}, tabs }),
+    );
+    await user.click(screen.getByRole("link", { name: "Grid" }));
+    expect(globalThis.confirm).toHaveBeenCalled();
+    refused.unmount();
+
+    globalThis.confirm = vi.fn(() => true);
+    renderDirty(createElement(MobileMenu, { open: true, onClose: () => {}, tabs }));
+    await user.click(screen.getByRole("link", { name: "Grid" }));
+    expect(globalThis.confirm).toHaveBeenCalled();
   });
 });

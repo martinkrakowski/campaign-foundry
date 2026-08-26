@@ -2,6 +2,7 @@
 
 import { useReducer, useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui";
+import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { useRun } from "@/lib/run-context";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { listBriefs, createBrief, updateBrief, unknownErrorMessage, type BriefEntry } from "@/lib/briefs-api";
@@ -60,11 +61,17 @@ export default function BriefPage() {
   };
 
   const loadBrief = useCallback((entry: BriefEntry) => {
-    dispatch({ type: "load", brief: entry.brief, entry: { file: entry.file } });
+    // Carry the revision through: handleSave sends it back as the conditional-write
+    // guard, so dropping it here would silently downgrade every save to last-write-wins.
+    dispatch({ type: "load", brief: entry.brief, entry: { file: entry.file, revision: entry.revision } });
   }, []);
 
   const createNew = () => {
-    dispatch({ type: "load", brief: initialEditorState().briefId ? { id: "", targetRegion: "", targetAudience: "", campaignMessage: "", products: [] } as any : initialEditorState() as any });
+    // No entry means `fromBrief` produces a "new" source, which is what a blank draft is.
+    dispatch({
+      type: "load",
+      brief: { id: "", targetRegion: "", targetAudience: "", campaignMessage: "", products: [] } as CampaignBrief,
+    });
   };
 
   const handleApply = () => {

@@ -23,18 +23,15 @@ export function Sidebar() {
  */
 export function BrowseBriefsButton({ onActivate }: { onActivate?: () => void }) {
   const { openBriefPicker } = useRun();
-  const { guardedPush, isDirty } = useGuardedNavigation();
+  const { guardedPush } = useGuardedNavigation();
   return (
     <div className="flex shrink-0 gap-2 border-t border-border p-3">
       <button
         type="button"
         onClick={() => {
           onActivate?.();
-          if (isDirty) {
-            if (!window.confirm("You have unsaved changes. Are you sure you want to leave?")) {
-              return;
-            }
-          }
+          // guardedPush already prompts when the editor is dirty — confirming here too
+          // would show the same dialog twice.
           guardedPush("/brief");
         }}
         className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-primary px-3 py-2 text-[12px] font-medium text-white transition-colors hover:bg-brand-primary-hover"
@@ -71,17 +68,12 @@ export function BrowseBriefsButton({ onActivate }: { onActivate?: () => void }) 
  */
 export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { brief } = useRun();
-  const { guardedPush, isDirty } = useGuardedNavigation();
+  const { guardedPush } = useGuardedNavigation();
   const aspectsLabel = "1:1, 9:16, 16:9";
 
   const handleEditClick = (e: React.MouseEvent) => {
     e.preventDefault();
     onNavigate?.();
-    if (isDirty) {
-      if (!window.confirm("You have unsaved changes. Are you sure you want to leave?")) {
-        return;
-      }
-    }
     guardedPush("/brief");
   };
 

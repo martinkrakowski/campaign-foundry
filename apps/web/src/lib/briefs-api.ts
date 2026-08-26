@@ -12,6 +12,8 @@ const API = "/api/pipeline";
 export interface BriefEntry {
   file: string;
   brief: CampaignBrief;
+  /** SHA-256 of the file's bytes, for the conditional write (API E1.0). */
+  revision?: string;
 }
 
 export interface AssetUploadResult {
@@ -95,11 +97,12 @@ function asBriefEntry(data: unknown): BriefEntry {
   if (typeof data !== "object" || data === null) {
     throw new BriefsApiError("Invalid response", 200);
   }
-  const rec = data as { file?: unknown; brief?: unknown };
+  const rec = data as { file?: unknown; brief?: unknown; revision?: unknown };
   if (typeof rec.file !== "string" || typeof rec.brief !== "object" || rec.brief === null) {
     throw new BriefsApiError("Invalid response", 200);
   }
-  return { file: rec.file, brief: rec.brief as CampaignBrief };
+  const entry: BriefEntry = { file: rec.file, brief: rec.brief as CampaignBrief };
+  return typeof rec.revision === "string" ? { ...entry, revision: rec.revision } : entry;
 }
 
 export async function listBriefs(): Promise<BriefEntry[]> {
