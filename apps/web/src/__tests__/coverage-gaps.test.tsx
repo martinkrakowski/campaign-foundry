@@ -2,7 +2,7 @@ import { describe, test, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, Fragment } from "react";
-import { renderWithRun, seedPersistedRun, makeAsset } from "@/__tests__/helpers";
+import { renderWithRun, seedPersistedRun, makeAsset, mockPipelineApi } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import { CommandBar } from "@/components/shell/CommandBar";
 import { Sidebar } from "@/components/shell/Sidebar";
@@ -11,23 +11,14 @@ import { Card } from "@/components/ui/card";
 import ExportPage from "@/app/(shell)/export/page";
 import RunsPage from "@/app/(shell)/runs/page";
 
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-const EMPTY = { halted: false, assets: [], log: null };
-
 beforeEach(() => localStorage.setItem("cf:brief-picked", "1"));
 
 const seedSingle = (assets: ReturnType<typeof makeAsset>[], postPending = false) => {
   localStorage.setItem("cf:brief", JSON.stringify({ id: "seed", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }] }));
   const report = { halted: false, assets, log: { entries: [], campaignId: "seed" } };
-  vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
-    if ((init as RequestInit | undefined)?.method === "POST") {
-      return postPending ? new Promise<Response>(() => {}) : Promise.resolve(json({ jobId: "seed-job" }, 202));
-    }
-    if (String(url).includes("/campaigns/jobs/")) {
-      return Promise.resolve(json({ status: "completed", done: assets.length, total: assets.length, log: report.log, result: report }));
-    }
-    return Promise.resolve(json(report));
+  mockPipelineApi({
+    report,
+    ...(postPending ? { post: () => new Promise<Response>(() => {}) } : {}),
   });
 };
 
@@ -40,9 +31,7 @@ describe("CommandBar — states", () => {
 
   test("shows the error status when a run fails", async () => {
     const user = userEvent.setup();
-    vi.mocked(globalThis.fetch).mockImplementation((_url, init) =>
-      (init as RequestInit | undefined)?.method === "POST" ? Promise.resolve(new Response("boom", { status: 500 })) : Promise.resolve(json(EMPTY)),
-    );
+    mockPipelineApi({ post: () => new Response("boom", { status: 500 }) });
     renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
     await user.click(screen.getByText(/Execute/));
     await user.click(within(await screen.findByRole("dialog")).getByText("Generate"));
@@ -102,7 +91,9 @@ describe("Sidebar — localized fallback", () => {
 describe("TelemetryDrawer — clipboard edges", () => {
   const seedLog = () => {
     localStorage.setItem("cf:brief", JSON.stringify({ id: "log3", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }] }));
-    vi.mocked(globalThis.fetch).mockImplementation(async () => json({ halted: false, assets: [], log: { campaignId: "log3", entries: [{ timestamp: "2026-01-01T10:00:00Z", stage: "S", message: "hello", level: "info" }] } }));
+    mockPipelineApi({
+      report: { halted: false, assets: [], log: { campaignId: "log3", entries: [{ timestamp: "2026-01-01T10:00:00Z", stage: "S", message: "hello", level: "info" }] } },
+    });
   };
 
   test("copy is a no-op when the clipboard API is unavailable", async () => {

@@ -1,13 +1,10 @@
-import { describe, test, expect, vi, beforeEach } from "vitest";
+import { describe, test, expect, beforeEach } from "vitest";
 import { screen, waitFor, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, Fragment } from "react";
-import { renderWithRun, seedPersistedRun, makeAsset, exerciseFocusTrap } from "@/__tests__/helpers";
+import { renderWithRun, seedPersistedRun, makeAsset, exerciseFocusTrap, mockPipelineApi } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import GridPage from "../page";
-
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 /** A tiny harness exposing execute/regenerate so loading states can be driven. */
 function Harness() {
@@ -30,11 +27,7 @@ describe("GridPage", () => {
 
   test("shows the running message while a run is in flight with no assets yet", async () => {
     const user = userEvent.setup();
-    vi.mocked(globalThis.fetch).mockImplementation((_url, init) =>
-      (init as RequestInit | undefined)?.method === "POST"
-        ? new Promise<Response>(() => {}) // never resolves → stays loading
-        : Promise.resolve(json({ halted: false, assets: [], log: null })),
-    );
+    mockPipelineApi({ post: () => new Promise<Response>(() => {}) }); // never resolves → stays loading
     renderWithRun(<Harness />);
     await user.click(screen.getByText("exec"));
     expect(await screen.findByText(/Running the pipeline/)).toBeTruthy();
@@ -96,9 +89,9 @@ describe("GridPage", () => {
   test("spins the targeted tiles during a selective regenerate", async () => {
     const user = userEvent.setup();
     localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/1:1/default": "rejected" }));
-    vi.mocked(globalThis.fetch).mockImplementation((_url, init) => {
-      if ((init as RequestInit | undefined)?.method === "POST") return new Promise<Response>(() => {}); // pending
-      return Promise.resolve(json({ halted: false, assets: [makeAsset()], log: { entries: [], campaignId: "seed" } }));
+    mockPipelineApi({
+      post: () => new Promise<Response>(() => {}), // pending
+      report: { halted: false, assets: [makeAsset()], log: { entries: [], campaignId: "seed" } },
     });
     localStorage.setItem("cf:brief-picked", "1");
     localStorage.setItem("cf:brief", JSON.stringify({ id: "seed", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }] }));
