@@ -132,6 +132,7 @@ describe("PlanVariationsUseCase.plan", () => {
       expect(result.error.message).toMatch(/accepted/);
       expect(result.error.message).toMatch(/count 12/);
       expect(result.error.message).toMatch(/axisProductSize 24/);
+      expect(result.error.message).toMatch(/minDistance 6/);
     }
   });
 
@@ -156,27 +157,94 @@ describe("PlanVariationsUseCase.plan", () => {
     expect(byRatio.get("16:9") ?? 0).toBeGreaterThanOrEqual(1);
   });
 
-  test("product coverage that fills count skips the ratio pass", () => {
+  test("count below perRatio × ratios fails up front", () => {
+    const result = planner().plan(brief({ variation: { count: 1, coverage: { perRatio: 1 } } }));
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toMatch(/perRatio 1/);
+      expect(result.error.message).toMatch(/3 ratios/);
+      expect(result.error.message).toMatch(/count 1/);
+    }
+  });
+
+  test("count below perProduct × products fails up front", () => {
+    const result = planner().plan(brief({ variation: { count: 1, coverage: { perProduct: 1 } } }));
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toMatch(/perProduct 1/);
+      expect(result.error.message).toMatch(/2 products/);
+      expect(result.error.message).toMatch(/count 1/);
+    }
+  });
+
+  test("count 6 perRatio 2 accepts at least two of every ratio", () => {
     const result = planner().plan(
-      brief({
-        variation: { count: 4, seed: 7, minDistance: 1, coverage: { perProduct: 2, perRatio: 1 } },
-      }),
+      brief({ variation: { count: 6, seed: 7, minDistance: 1, coverage: { perRatio: 2 } } }),
     );
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.value.estimate.creatives).toBe(4);
+    const byRatio = new Map<string, number>();
+    for (const variant of result.value.variants) {
+      byRatio.set(variant.aspectRatio, (byRatio.get(variant.aspectRatio) ?? 0) + 1);
+    }
+    expect(byRatio.get("1:1") ?? 0).toBeGreaterThanOrEqual(2);
+    expect(byRatio.get("9:16") ?? 0).toBeGreaterThanOrEqual(2);
+    expect(byRatio.get("16:9") ?? 0).toBeGreaterThanOrEqual(2);
     expectDistanceHeld(result.value);
   });
 
-  test("product coverage stops mid-round once count is filled", () => {
+  test("returns the first unmet product when the accepted set misses coverage", () => {
     const result = planner().plan(
       brief({
-        variation: { count: 3, seed: 7, minDistance: 1, coverage: { perProduct: 2 } },
+        products: [product("a"), product("b"), product("c"), product("d")],
+        variation: { count: 4, seed: 1, minDistance: 1, coverage: { perProduct: 1, perRatio: 1 } },
+      }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toMatch(/coverage unmet/);
+      expect(result.error.message).toMatch(/product "b"/);
+      expect(result.error.message).toMatch(/perProduct 1/);
+    }
+  });
+
+  test("returns the first unmet ratio when products meet coverage but a ratio does not", () => {
+    const result = planner().plan(
+      brief({
+        products: [product("a"), product("b"), product("c")],
+        variation: { count: 3, seed: 1, minDistance: 1, coverage: { perProduct: 1, perRatio: 1 } },
+      }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toMatch(/coverage unmet/);
+      expect(result.error.message).toMatch(/ratio "1:1"/);
+      expect(result.error.message).toMatch(/perRatio 1/);
+    }
+  });
+
+  test("a coverage candidate rejected by distance is retried", () => {
+    const result = planner().plan(
+      brief({
+        products: [product("solo")],
+        variation: {
+          count: 3,
+          seed: 7,
+          minDistance: 2,
+          coverage: { perRatio: 1 },
+          axes: { layout: ["headline-top", "headline-bottom"], tone: ["bold", "subtle"] },
+        },
       }),
     );
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.value.variants).toHaveLength(3);
+    const byRatio = new Map<string, number>();
+    for (const variant of result.value.variants) {
+      byRatio.set(variant.aspectRatio, (byRatio.get(variant.aspectRatio) ?? 0) + 1);
+    }
+    expect(byRatio.get("1:1") ?? 0).toBeGreaterThanOrEqual(1);
+    expect(byRatio.get("9:16") ?? 0).toBeGreaterThanOrEqual(1);
+    expect(byRatio.get("16:9") ?? 0).toBeGreaterThanOrEqual(1);
     expectDistanceHeld(result.value);
   });
 
@@ -289,5 +357,55 @@ describe("PlanVariationsUseCase.replan", () => {
       expect(result.error.message).toMatch(/exhausted 64 draws/);
       expect(result.error.message).toMatch(/index 0/);
     }
+  });
+
+  test("replan of a product at the perProduct floor never changes productId", () => {
+    const policyResult = VariationPolicy.fromBrief(
+      brief({ variation: { count: 2, seed: 7, minDistance: 1, coverage: { perProduct: 1 } } }),
+    );
+    expect(policyResult.success).toBe(true);
+    if (!policyResult.success) return;
+    const alpha: Variant = {
+      index: 0,
+      seed: seedFrom("golden", "0", "0"),
+      productId: "alpha",
+      aspectRatio: "1:1",
+      layout: "headline-top",
+      tone: "bold",
+      backgroundSource: "procedural",
+      paletteShift: 0,
+    };
+    const beta: Variant = {
+      index: 1,
+      seed: seedFrom("golden", "1", "0"),
+      productId: "beta",
+      aspectRatio: "9:16",
+      layout: "headline-bottom",
+      tone: "subtle",
+      backgroundSource: "procedural",
+      paletteShift: 0,
+    };
+    const plan: VariationPlan = {
+      policyHash: policyResult.value.policyHash,
+      seed: policyResult.value.seed,
+      variants: [alpha, beta],
+      estimate: {
+        creatives: 2,
+        axisProductSize: policyResult.value.axisProductSize,
+        feasible: true,
+        genaiCalls: 0,
+      },
+      policy: policyResult.value,
+      briefId: "golden",
+    };
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const result = planner().replan(plan, 0, attempt);
+      if (!result.success) continue;
+      expect(result.value.variants[0].productId).toBe("alpha");
+      expect(result.value.variants[1]).toEqual(beta);
+    }
+    const any = planner().replan(plan, 0, 1);
+    expect(any.success).toBe(true);
+    if (any.success) expect(any.value.variants[0].productId).toBe("alpha");
   });
 });
