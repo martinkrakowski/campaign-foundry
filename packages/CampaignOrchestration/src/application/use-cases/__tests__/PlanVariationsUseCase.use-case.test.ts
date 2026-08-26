@@ -476,3 +476,92 @@ describe("PlanVariationsUseCase.replan", () => {
     if (!result.success) expect(result.error.message).toMatch(/exhausted 64 draws/);
   });
 });
+
+const motionBrief = (over: Partial<CampaignBrief> = {}): CampaignBrief =>
+  brief({
+    variation: {
+      count: 12,
+      seed: 7,
+      minDistance: 1,
+      axes: { motion: ["ken-burns-in", "headline-rise"], duration: [4, 6] },
+    },
+    output: { formats: ["static", "motion"] },
+    ...over,
+  });
+
+describe("PlanVariationsUseCase — motion axes", () => {
+  test("a mixed-format brief draws both still and motion slots, duration only on motion", () => {
+    const result = planner().plan(motionBrief());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const motion = result.value.variants.filter((v) => v.motion !== undefined);
+    const still = result.value.variants.filter((v) => v.motion === undefined);
+    expect(motion.length).toBeGreaterThan(0);
+    expect(still.length).toBeGreaterThan(0);
+    for (const v of motion) {
+      expect(["ken-burns-in", "headline-rise"]).toContain(v.motion);
+      expect([4, 6]).toContain(v.durationSec);
+    }
+    for (const v of still) expect(v).not.toHaveProperty("durationSec");
+    expect(result.value.policy.axisProductSize).toBe(2 * 3 * 2 * 2 * 1 * 1 * 3 * 2);
+    expect(result.value.estimate.frames).toBe(motion.reduce((n, v) => n + (v.durationSec ?? 0) * 30, 0));
+    const golden = planner().plan(brief());
+    if (golden.success) expect(result.value.policyHash).not.toBe(golden.value.policyHash);
+  });
+
+  test("formats [motion] only makes every variant a motion variant", () => {
+    const result = planner().plan(motionBrief({ output: { formats: ["motion"] } }));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.variants.every((v) => v.motion !== undefined && v.durationSec !== undefined)).toBe(true);
+    expect(result.value.policy.mixStatic).toBe(false);
+  });
+
+  test("a motion axis without the motion format, or an empty motion axis, stays static (no draws, no frames)", () => {
+    const golden = planner().plan(brief());
+    const noFormat = planner().plan(motionBrief({ output: { formats: ["static"] } }));
+    const emptyAxis = planner().plan(
+      motionBrief({ variation: { count: 12, seed: 7, minDistance: 1, axes: { motion: [] } } }),
+    );
+    expect(golden.success && noFormat.success && emptyAxis.success).toBe(true);
+    if (!golden.success || !noFormat.success || !emptyAxis.success) return;
+    expect(noFormat.value.variants).toEqual(golden.value.variants);
+    expect(emptyAxis.value.variants).toEqual(golden.value.variants);
+    expect(noFormat.value.policyHash).toBe(golden.value.policyHash);
+    expect(noFormat.value.estimate).not.toHaveProperty("frames");
+    expect(noFormat.value.policy.motionEnabled).toBe(false);
+  });
+
+  test("motion and durationSec are Hamming axes (minDistance up to 8)", () => {
+    const eight = planner().plan(motionBrief({ variation: { count: 1, seed: 7, minDistance: 8, axes: { motion: ["ken-burns-in"] } } }));
+    expect(eight.success).toBe(true);
+    const nine = planner().plan(motionBrief({ variation: { count: 1, seed: 7, minDistance: 9 } }));
+    expect(nine.success).toBe(false);
+    if (!nine.success) expect(nine.error.message).toMatch(/minDistance/);
+  });
+
+  test("replan keeps the frames estimate in step with the re-drawn slot", () => {
+    const planned = planner().plan(motionBrief());
+    expect(planned.success).toBe(true);
+    if (!planned.success) return;
+    const index = planned.value.variants.findIndex((v) => v.motion !== undefined);
+    const next = planner().replan(planned.value, index, 1);
+    expect(next.success).toBe(true);
+    if (!next.success) return;
+    const frames = next.value.variants.reduce((n, v) => n + (v.durationSec ?? 0) * 30, 0);
+    expect(next.value.estimate.frames).toBe(frames);
+  });
+
+  test("rejects unknown motion kinds and out-of-range durations", () => {
+    const badKind = planner().plan(
+      motionBrief({ variation: { count: 2, axes: { motion: ["spin"] } } }),
+    );
+    expect(badKind.success).toBe(false);
+    if (!badKind.success) expect(badKind.error.message).toBe("Invalid motion.");
+    for (const duration of [1, 31, 2.5]) {
+      const bad = planner().plan(motionBrief({ variation: { count: 2, axes: { motion: ["accent-wipe"], duration: [duration] } } }));
+      expect(bad.success).toBe(false);
+      if (!bad.success) expect(bad.error.message).toBe("Invalid duration.");
+    }
+  });
+});

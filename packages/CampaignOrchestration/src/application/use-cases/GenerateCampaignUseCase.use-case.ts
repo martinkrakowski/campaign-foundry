@@ -1,9 +1,10 @@
 import { ok, err, type Result } from "@campaignfoundry/shared";
 import type { CampaignBrief } from "../../domain/entities/CampaignBrief.js";
-import type { GeneratedAsset } from "../../domain/entities/GeneratedAsset.js";
+import type { GeneratedAsset, VariantDescriptor } from "../../domain/entities/GeneratedAsset.js";
 import type { Product } from "../../domain/entities/Product.js";
 import { variantTreatmentId, type Variant } from "../../domain/entities/Variant.js";
-import { AspectRatio } from "../../domain/value-objects/AspectRatio.vo.js";
+import { AspectRatio, type AspectRatioValue } from "../../domain/value-objects/AspectRatio.vo.js";
+import type { MotionKind } from "../../domain/value-objects/MotionKind.vo.js";
 import { DEFAULT_TREATMENT, SAFE_ID_PATTERN } from "../../domain/value-objects/Treatment.vo.js";
 import { PipelineExecutionLog } from "../../domain/value-objects/PipelineExecutionLog.vo.js";
 import type { PipelineResult } from "../../domain/value-objects/PipelineResult.vo.js";
@@ -14,9 +15,11 @@ import type {
 } from "../ports/in/CampaignPipelinePort.js";
 import { isVariationTarget } from "../ports/in/CampaignPipelinePort.js";
 import type { CompliancePort } from "../ports/out/CompliancePort.js";
-import type { CompositorPort } from "../ports/out/CompositorPort.js";
+import type { CompositeRequest, CompositorPort, SafeInsets } from "../ports/out/CompositorPort.js";
 import type { ExportPort } from "../ports/out/ExportPort.js";
 import type { BackgroundContext, ImageGeneratorPort } from "../ports/out/ImageGeneratorPort.js";
+import type { VideoCompositorPort } from "../ports/out/VideoCompositorPort.js";
+import { MOTION_FPS } from "./PlanVariationsUseCase.use-case.js";
 
 /** Classic briefs keep the two-product floor; variation relaxes to 1 (D10). */
 const MINIMUM_PRODUCTS_CLASSIC = 2;
@@ -30,6 +33,16 @@ const MINIMUM_PRODUCTS_VARIATION = 1;
  * bounding both.
  */
 const MAX_CONCURRENT_BACKGROUNDS = 8;
+
+/** Normalised times whose frames are brand-density checked on a motion variant. */
+const MOTION_SAMPLE_AT: readonly number[] = [0, 0.25, 0.5, 0.75, 1];
+/** Planner default; a motion variant without `durationSec` (hand-built plan) encodes this. */
+const DEFAULT_DURATION_SEC = 6;
+
+/** A variation asset before its compliance verdict — shared by the static and motion renders. */
+type VariationAssetBase = Omit<GeneratedAsset, "complianceScore" | "passedCompliance" | "logoApplied"> & {
+  readonly descriptor: VariantDescriptor;
+};
 
 /**
  * Run `fn` over `items` with at most `limit` in flight at once, preserving input
@@ -59,6 +72,18 @@ export interface VariationPlanner {
   replan(plan: VariationPlan, index: number, attempt: number): Result<VariationPlan, Error>;
 }
 
+/**
+ * Platform safe zone as the composition root sees it (Distribution's profile
+ * table). Injected as a resolver so orchestration never depends on Distribution.
+ */
+export interface PlatformSafeZone {
+  readonly ratio: AspectRatioValue;
+  readonly safeInsets: SafeInsets;
+}
+
+/** Resolve a platform id from `output.platforms`; unknown ids resolve to undefined and are ignored. */
+export type PlatformSafeZoneResolver = (platformId: string) => PlatformSafeZone | undefined;
+
 /** Ports injected at the composition root — the use case depends on contracts, never adapters. */
 export interface GenerateCampaignDeps {
   readonly imageGenerator: ImageGeneratorPort;
@@ -66,9 +91,13 @@ export interface GenerateCampaignDeps {
   readonly proceduralGenerator: ImageGeneratorPort;
   readonly planner: VariationPlanner;
   readonly compositor: CompositorPort;
+  /** Motion variants only; static and classic paths never touch it. */
+  readonly videoCompositor: VideoCompositorPort;
   readonly compliance: CompliancePort;
   readonly exporter: ExportPort;
   readonly now: () => Date;
+  /** Safe-inset source for `output.platforms` (D11). Absent → no insets are ever passed. */
+  readonly platformSafeZones?: PlatformSafeZoneResolver;
 }
 
 /**
@@ -317,6 +346,9 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     );
 
     const pinnedProofIndex = firstSquareIndexByProduct(plan.variants);
+    // D11: the union (max per side) of the requested platforms' insets, per ratio.
+    // Briefs without platforms pass nothing, so their geometry is byte-identical.
+    const insetsByRatio = unionSafeInsets(brief.output?.platforms, this.deps.platformSafeZones);
 
     const productById = new Map(brief.products.map((product) => [product.id, product]));
     const cells: Array<{ variant: Variant; product: Product; ratio: AspectRatio; attempt: number }> =
@@ -346,6 +378,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         log,
         cell.attempt,
         pinnedProofIndex.get(cell.product.id) === cell.variant.index,
+        insetsByRatio.get(cell.ratio.value),
       ),
     );
 
@@ -382,6 +415,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     log: PipelineExecutionLog,
     attempt: number,
     writeProof: boolean,
+    safeInsets: SafeInsets | undefined,
   ): Promise<{ asset: GeneratedAsset; heroImage?: Uint8Array }> {
     const cellContext: BackgroundContext = {
       ...context,
@@ -399,7 +433,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       background.source === "procedural" ? "warn" : "info",
     );
 
-    const composite = await this.deps.compositor.compositeAsset({
+    const request: CompositeRequest = {
       background: background.image,
       message: copy,
       brandColor: product.primaryColor,
@@ -407,25 +441,17 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       ratio,
       layout: variant.layout,
       tone: variant.tone,
-    });
-
-    const visual = await this.deps.compliance.validateBrandColorDensity(
-      composite.image,
-      product.primaryColor,
-    );
+      ...(safeInsets !== undefined ? { safeInsets } : {}),
+    };
 
     const treatment = variantTreatmentId(variant);
-    const outputPath = `${product.id}/${ratio.slug}/v${variant.index}.png`;
-    await this.deps.exporter.saveToDirectory(composite.image, outputPath);
-
-    const asset: GeneratedAsset = {
+    const basePath = `${product.id}/${ratio.slug}/v${variant.index}`;
+    const outputPath = `${basePath}.png`;
+    const base: VariationAssetBase = {
       productId: product.id,
       aspectRatio: ratio.value,
       outputPath,
       proofPath: `proofs/${product.id}.pdf`,
-      complianceScore: visual.score ?? 0,
-      passedCompliance: visual.passed,
-      logoApplied: composite.logoApplied,
       treatment,
       backgroundSource: background.source,
       variantIndex: variant.index,
@@ -439,6 +465,26 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         paletteShift: variant.paletteShift,
       },
     };
+
+    if (variant.motion !== undefined) {
+      return this.renderMotionVariant(variant, variant.motion, product, ratio, request, base, log, writeProof);
+    }
+
+    const composite = await this.deps.compositor.compositeAsset(request);
+
+    const visual = await this.deps.compliance.validateBrandColorDensity(
+      composite.image,
+      product.primaryColor,
+    );
+
+    await this.deps.exporter.saveToDirectory(composite.image, outputPath);
+
+    const asset: GeneratedAsset = {
+      ...base,
+      complianceScore: visual.score ?? 0,
+      passedCompliance: visual.passed,
+      logoApplied: composite.logoApplied,
+    };
     log.record(
       "CompositeVariations",
       `${product.id} @ ${ratio.value} [v${variant.index} ${treatment}] — brand density ${(visual.score ?? 0).toFixed(3)}${visual.passed ? "" : " (below threshold)"}, logo ${composite.logoApplied ? "present" : "missing"}`,
@@ -448,6 +494,62 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       asset,
       heroImage: writeProof ? composite.image : undefined,
     };
+  }
+
+  /**
+   * Motion slot: encode the clip, brand-check every sampled frame (the asset
+   * passes only if all do; the minimum score is recorded), save `.mp4` + poster.
+   * The poster is the still the grid, export, packaging, and proof keep using.
+   */
+  private async renderMotionVariant(
+    variant: Variant,
+    motion: MotionKind,
+    product: Product,
+    ratio: AspectRatio,
+    request: CompositeRequest,
+    base: VariationAssetBase,
+    log: PipelineExecutionLog,
+    writeProof: boolean,
+  ): Promise<{ asset: GeneratedAsset; heroImage?: Uint8Array }> {
+    const durationSec = variant.durationSec ?? DEFAULT_DURATION_SEC;
+    const video = await this.deps.videoCompositor.compositeVideo({
+      ...request,
+      durationSec,
+      fps: MOTION_FPS,
+      motion,
+      sampleAt: MOTION_SAMPLE_AT,
+    });
+
+    // No sampled frame is no evidence: an adapter that returns none fails the check.
+    let passed = video.sampledFrames.length > 0;
+    let minScore = passed ? 1 : 0;
+    for (const frame of video.sampledFrames) {
+      const visual = await this.deps.compliance.validateBrandColorDensity(frame, product.primaryColor);
+      if (!visual.passed) passed = false;
+      minScore = Math.min(minScore, visual.score ?? 0);
+    }
+
+    const videoPath = `${base.outputPath.slice(0, -".png".length)}.mp4`;
+    await this.deps.exporter.saveToDirectory(video.video, videoPath);
+    await this.deps.exporter.saveToDirectory(video.poster, base.outputPath);
+
+    const asset: GeneratedAsset = {
+      ...base,
+      videoPath,
+      durationSec,
+      complianceScore: minScore,
+      passedCompliance: passed,
+      logoApplied: video.logoApplied,
+      format: "motion",
+      descriptor: { ...base.descriptor, motion, durationSec },
+    };
+    log.record(
+      "CompositeVariations",
+      `${product.id} @ ${ratio.value} [v${variant.index} ${base.treatment} ${motion} ${durationSec}s] — min brand density over ${video.sampledFrames.length} frames ${minScore.toFixed(3)}${passed ? "" : " (below threshold)"}, logo ${video.logoApplied ? "present" : "missing"}`,
+      passed && video.logoApplied ? "info" : "warn",
+    );
+    // The proof pin is by plan order and ratio; a pinned motion 1:1 hero proofs from its poster.
+    return { asset, heroImage: writeProof ? video.poster : undefined };
   }
 
   /** MinimumProductsRule + path-safe/unique ids, or the pipeline never starts. */
@@ -520,6 +622,35 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     log.record("ExecuteLegalGateCheck", "Legal gate passed");
     return false;
   }
+}
+
+/**
+ * D11: per ratio, the max-per-side union of the requested platforms' safe insets.
+ * Unknown platform ids and ratios no platform targets are absent from the map.
+ */
+export function unionSafeInsets(
+  platformIds: readonly string[] | undefined,
+  resolve: PlatformSafeZoneResolver | undefined,
+): Map<AspectRatioValue, SafeInsets> {
+  const byRatio = new Map<AspectRatioValue, SafeInsets>();
+  if (!platformIds || !resolve) return byRatio;
+  for (const id of platformIds) {
+    const zone = resolve(id);
+    if (!zone) continue;
+    const current = byRatio.get(zone.ratio);
+    byRatio.set(
+      zone.ratio,
+      current === undefined
+        ? zone.safeInsets
+        : {
+            top: Math.max(current.top, zone.safeInsets.top),
+            right: Math.max(current.right, zone.safeInsets.right),
+            bottom: Math.max(current.bottom, zone.safeInsets.bottom),
+            left: Math.max(current.left, zone.safeInsets.left),
+          },
+    );
+  }
+  return byRatio;
 }
 
 /** First 1:1 variant of each product in plan order — the only slot that may rewrite its proof. */

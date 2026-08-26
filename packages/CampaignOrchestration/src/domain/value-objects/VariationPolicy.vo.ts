@@ -3,6 +3,7 @@ import { err, ok, seedFrom, type Result } from "@campaignfoundry/shared";
 import type { CampaignBrief } from "../entities/CampaignBrief.js";
 import { AspectRatio, type AspectRatioValue } from "./AspectRatio.vo.js";
 import { LAYOUT_VALUES, TONE_VALUES, type LayoutKind, type ToneKind } from "./Treatment.vo.js";
+import { MOTION_KINDS, type MotionKind } from "./MotionKind.vo.js";
 
 /**
  * Background *axis* values from the brief parser (`procedural` | `asset-pool` | `genai`).
@@ -19,11 +20,19 @@ export const DISTANCE_AXES = [
   "tone",
   "backgroundSource",
   "paletteShift",
+  "motion",
+  "durationSec",
 ] as const;
 
 const UINT32_MAX = 0xffffffff;
 const DEFAULT_BACKGROUND_SOURCES: readonly BackgroundAxisSource[] = ["procedural"];
 const DEFAULT_PALETTE_SHIFT: readonly number[] = [0];
+/** Static only: no motion kinds are drawn unless the brief lists some. */
+const DEFAULT_MOTION: readonly MotionKind[] = [];
+/** Clip length in whole seconds; the parser bounds it to [2, 30]. */
+const DEFAULT_DURATION: readonly number[] = [6];
+const MIN_DURATION_SEC = 2;
+const MAX_DURATION_SEC = 30;
 
 export interface VariationCoverage {
   readonly perProduct: number;
@@ -50,6 +59,12 @@ export class VariationPolicy {
     readonly ratios: readonly AspectRatioValue[],
     readonly axisProductSize: number,
     readonly policyHash: string,
+    readonly motion: readonly MotionKind[],
+    readonly duration: readonly number[],
+    /** True iff `output.formats` includes "motion" and the motion axis is non-empty. */
+    readonly motionEnabled: boolean,
+    /** True iff `output.formats` also includes "static": the motion draw keeps a still slot. */
+    readonly mixStatic: boolean,
   ) {}
 
   static fromBrief(brief: CampaignBrief): Result<VariationPolicy, Error> {
@@ -101,6 +116,17 @@ export class VariationPolicy {
     );
     const paletteShiftResult = requirePaletteShift(paletteShift);
     if (!paletteShiftResult.success) return paletteShiftResult;
+    const motion = unique(
+      axes?.motion !== undefined ? [...(axes.motion as readonly MotionKind[])] : [...DEFAULT_MOTION],
+    );
+    const motionResult = requireMotion(motion);
+    if (!motionResult.success) return motionResult;
+    const duration = unique(axes?.duration !== undefined ? [...axes.duration] : [...DEFAULT_DURATION]);
+    const durationResult = requireDuration(duration);
+    if (!durationResult.success) return durationResult;
+    const formats = brief.output?.formats ?? ["static"];
+    const motionEnabled = formats.includes("motion") && motion.length > 0;
+    const mixStatic = motionEnabled && formats.includes("static");
 
     const productIds = unique(brief.products.map((product) => product.id));
     const ratios = AspectRatio.all().map((ratio) => ratio.value);
@@ -110,7 +136,8 @@ export class VariationPolicy {
       layout.length *
       tone.length *
       backgroundSource.length *
-      paletteShift.length;
+      paletteShift.length *
+      (motionEnabled ? (motion.length + (mixStatic ? 1 : 0)) * duration.length : 1);
 
     const policyHash = hashPolicy({
       axisProductSize,
@@ -124,6 +151,8 @@ export class VariationPolicy {
       ratios,
       seed,
       tone,
+      // Static briefs hash exactly as before the motion axes existed (golden-stable).
+      ...(motionEnabled ? { duration, mixStatic, motion } : {}),
     });
 
     return ok(
@@ -140,6 +169,10 @@ export class VariationPolicy {
         ratios,
         axisProductSize,
         policyHash,
+        motion,
+        duration,
+        motionEnabled,
+        mixStatic,
       ),
     );
   }
@@ -165,6 +198,24 @@ function requirePaletteShift(values: readonly number[]): Result<readonly number[
   return ok(values);
 }
 
+function requireMotion(values: readonly MotionKind[]): Result<readonly MotionKind[], Error> {
+  for (const kind of values) {
+    if (!(MOTION_KINDS as readonly string[]).includes(kind)) {
+      return err(new Error("Invalid motion."));
+    }
+  }
+  return ok(values);
+}
+
+function requireDuration(values: readonly number[]): Result<readonly number[], Error> {
+  for (const seconds of values) {
+    if (!Number.isInteger(seconds) || seconds < MIN_DURATION_SEC || seconds > MAX_DURATION_SEC) {
+      return err(new Error("Invalid duration."));
+    }
+  }
+  return ok(values);
+}
+
 function hashPolicy(payload: {
   axisProductSize: number;
   backgroundSource: readonly string[];
@@ -177,6 +228,9 @@ function hashPolicy(payload: {
   ratios: readonly string[];
   seed: number;
   tone: readonly string[];
+  duration?: readonly number[];
+  mixStatic?: boolean;
+  motion?: readonly string[];
 }): string {
   return createHash("sha256").update(canonicalJson(payload)).digest("hex");
 }

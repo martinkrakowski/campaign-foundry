@@ -45,6 +45,10 @@ describe("VariationPolicy.fromBrief", () => {
     expect(policy.tone).toEqual([...TONE_VALUES]);
     expect(policy.backgroundSource).toEqual(["procedural"]);
     expect(policy.paletteShift).toEqual([0]);
+    expect(policy.motion).toEqual([]);
+    expect(policy.duration).toEqual([6]);
+    expect(policy.motionEnabled).toBe(false);
+    expect(policy.mixStatic).toBe(false);
     expect(policy.productIds).toEqual(["alpha", "beta"]);
     expect(policy.ratios).toEqual(["1:1", "9:16", "16:9"]);
     expect(policy.axisProductSize).toBe(2 * 3 * 2 * 2 * 1 * 1);
@@ -142,7 +146,7 @@ describe("VariationPolicy.fromBrief", () => {
     [{ count: Number.POSITIVE_INFINITY }, /count/],
     [{ count: Number.NaN }, /count/],
     [{ count: 1, minDistance: -1 }, /minDistance/],
-    [{ count: 1, minDistance: 7 }, /minDistance/],
+    [{ count: 1, minDistance: 9 }, /minDistance/],
     [{ count: 1, minDistance: 1.5 }, /minDistance/],
     [{ count: 1, minDistance: Number.POSITIVE_INFINITY }, /minDistance/],
     [{ count: 1, coverage: { perProduct: -1 } }, /coverage\.perProduct/],

@@ -2,6 +2,7 @@ import { err, ok, SeededRandom, seedFrom, type Result } from "@campaignfoundry/s
 import type { CampaignBrief } from "../../domain/entities/CampaignBrief.js";
 import type { Variant } from "../../domain/entities/Variant.js";
 import type { AspectRatioValue } from "../../domain/value-objects/AspectRatio.vo.js";
+import type { MotionKind } from "../../domain/value-objects/MotionKind.vo.js";
 import type { VariationPlan } from "../../domain/value-objects/VariationPlan.vo.js";
 import {
   DISTANCE_AXES,
@@ -10,6 +11,9 @@ import {
 
 /** Re-roll bound: 64 draws from `seedFrom(briefId, index, attempt)`. */
 const REPLAN_MAX_DRAWS = 64;
+
+/** Encode frame rate; the estimate's `frames` and the generator's `fps` agree on it. */
+export const MOTION_FPS = 30;
 
 interface AxisDraw {
   readonly productId?: string;
@@ -128,7 +132,7 @@ export class PlanVariationsUseCase {
       return ok({
         ...plan,
         variants,
-        estimate: { ...plan.estimate, genaiCalls: genaiCalls(variants) },
+        estimate: { ...plan.estimate, genaiCalls: genaiCalls(variants), ...framesEstimate(variants, plan.policy) },
       });
     }
 
@@ -152,7 +156,23 @@ function drawAxes(
     tone: rng.pick(policy.tone),
     backgroundSource: rng.pick(policy.backgroundSource),
     paletteShift: rng.pick(policy.paletteShift),
+    ...drawMotion(rng, policy),
   };
+}
+
+/**
+ * Motion axes. Static briefs consume no draws (goldens unchanged). With both
+ * formats requested the draw keeps one still slot, so a mixed brief yields PNGs
+ * and mp4s; `duration` is drawn only for a motion slot.
+ */
+function drawMotion(rng: SeededRandom, policy: VariationPolicy): Pick<Variant, "motion" | "durationSec"> {
+  if (!policy.motionEnabled) return {};
+  const slots: ReadonlyArray<MotionKind | undefined> = policy.mixStatic
+    ? [undefined, ...policy.motion]
+    : policy.motion;
+  const motion = rng.pick(slots);
+  if (motion === undefined) return {};
+  return { motion, durationSec: rng.pick(policy.duration) };
 }
 
 function hamming(a: Variant, b: Variant): number {
@@ -217,6 +237,16 @@ function genaiCalls(variants: readonly Variant[]): number {
   return variants.filter((variant) => variant.backgroundSource === "genai").length;
 }
 
+/** `frames` only on motion plans, so static plan JSON stays byte-identical. */
+function framesEstimate(variants: readonly Variant[], policy: VariationPolicy): { frames?: number } {
+  if (!policy.motionEnabled) return {};
+  let frames = 0;
+  for (const variant of variants) {
+    if (variant.durationSec !== undefined) frames += variant.durationSec * MOTION_FPS;
+  }
+  return { frames };
+}
+
 function toPlan(briefId: string, policy: VariationPolicy, variants: readonly Variant[]): VariationPlan {
   return {
     policyHash: policy.policyHash,
@@ -227,6 +257,7 @@ function toPlan(briefId: string, policy: VariationPolicy, variants: readonly Var
       axisProductSize: policy.axisProductSize,
       feasible: true,
       genaiCalls: genaiCalls(variants),
+      ...framesEstimate(variants, policy),
     },
     policy,
     briefId,

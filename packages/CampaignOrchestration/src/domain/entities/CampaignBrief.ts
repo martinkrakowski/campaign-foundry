@@ -28,8 +28,8 @@ export interface CampaignBrief {
    */
   readonly mode?: "brief" | "variation";
   /**
-   * Optional variation policy. Unsupported axes (headline, motion, duration)
-   * are rejected at parse time, not here.
+   * Optional variation policy. Unsupported axes (headline) and — without the
+   * ffmpeg capability — motion/duration are rejected at parse time, not here.
    */
   readonly variation?: {
     readonly count?: number;
@@ -44,6 +44,8 @@ export interface CampaignBrief {
       readonly tone?: readonly string[];
       readonly background?: { readonly source?: readonly string[] };
       readonly paletteShift?: readonly number[];
+      readonly motion?: readonly string[];
+      readonly duration?: readonly number[];
     };
   };
   /**

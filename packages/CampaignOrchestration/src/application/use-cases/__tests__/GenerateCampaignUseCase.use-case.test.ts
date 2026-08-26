@@ -1,6 +1,6 @@
 import { describe, test, expect, vi } from "vitest";
-import { GenerateCampaignUseCase } from "../GenerateCampaignUseCase.use-case.js";
-import type { GenerateCampaignDeps } from "../GenerateCampaignUseCase.use-case.js";
+import { GenerateCampaignUseCase, unionSafeInsets } from "../GenerateCampaignUseCase.use-case.js";
+import type { GenerateCampaignDeps, PlatformSafeZoneResolver } from "../GenerateCampaignUseCase.use-case.js";
 import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
 import type { Product } from "../../../domain/entities/Product.js";
 import type { Variant } from "../../../domain/entities/Variant.js";
@@ -12,6 +12,7 @@ import {
   fakePlan,
   fakePlanner,
   fakeVariant,
+  fakeVideoCompositor,
   recordingExporter,
   type RecordingExporter,
 } from "./_fakes.js";
@@ -43,6 +44,7 @@ const deps = (over: Partial<GenerateCampaignDeps> = {}): GenerateCampaignDeps =>
   proceduralGenerator: fakeImageGenerator(),
   planner: fakePlanner(),
   compositor: fakeCompositor(),
+  videoCompositor: fakeVideoCompositor(),
   compliance: fakeCompliance(),
   exporter: recordingExporter(),
   now: () => new Date("2026-01-01T00:00:00.000Z"),
@@ -637,5 +639,189 @@ describe("GenerateCampaignUseCase — variation", () => {
     if (!result.success) return;
     const line = result.value.log.entries.find((e) => e.stage === "ResolveBackgroundAssets");
     expect(line?.level).toBe("info");
+  });
+});
+
+const motionVariant = (over: Partial<Variant> = {}): Variant =>
+  fakeVariant({ motion: "ken-burns-in", durationSec: 6, ...over });
+
+const firstCompositeCall = (d: GenerateCampaignDeps): Record<string, unknown> =>
+  vi.mocked(d.compositor.compositeAsset).mock.calls[0][0] as unknown as Record<string, unknown>;
+
+describe("GenerateCampaignUseCase — motion variants", () => {
+  test("encodes a motion variant through the video port and saves mp4 + poster", async () => {
+    const variants = [motionVariant(), fakeVariant({ index: 1, aspectRatio: "9:16" })];
+    const d = deps({ planner: fakePlanner(fakePlan(variants)) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    expect(d.videoCompositor.compositeVideo).toHaveBeenCalledTimes(1);
+    expect(d.videoCompositor.compositeVideo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        durationSec: 6,
+        fps: 30,
+        motion: "ken-burns-in",
+        sampleAt: [0, 0.25, 0.5, 0.75, 1],
+        layout: "headline-bottom",
+        tone: "bold",
+      }),
+    );
+    // The still compositor only ran for the static slot.
+    expect(d.compositor.compositeAsset).toHaveBeenCalledTimes(1);
+    // Cells run concurrently, so assert membership rather than interleaving order.
+    const saved = (d.exporter as RecordingExporter).saved;
+    expect(saved).toHaveLength(3);
+    expect(saved).toEqual(
+      expect.arrayContaining([
+        { path: "alpha/1x1/v0.mp4", bytes: 4 },
+        { path: "alpha/1x1/v0.png", bytes: 3 },
+        { path: "alpha/9x16/v1.png", bytes: 3 },
+      ]),
+    );
+    expect(result.value.assets[0]).toMatchObject({
+      outputPath: "alpha/1x1/v0.png",
+      videoPath: "alpha/1x1/v0.mp4",
+      durationSec: 6,
+      format: "motion",
+      complianceScore: 0.5,
+      passedCompliance: true,
+      logoApplied: true,
+      descriptor: { layout: "headline-bottom", motion: "ken-burns-in", durationSec: 6 },
+    });
+    expect(result.value.assets[1]).toMatchObject({ format: "static" });
+    expect(result.value.assets[1]).not.toHaveProperty("videoPath");
+    // Every sampled frame was brand-checked (5) plus the one static composite.
+    expect(d.compliance.validateBrandColorDensity).toHaveBeenCalledTimes(6);
+    expect(result.value.log.entries.some((e) => /ken-burns-in 6s/.test(e.message) && e.level === "info")).toBe(true);
+  });
+
+  test("records the minimum sampled-frame score and fails the asset when one frame fails", async () => {
+    const d = deps({
+      planner: fakePlanner(fakePlan([motionVariant()])),
+      compliance: fakeCompliance({ densities: [0.5, 0.4, 0.01, 0.6, 0.3] }),
+    });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.assets[0]).toMatchObject({ complianceScore: 0.01, passedCompliance: false });
+    expect(result.value.log.entries.some((e) => /below threshold/.test(e.message) && e.level === "warn")).toBe(true);
+  });
+
+  test("a scoreless frame counts as 0 and a missing logo warns", async () => {
+    const d = deps({
+      planner: fakePlanner(fakePlan([motionVariant()])),
+      compliance: fakeCompliance({ scoreless: true }),
+      videoCompositor: fakeVideoCompositor({ logoApplied: false }),
+    });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.assets[0]).toMatchObject({ complianceScore: 0, passedCompliance: true, logoApplied: false });
+    expect(result.value.log.entries.some((e) => /logo missing/.test(e.message) && e.level === "warn")).toBe(true);
+  });
+
+  test("no sampled frames is no evidence: the asset fails with score 0", async () => {
+    const d = deps({
+      planner: fakePlanner(fakePlan([motionVariant()])),
+      videoCompositor: fakeVideoCompositor({ frames: 0 }),
+    });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.assets[0]).toMatchObject({ complianceScore: 0, passedCompliance: false });
+    expect(d.compliance.validateBrandColorDensity).not.toHaveBeenCalled();
+  });
+
+  test("a motion variant without durationSec encodes the 6 s default", async () => {
+    const d = deps({ planner: fakePlanner(fakePlan([motionVariant({ durationSec: undefined })])) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(result.success).toBe(true);
+    expect(d.videoCompositor.compositeVideo).toHaveBeenCalledWith(expect.objectContaining({ durationSec: 6 }));
+    if (result.success) expect(result.value.assets[0].durationSec).toBe(6);
+  });
+
+  test("a pinned 1:1 motion variant proofs from its poster; a non-pinned one does not", async () => {
+    const variants = [motionVariant({ index: 0 }), motionVariant({ index: 1 })];
+    const d = deps({ planner: fakePlanner(fakePlan(variants)) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(result.success).toBe(true);
+    expect((d.exporter as RecordingExporter).proofs).toEqual(["proofs/alpha.pdf"]);
+    expect(d.exporter.generatePrintProof).toHaveBeenCalledWith(new Uint8Array([4, 5, 6]), "proofs/alpha.pdf");
+  });
+
+  test("a motion re-roll keeps the slot identity and returns the regenerated motion asset", async () => {
+    const d = deps({ planner: fakePlanner(fakePlan([motionVariant(), motionVariant({ index: 1 })])) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [{ productId: "alpha", variantIndex: 1, attempt: 2 }],
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.assets).toHaveLength(1);
+    expect(result.value.assets[0]).toMatchObject({ variantIndex: 1, attempt: 2, videoPath: "alpha/1x1/v1.mp4" });
+  });
+});
+
+const ZONES: Record<string, { ratio: "1:1" | "9:16" | "16:9"; safeInsets: { top: number; right: number; bottom: number; left: number } }> = {
+  "instagram-feed": { ratio: "1:1", safeInsets: { top: 0, right: 0, bottom: 0, left: 0 } },
+  "instagram-reel": { ratio: "9:16", safeInsets: { top: 250, right: 0, bottom: 340, left: 60 } },
+  tiktok: { ratio: "9:16", safeInsets: { top: 120, right: 120, bottom: 400, left: 0 } },
+};
+const resolver: PlatformSafeZoneResolver = (id) => ZONES[id];
+
+describe("unionSafeInsets (D11)", () => {
+  test("takes the max per side across platforms sharing a ratio", () => {
+    const union = unionSafeInsets(["instagram-reel", "tiktok", "instagram-feed"], resolver);
+    expect(union.get("9:16")).toEqual({ top: 250, right: 120, bottom: 400, left: 60 });
+    expect(union.get("1:1")).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
+    expect(union.has("16:9")).toBe(false);
+  });
+
+  test("ignores unknown platform ids and is empty without platforms or a resolver", () => {
+    expect(unionSafeInsets(["nope", "tiktok"], resolver).get("9:16")).toEqual(ZONES.tiktok.safeInsets);
+    expect(unionSafeInsets(undefined, resolver).size).toBe(0);
+    expect(unionSafeInsets(["tiktok"], undefined).size).toBe(0);
+  });
+});
+
+describe("GenerateCampaignUseCase — safe insets at generation (D11)", () => {
+  const withPlatforms = (platforms?: readonly string[]): CampaignBrief =>
+    variationBrief(platforms ? { output: { formats: ["static"], platforms } } : {});
+
+  test("variation + platforms passes the per-ratio union; untargeted ratios get nothing", async () => {
+    const variants = [fakeVariant({ aspectRatio: "9:16" }), fakeVariant({ index: 1, aspectRatio: "16:9" })];
+    const d = deps({ planner: fakePlanner(fakePlan(variants)), platformSafeZones: resolver });
+    const result = await new GenerateCampaignUseCase(d).execute(withPlatforms(["instagram-reel", "tiktok"]));
+    expect(result.success).toBe(true);
+    const calls = vi.mocked(d.compositor.compositeAsset).mock.calls.map((c) => c[0]);
+    expect(calls[0].safeInsets).toEqual({ top: 250, right: 120, bottom: 400, left: 60 });
+    expect(calls[1]).not.toHaveProperty("safeInsets");
+  });
+
+  test("a motion variant receives the same insets", async () => {
+    const d = deps({ planner: fakePlanner(fakePlan([motionVariant({ aspectRatio: "9:16" })])), platformSafeZones: resolver });
+    await new GenerateCampaignUseCase(d).execute(withPlatforms(["instagram-reel"]));
+    expect(d.videoCompositor.compositeVideo).toHaveBeenCalledWith(
+      expect.objectContaining({ safeInsets: ZONES["instagram-reel"].safeInsets }),
+    );
+  });
+
+  test("a brief without platforms, or a root without a resolver, passes no insets (zero path)", async () => {
+    const noPlatforms = deps({ planner: fakePlanner(fakePlan([fakeVariant({ aspectRatio: "9:16" })])), platformSafeZones: resolver });
+    await new GenerateCampaignUseCase(noPlatforms).execute(withPlatforms());
+    expect(firstCompositeCall(noPlatforms)).not.toHaveProperty("safeInsets");
+
+    const noResolver = deps({ planner: fakePlanner(fakePlan([fakeVariant({ aspectRatio: "9:16" })])) });
+    await new GenerateCampaignUseCase(noResolver).execute(withPlatforms(["instagram-reel"]));
+    expect(firstCompositeCall(noResolver)).not.toHaveProperty("safeInsets");
+  });
+
+  test("classic mode never passes insets even with platforms and a resolver", async () => {
+    const d = deps({ platformSafeZones: resolver });
+    await new GenerateCampaignUseCase(d).execute(baseBrief({ output: { formats: ["static"], platforms: ["instagram-reel"] } }));
+    for (const call of vi.mocked(d.compositor.compositeAsset).mock.calls) {
+      expect(call[0]).not.toHaveProperty("safeInsets");
+    }
+    expect(d.videoCompositor.compositeVideo).not.toHaveBeenCalled();
   });
 });
