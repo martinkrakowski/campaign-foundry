@@ -2,3 +2,4 @@
 
 export * from "./error-message.js";
 export * from "./result.js";
+export * from "./value-objects/index.js";

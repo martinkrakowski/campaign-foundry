@@ -20,6 +20,27 @@ monorepo:
         emitDeclarationOnly: true
         declarationMap: true
         tsBuildInfoFile: ./dist/.tsbuildinfo
+    eslint:
+      template: |
+        import eslint from '@eslint/js';
+        import tseslint from 'typescript-eslint';
+        import deterministicCore from '../../eslint.deterministic-core.js';
+
+        export default tseslint.config(
+          eslint.configs.recommended,
+          ...tseslint.configs.recommended,
+          {
+            rules: {
+              '@typescript-eslint/no-explicit-any': 'warn',
+              '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+            },
+          },
+          // Deterministic core: no ambient randomness or wall clock in src/domain/**.
+          ...deterministicCore(),
+          {
+            ignores: ['dist/**', 'node_modules/**'],
+          },
+        );
     packageJson:
       scripts:
         build: tsc
@@ -102,7 +123,8 @@ bounded_contexts:
     layers:
       domain:
         entities: []
-        value_objects: []
+        value_objects:
+          - SeededRandom
         domain_services: []
       application:
         use_cases: []
@@ -141,6 +163,32 @@ bounded_contexts:
           out: []
       infrastructure:
         adapters: []
+    generator:
+      eslint:
+        template: |
+          import eslint from '@eslint/js';
+          import tseslint from 'typescript-eslint';
+          import deterministicCore from '../../eslint.deterministic-core.js';
+
+          export default tseslint.config(
+            eslint.configs.recommended,
+            ...tseslint.configs.recommended,
+            {
+              rules: {
+                '@typescript-eslint/no-explicit-any': 'warn',
+                '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+              },
+            },
+            // Deterministic core, widened to the use cases. PipelineExecutionLog is the one
+            // sanctioned wall-clock reader in the domain (it stamps the run log).
+            ...deterministicCore({
+              extraFiles: ['src/application/use-cases/**/*.ts'],
+              ignores: ['src/domain/value-objects/PipelineExecutionLog.vo.ts'],
+            }),
+            {
+              ignores: ['dist/**', 'node_modules/**'],
+            },
+          );
   - name: CreativeGeneration
     type: core
     description: >

@@ -16,7 +16,7 @@ import {
 } from "@campaignfoundry/CreativeGeneration";
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
 import { FileSystemExporter } from "@campaignfoundry/Distribution";
-import type { Result } from "@campaignfoundry/shared";
+import { err, type Result } from "@campaignfoundry/shared";
 import { outputRoot } from "./config.js";
 
 // Load .env before any process.env read below. Called (not a bare side-effect
@@ -51,6 +51,10 @@ export const ALLOWED_IMAGE_MODELS: readonly string[] = [
  *
  * Each GenAI provider is only used when its credentials are present (else it falls
  * through). Adopting Firefly was a one-line addition here — the domain never changed.
+ *
+ * A future `genai` variation axis decides *whether* GenAI is used for a cell;
+ * `selected` (`?model=`) still decides *which* provider. `paletteShift` is
+ * applied only by ProceduralBackgroundGenerator and is not wired from the brief.
  */
 function imageGenerator(selected?: string): ImageGeneratorPort {
   const procedural = new ProceduralBackgroundGenerator();
@@ -105,8 +109,9 @@ export function buildPipeline(imageModel?: string): GenerateCampaignUseCase {
 }
 
 /**
- * Run a campaign. `imageModel` (from the UI's model picker) selects the primary
- * generator; `regenerateOnly` (the HITL re-roll) restricts the run to just those
+ * Run a campaign. `imageModel` (from `?model=`) selects *which* provider; a
+ * future `genai` axis decides *whether* GenAI is used for a cell.
+ * `regenerateOnly` (the HITL re-roll) restricts the run to just those
  * creatives, leaving every other cell untouched.
  */
 export function runCampaign(
@@ -114,5 +119,14 @@ export function runCampaign(
   imageModel?: string,
   regenerateOnly?: ReadonlyArray<RegenerationTarget>,
 ): Promise<Result<PipelineResult, Error>> {
+  // Variation briefs parse (so they can be listed and edited) but cannot run yet: the
+  // planner that consumes `variation` lands in Phase 2. Refusing here — for the API
+  // and the CLI alike — keeps a randomized brief from silently producing the classic
+  // product × ratio × treatment matrix.
+  if (brief.mode === "variation") {
+    return Promise.resolve(
+      err(new Error('Variation mode is not executable in this version; use mode "brief".')),
+    );
+  }
   return buildPipeline(imageModel).execute(brief, regenerateOnly ? { regenerateOnly } : undefined);
 }

@@ -220,3 +220,69 @@ To keep this file out of version control, add `.agents/session-log.md` to
     GET is immediate.
 - **Left open:**
   - SSE / persisted queue is a later optional train. N=100 still in-process.
+## 2026-08-25 — brief schema v2 (optional fields + parse allowlist)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `CampaignBrief` gained optional `mode`, `variation`, and `output` (absent =
+    classic behaviour).
+  - `parseBrief` allowlists P0 axes (`layout`, `tone`, `background`,
+    `paletteShift`) and formats (`static`); unsupported axes/formats/`pool://`
+    throw with the name in the message (HTTP 400 via existing generate route).
+  - Documented `?model=` vs future `genai` axis and un-wired `paletteShift` in
+    `pipeline.ts`. Added `briefs/sample-randomized.yaml` (static axes only).
+- **Decisions:**
+  - Nested layout/tone stay `string[]` on the domain type; enum checks live in
+    parseBrief so unsupported axes are rejected at the boundary, not the type.
+  - `count` is validated only when present (not required by `variation: {}`).
+  - Did not invoke the planner, change generation, or relax MINIMUM_PRODUCTS.
+- **Left open:**
+  - Phase J (job handle), Phase 2 (planner / VariationPolicy), pools, motion.
+## 2026-08-25 — SeededRandom + scoped determinism lint
+
+- **Mode:** Implementer
+- **Changes:**
+  - Added `SeededRandom` VO + `seedFrom` (mulberry32 + FNV-1a) in shared, with
+    golden tests; hexagen barrels re-export it.
+  - Owned a files-scoped ban on `Math.random` / wall-clock `Date` via per-context
+    eslint templates on `shared` and `CampaignOrchestration`.
+- **Decisions:**
+  - Landed D14 through `bounded_contexts[].generator.eslint.template`, not a
+    hand-edit of generated `eslint.config.js` (hexagen would overwrite it).
+  - Excluded `PipelineExecutionLog.vo.ts` from the Date restriction rather than
+    injecting a clock.
+- **Left open:**
+  - Phase 0.3–0.6, Phase J, the planner.
+## 2026-08-25 — review docs/planning/randomizer-and-motion.md
+
+- **Mode:** Reviewer
+- **Changes:**
+  - None to source. Read-only review of the randomized-campaign / motion / create-project plan against CampaignOrchestration, the compositor, generate POST, HITL identity keys, and hexagen port placement.
+- **Decisions:**
+  - Verdict: needs revision before implementation. Direction is sound (seeded planner, GenAI only in approved pools, ffmpeg motion as follow-on) but several contracts conflict with current code (asset identity, byte-determinism, port ownership, sync generate timeout, MINIMUM_PRODUCTS, existing /brief editor).
+- **Left open:**
+  - Plan author should resolve the blocking issues in the review before PRs start. Open product calls in the plan (ffmpeg-static vs system, audio, copy-pool provider, GenAI video) still need a decision.
+
+## 2026-08-25 — revise docs/planning/2026-08-25_randomized-campaigns-and-motion.md (v2)
+
+- **Mode:** Author
+- **Changes:**
+  - Plan rewritten to v2 against four reviews, in the dated planning-doc format (locked decisions D1–D14, findings C/H/M/L, phase tables, DoD). Verified in code: identity key in `report.ts keyOf` / `run-context assetKey` / `RegenerationTarget`; `MINIMUM_PRODUCTS = 2`; three fixed canvases; `/brief` is a live editor; clock use in `PipelineExecutionLog` and Firefly IMS; no `output/cache`; `.mp4` absent from output content-types; `.pools.json` would match the briefs lister; CI Node 22; hexagen `@generated` barrels.
+- **Decisions:**
+  - ffmpeg-static (pinned, tech-stack row + GPL note); no audio in motion MVP; OpenRouter chat text adapter for copy pools; GenAI video deferred.
+  - Determinism split into three tiers (plan / composite / sources+container); job handle (202 + polling) pulled into the MVP before generate-from-plan; variant identity `productId/variantIndex` migrated in one PR across all consumers; ports (`VideoCompositorPort`, `CopyGeneratorPort`) in CampaignOrchestration; parser allowlist rejects not-yet-supported axes; `/brief` stays the editor and gains Save; `MINIMUM_PRODUCTS` relaxed to 1 in variation mode; safe insets applied at generation (default 0); packaging never re-renders; brand floor static across `t`, no logo-hold detector; lint rule scoped to domain + planner.
+- **Left open:**
+  - Offer reels/tiktok in the static MVP (recommend no until motion); 4:5 ratio timing.
+
+## 2026-08-25 — wave 1 orchestration + review (PRs #39–#42)
+
+- **Mode:** Reviewer (orchestrating Grok as Implementer)
+- **Changes:**
+  - Grok (`grok -p`, three worktree subagents + a verifier) implemented plan P0 (#41 SeededRandom + lint, #40 brief schema v2) and Phase J (#42 job handle). Each PR reviewed here at high effort; bot findings (Qodo, CodeRabbit) verified against the code.
+  - Fix commits pushed to all three: #41 `486ad9a` (int32 state wrap, seed validation, lint fragment owned once + all bounded contexts, `Date()`/`globalThis`/`crypto`/`performance` gaps closed); #40 `81898c9` (`runCampaign` refuses `mode: variation` until the planner exists, `count` required, `pool://` names the real axis); #42 `6332173` (bounded job store + TTL, honest lost-job handling, cancellable backoff polling, 409 per-campaign guard, one `fetchPersistedRun`).
+  - Every bot review thread answered and resolved; a disposition comment on each PR records what was refuted and why. Plan revised to v2.1 (#39 `5d82383`) with the review-derived corrections.
+- **Decisions:**
+  - Bot findings were all real; the `/code-review 40` run reviewed the working tree instead of the PR — its plan-level findings went into #39.
+  - Refused: clock injection into `PipelineExecutionLog` (D14 keeps the exemption for wave 1), a `JobStore` port at the composition root (edge concern, single implementation), `Result<T,E>` as the job wire shape, dropping `done/total` (agreed Phase J shape).
+- **Left open:**
+  - Follow-ups noted in the plan's wave-1 status: clock injection, one `mockPipelineApi` test fixture, real progress from `PipelineExecutionLog.totalOperations`. Worktrees `../cf-wt-*` remain until the PRs merge.
