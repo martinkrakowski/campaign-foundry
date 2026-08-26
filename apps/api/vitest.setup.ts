@@ -16,3 +16,5 @@ const AUTO_IMPORTS = [
 const target = globalThis as unknown as Record<string, unknown>;
 const source = h3 as unknown as Record<string, unknown>;
 for (const name of AUTO_IMPORTS) target[name] = source[name];
+// Nitro auto-imports this for server/plugins; identity wrap matches nitropack/runtime.
+target.defineNitroPlugin = (plugin: unknown) => plugin;

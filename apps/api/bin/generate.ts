@@ -4,6 +4,7 @@ import { loadBrief } from "../server/lib/load-brief.js";
 import { runCampaign } from "../server/lib/pipeline.js";
 import { outputRoot } from "../server/lib/config.js";
 import { writeReport } from "../server/lib/report.js";
+import { probeFfmpeg, setCapabilities } from "../server/lib/capabilities.js";
 
 function arg(flag: string): string | undefined {
   const i = argv.indexOf(flag);
@@ -11,6 +12,12 @@ function arg(flag: string): string | undefined {
 }
 
 export async function main(briefPathArg?: string): Promise<void> {
+  const cap = await probeFfmpeg();
+  setCapabilities(cap);
+  if (!cap.motion) {
+    console.warn(`[generate] motion unavailable: ${cap.reason}`);
+  }
+
   const briefPath = briefPathArg ?? arg("--brief") ?? "briefs/sample-campaign.yaml";
   console.log(`\n  Campaign Foundry — generating from ${briefPath}\n`);
 

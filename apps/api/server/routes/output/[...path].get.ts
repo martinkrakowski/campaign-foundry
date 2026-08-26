@@ -8,6 +8,7 @@ const CONTENT_TYPES: Record<string, string> = {
   ".png": "image/png",
   ".pdf": "application/pdf",
   ".json": "application/json",
+  ".mp4": "video/mp4",
 };
 
 /** GET /output/** — stream a generated creative/proof from the output root (path-traversal guarded). */
