@@ -281,6 +281,8 @@ Never resolve a thread you did not answer, and never claim a fix you have not ve
 | Refutations are recorded on the PR | A silently ignored bot comment is indistinguishable from an overlooked one. |
 | Merge sequentially, re-verify CI after each refresh | `main` went red once from a PR that was green before the PR ahead of it merged; the next merge caught it. |
 | No `--delete-branch` while a worktree holds the branch | `gh pr merge --delete-branch` fails after a successful merge and looks like a merge failure. |
+| Refresh **every** PR before merging, even one with no worktree | A spec of the form `PR||branch` used to skip the refresh and merge stale; the script now refreshes in a throwaway **detached** worktree (`git worktree add` refuses a branch checked out elsewhere). |
+| Never name a shell local `path` in zsh | `path` is tied to `$PATH`; `local … path …` empties PATH inside the function, so every `git`/`awk`/`sort` call fails. It cost the merge helper its entire conflict-resolution path until a scenario test caught it. |
 | Keep `yarn install` per worktree, never share | Stale `node_modules` in the main checkout crashed the dev server long after the feature merged. |
 
 ---
