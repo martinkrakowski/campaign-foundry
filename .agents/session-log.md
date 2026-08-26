@@ -583,3 +583,31 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Wizard "Generate suggestions" control.
 
 
+
+---
+
+## 2026-08-26 — PR #52 review fixes (lane B, copy pools)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `pools.ts`: unique tmp names (`pools.json.<pid>-<rand>.tmp`), `withPoolLock`
+    (per-briefId promise chain, errors don't poison it), `isPoolDirSymlink`.
+  - `CopyGeneratorError` (kind + `retryAfterSeconds`) lives on the port so the
+    edge maps it without importing the adapter. Adapter: fence-strip + join
+    content-parts before `JSON.parse`, 30 s `AbortSignal.timeout` (`timeoutMs`
+    injectable), `<<< >>>`-delimited one-line brief fields, `seen` set dropped.
+    `OPENROUTER_COPY_MODEL` in the composition root; ports/out barrel alphabetised.
+  - POST: usable texts capped at `count` and 60 chars; read→merge→write under
+    the lock; known-only regeneration → 200 `added: 0` (no write); error map
+    503/502/429+Retry-After/422; replies carry `added`. PATCH: stale reason
+    cleared on a passing edit, duplicate normalised text → 422 naming the
+    other id, duplicate ids → 400, `entries: []` → 200 without a write, symlinked
+    `briefs/<id>` → 400 on both routes.
+- **Decisions:**
+  - The LLM call stays outside the lock (slow); only the file section is
+    serialised, and de-dup against the pool happens inside it.
+  - Other non-2xx upstream replies map to 502 (not in the brief; auth-adjacent).
+  - Route tests import `CopyGeneratorError` after `vi.resetModules()` so
+    `instanceof` sees the route's module instance.
+- **Left open:**
+  - Phase 3.4 allowlist `headline: pool://copy`, planner consumption, wizard control.
