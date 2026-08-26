@@ -1,5 +1,5 @@
 {
-  "darwin": {
+  "darwin-arm64": {
     "headline-bottom/bold/1:1": "c8121a776641dad6877afa768e70c973d07a0b9dafdc893776fa58a0e72d94d2",
     "headline-bottom/bold/9:16": "933b36cb489e21fcf06d0b840e688c20d2f92aafe9ab935ab9a8217e2e953e43",
     "headline-bottom/bold/16:9": "5ca1b29c308fcdc04d8c2f0dc1ba5f686d1efa22a9ab512248f4b1a8a6e3b79c",
@@ -13,7 +13,7 @@
     "headline-top/subtle/9:16": "ec47643bb42a6d25285713895f0775274fc63344a1419ebf7ace041606fa8ac7",
     "headline-top/subtle/16:9": "a721f261fa748a0f2c91c5c9f850ccdb140f882c474f3211928d08315d867087"
   },
-  "linux": {
+  "linux-x64": {
     "headline-bottom/bold/1:1": "3e8e4582a1c60de901d02657865f7507069885158d8fbee776f860841c64dbdf",
     "headline-bottom/bold/9:16": "1ac552487304d05be307554b97a060e22b2bde68a3be7f9156223071130dacde",
     "headline-bottom/bold/16:9": "4555681ab2368ebd3db8f453be6a269df67cc4bb953a2a5e26e6fbd5d0af4d6d",

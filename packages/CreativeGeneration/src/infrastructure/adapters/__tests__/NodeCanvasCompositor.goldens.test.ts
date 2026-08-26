@@ -6,6 +6,12 @@ import { fileURLToPath } from "node:url";
 import { AspectRatio, type CompositeRequest, type LayoutKind, type ToneKind } from "@campaignfoundry/CampaignOrchestration";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 import { ProceduralBackgroundGenerator } from "../ProceduralBackgroundGenerator.js";
+import {
+  compositorGoldenKey,
+  missingGoldenMapMessage,
+  resolveGoldenMap,
+  type GoldenFixture,
+} from "./compositor-golden-key.js";
 
 const LAYOUTS: readonly LayoutKind[] = ["headline-bottom", "headline-top"];
 const TONES: readonly ToneKind[] = ["bold", "subtle"];
@@ -29,44 +35,47 @@ const cellKey = (layout: LayoutKind, tone: ToneKind, ratioValue: string) =>
 
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
-type GoldenMap = Record<string, string>;
-
 const fixture = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures/compositor-goldens.json"), "utf8"),
-) as Record<string, GoldenMap>;
+) as GoldenFixture;
 
 describe("NodeCanvasCompositor goldens", () => {
   const compositor = new NodeCanvasCompositor();
   const backgrounds = new ProceduralBackgroundGenerator();
+  const key = compositorGoldenKey();
+  const goldens = resolveGoldenMap(fixture, key);
+  const skipReason = goldens ? undefined : missingGoldenMapMessage(key, Object.keys(fixture));
 
-  test("still PNG sha256 matches the committed matrix (both layouts × both tones × three ratios)", async () => {
-    // Font rasterization differs by OS (CoreText vs FreeType); maps are per-platform.
-    const goldens = fixture[process.platform] ?? {};
-    expect(
-      Object.keys(goldens),
-      `No compositor PNG goldens for platform "${process.platform}" (recorded: ${Object.keys(fixture).join(", ")})`,
-    ).toHaveLength(12);
+  test.skipIf(Boolean(skipReason))(
+    skipReason ??
+      "still PNG sha256 matches the committed matrix (both layouts × both tones × three ratios)",
+    async () => {
+      const map = resolveGoldenMap(fixture, key);
+      if (!map) {
+        throw new Error(`unreachable: skipped when goldens missing for "${key}"`);
+      }
 
-    const observed: Record<string, string> = {};
-    for (const layout of LAYOUTS) {
-      for (const tone of TONES) {
-        for (const ratioValue of RATIOS) {
-          const r = ratio(ratioValue);
-          const bg = await backgrounds.resolveBackground(product, r, bgCtx);
-          const request: CompositeRequest = {
-            background: bg.image,
-            message: MESSAGE,
-            brandColor: BRAND,
-            logoPath: LOGO,
-            ratio: r,
-            layout,
-            tone,
-          };
-          const out = await compositor.compositeAsset(request);
-          observed[cellKey(layout, tone, ratioValue)] = sha256(out.image);
+      const observed: Record<string, string> = {};
+      for (const layout of LAYOUTS) {
+        for (const tone of TONES) {
+          for (const ratioValue of RATIOS) {
+            const r = ratio(ratioValue);
+            const bg = await backgrounds.resolveBackground(product, r, bgCtx);
+            const request: CompositeRequest = {
+              background: bg.image,
+              message: MESSAGE,
+              brandColor: BRAND,
+              logoPath: LOGO,
+              ratio: r,
+              layout,
+              tone,
+            };
+            const out = await compositor.compositeAsset(request);
+            observed[cellKey(layout, tone, ratioValue)] = sha256(out.image);
+          }
         }
       }
-    }
-    expect(observed).toEqual(goldens);
-  });
+      expect(observed).toEqual(map);
+    },
+  );
 });

@@ -295,7 +295,7 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Golden sha256 fixture is the wave-3 safety net; hashes unchanged after the extract.
 - **Decisions:**
   - wrapText stays in `drawCreative` on the real ctx (drawing-adjacent, not filesystem I/O) so measureText cannot drift.
-  - Module-level exports only (`PreparedCreative`, `drawCreative`, `prepareCreative` as a class method); no barrel/manifest change.
+  - No barrel or manifest *file* was edited. The `@generated` barrels `export *` from `NodeCanvasCompositor.ts`, so the new module-level `PreparedCreative` / `drawCreative` exports still leaked from `@campaignfoundry/CreativeGeneration`'s root (and through them `@napi-rs/canvas` `Image` / `SKRSContext2D`). Hexagen has no non-barreled `internal` export path.
 - **Left open:**
   - Phase 4.3 motion (background + headline only; band and logo static across `t`).
 
@@ -305,6 +305,17 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Changes:**
   - Keyed the 12-cell PNG sha256 fixture by `darwin` / `linux` so CI (FreeType) and local (CoreText) both assert byte-identity without changing draw/prepare.
 - **Decisions:**
-  - Missing `process.platform` fails the test (does not skip). Linux map recorded from CI of the same refactor, not a behaviour change.
+  - Missing `process.platform` failed the test (did not skip) in this commit. See the following entry for arch-keyed maps and skip-on-missing.
+- **Left open:**
+  - none.
+
+## 2026-08-25 — PR #45 review: public surface, golden keying, evidence
+
+- **Mode:** Implementer
+- **Changes:**
+  - `NodeCanvasCompositor.prepare(request)` / `.draw(ctx, prepared, t)` are static members; `PreparedCreative` is module-private (not exported). The barrel surface stays the class. Dropped unused `PreparedCreative.subtle` — tone still drives `shadeAlpha` / `fontWeight` locally; draw path unchanged.
+  - Goldens keyed by `${process.platform}-${process.arch}` (`darwin-arm64`, `linux-x64`). Missing or empty map skips via `test.skipIf` with a message naming the key and how to record it. Key-resolution helper unit-tested.
+- **Decisions:**
+  - Darwin hashes were recorded at `6263f1d` (pre-refactor) and are unchanged through the refactor — proven identity on darwin. The linux map was recorded from CI *after* the refactor, so it pins the refactored output going forward but does not prove identity on the FreeType path.
 - **Left open:**
   - none.
