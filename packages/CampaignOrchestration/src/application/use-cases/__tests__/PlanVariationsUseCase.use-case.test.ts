@@ -4,6 +4,7 @@ import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
 import type { Product } from "../../../domain/entities/Product.js";
 import type { Variant } from "../../../domain/entities/Variant.js";
 import type { VariationPlan } from "../../../domain/value-objects/VariationPlan.vo.js";
+import { MOTION_KINDS } from "../../../domain/value-objects/MotionKind.vo.js";
 import { VariationPolicy } from "../../../domain/value-objects/VariationPolicy.vo.js";
 import { PlanVariationsUseCase } from "../PlanVariationsUseCase.use-case.js";
 
@@ -27,7 +28,7 @@ const brief = (over: Partial<CampaignBrief> = {}): CampaignBrief => ({
 const planner = (): PlanVariationsUseCase => new PlanVariationsUseCase();
 
 const hamming = (a: Variant, b: Variant): number => {
-  const axes = ["productId", "aspectRatio", "layout", "tone", "backgroundSource", "paletteShift", "headline"] as const;
+  const axes = ["productId", "aspectRatio", "layout", "tone", "backgroundSource", "paletteShift", "headline", "motion", "durationSec"] as const;
   return axes.reduce((distance, axis) => distance + (a[axis] !== b[axis] ? 1 : 0), 0);
 };
 
@@ -474,6 +475,188 @@ describe("PlanVariationsUseCase.replan", () => {
     const result = planner().replan(plan, 0, 1);
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error.message).toMatch(/exhausted 64 draws/);
+  });
+});
+
+const motionBrief = (over: Partial<CampaignBrief> = {}): CampaignBrief =>
+  brief({
+    variation: {
+      count: 12,
+      seed: 7,
+      minDistance: 1,
+      axes: { motion: ["ken-burns-in", "headline-rise"], duration: [4, 6] },
+    },
+    output: { formats: ["static", "motion"] },
+    ...over,
+  });
+
+describe("PlanVariationsUseCase — motion axes", () => {
+  test("a mixed-format brief draws both still and motion slots, duration only on motion", () => {
+    const result = planner().plan(motionBrief());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const motion = result.value.variants.filter((v) => v.motion !== undefined);
+    const still = result.value.variants.filter((v) => v.motion === undefined);
+    expect(motion.length).toBeGreaterThan(0);
+    expect(still.length).toBeGreaterThan(0);
+    for (const v of motion) {
+      expect(["ken-burns-in", "headline-rise"]).toContain(v.motion);
+      expect([4, 6]).toContain(v.durationSec);
+    }
+    for (const v of still) expect(v).not.toHaveProperty("durationSec");
+    // base × (|motion| × |duration| + one still slot) — the still is not multiplied by |duration|.
+    expect(result.value.policy.axisProductSize).toBe(2 * 3 * 2 * 2 * 1 * 1 * (2 * 2 + 1));
+    expect(result.value.estimate.frames).toBe(motion.reduce((n, v) => n + (v.durationSec ?? 0) * 30, 0));
+    const golden = planner().plan(brief());
+    if (golden.success) expect(result.value.policyHash).not.toBe(golden.value.policyHash);
+  });
+
+  test("formats [motion] only makes every variant a motion variant", () => {
+    const result = planner().plan(motionBrief({ output: { formats: ["motion"] } }));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.variants.every((v) => v.motion !== undefined && v.durationSec !== undefined)).toBe(true);
+    expect(result.value.policy.mixStatic).toBe(false);
+  });
+
+  test("a motion axis without the motion format stays static (no draws, no frames)", () => {
+    const golden = planner().plan(brief());
+    const noFormat = planner().plan(motionBrief({ output: { formats: ["static"] } }));
+    expect(golden.success && noFormat.success).toBe(true);
+    if (!golden.success || !noFormat.success) return;
+    expect(noFormat.value.variants).toEqual(golden.value.variants);
+    expect(noFormat.value.policyHash).toBe(golden.value.policyHash);
+    expect(noFormat.value.estimate).not.toHaveProperty("frames");
+    expect(noFormat.value.policy.motionEnabled).toBe(false);
+  });
+
+  test("formats: motion with an empty motion axis is refused; with no axis every kind is drawn", () => {
+    const emptyAxis = planner().plan(
+      motionBrief({ variation: { count: 12, seed: 7, minDistance: 1, axes: { motion: [] } } }),
+    );
+    expect(emptyAxis.success).toBe(false);
+    if (!emptyAxis.success) expect(emptyAxis.error.message).toMatch(/select at least one motion kind/);
+
+    const noAxis = planner().plan(
+      motionBrief({ variation: { count: 12, seed: 7, minDistance: 1 }, output: { formats: ["motion"] } }),
+    );
+    expect(noAxis.success).toBe(true);
+    if (!noAxis.success) return;
+    expect(noAxis.value.variants.every((v) => v.motion !== undefined)).toBe(true);
+    expect(noAxis.value.policy.motion).toEqual([...MOTION_KINDS]);
+  });
+
+  test("motion and durationSec are Hamming axes (minDistance up to 8)", () => {
+    const eight = planner().plan(motionBrief({ variation: { count: 1, seed: 7, minDistance: 8, axes: { motion: ["ken-burns-in"] } } }));
+    expect(eight.success).toBe(true);
+    const nine = planner().plan(motionBrief({ variation: { count: 1, seed: 7, minDistance: 9 } }));
+    expect(nine.success).toBe(false);
+    if (!nine.success) expect(nine.error.message).toMatch(/minDistance/);
+  });
+
+  test("draws motion only for the ratios in input.motionRatios (the requested motion platforms)", () => {
+    const result = planner().plan(
+      motionBrief({
+        variation: { count: 12, seed: 7, minDistance: 1, axes: { motion: ["ken-burns-in"], duration: [4] } },
+        output: { formats: ["static", "motion"], platforms: ["instagram-feed", "instagram-reel", "myspace"] },
+      }),
+      { motionRatios: ["9:16"] },
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.policy.motionRatios).toEqual(["9:16"]);
+    const clips = result.value.variants.filter((v) => v.motion !== undefined);
+    expect(clips.length).toBeGreaterThan(0);
+    expect(clips.every((v) => v.aspectRatio === "9:16")).toBe(true);
+    expect(result.value.estimate.frames).toBe(clips.length * 4 * 30);
+
+    // Every requested platform is static: no ratio can ship a clip, so none is drawn.
+    const staticOnly = planner().plan(
+      motionBrief({ output: { formats: ["motion"], platforms: ["instagram-feed"] } }),
+      { motionRatios: [] },
+    );
+    expect(staticOnly.success).toBe(true);
+    if (!staticOnly.success) return;
+    expect(staticOnly.value.policy.motionRatios).toEqual([]);
+    expect(staticOnly.value.variants.every((v) => v.motion === undefined)).toBe(true);
+    expect(staticOnly.value.estimate.frames).toBe(0);
+
+    // No motionRatios in the input keeps every ratio eligible.
+    const unrestricted = planner().plan(motionBrief());
+    expect(unrestricted.success).toBe(true);
+    if (!unrestricted.success) return;
+    expect(unrestricted.value.policy.motionRatios).toEqual(["1:1", "9:16", "16:9"]);
+    expect(unrestricted.value.variants.some((v) => v.motion !== undefined && v.aspectRatio !== "9:16")).toBe(true);
+  });
+
+  test("replan of a ratio no motion platform packages stays a still", () => {
+    const planned = planner().plan(
+      motionBrief({ output: { formats: ["motion"], platforms: ["instagram-reel"] } }),
+      { motionRatios: ["9:16"] },
+    );
+    expect(planned.success).toBe(true);
+    if (!planned.success) return;
+    const index = planned.value.variants.findIndex((v) => v.aspectRatio !== "9:16");
+    expect(index).toBeGreaterThanOrEqual(0);
+    const next = planner().replan(planned.value, index, 1);
+    expect(next.success).toBe(true);
+    if (next.success) expect(next.value.variants[index].motion).toBeUndefined();
+  });
+
+  test("a brief with both the headline and motion axes draws both and bounds minDistance at 9", () => {
+    const headlines = ["Stay wild", "Go far"];
+    const both = motionBrief({
+      variation: {
+        count: 12,
+        seed: 7,
+        minDistance: 1,
+        axes: { motion: ["ken-burns-in"], duration: [4], headline: "pool://copy" },
+      },
+      output: { formats: ["motion"] },
+    });
+    const result = planner().plan(both, { headlines });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    for (const v of result.value.variants) {
+      expect(headlines).toContain(v.headline);
+      expect(v.motion).toBe("ken-burns-in");
+    }
+    expect(result.value.policy.axisProductSize).toBe(2 * 3 * 2 * 2 * 1 * 1 * 2 * 1 * 1);
+    const nine = planner().plan(
+      { ...both, variation: { ...both.variation, count: 1, minDistance: 9 } },
+      { headlines },
+    );
+    expect(nine.success).toBe(true);
+    const ten = planner().plan(
+      { ...both, variation: { ...both.variation, count: 1, minDistance: 10 } },
+      { headlines },
+    );
+    expect(ten.success).toBe(false);
+  });
+
+  test("replan keeps the frames estimate in step with the re-drawn slot", () => {
+    const planned = planner().plan(motionBrief());
+    expect(planned.success).toBe(true);
+    if (!planned.success) return;
+    const index = planned.value.variants.findIndex((v) => v.motion !== undefined);
+    const next = planner().replan(planned.value, index, 1);
+    expect(next.success).toBe(true);
+    if (!next.success) return;
+    const frames = next.value.variants.reduce((n, v) => n + (v.durationSec ?? 0) * 30, 0);
+    expect(next.value.estimate.frames).toBe(frames);
+  });
+
+  test("rejects unknown motion kinds and out-of-range durations", () => {
+    const badKind = planner().plan(
+      motionBrief({ variation: { count: 2, axes: { motion: ["spin"] } } }),
+    );
+    expect(badKind.success).toBe(false);
+    if (!badKind.success) expect(badKind.error.message).toBe("Invalid motion.");
+    for (const duration of [1, 31, 2.5]) {
+      const bad = planner().plan(motionBrief({ variation: { count: 2, axes: { motion: ["accent-wipe"], duration: [duration] } } }));
+      expect(bad.success).toBe(false);
+      if (!bad.success) expect(bad.error.message).toBe("Invalid duration.");
+    }
   });
 });
 

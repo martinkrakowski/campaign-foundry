@@ -6,6 +6,8 @@ export interface VariationEstimate {
   readonly axisProductSize: number;
   readonly feasible: boolean;
   readonly genaiCalls: number;
+  /** Total frames to encode (Σ durationSec × fps over motion variants). Motion plans only. */
+  readonly frames?: number;
 }
 
 /**

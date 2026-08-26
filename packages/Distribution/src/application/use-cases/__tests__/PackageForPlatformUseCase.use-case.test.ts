@@ -56,6 +56,7 @@ const exec = (
     packagedAt: string;
     skipped: number;
     include: string[];
+    capabilities: { motion: boolean };
   }> = {},
 ) =>
   new PackageForPlatformUseCase(store).execute({
@@ -88,13 +89,20 @@ describe("PackageForPlatformUseCase", () => {
     expect(store.writeManifest).not.toHaveBeenCalled();
   });
 
-  test("rejects a hidden platform by name (tiktok) without writing", async () => {
+  test("rejects a motion platform by name (tiktok) without the motion capability", async () => {
     const store = fakeStore();
     const result = await exec(store, { platforms: ["instagram-feed", "tiktok"] });
     expect(result.success).toBe(false);
-    if (!result.success) expect(result.error.message).toMatch(/tiktok/);
+    if (!result.success) expect(result.error.message).toBe('Platform "tiktok" is not visible');
     expect(store.writePackaged).not.toHaveBeenCalled();
     expect(store.writeManifest).not.toHaveBeenCalled();
+  });
+
+  test("static items carry format: static", async () => {
+    const store = fakeStore();
+    const result = await exec(store);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.value.platforms[0].items[0].format).toBe("static");
   });
 
   test("selects 1:1 assets for instagram-feed and 16:9 for x; 9:16 is not selected", async () => {
@@ -240,5 +248,107 @@ describe("PackageForPlatformUseCase", () => {
     if (!result.success) expect(result.error.message).toMatch(/^Platform "x":/);
     expect(store.writeManifest).toHaveBeenCalledTimes(1);
     expect(store.manifests[0].platformId).toBe("instagram-feed");
+  });
+});
+
+describe("PackageForPlatformUseCase — motion", () => {
+  const motion = (over: Partial<GeneratedAsset> = {}): GeneratedAsset =>
+    asset({
+      productId: "alpha",
+      aspectRatio: "9:16",
+      outputPath: "alpha/9x16/v1.png",
+      videoPath: "alpha/9x16/v1.mp4",
+      durationSec: 6,
+      format: "motion",
+      variantIndex: 1,
+      treatment: "headline-top-bold",
+      ...over,
+    });
+  const MOTION = { motion: true };
+
+  test("a motion profile packages the mp4 and its poster with format, duration, and checks", async () => {
+    const store = fakeStore();
+    const assets = [motion(), asset({ aspectRatio: "9:16", outputPath: "alpha/9x16/v2.png", format: "static", variantIndex: 2 })];
+    const result = await exec(store, { assets, platforms: ["instagram-reel"], capabilities: MOTION });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const [reel] = result.value.platforms;
+    expect(reel.items).toEqual([
+      {
+        productId: "alpha",
+        aspectRatio: "9:16",
+        treatment: "headline-top-bold",
+        format: "motion",
+        source: "alpha/9x16/v1.mp4",
+        packagedPath: "packages/camp/instagram-reel/alpha/9x16/v1.mp4",
+        posterPath: "packages/camp/instagram-reel/alpha/9x16/v1.png",
+        durationSec: 6,
+        bytes: SMALL.length,
+        checks: { size: "pass", duration: "pass" },
+      },
+    ]);
+    // The static 9:16 row is not eligible for a motion profile.
+    expect(reel.excluded).toBe(0);
+    expect(store.reads).toEqual(["alpha/9x16/v1.mp4", "alpha/9x16/v1.png"]);
+  });
+
+  test("a static profile ignores motion rows even at the same ratio", async () => {
+    const store = fakeStore();
+    const result = await exec(store, {
+      assets: [motion({ aspectRatio: "1:1" }), asset()],
+      platforms: ["instagram-feed"],
+      capabilities: MOTION,
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.platforms[0].items.map((i) => i.source)).toEqual(["alpha/1x1.png"]);
+    expect(result.value.platforms[0].excluded).toBe(0);
+  });
+
+  test("a motion row without a videoPath is treated as a static row", async () => {
+    const store = fakeStore();
+    const result = await exec(store, {
+      assets: [motion({ videoPath: undefined })],
+      platforms: ["instagram-reel"],
+      capabilities: MOTION,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.value.platforms[0].items).toEqual([]);
+  });
+
+  test("fails the duration check over the cap or when the row has no duration", async () => {
+    const store = fakeStore();
+    const result = await exec(store, {
+      assets: [motion({ durationSec: 61 }), motion({ variantIndex: 3, outputPath: "alpha/9x16/v3.png", videoPath: "alpha/9x16/v3.mp4", durationSec: undefined })],
+      platforms: ["instagram-story"],
+      capabilities: MOTION,
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const [over, missing] = result.value.platforms[0].items;
+    expect(over.checks.duration).toBe("fail");
+    expect(missing.checks.duration).toBe("fail");
+    expect(missing).not.toHaveProperty("durationSec");
+  });
+
+  test("records a size fail on an oversized mp4", async () => {
+    const store = fakeStore(new Uint8Array(platformProfile("tiktok")!.maxBytes + 1));
+    const result = await exec(store, { assets: [motion()], platforms: ["tiktok"], capabilities: MOTION });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.value.platforms[0].items[0].checks).toEqual({ size: "fail", duration: "pass" });
+  });
+
+  test("honours include for motion identities", async () => {
+    const store = fakeStore();
+    const result = await exec(store, {
+      assets: [motion(), motion({ variantIndex: 2, outputPath: "alpha/9x16/v2.png", videoPath: "alpha/9x16/v2.mp4" })],
+      platforms: ["youtube-short"],
+      include: ["alpha/v2"],
+      capabilities: MOTION,
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.platforms[0].items.map((i) => i.source)).toEqual(["alpha/9x16/v2.mp4"]);
+    expect(result.value.platforms[0].excluded).toBe(1);
   });
 });

@@ -1,8 +1,17 @@
-import { describe, test, expect, beforeEach } from "vitest";
+import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { screen, waitFor, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, Fragment } from "react";
-import { renderWithRun, seedPersistedRun, makeAsset, exerciseFocusTrap, mockPipelineApi, jobOk, json } from "@/__tests__/helpers";
+import {
+  renderWithRun,
+  seedPersistedRun,
+  makeAsset,
+  makeMotionAsset,
+  exerciseFocusTrap,
+  mockPipelineApi,
+  jobOk,
+  json,
+} from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import GridPage from "../page";
 
@@ -284,5 +293,140 @@ describe("GridPage", () => {
     await user.selectOptions(screen.getByLabelText("Tone"), "All");
     await user.selectOptions(screen.getByLabelText("Background source"), "genai");
     expect(await screen.findByText(/Showing 1 of 1/)).toBeTruthy();
+  });
+});
+
+describe("GridPage — motion cells", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const LABEL = "alpha @ 9:16 · v1 · headline-top-bold";
+
+  test("renders a muted metadata-preloaded <video> with the poster, the motion chip, and mp4 + poster downloads", async () => {
+    seedPersistedRun([makeMotionAsset(), makeAsset()]);
+    renderWithRun(<GridPage />);
+    const video = (await screen.findByLabelText(LABEL)) as HTMLVideoElement;
+    expect(video.tagName).toBe("VIDEO");
+    expect(video.muted).toBe(true);
+    expect(video.getAttribute("preload")).toBe("metadata");
+    expect(video.getAttribute("poster")).toContain("/output/alpha/9x16/v1.png?v=");
+    expect(video.getAttribute("src")).toContain("/output/alpha/9x16/v1.mp4?v=");
+    expect(screen.getByText("ken-burns-in · 6s")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Download .MP4" }).getAttribute("href")).toContain("alpha/9x16/v1.mp4");
+    expect(screen.getByRole("link", { name: "Download poster .PNG" })).toBeTruthy();
+    // The static tile keeps its plain image + download label.
+    expect(screen.getByRole("img", { name: "alpha @ 1:1 · default" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Download .PNG" })).toBeTruthy();
+  });
+
+  test("hover plays and leaving rewinds; the play control toggles for keyboard users", async () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(() => Promise.resolve());
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    const user = userEvent.setup();
+    seedPersistedRun([makeMotionAsset()]);
+    renderWithRun(<GridPage />);
+    const video = (await screen.findByLabelText(LABEL)) as HTMLVideoElement;
+    const tile = video.parentElement as HTMLElement;
+
+    fireEvent.mouseEnter(tile);
+    expect(play).toHaveBeenCalledTimes(1);
+    // The control flips to "playing" only once play() has resolved.
+    expect(await screen.findByRole("button", { name: `Pause ${LABEL}`, pressed: true })).toBeTruthy();
+    video.currentTime = 3;
+    fireEvent.mouseLeave(tile);
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(video.currentTime).toBe(0);
+    expect(screen.getByRole("button", { name: `Play ${LABEL}`, pressed: false })).toBeTruthy();
+
+    // Keyboard: focus + Enter never passes through the hover handlers.
+    screen.getByRole("button", { name: `Play ${LABEL}` }).focus();
+    await user.keyboard("{Enter}");
+    expect(play).toHaveBeenCalledTimes(2);
+    expect((await screen.findByRole("button", { name: `Pause ${LABEL}`, pressed: true })).textContent).toBe("❚❚ 6s");
+    await user.keyboard("{Enter}");
+    expect(pause).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("button", { name: `Play ${LABEL}`, pressed: false }).textContent).toBe("▶ 6s");
+  });
+
+  test("a play() that returns nothing counts as playing; a rejected play() keeps the play control and shows a hint", async () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play");
+    play.mockImplementationOnce(() => undefined as unknown as Promise<void>);
+    play.mockImplementationOnce(() => Promise.reject(new Error("NotAllowedError")));
+    play.mockImplementationOnce(() => Promise.resolve());
+    const user = userEvent.setup();
+    seedPersistedRun([makeMotionAsset({ durationSec: undefined, descriptor: { layout: "headline-top", tone: "bold", backgroundSource: "procedural", paletteShift: 0, motion: "headline-rise" } })]);
+    renderWithRun(<GridPage />);
+    const button = await screen.findByRole("button", { name: `Play ${LABEL}` });
+    expect(button.textContent).toContain("clip");
+    expect(screen.getByText("headline-rise · ?s")).toBeTruthy();
+    button.focus();
+    await user.keyboard("{Enter}"); // play() → undefined (old engine): treated as started
+    expect(await screen.findByRole("button", { name: `Pause ${LABEL}`, pressed: true })).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+    await user.keyboard("{Enter}"); // pause
+    await user.keyboard("{Enter}"); // play() → rejected: not playing, hint shown
+    expect(play).toHaveBeenCalledTimes(2);
+    expect(await screen.findByRole("status")).toHaveProperty("textContent", "can't play");
+    expect(screen.getByRole("button", { name: `Play ${LABEL}`, pressed: false })).toBeTruthy();
+    await user.keyboard("{Enter}"); // play() → resolves: the hint clears
+    expect(await screen.findByRole("button", { name: `Pause ${LABEL}`, pressed: true })).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  test("the chip falls back to the asset duration when the descriptor lacks one", async () => {
+    seedPersistedRun([makeMotionAsset({ durationSec: 4, descriptor: { layout: "headline-top", tone: "bold", backgroundSource: "procedural", paletteShift: 0, motion: "accent-wipe" } })]);
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText("accent-wipe · 4s")).toBeTruthy();
+  });
+
+  test("the preview modal plays the clip with controls", async () => {
+    const user = userEvent.setup();
+    seedPersistedRun([makeMotionAsset()]);
+    renderWithRun(<GridPage />);
+    await screen.findByLabelText(LABEL);
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+    const dialog = await screen.findByRole("dialog");
+    const preview = within(dialog).getByLabelText(LABEL) as HTMLVideoElement;
+    expect(preview.tagName).toBe("VIDEO");
+    expect(preview.hasAttribute("controls")).toBe(true);
+    expect(preview.muted).toBe(true);
+    fireEvent.click(preview); // stopPropagation — the dialog stays open
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
+  test("the format filter separates motion from static cells", async () => {
+    const user = userEvent.setup();
+    seedPersistedRun([makeMotionAsset(), makeAsset()]);
+    renderWithRun(<GridPage />);
+    await screen.findByLabelText(LABEL);
+    await user.selectOptions(screen.getByLabelText("Format"), "motion");
+    expect(screen.getByLabelText(LABEL)).toBeTruthy();
+    expect(screen.queryByRole("img", { name: "alpha @ 1:1 · default" })).toBeNull();
+    await user.selectOptions(screen.getByLabelText("Format"), "static");
+    expect(screen.queryByLabelText(LABEL)).toBeNull();
+    expect(screen.getByRole("img", { name: "alpha @ 1:1 · default" })).toBeTruthy();
+  });
+
+  test("re-rolling a rejected motion variant sends its identity with attempt + 1 and swaps the tile in place", async () => {
+    const user = userEvent.setup();
+    const original = makeMotionAsset();
+    const rerolled = makeMotionAsset({ attempt: 1, complianceScore: 0.9, descriptor: { ...original.descriptor!, motion: "accent-wipe" } });
+    seedPersistedRun([original]);
+    let body: unknown;
+    mockPipelineApi({
+      report: { halted: false, assets: [original], log: { entries: [], campaignId: "seed" } },
+      post: (_u, init) => {
+        body = JSON.parse(String(init.body));
+        return json({ jobId: "job-2" }, 202);
+      },
+      job: () => jobOk({ halted: false, assets: [rerolled], log: { entries: [], campaignId: "seed" } }),
+    });
+    renderWithRun(<Harness />);
+    await screen.findByLabelText(LABEL);
+    await user.click(screen.getByRole("button", { name: "Reject" }));
+    await user.click(screen.getByText("regen"));
+    expect(await screen.findByText("accent-wipe · 6s")).toBeTruthy();
+    expect((body as { regenerateOnly: unknown[] }).regenerateOnly).toEqual([{ productId: "alpha", variantIndex: 1, attempt: 1 }]);
+    expect(screen.getAllByLabelText(LABEL)).toHaveLength(1);
+    expect(screen.getByText(/90\.0%/)).toBeTruthy();
   });
 });

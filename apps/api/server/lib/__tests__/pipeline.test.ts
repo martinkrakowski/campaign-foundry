@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GenerateCampaignUseCase, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { ALLOWED_IMAGE_MODELS, buildPipeline, copyGenerator, runCampaign } from "../pipeline.js";
+import { ALLOWED_IMAGE_MODELS, buildPipeline, copyGenerator, platformZones, runCampaign } from "../pipeline.js";
 
 const brief: CampaignBrief = {
   id: "camp",
@@ -251,6 +251,29 @@ describe("pipeline composition root", () => {
     const r = await runCampaign(brief, "procedural", [{ productId: "alpha", aspectRatio: "1:1", treatment: "default" }]);
     expect(r.success).toBe(true);
     if (r.success) expect(r.value.assets.map((a) => a.outputPath)).toEqual(["alpha/1x1.png"]);
+  });
+
+  test("variation + platforms resolves safe zones from the profile table (unknown ids ignored)", async () => {
+    const r = await runCampaign(
+      {
+        ...brief,
+        mode: "variation",
+        variation: { count: 2, seed: 1, axes: { layout: ["headline-bottom"], tone: ["bold"] } },
+        output: { formats: ["static"], platforms: ["instagram-feed", "myspace"] },
+      },
+      "procedural",
+    );
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.value.assets).toHaveLength(2);
+  });
+
+  test("platformZones exposes ratio, insets and formats from the profile table", () => {
+    expect(platformZones("instagram-reel")).toEqual({
+      ratio: "9:16",
+      safeInsets: { top: 250, right: 0, bottom: 340, left: 0 },
+      formats: ["motion"],
+    });
+    expect(platformZones("myspace")).toBeUndefined();
   });
 
   test("copyGenerator is undefined without OPENROUTER_API_KEY and constructed with it", () => {

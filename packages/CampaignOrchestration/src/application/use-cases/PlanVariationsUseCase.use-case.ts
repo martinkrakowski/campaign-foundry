@@ -2,15 +2,15 @@ import { err, ok, SeededRandom, seedFrom, type Result } from "@campaignfoundry/s
 import type { CampaignBrief } from "../../domain/entities/CampaignBrief.js";
 import type { Variant } from "../../domain/entities/Variant.js";
 import type { AspectRatioValue } from "../../domain/value-objects/AspectRatio.vo.js";
+import type { MotionKind } from "../../domain/value-objects/MotionKind.vo.js";
 import type { VariationPlan } from "../../domain/value-objects/VariationPlan.vo.js";
-import {
-  DISTANCE_AXES,
-  VariationPolicy,
-  type PlanInput,
-} from "../../domain/value-objects/VariationPolicy.vo.js";
+import { DISTANCE_AXES, VariationPolicy, type PlanInput } from "../../domain/value-objects/VariationPolicy.vo.js";
 
 /** Re-roll bound: 64 draws from `seedFrom(briefId, index, attempt)`. */
 const REPLAN_MAX_DRAWS = 64;
+
+/** Encode frame rate; the estimate's `frames` and the generator's `fps` agree on it. */
+export const MOTION_FPS = 30;
 
 interface AxisDraw {
   readonly productId?: string;
@@ -23,8 +23,10 @@ interface AxisDraw {
  * `plan` round-robins deficient coverage axes, then fills to `count`, greedy-accepting
  * at Hamming `minDistance`, with a hard cap of `count × 3` candidates. Coverage is
  * a property of the accepted set. `replan` replaces one slot without breaking
- * distance or coverage. `input.headlines` (the approved copy pool) is resolved
- * into the policy at plan time; the stored policy carries it for `replan`.
+ * distance or coverage. `input` carries what the brief cannot: `headlines` (the
+ * approved copy pool) and `motionRatios` (the ratios the requested motion
+ * platforms package) — both resolved into the policy at plan time; the stored
+ * policy carries them for `replan`.
  */
 export class PlanVariationsUseCase {
   plan(brief: CampaignBrief, input: PlanInput = {}): Result<VariationPlan, Error> {
@@ -130,7 +132,7 @@ export class PlanVariationsUseCase {
       return ok({
         ...plan,
         variants,
-        estimate: { ...plan.estimate, genaiCalls: genaiCalls(variants) },
+        estimate: { ...plan.estimate, genaiCalls: genaiCalls(variants), ...framesEstimate(variants, plan.policy) },
       });
     }
 
@@ -147,20 +149,45 @@ function drawAxes(
   policy: VariationPolicy,
   fixed: AxisDraw,
 ): Omit<Variant, "index" | "seed"> {
+  // Draw order is the golden sequence: product, ratio, then the treatment axes.
+  const productId = fixed.productId ?? rng.pick(policy.productIds);
+  const aspectRatio = fixed.aspectRatio ?? rng.pick(policy.ratios);
   return {
-    productId: fixed.productId ?? rng.pick(policy.productIds),
-    aspectRatio: fixed.aspectRatio ?? rng.pick(policy.ratios),
+    productId,
+    aspectRatio,
     layout: rng.pick(policy.layout),
     tone: rng.pick(policy.tone),
     backgroundSource: rng.pick(policy.backgroundSource),
     paletteShift: rng.pick(policy.paletteShift),
+    // Optional axes draw last, each only when on, so briefs without them keep their goldens.
     ...drawHeadline(rng, policy),
+    ...drawMotion(rng, policy, aspectRatio),
   };
 }
 
-/** Draw a pooled headline last, so briefs without the axis leave the rng sequence untouched. */
-function drawHeadline(rng: SeededRandom, policy: VariationPolicy): { headline?: string } {
+/** Draw a pooled headline, so briefs without the axis leave the rng sequence untouched. */
+function drawHeadline(rng: SeededRandom, policy: VariationPolicy): Pick<Variant, "headline"> {
   return policy.headline.length === 0 ? {} : { headline: rng.pick(policy.headline) };
+}
+
+/**
+ * Motion axes. Static briefs consume no draws (goldens unchanged). With both
+ * formats requested the draw keeps one still slot, so a mixed brief yields PNGs
+ * and mp4s; `duration` is drawn only for a motion slot. A ratio no requested
+ * motion platform packages stays a still (no draws consumed).
+ */
+function drawMotion(
+  rng: SeededRandom,
+  policy: VariationPolicy,
+  aspectRatio: AspectRatioValue,
+): Pick<Variant, "motion" | "durationSec"> {
+  if (!policy.motionEnabled || !policy.motionRatios.includes(aspectRatio)) return {};
+  const slots: ReadonlyArray<MotionKind | undefined> = policy.mixStatic
+    ? [undefined, ...policy.motion]
+    : policy.motion;
+  const motion = rng.pick(slots);
+  if (motion === undefined) return {};
+  return { motion, durationSec: rng.pick(policy.duration) };
 }
 
 function hamming(a: Variant, b: Variant): number {
@@ -225,6 +252,16 @@ function genaiCalls(variants: readonly Variant[]): number {
   return variants.filter((variant) => variant.backgroundSource === "genai").length;
 }
 
+/** `frames` only on motion plans, so static plan JSON stays byte-identical. */
+function framesEstimate(variants: readonly Variant[], policy: VariationPolicy): { frames?: number } {
+  if (!policy.motionEnabled) return {};
+  let frames = 0;
+  for (const variant of variants) {
+    if (variant.durationSec !== undefined) frames += variant.durationSec * MOTION_FPS;
+  }
+  return { frames };
+}
+
 function toPlan(briefId: string, policy: VariationPolicy, variants: readonly Variant[]): VariationPlan {
   return {
     policyHash: policy.policyHash,
@@ -235,6 +272,7 @@ function toPlan(briefId: string, policy: VariationPolicy, variants: readonly Var
       axisProductSize: policy.axisProductSize,
       feasible: true,
       genaiCalls: genaiCalls(variants),
+      ...framesEstimate(variants, policy),
     },
     policy,
     briefId,

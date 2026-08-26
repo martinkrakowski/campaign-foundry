@@ -7,6 +7,8 @@ import {
   parseRegenerateOnly,
   loadBrief,
   assertSafeId,
+  MOTION_AXES,
+  MOTION_FORMAT,
   SUPPORTED_AXES,
   SUPPORTED_FORMATS,
 } from "../load-brief.js";
@@ -95,9 +97,11 @@ const v2Brief = {
 };
 
 describe("parseBrief v2 fields", () => {
-  test("SUPPORTED_AXES and SUPPORTED_FORMATS lock the P0 allowlist", () => {
+  test("SUPPORTED_AXES and SUPPORTED_FORMATS lock the P0 allowlist; motion is a gated extension", () => {
     expect(SUPPORTED_AXES).toEqual(["layout", "tone", "background", "paletteShift", "headline"]);
     expect(SUPPORTED_FORMATS).toEqual(["static"]);
+    expect(MOTION_AXES).toEqual(["motion", "duration"]);
+    expect(MOTION_FORMAT).toBe("motion");
   });
 
   test("accepts headline: pool://copy — the only supported pool reference", () => {
@@ -279,5 +283,112 @@ describe("loadBrief", () => {
     const path = join(dir, "c.yaml");
     writeFileSync(path, "id: camp\ntargetRegion: DE\ntargetAudience: a\ncampaignMessage: Hi\nproducts:\n  - id: alpha\n  - id: beta\n");
     expect((await loadBrief(path)).products).toHaveLength(2);
+  });
+});
+
+const MOTION_ON = { motion: true } as const;
+const MOTION_OFF = { motion: false, reason: "ffmpeg -version exited 1" } as const;
+
+const motionBrief = (over: Record<string, unknown> = {}) => ({
+  ...v2Brief,
+  variation: { ...v2Brief.variation, axes: { ...staticAxes, motion: ["ken-burns-in", "headline-rise"], duration: [6] } },
+  output: { formats: ["static", "motion"], platforms: ["instagram-feed", "instagram-reel"] },
+  ...over,
+});
+
+describe("parseBrief motion allowlist (D8, gated on the ffmpeg capability)", () => {
+  test("accepts motion, duration, formats: motion, and motion platforms when the capability is on", () => {
+    const brief = parseBrief(motionBrief(), MOTION_ON);
+    expect(brief.variation?.axes?.motion).toEqual(["ken-burns-in", "headline-rise"]);
+    expect(brief.variation?.axes?.duration).toEqual([6]);
+    expect(brief.output?.formats).toEqual(["static", "motion"]);
+    expect(brief.output?.platforms).toEqual(["instagram-feed", "instagram-reel"]);
+    // Either axis alone is fine (duration defaults in the planner).
+    expect(parseBrief(motionBrief({ variation: { count: 2, axes: { motion: ["accent-wipe"] } } }), MOTION_ON).variation?.axes?.duration).toBeUndefined();
+    for (const id of ["instagram-story", "tiktok", "youtube-short"]) {
+      expect(parseBrief(motionBrief({ output: { formats: ["motion"], platforms: [id] } }), MOTION_ON).output?.platforms).toEqual([id]);
+    }
+  });
+
+  test.each([
+    ["the motion axis", { ...valid, variation: { axes: { motion: ["ken-burns-in"] } } }, /axis "motion": motion output is unavailable \(ffmpeg -version exited 1\)/],
+    ["the duration axis", { ...valid, variation: { axes: { duration: [6] } } }, /axis "duration": motion output is unavailable/],
+    ["the motion format", { ...valid, output: { formats: ["motion"] } }, /format "motion": motion output is unavailable \(ffmpeg -version exited 1\)/],
+    ["a motion platform", { ...valid, output: { platforms: ["instagram-reel"] } }, /platform "instagram-reel": motion output is unavailable/],
+  ])("rejects %s with the probe reason when the capability is off", (_label, input, message) => {
+    expect(() => parseBrief(input, MOTION_OFF)).toThrow(message);
+  });
+
+  test("the default accessor is the boot probe snapshot (not probed → off) and a reasonless flag has a fallback", () => {
+    expect(() => parseBrief(motionBrief())).toThrow(/motion output is unavailable \(not probed\)/);
+    expect(() => parseBrief(motionBrief(), { motion: false })).toThrow(/\(ffmpeg capability is off\)/);
+  });
+
+  test.each([
+    ["an unknown motion kind", motionBrief({ variation: { count: 2, axes: { motion: ["spin"] } } }), /variation.axes.motion.*"spin"/],
+    ["a non-array duration", motionBrief({ variation: { count: 2, axes: { duration: 6 } } }), /duration" must be an array/],
+    ["a duration below 2", motionBrief({ variation: { count: 2, axes: { duration: [1] } } }), /between 2 and 30/],
+    ["a duration above 30", motionBrief({ variation: { count: 2, axes: { duration: [31] } } }), /between 2 and 30/],
+    ["a fractional duration", motionBrief({ variation: { count: 2, axes: { duration: [2.5] } } }), /between 2 and 30/],
+    ["an unknown platform", motionBrief({ output: { platforms: ["myspace"] } }), /Unknown output platform "myspace"/],
+    ["an unknown format", motionBrief({ output: { formats: ["gif"] } }), /Unsupported output format "gif"/],
+  ])("rejects %s even with the capability on", (_label, input, message) => {
+    expect(() => parseBrief(input, MOTION_ON)).toThrow(message);
+  });
+
+  test.each([
+    ["[static] + a motion-only platform", { formats: ["static"], platforms: ["instagram-reel"] }, /platform "instagram-reel" packages only \[motion\], which output.formats \[static\] does not request/],
+    ["[motion] + a static-only platform", { formats: ["motion"], platforms: ["instagram-feed"] }, /platform "instagram-feed" packages only \[static\], which output.formats \[motion\] does not request/],
+    ["no formats (static) + a motion-only platform", { platforms: ["instagram-reel"] }, /platform "instagram-reel" packages only \[motion\], which output.formats \[static\] does not request/],
+    ["a format no requested platform packages", { formats: ["static", "motion"], platforms: ["instagram-reel"] }, /format "static" is requested but none of output.platforms \[instagram-reel\] can package it/],
+  ])("rejects incompatible formats/platforms: %s", (_label, output, message) => {
+    expect(() => parseBrief(motionBrief({ output }), MOTION_ON)).toThrow(message);
+  });
+
+  test("accepts formats/platforms that agree: static, mixed, and motion-only", () => {
+    const parse = (output: Record<string, unknown>) => parseBrief(motionBrief({ output }), MOTION_ON).output;
+    expect(parse({ formats: ["static"], platforms: ["instagram-feed"] })?.formats).toEqual(["static"]);
+    expect(parse({ formats: ["static", "motion"], platforms: ["instagram-feed", "tiktok"] })?.formats).toEqual(["static", "motion"]);
+    expect(parse({ formats: ["motion"], platforms: ["instagram-reel", "youtube-short"] })?.formats).toEqual(["motion"]);
+    // Platforms without formats keep the static default.
+    expect(parse({ platforms: ["linkedin"] })?.platforms).toEqual(["linkedin"]);
+  });
+
+  test("formats: motion with an explicitly empty motion axis is rejected; an absent axis is accepted", () => {
+    const empty = motionBrief({
+      variation: { ...v2Brief.variation, axes: { ...staticAxes, motion: [] } },
+      output: { formats: ["motion"], platforms: ["instagram-reel"] },
+    });
+    expect(() => parseBrief(empty, MOTION_ON)).toThrow(
+      /"variation.axes.motion" must select at least one motion kind when output.formats includes "motion"/,
+    );
+    const absent = motionBrief({
+      variation: { ...v2Brief.variation, axes: staticAxes },
+      output: { formats: ["motion"], platforms: ["instagram-reel"] },
+    });
+    expect(parseBrief(absent, MOTION_ON).variation?.axes?.motion).toBeUndefined();
+    // Without the motion format an empty axis is merely inert.
+    const inert = motionBrief({
+      variation: { ...v2Brief.variation, axes: { ...staticAxes, motion: [] } },
+      output: { formats: ["static"], platforms: ["instagram-feed"] },
+    });
+    expect(parseBrief(inert, MOTION_ON).output?.formats).toEqual(["static"]);
+  });
+
+  test("static platforms are accepted regardless of the capability; unknown ids are not", () => {
+    expect(parseBrief({ ...valid, output: { platforms: ["instagram-feed", "linkedin", "x"] } }, MOTION_OFF).output?.platforms).toHaveLength(3);
+    expect(() => parseBrief({ ...valid, output: { platforms: ["myspace"] } }, MOTION_OFF)).toThrow(/Unknown output platform/);
+  });
+
+  test("loadBrief forwards the capability", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cf-brief-motion-"));
+    try {
+      const path = join(dir, "motion.json");
+      writeFileSync(path, JSON.stringify(motionBrief()));
+      await expect(loadBrief(path)).rejects.toThrow(/motion output is unavailable/);
+      expect((await loadBrief(path, MOTION_ON)).output?.formats).toEqual(["static", "motion"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

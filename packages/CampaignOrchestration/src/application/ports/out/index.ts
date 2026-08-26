@@ -4,4 +4,5 @@ export * from "./CompositorPort.js";
 export * from "./CopyGeneratorPort.js";
 export * from "./ExportPort.js";
 export * from "./ImageGeneratorPort.js";
+export * from "./PlatformProfilePort.js";
 export * from "./VideoCompositorPort.js";

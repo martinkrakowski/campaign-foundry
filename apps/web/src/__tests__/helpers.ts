@@ -38,6 +38,21 @@ export const makeAsset = (over: Partial<Asset> = {}): Asset => ({
   ...over,
 });
 
+/** A motion variation asset: mp4 + poster, 6 s ken-burns-in, with its descriptor. */
+export const makeMotionAsset = (over: Partial<Asset> = {}): Asset =>
+  makeAsset({
+    aspectRatio: "9:16",
+    outputPath: "alpha/9x16/v1.png",
+    videoPath: "alpha/9x16/v1.mp4",
+    durationSec: 6,
+    format: "motion",
+    variantIndex: 1,
+    attempt: 0,
+    treatment: "headline-top-bold",
+    descriptor: { layout: "headline-top", tone: "bold", backgroundSource: "procedural", paletteShift: 0, motion: "ken-burns-in", durationSec: 6 },
+    ...over,
+  });
+
 /** A fresh Response per call — a Response body can only be read once. */
 export const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });

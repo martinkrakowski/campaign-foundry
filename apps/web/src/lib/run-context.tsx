@@ -26,7 +26,12 @@ export const API = "/api/pipeline";
 export interface Asset {
   productId: string;
   aspectRatio: string;
+  /** The PNG — the poster on motion assets. */
   outputPath: string;
+  /** The mp4 — motion assets only. */
+  videoPath?: string;
+  /** Clip length in seconds — motion assets only. */
+  durationSec?: number;
   proofPath?: string;
   complianceScore: number;
   passedCompliance: boolean;
@@ -45,6 +50,8 @@ export interface Asset {
     tone: string;
     backgroundSource: string;
     paletteShift: number;
+    motion?: string;
+    durationSec?: number;
   };
 }
 
@@ -191,6 +198,13 @@ export const assetLabel = (
   a.variantIndex !== undefined
     ? `${a.productId} @ ${a.aspectRatio} · v${a.variantIndex} · ${a.treatment}`
     : `${a.productId} @ ${a.aspectRatio} · ${a.treatment}`;
+
+/** Canvas raster + encode budget per frame (wave-4 perf spike), for the encode estimate. */
+export const ENCODE_MS_PER_FRAME = 7;
+
+/** Human-readable encode estimate for a frame count. */
+export const encodeMinutes = (frames: number): string =>
+  `≈ ${((frames * ENCODE_MS_PER_FRAME) / 60_000).toFixed(1)} min`;
 
 /** localStorage key for persisted HITL approve/reject decisions. */
 const DECISIONS_KEY = "cf:decisions";

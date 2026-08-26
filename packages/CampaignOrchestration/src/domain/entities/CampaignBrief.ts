@@ -28,9 +28,10 @@ export interface CampaignBrief {
    */
   readonly mode?: "brief" | "variation";
   /**
-   * Optional variation policy. Unsupported axes (motion, duration) are
-   * rejected at parse time, not here. `headline` is the only pool reference
-   * (`pool://copy`): its texts are resolved at plan time from the approved pool.
+   * Optional variation policy. Unsupported values are rejected at parse
+   * time, not here: `headline` accepts only the pool reference `pool://copy`
+   * (its texts are resolved at plan time from the approved pool), and
+   * motion/duration need the ffmpeg capability.
    */
   readonly variation?: {
     readonly count?: number;
@@ -46,6 +47,8 @@ export interface CampaignBrief {
       readonly background?: { readonly source?: readonly string[] };
       readonly paletteShift?: readonly number[];
       readonly headline?: string;
+      readonly motion?: readonly string[];
+      readonly duration?: readonly number[];
     };
   };
   /**
