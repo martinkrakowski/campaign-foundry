@@ -2,7 +2,7 @@ import { describe, test, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, Fragment } from "react";
-import { renderWithRun, seedPersistedRun, makeAsset } from "@/__tests__/helpers";
+import { renderWithRun, seedPersistedRun, makeAsset, json, mockPipelineApi } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import { CommandBar } from "@/components/shell/CommandBar";
 import { Sidebar } from "@/components/shell/Sidebar";
@@ -11,8 +11,6 @@ import { Card } from "@/components/ui/card";
 import ExportPage from "@/app/(shell)/export/page";
 import RunsPage from "@/app/(shell)/runs/page";
 
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const EMPTY = { halted: false, assets: [], log: null };
 
 beforeEach(() => localStorage.setItem("cf:brief-picked", "1"));
@@ -20,14 +18,9 @@ beforeEach(() => localStorage.setItem("cf:brief-picked", "1"));
 const seedSingle = (assets: ReturnType<typeof makeAsset>[], postPending = false) => {
   localStorage.setItem("cf:brief", JSON.stringify({ id: "seed", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }] }));
   const report = { halted: false, assets, log: { entries: [], campaignId: "seed" } };
-  vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
-    if ((init as RequestInit | undefined)?.method === "POST") {
-      return postPending ? new Promise<Response>(() => {}) : Promise.resolve(json({ jobId: "seed-job" }, 202));
-    }
-    if (String(url).includes("/campaigns/jobs/")) {
-      return Promise.resolve(json({ status: "completed", done: assets.length, total: assets.length, log: report.log, result: report }));
-    }
-    return Promise.resolve(json(report));
+  mockPipelineApi({
+    report,
+    post: postPending ? () => new Promise<Response>(() => {}) : () => json({ jobId: "seed-job" }, 202),
   });
 };
 

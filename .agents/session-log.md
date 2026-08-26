@@ -286,3 +286,15 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Refused: clock injection into `PipelineExecutionLog` (D14 keeps the exemption for wave 1), a `JobStore` port at the composition root (edge concern, single implementation), `Result<T,E>` as the job wire shape, dropping `done/total` (agreed Phase J shape).
 - **Left open:**
   - Follow-ups noted in the plan's wave-1 status: clock injection, one `mockPipelineApi` test fixture, real progress from `PipelineExecutionLog.totalOperations`. Worktrees `../cf-wt-*` remain until the PRs merge.
+
+## 2026-08-25 — shared mockPipelineApi helper
+
+- **Mode:** Implementer
+- **Changes:**
+  - Exported `json`, `jobOk`, and `mockPipelineApi({ report?, job?, post?, result? })` from `apps/web/src/__tests__/helpers.ts`.
+  - Wired the four fetch-router copies (vitest.setup `beforeEach`, `seedPersistedRun`, `seedSingle`, run-context `mockApi`) through that helper; removed duplicate local `json` helpers in coverage-gaps, run-context, grid, and shell-modals tests.
+- **Decisions:**
+  - Default POST jobId stays `job-1` (run-context); other call sites pass `post` so `test-job` / `seed-job` (and pending POST) are unchanged.
+  - `mockApi` is a thin wrapper that forwards `{ post, job, result }` so run-context call sites stay as they were.
+- **Left open:**
+  - None.

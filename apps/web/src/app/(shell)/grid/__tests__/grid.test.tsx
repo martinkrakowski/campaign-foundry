@@ -2,12 +2,9 @@ import { describe, test, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, Fragment } from "react";
-import { renderWithRun, seedPersistedRun, makeAsset, exerciseFocusTrap } from "@/__tests__/helpers";
+import { renderWithRun, seedPersistedRun, makeAsset, exerciseFocusTrap, json } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import GridPage from "../page";
-
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 /** A tiny harness exposing execute/regenerate so loading states can be driven. */
 function Harness() {

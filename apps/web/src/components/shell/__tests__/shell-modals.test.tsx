@@ -1,13 +1,10 @@
 import { describe, test, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderWithRun, exerciseFocusTrap } from "@/__tests__/helpers";
+import { renderWithRun, exerciseFocusTrap, json } from "@/__tests__/helpers";
 import { ModelSelector } from "../ModelSelector";
 import { BriefPicker } from "../BriefPicker";
 import { TelemetryDrawer } from "../TelemetryDrawer";
-
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 beforeEach(() => {
   localStorage.setItem("cf:brief-picked", "1"); // suppress auto-open unless a test wants it

@@ -38,6 +38,44 @@ export const makeAsset = (over: Partial<Asset> = {}): Asset => ({
   ...over,
 });
 
+export const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+export const jobOk = (result: { halted?: boolean; assets?: unknown[]; log?: unknown }) => {
+  const n = result.halted ? 0 : (result.assets?.length ?? 0);
+  return json({ status: "completed", done: n, total: n, log: result.log ?? null, result });
+};
+
+type PostFn = (url: string, init: RequestInit) => Response | Promise<Response>;
+type GetFn = (url: string) => Response | Promise<Response>;
+
+/**
+ * Shared pipeline fetch router. Default POST is 202 { jobId: "job-1" }; GET
+ * `/campaigns/jobs/` is a completed snapshot from `report` (empty job if omitted);
+ * any other GET returns `report` (or `{ halted: false, assets: [], log: null }`).
+ */
+export const mockPipelineApi = (
+  opts: {
+    report?: { halted?: boolean; assets?: unknown[]; log?: unknown };
+    post?: PostFn;
+    job?: GetFn;
+    result?: GetFn;
+  } = {},
+) =>
+  vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+    const u = String(url);
+    const req = (init ?? {}) as RequestInit;
+    if (req.method === "POST") {
+      return Promise.resolve(opts.post ? opts.post(u, req) : json({ jobId: "job-1" }, 202));
+    }
+    if (u.includes("/campaigns/jobs/")) {
+      return Promise.resolve(opts.job ? opts.job(u) : jobOk(opts.report ?? { halted: false, assets: [], log: { entries: [] } }));
+    }
+    return Promise.resolve(opts.result ? opts.result(u) : json(opts.report ?? { halted: false, assets: [], log: null }));
+  });
+
+export const mockApi = (opts: { post?: PostFn; job?: GetFn; result?: GetFn } = {}) => mockPipelineApi(opts);
+
 /**
  * Seed a persisted run that RunProvider restores on mount: stores a brief (so the
  * picker won't auto-open) and points the default fetch at a report with `assets`.
@@ -59,19 +97,9 @@ export const seedPersistedRun = (assets: Asset[], opts: { halted?: boolean; id?:
       ],
     }),
   );
-  const report = { halted: opts.halted ?? false, assets, log: { entries: [], campaignId: id } };
-  vi.mocked(globalThis.fetch).mockImplementation(async (url, init) => {
-    const headers = { "content-type": "application/json" };
-    if ((init as RequestInit | undefined)?.method === "POST") {
-      return new Response(JSON.stringify({ jobId: "seed-job" }), { status: 202, headers });
-    }
-    if (String(url).includes("/campaigns/jobs/")) {
-      return new Response(
-        JSON.stringify({ status: "completed", done: assets.length, total: assets.length, log: report.log, result: report }),
-        { status: 200, headers },
-      );
-    }
-    return new Response(JSON.stringify(report), { status: 200, headers });
+  mockPipelineApi({
+    report: { halted: opts.halted ?? false, assets, log: { entries: [], campaignId: id } },
+    post: () => json({ jobId: "seed-job" }, 202),
   });
 };
 

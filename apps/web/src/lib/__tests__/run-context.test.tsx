@@ -2,6 +2,7 @@ import { describe, test, expect, vi, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { RunProvider, useRun, assetKey, type Asset } from "@/lib/run-context";
+import { json, jobOk, mockApi } from "@/__tests__/helpers";
 
 const wrapper = ({ children }: { children: ReactNode }) => createElement(RunProvider, null, children);
 const setup = () => renderHook(() => useRun(), { wrapper });
@@ -18,32 +19,7 @@ const asset = (over: Partial<Asset> = {}): Asset => ({
   ...over,
 });
 
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const EMPTY = { halted: false, assets: [], log: null };
-
-const jobOk = (result: { halted?: boolean; assets?: unknown[]; log?: unknown }) => {
-  const n = result.halted ? 0 : (result.assets?.length ?? 0);
-  return json({ status: "completed", done: n, total: n, log: result.log ?? null, result });
-};
-
-/** POST → 202 { jobId }, GET job → completed (or override), GET result → EMPTY. */
-const mockApi = (opts: {
-  post?: (url: string, init: RequestInit) => Response | Promise<Response>;
-  job?: (url: string) => Response | Promise<Response>;
-  result?: (url: string) => Response | Promise<Response>;
-} = {}) =>
-  vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
-    const u = String(url);
-    const req = (init ?? {}) as RequestInit;
-    if (req.method === "POST") {
-      return Promise.resolve(opts.post ? opts.post(u, req) : json({ jobId: "job-1" }, 202));
-    }
-    if (u.includes("/campaigns/jobs/")) {
-      return Promise.resolve(opts.job ? opts.job(u) : jobOk({ halted: false, assets: [], log: { entries: [] } }));
-    }
-    return Promise.resolve(opts.result ? opts.result(u) : json(EMPTY));
-  });
 
 describe("useRun", () => {
   test("throws when used outside a RunProvider", () => {
