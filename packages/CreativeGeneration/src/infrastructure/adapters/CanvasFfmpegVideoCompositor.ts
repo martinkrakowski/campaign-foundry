@@ -1,0 +1,232 @@
+import { spawn as defaultSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { once } from "node:events";
+import { createRequire } from "node:module";
+import type { Writable } from "node:stream";
+import { createCanvas, type Canvas, type SKRSContext2D } from "@napi-rs/canvas";
+import type {
+  VideoCompositeRequest,
+  VideoCompositeResult,
+  VideoCompositorPort,
+} from "@campaignfoundry/CampaignOrchestration";
+import { restT } from "@campaignfoundry/CampaignOrchestration";
+import { NodeCanvasCompositor } from "./NodeCanvasCompositor.js";
+
+const require = createRequire(import.meta.url);
+const ffmpegStatic = require("ffmpeg-static") as string | null;
+
+/** Encode pool size — canvas raster is the bottleneck, not ffmpeg. */
+export const MAX_CONCURRENT_ENCODES = 2;
+
+export type FfmpegSpawn = (
+  command: string,
+  args: readonly string[],
+  options: SpawnOptions,
+) => ChildProcess;
+
+export interface CanvasFfmpegVideoCompositorOptions {
+  readonly fontFamily?: string;
+  readonly spawn?: FfmpegSpawn;
+  readonly ffmpegPath?: string | null;
+}
+
+type Prepared = Awaited<ReturnType<typeof NodeCanvasCompositor.prepare>>;
+
+class EncodeGate {
+  #active = 0;
+  #waiters: Array<() => void> = [];
+
+  async acquire(): Promise<void> {
+    if (this.#active < MAX_CONCURRENT_ENCODES) {
+      this.#active += 1;
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      this.#waiters.push(() => {
+        this.#active += 1;
+        resolve();
+      });
+    });
+  }
+
+  release(): void {
+    this.#active -= 1;
+    const next = this.#waiters.shift();
+    if (next) next();
+  }
+}
+
+const encodeGate = new EncodeGate();
+const STDERR_TAIL = 4_000;
+
+/**
+ * CanvasFfmpegVideoCompositor — VideoCompositorPort adapter.
+ *
+ * Prepares the still once, blits each frame through {@link NodeCanvasCompositor.draw},
+ * and pipes packed RGBA into the `ffmpeg-static` binary (never system ffmpeg).
+ */
+export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
+  private readonly fontFamily: string;
+  private readonly spawn: FfmpegSpawn;
+  private readonly ffmpegPath: string | null;
+
+  constructor(options: CanvasFfmpegVideoCompositorOptions = {}) {
+    this.fontFamily = options.fontFamily ?? "Inter";
+    this.spawn =
+      options.spawn ??
+      ((command, args, spawnOptions) => defaultSpawn(command, [...args], spawnOptions));
+    this.ffmpegPath = options.ffmpegPath !== undefined ? options.ffmpegPath : ffmpegStatic;
+  }
+
+  async compositeVideo(request: VideoCompositeRequest): Promise<VideoCompositeResult> {
+    const frames = Math.round(request.durationSec * request.fps);
+    if (!Number.isFinite(frames) || frames < 2) {
+      throw new Error("durationSec * fps must yield at least 2 frames");
+    }
+    assertSampleAt(request.sampleAt);
+    if (!this.ffmpegPath) {
+      throw new Error("ffmpeg-static binary is not available");
+    }
+
+    const prepared = await NodeCanvasCompositor.prepare(request, this.fontFamily);
+    const canvas = createCanvas(prepared.width, prepared.height);
+    const ctx = canvas.getContext("2d");
+
+    const video = await this.encodeFrames(canvas, ctx, prepared, request, frames, this.ffmpegPath);
+
+    NodeCanvasCompositor.draw(ctx, prepared, restT(request.motion), request.motion);
+    const poster = new Uint8Array(canvas.toBuffer("image/png"));
+
+    const sampledFrames = request.sampleAt.map((t) => {
+      NodeCanvasCompositor.draw(ctx, prepared, t, request.motion);
+      return new Uint8Array(canvas.toBuffer("image/png"));
+    });
+
+    return { video, poster, sampledFrames, logoApplied: prepared.logoApplied };
+  }
+
+  private async encodeFrames(
+    canvas: Canvas,
+    ctx: SKRSContext2D,
+    prepared: Prepared,
+    request: VideoCompositeRequest,
+    frames: number,
+    ffmpegPath: string,
+  ): Promise<Uint8Array> {
+    await encodeGate.acquire();
+    try {
+      const child = this.spawn(ffmpegPath, ffmpegArgs(prepared.width, prepared.height, request.fps), {
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      });
+      if (!child.stdin || !child.stdout || !child.stderr) {
+        child.kill();
+        throw new Error("ffmpeg stdio pipes were not created");
+      }
+
+      const stdoutChunks: Buffer[] = [];
+      let stderr = "";
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdoutChunks.push(chunk);
+      });
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (chunk: string) => {
+        stderr += chunk;
+        if (stderr.length > STDERR_TAIL * 2) stderr = stderr.slice(-STDERR_TAIL);
+      });
+
+      const finished = new Promise<number | null>((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", (code) => resolve(code));
+      });
+
+      let writeError: unknown;
+      try {
+        for (let i = 0; i < frames; i++) {
+          NodeCanvasCompositor.draw(ctx, prepared, i / (frames - 1), request.motion);
+          await writeWithBackpressure(child.stdin, Buffer.from(canvas.data()));
+        }
+        child.stdin.end();
+      } catch (error) {
+        writeError = error;
+        if (!child.killed) child.kill();
+      }
+
+      let code: number | null;
+      try {
+        code = await finished;
+      } catch (error) {
+        throw new Error(formatFfmpegFailure(error instanceof Error ? error.message : String(error), ffmpegPath));
+      }
+
+      if (code !== 0) {
+        throw new Error(formatFfmpegFailure(stderr || `ffmpeg exited ${code}`, ffmpegPath));
+      }
+      if (writeError) {
+        throw new Error(
+          formatFfmpegFailure(writeError instanceof Error ? writeError.message : String(writeError), ffmpegPath),
+        );
+      }
+      return new Uint8Array(Buffer.concat(stdoutChunks));
+    } finally {
+      encodeGate.release();
+    }
+  }
+}
+
+function ffmpegArgs(width: number, height: number, fps: number): string[] {
+  return [
+    "-f",
+    "rawvideo",
+    "-pix_fmt",
+    "rgba",
+    "-s",
+    `${width}x${height}`,
+    "-framerate",
+    String(fps),
+    "-i",
+    "-",
+    "-c:v",
+    "libx264",
+    "-pix_fmt",
+    "yuv420p",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "20",
+    // empty_moov is required so the mp4 muxer can write to a non-seekable pipe.
+    "-movflags",
+    "+faststart+empty_moov",
+    "-map_metadata",
+    "-1",
+    "-f",
+    "mp4",
+    "pipe:1",
+  ];
+}
+
+async function writeWithBackpressure(stdin: Writable, data: Buffer): Promise<void> {
+  if (!stdin.write(data)) {
+    await once(stdin, "drain");
+  }
+}
+
+function assertSampleAt(sampleAt: readonly number[]): void {
+  for (const t of sampleAt) {
+    if (typeof t !== "number" || !Number.isFinite(t) || t < 0 || t > 1) {
+      throw new Error(`sampleAt values must be finite numbers in [0, 1] (got ${String(t)})`);
+    }
+  }
+}
+
+function formatFfmpegFailure(detail: string, ffmpegPath: string): string {
+  const tail = detail.length > STDERR_TAIL ? detail.slice(-STDERR_TAIL) : detail;
+  return redactAbsolutePaths(tail, [ffmpegPath]);
+}
+
+function redactAbsolutePaths(text: string, known: readonly string[]): string {
+  let out = text;
+  for (const p of known) {
+    out = out.split(p).join("ffmpeg");
+  }
+  return out.replace(/(?:\/|[A-Za-z]:[\\/])[^\s"'`=),]+/g, "<path>");
+}
