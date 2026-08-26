@@ -11,10 +11,16 @@ export interface PackageManifestItem {
   readonly checks: { readonly size: "pass" | "fail" };
 }
 
-/** Written to platforms/<platformId>/manifest.json — never re-rendered. */
+/**
+ * Written to packages/<campaignId>/<platformId>/manifest.json — never re-rendered.
+ * `packagedAt` is the clock reading from the composition root; the package is the
+ * current output for that report (renders are not campaign-namespaced).
+ */
 export interface PackageManifest {
   readonly campaignId: string;
   readonly platformId: string;
+  readonly packagedAt: string;
+  readonly skipped: number;
   readonly profile: PlatformProfile;
   readonly items: readonly PackageManifestItem[];
 }
@@ -28,7 +34,7 @@ export interface PackageStorePort {
   /** Read a source creative relative to the output root (GeneratedAsset.outputPath). */
   readAsset(relativePath: string): Promise<Uint8Array>;
   /**
-   * Write bytes under output/<campaignId>/platforms/<platformId>/.
+   * Write bytes under output/packages/<campaignId>/<platformId>/.
    * Returns a path relative to the output root. Must refuse `..`.
    */
   writePackaged(platformId: string, relativePath: string, bytes: Uint8Array): Promise<string>;
