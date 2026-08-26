@@ -218,3 +218,16 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Determinism split into three tiers (plan / composite / sources+container); job handle (202 + polling) pulled into the MVP before generate-from-plan; variant identity `productId/variantIndex` migrated in one PR across all consumers; ports (`VideoCompositorPort`, `CopyGeneratorPort`) in CampaignOrchestration; parser allowlist rejects not-yet-supported axes; `/brief` stays the editor and gains Save; `MINIMUM_PRODUCTS` relaxed to 1 in variation mode; safe insets applied at generation (default 0); packaging never re-renders; brand floor static across `t`, no logo-hold detector; lint rule scoped to domain + planner.
 - **Left open:**
   - Offer reels/tiktok in the static MVP (recommend no until motion); 4:5 ratio timing.
+
+## 2026-08-25 — wave 1 orchestration + review (PRs #39–#42)
+
+- **Mode:** Reviewer (orchestrating Grok as Implementer)
+- **Changes:**
+  - Grok (`grok -p`, three worktree subagents + a verifier) implemented plan P0 (#41 SeededRandom + lint, #40 brief schema v2) and Phase J (#42 job handle). Each PR reviewed here at high effort; bot findings (Qodo, CodeRabbit) verified against the code.
+  - Fix commits pushed to all three: #41 `486ad9a` (int32 state wrap, seed validation, lint fragment owned once + all bounded contexts, `Date()`/`globalThis`/`crypto`/`performance` gaps closed); #40 `81898c9` (`runCampaign` refuses `mode: variation` until the planner exists, `count` required, `pool://` names the real axis); #42 `6332173` (bounded job store + TTL, honest lost-job handling, cancellable backoff polling, 409 per-campaign guard, one `fetchPersistedRun`).
+  - Every bot review thread answered and resolved; a disposition comment on each PR records what was refuted and why. Plan revised to v2.1 (#39 `5d82383`) with the review-derived corrections.
+- **Decisions:**
+  - Bot findings were all real; the `/code-review 40` run reviewed the working tree instead of the PR — its plan-level findings went into #39.
+  - Refused: clock injection into `PipelineExecutionLog` (D14 keeps the exemption for wave 1), a `JobStore` port at the composition root (edge concern, single implementation), `Result<T,E>` as the job wire shape, dropping `done/total` (agreed Phase J shape).
+- **Left open:**
+  - Follow-ups noted in the plan's wave-1 status: clock injection, one `mockPipelineApi` test fixture, real progress from `PipelineExecutionLog.totalOperations`. Worktrees `../cf-wt-*` remain until the PRs merge.
