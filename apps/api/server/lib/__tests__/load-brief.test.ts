@@ -336,6 +336,27 @@ describe("parseBrief motion allowlist (D8, gated on the ffmpeg capability)", () 
     expect(() => parseBrief(input, MOTION_ON)).toThrow(message);
   });
 
+  test("formats: motion with an explicitly empty motion axis is rejected; an absent axis is accepted", () => {
+    const empty = motionBrief({
+      variation: { ...v2Brief.variation, axes: { ...staticAxes, motion: [] } },
+      output: { formats: ["motion"], platforms: ["instagram-reel"] },
+    });
+    expect(() => parseBrief(empty, MOTION_ON)).toThrow(
+      /"variation.axes.motion" must select at least one motion kind when output.formats includes "motion"/,
+    );
+    const absent = motionBrief({
+      variation: { ...v2Brief.variation, axes: staticAxes },
+      output: { formats: ["motion"], platforms: ["instagram-reel"] },
+    });
+    expect(parseBrief(absent, MOTION_ON).variation?.axes?.motion).toBeUndefined();
+    // Without the motion format an empty axis is merely inert.
+    const inert = motionBrief({
+      variation: { ...v2Brief.variation, axes: { ...staticAxes, motion: [] } },
+      output: { formats: ["static"], platforms: ["instagram-feed"] },
+    });
+    expect(parseBrief(inert, MOTION_ON).output?.formats).toEqual(["static"]);
+  });
+
   test("static platforms are accepted regardless of the capability; unknown ids are not", () => {
     expect(parseBrief({ ...valid, output: { platforms: ["instagram-feed", "linkedin", "x"] } }, MOTION_OFF).output?.platforms).toHaveLength(3);
     expect(() => parseBrief({ ...valid, output: { platforms: ["myspace"] } }, MOTION_OFF)).toThrow(/Unknown output platform/);

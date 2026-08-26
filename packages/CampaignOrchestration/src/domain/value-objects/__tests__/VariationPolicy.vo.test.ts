@@ -3,6 +3,7 @@ import { seedFrom } from "@campaignfoundry/shared";
 import type { CampaignBrief } from "../../entities/CampaignBrief.js";
 import type { Product } from "../../entities/Product.js";
 import { LAYOUT_VALUES, TONE_VALUES } from "../Treatment.vo.js";
+import { MOTION_KINDS } from "../MotionKind.vo.js";
 import {
   BACKGROUND_AXIS_SOURCES,
   canonicalHeadlines,
@@ -160,6 +161,44 @@ describe("VariationPolicy.fromBrief", () => {
     expect(motionOn(9).success).toBe(false);
     expect(motionOff(6).success).toBe(true);
     expect(motionOff(7).success).toBe(false);
+  });
+
+  test("formats: motion with no motion axis defaults to every MOTION_KINDS entry (every variant a clip)", () => {
+    const result = VariationPolicy.fromBrief(
+      brief({ variation: { count: 1 }, output: { formats: ["motion"] } }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.motion).toEqual([...MOTION_KINDS]);
+    expect(result.value.motionEnabled).toBe(true);
+    expect(result.value.mixStatic).toBe(false);
+  });
+
+  test("formats: motion with an explicitly empty motion axis is rejected", () => {
+    const result = VariationPolicy.fromBrief(
+      brief({ variation: { count: 1, axes: { motion: [] } }, output: { formats: ["motion"] } }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/select at least one motion kind/);
+  });
+
+  test("an empty motion axis without the motion format stays a static policy", () => {
+    const result = VariationPolicy.fromBrief(brief({ variation: { count: 1, axes: { motion: [] } } }));
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.value.motionEnabled).toBe(false);
+  });
+
+  test("formats: [static, motion] mixes (still slot kept); [motion] alone does not", () => {
+    const mixed = VariationPolicy.fromBrief(
+      brief({ variation: { count: 1, axes: { motion: ["ken-burns-in"] } }, output: { formats: ["static", "motion"] } }),
+    );
+    const clipsOnly = VariationPolicy.fromBrief(
+      brief({ variation: { count: 1, axes: { motion: ["ken-burns-in"] } }, output: { formats: ["motion"] } }),
+    );
+    expect(mixed.success && clipsOnly.success).toBe(true);
+    if (!mixed.success || !clipsOnly.success) return;
+    expect(mixed.value.mixStatic).toBe(true);
+    expect(clipsOnly.value.mixStatic).toBe(false);
   });
 
   test("motionRatios narrows to the plan input and joins the hash only for motion briefs", () => {

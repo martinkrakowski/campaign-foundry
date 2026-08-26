@@ -264,6 +264,21 @@ function validateOutput(value: unknown, capabilities: Capabilities): void {
   }
 }
 
+/**
+ * `formats: motion` with an explicitly empty motion axis is a contradiction: the
+ * brief asks for clips but forbids every kind. An absent axis means all kinds.
+ */
+function validateMotionAxisRequested(record: Record<string, unknown>): void {
+  const formats = (record.output as Record<string, unknown> | undefined)?.formats;
+  if (!Array.isArray(formats) || !formats.includes(MOTION_FORMAT)) return;
+  const axes = (record.variation as Record<string, unknown> | undefined)?.axes as Record<string, unknown> | undefined;
+  if (Array.isArray(axes?.motion) && axes.motion.length === 0) {
+    throw new Error(
+      `Campaign brief field "variation.axes.motion" must select at least one motion kind when output.formats includes "${MOTION_FORMAT}".`,
+    );
+  }
+}
+
 /** Structurally validate the optional `treatments` array, when present. */
 function validateTreatments(value: unknown): void {
   if (value === undefined) return;
@@ -316,6 +331,7 @@ export function parseBrief(data: unknown, capabilities: Capabilities = getCapabi
   validateMode(record.mode);
   validateVariation(record.variation, capabilities);
   validateOutput(record.output, capabilities);
+  validateMotionAxisRequested(record);
   // A randomized campaign has no meaning without a total: `count` is the planner's
   // one required input (plan D13), so demand it up front rather than at run time.
   if (record.mode === "variation") {

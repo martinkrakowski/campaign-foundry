@@ -31,8 +31,12 @@ export const DISTANCE_AXES = [
 const UINT32_MAX = 0xffffffff;
 const DEFAULT_BACKGROUND_SOURCES: readonly BackgroundAxisSource[] = ["procedural"];
 const DEFAULT_PALETTE_SHIFT: readonly number[] = [0];
-/** Static only: no motion kinds are drawn unless the brief lists some. */
-const DEFAULT_MOTION: readonly MotionKind[] = [];
+/**
+ * Motion axis default when `output.formats` requests "motion" but the brief
+ * lists no `axes.motion`: every kind. A brief that asks for clips gets clips;
+ * a static brief (no motion format) draws no motion kinds at all.
+ */
+const DEFAULT_MOTION: readonly MotionKind[] = MOTION_KINDS;
 /** Clip length in whole seconds; the parser bounds it to [2, 30]. */
 const DEFAULT_DURATION: readonly number[] = [6];
 const MIN_DURATION_SEC = 2;
@@ -113,16 +117,24 @@ export class VariationPolicy {
     };
 
     const axes = variation.axes;
+    const formats = brief.output?.formats ?? ["static"];
+    const wantsMotion = formats.includes("motion");
+    // Absent axis + motion format → all kinds; an explicit empty axis with the
+    // motion format is a contradiction the parser rejects and the domain refuses
+    // too, so a brief that asks for clips can never silently render stills.
     const motion = unique(
-      axes?.motion !== undefined ? [...(axes.motion as readonly MotionKind[])] : [...DEFAULT_MOTION],
+      axes?.motion !== undefined
+        ? [...(axes.motion as readonly MotionKind[])]
+        : wantsMotion
+          ? [...DEFAULT_MOTION]
+          : [],
     );
-    const motionResult = requireMotion(motion);
+    const motionResult = requireMotion(motion, wantsMotion);
     if (!motionResult.success) return motionResult;
     const duration = unique(axes?.duration !== undefined ? [...axes.duration] : [...DEFAULT_DURATION]);
     const durationResult = requireDuration(duration);
     if (!durationResult.success) return durationResult;
-    const formats = brief.output?.formats ?? ["static"];
-    const motionEnabled = formats.includes("motion") && motion.length > 0;
+    const motionEnabled = wantsMotion && motion.length > 0;
     const mixStatic = motionEnabled && formats.includes("static");
 
     const headlineResult = resolveHeadline(brief, axes?.headline, input.headlines);
@@ -236,7 +248,10 @@ function requirePaletteShift(values: readonly number[]): Result<readonly number[
   return ok(values);
 }
 
-function requireMotion(values: readonly MotionKind[]): Result<readonly MotionKind[], Error> {
+function requireMotion(values: readonly MotionKind[], wantsMotion: boolean): Result<readonly MotionKind[], Error> {
+  if (wantsMotion && values.length === 0) {
+    return err(new Error('Invalid motion: select at least one motion kind when output.formats includes "motion".'));
+  }
   for (const kind of values) {
     if (!(MOTION_KINDS as readonly string[]).includes(kind)) {
       return err(new Error("Invalid motion."));

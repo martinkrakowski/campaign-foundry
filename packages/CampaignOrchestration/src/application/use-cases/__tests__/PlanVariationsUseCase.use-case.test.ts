@@ -4,6 +4,7 @@ import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
 import type { Product } from "../../../domain/entities/Product.js";
 import type { Variant } from "../../../domain/entities/Variant.js";
 import type { VariationPlan } from "../../../domain/value-objects/VariationPlan.vo.js";
+import { MOTION_KINDS } from "../../../domain/value-objects/MotionKind.vo.js";
 import { VariationPolicy } from "../../../domain/value-objects/VariationPolicy.vo.js";
 import { PlanVariationsUseCase } from "../PlanVariationsUseCase.use-case.js";
 
@@ -517,19 +518,31 @@ describe("PlanVariationsUseCase — motion axes", () => {
     expect(result.value.policy.mixStatic).toBe(false);
   });
 
-  test("a motion axis without the motion format, or an empty motion axis, stays static (no draws, no frames)", () => {
+  test("a motion axis without the motion format stays static (no draws, no frames)", () => {
     const golden = planner().plan(brief());
     const noFormat = planner().plan(motionBrief({ output: { formats: ["static"] } }));
-    const emptyAxis = planner().plan(
-      motionBrief({ variation: { count: 12, seed: 7, minDistance: 1, axes: { motion: [] } } }),
-    );
-    expect(golden.success && noFormat.success && emptyAxis.success).toBe(true);
-    if (!golden.success || !noFormat.success || !emptyAxis.success) return;
+    expect(golden.success && noFormat.success).toBe(true);
+    if (!golden.success || !noFormat.success) return;
     expect(noFormat.value.variants).toEqual(golden.value.variants);
-    expect(emptyAxis.value.variants).toEqual(golden.value.variants);
     expect(noFormat.value.policyHash).toBe(golden.value.policyHash);
     expect(noFormat.value.estimate).not.toHaveProperty("frames");
     expect(noFormat.value.policy.motionEnabled).toBe(false);
+  });
+
+  test("formats: motion with an empty motion axis is refused; with no axis every kind is drawn", () => {
+    const emptyAxis = planner().plan(
+      motionBrief({ variation: { count: 12, seed: 7, minDistance: 1, axes: { motion: [] } } }),
+    );
+    expect(emptyAxis.success).toBe(false);
+    if (!emptyAxis.success) expect(emptyAxis.error.message).toMatch(/select at least one motion kind/);
+
+    const noAxis = planner().plan(
+      motionBrief({ variation: { count: 12, seed: 7, minDistance: 1 }, output: { formats: ["motion"] } }),
+    );
+    expect(noAxis.success).toBe(true);
+    if (!noAxis.success) return;
+    expect(noAxis.value.variants.every((v) => v.motion !== undefined)).toBe(true);
+    expect(noAxis.value.policy.motion).toEqual([...MOTION_KINDS]);
   });
 
   test("motion and durationSec are Hamming axes (minDistance up to 8)", () => {
