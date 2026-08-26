@@ -21,11 +21,16 @@ const entry = (id: string, revision?: string) => ({ file: `${id}.yaml`, brief: b
 
 /** Route each call by URL+method; unmatched calls fail loudly rather than hanging. */
 const routes = (handlers: { list?: () => Response; post?: () => Response; put?: (url: string) => Response }) => {
-  const calls: { url: string; method: string }[] = [];
+  const calls: { url: string; method: string; body?: Record<string, unknown> }[] = [];
   vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
     const u = String(url);
     const method = (init?.method ?? "GET").toUpperCase();
-    calls.push({ url: u, method });
+    const raw = init?.body;
+    calls.push({
+      url: u,
+      method,
+      ...(typeof raw === "string" ? { body: JSON.parse(raw) as Record<string, unknown> } : {}),
+    });
     if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
       return Promise.resolve(handlers.list?.() ?? json({ briefs: [] }));
     }
@@ -99,11 +104,17 @@ describe("BriefPage — data flow", () => {
     });
   });
 
-  test("a new draft is saved with a POST", async () => {
+  test("a new draft is saved with a POST carrying what was typed", async () => {
     const user = userEvent.setup();
     const calls = routes({});
     renderWithRun(<BriefPage />);
     await waitForEditorReady();
+
+    // The editor adopts the shell's active brief, so reach a genuinely blank draft the
+    // way a user would rather than typing on top of the populated fields.
+    await user.click(screen.getAllByText("New brief...")[0]);
+    await user.click(screen.getAllByText("New brief...").slice(-1)[0]);
+    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
 
     await fillValidDraft(user);
 
@@ -111,7 +122,23 @@ describe("BriefPage — data flow", () => {
       expect((screen.getByText("Save & apply").closest("button") as HTMLButtonElement).disabled).toBe(false),
     );
     await user.click(screen.getByText("Save & apply"));
-    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+
+    const post = await waitFor(() => {
+      const call = calls.find((c) => c.method === "POST");
+      expect(call).toBeTruthy();
+      return call!;
+    });
+    expect(post.url).not.toContain("replace=1");
+    expect(post.body).toMatchObject({
+      id: "fresh",
+      targetRegion: "DE",
+      targetAudience: "a",
+      campaignMessage: "Hi",
+      products: [
+        expect.objectContaining({ id: "a", name: "A", logoPath: "a.png" }),
+        expect.objectContaining({ id: "b", name: "B", logoPath: "b.png" }),
+      ],
+    });
   });
 
   test("a failed save surfaces the message", async () => {
