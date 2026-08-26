@@ -195,3 +195,26 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Confirmed obsolete: 0.8.0 `sync --check` refuses a dirty tree ("use
     `--allow-dirty`") instead of the old `git reset --hard` — the rollback footgun
     flagged on 2026-06-09 is gone.
+
+---
+
+## 2026-08-25 — review docs/planning/randomizer-and-motion.md
+
+- **Mode:** Reviewer
+- **Changes:**
+  - None to source. Read-only review of the randomized-campaign / motion / create-project plan against CampaignOrchestration, the compositor, generate POST, HITL identity keys, and hexagen port placement.
+- **Decisions:**
+  - Verdict: needs revision before implementation. Direction is sound (seeded planner, GenAI only in approved pools, ffmpeg motion as follow-on) but several contracts conflict with current code (asset identity, byte-determinism, port ownership, sync generate timeout, MINIMUM_PRODUCTS, existing /brief editor).
+- **Left open:**
+  - Plan author should resolve the blocking issues in the review before PRs start. Open product calls in the plan (ffmpeg-static vs system, audio, copy-pool provider, GenAI video) still need a decision.
+
+## 2026-08-25 — revise docs/planning/2026-08-25_randomized-campaigns-and-motion.md (v2)
+
+- **Mode:** Author
+- **Changes:**
+  - Plan rewritten to v2 against four reviews, in the dated planning-doc format (locked decisions D1–D14, findings C/H/M/L, phase tables, DoD). Verified in code: identity key in `report.ts keyOf` / `run-context assetKey` / `RegenerationTarget`; `MINIMUM_PRODUCTS = 2`; three fixed canvases; `/brief` is a live editor; clock use in `PipelineExecutionLog` and Firefly IMS; no `output/cache`; `.mp4` absent from output content-types; `.pools.json` would match the briefs lister; CI Node 22; hexagen `@generated` barrels.
+- **Decisions:**
+  - ffmpeg-static (pinned, tech-stack row + GPL note); no audio in motion MVP; OpenRouter chat text adapter for copy pools; GenAI video deferred.
+  - Determinism split into three tiers (plan / composite / sources+container); job handle (202 + polling) pulled into the MVP before generate-from-plan; variant identity `productId/variantIndex` migrated in one PR across all consumers; ports (`VideoCompositorPort`, `CopyGeneratorPort`) in CampaignOrchestration; parser allowlist rejects not-yet-supported axes; `/brief` stays the editor and gains Save; `MINIMUM_PRODUCTS` relaxed to 1 in variation mode; safe insets applied at generation (default 0); packaging never re-renders; brand floor static across `t`, no logo-hold detector; lint rule scoped to domain + planner.
+- **Left open:**
+  - Offer reels/tiktok in the static MVP (recommend no until motion); 4:5 ratio timing.
