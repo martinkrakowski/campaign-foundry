@@ -16,7 +16,14 @@ const brief: CampaignBrief = {
   ],
 };
 
-const KEYS = ["GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY", "FIREFLY_CLIENT_ID", "FIREFLY_CLIENT_SECRET"];
+const KEYS = [
+  "GEMINI_API_KEY",
+  "GOOGLE_API_KEY",
+  "OPENROUTER_API_KEY",
+  "OPENROUTER_COPY_MODEL",
+  "FIREFLY_CLIENT_ID",
+  "FIREFLY_CLIENT_SECRET",
+];
 
 describe("pipeline composition root", () => {
   let dir: string;
@@ -99,5 +106,7 @@ describe("pipeline composition root", () => {
     expect(generator).toBeDefined();
     expect(generator?.model).toBe("openai/gpt-4o-mini");
     expect(typeof generator?.suggestHeadlines).toBe("function");
+    process.env.OPENROUTER_COPY_MODEL = "anthropic/claude-3.5-haiku";
+    expect(copyGenerator()?.model).toBe("anthropic/claude-3.5-haiku");
   });
 });

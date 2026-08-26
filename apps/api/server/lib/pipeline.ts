@@ -139,10 +139,11 @@ export function runCampaign(
 
 /**
  * Copy-pool generator. Absent when OPENROUTER_API_KEY is unset — routes map that
- * to 503. Never wired into GenerateCampaignUseCase (pools are built up front).
+ * to 503. `OPENROUTER_COPY_MODEL` overrides the adapter's default text model.
+ * Never wired into GenerateCampaignUseCase (pools are built up front).
  */
 export function copyGenerator(): CopyGeneratorPort | undefined {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return undefined;
-  return new OpenRouterCopyGenerator({ apiKey });
+  return new OpenRouterCopyGenerator({ apiKey, model: process.env.OPENROUTER_COPY_MODEL });
 }
