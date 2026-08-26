@@ -275,10 +275,9 @@ describe("BriefPage — data flow", () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
   });
 
-  test("an error chip for a section that has no panel is a no-op, not a crash", async () => {
+  test("the Policy chip now scrolls to a real section", async () => {
     const user = userEvent.setup();
-    // A randomized brief whose policy is invalid raises Policy errors, but E1 renders no
-    // policy panel (it arrives in E2.2) — so the chip's scroll target does not exist.
+    // E2.2 gives randomized briefs a policy panel, so this chip finally has a target.
     const randomized = {
       file: "rand.yaml",
       revision: "r1",
@@ -294,15 +293,48 @@ describe("BriefPage — data flow", () => {
     routes({ list: () => json({ briefs: [randomized] }) });
     renderWithRun(<BriefPage />);
 
-    await user.click(screen.getByText("New brief..."));
+    await user.click(screen.getAllByText("New brief...")[0]);
     await user.click(await screen.findByText("rand"));
 
-    const chip = (await screen.findAllByRole("button", { name: /Policy/ })).find((b) =>
+    const section = await waitFor(() => {
+      const el = document.getElementById("policy");
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+    const scrollIntoView = vi.fn();
+    section.scrollIntoView = scrollIntoView;
+
+    const chip = Array.from(document.querySelectorAll<HTMLElement>("button.rounded-full")).find((b) =>
       /Policy/.test(b.textContent ?? ""),
     ) as HTMLElement;
     expect(chip).toBeTruthy();
-    await user.click(await screen.findByText("New brief..."));
-    await waitFor(() => expect(document.getElementById("policy")).toBeNull());
+    await user.click(chip);
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+  });
+
+  test("a chip for a section that still has no panel is a no-op, not a crash", async () => {
+    const user = userEvent.setup();
+    // Motion errors have no panel until E2.3, so scrollToFirstError's defensive
+    // branch still needs to hold.
+    const motion = {
+      file: "clip.yaml",
+      revision: "r1",
+      brief: { ...brief("clip"), output: { formats: ["static", "motion"], platforms: ["linkedin"] } },
+    };
+    routes({ list: () => json({ briefs: [motion] }) });
+    renderWithRun(<BriefPage />);
+
+    await user.click(screen.getAllByText("New brief...")[0]);
+    await user.click(await screen.findByText("clip"));
+
+    const chip = await waitFor(() => {
+      const found = Array.from(document.querySelectorAll<HTMLElement>("button.rounded-full")).find((b) =>
+        /Motion/.test(b.textContent ?? ""),
+      );
+      expect(found).toBeTruthy();
+      return found as HTMLElement;
+    });
+    expect(document.getElementById("motion")).toBeNull();
 
     await user.click(chip);
     expect(chip).toBeTruthy();
