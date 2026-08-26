@@ -14,8 +14,9 @@ function arg(flag: string): string | undefined {
 }
 
 export async function main(briefPathArg?: string): Promise<void> {
-  // The parser gates `motion`/`duration`/`formats: motion` on this probe; cap it so
-  // a wedged binary cannot stall the CLI.
+  // Probe before parsing: this is a run path, so the brief is parsed in enforcing mode
+  // below and a motion brief is refused here rather than deep in the compositor. Cap the
+  // probe so a wedged binary cannot stall the CLI.
   const cap = await probeFfmpeg({ timeoutMs: CLI_PROBE_TIMEOUT_MS });
   setCapabilities(cap);
   if (!cap.motion) {
@@ -25,7 +26,11 @@ export async function main(briefPathArg?: string): Promise<void> {
   const briefPath = briefPathArg ?? arg("--brief") ?? "briefs/sample-campaign.yaml";
   console.log(`\n  Campaign Foundry — generating from ${briefPath}\n`);
 
-  const brief = await loadBrief(briefPath);
+  // Enforcing: the CLI runs the campaign, so it must refuse what this host cannot
+  // produce. Authoring mode (the default, D15) is for listing and persistence only —
+  // without this flag a motion brief on a host with no ffmpeg parses cleanly, spends
+  // image-generation budget, then dies in CanvasFfmpegVideoCompositor.
+  const brief = await loadBrief(briefPath, { enforceCapabilities: true });
   const result = await runCampaign(brief);
 
   if (!result.success) {

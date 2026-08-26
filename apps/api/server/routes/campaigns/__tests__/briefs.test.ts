@@ -95,7 +95,7 @@ describe("GET /campaigns/briefs", () => {
     expect(warn).toHaveBeenCalled(); // logged the skipped malformed brief
   });
 
-  test("warns and skips a motion brief while the ffmpeg capability is off", async () => {
+  test("lists a motion brief while the ffmpeg capability is off (D15 authoring mode)", async () => {
     mkdirSync(join(dir, "briefs"), { recursive: true });
     writeFileSync(join(dir, "briefs", "good.yaml"), validBrief);
     writeFileSync(
@@ -849,4 +849,51 @@ describe("authoring briefs", () => {
     expect(listed.briefs).toHaveLength(1);
     expect(listed.briefs[0].revision).toBe(await hashFile(campYaml()));
   });
+
+  test("D12: a motion brief is created, updated and re-read verbatim while the capability is off", async () => {
+    const { setCapabilities } = await import("../../../lib/capabilities.js");
+    setCapabilities({ motion: false, reason: "ffmpeg-static binary is not available" });
+    try {
+      const { create, update } = await api();
+      const motion = brief({
+        mode: "variation",
+        variation: {
+          count: 4,
+          axes: {
+            layout: ["headline-top"],
+            tone: ["bold"],
+            background: { source: ["procedural"] },
+            paletteShift: [0],
+            motion: ["ken-burns-in"],
+            duration: [6],
+          },
+        },
+        output: { formats: ["motion"], platforms: ["instagram-reel"] },
+      });
+
+      // authoring mode: this host cannot run it, but it must still persist (D7/D12)
+      const created = await create()(jsonReq("http://x/campaigns/briefs", "POST", motion));
+      expect(created.status).toBe(201);
+
+      const afterCreate = await loadBrief(campYaml());
+      expect(afterCreate.variation?.axes?.motion).toEqual(["ken-burns-in"]);
+      expect(afterCreate.variation?.axes?.duration).toEqual([6]);
+      expect(afterCreate.output?.formats).toEqual(["motion"]);
+
+      const updated = await update()(
+        jsonReq("http://x/campaigns/briefs/camp", "PUT", { ...motion, campaignMessage: "Edited" }),
+      );
+      expect(updated.status).toBe(200);
+
+      // nothing stripped on the way through the second write either
+      const afterUpdate = await loadBrief(campYaml());
+      expect(afterUpdate.campaignMessage).toBe("Edited");
+      expect(afterUpdate.variation?.axes?.motion).toEqual(["ken-burns-in"]);
+      expect(afterUpdate.variation?.axes?.duration).toEqual([6]);
+      expect(afterUpdate.output?.platforms).toEqual(["instagram-reel"]);
+    } finally {
+      setCapabilities({ motion: false, reason: "not probed" });
+    }
+  });
+
 });
