@@ -7,4 +7,8 @@ export interface PipelineResult {
   readonly log: PipelineExecutionLog;
   /** True when the legal gate halted the run before any creative was generated. */
   readonly halted: boolean;
+  /** Variation-plan hash. Omitted on classic runs so persisted reports stay byte-identical. */
+  readonly policyHash?: string;
+  /** Variation-plan seed. Omitted on classic runs. */
+  readonly seed?: number;
 }

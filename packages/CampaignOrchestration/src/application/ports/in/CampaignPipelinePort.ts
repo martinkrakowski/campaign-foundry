@@ -3,14 +3,35 @@ import type { PipelineResult } from "../../../domain/value-objects/PipelineResul
 import type { Result } from "@campaignfoundry/shared";
 
 /**
- * A single creative cell to regenerate, addressed by its identity within the
- * campaign matrix (product × aspect ratio × treatment). Mirrors the asset key the
- * review UI uses, so a human's "reject" maps straight to a regeneration target.
+ * Classic cell identity: product × aspect ratio × treatment. Byte-identical to
+ * the pre-variation target shape so existing HITL payloads keep working.
  */
-export interface RegenerationTarget {
+export interface ClassicRegenerationTarget {
   readonly productId: string;
   readonly aspectRatio: string;
   readonly treatment: string;
+}
+
+/**
+ * Variation slot identity: product + variantIndex (D6). `attempt` is the re-roll
+ * counter passed through to `replan(plan, index, attempt)` — originals are 0,
+ * so a re-roll must send `>= 1` (`previous + 1`). Omitted defaults to 1.
+ */
+export interface VariationRegenerationTarget {
+  readonly productId: string;
+  readonly variantIndex: number;
+  readonly attempt?: number;
+}
+
+/**
+ * A single creative cell to regenerate. Presence of numeric `variantIndex` is
+ * the discriminator (D6).
+ */
+export type RegenerationTarget = ClassicRegenerationTarget | VariationRegenerationTarget;
+
+/** True when the target addresses a variation slot rather than a classic cell. */
+export function isVariationTarget(t: RegenerationTarget): t is VariationRegenerationTarget {
+  return "variantIndex" in t && typeof t.variantIndex === "number";
 }
 
 /** Optional run modifiers passed alongside a brief. */

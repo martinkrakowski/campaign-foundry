@@ -109,6 +109,64 @@ describe("report persistence", () => {
     ).toBe(true);
     expect(isPersistedAsset(null)).toBe(false);
     expect(isPersistedAsset("nope")).toBe(false);
+    expect(
+      isPersistedAsset({ productId: 1, aspectRatio: "1:1", treatment: "default", outputPath: "alpha/1x1.png" }),
+    ).toBe(false);
+  });
+
+  test("isPersistedAsset requires the four strings plus integer variantIndex and attempt on variation rows", () => {
+    const variation = {
+      productId: "alpha",
+      aspectRatio: "1:1",
+      treatment: "headline-top-bold",
+      outputPath: "alpha/1x1/v0.png",
+      variantIndex: 0,
+      attempt: 0,
+    };
+    expect(isPersistedAsset(variation)).toBe(true);
+    expect(isPersistedAsset({ ...variation, variantIndex: 1.5 })).toBe(false);
+    expect(isPersistedAsset({ ...variation, variantIndex: -1 })).toBe(false);
+    expect(isPersistedAsset({ ...variation, attempt: -1 })).toBe(false);
+    expect(isPersistedAsset({ ...variation, attempt: 1.2 })).toBe(false);
+    expect(isPersistedAsset({ ...variation, attempt: undefined })).toBe(false);
+    expect(isPersistedAsset({ ...variation, aspectRatio: undefined })).toBe(false);
+    expect(isPersistedAsset({ ...variation, treatment: undefined })).toBe(false);
+  });
+
+  test("merge of a re-rolled variation slot replaces exactly one row; siblings unchanged", async () => {
+    const v0 = asset({
+      variantIndex: 0,
+      attempt: 0,
+      outputPath: "alpha/1x1/v0.png",
+      treatment: "headline-bottom-bold",
+      seed: 1,
+      format: "static",
+    });
+    const v1 = asset({
+      productId: "beta",
+      variantIndex: 1,
+      attempt: 0,
+      outputPath: "beta/9x16/v1.png",
+      treatment: "headline-top-subtle",
+      seed: 2,
+      format: "static",
+    });
+    await writeReport({
+      ...result([v0, v1]),
+      policyHash: "abc",
+      seed: 42,
+    });
+    const path = await writeReport(
+      { ...result([asset({ ...v0, complianceScore: 0.9, seed: 99 })]), policyHash: "abc", seed: 42 },
+      { merge: true },
+    );
+    const per = readAssets(path);
+    expect(per).toHaveLength(2); // count stays at the original row count
+    expect(per.find((a) => a.variantIndex === 0)?.complianceScore).toBe(0.9);
+    expect(per.find((a) => a.variantIndex === 1)?.outputPath).toBe("beta/9x16/v1.png");
+    const payload = JSON.parse(readFileSync(path, "utf8")) as { policyHash: string; seed: number };
+    expect(payload.policyHash).toBe("abc");
+    expect(payload.seed).toBe(42);
   });
 
   test("merge drops unkeyable rows from a corrupt prior report, with a warning", async () => {

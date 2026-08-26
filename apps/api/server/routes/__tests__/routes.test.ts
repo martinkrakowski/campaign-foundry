@@ -74,7 +74,11 @@ type JobBody = {
   done: number;
   total: number;
   log: unknown;
-  result?: { halted: boolean; assets: { outputPath: string }[]; log: unknown };
+  result?: {
+    halted: boolean;
+    assets: { outputPath: string; productId?: string; variantIndex?: number }[];
+    log: unknown;
+  };
   error?: string;
 };
 
@@ -150,6 +154,70 @@ describe("POST /campaigns/generate", () => {
     expect(res.status).toBe(202);
     const { body } = await awaitJob(((await res.json()) as { jobId: string }).jobId);
     expect(body.result?.assets.map((a) => a.outputPath)).toEqual(["alpha/1x1.png"]);
+  });
+
+  test("variation re-roll keeps report row count at variation.count", async () => {
+    const vbrief = brief({
+      mode: "variation",
+      variation: {
+        count: 4,
+        seed: 42,
+        minDistance: 1,
+        axes: {
+          layout: ["headline-top", "headline-bottom"],
+          tone: ["bold", "subtle"],
+          background: { source: ["procedural"] },
+          paletteShift: [0, 0.1],
+        },
+      },
+    });
+    const seed = await call(vbrief);
+    const { body: first } = await awaitJob(((await seed.json()) as { jobId: string }).jobId);
+    expect(first.status).toBe("completed");
+    expect(first.result?.assets).toHaveLength(4);
+    const slot = first.result?.assets[0];
+    expect(slot?.productId).toEqual(expect.any(String));
+    expect(slot?.variantIndex).toEqual(expect.any(Number));
+    const reroll = await call({
+      brief: vbrief,
+      regenerateOnly: [{ productId: slot!.productId, variantIndex: slot!.variantIndex }],
+    });
+    expect(reroll.status).toBe(202);
+    const { body: second } = await awaitJob(((await reroll.json()) as { jobId: string }).jobId);
+    expect(second.status).toBe("completed");
+    expect(second.result?.assets).toHaveLength(1);
+    expect(second.result?.assets[0].outputPath).toBe(slot!.outputPath);
+    const report = await web("get", "/campaigns/result", resultHandler)(
+      new Request("http://x/campaigns/result?campaignId=camp"),
+    );
+    expect(((await report.json()) as { assets: unknown[] }).assets).toHaveLength(4);
+  });
+
+  test("variation target productId mismatch fails the job", async () => {
+    const vbrief = brief({
+      mode: "variation",
+      variation: {
+        count: 4,
+        seed: 42,
+        minDistance: 1,
+        axes: {
+          layout: ["headline-top", "headline-bottom"],
+          tone: ["bold", "subtle"],
+          background: { source: ["procedural"] },
+          paletteShift: [0, 0.1],
+        },
+      },
+    });
+    const seed = await call(vbrief);
+    const { body: first } = await awaitJob(((await seed.json()) as { jobId: string }).jobId);
+    const slot = first.result?.assets[0];
+    const res = await call({
+      brief: vbrief,
+      regenerateOnly: [{ productId: "ghost", variantIndex: slot!.variantIndex, attempt: 1 }],
+    });
+    const { body } = await awaitJob(((await res.json()) as { jobId: string }).jobId);
+    expect(body.status).toBe("failed");
+    expect(body.error).toMatch(/does not match plan slot|productId/);
   });
 
   test("halts on prohibited copy", async () => {
@@ -284,6 +352,16 @@ describe("GET /output/**", () => {
     const body = await (outputHandler as unknown as (e: unknown) => Promise<unknown>)(event);
     expect(event.node.res.statusCode).toBe(400);
     expect(body).toEqual({ error: "Invalid path" });
+  });
+
+  test("refuses the seed cache directory with 404", async () => {
+    mkdirSync(resolve(dir, "cache"), { recursive: true });
+    writeFileSync(resolve(dir, "cache", "secret.png"), png());
+    const file = await call("cache/secret.png");
+    expect(file.status).toBe(404);
+    expect(await file.json()).toEqual({ error: "Not found" });
+    const folder = await call("cache");
+    expect(folder.status).toBe(404);
   });
 
   test("treats a missing path param as the root path (then 404s)", async () => {

@@ -107,13 +107,20 @@ export class PlanVariationsUseCase {
     if (!Number.isInteger(index) || index < 0 || index >= plan.variants.length) {
       return err(new Error(`Invalid variant index ${index}.`));
     }
+    if (!Number.isInteger(attempt) || attempt < 1) {
+      return err(new Error(`replan attempt must be an integer >= 1 (received ${attempt}).`));
+    }
 
+    const occupant = plan.variants[index];
     const rng = new SeededRandom(seedFrom(plan.briefId, String(index), String(attempt)));
     const others = plan.variants.filter((_, slot) => slot !== index);
     const seed = seedFrom(plan.briefId, String(index), String(attempt));
 
     for (let draw = 0; draw < REPLAN_MAX_DRAWS; draw++) {
-      const axes = drawAxes(rng, plan.policy, {});
+      const axes = drawAxes(rng, plan.policy, {
+        productId: occupant.productId,
+        aspectRatio: occupant.aspectRatio,
+      });
       const variant: Variant = { index, seed, ...axes };
       if (!meetsMinDistance(variant, others, plan.policy.minDistance)) continue;
       const variants = plan.variants.map((current, slot) => (slot === index ? variant : current));

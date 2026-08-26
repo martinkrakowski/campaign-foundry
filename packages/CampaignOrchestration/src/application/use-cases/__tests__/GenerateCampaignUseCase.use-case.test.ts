@@ -3,11 +3,15 @@ import { GenerateCampaignUseCase } from "../GenerateCampaignUseCase.use-case.js"
 import type { GenerateCampaignDeps } from "../GenerateCampaignUseCase.use-case.js";
 import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
 import type { Product } from "../../../domain/entities/Product.js";
+import type { Variant } from "../../../domain/entities/Variant.js";
 import type { Treatment } from "../../../domain/value-objects/Treatment.vo.js";
 import {
   fakeCompliance,
   fakeCompositor,
   fakeImageGenerator,
+  fakePlan,
+  fakePlanner,
+  fakeVariant,
   recordingExporter,
   type RecordingExporter,
 } from "./_fakes.js";
@@ -36,6 +40,8 @@ const TWO_TREATMENTS: Treatment[] = [
 
 const deps = (over: Partial<GenerateCampaignDeps> = {}): GenerateCampaignDeps => ({
   imageGenerator: fakeImageGenerator(),
+  proceduralGenerator: fakeImageGenerator(),
+  planner: fakePlanner(),
   compositor: fakeCompositor(),
   compliance: fakeCompliance(),
   exporter: recordingExporter(),
@@ -272,6 +278,15 @@ describe("GenerateCampaignUseCase — selective regeneration", () => {
     expect((d.exporter as RecordingExporter).proofs).toEqual([]);
   });
 
+  test("ignores variation-shaped targets on a classic run", async () => {
+    const d = deps();
+    const result = await new GenerateCampaignUseCase(d).execute(baseBrief(), {
+      regenerateOnly: [{ productId: "alpha", variantIndex: 0 }],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.value.assets).toEqual([]);
+  });
+
   test("an empty target list is a no-op run (no cells, no proofs)", async () => {
     const d = deps();
     const result = await new GenerateCampaignUseCase(d).execute(baseBrief(), { regenerateOnly: [] });
@@ -281,5 +296,346 @@ describe("GenerateCampaignUseCase — selective regeneration", () => {
     expect(result.value.halted).toBe(false);
     expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
     expect((d.exporter as RecordingExporter).proofs).toEqual([]);
+  });
+});
+
+const variationBrief = (over: Partial<CampaignBrief> = {}): CampaignBrief =>
+  baseBrief({ mode: "variation", variation: { count: 3, seed: 42 }, ...over });
+
+describe("GenerateCampaignUseCase — variation", () => {
+  test("allows a single-product variation brief", async () => {
+    const variants = [fakeVariant(), fakeVariant({ index: 1, aspectRatio: "9:16" })];
+    const d = deps({ planner: fakePlanner(fakePlan(variants)) });
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({ products: [product("alpha")] }),
+    );
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.value.assets).toHaveLength(2);
+  });
+
+  test("classic still requires two products", async () => {
+    const result = await new GenerateCampaignUseCase(deps()).execute(baseBrief({ products: [product("alpha")] }));
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/at least 2 unique products/);
+  });
+
+  test("produces count assets with v<index> paths, descriptor, and plan provenance", async () => {
+    const variants = [
+      fakeVariant({ index: 0, aspectRatio: "1:1" }),
+      fakeVariant({ index: 1, productId: "beta", aspectRatio: "9:16", layout: "headline-top", tone: "subtle" }),
+      fakeVariant({ index: 2, aspectRatio: "16:9", backgroundSource: "genai", paletteShift: 0.1 }),
+    ];
+    const d = deps({ planner: fakePlanner(fakePlan(variants)) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    expect(result.value.assets).toHaveLength(3);
+    expect(result.value.assets.map((a) => a.outputPath)).toEqual([
+      "alpha/1x1/v0.png",
+      "beta/9x16/v1.png",
+      "alpha/16x9/v2.png",
+    ]);
+    expect(result.value.assets[0]).toMatchObject({
+      variantIndex: 0,
+      attempt: 0,
+      seed: 1,
+      format: "static",
+      treatment: "headline-bottom-bold",
+      descriptor: {
+        layout: "headline-bottom",
+        tone: "bold",
+        backgroundSource: "procedural",
+        paletteShift: 0,
+      },
+    });
+    expect(result.value.policyHash).toBe("hash");
+    expect(result.value.seed).toBe(42);
+    expect(result.value.log.totalOperations).toBe(3);
+    expect((d.exporter as RecordingExporter).proofs).toEqual(["proofs/alpha.pdf"]);
+  });
+
+  test("returns a planner error without touching generation ports", async () => {
+    const d = deps({ planner: fakePlanner(new Error("Variation plan shortfall: accepted 1 of count 12")) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/shortfall/);
+    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+    expect(d.proceduralGenerator.resolveBackground).not.toHaveBeenCalled();
+  });
+
+  test("routes procedural cells to proceduralGenerator and genai/asset-pool to imageGenerator", async () => {
+    const variants = [
+      fakeVariant({ index: 0, backgroundSource: "procedural" }),
+      fakeVariant({ index: 1, productId: "beta", backgroundSource: "genai" }),
+      fakeVariant({ index: 2, productId: "beta", aspectRatio: "9:16", backgroundSource: "asset-pool" }),
+    ];
+    const d = deps({ planner: fakePlanner(fakePlan(variants)) });
+    await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(d.proceduralGenerator.resolveBackground).toHaveBeenCalledTimes(1);
+    expect(d.imageGenerator.resolveBackground).toHaveBeenCalledTimes(2);
+    const ctx = vi.mocked(d.proceduralGenerator.resolveBackground).mock.calls[0][2];
+    expect(ctx.seed).toBe(1);
+    expect(ctx.paletteShift).toBe(0);
+  });
+
+  test("passes layout and tone from the variant to the compositor", async () => {
+    const d = deps({
+      planner: fakePlanner(
+        fakePlan([fakeVariant({ layout: "headline-top", tone: "subtle", paletteShift: 0.2 })]),
+      ),
+    });
+    await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(vi.mocked(d.compositor.compositeAsset).mock.calls[0][0]).toMatchObject({
+      layout: "headline-top",
+      tone: "subtle",
+    });
+  });
+
+  test("regenerateOnly + variantIndex calls replan with attempt and generates only those slots", async () => {
+    const variants = [
+      fakeVariant({ index: 0 }),
+      fakeVariant({ index: 1, productId: "beta", aspectRatio: "9:16" }),
+      fakeVariant({ index: 2, aspectRatio: "16:9" }),
+    ];
+    const planner = fakePlanner(fakePlan(variants));
+    const d = deps({ planner });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [{ productId: "beta", variantIndex: 1, attempt: 3 }],
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(planner.plan).toHaveBeenCalledTimes(1);
+    expect(planner.replan).toHaveBeenCalledTimes(1);
+    expect(planner.replan).toHaveBeenCalledWith(expect.anything(), 1, 3);
+    expect(result.value.assets).toHaveLength(1);
+    expect(result.value.assets[0].outputPath).toBe("beta/9x16/v1.png");
+    expect(result.value.assets[0].seed).toBe(103); // attempt + 100 from the fake
+    expect(result.value.assets[0].attempt).toBe(3);
+    expect(d.proceduralGenerator.resolveBackground).toHaveBeenCalledTimes(1);
+  });
+
+  test("regenerateOnly defaults omitted attempt to 1 (first re-roll)", async () => {
+    const planner = fakePlanner(fakePlan([fakeVariant(), fakeVariant({ index: 1, productId: "beta" })]));
+    const d = deps({ planner });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [{ productId: "alpha", variantIndex: 0 }],
+    });
+    expect(planner.replan).toHaveBeenCalledWith(expect.anything(), 0, 1);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.value.assets[0].attempt).toBe(1);
+  });
+
+  test("rejects a re-roll whose attempt is < 1", async () => {
+    const planner = fakePlanner(fakePlan([fakeVariant()]));
+    const d = deps({ planner });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [{ productId: "alpha", variantIndex: 0, attempt: 0 }],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/attempt must be an integer >= 1/);
+    expect(planner.replan).not.toHaveBeenCalled();
+  });
+
+  test("returns a replan error without generating", async () => {
+    const planner = fakePlanner(fakePlan([fakeVariant()]));
+    planner.replan = vi.fn(() => ({ success: false as const, error: new Error("replan exhausted") }));
+    const d = deps({ planner });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [{ productId: "alpha", variantIndex: 0, attempt: 1 }],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/replan exhausted/);
+    expect(d.proceduralGenerator.resolveBackground).not.toHaveBeenCalled();
+  });
+
+  test("fails loud when the plan references an unknown product", async () => {
+    const d = deps({ planner: fakePlanner(fakePlan([fakeVariant({ productId: "ghost" })])) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/unknown product "ghost"/);
+  });
+
+  test("fails loud when the plan references an unsupported ratio", async () => {
+    const d = deps({
+      planner: fakePlanner(fakePlan([fakeVariant({ aspectRatio: "21:9" as Variant["aspectRatio"] })])),
+    });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/Unsupported aspect ratio/);
+  });
+
+  test("classic-only regenerateOnly targets on a variation brief are an error", async () => {
+    const planner = fakePlanner(fakePlan([fakeVariant(), fakeVariant({ index: 1, productId: "beta" })]));
+    const d = deps({ planner });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [{ productId: "alpha", aspectRatio: "1:1", treatment: "default" }],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/targets do not match the brief mode/);
+    expect(planner.replan).not.toHaveBeenCalled();
+    expect(d.proceduralGenerator.resolveBackground).not.toHaveBeenCalled();
+  });
+
+  test("rejects a variation target whose productId does not match the planned slot", async () => {
+    const planner = fakePlanner(fakePlan([fakeVariant(), fakeVariant({ index: 1, productId: "beta" })]));
+    const d = deps({ planner });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [{ productId: "beta", variantIndex: 0, attempt: 1 }],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toMatch(/productId "beta"/);
+      expect(result.error.message).toMatch(/slot 0/);
+    }
+    expect(planner.replan).not.toHaveBeenCalled();
+  });
+
+  test("rejects a variation target whose variantIndex is out of range", async () => {
+    const planner = fakePlanner(fakePlan([fakeVariant()]));
+    const d = deps({ planner });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [{ productId: "alpha", variantIndex: 4, attempt: 1 }],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/Invalid variant index 4/);
+    expect(planner.replan).not.toHaveBeenCalled();
+  });
+
+  test("rejects a non-integer or negative variantIndex and a fractional attempt", async () => {
+    const planner = fakePlanner(fakePlan([fakeVariant()]));
+    const d = deps({ planner });
+    const fractional = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [{ productId: "alpha", variantIndex: 1.5, attempt: 1 }],
+    });
+    expect(fractional.success).toBe(false);
+    const negative = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [{ productId: "alpha", variantIndex: -1, attempt: 1 }],
+    });
+    expect(negative.success).toBe(false);
+    const badAttempt = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [{ productId: "alpha", variantIndex: 0, attempt: 1.5 }],
+    });
+    expect(badAttempt.success).toBe(false);
+    if (!badAttempt.success) expect(badAttempt.error.message).toMatch(/attempt must be an integer >= 1/);
+    expect(planner.replan).not.toHaveBeenCalled();
+  });
+
+  test("de-duplicates regenerateOnly targets by variantIndex", async () => {
+    const planner = fakePlanner(
+      fakePlan([fakeVariant(), fakeVariant({ index: 1, productId: "beta", aspectRatio: "9:16" })]),
+    );
+    const d = deps({ planner });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [
+        { productId: "alpha", variantIndex: 0, attempt: 1 },
+        { productId: "alpha", variantIndex: 0, attempt: 2 },
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(planner.replan).toHaveBeenCalledTimes(1);
+    expect(planner.replan).toHaveBeenCalledWith(expect.anything(), 0, 1);
+    expect(result.value.assets).toHaveLength(1);
+  });
+
+  test("re-roll keeps productId, aspectRatio, and outputPath of the slot", async () => {
+    const planner = fakePlanner(
+      fakePlan([
+        fakeVariant({ index: 0, aspectRatio: "9:16" }),
+        fakeVariant({ index: 1, productId: "beta", aspectRatio: "1:1" }),
+      ]),
+    );
+    const d = deps({ planner });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [{ productId: "alpha", variantIndex: 0, attempt: 1 }],
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.assets[0]).toMatchObject({
+      productId: "alpha",
+      aspectRatio: "9:16",
+      outputPath: "alpha/9x16/v0.png",
+      variantIndex: 0,
+      attempt: 1,
+    });
+  });
+
+  test("print proof is pinned to the first 1:1 variant of each product in plan order", async () => {
+    const variants = [
+      fakeVariant({ index: 0, aspectRatio: "16:9" }),
+      fakeVariant({ index: 1, aspectRatio: "1:1" }),
+      fakeVariant({ index: 2, aspectRatio: "1:1" }),
+      fakeVariant({ index: 3, productId: "beta", aspectRatio: "1:1" }),
+    ];
+    const d = deps({ planner: fakePlanner(fakePlan(variants)) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(result.success).toBe(true);
+    expect((d.exporter as RecordingExporter).proofs).toEqual(["proofs/alpha.pdf", "proofs/beta.pdf"]);
+  });
+
+  test("re-rolling a non-pinned 1:1 variant does not rewrite the product proof", async () => {
+    const variants = [
+      fakeVariant({ index: 0, aspectRatio: "1:1" }),
+      fakeVariant({ index: 1, aspectRatio: "1:1" }),
+      fakeVariant({ index: 2, productId: "beta", aspectRatio: "1:1" }),
+    ];
+    const d = deps({ planner: fakePlanner(fakePlan(variants)) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [{ productId: "alpha", variantIndex: 1, attempt: 1 }],
+    });
+    expect(result.success).toBe(true);
+    expect((d.exporter as RecordingExporter).proofs).toEqual([]);
+  });
+
+  test("re-rolling the pinned 1:1 variant rewrites that product's proof", async () => {
+    const variants = [
+      fakeVariant({ index: 0, aspectRatio: "1:1" }),
+      fakeVariant({ index: 1, aspectRatio: "1:1" }),
+    ];
+    const d = deps({ planner: fakePlanner(fakePlan(variants)) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [{ productId: "alpha", variantIndex: 0, attempt: 1 }],
+    });
+    expect(result.success).toBe(true);
+    expect((d.exporter as RecordingExporter).proofs).toEqual(["proofs/alpha.pdf"]);
+  });
+
+  test("warns on procedural variation backgrounds and records a missing logo", async () => {
+    const d = deps({
+      planner: fakePlanner(fakePlan([fakeVariant()])),
+      compositor: fakeCompositor(false),
+      compliance: fakeCompliance({ density: 0.001 }),
+    });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.assets[0].passedCompliance).toBe(false);
+    expect(result.value.assets[0].logoApplied).toBe(false);
+    const line = result.value.log.entries.find((e) => e.stage === "CompositeVariations");
+    expect(line?.message).toMatch(/below threshold/);
+    expect(line?.message).toMatch(/logo missing/);
+  });
+
+  test("defaults a scoreless variation density check to 0", async () => {
+    const d = deps({
+      planner: fakePlanner(fakePlan([fakeVariant()])),
+      compliance: fakeCompliance({ scoreless: true }),
+    });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.value.assets[0].complianceScore).toBe(0);
+  });
+
+  test("records an info log when a variation background is not procedural", async () => {
+    const d = deps({
+      planner: fakePlanner(fakePlan([fakeVariant({ backgroundSource: "genai" })])),
+      imageGenerator: fakeImageGenerator("imagen"),
+    });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const line = result.value.log.entries.find((e) => e.stage === "ResolveBackgroundAssets");
+    expect(line?.level).toBe("info");
   });
 });

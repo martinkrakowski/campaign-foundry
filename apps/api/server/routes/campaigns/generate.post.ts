@@ -61,6 +61,8 @@ export default defineEventHandler(async (event) => {
       halted: result.value.halted,
       assets: result.value.assets,
       log: result.value.log,
+      policyHash: result.value.policyHash,
+      seed: result.value.seed,
     });
   });
   setResponseStatus(event, 202);

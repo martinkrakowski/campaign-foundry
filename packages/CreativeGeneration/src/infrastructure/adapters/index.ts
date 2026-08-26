@@ -2,6 +2,7 @@
 
 export * from "./AssetReusingImageGenerator.js";
 export * from "./canvas-util.js";
+export * from "./FileSystemBackgroundCache.js";
 export * from "./FireflyImageGenerator.js";
 export * from "./GeminiImageGenerator.js";
 export * from "./NodeCanvasCompositor.js";

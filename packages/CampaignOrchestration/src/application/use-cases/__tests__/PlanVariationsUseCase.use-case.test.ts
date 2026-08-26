@@ -294,10 +294,13 @@ describe("PlanVariationsUseCase.replan", () => {
       if (i === 2) continue;
       expect(result.value.variants[i]).toEqual(planned.value.variants[i]);
     }
+    const original = planned.value.variants[2];
     const replacement = result.value.variants[2];
     expect(replacement.index).toBe(2);
     expect(replacement.seed).toBe(seedFrom("golden", "2", "1"));
-    expect(replacement).not.toEqual(planned.value.variants[2]);
+    expect(replacement.productId).toBe(original.productId);
+    expect(replacement.aspectRatio).toBe(original.aspectRatio);
+    expect(replacement).not.toEqual(original);
     for (const other of result.value.variants.filter((_, i) => i !== 2)) {
       expect(hamming(replacement, other)).toBeGreaterThanOrEqual(planned.value.policy.minDistance);
     }
@@ -310,13 +313,42 @@ describe("PlanVariationsUseCase.replan", () => {
     const planned = planner().plan(brief({ variation: { count: 3, seed: 7 } }));
     expect(planned.success).toBe(true);
     if (!planned.success) return;
-    const outOfRange = planner().replan(planned.value, 3, 0);
+    const outOfRange = planner().replan(planned.value, 3, 1);
     expect(outOfRange.success).toBe(false);
     if (!outOfRange.success) expect(outOfRange.error.message).toMatch(/index 3/);
-    const negative = planner().replan(planned.value, -1, 0);
+    const negative = planner().replan(planned.value, -1, 1);
     expect(negative.success).toBe(false);
-    const fractional = planner().replan(planned.value, 1.5, 0);
+    const fractional = planner().replan(planned.value, 1.5, 1);
     expect(fractional.success).toBe(false);
+  });
+
+  test("rejects attempt < 1 so a re-roll cannot reuse the original seed", () => {
+    const planned = planner().plan(brief({ variation: { count: 3, seed: 7 } }));
+    expect(planned.success).toBe(true);
+    if (!planned.success) return;
+    const zero = planner().replan(planned.value, 0, 0);
+    expect(zero.success).toBe(false);
+    if (!zero.success) expect(zero.error.message).toMatch(/attempt must be an integer >= 1/);
+    const negative = planner().replan(planned.value, 0, -1);
+    expect(negative.success).toBe(false);
+    const fractional = planner().replan(planned.value, 0, 1.5);
+    expect(fractional.success).toBe(false);
+  });
+
+  test("re-rolling slot k never changes productId or aspectRatio", () => {
+    const planned = planner().plan(brief());
+    expect(planned.success).toBe(true);
+    if (!planned.success) return;
+    for (let k = 0; k < planned.value.variants.length; k++) {
+      const result = planner().replan(planned.value, k, 1);
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      const original = planned.value.variants[k];
+      const next = result.value.variants[k];
+      expect(next.productId).toBe(original.productId);
+      expect(next.aspectRatio).toBe(original.aspectRatio);
+      expect(next.index).toBe(k);
+    }
   });
 
   test("exhausts after 64 distance-failing draws", () => {
@@ -398,14 +430,49 @@ describe("PlanVariationsUseCase.replan", () => {
       policy: policyResult.value,
       briefId: "golden",
     };
-    for (let attempt = 0; attempt < 8; attempt++) {
+    for (let attempt = 1; attempt <= 8; attempt++) {
       const result = planner().replan(plan, 0, attempt);
       if (!result.success) continue;
       expect(result.value.variants[0].productId).toBe("alpha");
+      expect(result.value.variants[0].aspectRatio).toBe("1:1");
       expect(result.value.variants[1]).toEqual(beta);
     }
     const any = planner().replan(plan, 0, 1);
     expect(any.success).toBe(true);
     if (any.success) expect(any.value.variants[0].productId).toBe("alpha");
+  });
+
+  test("replan still post-checks coverage and exhausts when the occupant cannot satisfy it", () => {
+    const policyResult = VariationPolicy.fromBrief(
+      brief({ variation: { count: 2, seed: 7, minDistance: 0, coverage: { perProduct: 1 } } }),
+    );
+    expect(policyResult.success).toBe(true);
+    if (!policyResult.success) return;
+    const onlyAlpha = (index: number): Variant => ({
+      index,
+      seed: index,
+      productId: "alpha",
+      aspectRatio: "1:1",
+      layout: "headline-top",
+      tone: "bold",
+      backgroundSource: "procedural",
+      paletteShift: 0,
+    });
+    const plan: VariationPlan = {
+      policyHash: policyResult.value.policyHash,
+      seed: policyResult.value.seed,
+      variants: [onlyAlpha(0), onlyAlpha(1)],
+      estimate: {
+        creatives: 2,
+        axisProductSize: policyResult.value.axisProductSize,
+        feasible: true,
+        genaiCalls: 0,
+      },
+      policy: policyResult.value,
+      briefId: "golden",
+    };
+    const result = planner().replan(plan, 0, 1);
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/exhausted 64 draws/);
   });
 });

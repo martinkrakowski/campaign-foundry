@@ -1,21 +1,26 @@
 import { ok, err, type Result } from "@campaignfoundry/shared";
 import type { CampaignBrief } from "../../domain/entities/CampaignBrief.js";
 import type { GeneratedAsset } from "../../domain/entities/GeneratedAsset.js";
+import type { Product } from "../../domain/entities/Product.js";
+import { variantTreatmentId, type Variant } from "../../domain/entities/Variant.js";
 import { AspectRatio } from "../../domain/value-objects/AspectRatio.vo.js";
 import { DEFAULT_TREATMENT, SAFE_ID_PATTERN } from "../../domain/value-objects/Treatment.vo.js";
 import { PipelineExecutionLog } from "../../domain/value-objects/PipelineExecutionLog.vo.js";
 import type { PipelineResult } from "../../domain/value-objects/PipelineResult.vo.js";
+import type { VariationPlan } from "../../domain/value-objects/VariationPlan.vo.js";
 import type {
   CampaignExecutionOptions,
   CampaignPipelinePort,
 } from "../ports/in/CampaignPipelinePort.js";
+import { isVariationTarget } from "../ports/in/CampaignPipelinePort.js";
 import type { CompliancePort } from "../ports/out/CompliancePort.js";
 import type { CompositorPort } from "../ports/out/CompositorPort.js";
 import type { ExportPort } from "../ports/out/ExportPort.js";
-import type { ImageGeneratorPort } from "../ports/out/ImageGeneratorPort.js";
+import type { BackgroundContext, ImageGeneratorPort } from "../ports/out/ImageGeneratorPort.js";
 
-/** A campaign brief must contain at least this many unique products. */
-const MINIMUM_PRODUCTS = 2;
+/** Classic briefs keep the two-product floor; variation relaxes to 1 (D10). */
+const MINIMUM_PRODUCTS_CLASSIC = 2;
+const MINIMUM_PRODUCTS_VARIATION = 1;
 
 /**
  * Cap on concurrently-generated backgrounds. Backgrounds are the slow GenAI step,
@@ -48,9 +53,18 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+/** Planner seam — `PlanVariationsUseCase` at the composition root, a fake in tests. */
+export interface VariationPlanner {
+  plan(brief: CampaignBrief): Result<VariationPlan, Error>;
+  replan(plan: VariationPlan, index: number, attempt: number): Result<VariationPlan, Error>;
+}
+
 /** Ports injected at the composition root — the use case depends on contracts, never adapters. */
 export interface GenerateCampaignDeps {
   readonly imageGenerator: ImageGeneratorPort;
+  /** Dedicated procedural generator — variation `procedural` cells skip the GenAI chain. */
+  readonly proceduralGenerator: ImageGeneratorPort;
+  readonly planner: VariationPlanner;
   readonly compositor: CompositorPort;
   readonly compliance: CompliancePort;
   readonly exporter: ExportPort;
@@ -82,6 +96,10 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     const halt = await this.runLegalGate(brief, log);
     if (halt) return ok({ assets: [], log, halted: true });
 
+    if (brief.mode === "variation") {
+      return this.executeVariation(brief, options, log);
+    }
+
     // 3-7. Generate every creative: one per (product × aspect ratio × treatment).
     const ratios = AspectRatio.all();
     // A brief with no treatments still produces one creative per cell (back-compat).
@@ -95,7 +113,11 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     // Targets are matched by the same identity the review UI keys on. Absent → full run.
     const targets = options?.regenerateOnly;
     const targetKeys = targets
-      ? new Set(targets.map((t) => `${t.productId}/${t.aspectRatio}/${t.treatment}`))
+      ? new Set(
+          targets.flatMap((t) =>
+            isVariationTarget(t) ? [] : [`${t.productId}/${t.aspectRatio}/${t.treatment}`],
+          ),
+        )
       : null;
     const isTarget = (productId: string, ratioValue: string, treatmentId: string): boolean =>
       targetKeys === null || targetKeys.has(`${productId}/${ratioValue}/${treatmentId}`);
@@ -222,6 +244,212 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     return ok({ assets, log, halted: false });
   }
 
+  /**
+   * Variation path: plan (or replan targeted slots), then generate one creative
+   * per variant. Classic matrix, keys, and paths are untouched.
+   */
+  private async executeVariation(
+    brief: CampaignBrief,
+    options: CampaignExecutionOptions | undefined,
+    log: PipelineExecutionLog,
+  ): Promise<Result<PipelineResult, Error>> {
+    const planned = this.deps.planner.plan(brief);
+    if (!planned.success) return planned;
+    let plan = planned.value;
+
+    const copy = brief.localizedMessage ?? brief.campaignMessage;
+    const context: BackgroundContext = {
+      campaignMessage: brief.campaignMessage,
+      targetAudience: brief.targetAudience,
+      targetRegion: brief.targetRegion,
+    };
+
+    const targets = options?.regenerateOnly;
+    let variants: readonly Variant[];
+    const attemptByIndex = new Map<number, number>();
+    if (targets) {
+      const variationTargets = targets.filter(isVariationTarget);
+      if (variationTargets.length === 0) {
+        return err(new Error("targets do not match the brief mode"));
+      }
+      const seen = new Set<number>();
+      const unique = variationTargets.filter((target) => {
+        if (seen.has(target.variantIndex)) return false;
+        seen.add(target.variantIndex);
+        return true;
+      });
+      const slots: Variant[] = [];
+      for (const target of unique) {
+        if (
+          !Number.isInteger(target.variantIndex) ||
+          target.variantIndex < 0 ||
+          target.variantIndex >= plan.variants.length
+        ) {
+          return err(new Error(`Invalid variant index ${target.variantIndex}.`));
+        }
+        const occupant = plan.variants[target.variantIndex];
+        if (occupant.productId !== target.productId) {
+          return err(
+            new Error(
+              `Variation target productId "${target.productId}" does not match plan slot ${target.variantIndex} ("${occupant.productId}").`,
+            ),
+          );
+        }
+        const attempt = target.attempt ?? 1;
+        if (!Number.isInteger(attempt) || attempt < 1) {
+          return err(new Error(`replan attempt must be an integer >= 1 (received ${attempt}).`));
+        }
+        const next = this.deps.planner.replan(plan, target.variantIndex, attempt);
+        if (!next.success) return next;
+        plan = next.value;
+        slots.push(plan.variants[target.variantIndex]);
+        attemptByIndex.set(target.variantIndex, attempt);
+      }
+      variants = slots;
+    } else {
+      variants = plan.variants;
+    }
+
+    log.totalOperations = variants.length;
+    log.record(
+      "PlanVariations",
+      `policy ${plan.policyHash} seed ${plan.seed} — ${variants.length} variants`,
+    );
+
+    const pinnedProofIndex = firstSquareIndexByProduct(plan.variants);
+
+    const productById = new Map(brief.products.map((product) => [product.id, product]));
+    const cells: Array<{ variant: Variant; product: Product; ratio: AspectRatio; attempt: number }> =
+      [];
+    for (const variant of variants) {
+      const product = productById.get(variant.productId);
+      if (!product) {
+        return err(new Error(`Variation plan references unknown product "${variant.productId}".`));
+      }
+      const ratio = AspectRatio.create(variant.aspectRatio);
+      if (!ratio.success) return ratio;
+      cells.push({
+        variant,
+        product,
+        ratio: ratio.value,
+        attempt: attemptByIndex.get(variant.index) ?? 0,
+      });
+    }
+
+    const cellResults = await mapWithConcurrency(cells, MAX_CONCURRENT_BACKGROUNDS, (cell) =>
+      this.renderVariant(
+        cell.variant,
+        cell.product,
+        cell.ratio,
+        copy,
+        context,
+        log,
+        cell.attempt,
+        pinnedProofIndex.get(cell.product.id) === cell.variant.index,
+      ),
+    );
+
+    const assets: GeneratedAsset[] = cellResults.map((cell) => cell.asset);
+    const heroByProduct = new Map<string, Uint8Array>();
+    for (const cell of cellResults) {
+      if (cell.heroImage && !heroByProduct.has(cell.asset.productId)) {
+        heroByProduct.set(cell.asset.productId, cell.heroImage);
+      }
+    }
+    for (const product of brief.products) {
+      const heroImage = heroByProduct.get(product.id);
+      if (!heroImage) continue;
+      await this.deps.exporter.generatePrintProof(heroImage, `proofs/${product.id}.pdf`);
+      log.record("ExportPrintProofs", `Print proof written for ${product.id}`);
+    }
+
+    log.complete();
+    return ok({
+      assets,
+      log,
+      halted: false,
+      policyHash: plan.policyHash,
+      seed: plan.seed,
+    });
+  }
+
+  private async renderVariant(
+    variant: Variant,
+    product: Product,
+    ratio: AspectRatio,
+    copy: string,
+    context: BackgroundContext,
+    log: PipelineExecutionLog,
+    attempt: number,
+    writeProof: boolean,
+  ): Promise<{ asset: GeneratedAsset; heroImage?: Uint8Array }> {
+    const cellContext: BackgroundContext = {
+      ...context,
+      seed: variant.seed,
+      paletteShift: variant.paletteShift,
+    };
+    const generator =
+      variant.backgroundSource === "procedural"
+        ? this.deps.proceduralGenerator
+        : this.deps.imageGenerator;
+    const background = await generator.resolveBackground(product, ratio, cellContext);
+    log.record(
+      "ResolveBackgroundAssets",
+      `${product.id} @ ${ratio.value} v${variant.index} — background: ${background.source}${background.source === "procedural" ? " (procedural fallback — no GenAI background)" : ""}`,
+      background.source === "procedural" ? "warn" : "info",
+    );
+
+    const composite = await this.deps.compositor.compositeAsset({
+      background: background.image,
+      message: copy,
+      brandColor: product.primaryColor,
+      logoPath: product.logoPath,
+      ratio,
+      layout: variant.layout,
+      tone: variant.tone,
+    });
+
+    const visual = await this.deps.compliance.validateBrandColorDensity(
+      composite.image,
+      product.primaryColor,
+    );
+
+    const treatment = variantTreatmentId(variant);
+    const outputPath = `${product.id}/${ratio.slug}/v${variant.index}.png`;
+    await this.deps.exporter.saveToDirectory(composite.image, outputPath);
+
+    const asset: GeneratedAsset = {
+      productId: product.id,
+      aspectRatio: ratio.value,
+      outputPath,
+      proofPath: `proofs/${product.id}.pdf`,
+      complianceScore: visual.score ?? 0,
+      passedCompliance: visual.passed,
+      logoApplied: composite.logoApplied,
+      treatment,
+      backgroundSource: background.source,
+      variantIndex: variant.index,
+      attempt,
+      seed: variant.seed,
+      format: "static",
+      descriptor: {
+        layout: variant.layout,
+        tone: variant.tone,
+        backgroundSource: variant.backgroundSource,
+        paletteShift: variant.paletteShift,
+      },
+    };
+    log.record(
+      "CompositeVariations",
+      `${product.id} @ ${ratio.value} [v${variant.index} ${treatment}] — brand density ${(visual.score ?? 0).toFixed(3)}${visual.passed ? "" : " (below threshold)"}, logo ${composite.logoApplied ? "present" : "missing"}`,
+      visual.passed && composite.logoApplied ? "info" : "warn",
+    );
+    return {
+      asset,
+      heroImage: writeProof ? composite.image : undefined,
+    };
+  }
+
   /** MinimumProductsRule + path-safe/unique ids, or the pipeline never starts. */
   private validateBrief(brief: CampaignBrief): Result<true, Error> {
     // The brief id is the campaign's persisted-report filename (per-campaign reload);
@@ -249,10 +477,12 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     if (unique.size !== productIds.length) {
       return err(new Error("A campaign brief requires unique product ids."));
     }
-    if (unique.size < MINIMUM_PRODUCTS) {
+    const minProducts =
+      brief.mode === "variation" ? MINIMUM_PRODUCTS_VARIATION : MINIMUM_PRODUCTS_CLASSIC;
+    if (unique.size < minProducts) {
       return err(
         new Error(
-          `A campaign brief requires at least ${MINIMUM_PRODUCTS} unique products (received ${unique.size}).`,
+          `A campaign brief requires at least ${minProducts} unique products (received ${unique.size}).`,
         ),
       );
     }
@@ -290,4 +520,15 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     log.record("ExecuteLegalGateCheck", "Legal gate passed");
     return false;
   }
+}
+
+/** First 1:1 variant of each product in plan order — the only slot that may rewrite its proof. */
+function firstSquareIndexByProduct(variants: readonly Variant[]): Map<string, number> {
+  const pinned = new Map<string, number>();
+  for (const variant of variants) {
+    if (variant.aspectRatio === "1:1" && !pinned.has(variant.productId)) {
+      pinned.set(variant.productId, variant.index);
+    }
+  }
+  return pinned;
 }

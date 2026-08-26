@@ -1,5 +1,10 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
-import { AspectRatio, type ImageGeneratorPort } from "@campaignfoundry/CampaignOrchestration";
+import {
+  AspectRatio,
+  type BackgroundCachePort,
+  type ImageGeneratorPort,
+} from "@campaignfoundry/CampaignOrchestration";
+import { backgroundCacheKey } from "../FileSystemBackgroundCache.js";
 import { GeminiImageGenerator, type ImagenClient } from "../GeminiImageGenerator.js";
 
 const ratio = (v = "1:1") => {
@@ -72,6 +77,43 @@ describe("GeminiImageGenerator", () => {
       ctx,
     );
     expect(out.source).toBe("procedural");
+  });
+
+  test("serves a seed-cache hit without calling the client", async () => {
+    const generateImages = vi.fn(async (_args: GenArgs) => ({
+      generatedImages: [{ image: { imageBytes: "AA==" } }],
+    }));
+    const cache: BackgroundCachePort = {
+      get: vi.fn(async () => new Uint8Array([9, 9])),
+      set: vi.fn(),
+    };
+    const out = await new GeminiImageGenerator({
+      apiKey: "k",
+      client: { models: { generateImages } },
+      cache,
+    }).resolveBackground(product, ratio(), { ...ctx, seed: 7 });
+    expect(out).toEqual({ image: new Uint8Array([9, 9]), source: "imagen", cached: true });
+    expect(generateImages).not.toHaveBeenCalled();
+    expect(vi.mocked(cache.get).mock.calls[0][0]).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  test("stores a seed-cache miss after a live fetch", async () => {
+    const generateImages = vi.fn(async (_args: GenArgs) => ({
+      generatedImages: [{ image: { imageBytes: Buffer.from("live").toString("base64") } }],
+    }));
+    const cache: BackgroundCachePort = { get: vi.fn(async () => undefined), set: vi.fn() };
+    const out = await new GeminiImageGenerator({
+      apiKey: "k",
+      client: { models: { generateImages } },
+      cache,
+    }).resolveBackground(product, ratio(), { ...ctx, seed: 7 });
+    expect(Buffer.from(out.image).toString()).toBe("live");
+    expect(out.cached).toBeUndefined();
+    expect(cache.set).toHaveBeenCalledTimes(1);
+    const key = vi.mocked(cache.set).mock.calls[0][0];
+    expect(key).toBe(
+      backgroundCacheKey("imagen", "imagen-4.0-generate-001", generateImages.mock.calls[0][0].prompt, "1:1", 7),
+    );
   });
 
   test("rethrows when the client fails and there is no fallback", async () => {

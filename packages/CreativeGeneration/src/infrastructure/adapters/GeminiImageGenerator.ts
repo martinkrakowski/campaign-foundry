@@ -1,11 +1,13 @@
 import { GoogleGenAI } from "@google/genai";
 import type {
   AspectRatio,
+  BackgroundCachePort,
   BackgroundContext,
   BackgroundResult,
   ImageGeneratorPort,
   Product,
 } from "@campaignfoundry/CampaignOrchestration";
+import { resolveCachedBackground } from "./FileSystemBackgroundCache.js";
 
 /** Default Imagen model (override with the IMAGEN_MODEL env var). */
 const DEFAULT_MODEL = "imagen-4.0-generate-001";
@@ -28,6 +30,8 @@ export interface GeminiImageGeneratorOptions {
   readonly fallback?: ImageGeneratorPort;
   /** Injectable client seam (defaults to a real GoogleGenAI) — lets tests stub the SDK. */
   readonly client?: ImagenClient;
+  /** Optional seed cache; used only when `context.seed` is present. */
+  readonly cache?: BackgroundCachePort;
 }
 
 /**
@@ -40,11 +44,13 @@ export class GeminiImageGenerator implements ImageGeneratorPort {
   private readonly ai: ImagenClient;
   private readonly model: string;
   private readonly fallback?: ImageGeneratorPort;
+  private readonly cache?: BackgroundCachePort;
 
   constructor(options: GeminiImageGeneratorOptions) {
     this.ai = options.client ?? new GoogleGenAI({ apiKey: options.apiKey });
     this.model = options.model && options.model.length > 0 ? options.model : DEFAULT_MODEL;
     this.fallback = options.fallback;
+    this.cache = options.cache;
   }
 
   async resolveBackground(
@@ -53,14 +59,23 @@ export class GeminiImageGenerator implements ImageGeneratorPort {
     context: BackgroundContext,
   ): Promise<BackgroundResult> {
     try {
-      const response = await this.ai.models.generateImages({
-        model: this.model,
-        prompt: this.buildPrompt(product, context),
-        config: { numberOfImages: 1, aspectRatio: ratio.value },
-      });
-      const imageBytes = response.generatedImages?.[0]?.image?.imageBytes;
-      if (!imageBytes) throw new Error("Imagen returned no image data");
-      return { image: Buffer.from(imageBytes, "base64"), source: "imagen" };
+      const prompt = this.buildPrompt(product, context);
+      return await resolveCachedBackground(
+        this.cache,
+        context.seed,
+        { provider: "imagen", model: this.model, prompt, ratio: ratio.value },
+        async () => {
+          const response = await this.ai.models.generateImages({
+            model: this.model,
+            prompt,
+            config: { numberOfImages: 1, aspectRatio: ratio.value },
+          });
+          const imageBytes = response.generatedImages?.[0]?.image?.imageBytes;
+          if (!imageBytes) throw new Error("Imagen returned no image data");
+          return Buffer.from(imageBytes, "base64");
+        },
+        "imagen",
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (this.fallback) {

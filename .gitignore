@@ -29,7 +29,8 @@ coverage/
 SYNC-MIGRATION-REPORT.md
 
 # Generated creative output (binaries; see README) — anchored so the Nitro
-# `server/routes/output/` source dir is NOT ignored.
+# `server/routes/output/` source dir is NOT ignored. The GenAI seed cache lives
+# under /output/cache and is covered by this entry.
 /output/
 /apps/api/output/
 

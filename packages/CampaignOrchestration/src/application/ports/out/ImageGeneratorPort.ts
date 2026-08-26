@@ -11,6 +11,10 @@ export interface BackgroundContext {
   readonly campaignMessage: string;
   readonly targetAudience: string;
   readonly targetRegion: string;
+  /** Variation-plan seed. GenAI adapters hash it into the background cache key. */
+  readonly seed?: number;
+  /** Palette shift in hue-circle turns. Applied only by the procedural generator. */
+  readonly paletteShift?: number;
 }
 
 /** A resolved background plus its provenance (for HITL/telemetry visibility). */
@@ -19,6 +23,8 @@ export interface BackgroundResult {
   readonly image: Uint8Array;
   /** Where the background came from. */
   readonly source: BackgroundSource;
+  /** True when the bytes were served from the seed cache rather than a live call. */
+  readonly cached?: boolean;
 }
 
 /**

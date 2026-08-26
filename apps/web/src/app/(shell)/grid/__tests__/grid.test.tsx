@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach } from "vitest";
 import { screen, waitFor, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, Fragment } from "react";
-import { renderWithRun, seedPersistedRun, makeAsset, exerciseFocusTrap, mockPipelineApi } from "@/__tests__/helpers";
+import { renderWithRun, seedPersistedRun, makeAsset, exerciseFocusTrap, mockPipelineApi, jobOk } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import GridPage from "../page";
 
@@ -53,6 +53,64 @@ describe("GridPage", () => {
     expect(screen.getByText(/✓ 0 approved/)).toBeTruthy();
   });
 
+  test("shows a descriptor chip on variation cells", async () => {
+    seedPersistedRun([
+      makeAsset({
+        variantIndex: 0,
+        treatment: "headline-top-subtle",
+        descriptor: { layout: "headline-top", tone: "subtle", backgroundSource: "procedural", paletteShift: 0.1 },
+      }),
+    ]);
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText("alpha @ 1:1 · v0 · headline-top-subtle")).toBeTruthy();
+    expect(screen.getByText("headline-top · subtle · procedural")).toBeTruthy();
+  });
+
+  test("omits the descriptor chip when a variant has no descriptor", async () => {
+    seedPersistedRun([makeAsset({ variantIndex: 1, treatment: "headline-bottom-bold" })]);
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText("alpha @ 1:1 · v1 · headline-bottom-bold")).toBeTruthy();
+    expect(screen.queryByText(/headline-bottom ·/)).toBeNull();
+  });
+
+  test("a variation re-roll updates the tile in place and clears its decision", async () => {
+    const user = userEvent.setup();
+    const original = makeAsset({
+      variantIndex: 0,
+      attempt: 0,
+      treatment: "headline-top-subtle",
+      outputPath: "alpha/1x1/v0.png",
+    });
+    const rerolled = { ...original, attempt: 1, treatment: "headline-bottom-bold" };
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem(
+      "cf:brief",
+      JSON.stringify({
+        id: "seed",
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "Hi",
+        products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
+      }),
+    );
+    localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/v0": "rejected" }));
+    mockPipelineApi({
+      report: { halted: false, assets: [original], log: { entries: [], campaignId: "seed" } },
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [rerolled],
+          log: { entries: [], campaignId: "seed" },
+        }),
+    });
+    renderWithRun(<Harness />);
+    expect(await screen.findByText("alpha @ 1:1 · v0 · headline-top-subtle")).toBeTruthy();
+    await user.click(screen.getByText("regen"));
+    expect(await screen.findByText("alpha @ 1:1 · v0 · headline-bottom-bold")).toBeTruthy();
+    expect(screen.queryByText("alpha @ 1:1 · v0 · headline-top-subtle")).toBeNull();
+    await waitFor(() => expect(screen.getByText(/✗ 0 rejected/)).toBeTruthy());
+  });
+
   test("approve and reject toggle a creative's decision", async () => {
     const user = userEvent.setup();
     seedPersistedRun([makeAsset()]);
@@ -71,7 +129,7 @@ describe("GridPage", () => {
     renderWithRun(<GridPage />);
     await user.click((await screen.findAllByText("Preview"))[0]);
     const modal = await screen.findByRole("dialog");
-    const meta = within(modal).getByText(/alpha · 1:1 · default/);
+    const meta = within(modal).getByText(/alpha @ 1:1 · default/);
     expect(meta).toBeTruthy();
     // Clicking the image and the metadata must not bubble to the backdrop (stopPropagation).
     await user.click(within(modal).getByRole("img"));

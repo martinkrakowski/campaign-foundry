@@ -1,6 +1,8 @@
+import { join } from "node:path";
 import { loadEnv } from "./env.js";
 import {
   GenerateCampaignUseCase,
+  PlanVariationsUseCase,
   type CampaignBrief,
   type ImageGeneratorPort,
   type PipelineResult,
@@ -8,6 +10,7 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import {
   AssetReusingImageGenerator,
+  FileSystemBackgroundCache,
   FireflyImageGenerator,
   GeminiImageGenerator,
   NodeCanvasCompositor,
@@ -16,7 +19,7 @@ import {
 } from "@campaignfoundry/CreativeGeneration";
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
 import { FileSystemExporter } from "@campaignfoundry/Distribution";
-import { err, type Result } from "@campaignfoundry/shared";
+import type { Result } from "@campaignfoundry/shared";
 import { outputRoot } from "./config.js";
 
 // Load .env before any process.env read below. Called (not a bare side-effect
@@ -52,12 +55,13 @@ export const ALLOWED_IMAGE_MODELS: readonly string[] = [
  * Each GenAI provider is only used when its credentials are present (else it falls
  * through). Adopting Firefly was a one-line addition here — the domain never changed.
  *
- * A future `genai` variation axis decides *whether* GenAI is used for a cell;
+ * The `genai` variation axis decides *whether* GenAI is used for a cell;
  * `selected` (`?model=`) still decides *which* provider. `paletteShift` is
- * applied only by ProceduralBackgroundGenerator and is not wired from the brief.
+ * applied only by ProceduralBackgroundGenerator.
  */
 function imageGenerator(selected?: string): ImageGeneratorPort {
   const procedural = new ProceduralBackgroundGenerator();
+  const cache = new FileSystemBackgroundCache(join(outputRoot(), "cache"));
   const geminiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
   const openRouterKey = process.env.OPENROUTER_API_KEY;
   const fireflyId = process.env.FIREFLY_CLIENT_ID;
@@ -66,7 +70,7 @@ function imageGenerator(selected?: string): ImageGeneratorPort {
   // An OpenRouter generator for a given model, falling back to procedural.
   const openRouter = (model?: string): ImageGeneratorPort =>
     openRouterKey
-      ? new OpenRouterImageGenerator({ apiKey: openRouterKey, model, fallback: procedural })
+      ? new OpenRouterImageGenerator({ apiKey: openRouterKey, model, fallback: procedural, cache })
       : procedural;
 
   // Imagen with the OpenRouter default as its first fallback, then procedural.
@@ -76,6 +80,7 @@ function imageGenerator(selected?: string): ImageGeneratorPort {
           apiKey: geminiKey,
           model: process.env.IMAGEN_MODEL,
           fallback: openRouter(process.env.OPENROUTER_IMAGE_MODEL),
+          cache,
         })
       : openRouter(process.env.OPENROUTER_IMAGE_MODEL);
 
@@ -83,7 +88,12 @@ function imageGenerator(selected?: string): ImageGeneratorPort {
   // its credentials are absent.
   const firefly = (): ImageGeneratorPort =>
     fireflyId && fireflySecret
-      ? new FireflyImageGenerator({ clientId: fireflyId, clientSecret: fireflySecret, fallback: imagen() })
+      ? new FireflyImageGenerator({
+          clientId: fireflyId,
+          clientSecret: fireflySecret,
+          fallback: imagen(),
+          cache,
+        })
       : imagen();
 
   let generator: ImageGeneratorPort;
@@ -102,6 +112,8 @@ function imageGenerator(selected?: string): ImageGeneratorPort {
 export function buildPipeline(imageModel?: string): GenerateCampaignUseCase {
   return new GenerateCampaignUseCase({
     imageGenerator: imageGenerator(imageModel),
+    proceduralGenerator: new ProceduralBackgroundGenerator(),
+    planner: new PlanVariationsUseCase(),
     compositor: new NodeCanvasCompositor(process.env.MESSAGE_FONT),
     compliance: new BrandComplianceChecker(),
     exporter: new FileSystemExporter(outputRoot()),
@@ -110,8 +122,8 @@ export function buildPipeline(imageModel?: string): GenerateCampaignUseCase {
 }
 
 /**
- * Run a campaign. `imageModel` (from `?model=`) selects *which* provider; a
- * future `genai` axis decides *whether* GenAI is used for a cell.
+ * Run a campaign. `imageModel` (from `?model=`) selects *which* provider; the
+ * `genai` axis decides *whether* GenAI is used for a cell.
  * `regenerateOnly` (the HITL re-roll) restricts the run to just those
  * creatives, leaving every other cell untouched.
  */
@@ -120,14 +132,5 @@ export function runCampaign(
   imageModel?: string,
   regenerateOnly?: ReadonlyArray<RegenerationTarget>,
 ): Promise<Result<PipelineResult, Error>> {
-  // Variation briefs parse (so they can be listed and edited) but cannot run yet: the
-  // planner that consumes `variation` lands in Phase 2. Refusing here — for the API
-  // and the CLI alike — keeps a randomized brief from silently producing the classic
-  // product × ratio × treatment matrix.
-  if (brief.mode === "variation") {
-    return Promise.resolve(
-      err(new Error('Variation mode is not executable in this version; use mode "brief".')),
-    );
-  }
   return buildPipeline(imageModel).execute(brief, regenerateOnly ? { regenerateOnly } : undefined);
 }
