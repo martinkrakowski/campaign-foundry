@@ -195,3 +195,24 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Confirmed obsolete: 0.8.0 `sync --check` refuses a dirty tree ("use
     `--allow-dirty`") instead of the old `git reset --hard` — the rollback footgun
     flagged on 2026-06-09 is gone.
+
+---
+
+## 2026-08-25 — brief schema v2 (optional fields + parse allowlist)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `CampaignBrief` gained optional `mode`, `variation`, and `output` (absent =
+    classic behaviour).
+  - `parseBrief` allowlists P0 axes (`layout`, `tone`, `background`,
+    `paletteShift`) and formats (`static`); unsupported axes/formats/`pool://`
+    throw with the name in the message (HTTP 400 via existing generate route).
+  - Documented `?model=` vs future `genai` axis and un-wired `paletteShift` in
+    `pipeline.ts`. Added `briefs/sample-randomized.yaml` (static axes only).
+- **Decisions:**
+  - Nested layout/tone stay `string[]` on the domain type; enum checks live in
+    parseBrief so unsupported axes are rejected at the boundary, not the type.
+  - `count` is validated only when present (not required by `variation: {}`).
+  - Did not invoke the planner, change generation, or relax MINIMUM_PRODUCTS.
+- **Left open:**
+  - Phase J (job handle), Phase 2 (planner / VariationPolicy), pools, motion.
