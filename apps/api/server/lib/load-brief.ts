@@ -11,6 +11,167 @@ import {
 
 const REQUIRED_FIELDS = ["id", "targetRegion", "targetAudience", "campaignMessage", "products"] as const;
 
+/** P0 variation axes. Unsupported keys (headline, motion, duration) fail parse. */
+export const SUPPORTED_AXES = ["layout", "tone", "background", "paletteShift"] as const;
+
+/** P0 output formats. `"motion"` is rejected until that phase lands. */
+export const SUPPORTED_FORMATS = ["static"] as const;
+
+const BACKGROUND_SOURCES = ["procedural", "asset-pool", "genai"] as const;
+const BRIEF_MODES = ["brief", "variation"] as const;
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isFiniteInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function assertFiniteIntegerAtLeast(value: unknown, field: string, min: number): void {
+  if (!isFiniteInteger(value) || value < min) {
+    throw new Error(`Campaign brief field "${field}" must be a finite integer >= ${min}.`);
+  }
+}
+
+function assertAllowedStringArray(value: unknown, field: string, allowed: readonly string[]): void {
+  if (!Array.isArray(value)) {
+    throw new Error(`Campaign brief field "${field}" must be an array.`);
+  }
+  for (const entry of value) {
+    if (typeof entry !== "string" || !allowed.includes(entry)) {
+      throw new Error(`Campaign brief field "${field}" has unsupported value ${JSON.stringify(entry)}.`);
+    }
+  }
+}
+
+function validateMode(value: unknown): void {
+  if (value === undefined) return;
+  if (typeof value !== "string" || !(BRIEF_MODES as readonly string[]).includes(value)) {
+    throw new Error(
+      `Campaign brief field "mode" must be "brief" or "variation"; got ${JSON.stringify(value)}.`,
+    );
+  }
+}
+
+function validateCoverage(value: unknown): void {
+  if (!isPlainObject(value)) {
+    throw new Error('Campaign brief field "variation.coverage" must be an object.');
+  }
+  if (value.perProduct !== undefined) {
+    assertFiniteIntegerAtLeast(value.perProduct, "variation.coverage.perProduct", 0);
+  }
+  if (value.perRatio !== undefined) {
+    assertFiniteIntegerAtLeast(value.perRatio, "variation.coverage.perRatio", 0);
+  }
+}
+
+function validateBackground(value: unknown): void {
+  if (!isPlainObject(value)) {
+    throw new Error('Campaign brief field "variation.axes.background" must be an object.');
+  }
+  if (value.source !== undefined) {
+    assertAllowedStringArray(value.source, "variation.axes.background.source", BACKGROUND_SOURCES);
+  }
+}
+
+function validatePaletteShift(value: unknown): void {
+  if (!Array.isArray(value)) {
+    throw new Error('Campaign brief field "variation.axes.paletteShift" must be an array.');
+  }
+  for (const entry of value) {
+    if (!isFiniteNumber(entry)) {
+      throw new Error('Campaign brief field "variation.axes.paletteShift" must contain finite numbers.');
+    }
+  }
+}
+
+function validateAxes(value: unknown): void {
+  if (!isPlainObject(value)) {
+    throw new Error('Campaign brief field "variation.axes" must be an object.');
+  }
+  for (const key of Object.keys(value)) {
+    if (!(SUPPORTED_AXES as readonly string[]).includes(key)) {
+      throw new Error(`Unsupported variation axis "${key}".`);
+    }
+  }
+  // Copy-pool refs are a headline-axis protocol and are not yet supported.
+  if (JSON.stringify(value).includes("pool://")) {
+    throw new Error('Unsupported variation axis "headline" (pool:// copy pools are not yet supported).');
+  }
+  if (value.layout !== undefined) {
+    assertAllowedStringArray(value.layout, "variation.axes.layout", LAYOUT_VALUES);
+  }
+  if (value.tone !== undefined) {
+    assertAllowedStringArray(value.tone, "variation.axes.tone", TONE_VALUES);
+  }
+  if (value.background !== undefined) {
+    validateBackground(value.background);
+  }
+  if (value.paletteShift !== undefined) {
+    validatePaletteShift(value.paletteShift);
+  }
+}
+
+function validateVariation(value: unknown): void {
+  if (value === undefined) return;
+  if (!isPlainObject(value)) {
+    throw new Error('Campaign brief field "variation" must be an object.');
+  }
+  if (value.count !== undefined) {
+    assertFiniteIntegerAtLeast(value.count, "variation.count", 1);
+  }
+  if (value.seed !== undefined) {
+    if (!isFiniteNumber(value.seed)) {
+      throw new Error('Campaign brief field "variation.seed" must be a finite number.');
+    }
+  }
+  if (value.minDistance !== undefined) {
+    assertFiniteIntegerAtLeast(value.minDistance, "variation.minDistance", 0);
+  }
+  if (value.coverage !== undefined) {
+    validateCoverage(value.coverage);
+  }
+  if (value.axes !== undefined) {
+    validateAxes(value.axes);
+  }
+}
+
+function validateOutput(value: unknown): void {
+  if (value === undefined) return;
+  if (!isPlainObject(value)) {
+    throw new Error('Campaign brief field "output" must be an object.');
+  }
+  if (value.formats !== undefined) {
+    if (!Array.isArray(value.formats) || value.formats.length === 0) {
+      throw new Error('Campaign brief field "output.formats" must be a non-empty array.');
+    }
+    for (const entry of value.formats) {
+      if (typeof entry !== "string" || !(SUPPORTED_FORMATS as readonly string[]).includes(entry)) {
+        throw new Error(`Unsupported output format ${JSON.stringify(entry)}.`);
+      }
+    }
+  }
+  if (value.platforms !== undefined) {
+    if (!Array.isArray(value.platforms) || value.platforms.length === 0) {
+      throw new Error(
+        'Campaign brief field "output.platforms" must be a non-empty array of non-empty strings.',
+      );
+    }
+    for (const entry of value.platforms) {
+      if (typeof entry !== "string" || entry.length === 0) {
+        throw new Error(
+          'Campaign brief field "output.platforms" must be a non-empty array of non-empty strings.',
+        );
+      }
+    }
+  }
+}
+
 /** Structurally validate the optional `treatments` array, when present. */
 function validateTreatments(value: unknown): void {
   if (value === undefined) return;
@@ -69,6 +230,9 @@ export function parseBrief(data: unknown): CampaignBrief {
     }
   }
   validateTreatments(record.treatments);
+  validateMode(record.mode);
+  validateVariation(record.variation);
+  validateOutput(record.output);
   return record as unknown as CampaignBrief;
 }
 

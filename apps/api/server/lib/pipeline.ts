@@ -51,6 +51,10 @@ export const ALLOWED_IMAGE_MODELS: readonly string[] = [
  *
  * Each GenAI provider is only used when its credentials are present (else it falls
  * through). Adopting Firefly was a one-line addition here — the domain never changed.
+ *
+ * A future `genai` variation axis decides *whether* GenAI is used for a cell;
+ * `selected` (`?model=`) still decides *which* provider. `paletteShift` is
+ * applied only by ProceduralBackgroundGenerator and is not wired from the brief.
  */
 function imageGenerator(selected?: string): ImageGeneratorPort {
   const procedural = new ProceduralBackgroundGenerator();
@@ -105,8 +109,9 @@ export function buildPipeline(imageModel?: string): GenerateCampaignUseCase {
 }
 
 /**
- * Run a campaign. `imageModel` (from the UI's model picker) selects the primary
- * generator; `regenerateOnly` (the HITL re-roll) restricts the run to just those
+ * Run a campaign. `imageModel` (from `?model=`) selects *which* provider; a
+ * future `genai` axis decides *whether* GenAI is used for a cell.
+ * `regenerateOnly` (the HITL re-roll) restricts the run to just those
  * creatives, leaving every other cell untouched.
  */
 export function runCampaign(
