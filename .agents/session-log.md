@@ -791,3 +791,43 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Left open:**
   - The grid descriptor chip for `headline` (short, title-cased) is lane A's
     one-line follow-up (`feat/motion-generation` owns the grid).
+
+## 2026-08-26 — PR #58 Qodo review fixes, round 2 (motion generation, branch feat/motion-generation)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `VariationPolicy`: with `formats: motion` an absent `axes.motion` defaults to
+    every `MOTION_KINDS` entry; an explicitly empty axis is an `err` ("select at
+    least one motion kind"). The parser rejects the same contradiction with a 400
+    (`validateMotionAxisRequested`). Static briefs are untouched.
+  - Parser `validateFormatPlatformCompatibility`: every requested format needs a
+    platform that packages it and every platform needs a requested format
+    (`formats` defaults to `[static]`); the 400 names both sides.
+  - `axisProductSize` for mixed plans is base × (|motion| × |duration| +
+    (mixStatic ? 1 : 0)) — the still slot is no longer multiplied by |duration|.
+  - `CanvasFfmpegVideoCompositor`: on timeout the gate is released and the work
+    dir removed only after the child's `close` (SIGTERM → SIGKILL still
+    escalates), so ffmpeg processes never exceed `MAX_CONCURRENT_ENCODES`.
+  - `isPersistedAsset`: `format` ∈ {absent, static, motion}; motion rows need a
+    string `videoPath` and a finite `durationSec`; unknown formats are skipped
+    and counted (never packaged as stills).
+  - Export page: a selected platform counts only while visible; nothing visible
+    selected → Package disabled ("Select a platform first"); the zip link follows
+    the packaged platform.
+  - Grid `MotionCell`: `playing` flips only after `video.play()` resolves; a
+    rejection keeps the play control and shows a "can't play" status that clears
+    on the next successful start.
+  - README Motion section documents the formats rule, the compatibility check,
+    the corrected size formula, and the review/export behaviour.
+- **Decisions:**
+  - The empty-axis rejection is scoped to briefs whose `formats` include motion;
+    `motion: []` on a static brief stays inert (nothing to contradict).
+  - The compatibility check runs whenever `output.platforms` is set, so a
+    platform list without `formats` is checked against the static default —
+    `platforms: [instagram-reel]` alone is a 400, not a silent all-stills run.
+  - Waiting on `close` after SIGKILL is unbounded on purpose: the kernel
+    guarantees the exit, and a bounded wait would reintroduce the race.
+- **Left open:**
+  - The domain still tolerates `formats: [motion]` + all-static platforms via
+    `motionRatios: []` (every variant a still) — unreachable through the parser
+    now, kept as the documented domain edge.
