@@ -1,0 +1,15 @@
+{
+  "briefId": "sample-pooled",
+  "generatedAt": "2026-08-26T00:00:00.000Z",
+  "model": "hand-curated",
+  "entries": [
+    { "id": "h1", "text": "Stay wild. Stay hydrated.", "status": "approved" },
+    { "id": "h2", "text": "Every trail deserves a cold sip.", "status": "approved" },
+    {
+      "id": "h3",
+      "text": "Guaranteed to cure your thirst forever.",
+      "status": "rejected",
+      "reason": "Prohibited term: \"guaranteed\""
+    }
+  ]
+}

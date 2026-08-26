@@ -1,0 +1,39 @@
+# Randomized sample with pooled headlines. `headline: pool://copy` is the only
+# supported pool reference: at plan time the planner draws each variant's headline
+# from the APPROVED entries of `briefs/sample-pooled/pools.json` (rejected entries
+# are never selectable), and `headline` joins the Hamming-distance axes. A missing
+# or empty pool fails the plan loud (422 on `POST /campaigns/plan`, a failed job on
+# generate). Generate a real pool with `POST /campaigns/pools/copy` (needs
+# OPENROUTER_API_KEY) or curate the checked-in one via PATCH; static platforms only.
+id: sample-pooled
+targetRegion: DE
+targetAudience: Urban outdoor enthusiasts, 25-40
+campaignMessage: Stay wild. Stay hydrated.
+localizedMessage: Bleib wild. Bleib hydriert.
+products:
+  - id: hydra-bottle
+    name: Hydra Bottle
+    primaryColor: "#1473E6"
+    logoPath: assets/inputs/hydra-logo.png
+  - id: trail-pack
+    name: Trail Pack
+    primaryColor: "#E0218A"
+    logoPath: assets/inputs/trail-logo.png
+mode: variation
+variation:
+  count: 12
+  seed: 7
+  minDistance: 2
+  coverage:
+    perProduct: 1
+    perRatio: 1
+  axes:
+    layout: [headline-top, headline-bottom]
+    tone: [bold, subtle]
+    background:
+      source: [procedural]
+    paletteShift: [0, 0.1]
+    headline: pool://copy   # approved entries of briefs/sample-pooled/pools.json
+output:
+  formats: [static]
+  platforms: [instagram-feed, linkedin, x]
