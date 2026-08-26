@@ -286,3 +286,23 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Refused: clock injection into `PipelineExecutionLog` (D14 keeps the exemption for wave 1), a `JobStore` port at the composition root (edge concern, single implementation), `Result<T,E>` as the job wire shape, dropping `done/total` (agreed Phase J shape).
 - **Left open:**
   - Follow-ups noted in the plan's wave-1 status: clock injection, one `mockPipelineApi` test fixture, real progress from `PipelineExecutionLog.totalOperations`. Worktrees `../cf-wt-*` remain until the PRs merge.
+
+## 2026-08-25 — briefs API (Phase 1.1–1.2)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `POST /campaigns/briefs` (409 unless `?replace=1`), `PUT /campaigns/briefs/:id`,
+    `POST /campaigns/briefs/:id/duplicate`, `POST /campaigns/assets`.
+  - Write helpers: confined path resolve, yaml dump in sample key order, asset
+    name/magic/size checks. README authoring curl block. Route tests under
+    `mkdtemp` `PROJECT_ROOT`.
+- **Decisions:**
+  - PUT rewrites existing `.yaml`/`.yml` only (404 on JSON-only); JSON is
+    replaced via `POST ?replace=1` which writes `<id>.yaml`.
+  - Asset `name` is `SAFE_ID_PATTERN` plus `.(png|jpg|jpeg)`. Writes only under
+    `assets/inputs/<briefId>/` (demo logos at `assets/inputs/*.png` cannot be
+    overwritten). Local-tool trust model in the route doc.
+  - Decoded size is capped at 2 MiB (413) before magic so a huge payload is
+    rejected without a header scan.
+- **Left open:**
+  - Phase 1.3–1.6 UI (Save to briefs/, BriefPicker create/duplicate, wizard).
