@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CopyPool } from "@campaignfoundry/CampaignOrchestration";
@@ -99,5 +99,61 @@ describe("copy pool persistence", () => {
     mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
     writeFileSync(join(dir, "briefs", "camp", "pools.json"), "{not-json");
     await expect(readPool("camp")).rejects.toThrow();
+  });
+  test("concurrent writePool calls use distinct temp files and both settle", async () => {
+    const { writePool, readPool } = await filesFor(dir);
+    await Promise.all([
+      writePool(pool()),
+      writePool(pool({ entries: [{ id: "h2", text: "Stay hydrated", status: "approved" }] })),
+    ]);
+    expect((await readPool("camp"))?.entries).toHaveLength(1);
+    expect(readdirSync(join(dir, "briefs", "camp"))).toEqual(["pools.json"]);
+  });
+
+  test("withPoolLock runs sections for one brief in order and does not block other briefs", async () => {
+    const { withPoolLock } = await filesFor(dir);
+    const order: string[] = [];
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const first = withPoolLock("camp", async () => {
+      await gate;
+      order.push("first");
+      return 1;
+    });
+    const second = withPoolLock("camp", async () => {
+      order.push("second");
+      return 2;
+    });
+    const other = withPoolLock("other", async () => {
+      order.push("other");
+      return 3;
+    });
+    expect(await other).toBe(3);
+    expect(order).toEqual(["other"]);
+    release();
+    expect(await Promise.all([first, second])).toEqual([1, 2]);
+    expect(order).toEqual(["other", "first", "second"]);
+  });
+
+  test("withPoolLock keeps serving a brief after a section rejects", async () => {
+    const { withPoolLock } = await filesFor(dir);
+    await expect(
+      withPoolLock("camp", async () => {
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    expect(await withPoolLock("camp", async () => "ok")).toBe("ok");
+  });
+
+  test("isPoolDirSymlink is false when missing or a real dir, true for a symlink, and rethrows other errors", async () => {
+    const { isPoolDirSymlink } = await filesFor(dir);
+    expect(await isPoolDirSymlink("camp")).toBe(false);
+    mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
+    expect(await isPoolDirSymlink("camp")).toBe(false);
+    symlinkSync(join(dir, "briefs", "camp"), join(dir, "briefs", "linked"));
+    expect(await isPoolDirSymlink("linked")).toBe(true);
+    await expect(isPoolDirSymlink("../escape")).rejects.toThrow(/Path escapes the allowed directory/);
   });
 });
