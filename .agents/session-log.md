@@ -286,3 +286,16 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Refused: clock injection into `PipelineExecutionLog` (D14 keeps the exemption for wave 1), a `JobStore` port at the composition root (edge concern, single implementation), `Result<T,E>` as the job wire shape, dropping `done/total` (agreed Phase J shape).
 - **Left open:**
   - Follow-ups noted in the plan's wave-1 status: clock injection, one `mockPipelineApi` test fixture, real progress from `PipelineExecutionLog.totalOperations`. Worktrees `../cf-wt-*` remain until the PRs merge.
+
+## 2026-08-25 — inject log clock (D14 follow-up)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `PipelineExecutionLog` constructor is now `(campaignId, now)`; `startedAt` / `record` / `complete` call `now()`. No default clock in the domain.
+  - `GenerateCampaignDeps.now` is required; `buildPipeline` supplies `() => new Date()`. Tests use a fixed/sequenced fake clock and assert exact timestamps.
+  - Dropped the CampaignOrchestration eslint ignore of `PipelineExecutionLog.vo.ts` (manifest template + `yarn sync`).
+- **Decisions:**
+  - No `now` default in the use case either — application/use-cases is under the same deterministic-core lint.
+  - Composition root is the only place that may close over `new Date()`.
+- **Left open:**
+  - none for this follow-up.
