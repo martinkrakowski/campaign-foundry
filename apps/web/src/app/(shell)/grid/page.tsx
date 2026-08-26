@@ -21,10 +21,20 @@ const videoSrc = (a: Asset & { videoPath: string }, version: number): string =>
 
 const isMotion = (a: Asset): a is Asset & { videoPath: string } => typeof a.videoPath === "string";
 
-/** Start playback without surfacing the autoplay rejection browsers raise on unmuted media. */
-const startPlayback = (video: HTMLVideoElement): void => {
+/**
+ * Start playback; resolves true once the browser has actually started playing and
+ * false when it refused (autoplay policy, unsupported source). Older engines
+ * return nothing from `play()` — treat that as started.
+ */
+const startPlayback = async (video: HTMLVideoElement): Promise<boolean> => {
   const pending = video.play();
-  if (pending !== undefined) void pending.catch(() => {});
+  if (pending === undefined) return true;
+  try {
+    await pending;
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 const stopPlayback = (video: HTMLVideoElement): void => {
@@ -548,15 +558,20 @@ function MotionCell({
   // it is mounted (the first render has none) — no null guard on every handler.
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const [playing, setPlaying] = useState(false);
+  const [playFailed, setPlayFailed] = useState(false);
   const label = assetLabel(asset);
 
+  // `playing` flips only once `play()` has resolved, so a refused playback keeps
+  // the play control (and shows why) instead of a pause control over a still poster.
   const controls =
     video === null
       ? undefined
       : {
           play: () => {
-            startPlayback(video);
-            setPlaying(true);
+            void startPlayback(video).then((started) => {
+              setPlaying(started);
+              setPlayFailed(!started);
+            });
           },
           stop: () => {
             stopPlayback(video);
@@ -578,6 +593,14 @@ function MotionCell({
         className="block h-auto w-full"
       />
       {children}
+      {playFailed && !playing && (
+        <span
+          role="status"
+          className="absolute bottom-2 left-2 z-20 rounded border border-error/50 bg-black/70 px-2 py-1 font-mono text-[10px] text-error"
+        >
+          can&apos;t play
+        </span>
+      )}
       <button
         type="button"
         onClick={playing ? controls?.stop : controls?.play}

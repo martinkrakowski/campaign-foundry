@@ -329,7 +329,8 @@ describe("GridPage — motion cells", () => {
 
     fireEvent.mouseEnter(tile);
     expect(play).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: `Pause ${LABEL}`, pressed: true })).toBeTruthy();
+    // The control flips to "playing" only once play() has resolved.
+    expect(await screen.findByRole("button", { name: `Pause ${LABEL}`, pressed: true })).toBeTruthy();
     video.currentTime = 3;
     fireEvent.mouseLeave(tile);
     expect(pause).toHaveBeenCalledTimes(1);
@@ -340,16 +341,17 @@ describe("GridPage — motion cells", () => {
     screen.getByRole("button", { name: `Play ${LABEL}` }).focus();
     await user.keyboard("{Enter}");
     expect(play).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole("button", { name: `Pause ${LABEL}`, pressed: true }).textContent).toBe("❚❚ 6s");
+    expect((await screen.findByRole("button", { name: `Pause ${LABEL}`, pressed: true })).textContent).toBe("❚❚ 6s");
     await user.keyboard("{Enter}");
     expect(pause).toHaveBeenCalledTimes(2);
     expect(screen.getByRole("button", { name: `Play ${LABEL}`, pressed: false }).textContent).toBe("▶ 6s");
   });
 
-  test("tolerates a play() that returns nothing or rejects (autoplay policy)", async () => {
+  test("a play() that returns nothing counts as playing; a rejected play() keeps the play control and shows a hint", async () => {
     const play = vi.spyOn(HTMLMediaElement.prototype, "play");
     play.mockImplementationOnce(() => undefined as unknown as Promise<void>);
     play.mockImplementationOnce(() => Promise.reject(new Error("NotAllowedError")));
+    play.mockImplementationOnce(() => Promise.resolve());
     const user = userEvent.setup();
     seedPersistedRun([makeMotionAsset({ durationSec: undefined, descriptor: { layout: "headline-top", tone: "bold", backgroundSource: "procedural", paletteShift: 0, motion: "headline-rise" } })]);
     renderWithRun(<GridPage />);
@@ -357,11 +359,17 @@ describe("GridPage — motion cells", () => {
     expect(button.textContent).toContain("clip");
     expect(screen.getByText("headline-rise · ?s")).toBeTruthy();
     button.focus();
-    await user.keyboard("{Enter}"); // play() → undefined
+    await user.keyboard("{Enter}"); // play() → undefined (old engine): treated as started
+    expect(await screen.findByRole("button", { name: `Pause ${LABEL}`, pressed: true })).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
     await user.keyboard("{Enter}"); // pause
-    await user.keyboard("{Enter}"); // play() → rejected promise, swallowed
+    await user.keyboard("{Enter}"); // play() → rejected: not playing, hint shown
     expect(play).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole("button", { name: `Pause ${LABEL}`, pressed: true })).toBeTruthy();
+    expect(await screen.findByRole("status")).toHaveProperty("textContent", "can't play");
+    expect(screen.getByRole("button", { name: `Play ${LABEL}`, pressed: false })).toBeTruthy();
+    await user.keyboard("{Enter}"); // play() → resolves: the hint clears
+    expect(await screen.findByRole("button", { name: `Pause ${LABEL}`, pressed: true })).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   test("the chip falls back to the asset duration when the descriptor lacks one", async () => {
