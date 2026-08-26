@@ -479,3 +479,21 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Left open:**
   - Lane A lands `POST /campaigns/plan`; until then the estimate panel shows "estimate unavailable" on 404.
 
+---
+
+## 2026-08-26 — PR #51 review findings (brief save + wizard)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `/brief` merges editor drafts over loaded products by id (keeps `inputAsset` and other optional fields) and re-initialises the form when `brief.id` changes. Save is disabled while `form.id !== brief.id`.
+  - Wizard policy validation matches `VariationPolicy.fromBrief` (seed uint32, minDistance 0–6, coverage ≥ 0). Empty axis selections block Next instead of omitting the axis (omitted = planner defaults).
+  - Logo uploads are named `<productId>-<stem>.<ext>`; a 409 for that name is treated as success. Product drafts have a stable `key` for React keys and async upload dispatch; Remove is disabled while that product's upload is in flight.
+  - YAML preview quotes scalars js-yaml would retype. EstimatePanel passes `AbortSignal` into `planCampaign` and aborts on edit/unmount; the leave-step test uses fake timers.
+  - Stepper sets `aria-current="step"` and moves focus to the step heading after Next/Back.
+  - Removed unused `updateBrief`; collapsed `BriefWriteResult` into `BriefEntry`; `fileToBase64` uses `FileReader.readAsDataURL`.
+- **Decisions:**
+  - Left `PUT /campaigns/briefs/:id` unwired — create + `?replace=1` still covers persist. Dropped the unused client helper rather than adding a second save path.
+  - Left the 404 → "estimate unavailable" branch as the network/absent fallback (route exists on `main`).
+- **Left open:**
+  - none for this review pass.
+
