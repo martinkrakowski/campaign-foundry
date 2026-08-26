@@ -1,8 +1,9 @@
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { completeJob, createJob, failJob, hasRunningJob, runJob } from "../../lib/jobs.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
+import { outputRoot } from "../../lib/config.js";
 import { ALLOWED_IMAGE_MODELS, runCampaign } from "../../lib/pipeline.js";
-import { writeReport } from "../../lib/report.js";
+import { readReport, writeReport } from "../../lib/report.js";
 
 /**
  * POST /campaigns/generate — validates the brief, starts an in-process run, and
@@ -11,9 +12,20 @@ import { writeReport } from "../../lib/report.js";
  *
  * Body is either a bare campaign brief, or an envelope `{ brief, regenerateOnly }`
  * where `regenerateOnly` (the HITL re-roll) restricts the run to just those creatives
- * and merges them into the persisted report. An optional `?model=` query selects the
- * primary image model (else the default fallback chain).
+ * and merges them into the persisted report. A variation re-roll is pinned to the
+ * persisted report's `policyHash`: if the pool or policy changed since that run the
+ * job fails ("Plan changed since the last run …") instead of overlaying one slot onto
+ * a different base plan. An optional `?model=` query selects the primary image model
+ * (else the default fallback chain).
  */
+
+/** The persisted report's policyHash for a variation re-roll, else undefined (no pin). */
+async function persistedPolicyHash(brief: CampaignBrief, reroll: boolean): Promise<string | undefined> {
+  if (!reroll || brief.mode !== "variation") return undefined;
+  const report = await readReport(outputRoot(), brief.id);
+  const hash = typeof report === "object" && report !== null ? (report as { policyHash?: unknown }).policyHash : undefined;
+  return typeof hash === "string" ? hash : undefined;
+}
 export default defineEventHandler(async (event) => {
   let brief: CampaignBrief;
   let regenerateOnly: ReturnType<typeof parseRegenerateOnly>;
@@ -49,7 +61,8 @@ export default defineEventHandler(async (event) => {
 
   const jobId = createJob(brief.id);
   runJob(jobId, async () => {
-    const result = await runCampaign(brief, imageModel, regenerateOnly);
+    const expectedPolicyHash = await persistedPolicyHash(brief, regenerateOnly !== undefined);
+    const result = await runCampaign(brief, imageModel, regenerateOnly, expectedPolicyHash);
     if (!result.success) {
       failJob(jobId, result.error.message);
       return;
