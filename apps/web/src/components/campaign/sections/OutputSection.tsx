@@ -14,16 +14,24 @@ export function OutputSection({ state, dispatch, errors }: { state: EditorState;
         <div>
           <h3 className="mb-2 font-mono text-[11px] uppercase tracking-widest text-text-muted">Formats</h3>
           <div className="flex gap-2">
-            {["static", "motion"].map((format) => (
-              <Button
-                key={format}
-                variant={state.formats.includes(format) ? "primary" : "secondary"}
-                size="sm"
-                onClick={() => dispatch({ type: "toggleFormat", value: format })}
-              >
-                {format}
-              </Button>
-            ))}
+            {["static", "motion"].map((format) => {
+              // Motion needs kinds and durations to be valid, and those controls arrive
+              // in E2.3. Offering the toggle here would strand the draft in a state that
+              // can never save. A brief that already declares motion still shows it.
+              const deferred = format === "motion";
+              return (
+                <Button
+                  key={format}
+                  variant={state.formats.includes(format) ? "primary" : "secondary"}
+                  size="sm"
+                  disabled={deferred}
+                  title={deferred ? "Motion output is configured in the variation policy section." : undefined}
+                  onClick={() => dispatch({ type: "toggleFormat", value: format })}
+                >
+                  {format}
+                </Button>
+              );
+            })}
           </div>
           {errors.formats ? <p className="mt-1 text-[11px] text-error">{errors.formats}</p> : null}
         </div>

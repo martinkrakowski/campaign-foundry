@@ -17,6 +17,7 @@ import {
   fromBrief,
   isDirtySinceSave,
   isDirtySinceApply,
+  isPristine,
   getDraftKey,
   saveDraftToStorage,
   loadDraftFromStorage,
@@ -576,5 +577,85 @@ describe("temp ids", () => {
       vi.stubGlobal("crypto", original);
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("variation policy round-trip", () => {
+  const randomized = {
+    id: "camp",
+    targetRegion: "DE",
+    targetAudience: "a",
+    campaignMessage: "Hi",
+    products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "l.png" }],
+    mode: "variation",
+    variation: {
+      count: 40,
+      seed: 7,
+      minDistance: 3,
+      coverage: { perProduct: 2, perRatio: 5 },
+      axes: {
+        layout: ["headline-top"],
+        tone: ["subtle"],
+        background: { source: ["genai"] },
+        paletteShift: [0.2],
+        headline: HEADLINE_POOL_REF,
+        motion: ["ken-burns-in"],
+        duration: [6],
+      },
+    },
+  } as unknown as CampaignBrief;
+
+  test("a loaded randomized brief keeps its policy instead of reverting to defaults", () => {
+    const state = fromBrief(randomized, { file: "camp.yaml" });
+    expect(state.variation).toMatchObject({
+      count: "40",
+      seed: "7",
+      minDistance: "3",
+      perProduct: "2",
+      perRatio: "5",
+      layout: ["headline-top"],
+      tone: ["subtle"],
+      background: ["genai"],
+      paletteShift: [0.2],
+      headline: true,
+    });
+    expect(state.motion).toEqual(["ken-burns-in"]);
+    expect(state.duration).toEqual([6]);
+  });
+
+  test("saving it back produces the same policy — no silent rewrite", () => {
+    const round = toBrief(fromBrief(randomized, { file: "camp.yaml" }));
+    expect(round.variation).toEqual(randomized.variation);
+  });
+
+  test("a randomized brief with only a count keeps the optional fields absent", () => {
+    const sparse = {
+      ...randomized,
+      variation: { count: 5, axes: { layout: ["headline-top"], tone: ["bold"], background: { source: ["procedural"] }, paletteShift: [0] } },
+    } as unknown as CampaignBrief;
+    const state = fromBrief(sparse, { file: "camp.yaml" });
+    expect(state.variation).toMatchObject({ count: "5", seed: "", minDistance: "", perProduct: "", perRatio: "" });
+    expect(state.motion).toEqual([]);
+    expect(toBrief(state).variation).toEqual(sparse.variation);
+  });
+
+  test("a classic brief still gets the editor's randomized defaults", () => {
+    const state = fromBrief(savedBrief(), { file: "camp.yaml" });
+    expect(state.variation).toMatchObject({ count: "12", minDistance: "2", perProduct: "1", perRatio: "1" });
+  });
+});
+
+describe("restore", () => {
+  test("reinstates a recovered draft wholesale", () => {
+    const draft = { ...base(), briefId: "recovered", campaignMessage: "from storage" };
+    expect(reduce(base(), { type: "restore", state: draft })).toBe(draft);
+  });
+});
+
+describe("isPristine", () => {
+  test("is true for a freshly opened editor and false once anything is typed", () => {
+    expect(isPristine(initialEditorState())).toBe(true);
+    expect(isPristine(initialEditorState("variation"))).toBe(true);
+    expect(isPristine(reduce(base(), { type: "patch", patch: { briefId: "x" } }))).toBe(false);
   });
 });

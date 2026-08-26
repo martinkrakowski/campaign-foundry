@@ -42,6 +42,11 @@ export function validateIdentity(state: EditorState, existingIds?: string[]): Fi
   if (!SAFE_ID_PATTERN.test(state.briefId)) {
     errors.briefId = "Lowercase letters, digits and hyphens only (max 64) — used as the reload key.";
   }
+  // Region and audience are rendered by the Identity section, so their errors belong to
+  // it — filed under Copy they would never reach their inputs, and the error strip would
+  // scroll past the fields actually blocking Save.
+  if (state.targetRegion.trim() === "") errors.targetRegion = "Target region is required.";
+  if (state.targetAudience.trim() === "") errors.targetAudience = "Target audience is required.";
   if (existingIds) {
     const conflictingId = state.briefId;
     if (state.source.kind === "new") {
@@ -64,8 +69,6 @@ export function validateIdentity(state: EditorState, existingIds?: string[]): Fi
 
 export function validateCopy(state: EditorState): FieldErrors {
   const errors: FieldErrors = {};
-  if (state.targetRegion.trim() === "") errors.targetRegion = "Target region is required.";
-  if (state.targetAudience.trim() === "") errors.targetAudience = "Target audience is required.";
   if (state.campaignMessage.trim() === "") errors.campaignMessage = "Campaign message is required.";
   return errors;
 }

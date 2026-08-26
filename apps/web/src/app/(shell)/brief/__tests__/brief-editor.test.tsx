@@ -3,6 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRun, json } from "@/__tests__/helpers";
 import { API } from "@/lib/run-context";
+import { fromBrief, saveDraftToStorage } from "@/components/campaign/editor-state";
 import BriefPage from "../page";
 
 const brief = (id: string) => ({
@@ -33,6 +34,25 @@ const routes = (handlers: { list?: () => Response; post?: () => Response; put?: 
     return Promise.resolve(json({}, 404));
   });
   return calls;
+};
+
+/** The editor adopts the shell's active brief only after the listing arrives. */
+const waitForEditorReady = async () =>
+  waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).not.toBe(""));
+
+const fillValidDraft = async (user: ReturnType<typeof userEvent.setup>, id = "fresh") => {
+  await user.type(screen.getByLabelText("Brief ID"), id);
+  await user.type(screen.getByLabelText("Target Region"), "DE");
+  await user.type(screen.getByLabelText("Target Audience"), "a");
+  await user.type(screen.getByLabelText("Campaign Message"), "Hi");
+  const names = screen.getAllByLabelText("Name");
+  await user.type(names[0], "A");
+  await user.type(names[1], "B");
+  const logos = screen
+    .getAllByLabelText("Logo Path")
+    .filter((el) => el.tagName === "INPUT" && el.getAttribute("type") !== "file");
+  await user.type(logos[0], "a.png");
+  await user.type(logos[1], "b.png");
 };
 
 describe("BriefPage — data flow", () => {
@@ -84,20 +104,7 @@ describe("BriefPage — data flow", () => {
     const calls = routes({});
     renderWithRun(<BriefPage />);
 
-    await user.type(screen.getByLabelText("Brief ID"), "fresh");
-    await user.type(screen.getByLabelText("Target Region"), "DE");
-    await user.type(screen.getByLabelText("Target Audience"), "a");
-    await user.type(screen.getByLabelText("Campaign Message"), "Hi");
-    const names = screen.getAllByLabelText("Name");
-    await user.type(names[0], "A");
-    await user.type(names[1], "B");
-    // the "Logo Path" label wraps the text field, the hidden file input AND the
-    // Upload button, so narrow to the text fields before indexing by product
-    const logos = screen
-      .getAllByLabelText("Logo Path")
-      .filter((el) => el.tagName === "INPUT" && el.getAttribute("type") !== "file");
-    await user.type(logos[0], "a.png");
-    await user.type(logos[1], "b.png");
+    await fillValidDraft(user);
 
     const save = screen.getByText("Save & apply").closest("button") as HTMLButtonElement;
     await waitFor(() => expect(save.disabled).toBe(false));
@@ -122,6 +129,7 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<BriefPage />);
+    await fillValidDraft(user);
 
     await user.click(screen.getByRole("button", { name: "Save as..." }));
     await user.type(screen.getByLabelText("New brief id"), "copy");
@@ -135,6 +143,7 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({ post: () => json({ error: "already exists" }, 409) });
     renderWithRun(<BriefPage />);
+    await fillValidDraft(user);
 
     await user.click(screen.getByRole("button", { name: "Save as..." }));
     await user.type(screen.getByLabelText("New brief id"), "copy");
@@ -148,6 +157,7 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({});
     renderWithRun(<BriefPage />);
+    await fillValidDraft(user);
 
     await user.click(screen.getByRole("button", { name: "Save as..." }));
     await user.click(screen.getByRole("button", { name: "Cancel" }));
@@ -175,6 +185,7 @@ describe("BriefPage — data flow", () => {
     renderWithRun(<BriefPage />);
 
     expect(screen.getByText("Draft not applied")).toBeTruthy();
+    await fillValidDraft(user);
     await user.click(screen.getByText("Apply to run"));
     await waitFor(() => expect(screen.queryByText("Draft not applied")).toBeNull());
   });
@@ -204,8 +215,12 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({});
     renderWithRun(<BriefPage />);
+    await waitForEditorReady();
 
-    // a blank draft fails identity, so the strip is present
+    // The editor opens on the shell's active brief, which is valid — clear a required
+    // field so Identity actually has something to report.
+    await user.clear(screen.getByLabelText("Target Region"));
+
     // "Identity" labels a table-of-contents button too, and both carry a count badge —
     // so pick the chip out of the ErrorStrip by its pill styling.
     await screen.findAllByRole("button", { name: /Identity/ });
@@ -223,20 +238,196 @@ describe("BriefPage — data flow", () => {
 
   test("an error chip for a section that has no panel is a no-op, not a crash", async () => {
     const user = userEvent.setup();
-    routes({});
+    // A randomized brief whose policy is invalid raises Policy errors, but E1 renders no
+    // policy panel (it arrives in E2.2) — so the chip's scroll target does not exist.
+    const randomized = {
+      file: "rand.yaml",
+      revision: "r1",
+      brief: {
+        ...brief("rand"),
+        mode: "variation",
+        variation: {
+          count: 0,
+          axes: { layout: ["headline-top"], tone: ["bold"], background: { source: ["procedural"] }, paletteShift: [0] },
+        },
+      },
+    };
+    routes({ list: () => json({ briefs: [randomized] }) });
     renderWithRun(<BriefPage />);
 
-    // Requesting the motion format raises motion errors, but the editor renders no
-    // "motion" panel — so the chip's scroll target does not exist.
-    await user.click(screen.getByRole("button", { name: "motion" }));
-    const chip = (await screen.findAllByRole("button", { name: /Motion/ })).find((b) =>
-      /Motion\s*\d/.test(b.textContent ?? ""),
+    await user.click(screen.getByText("New brief..."));
+    await user.click(await screen.findByText("rand"));
+
+    const chip = (await screen.findAllByRole("button", { name: /Policy/ })).find((b) =>
+      /Policy/.test(b.textContent ?? ""),
     ) as HTMLElement;
     expect(chip).toBeTruthy();
-    expect(document.getElementById("motion")).toBeNull();
+    expect(document.getElementById("policy")).toBeNull();
 
     await user.click(chip);
     expect(chip).toBeTruthy();
+  });
+
+  test("unsaved edits come back when the brief they belong to is reopened", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+
+    // what the auto-save would have written while editing "camp"
+    const edited = fromBrief(brief("camp") as never, { file: "camp.yaml", revision: "r1" });
+    saveDraftToStorage({ ...edited, campaignMessage: "unsaved work" });
+
+    renderWithRun(<BriefPage />);
+    await user.click(screen.getAllByText(/^(New brief\.\.\.|summer-hydration-2026)$/)[0]);
+    await user.click(await screen.findByText("camp"));
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Message") as HTMLInputElement).value).toBe("unsaved work"),
+    );
+  });
+
+  test("declining the prompt keeps the current draft when selecting another brief", async () => {
+    const user = userEvent.setup();
+    globalThis.confirm = vi.fn(() => false);
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<BriefPage />);
+
+    await user.type(screen.getByLabelText("Campaign Message"), "!");
+    const before = (screen.getByLabelText("Brief ID") as HTMLInputElement).value;
+
+    await user.click(screen.getAllByText(/^(New brief\.\.\.|summer-hydration-2026)$/)[0]);
+    await user.click(await screen.findByText("camp"));
+
+    expect(globalThis.confirm).toHaveBeenCalled();
+    expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(before);
+  });
+
+  test("declining the prompt keeps the current draft when starting a new brief", async () => {
+    const user = userEvent.setup();
+    globalThis.confirm = vi.fn(() => false);
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<BriefPage />);
+
+    await user.type(screen.getByLabelText("Campaign Message"), "!");
+    const before = (screen.getByLabelText("Brief ID") as HTMLInputElement).value;
+
+    await user.click(screen.getAllByText(/^(New brief\.\.\.|summer-hydration-2026)$/)[0]);
+    await user.click(screen.getAllByText("New brief...").slice(-1)[0]);
+
+    expect(globalThis.confirm).toHaveBeenCalled();
+    expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(before);
+  });
+
+  test("Apply, Save and Save as… all refuse an invalid draft", async () => {
+    const user = userEvent.setup();
+    const calls = routes({});
+    renderWithRun(<BriefPage />);
+
+    await user.clear(screen.getByLabelText("Target Region"));
+    const apply = screen.getByText("Apply to run").closest("button") as HTMLButtonElement;
+    const save = screen.getByText("Save & apply").closest("button") as HTMLButtonElement;
+    const saveAs = screen.getByText("Save as...").closest("button") as HTMLButtonElement;
+    await waitFor(() => expect(apply.disabled).toBe(true));
+    expect(save.disabled).toBe(true);
+    expect(saveAs.disabled).toBe(true);
+    expect(calls.some((c) => c.method !== "GET")).toBe(false);
+  });
+
+  test("Save as… onto an existing id asks before overwriting, and honours a refusal", async () => {
+    const user = userEvent.setup();
+    globalThis.confirm = vi.fn(() => false);
+    const calls = routes({ list: () => json({ briefs: [entry("taken", "r1")] }) });
+    renderWithRun(<BriefPage />);
+    await waitForEditorReady();
+
+    await user.click(screen.getByRole("button", { name: "Save as..." }));
+    await user.type(screen.getByLabelText("New brief id"), "taken");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(globalThis.confirm).toHaveBeenCalled();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  test("accepting the overwrite retries with ?replace=1", async () => {
+    const user = userEvent.setup();
+    globalThis.confirm = vi.fn(() => true);
+    const calls = routes({ list: () => json({ briefs: [entry("taken", "r1")] }) });
+    renderWithRun(<BriefPage />);
+    await waitForEditorReady();
+
+    await user.click(screen.getByRole("button", { name: "Save as..." }));
+    await user.type(screen.getByLabelText("New brief id"), "taken");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.url).toContain("replace=1"));
+  });
+
+  test("a 409 from a brief that appeared since the list was fetched offers the same overwrite", async () => {
+    const user = userEvent.setup();
+    globalThis.confirm = vi.fn(() => true);
+    let posts = 0;
+    const calls = routes({
+      post: () => {
+        posts += 1;
+        return posts === 1 ? json({ error: "already exists" }, 409) : json({ file: "copy.yaml", brief: brief("copy") }, 201);
+      },
+    });
+    renderWithRun(<BriefPage />);
+    await waitForEditorReady();
+
+    await user.click(screen.getByRole("button", { name: "Save as..." }));
+    await user.type(screen.getByLabelText("New brief id"), "copy");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(posts).toBe(2));
+    expect(calls.filter((c) => c.method === "POST")[1].url).toContain("replace=1");
+  });
+
+  test("refusing the 409 overwrite leaves the copy unwritten", async () => {
+    const user = userEvent.setup();
+    globalThis.confirm = vi.fn(() => false);
+    let posts = 0;
+    routes({
+      post: () => {
+        posts += 1;
+        return json({ error: "already exists" }, 409);
+      },
+    });
+    renderWithRun(<BriefPage />);
+    await waitForEditorReady();
+
+    await user.click(screen.getByRole("button", { name: "Save as..." }));
+    await user.type(screen.getByLabelText("New brief id"), "copy");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(posts).toBe(1));
+    expect(screen.getByLabelText("New brief id")).toBeTruthy();
+  });
+
+  test("a non-409 Save as… failure is reported", async () => {
+    const user = userEvent.setup();
+    globalThis.confirm = vi.fn(() => true);
+    routes({ post: () => json({ error: "disk full" }, 500) });
+    renderWithRun(<BriefPage />);
+    await waitForEditorReady();
+
+    await user.click(screen.getByRole("button", { name: "Save as..." }));
+    await user.type(screen.getByLabelText("New brief id"), "copy");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText(/disk full/)).toBeTruthy();
+  });
+
+  test("the active brief is re-attached to its file when the listing knows it", async () => {
+    const calls = routes({ list: () => json({ briefs: [entry("summer-hydration-2026", "rev-live")] }) });
+    renderWithRun(<BriefPage />);
+
+    // the shell's active brief appears in the listing, so the editor adopts that entry's
+    // file identity and can save conditionally rather than as a new draft
+    await waitFor(() => expect(screen.getByLabelText("Brief ID").hasAttribute("readonly")).toBe(true));
+
+    const user = userEvent.setup();
+    await user.click(screen.getByText("Save & apply"));
+    await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.url).toContain("revision=rev-live"));
   });
 
   test("the mode toggle switches between classic and randomized", async () => {

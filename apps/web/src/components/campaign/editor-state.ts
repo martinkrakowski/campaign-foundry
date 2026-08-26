@@ -134,7 +134,8 @@ export type EditorAction =
   | { type: "setPool"; briefId: string; pool: CopyPool | null }
   | { type: "load"; brief: CampaignBrief; entry?: { file: string; revision?: string } }
   | { type: "apply" }
-  | { type: "save" }
+  | { type: "save"; saved?: CampaignBrief }
+  | { type: "restore"; state: EditorState }
   | { type: "discard" }
   | { type: "setCapabilities"; capabilities: { motion: boolean; reason?: string } };
 
@@ -302,8 +303,12 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case "apply": {
       return { ...state, appliedSnapshot: toBrief(state) };
     }
+    case "restore":
+      return action.state;
     case "save": {
-      const savedSnapshot = toBrief(state);
+      // Snapshot what was actually persisted, not whatever the reducer holds when the
+      // response lands — edits made during the request must stay dirty.
+      const savedSnapshot = action.saved ?? toBrief(state);
       const source: EditorSource = state.source.kind === "file" 
         ? { ...state.source, savedSnapshot }
         : { kind: "file", file: `${state.briefId}.yaml`, loadedId: state.briefId, savedSnapshot, revision: undefined };
@@ -362,16 +367,24 @@ export function toBrief(state: EditorState): CampaignBrief {
   const minDistance = parseInt(state.variation.minDistance, 10);
   const perProduct = parseInt(state.variation.perProduct, 10);
   const perRatio = parseInt(state.variation.perRatio, 10);
+  // Build the object first and drop it when nothing survives: blank inputs parse to NaN,
+  // which is neither > 0 nor === 0, and would otherwise emit an empty `coverage: {}`.
+  const coverageFields = {
+    ...(perProduct > 0 ? { perProduct } : {}),
+    ...(perRatio > 0 ? { perRatio } : {}),
+  };
   const coverage =
-    perProduct === 0 && perRatio === 0
-      ? undefined
-      : ({ ...(perProduct > 0 ? { perProduct } : {}), ...(perRatio > 0 ? { perRatio } : {}) } as VariationPolicy["coverage"]);
+    Object.keys(coverageFields).length > 0 ? (coverageFields as VariationPolicy["coverage"]) : undefined;
   const axes = {
     layout: [...state.variation.layout],
     tone: [...state.variation.tone],
     background: { source: [...state.variation.background] },
     paletteShift: [...state.variation.paletteShift],
     ...(state.variation.headline ? { headline: HEADLINE_POOL_REF } : {}),
+    // D12: a loaded motion brief keeps its motion fields verbatim even on a host with
+    // no controls for them, so saving never strips what the file already declared.
+    ...(state.motion.length > 0 ? { motion: [...state.motion] } : {}),
+    ...(state.duration.length > 0 ? { duration: [...state.duration] } : {}),
   };
   return {
     ...withCopy,
@@ -394,6 +407,14 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
   const treatments = brief.treatments?.map((t) => ({ id: t.id, layout: t.layout, tone: t.tone })) ?? [];
   const formats = [...(brief.output?.formats ?? ["static"])];
   const platforms = [...(brief.output?.platforms ?? [...STATIC_PLATFORMS])];
+  // Carry the persisted variation policy back into the draft. Defaulting these would
+  // silently rewrite a randomized brief's policy the first time it was saved, even
+  // though E1 renders no controls for them yet (they arrive in E2.2 / E2.3).
+  const variation = brief.variation;
+  const axes = variation?.axes as Record<string, unknown> | undefined;
+  const num = (value: unknown): string => (typeof value === "number" ? String(value) : "");
+  const list = <T,>(value: unknown, fallback: T[]): T[] => (Array.isArray(value) ? [...(value as T[])] : fallback);
+  const coverage = variation?.coverage as { perProduct?: number; perRatio?: number } | undefined;
   return {
     source,
     mode: brief.mode ?? "brief",
@@ -405,19 +426,19 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
     products,
     treatments,
     variation: {
-      count: "12",
-      seed: "",
-      minDistance: "2",
-      perProduct: "1",
-      perRatio: "1",
-      layout: [...LAYOUT_OPTIONS],
-      tone: [...TONE_OPTIONS],
-      background: ["procedural"],
-      paletteShift: [...PALETTE_SHIFT_OPTIONS],
-      headline: false,
+      count: variation ? String(variation.count) : "12",
+      seed: num(variation?.seed),
+      minDistance: variation?.minDistance === undefined ? (variation ? "" : "2") : String(variation.minDistance),
+      perProduct: coverage ? num(coverage.perProduct) : variation ? "" : "1",
+      perRatio: coverage ? num(coverage.perRatio) : variation ? "" : "1",
+      layout: list(axes?.layout, [...LAYOUT_OPTIONS]),
+      tone: list(axes?.tone, [...TONE_OPTIONS]),
+      background: list((axes?.background as { source?: unknown } | undefined)?.source, ["procedural"]),
+      paletteShift: list(axes?.paletteShift, [...PALETTE_SHIFT_OPTIONS]),
+      headline: axes?.headline === HEADLINE_POOL_REF,
     },
-    motion: [],
-    duration: [],
+    motion: list(axes?.motion, []),
+    duration: list(axes?.duration, []),
     formats,
     platforms,
     pool: null,
@@ -425,6 +446,15 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
     appliedSnapshot: null,
     capabilities: null,
   };
+}
+
+/**
+ * True when the draft still matches a freshly-opened editor in the same mode. A new
+ * source counts as dirty by definition, so this is what "has the user actually typed
+ * anything?" has to ask before prompting or auto-saving.
+ */
+export function isPristine(state: EditorState): boolean {
+  return JSON.stringify(toBrief(state)) === JSON.stringify(toBrief(initialEditorState(state.mode)));
 }
 
 export function isDirtySinceSave(state: EditorState): boolean {

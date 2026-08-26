@@ -38,6 +38,19 @@ describe("BriefPage E1 Features", () => {
   test("Save as... opens dialog", async () => {
     const user = userEvent.setup();
     renderWithRun(<BriefPage />);
+    // Save as… is disabled while the draft has validation errors, so fill it in first.
+    await user.type(screen.getByLabelText("Brief ID"), "fresh");
+    await user.type(screen.getByLabelText("Target Region"), "DE");
+    await user.type(screen.getByLabelText("Target Audience"), "a");
+    await user.type(screen.getByLabelText("Campaign Message"), "Hi");
+    const names = screen.getAllByLabelText("Name");
+    await user.type(names[0], "A");
+    await user.type(names[1], "B");
+    const logos = screen
+      .getAllByLabelText("Logo Path")
+      .filter((el) => el.tagName === "INPUT" && el.getAttribute("type") !== "file");
+    await user.type(logos[0], "a.png");
+    await user.type(logos[1], "b.png");
     // Once the dialog is open, "Save as..." matches both the action-bar button and
     // the dialog heading — query by role so each assertion names the one it means.
     await user.click(screen.getByRole("button", { name: "Save as..." }));

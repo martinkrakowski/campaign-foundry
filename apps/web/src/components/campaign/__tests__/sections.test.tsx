@@ -74,10 +74,28 @@ describe("OutputSection", () => {
     const dispatch = vi.fn();
     render(<OutputSection state={state()} dispatch={dispatch} errors={{}} />);
 
-    await user.click(screen.getByRole("button", { name: "motion" }));
-    expect(dispatch).toHaveBeenCalledWith({ type: "toggleFormat", value: "motion" });
+    await user.click(screen.getByRole("button", { name: "static" }));
+    expect(dispatch).toHaveBeenCalledWith({ type: "toggleFormat", value: "static" });
     await user.click(screen.getByRole("button", { name: "linkedin" }));
     expect(dispatch).toHaveBeenCalledWith({ type: "togglePlatform", value: "linkedin" });
+  });
+
+  test("motion cannot be selected here — its controls arrive with the policy section", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    render(<OutputSection state={state()} dispatch={dispatch} errors={{}} />);
+
+    const motion = screen.getByRole("button", { name: "motion" }) as HTMLButtonElement;
+    expect(motion.disabled).toBe(true);
+    await user.click(motion);
+    expect(dispatch).not.toHaveBeenCalledWith({ type: "toggleFormat", value: "motion" });
+  });
+
+  test("a brief that already declares motion still shows it as selected", () => {
+    render(<OutputSection state={state({ formats: ["static", "motion"] })} dispatch={vi.fn()} errors={{}} />);
+    const motion = screen.getByRole("button", { name: "motion" });
+    const staticFmt = screen.getByRole("button", { name: "static" });
+    expect(motion.className).toBe(staticFmt.className.replace(/\s*$/, ""));
   });
 
   test("an unselected platform renders in the secondary style", () => {

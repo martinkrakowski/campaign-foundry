@@ -75,10 +75,16 @@ describe("validateIdentity", () => {
 });
 
 describe("validateCopy", () => {
-  test("region, audience and message are all required", () => {
+  test("only the campaign message belongs to Copy — its section renders it", () => {
     expect(validateCopy(valid())).toEqual({});
-    const empty = validateCopy(valid({ targetRegion: " ", targetAudience: "", campaignMessage: "  " }));
-    expect(Object.keys(empty).sort()).toEqual(["campaignMessage", "targetAudience", "targetRegion"]);
+    expect(Object.keys(validateCopy(valid({ campaignMessage: "  " })))).toEqual(["campaignMessage"]);
+  });
+
+  test("region and audience are filed under Identity, where their inputs live", () => {
+    const errors = validateIdentity(valid({ targetRegion: " ", targetAudience: "" }));
+    expect(errors.targetRegion).toMatch(/Target region is required/);
+    expect(errors.targetAudience).toMatch(/Target audience is required/);
+    expect(validateCopy(valid({ targetRegion: " ", targetAudience: "" }))).toEqual({});
   });
 });
 
@@ -232,9 +238,10 @@ describe("aggregation", () => {
     expect(hasSectionErrors(clean, "nonexistent")).toBe(false);
     expect(getTotalErrorCount(clean)).toBe(0);
 
+    // both of these now land in Identity, which is where their inputs are rendered
     const broken = validateState(valid({ briefId: "Bad Id", targetRegion: "" }));
     expect(hasErrors(broken.identity)).toBe(true);
-    expect(hasSectionErrors(broken, "copy")).toBe(true);
+    expect(hasSectionErrors(broken, "copy")).toBe(false);
     expect(getTotalErrorCount(broken)).toBe(2);
   });
 });

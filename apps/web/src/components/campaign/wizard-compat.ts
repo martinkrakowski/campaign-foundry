@@ -249,11 +249,14 @@ export function toBrief(state: WizardState): CampaignBrief {
   const minDistance = parseInt(state.variation.minDistance, 10);
   const perProduct = parseInt(state.variation.perProduct, 10);
   const perRatio = parseInt(state.variation.perRatio, 10);
+  // Match the editor exactly: only positive values are a coverage rule, and an empty
+  // result is omitted rather than serialized as `coverage: {}`.
+  const coverageFields = {
+    ...(perProduct > 0 ? { perProduct } : {}),
+    ...(perRatio > 0 ? { perRatio } : {}),
+  };
   const coverage =
-    (isNaN(perProduct) && isNaN(perRatio)) ? undefined : ({
-      ...(!isNaN(perProduct) ? { perProduct } : {}),
-      ...(!isNaN(perRatio) ? { perRatio } : {}),
-    } as VariationPolicy["coverage"]);
+    Object.keys(coverageFields).length > 0 ? (coverageFields as VariationPolicy["coverage"]) : undefined;
 
   const axes = {
     layout: [...state.variation.layout],

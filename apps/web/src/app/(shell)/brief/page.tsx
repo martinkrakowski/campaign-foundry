@@ -1,12 +1,29 @@
 "use client";
 
-import { useReducer, useState, useEffect, useCallback } from "react";
+import { useReducer, useState, useEffect } from "react";
 import { Button } from "@/components/ui";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { useRun } from "@/lib/run-context";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
-import { listBriefs, createBrief, updateBrief, unknownErrorMessage, type BriefEntry } from "@/lib/briefs-api";
-import { editorReducer, initialEditorState, toBrief, isDirtySinceSave, saveDraftToStorage, purgeDraftFromStorage } from "@/components/campaign/editor-state";
+import {
+  listBriefs,
+  createBrief,
+  updateBrief,
+  unknownErrorMessage,
+  isBriefsApiError,
+  type BriefEntry,
+} from "@/lib/briefs-api";
+import {
+  editorReducer,
+  initialEditorState,
+  toBrief,
+  isDirtySinceSave,
+  isPristine,
+  getDraftKey,
+  saveDraftToStorage,
+  loadDraftFromStorage,
+  purgeDraftFromStorage,
+} from "@/components/campaign/editor-state";
 import { validateState, getTotalErrorCount, type FieldErrors } from "@/components/campaign/validate";
 import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, OutputSection } from "@/components/campaign/sections";
 import { StatusChip } from "@/components/campaign/StatusChip";
@@ -14,12 +31,15 @@ import { TableOfContents } from "@/components/campaign/TableOfContents";
 import { ErrorStrip } from "@/components/campaign/ErrorStrip";
 import { BriefSelector } from "@/components/campaign/BriefSelector";
 
+const LEAVE_PROMPT = "You have unsaved changes. Are you sure you want to leave?";
+
 export default function BriefPage() {
-  const { setBrief: setRunBrief } = useRun();
+  const { brief: runBrief, setBrief: setRunBrief } = useRun();
   const { setDirty } = useEditorDirty();
   const [state, dispatch] = useReducer(editorReducer, initialEditorState());
   const [errors, setErrors] = useState<Record<string, FieldErrors>>({});
   const [briefs, setBriefs] = useState<BriefEntry[]>([]);
+  const [briefsLoaded, setBriefsLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [persistError, setPersistError] = useState<string | undefined>();
   const [saveAsId, setSaveAsId] = useState<string | null>(null);
@@ -33,6 +53,35 @@ export default function BriefPage() {
     return () => window.removeEventListener("focus", handleFocus);
   }, []);
 
+  // D11 recovery: reinstate an auto-saved draft, once per draft key and only when it
+  // actually differs from what is on screen. Keying on the draft rather than on mount
+  // matters — a new draft's key contains a temp id minted at mount, so an unsaved edit
+  // is only ever recoverable once the editor has settled on the brief it belongs to.
+  const draftKey = getDraftKey(state);
+  useEffect(() => {
+    const draft = loadDraftFromStorage(state);
+    if (draft && JSON.stringify(draft) !== JSON.stringify(state)) {
+      dispatch({ type: "restore", state: draft });
+    }
+  }, [draftKey]);
+
+  // The shell's picker and the sidebar's Edit both set the run-context brief. Follow it
+  // so the editor never sits on stale content while /brief is mounted; never over a
+  // dirty draft, and re-attach the file identity from the listing when we have it.
+  useEffect(() => {
+    // Wait for the listing: syncing before it arrives would adopt the brief without its
+    // file identity, and the editor would then be too dirty to re-attach it.
+    if (!briefsLoaded) return;
+    const loadedId = state.source.kind === "file" ? state.source.loadedId : undefined;
+    if (loadedId === runBrief.id || (!isPristine(state) && isDirtySinceSave(state))) return;
+    const match = briefs.find((entry) => entry.brief.id === runBrief.id);
+    dispatch({
+      type: "load",
+      brief: match ? match.brief : runBrief,
+      ...(match ? { entry: { file: match.file, revision: match.revision } } : {}),
+    });
+  }, [runBrief, briefs, briefsLoaded]);
+
   // Validate on state change
   useEffect(() => {
     const existingIds = briefs.map((b) => b.brief.id);
@@ -40,14 +89,17 @@ export default function BriefPage() {
     setErrors(validationErrors);
   }, [state, briefs]);
 
-  // Update dirty state
+  // Update dirty state. The provider outlives this route, so clear the flag on unmount —
+  // otherwise every later navigation in the shell keeps prompting.
   useEffect(() => {
-    const dirty = isDirtySinceSave(state);
-    setDirty(dirty);
+    setDirty(isDirtySinceSave(state));
+    return () => setDirty(false);
   }, [state, setDirty]);
 
-  // Auto-save on state change
+  // Auto-save, but only for a draft that has actually diverged from a pristine editor.
+  // Writing unconditionally would recreate the key that Save and Discard just purged.
   useEffect(() => {
+    if (isPristine(state)) return;
     saveDraftToStorage(state);
   }, [state]);
 
@@ -57,16 +109,26 @@ export default function BriefPage() {
       setBriefs(entries);
     } catch (error) {
       console.error("Failed to load briefs:", error);
+    } finally {
+      setBriefsLoaded(true);
     }
   };
 
-  const loadBrief = useCallback((entry: BriefEntry) => {
+  const totalErrors = getTotalErrorCount(errors);
+
+  /** Every path that replaces the draft goes through the same D14 confirmation. */
+  const confirmReplace = (): boolean =>
+    isPristine(state) || !isDirtySinceSave(state) || window.confirm(LEAVE_PROMPT);
+
+  const loadBrief = (entry: BriefEntry) => {
+    if (!confirmReplace()) return;
     // Carry the revision through: handleSave sends it back as the conditional-write
     // guard, so dropping it here would silently downgrade every save to last-write-wins.
     dispatch({ type: "load", brief: entry.brief, entry: { file: entry.file, revision: entry.revision } });
-  }, []);
+  };
 
   const createNew = () => {
+    if (!confirmReplace()) return;
     // No entry means `fromBrief` produces a "new" source, which is what a blank draft is.
     dispatch({
       type: "load",
@@ -90,7 +152,11 @@ export default function BriefPage() {
       } else {
         await createBrief(brief);
       }
-      dispatch({ type: "save" });
+      // D3: "Save & apply" does both. Pass the brief that was actually persisted so
+      // edits made while the request was in flight stay dirty.
+      dispatch({ type: "save", saved: brief });
+      dispatch({ type: "apply" });
+      setRunBrief(brief);
       purgeDraftFromStorage(state);
       await loadBriefs();
     } catch (error) {
@@ -106,7 +172,24 @@ export default function BriefPage() {
     try {
       const brief = toBrief(state);
       const newBrief = { ...brief, id: newId };
-      await createBrief(newBrief);
+      // D9: Save as… posts the *current draft* under the new id. A collision is offered
+      // as an explicit overwrite rather than silently failing; the API's 409 is the
+      // backstop for a brief that appeared since the list was fetched.
+      const taken = briefs.some((entry) => entry.brief.id === newId);
+      if (taken && !window.confirm(`A brief with id "${newId}" already exists. Overwrite it?`)) {
+        setSaving(false);
+        return;
+      }
+      try {
+        await createBrief(newBrief, taken ? { replace: true } : {});
+      } catch (error) {
+        if (!isBriefsApiError(error) || error.status !== 409) throw error;
+        if (!window.confirm(`A brief with id "${newId}" already exists. Overwrite it?`)) {
+          setSaving(false);
+          return;
+        }
+        await createBrief(newBrief, { replace: true });
+      }
       dispatch({ type: "load", brief: newBrief, entry: { file: `${newId}.yaml` } });
       purgeDraftFromStorage(state);
       await loadBriefs();
@@ -122,8 +205,6 @@ export default function BriefPage() {
     dispatch({ type: "discard" });
     purgeDraftFromStorage(state);
   };
-
-  const totalErrors = getTotalErrorCount(errors);
 
   const scrollToFirstError = (section: string) => {
     const element = document.getElementById(section);
@@ -206,13 +287,13 @@ export default function BriefPage() {
       {/* Sticky action bar */}
       <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-background p-4">
         <div className="mx-auto flex max-w-5xl items-center gap-3">
-          <Button onClick={handleApply}>
+          <Button onClick={handleApply} disabled={totalErrors > 0}>
             Apply to run
           </Button>
           <Button variant="secondary" onClick={() => void handleSave()} disabled={saving || totalErrors > 0}>
             {saving ? "Saving..." : "Save & apply"}
           </Button>
-          <Button variant="secondary" onClick={() => setSaveAsId("")}>
+          <Button variant="secondary" onClick={() => setSaveAsId("")} disabled={totalErrors > 0}>
             Save as...
           </Button>
           <Button variant="ghost" onClick={handleDiscard}>
@@ -248,7 +329,7 @@ export default function BriefPage() {
               autoFocus
             />
             <div className="flex gap-2">
-              <Button onClick={() => handleSaveAs(saveAsId)} disabled={saving || !saveAsId}>
+              <Button onClick={() => handleSaveAs(saveAsId)} disabled={saving || !saveAsId || totalErrors > 0}>
                 Save
               </Button>
               <Button variant="ghost" onClick={() => setSaveAsId(null)}>
