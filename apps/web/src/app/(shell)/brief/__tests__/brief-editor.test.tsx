@@ -5,10 +5,10 @@ import { renderWithRun, json } from "@/__tests__/helpers";
 import { API } from "@/lib/run-context";
 import { fromBrief, saveDraftToStorage } from "@/components/campaign/editor-state";
 import BriefPage from "../page";
-import { useEditorOutline } from "@/lib/editor-outline-context";
+import { useEditorPanels } from "@/lib/editor-panels-context";
 
-/** Places the sections the page publishes to the left bar (Variation policy, Output). */
-const BarPanels = () => useEditorOutline().outline?.panels ?? null;
+/** Places the sections the page publishes to the left bar (the variation policy). */
+const BarPanels = () => useEditorPanels().panels ?? null;
 /** The page plus the bar panels it publishes, as a user would see them together. */
 const Editor = () => (
   <>
@@ -594,6 +594,22 @@ describe("BriefPage — data flow", () => {
     const panel = pre.closest(".sticky") as HTMLElement;
     expect(panel).toBeTruthy();
     expect(panel.className).toMatch(/overflow-y-auto/);
+  });
+
+  test("the policy accordion counts its issues, singular and plural", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<Editor />);
+    await waitForEditorReady();
+    await user.click(screen.getByText("Randomized"));
+
+    // empty an axis entirely → one issue; empty a second → two
+    await user.click(await screen.findByRole("button", { name: "headline-top" }));
+    await user.click(screen.getByRole("button", { name: "headline-bottom" }));
+    await waitFor(() => expect(screen.getByText("1 issue")).toBeTruthy());
+    await user.click(screen.getByRole("button", { name: "bold" }));
+    await user.click(screen.getByRole("button", { name: "subtle" }));
+    await waitFor(() => expect(screen.getByText("2 issues")).toBeTruthy());
   });
 
   test("the mode toggle switches between classic and randomized", async () => {

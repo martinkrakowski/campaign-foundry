@@ -6,6 +6,7 @@ import { renderWithRun, seedPersistedRun, nextMock, exerciseFocusTrap, makeAsset
 import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { Accordion } from "../Accordion";
 import { Sidebar, BrowseBriefsButton, SidebarContent } from "../Sidebar";
+import { useEditorPanels } from "@/lib/editor-panels-context";
 import { Header } from "../Header";
 import { MobileMenu } from "../MobileMenu";
 
@@ -51,6 +52,38 @@ describe("Sidebar", () => {
     // Picker isn't rendered here, but openBriefPicker is wired — clicking shouldn't throw.
     await user.click(screen.getByText("Browse briefs"));
     expect(screen.getByText("Browse briefs")).toBeTruthy();
+  });
+});
+
+describe("Sidebar — editor panels", () => {
+  test("shows nothing extra when no editor is publishing panels", () => {
+    seedPersistedRun([makeAsset()]);
+    renderWithRun(<SidebarContent />);
+    // the bar's own sections only — no separator, no placed panel
+    expect(screen.getByText("Campaign Brief")).toBeTruthy();
+    expect(screen.getByText("Project Bin")).toBeTruthy();
+    expect(screen.queryByText("Variation Policy")).toBeNull();
+  });
+
+  test("places the panels an editor publishes, after Project Bin", () => {
+    const Publish = () => {
+      const { setPanels } = useEditorPanels();
+      useEffect(() => {
+        setPanels(<p>policy lives here</p>);
+        return () => setPanels(null);
+      }, [setPanels]);
+      return null;
+    };
+    seedPersistedRun([makeAsset()]);
+    renderWithRun(
+      <>
+        <Publish />
+        <SidebarContent />
+      </>,
+    );
+    const placed = screen.getByText("policy lives here");
+    const bin = screen.getByText("Project Bin");
+    expect(bin.compareDocumentPosition(placed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 

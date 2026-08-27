@@ -1,11 +1,10 @@
 "use client";
 
 import type { Dispatch } from "react";
-import { Input } from "@/components/ui";
+import { Button, Input, Slider, Stepper } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
-import type { FieldErrors } from "@/components/campaign/validate";
-import { maxMinDistance } from "@/components/campaign/validate";
+import { axisProductSize, maxMinDistance, type FieldErrors } from "@/components/campaign/validate";
 import { SectionShell, Field } from "./IdentitySection";
 import {
   LAYOUT_OPTIONS,
@@ -100,55 +99,95 @@ function HeadlineAxisToggle({ state, dispatch }: { state: EditorState; dispatch:
 
 export function PolicySection({ state, dispatch, errors, compact = false }: { state: EditorState; dispatch: Dispatch<EditorAction>; errors: FieldErrors; compact?: boolean }) {
   if (state.mode !== "variation") return null;
+  const axisMax = axisProductSize(state);
 
   return (
     <SectionShell id="policy" title="4 · Variation Policy" errorCount={Object.keys(errors).length} compact={compact}>
       <div className="space-y-6">
-        <div className={compact ? "grid grid-cols-1 gap-3" : "grid grid-cols-1 gap-4 sm:grid-cols-3"}>
-          <Field label="Count" error={errors.count}>
-            <Input
-              type="number"
-              value={state.variation.count}
-              onChange={(e) => dispatch({ type: "setVariation", field: "count", value: e.target.value })}
+        <div className={compact ? "space-y-4" : "grid grid-cols-1 gap-4 sm:grid-cols-3"}>
+          <Field
+            label="Count"
+            error={errors.count}
+            hint={`How many creatives to draw — at most ${axisMax} from these axes`}
+          >
+            <Slider
+              aria-label="Count"
+              min={1}
+              max={axisMax}
+              value={Number.parseInt(state.variation.count, 10) || 1}
               invalid={Boolean(errors.count)}
-            />
-          </Field>
-          <Field label="Seed (optional)" error={errors.seed}>
-            <Input
-              type="number"
-              value={state.variation.seed}
-              onChange={(e) => dispatch({ type: "setVariation", field: "seed", value: e.target.value })}
-              invalid={Boolean(errors.seed)}
+              onChange={(value) => dispatch({ type: "setVariation", field: "count", value: String(value) })}
             />
           </Field>
           <Field
-            label="Min Distance"
+            label="Min distance"
             error={errors.minDistance}
-            hint={`Whole numbers, 0–${maxMinDistance(state)} — the number of active axes`}
+            hint={`How many axes any two creatives must differ in — up to ${maxMinDistance(state)}, the active axes`}
           >
-            <Input
-              type="number"
+            <Stepper
+              aria-label="Min distance"
+              min={0}
+              max={maxMinDistance(state)}
               value={state.variation.minDistance}
-              onChange={(e) => dispatch({ type: "setVariation", field: "minDistance", value: e.target.value })}
               invalid={Boolean(errors.minDistance)}
+              allowUnset
+              unsetLabel="Auto (1)"
+              onChange={(value) => dispatch({ type: "setVariation", field: "minDistance", value })}
             />
+          </Field>
+          <Field label="Seed" error={errors.seed} hint="Fixes the draw, so the same brief plans the same creatives">
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                placeholder="Auto"
+                value={state.variation.seed}
+                invalid={Boolean(errors.seed)}
+                onChange={(e) => dispatch({ type: "setVariation", field: "seed", value: e.target.value })}
+              />
+              <Button
+                variant="secondary"
+                size="sm"
+                aria-label={state.variation.seed.trim() === "" ? "Pick a seed" : "Clear the seed"}
+                onClick={() =>
+                  dispatch({
+                    type: "setVariation",
+                    field: "seed",
+                    value: state.variation.seed.trim() === "" ? String(Math.floor(Math.random() * 0xffffffff)) : "",
+                  })
+                }
+              >
+                {state.variation.seed.trim() === "" ? "Pick" : "Clear"}
+              </Button>
+            </div>
           </Field>
         </div>
-        <div className={compact ? "grid grid-cols-1 gap-3" : "grid grid-cols-1 gap-4 sm:grid-cols-2"}>
-          <Field label="Coverage per Product" error={errors.perProduct}>
-            <Input
-              type="number"
+        <div className={compact ? "space-y-4" : "grid grid-cols-1 gap-4 sm:grid-cols-2"}>
+          <Field
+            label="Coverage per product"
+            error={errors.perProduct}
+            hint="Fewest creatives each product must get"
+          >
+            <Stepper
+              aria-label="Coverage per product"
+              min={0}
+              max={Math.max(1, Number.parseInt(state.variation.count, 10) || 1)}
               value={state.variation.perProduct}
-              onChange={(e) => dispatch({ type: "setVariation", field: "perProduct", value: e.target.value })}
               invalid={Boolean(errors.perProduct)}
+              allowUnset
+              unsetLabel="No floor"
+              onChange={(value) => dispatch({ type: "setVariation", field: "perProduct", value })}
             />
           </Field>
-          <Field label="Coverage per Ratio" error={errors.perRatio}>
-            <Input
-              type="number"
+          <Field label="Coverage per ratio" error={errors.perRatio} hint="Fewest creatives each aspect ratio must get">
+            <Stepper
+              aria-label="Coverage per ratio"
+              min={0}
+              max={Math.max(1, Number.parseInt(state.variation.count, 10) || 1)}
               value={state.variation.perRatio}
-              onChange={(e) => dispatch({ type: "setVariation", field: "perRatio", value: e.target.value })}
               invalid={Boolean(errors.perRatio)}
+              allowUnset
+              unsetLabel="No floor"
+              onChange={(value) => dispatch({ type: "setVariation", field: "perRatio", value })}
             />
           </Field>
         </div>

@@ -1,5 +1,6 @@
 import { describe, test, expect } from "vitest";
 import {
+  axisProductSize,
   maxMinDistance,
   motionUnavailableReason,
   validateIdentity,
@@ -68,6 +69,55 @@ describe("motionUnavailableReason", () => {
     expect(motionUnavailableReason(valid({ capabilities: { motion: false }, formats: ["motion"] }))).toBe(
       "Motion format is not available: capability off.",
     );
+  });
+});
+
+describe("axisProductSize", () => {
+  test("multiplies the axes a static brief draws from", () => {
+    // 2 products × 3 ratios × 2 layouts × 2 tones × 1 background × 3 palette shifts
+    expect(axisProductSize(valid())).toBe(2 * 3 * 2 * 2 * 1 * 3);
+  });
+
+  test("a motion-only brief is limited to the ratios its motion platforms package", () => {
+    const reel = valid({
+      formats: ["motion"],
+      platforms: ["instagram-reel"],
+      motion: ["ken-burns-in"],
+      duration: [4],
+    });
+    // instagram-reel is 9:16, so one ratio — and one motion kind × one duration
+    expect(axisProductSize(reel)).toBe(2 * 1 * 2 * 2 * 1 * 3 * 1);
+
+    // a second motion platform at the same ratio adds nothing; tiktok is 9:16 too
+    expect(axisProductSize({ ...reel, platforms: ["instagram-reel", "tiktok"] })).toBe(axisProductSize(reel));
+  });
+
+  test("a mixed brief keeps every ratio and adds the still slot", () => {
+    const mixed = valid({
+      formats: ["static", "motion"],
+      platforms: ["instagram-feed", "instagram-reel"],
+      motion: ["ken-burns-in", "ken-burns-out"],
+      duration: [4, 6],
+    });
+    // 2 kinds × 2 durations + 1 still = 5 on the motion axis, and all three ratios
+    expect(axisProductSize(mixed)).toBe(2 * 3 * 2 * 2 * 1 * 3 * 5);
+  });
+
+  test("unknown platform ids and a motion format with no kinds do not collapse it to zero", () => {
+    const unknown = valid({ formats: ["motion"], platforms: ["myspace"], motion: ["ken-burns-in"] });
+    expect(axisProductSize(unknown)).toBeGreaterThan(0);
+    const noKinds = valid({ formats: ["motion"], platforms: ["instagram-reel"], motion: [] });
+    expect(axisProductSize(noKinds)).toBeGreaterThan(0);
+  });
+
+  test("the headline axis multiplies by the approved pool", () => {
+    const base = valid();
+    const pooled = {
+      ...base,
+      variation: { ...base.variation, headline: true },
+      pool: { entries: [{ id: "a", text: "x", status: "approved" }, { id: "b", text: "y", status: "approved" }] },
+    } as unknown as typeof base;
+    expect(axisProductSize(pooled)).toBe(axisProductSize(base) * 2);
   });
 });
 

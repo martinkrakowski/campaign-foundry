@@ -1,5 +1,5 @@
 import type { EditorState } from "./editor-state";
-import { LAYOUT_OPTIONS, TONE_OPTIONS } from "./editor-state";
+import { LAYOUT_OPTIONS, TONE_OPTIONS, approvedHeadlines } from "./editor-state";
 import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
 
 export const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -12,6 +12,43 @@ export type FieldErrors = Record<string, string>;
 
 const UINT32_MAX = 0xffffffff;
 const BASE_DISTANCE_AXES = 6;
+/** 1:1, 9:16, 16:9 — the canvases the pipeline renders. */
+const ALL_RATIOS = 3;
+
+/** Ratios a slot can be drawn at, mirroring VariationPolicy: a motion-only brief is
+ * limited to the ratios its motion platforms package. */
+function drawableRatios(state: EditorState): number {
+  const motionOnly = state.formats.includes("motion") && !state.formats.includes("static");
+  if (!motionOnly) return ALL_RATIOS;
+  const ratios = new Set(
+    state.platforms
+      .map((id) => PLATFORM_PROFILES[id])
+      .filter((profile): profile is PlatformProfile => profile !== undefined)
+      .filter((profile) => (profile.formats as readonly string[]).includes("motion"))
+      .map((profile) => profile.ratio),
+  );
+  return ratios.size;
+}
+
+/**
+ * How many distinct variants this brief's axes can produce — the planner's hard
+ * ceiling on `count`, mirroring `VariationPolicy.axisProductSize`. Drives the count
+ * slider's bound, so the editor cannot author a count the planner will refuse.
+ */
+export function axisProductSize(state: EditorState): number {
+  const motionEnabled = state.formats.includes("motion") && state.motion.length > 0;
+  const mixStatic = motionEnabled && state.formats.includes("static");
+  return (
+    Math.max(1, state.products.filter((product) => product.id.length > 0).length) *
+    Math.max(1, drawableRatios(state)) *
+    Math.max(1, state.variation.layout.length) *
+    Math.max(1, state.variation.tone.length) *
+    Math.max(1, state.variation.background.length) *
+    Math.max(1, state.variation.paletteShift.length) *
+    Math.max(1, state.variation.headline ? approvedHeadlines(state.pool) : 1) *
+    (motionEnabled ? state.motion.length * Math.max(1, state.duration.length) + (mixStatic ? 1 : 0) : 1)
+  );
+}
 
 export function maxMinDistance(state: EditorState): number {
   let axes = BASE_DISTANCE_AXES;

@@ -3,10 +3,10 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRun } from "@/__tests__/helpers";
 import BriefPage from "../page";
-import { useEditorOutline } from "@/lib/editor-outline-context";
+import { useEditorPanels } from "@/lib/editor-panels-context";
 
-/** Places the sections the page publishes to the left bar (Variation policy, Output). */
-const BarPanels = () => useEditorOutline().outline?.panels ?? null;
+/** Places the sections the page publishes to the left bar (the variation policy). */
+const BarPanels = () => useEditorPanels().panels ?? null;
 /** The page plus the bar panels it publishes, as a user would see them together. */
 const Editor = () => (
   <>
