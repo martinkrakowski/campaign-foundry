@@ -279,8 +279,13 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       next[action.index] = action.value;
       return { ...state, duration: next };
     }
-    case "addDuration":
-      return { ...state, duration: [...state.duration, 5] };
+    case "addDuration": {
+      // The planner de-duplicates this axis (`unique(axes.duration)` in
+      // VariationPolicy.vo), so appending a fixed value lets the user add entries that
+      // silently do nothing. Offer the next unused length instead.
+      const next = nextFreeDuration(state.duration);
+      return next === undefined ? state : { ...state, duration: [...state.duration, next] };
+    }
     case "removeDuration":
       return { ...state, duration: state.duration.filter((_, index) => index !== action.index) };
     case "toggleFormat": {
@@ -520,6 +525,25 @@ export function purgeDraftFromStorage(state: EditorState): void {
   if (typeof localStorage === "undefined") return;
   const key = getDraftKey(state);
   localStorage.removeItem(key);
+}
+
+/** Clip lengths the API accepts, mirroring load-brief's MIN/MAX_DURATION_SEC. */
+export const MIN_DURATION_SEC = 2;
+export const MAX_DURATION_SEC = 30;
+/** The default length a first duration is offered at. */
+export const DEFAULT_DURATION_SEC = 5;
+
+/**
+ * The next whole second in range that this list does not already hold, or undefined
+ * when every one is taken. Duplicates are meaningless — the planner collapses them.
+ */
+export function nextFreeDuration(duration: readonly number[]): number | undefined {
+  const taken = new Set(duration);
+  if (!taken.has(DEFAULT_DURATION_SEC)) return DEFAULT_DURATION_SEC;
+  for (let seconds = MIN_DURATION_SEC; seconds <= MAX_DURATION_SEC; seconds += 1) {
+    if (!taken.has(seconds)) return seconds;
+  }
+  return undefined;
 }
 
 export const PLAN_DEBOUNCE_MS = 250;

@@ -279,11 +279,26 @@ describe("editorReducer — motion, duration and formats", () => {
   });
 
   test("duration is appended, written by index and removed by index", () => {
+    // each Add offers a length the list does not already hold — the planner
+    // de-duplicates this axis, so a repeat would draw nothing
     const added = reduce(base(), { type: "addDuration" }, { type: "addDuration" });
-    expect(added.duration).toEqual([5, 5]);
+    expect(added.duration).toEqual([5, 2]);
     const set = reduce(added, { type: "setDuration", index: 1, value: 8 });
     expect(set.duration).toEqual([5, 8]);
     expect(reduce(set, { type: "removeDuration", index: 0 }).duration).toEqual([8]);
+  });
+
+  test("Add duration never offers a length already in the list", () => {
+    let state = base();
+    for (let i = 0; i < 8; i += 1) state = reduce(state, { type: "addDuration" });
+    expect(new Set(state.duration).size).toBe(state.duration.length);
+    expect(state.duration.every((s) => Number.isInteger(s) && s >= 2 && s <= 30)).toBe(true);
+  });
+
+  test("Add duration is a no-op once every length is taken", () => {
+    const full = Array.from({ length: 29 }, (_, i) => i + 2); // 2..30
+    const state = { ...base(), duration: full };
+    expect(reduce(state, { type: "addDuration" })).toBe(state);
   });
 
   test("toggleFormat adds then removes", () => {

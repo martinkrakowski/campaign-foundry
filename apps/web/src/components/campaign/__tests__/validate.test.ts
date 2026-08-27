@@ -286,6 +286,21 @@ describe("validateMotion", () => {
   });
 });
 
+describe("validateMotion — duplicate durations", () => {
+  test("a repeated length is reported, because the planner draws each once", () => {
+    const errors = validateMotion(
+      valid({ formats: ["static", "motion"], motion: ["ken-burns-in"], duration: [6, 6] }),
+    );
+    expect(errors.duration).toMatch(/Each duration must be distinct/);
+  });
+
+  test("distinct lengths pass", () => {
+    expect(
+      validateMotion(valid({ formats: ["static", "motion"], motion: ["ken-burns-in"], duration: [6, 8] })).duration,
+    ).toBeUndefined();
+  });
+});
+
 describe("aggregation", () => {
   test("validateState reports every section", () => {
     expect(Object.keys(validateState(valid())).sort()).toEqual([
