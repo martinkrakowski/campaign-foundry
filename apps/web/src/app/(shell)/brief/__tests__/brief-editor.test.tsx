@@ -510,6 +510,36 @@ describe("BriefPage — data flow", () => {
     await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.url).toContain("revision=rev-live"));
   });
 
+  test("the headline pool drawer opens from Copy and closes again", async () => {
+    const user = userEvent.setup();
+    const randomized = {
+      file: "rand.yaml",
+      revision: "r1",
+      brief: {
+        ...brief("rand"),
+        mode: "variation",
+        variation: {
+          count: 4,
+          axes: { layout: ["headline-top"], tone: ["bold"], background: { source: ["procedural"] }, paletteShift: [0] },
+        },
+      },
+    };
+    routes({ list: () => json({ briefs: [randomized] }) });
+    renderWithRun(<BriefPage />);
+
+    await user.click(screen.getAllByText("New brief...")[0]);
+    await user.click(await screen.findByText("rand"));
+    await waitFor(() => expect(document.getElementById("policy")).toBeTruthy());
+
+    // the drawer is only reachable from the Copy section, and only for a randomized brief
+    expect(screen.queryByText("Headline Pool")).toBeNull();
+    await user.click(screen.getByText("Manage Headline Pool"));
+    expect(await screen.findByText("Headline Pool")).toBeTruthy();
+
+    await user.click(screen.getByText("Close"));
+    await waitFor(() => expect(screen.queryByText("Headline Pool")).toBeNull());
+  });
+
   test("the mode toggle switches between classic and randomized", async () => {
     const user = userEvent.setup();
     routes({});

@@ -118,6 +118,9 @@ export default function BriefPage() {
 
   const totalErrors = getTotalErrorCount(errors);
 
+  /** Section errors before the first validation pass lands. */
+  const sectionErrors = (section: string): FieldErrors => errors[section] ?? {};
+
   /** Every path that replaces the draft goes through the same D14 confirmation. */
   const confirmReplace = (): boolean =>
     isPristine(state) || !isDirtySinceSave(state) || window.confirm(LEAVE_PROMPT);
@@ -258,24 +261,24 @@ export default function BriefPage() {
         {/* Sections */}
         <div className="space-y-8">
           <div id="identity">
-            <IdentitySection state={state} dispatch={dispatch} errors={errors.identity ?? {}} />
+            <IdentitySection state={state} dispatch={dispatch} errors={sectionErrors("identity")} />
           </div>
           <div id="copy">
-            <CopySection state={state} dispatch={dispatch} errors={errors.copy ?? {}} onOpenPool={() => setPoolDrawerOpen(true)} />
+            <CopySection state={state} dispatch={dispatch} errors={sectionErrors("copy")} onOpenPool={() => setPoolDrawerOpen(true)} />
           </div>
           <div id="products">
-            <ProductsSection state={state} dispatch={dispatch} errors={errors.products ?? {}} />
+            <ProductsSection state={state} dispatch={dispatch} errors={sectionErrors("products")} />
           </div>
           <div id="treatments">
             {state.mode === "brief" ? (
-              <TreatmentsSection state={state} dispatch={dispatch} errors={errors.treatments ?? {}} />
+              <TreatmentsSection state={state} dispatch={dispatch} errors={sectionErrors("treatments")} />
             ) : null}
           </div>
           {state.mode === "variation" ? (
-            <PolicySection state={state} dispatch={dispatch} errors={errors.policy ?? {}} />
+            <PolicySection state={state} dispatch={dispatch} errors={sectionErrors("policy")} />
           ) : null}
           <div id="output">
-            <OutputSection state={state} dispatch={dispatch} errors={errors.output ?? {}} />
+            <OutputSection state={state} dispatch={dispatch} errors={sectionErrors("output")} />
           </div>
         </div>
 

@@ -23,9 +23,13 @@ export function EstimatePanel({ state }: { state: EditorState }) {
           if (cancelled) return;
           setPlan(result);
         })
-        .catch((err) => {
+        .catch((err: unknown) => {
           if (cancelled) return;
-          if (err.name !== "AbortError") setPlan(null);
+          // An abort is this effect cleaning up after itself, not a failure.
+          if (err instanceof Error && err.name === "AbortError") return;
+          // Mirror planCampaign's own degradation. setPlan(null) would render
+          // "Estimating…" forever — the very symptom this catch exists to prevent.
+          setPlan({ kind: "unavailable" });
         });
     }, PLAN_DEBOUNCE_MS);
     return () => {
