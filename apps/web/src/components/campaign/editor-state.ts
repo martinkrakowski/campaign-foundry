@@ -1,10 +1,13 @@
 import type { CampaignBrief, CopyPool, Product, Treatment, VariationPolicy } from "@campaignfoundry/CampaignOrchestration";
+import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
 
 export const LAYOUT_OPTIONS = ["headline-top", "headline-bottom"] as const;
 export const TONE_OPTIONS = ["bold", "subtle"] as const;
 export const BACKGROUND_OPTIONS = ["procedural", "asset-pool", "genai"] as const;
 export const PALETTE_SHIFT_OPTIONS = [0, 0.1, 0.2] as const;
+/** The canvas ratios the pipeline renders — the domain's RATIO_VALUES, in its order. */
+export const RATIO_OPTIONS: readonly string[] = RATIO_VALUES;
 export const HEADLINE_POOL_REF = "pool://copy";
 export const STATIC_PLATFORMS = ["instagram-feed", "linkedin", "x"] as const;
 /** Every distribution platform id in profile order — the toggle order for Output. */
@@ -99,6 +102,7 @@ export interface EditorState {
     perRatio: string;
     layout: string[];
     tone: string[];
+    ratio: string[];
     background: string[];
     paletteShift: number[];
     headline: boolean;
@@ -125,6 +129,7 @@ export type EditorAction =
   | { type: "setVariation"; field: "count" | "seed" | "minDistance" | "perProduct" | "perRatio"; value: string }
   | { type: "toggleLayout"; value: string }
   | { type: "toggleTone"; value: string }
+  | { type: "toggleRatio"; value: string }
   | { type: "toggleBackground"; value: string }
   | { type: "togglePalette"; value: number }
   | { type: "toggleHeadline" }
@@ -168,6 +173,7 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
       perRatio: "1",
       layout: [...LAYOUT_OPTIONS],
       tone: [...TONE_OPTIONS],
+      ratio: [...RATIO_OPTIONS],
       background: ["procedural"],
       paletteShift: [...PALETTE_SHIFT_OPTIONS],
       headline: false,
@@ -249,6 +255,11 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return {
         ...state,
         variation: { ...state.variation, tone: toggleOrdered(state.variation.tone, action.value, TONE_OPTIONS) },
+      };
+    case "toggleRatio":
+      return {
+        ...state,
+        variation: { ...state.variation, ratio: toggleOrdered(state.variation.ratio, action.value, RATIO_OPTIONS) },
       };
     case "toggleBackground":
       return {
@@ -406,6 +417,10 @@ export function toBrief(state: EditorState): CampaignBrief {
   const axes = {
     layout: [...state.variation.layout],
     tone: [...state.variation.tone],
+    // The ratio axis is written only when it constrains: absent means every
+    // ratio, so a full selection round-trips a brief without the key
+    // byte-identically instead of growing a redundant `ratio: [all]`.
+    ...(state.variation.ratio.length < RATIO_OPTIONS.length ? { ratio: [...state.variation.ratio] } : {}),
     background: { source: [...state.variation.background] },
     paletteShift: [...state.variation.paletteShift],
     ...(state.variation.headline ? { headline: HEADLINE_POOL_REF } : {}),
@@ -461,6 +476,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
       perRatio: coverage ? num(coverage.perRatio) : variation ? "" : "1",
       layout: list(axes?.layout, [...LAYOUT_OPTIONS]),
       tone: list(axes?.tone, [...TONE_OPTIONS]),
+      ratio: list(axes?.ratio, [...RATIO_OPTIONS]),
       background: list((axes?.background as { source?: unknown } | undefined)?.source, ["procedural"]),
       paletteShift: list(axes?.paletteShift, [...PALETTE_SHIFT_OPTIONS]),
       headline: axes?.headline === HEADLINE_POOL_REF,

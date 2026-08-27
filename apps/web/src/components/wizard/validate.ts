@@ -5,6 +5,7 @@ import {
   maxMinDistance as campaignMaxMinDistance,
   validatePolicy as campaignValidatePolicy,
 } from "@/components/campaign/validate";
+import { RATIO_OPTIONS } from "@/components/campaign/editor-state";
 import type { EditorState } from "@/components/campaign/editor-state";
 
 const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -34,6 +35,8 @@ function toEditorState(state: WizardState): EditorState {
       perRatio: state.variation.perRatio,
       layout: state.variation.layout,
       tone: state.variation.tone,
+      // The wizard has no ratio controls (E3 removes it): every ratio stays on.
+      ratio: [...RATIO_OPTIONS],
       background: state.variation.background,
       paletteShift: state.variation.paletteShift,
       headline: state.variation.headline,

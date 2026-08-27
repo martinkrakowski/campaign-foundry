@@ -6,5 +6,6 @@ export { Button, type ButtonProps } from "./button";
 export { Card, CardHeader, CardContent, type CardProps } from "./card";
 export { CreativeGlyph, type CreativeGlyphProps, type LayoutOption, type ToneOption } from "./creative-glyph";
 export { Input, type InputProps } from "./input";
+export { RatioFrame, type RatioFrameProps, type RatioOption } from "./ratio-frame";
 export { Slider, type SliderProps } from "./slider";
 export { Stepper, type StepperProps } from "./stepper";

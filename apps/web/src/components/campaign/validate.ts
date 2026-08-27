@@ -1,5 +1,5 @@
 import type { EditorState } from "./editor-state";
-import { LAYOUT_OPTIONS, TONE_OPTIONS, approvedHeadlines } from "./editor-state";
+import { LAYOUT_OPTIONS, TONE_OPTIONS, RATIO_OPTIONS, approvedHeadlines } from "./editor-state";
 import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
 
 export const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -12,22 +12,54 @@ export type FieldErrors = Record<string, string>;
 
 const UINT32_MAX = 0xffffffff;
 const BASE_DISTANCE_AXES = 6;
-/** 1:1, 9:16, 16:9 — the canvases the pipeline renders. */
-const ALL_RATIOS = 3;
 
-/** Ratios a slot can be drawn at, mirroring VariationPolicy: a motion-only brief is
- * limited to the ratios its motion platforms package. */
-function drawableRatios(state: EditorState): number {
-  const motionOnly = state.formats.includes("motion") && !state.formats.includes("static");
-  if (!motionOnly) return ALL_RATIOS;
-  const ratios = new Set(
+/** Ratios the requested platforms package motion at — the motion filter's allowlist. */
+export function motionPackagedRatios(state: EditorState): Set<string> {
+  return new Set(
     state.platforms
       .map((id) => PLATFORM_PROFILES[id])
       .filter((profile): profile is PlatformProfile => profile !== undefined)
       .filter((profile) => (profile.formats as readonly string[]).includes("motion"))
       .map((profile) => profile.ratio),
   );
-  return ratios.size;
+}
+
+/** True while the motion narrowing applies: a motion-only brief has no still slot to fall back to. */
+function motionOnly(state: EditorState): boolean {
+  return state.formats.includes("motion") && !state.formats.includes("static");
+}
+
+/**
+ * Ratios a slot can be drawn at, mirroring VariationPolicy: the requested
+ * subset, narrowed by the motion filter for a motion-only brief (the ratios its
+ * motion platforms package). Empty when every selected ratio is excluded.
+ */
+export function drawableRatios(state: EditorState): string[] {
+  const requested = state.variation.ratio;
+  if (!motionOnly(state)) return [...requested];
+  const packaged = motionPackagedRatios(state);
+  return requested.filter((ratio) => packaged.has(ratio));
+}
+
+/**
+ * The projected per-ratio deal of `count`: dealt round-robin across the
+ * drawable ratios in panel order — the same round-robin the planner's coverage
+ * pass uses, so every drawable ratio's share stays ≥ the floor while the
+ * numbers differ per panel. Ratios not drawn (unselected or excluded) get 0.
+ */
+export function ratioAllocation(state: EditorState): Record<string, number> {
+  const drawable = drawableRatios(state);
+  const allocation: Record<string, number> = {};
+  for (const ratio of RATIO_OPTIONS) allocation[ratio] = 0;
+  const count = Math.max(0, Number.parseInt(state.variation.count, 10) || 0);
+  if (drawable.length === 0) return allocation;
+  const base = Math.floor(count / drawable.length);
+  let remainder = count % drawable.length;
+  for (const ratio of drawable) {
+    allocation[ratio] = base + (remainder > 0 ? 1 : 0);
+    if (remainder > 0) remainder -= 1;
+  }
+  return allocation;
 }
 
 /**
@@ -40,7 +72,7 @@ export function axisProductSize(state: EditorState): number {
   const mixStatic = motionEnabled && state.formats.includes("static");
   return (
     Math.max(1, state.products.filter((product) => product.id.length > 0).length) *
-    Math.max(1, drawableRatios(state)) *
+    Math.max(1, drawableRatios(state).length) *
     Math.max(1, state.variation.layout.length) *
     Math.max(1, state.variation.tone.length) *
     Math.max(1, state.variation.background.length) *
@@ -188,6 +220,18 @@ export function validatePolicy(state: EditorState): FieldErrors {
   }
   if (!isOptionalIntegerAtLeast(state.variation.perRatio, 0)) {
     errors.perRatio = "coverage.perRatio must be an integer >= 0.";
+  }
+  if (state.variation.ratio.length === 0) {
+    errors.ratio = "Select at least one aspect ratio.";
+  }
+  // The planner refuses a plan whose ratio floor cannot fit the count
+  // (perRatio × the ratios it will draw > count); the editor says so before
+  // the run instead of surfacing the shortfall as a plan error.
+  const floor = Number.parseInt(state.variation.perRatio, 10) || 0;
+  const drawableCount = drawableRatios(state).length;
+  const count = Number.parseInt(state.variation.count, 10) || 0;
+  if (floor > 0 && floor * drawableCount > count) {
+    errors.perRatio = `coverage.perRatio ${floor} × ${drawableCount} selected ratios exceeds count ${count} — lower the floor, raise the count, or select fewer ratios.`;
   }
   if (state.variation.layout.length === 0) errors.layout = "Select at least one layout.";
   if (state.variation.tone.length === 0) errors.tone = "Select at least one tone.";
