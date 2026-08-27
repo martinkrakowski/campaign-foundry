@@ -84,4 +84,23 @@ describe("CreativeGlyph", () => {
     expect(shades[0].getAttribute("fill")).toBe(`url(#${gradients[0].id})`);
     expect(shades[1].getAttribute("fill")).toBe(`url(#${gradients[1].id})`);
   });
+
+  test("the contrast shade is black in every theme — the compositor's is", () => {
+    // Regression: deriving the gradient from --color-background inverted it in the light
+    // theme (#ffffff), lightening the headline edge while the compositor always overlays
+    // rgba(0, 0, 0, shadeAlpha). The card would then misrepresent the creative it previews.
+    const { container } = render(<CreativeGlyph layout="headline-top" tone="bold" />);
+    const stops = [...container.querySelectorAll("stop")];
+    expect(stops).toHaveLength(2);
+    for (const stop of stops) {
+      expect(stop.getAttribute("stop-color")).toBe("#000000");
+    }
+    expect(stops[1].getAttribute("stop-opacity")).toBe("0.7");
+  });
+
+  test("subtle carries the compositor's lighter shade", () => {
+    const { container } = render(<CreativeGlyph layout="headline-top" tone="subtle" />);
+    const stops = [...container.querySelectorAll("stop")];
+    expect(stops[1].getAttribute("stop-opacity")).toBe("0.4");
+  });
 });

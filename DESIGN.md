@@ -174,10 +174,11 @@ Skeletal by design — patterns to extend, not a library.
   the value: it knows how to be chosen (pressed/unpressed, the selected border + tint, a
   check mark, `focus-visible` ring), not what a choice means — that is the preview it hosts
   (a `CreativeGlyph` for layout and tone). The accessible name is **exactly the raw option
-  value**, set as an explicit `aria-label`; the preview, the check mark and the meta caption
-  are `aria-hidden` because Testing Library matches whole names, and any extra text inside
-  the button would change "headline-top" into "headline-top shade .7" and orphan every
-  `getByRole("button", { name })` query in the suite.
+  value**, set as an explicit `aria-label` — that label is what fixes the name, since an
+  `aria-label` overrides descendant content. The preview and the check mark are `aria-hidden`
+  because they are decoration; the meta caption is too, as defence in depth, so that dropping
+  the label some day degrades to the bare value rather than to "headline-top shade .7" — which
+  would orphan every `getByRole("button", { name })` query in the suite.
 
 ### Shell (`src/components/shell`)
 

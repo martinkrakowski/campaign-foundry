@@ -10,6 +10,15 @@ export interface CreativeGlyphProps {
   readonly size?: number;
 }
 
+/**
+ * Union-keyed lookups rather than `=== "headline-top"` comparisons: a Record over the
+ * domain union makes a new member a *compile* error, while a `switch` with a `never`
+ * default would add a branch that is unreachable by construction and cannot be covered
+ * under the 100 % gate. Same idiom as `REST_T` in `MotionKind.vo.ts`.
+ */
+const TOP_EDGE: Record<LayoutKind, boolean> = { "headline-top": true, "headline-bottom": false };
+const HEAVY: Record<ToneKind, boolean> = { bold: true, subtle: false };
+
 const VIEWBOX = 46;
 /** The compositor's solid accent band: height * 0.05 (NodeCanvasCompositor.draw, layer 3). */
 const BAND = 2.3;
@@ -29,8 +38,8 @@ const BAR_GAP = 3;
 export function CreativeGlyph({ layout, tone, size = 46 }: CreativeGlyphProps): ReactNode {
   // An axis card previews one axis at a time; the omitted prop falls back to a
   // fixed representative value so every glyph still has an edge and a weight.
-  const top = (layout ?? "headline-top") === "headline-top";
-  const bold = (tone ?? "bold") === "bold";
+  const top = TOP_EDGE[layout ?? "headline-top"];
+  const bold = HEAVY[tone ?? "bold"];
   // tone → shadeAlpha / text weight, mirroring NodeCanvasCompositor.prepare:
   // `const shadeAlpha = subtle ? 0.4 : 0.7` and `fontWeight = subtle ? "500" : "bold"`.
   const shadeAlpha = bold ? 0.7 : 0.4;
@@ -48,12 +57,19 @@ export function CreativeGlyph({ layout, tone, size = 46 }: CreativeGlyphProps): 
       viewBox={`0 0 ${VIEWBOX} ${VIEWBOX}`}
       aria-hidden="true"
       focusable="false"
-      className="shrink-0 text-background"
+      className="shrink-0"
     >
       <defs>
+        {/*
+          Deliberately a literal black, not a theme token: the compositor's shade is
+          `rgba(0, 0, 0, shadeAlpha)` in every context (NodeCanvasCompositor.draw, layer 2),
+          so the miniature must darken the headline edge in the light theme too. Deriving it
+          from `--color-background` would invert it there (#ffffff), and the card would
+          misrepresent the creative it is previewing.
+        */}
         <linearGradient id={gradientId} x1="0" y1={top ? "0.55" : "0.45"} x2="0" y2={top ? "0" : "1"}>
-          <stop offset="0" stopColor="currentColor" stopOpacity={0} />
-          <stop offset="1" stopColor="currentColor" stopOpacity={shadeAlpha} />
+          <stop offset="0" stopColor="#000000" stopOpacity={0} />
+          <stop offset="1" stopColor="#000000" stopOpacity={shadeAlpha} />
         </linearGradient>
       </defs>
       {/* Layer 1 — photo ground (text-muted: the neutral placeholder). */}
