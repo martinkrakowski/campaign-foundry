@@ -18,10 +18,15 @@ export function EstimatePanel({ state }: { state: EditorState }) {
     const controller = new AbortController();
     setPlan(null);
     const timer = window.setTimeout(() => {
-      void planCampaign(toBrief(state), controller.signal).then((result) => {
-        if (cancelled) return;
-        setPlan(result);
-      });
+      void planCampaign(toBrief(state), controller.signal)
+        .then((result) => {
+          if (cancelled) return;
+          setPlan(result);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          if (err.name !== "AbortError") setPlan(null);
+        });
     }, PLAN_DEBOUNCE_MS);
     return () => {
       cancelled = true;
@@ -40,6 +45,7 @@ export function EstimatePanel({ state }: { state: EditorState }) {
     state.localizedMessage,
     state.platforms,
     state.pool,
+    state.formats,
   ]);
 
   return (

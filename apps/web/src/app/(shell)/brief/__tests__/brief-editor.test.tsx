@@ -337,7 +337,8 @@ describe("BriefPage — data flow", () => {
     expect(document.getElementById("motion")).toBeNull();
 
     await user.click(chip);
-    expect(chip).toBeTruthy();
+    expect(document.getElementById("motion")).toBeNull();
+    expect(screen.getAllByText(/Motion/)).toHaveLength(1);
   });
 
   test("unsaved edits come back when the brief they belong to is reopened", async () => {

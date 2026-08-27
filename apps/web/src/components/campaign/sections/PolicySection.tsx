@@ -60,8 +60,10 @@ const HEADLINE_POOL_EMPTY =
   "The headline pool has no approved entries — approve at least one in the Copy step.";
 
 function HeadlineAxisToggle({ state, dispatch }: { state: EditorState; dispatch: Dispatch<EditorAction> }) {
-  const approved = approvedHeadlines(state.pool);
-  const blocked = approved === 0;
+  const poolLoaded = state.pool !== null;
+  const approvedCount = approvedHeadlines(state.pool);
+  const hasApproved = approvedCount > 0;
+  const blocked = poolLoaded && !hasApproved;
   const on = state.variation.headline;
   return (
     <fieldset className="space-y-2">
@@ -80,7 +82,11 @@ function HeadlineAxisToggle({ state, dispatch }: { state: EditorState; dispatch:
           {HEADLINE_POOL_REF}
         </button>
         <span className="text-[11px] text-text-muted">
-          {blocked ? HEADLINE_POOL_EMPTY : `${approved} approved headline${approved === 1 ? "" : "s"}`}
+          {!poolLoaded
+            ? "Headline pool not loaded. Open the headline drawer to view available headlines."
+            : !hasApproved
+              ? HEADLINE_POOL_EMPTY
+              : `${approvedCount} approved headline${approvedCount === 1 ? "" : "s"}`}
         </span>
       </div>
     </fieldset>

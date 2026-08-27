@@ -111,9 +111,11 @@ export function HeadlinePoolDrawer({
     let cancelled = false;
     const controller = new AbortController();
     setLoading(true);
+    setUnavailable(undefined);
+    setError(undefined);
     getPool(briefId, controller.signal)
       .then((loaded) => {
-        if (!cancelled) dispatch({ type: "setPool", briefId, pool: loaded });
+        if (!cancelled) dispatch({ type: "loadPool", briefId, pool: loaded });
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(unknownErrorMessage(cause, "Could not load the headline pool"));
