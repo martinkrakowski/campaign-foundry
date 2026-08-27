@@ -124,6 +124,17 @@ describe("POST /campaigns/generate", () => {
     expect(((await report.json()) as { assets: unknown[] }).assets).toHaveLength(6);
   });
 
+  test("refuses a classic brief that requests motion — the reported bug: it rendered stills", async () => {
+    setCapabilities({ motion: true });
+    try {
+      const res = await call(brief({ output: { formats: ["motion"], platforms: ["instagram-reel"] } }));
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toMatch(/requires mode "variation"/);
+    } finally {
+      setCapabilities({ motion: false, reason: "not probed" });
+    }
+  });
+
   test("refuses a motion brief with 400 while the capability is off (D15 enforcing mode)", async () => {
     // generate is a run path: authoring mode is for listing and persistence only, so a
     // brief this host cannot produce must be refused here rather than deep in the pipeline.

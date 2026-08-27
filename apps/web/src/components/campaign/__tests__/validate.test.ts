@@ -214,6 +214,8 @@ describe("validatePolicy", () => {
 });
 
 describe("validateOutput", () => {
+  // Briefs that request motion are randomized here: on a classic brief the mode rule
+  // ("switch to Randomized") correctly outranks every capability/compatibility message.
   test("formats and platforms must be non-empty", () => {
     expect(validateOutput(valid())).toEqual({});
     expect(validateOutput(valid({ formats: [] })).formats).toMatch(/at least one format/);
@@ -221,12 +223,11 @@ describe("validateOutput", () => {
   });
 
   test("motion is refused while the capability is off, with the probe's reason", () => {
-    const off = valid({ formats: ["static", "motion"], capabilities: { motion: false, reason: "no ffmpeg" } });
+    const off = valid({ mode: "variation", formats: ["static", "motion"], capabilities: { motion: false, reason: "no ffmpeg" } });
     expect(validateOutput(off).formats).toMatch(/not available: no ffmpeg/);
-    const noReason = valid({ formats: ["motion"], capabilities: { motion: false } });
+    const noReason = valid({ mode: "variation", formats: ["motion"], capabilities: { motion: false } });
     expect(validateOutput(noReason).formats).toMatch(/capability off/);
-    const on = valid({
-      formats: ["static", "motion"],
+    const on = valid({ mode: "variation", formats: ["static", "motion"],
       platforms: ["instagram-feed", "instagram-reel"],
       capabilities: { motion: true },
     });
@@ -241,7 +242,7 @@ describe("validateOutput", () => {
   });
 
   test("a format no platform packages names the platforms that would", () => {
-    const errors = validateOutput(valid({ formats: ["static", "motion"], platforms: ["instagram-feed", "linkedin", "x"] }));
+    const errors = validateOutput(valid({ mode: "variation", formats: ["static", "motion"], platforms: ["instagram-feed", "linkedin", "x"] }));
     // the remedy, not just the rejection: these four appear in the picker the moment
     // motion is requested, so the message points straight at them
     expect(errors.formats).toBe(
@@ -253,14 +254,31 @@ describe("validateOutput", () => {
     // D12: the compatibility mirror must not add an error a save would be blocked by —
     // the only complaint is the capability, which does not gate persistence.
     const errors = validateOutput(
-      valid({
-        formats: ["static", "motion"],
+      valid({ mode: "variation", formats: ["static", "motion"],
         platforms: ["instagram-feed", "instagram-reel"],
         capabilities: { motion: false, reason: "no ffmpeg" },
       }),
     );
     expect(errors.platforms).toBeUndefined();
     expect(errors.formats).toMatch(/not available: no ffmpeg/);
+  });
+});
+
+describe("validateOutput — motion needs a randomized campaign", () => {
+  test("a classic brief requesting motion is told to switch mode", () => {
+    const errors = validateOutput(valid({ mode: "brief", formats: ["motion"], platforms: ["instagram-reel"] }));
+    expect(errors.formats).toMatch(/requires a randomized campaign — switch the mode to Randomized/);
+  });
+
+  test("the mode rule outranks the capability message — it is the root cause", () => {
+    const errors = validateOutput(
+      valid({ mode: "brief", formats: ["motion"], platforms: ["instagram-reel"], capabilities: { motion: false, reason: "no ffmpeg" } }),
+    );
+    expect(errors.formats).toMatch(/switch the mode to Randomized/);
+  });
+
+  test("a randomized brief requesting motion on a motion platform is clean", () => {
+    expect(validateOutput(valid({ mode: "variation", formats: ["motion"], platforms: ["instagram-reel"] }))).toEqual({});
   });
 });
 

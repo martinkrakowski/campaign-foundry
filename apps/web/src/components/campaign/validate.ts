@@ -206,6 +206,12 @@ export function validateOutput(state: EditorState): FieldErrors {
   }
   const unavailable = motionUnavailableReason(state);
   if (unavailable) errors.formats = unavailable;
+  // Motion is drawn by the variation planner only; the classic matrix renders stills.
+  // This is structural, not a capability, so it blocks Save — the remedy is a mode
+  // switch, and it outranks the capability message because it is the root cause.
+  if (state.mode !== "variation" && state.formats.includes("motion")) {
+    errors.formats = "Motion output requires a randomized campaign — switch the mode to Randomized.";
+  }
   return errors;
 }
 
