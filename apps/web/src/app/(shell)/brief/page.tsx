@@ -40,6 +40,7 @@ import { StatusChip } from "@/components/campaign/StatusChip";
 import { ErrorStrip } from "@/components/campaign/ErrorStrip";
 import { SaveMenu } from "@/components/campaign/SaveMenu";
 import { useEditorOutline } from "@/lib/editor-outline-context";
+import { scrollToSection } from "@/lib/scroll-to-section";
 import { BriefSelector } from "@/components/campaign/BriefSelector";
 import { HeadlinePoolDrawer } from "@/components/campaign/HeadlinePoolDrawer";
 
@@ -336,9 +337,7 @@ export default function BriefPage() {
     purgeDraftFromStorage(state);
   };
 
-  const scrollToFirstError = (section: string) => {
-    document.getElementById(section)?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
+  const scrollToFirstError = (section: string) => scrollToSection(section);
 
   return (
     // No h-full / inner overflow: like every other view, this one flows and the
@@ -379,16 +378,16 @@ export default function BriefPage() {
 
           {/* Sections */}
           <div className="space-y-8">
-            <div id="identity">
+            <div>
               <IdentitySection state={state} dispatch={dispatch} errors={sectionErrors("identity")} />
             </div>
-            <div id="copy">
+            <div>
               <CopySection state={state} dispatch={dispatch} errors={sectionErrors("copy")} onOpenPool={() => setPoolDrawerOpen(true)} />
             </div>
-            <div id="products">
+            <div>
               <ProductsSection state={state} dispatch={dispatch} errors={sectionErrors("products")} />
             </div>
-            <div id="treatments">
+            <div>
               {state.mode === "brief" ? (
                 <TreatmentsSection state={state} dispatch={dispatch} errors={sectionErrors("treatments")} />
               ) : null}

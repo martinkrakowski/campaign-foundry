@@ -1,6 +1,6 @@
 "use client";
 
-import type { Dispatch } from "react";
+import { useId, type Dispatch } from "react";
 import { Input } from "@/components/ui";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import type { FieldErrors } from "@/components/campaign/validate";
@@ -25,10 +25,19 @@ export function SectionShell({
   /** Sidebar placement: the bar's own heading scale, tighter rhythm. */
   compact?: boolean;
 }) {
+  const instanceId = useId();
+  const headingId = compact ? `${id}-heading-${instanceId}` : `${id}-heading`;
   return (
-    <section id={id} aria-labelledby={`${id}-heading`} className={compact ? "space-y-3 scroll-mt-4" : "space-y-4 scroll-mt-24"}>
+    // In the bar the section may be mounted twice (desktop sidebar + mobile menu), so
+    // it carries a data attribute instead of an id, and its heading id is per instance.
+    <section
+      id={compact ? undefined : id}
+      data-section={id}
+      aria-labelledby={headingId}
+      className={compact ? "space-y-3 scroll-mt-4" : "space-y-4 scroll-mt-24"}
+    >
       <h2
-        id={`${id}-heading`}
+        id={headingId}
         className={compact ? "flex items-center gap-2 text-[13px] font-bold text-text-primary" : "flex items-center gap-2 text-lg font-semibold text-white"}
       >
         {title}

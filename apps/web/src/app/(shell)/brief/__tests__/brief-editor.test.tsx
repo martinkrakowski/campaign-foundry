@@ -322,7 +322,7 @@ describe("BriefPage — data flow", () => {
     await user.click(await screen.findByText("rand"));
 
     const section = await waitFor(() => {
-      const el = document.getElementById("policy");
+      const el = document.querySelector('[data-section="policy"], #policy');
       expect(el).toBeTruthy();
       return el as HTMLElement;
     });
@@ -359,7 +359,7 @@ describe("BriefPage — data flow", () => {
       return found as HTMLElement;
     });
     const section = await waitFor(() => {
-      const el = document.getElementById("motion");
+      const el = document.querySelector('[data-section="motion"], #motion');
       expect(el).toBeTruthy();
       return el as HTMLElement;
     });
@@ -558,7 +558,7 @@ describe("BriefPage — data flow", () => {
 
     await user.click(screen.getAllByText("New brief...")[0]);
     await user.click(await screen.findByText("rand"));
-    await waitFor(() => expect(document.getElementById("policy")).toBeTruthy());
+    await waitFor(() => expect(document.querySelector('[data-section="policy"], #policy')).toBeTruthy());
 
     // the drawer is only reachable from the Copy section, and only for a randomized brief
     expect(screen.queryByText("Headline Pool")).toBeNull();
