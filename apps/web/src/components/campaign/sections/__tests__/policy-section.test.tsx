@@ -141,6 +141,25 @@ describe("PolicySection — the headline axis and its pool", () => {
     expect(screen.getByText("1 approved headline")).toBeTruthy();
   });
 
+  test("an axis already on can always be switched off, even against an empty pool", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    // loadPool no longer clears the axis for the user, so the toggle is the only way out
+    const stuck = editorReducer(state({ pool: pool(["pending"]) }), { type: "toggleHeadline" });
+    render(<PolicySection state={stuck} dispatch={dispatch} errors={{}} />);
+
+    const toggle = headlineToggle() as HTMLButtonElement;
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle.disabled).toBe(false);
+    await user.click(toggle);
+    expect(dispatch).toHaveBeenCalledWith({ type: "toggleHeadline" });
+  });
+
+  test("an axis that is off stays blocked while the pool has nothing approved", () => {
+    render(<PolicySection state={state({ pool: pool(["pending"]) })} dispatch={vi.fn()} errors={{}} />);
+    expect((headlineToggle() as HTMLButtonElement).disabled).toBe(true);
+  });
+
   test("the toggle reflects whether the axis is on", () => {
     const on = editorReducer(state({ pool: pool(["approved"]) }), { type: "toggleHeadline" });
     const { unmount } = render(<PolicySection state={on} dispatch={vi.fn()} errors={{}} />);

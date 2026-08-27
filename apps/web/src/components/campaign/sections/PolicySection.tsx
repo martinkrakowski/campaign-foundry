@@ -63,8 +63,12 @@ function HeadlineAxisToggle({ state, dispatch }: { state: EditorState; dispatch:
   const poolLoaded = state.pool !== null;
   const approvedCount = approvedHeadlines(state.pool);
   const hasApproved = approvedCount > 0;
-  const blocked = poolLoaded && !hasApproved;
+  // Blocked means "cannot be switched on". Turning it *off* must always be possible:
+  // loadPool deliberately no longer clears the axis for the user, so the toggle is the
+  // only way out of an axis enabled against a pool with nothing approved.
   const on = state.variation.headline;
+  const blocked = poolLoaded && !hasApproved;
+  const disabled = blocked && !on;
   return (
     <fieldset className="space-y-2">
       <legend className="text-[11px] text-text-muted">Headline</legend>
@@ -72,7 +76,7 @@ function HeadlineAxisToggle({ state, dispatch }: { state: EditorState; dispatch:
         <button
           type="button"
           aria-pressed={on}
-          disabled={blocked}
+          disabled={disabled}
           onClick={() => dispatch({ type: "toggleHeadline" })}
           className={cn(
             "rounded-md border px-3 py-1.5 font-mono text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",

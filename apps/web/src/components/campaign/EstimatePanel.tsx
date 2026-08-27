@@ -50,6 +50,8 @@ export function EstimatePanel({ state }: { state: EditorState }) {
     state.platforms,
     state.pool,
     state.formats,
+    state.motion,
+    state.duration,
   ]);
 
   return (

@@ -1,7 +1,7 @@
 "use client";
 
 import type { Dispatch } from "react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button, Input } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
@@ -105,6 +105,8 @@ export function HeadlinePoolDrawer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
   const [unavailable, setUnavailable] = useState<string | undefined>();
+  const currentBrief = useRef(briefId);
+  currentBrief.current = briefId;
 
   useEffect(() => {
     if (!open) return;
@@ -130,12 +132,17 @@ export function HeadlinePoolDrawer({
   }, [briefId, dispatch, open]);
 
   const apply = async (change: () => Promise<CopyPool>): Promise<boolean> => {
+    // Scope the outcome to the brief that was current when the change started: the
+    // reducer already drops a mismatched pool, but the local error and unavailable
+    // states would otherwise surface the old brief's failure in the new drawer.
+    const forBrief = briefId;
     setBusy(true);
     setError(undefined);
     try {
-      dispatch({ type: "setPool", briefId, pool: await change() });
+      dispatch({ type: "setPool", briefId: forBrief, pool: await change() });
       return true;
     } catch (cause) {
+      if (currentBrief.current !== forBrief) return false;
       if (isBriefsApiError(cause) && cause.status === 503) setUnavailable(cause.message);
       else setError(unknownErrorMessage(cause, "Headline pool update failed"));
       return false;

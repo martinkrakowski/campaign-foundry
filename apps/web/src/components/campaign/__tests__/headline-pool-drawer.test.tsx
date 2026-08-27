@@ -241,6 +241,36 @@ describe("HeadlinePoolDrawer", () => {
     expect(screen.getByLabelText("Edit a")).toBeTruthy(); // still editing
   });
 
+  test("a failure is not shown under a brief the user has since switched to", async () => {
+    const user = userEvent.setup();
+    let failGenerate = false;
+    vi.mocked(globalThis.fetch).mockImplementation((_url, init) => {
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "POST" && failGenerate) {
+        return new Promise((res) => setTimeout(() => res(json({ error: "stale failure" }, 500)), 60));
+      }
+      return Promise.resolve(json(poolBody([])));
+    });
+
+    // the plain component, so the brief really changes between renders (Harness's
+    // useReducer would ignore a new `initial`)
+    const props = (briefId: string) => ({
+      state: state({ briefId }),
+      dispatch: vi.fn(),
+      open: true,
+      onClose: () => {},
+    });
+    const { rerender } = render(<HeadlinePoolDrawer {...props("camp")} />);
+    await screen.findByText("No headlines yet.");
+
+    failGenerate = true;
+    await user.click(screen.getByText(/Generate 10 suggestions/));
+    rerender(<HeadlinePoolDrawer {...props("other")} />); // move on before it lands
+    await new Promise((r) => setTimeout(r, 150));
+
+    expect(screen.queryByText("stale failure")).toBeNull();
+  });
+
   test("a moderation reason is surfaced next to its entry", async () => {
     routes({ get: () => json(poolBody([entry("a", "rejected", { reason: "off-brand" })])) });
     open();

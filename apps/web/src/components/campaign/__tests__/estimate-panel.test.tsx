@@ -141,6 +141,18 @@ describe("EstimatePanel", () => {
     expect(screen.queryByText("estimate unavailable")).toBeNull();
   });
 
+  test("the request is re-issued when the motion axes change", async () => {
+    vi.mocked(globalThis.fetch).mockImplementation(() => Promise.resolve(json(OK_PLAN)));
+    const ready = planReady();
+    const { rerender } = render(<EstimatePanel state={ready} />);
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
+    const before = vi.mocked(globalThis.fetch).mock.calls.length;
+
+    // toBrief carries motion and duration, so a change to either must re-plan
+    rerender(<EstimatePanel state={{ ...ready, motion: ["ken-burns-in"], duration: [6] }} />);
+    await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.length).toBeGreaterThan(before));
+  });
+
   test("becoming unplannable clears a rendered estimate", async () => {
     vi.mocked(globalThis.fetch).mockResolvedValue(json(OK_PLAN));
     const ready = planReady();
