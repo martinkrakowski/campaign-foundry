@@ -233,17 +233,19 @@ describe("validateOutput", () => {
     expect(validateOutput(on).formats).toBeUndefined();
   });
 
-  test("a platform that packages none of the requested formats is rejected", () => {
+  test("a platform packaging none of the requested formats says how to resolve it", () => {
     const errors = validateOutput(valid({ formats: ["motion"], platforms: ["instagram-feed", "instagram-reel"] }));
-    expect(errors.platforms).toMatch(
-      /Platform "instagram-feed" packages only \[static\], which output\.formats \[motion\] does not request/,
+    expect(errors.platforms).toBe(
+      '"instagram-feed" only packages static — request that format, or remove the platform.',
     );
   });
 
-  test("a requested format no platform can package is rejected", () => {
+  test("a format no platform packages names the platforms that would", () => {
     const errors = validateOutput(valid({ formats: ["static", "motion"], platforms: ["instagram-feed", "linkedin", "x"] }));
-    expect(errors.formats).toMatch(
-      /Output format "motion" is requested but none of output\.platforms \[instagram-feed, linkedin, x\] can package it/,
+    // the remedy, not just the rejection: these four appear in the picker the moment
+    // motion is requested, so the message points straight at them
+    expect(errors.formats).toBe(
+      'No selected platform packages "motion" — add one of: instagram-story, instagram-reel, tiktok, youtube-short.',
     );
   });
 

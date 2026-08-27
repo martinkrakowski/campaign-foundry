@@ -188,13 +188,19 @@ export function validateOutput(state: EditorState): FieldErrors {
     .filter((profile): profile is PlatformProfile => profile !== undefined);
   for (const profile of profiles) {
     if (!profile.formats.some((format) => state.formats.includes(format))) {
-      errors.platforms = `Platform "${profile.id}" packages only [${profile.formats.join(", ")}], which output.formats [${state.formats.join(", ")}] does not request.`;
+      // The API states the rejection; the editor has to say what to do about it.
+      errors.platforms = `"${profile.id}" only packages ${profile.formats.join(" or ")} — request that format, or remove the platform.`;
       break;
     }
   }
   for (const format of state.formats) {
     if (!profiles.some((profile) => (profile.formats as readonly string[]).includes(format))) {
-      errors.formats = `Output format "${format}" is requested but none of output.platforms [${state.platforms.join(", ")}] can package it.`;
+      // Name the platforms that would satisfy it rather than only the ones that do not:
+      // selecting a format makes its platforms appear, and the message should point there.
+      const candidates = Object.values(PLATFORM_PROFILES)
+        .filter((profile) => (profile.formats as readonly string[]).includes(format))
+        .map((profile) => profile.id);
+      errors.formats = `No selected platform packages "${format}" — add one of: ${candidates.join(", ")}.`;
       break;
     }
   }

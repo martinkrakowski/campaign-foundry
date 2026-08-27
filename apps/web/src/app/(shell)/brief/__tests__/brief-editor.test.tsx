@@ -838,7 +838,7 @@ describe("BriefPage — capabilities and motion", () => {
 
     expect(
       await screen.findByText(
-        /Platform "instagram-reel" packages only \[motion\], which output\.formats \[static\] does not request/,
+        /"instagram-reel" only packages motion — request that format, or remove the platform\./,
       ),
     ).toBeTruthy();
     await waitFor(() =>
