@@ -54,6 +54,16 @@ describe("PolicySection — numeric fields", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field, value: `${initial}3` });
     expect(screen.getByText(`bad ${field}`)).toBeTruthy();
   });
+
+  test("the min-distance help states the bound the active axes actually allow", () => {
+    const { unmount } = render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.getByText(/Whole seconds, 0–6/)).toBeTruthy();
+    unmount();
+
+    // motion widens the bound by two axes; the text must follow, not hardcode six
+    render(<PolicySection state={state({ motion: ["ken-burns-in"] })} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.getByText(/Whole seconds, 0–8/)).toBeTruthy();
+  });
 });
 
 describe("PolicySection — axes", () => {

@@ -259,6 +259,16 @@ describe("editorReducer — variation axes", () => {
     expect(off.platforms).toEqual([STATIC_PLATFORMS[0], STATIC_PLATFORMS[2]]);
     expect(reduce(off, { type: "togglePlatform", value: STATIC_PLATFORMS[1] }).platforms).toEqual([...STATIC_PLATFORMS]);
   });
+
+  test("togglePlatform orders motion platforms after the static ones", () => {
+    const state = reduce(
+      { ...base(), platforms: ["instagram-feed"] },
+      { type: "togglePlatform", value: "tiktok" },
+      { type: "togglePlatform", value: "linkedin" },
+    );
+    expect(state.platforms).toEqual(["instagram-feed", "linkedin", "tiktok"]);
+    expect(reduce(state, { type: "togglePlatform", value: "linkedin" }).platforms).toEqual(["instagram-feed", "tiktok"]);
+  });
 });
 
 describe("editorReducer — motion, duration and formats", () => {

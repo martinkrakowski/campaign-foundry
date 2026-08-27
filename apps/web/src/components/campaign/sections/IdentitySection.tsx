@@ -40,10 +40,12 @@ export function SectionShell({
 export function Field({
   label,
   error,
+  hint,
   children,
 }: {
   label: string;
   error?: string;
+  hint?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -52,6 +54,7 @@ export function Field({
         <span className="mb-1.5 block text-[11px] text-text-muted">{label}</span>
         {children}
       </label>
+      {hint ? <span className="mt-1 block text-[11px] text-text-muted">{hint}</span> : null}
       {error ? <span className="mt-1 block text-[11px] text-error">{error}</span> : null}
     </div>
   );

@@ -20,7 +20,12 @@ const brief = (id: string) => ({
 const entry = (id: string, revision?: string) => ({ file: `${id}.yaml`, brief: brief(id), revision });
 
 /** Route each call by URL+method; unmatched calls fail loudly rather than hanging. */
-const routes = (handlers: { list?: () => Response; post?: () => Response; put?: (url: string) => Response }) => {
+const routes = (handlers: {
+  list?: () => Response;
+  post?: () => Response;
+  put?: (url: string) => Response;
+  capabilities?: () => Response;
+}) => {
   const calls: { url: string; method: string; body?: Record<string, unknown> }[] = [];
   vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
     const u = String(url);
@@ -31,6 +36,9 @@ const routes = (handlers: { list?: () => Response; post?: () => Response; put?: 
       method,
       ...(typeof raw === "string" ? { body: JSON.parse(raw) as Record<string, unknown> } : {}),
     });
+    if (method === "GET" && u === `${API}/campaigns/capabilities`) {
+      return Promise.resolve(handlers.capabilities?.() ?? json({ motion: true }));
+    }
     if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
       return Promise.resolve(handlers.list?.() ?? json({ briefs: [] }));
     }
@@ -312,10 +320,9 @@ describe("BriefPage — data flow", () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
   });
 
-  test("a chip for a section that still has no panel is a no-op, not a crash", async () => {
+  test("the Motion chip scrolls to the motion controls, which now exist", async () => {
     const user = userEvent.setup();
-    // Motion errors have no panel until E2.3, so scrollToFirstError's defensive
-    // branch still needs to hold.
+    // E2.3: motion errors finally have a panel — the chip's scroll target is real.
     const motion = {
       file: "clip.yaml",
       revision: "r1",
@@ -334,11 +341,16 @@ describe("BriefPage — data flow", () => {
       expect(found).toBeTruthy();
       return found as HTMLElement;
     });
-    expect(document.getElementById("motion")).toBeNull();
+    const section = await waitFor(() => {
+      const el = document.getElementById("motion");
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+    const scrollIntoView = vi.fn();
+    section.scrollIntoView = scrollIntoView;
 
     await user.click(chip);
-    expect(document.getElementById("motion")).toBeNull();
-    expect(screen.getAllByText(/Motion/)).toHaveLength(1);
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
   });
 
   test("unsaved edits come back when the brief they belong to is reopened", async () => {
@@ -552,5 +564,224 @@ describe("BriefPage — data flow", () => {
     await waitFor(() => expect(sectionHeading()).toBeNull());
     await user.click(screen.getByText("Classic"));
     await waitFor(() => expect(sectionHeading()).toBeTruthy());
+  });
+});
+
+describe("BriefPage — capabilities and motion", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem("cf:brief-picked", "1");
+    globalThis.confirm = vi.fn(() => true);
+  });
+
+  const motionToggle = () => screen.getByRole("button", { name: "motion" }) as HTMLButtonElement;
+
+  test("a 'not probed' snapshot is retried — the retry's verdict, not the snapshot, gates motion", async () => {
+    let calls = 0;
+    routes({
+      capabilities: () => {
+        calls += 1;
+        return calls <= 1 ? json({ motion: false, reason: "not probed" }) : json({ motion: false, reason: "no ffmpeg" });
+      },
+    });
+    renderWithRun(<BriefPage />);
+
+    await waitFor(() => expect(calls).toBe(2));
+    await waitFor(() => expect(motionToggle().disabled).toBe(true));
+    expect(screen.getByText(/Motion is not available on this host: no ffmpeg/)).toBeTruthy();
+  });
+
+  test("an exhausted probe window settles on the transient answer and says so", async () => {
+    let calls = 0;
+    routes({
+      capabilities: () => {
+        calls += 1;
+        return json({ motion: false, reason: "not probed" });
+      },
+    });
+    renderWithRun(<BriefPage />);
+
+    // the initial call plus the bounded retries, then the snapshot is taken as the verdict
+    await waitFor(() => expect(calls).toBe(4));
+    await waitFor(() => expect(motionToggle().disabled).toBe(true));
+    expect(screen.getByText(/not probed/)).toBeTruthy();
+  });
+
+  test("the capabilities are refetched when the window regains focus", async () => {
+    let calls = 0;
+    routes({
+      capabilities: () => {
+        calls += 1;
+        return calls === 1 ? json({ motion: true }) : json({ motion: false, reason: "no ffmpeg" });
+      },
+    });
+    renderWithRun(<BriefPage />);
+
+    await waitFor(() => expect(calls).toBe(1));
+    expect(motionToggle().disabled).toBe(false);
+
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(motionToggle().disabled).toBe(true));
+  });
+
+  test("a capabilities answer arriving after unmount is ignored", async () => {
+    let answer: ((response: Response) => void) | undefined;
+    vi.mocked(globalThis.fetch).mockImplementation((url) => {
+      if (String(url) === `${API}/campaigns/capabilities`) {
+        return new Promise<Response>((resolve) => {
+          answer = resolve;
+        });
+      }
+      return Promise.resolve(json({ halted: false, assets: [], log: null }));
+    });
+    const { unmount } = renderWithRun(<BriefPage />);
+    unmount();
+
+    answer?.(json({ motion: false, reason: "no ffmpeg" }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(vi.mocked(globalThis.fetch).mock.calls.length).toBeGreaterThan(0);
+  });
+
+  test("a motion brief authored from scratch saves with its motion policy (host with motion)", async () => {
+    const user = userEvent.setup();
+    const calls = routes({});
+    renderWithRun(<BriefPage />);
+    await waitForEditorReady();
+
+    await user.click(screen.getAllByText("New brief...")[0]);
+    await user.click(screen.getAllByText("New brief...").slice(-1)[0]);
+    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
+    await fillValidDraft(user);
+    await user.click(screen.getByText("Randomized"));
+
+    // request motion, then give it a kind, a duration and a packaging platform
+    await user.click(screen.getByRole("button", { name: "motion" }));
+    await user.click(screen.getByRole("button", { name: "ken-burns-in" }));
+    await user.click(screen.getByRole("button", { name: "Add duration" }));
+    await user.click(screen.getByRole("button", { name: "instagram-reel" }));
+
+    await user.click(screen.getByText("Save & apply"));
+    const post = await waitFor(() => {
+      const call = calls.find((c) => c.method === "POST" && c.url.includes("/campaigns/briefs"));
+      expect(call).toBeTruthy();
+      return call!;
+    });
+    expect(post.body).toMatchObject({
+      mode: "variation",
+      variation: { axes: { motion: ["ken-burns-in"], duration: [5] } },
+      output: {
+        formats: ["static", "motion"],
+        platforms: ["instagram-feed", "linkedin", "x", "instagram-reel"],
+      },
+    });
+  });
+
+  test("motion without a kind or a duration blocks Save, and the error reaches its input", async () => {
+    const user = userEvent.setup();
+    const calls = routes({});
+    renderWithRun(<BriefPage />);
+    await waitForEditorReady();
+
+    await user.click(screen.getAllByText("New brief...")[0]);
+    await user.click(screen.getAllByText("New brief...").slice(-1)[0]);
+    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
+    await fillValidDraft(user);
+    await user.click(screen.getByText("Randomized"));
+    await user.click(screen.getByRole("button", { name: "motion" }));
+
+    expect(screen.getByText("Select at least one motion kind.")).toBeTruthy();
+    expect(screen.getByText("Add at least one duration.")).toBeTruthy();
+    await waitFor(() =>
+      expect((screen.getByText("Save & apply").closest("button") as HTMLButtonElement).disabled).toBe(true),
+    );
+    expect(calls.some((c) => c.method !== "GET")).toBe(false);
+  });
+
+  test("a motion brief on a host without motion stays read-only, saves verbatim, and applies with the refusal (D12)", async () => {
+    const user = userEvent.setup();
+    const clip = {
+      ...brief("clip"),
+      mode: "variation",
+      variation: {
+        count: 8,
+        seed: 3,
+        minDistance: 2,
+        coverage: { perProduct: 1, perRatio: 1 },
+        axes: {
+          layout: ["headline-top", "headline-bottom"],
+          tone: ["bold", "subtle"],
+          background: { source: ["procedural"] },
+          paletteShift: [0, 0.1],
+          motion: ["ken-burns-in", "headline-rise"],
+          duration: [6],
+        },
+      },
+      output: { formats: ["static", "motion"], platforms: ["instagram-feed", "instagram-reel"] },
+    };
+    const calls = routes({
+      list: () => json({ briefs: [{ file: "clip.yaml", brief: clip, revision: "r1" }] }),
+      capabilities: () => json({ motion: false, reason: "no ffmpeg" }),
+    });
+    renderWithRun(<BriefPage />);
+
+    await user.click(screen.getAllByText("New brief...")[0]);
+    await user.click(await screen.findByText("clip"));
+    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe("clip"));
+
+    // the probe's verdict lands and the controls go read-only with its reason
+    await waitFor(() => expect(motionToggle().disabled).toBe(true));
+    expect(screen.getByText(/Motion is not available on this host: no ffmpeg/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled).toBe(true);
+    const duration = screen.getByLabelText("Duration 1 (seconds)") as HTMLInputElement;
+    expect(duration.disabled).toBe(true);
+    expect(duration.value).toBe("6");
+    expect((screen.getByRole("button", { name: "instagram-reel" }) as HTMLButtonElement).disabled).toBe(true);
+
+    // structurally valid ⇒ persistable: Save stays offered and keeps the fields verbatim
+    const save = () => screen.getByText("Save & apply").closest("button") as HTMLButtonElement;
+    await waitFor(() => expect(save().disabled).toBe(false));
+    await user.click(save());
+    const put = await waitFor(() => {
+      const call = calls.find((c) => c.method === "PUT");
+      expect(call).toBeTruthy();
+      return call!;
+    });
+    expect(put.url).toContain("revision=r1");
+    expect(put.body).toMatchObject({
+      id: "clip",
+      mode: "variation",
+      variation: { axes: { motion: ["ken-burns-in", "headline-rise"], duration: [6] } },
+      output: { formats: ["static", "motion"], platforms: ["instagram-feed", "instagram-reel"] },
+    });
+
+    // Apply is not blocked by the capability, and it reports the refusal
+    await user.click(screen.getByText("Apply to run"));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Motion format is not available: no ffmpeg."));
+  });
+
+  test("an incompatible format/platform pair is reported in the editor, not only by the API", async () => {
+    const user = userEvent.setup();
+    // static-only formats with a motion platform declared: the API would refuse at
+    // parse time; the editor must say it first.
+    const mismatched = {
+      file: "odd.yaml",
+      revision: "r1",
+      brief: { ...brief("odd"), output: { formats: ["static"], platforms: ["instagram-reel"] } },
+    };
+    routes({ list: () => json({ briefs: [mismatched] }) });
+    renderWithRun(<BriefPage />);
+
+    await user.click(screen.getAllByText("New brief...")[0]);
+    await user.click(await screen.findByText("odd"));
+    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe("odd"));
+
+    expect(
+      await screen.findByText(
+        /Platform "instagram-reel" packages only \[motion\], which output\.formats \[static\] does not request/,
+      ),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect((screen.getByText("Save & apply").closest("button") as HTMLButtonElement).disabled).toBe(true),
+    );
   });
 });

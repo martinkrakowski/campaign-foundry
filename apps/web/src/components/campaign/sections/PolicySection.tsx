@@ -5,6 +5,7 @@ import { Input } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import type { FieldErrors } from "@/components/campaign/validate";
+import { maxMinDistance } from "@/components/campaign/validate";
 import { SectionShell, Field } from "./IdentitySection";
 import {
   LAYOUT_OPTIONS,
@@ -120,7 +121,11 @@ export function PolicySection({ state, dispatch, errors }: { state: EditorState;
               invalid={Boolean(errors.seed)}
             />
           </Field>
-          <Field label="Min Distance" error={errors.minDistance}>
+          <Field
+            label="Min Distance"
+            error={errors.minDistance}
+            hint={`Whole seconds, 0–${maxMinDistance(state)} — the number of active axes`}
+          >
             <Input
               type="number"
               value={state.variation.minDistance}

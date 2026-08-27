@@ -9,6 +9,10 @@ import {
   listBriefs,
   createBrief,
   updateBrief,
+  getCapabilities,
+  isTransientCapabilities,
+  CAPABILITIES_RETRY_MS,
+  CAPABILITIES_MAX_RETRIES,
   unknownErrorMessage,
   isBriefsApiError,
   type BriefEntry,
@@ -24,7 +28,12 @@ import {
   loadDraftFromStorage,
   purgeDraftFromStorage,
 } from "@/components/campaign/editor-state";
-import { validateState, getTotalErrorCount, type FieldErrors } from "@/components/campaign/validate";
+import {
+  validateState,
+  getTotalErrorCount,
+  motionUnavailableReason,
+  type FieldErrors,
+} from "@/components/campaign/validate";
 import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, OutputSection, PolicySection } from "@/components/campaign/sections";
 import { StatusChip } from "@/components/campaign/StatusChip";
 import { TableOfContents } from "@/components/campaign/TableOfContents";
@@ -39,6 +48,7 @@ export default function BriefPage() {
   const { setDirty } = useEditorDirty();
   const [state, dispatch] = useReducer(editorReducer, initialEditorState());
   const [errors, setErrors] = useState<Record<string, FieldErrors>>({});
+  const [saveBlocked, setSaveBlocked] = useState(false);
   const [briefs, setBriefs] = useState<BriefEntry[]>([]);
   const [briefsLoaded, setBriefsLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -46,6 +56,7 @@ export default function BriefPage() {
   const [saveAsId, setSaveAsId] = useState<string | null>(null);
   const [showYamlSplit, setShowYamlSplit] = useState(false);
   const [poolDrawerOpen, setPoolDrawerOpen] = useState(false);
+  const [applyNotice, setApplyNotice] = useState<string | undefined>();
 
   // Load briefs on mount and set up focus listener
   useEffect(() => {
@@ -53,6 +64,37 @@ export default function BriefPage() {
     const handleFocus = () => loadBriefs();
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
+  }, []);
+
+  // Capabilities from the API's boot probe. Nitro does not await the ffmpeg probe,
+  // so the route may answer `{ motion: false, reason: "not probed" }` for the first
+  // moments after boot — that snapshot is retried, never taken as the verdict, and
+  // the window reopens on focus.
+  useEffect(() => {
+    let cancelled = false;
+    let retries = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async () => {
+      const capabilities = await getCapabilities();
+      if (cancelled || capabilities === null) return;
+      if (isTransientCapabilities(capabilities) && retries < CAPABILITIES_MAX_RETRIES) {
+        retries += 1;
+        timer = setTimeout(() => void load(), CAPABILITIES_RETRY_MS);
+        return;
+      }
+      dispatch({ type: "setCapabilities", capabilities });
+    };
+    void load();
+    const handleFocus = () => {
+      retries = 0;
+      void load();
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      window.removeEventListener("focus", handleFocus);
+    };
   }, []);
 
   // D11 recovery: reinstate an auto-saved draft, once per draft key and only when it
@@ -87,8 +129,12 @@ export default function BriefPage() {
   // Validate on state change
   useEffect(() => {
     const existingIds = briefs.map((b) => b.brief.id);
-    const validationErrors = validateState(state, existingIds);
-    setErrors(validationErrors);
+    setErrors(validateState(state, existingIds));
+    // D7: Save is blocked by structural invalidity only. A capability being off
+    // makes the draft unrunnable on this host, not unsavable — so the gating check
+    // runs the same validation with the capability unknown. The API parses saves in
+    // authoring mode; a motion brief must round-trip on a host without ffmpeg.
+    setSaveBlocked(getTotalErrorCount(validateState({ ...state, capabilities: null }, existingIds)) > 0);
   }, [state, briefs]);
 
   // Update dirty state. The provider outlives this route, so clear the flag on unmount —
@@ -145,6 +191,10 @@ export default function BriefPage() {
     const brief = toBrief(state);
     dispatch({ type: "apply" });
     setRunBrief(brief);
+    // D7: applying a motion brief on a host that cannot run it must not pretend it
+    // will produce clips — surface the probe's reason (the text the API's 400 would
+    // quote) as the status message. Run still refuses it server-side.
+    setApplyNotice(motionUnavailableReason(state));
   };
 
   const handleSave = async () => {
@@ -212,10 +262,7 @@ export default function BriefPage() {
   };
 
   const scrollToFirstError = (section: string) => {
-    const element = document.getElementById(section);
-    if (element) {
-      element.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
+    document.getElementById(section)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   return (
@@ -278,11 +325,16 @@ export default function BriefPage() {
             <PolicySection state={state} dispatch={dispatch} errors={sectionErrors("policy")} />
           ) : null}
           <div id="output">
-            <OutputSection state={state} dispatch={dispatch} errors={sectionErrors("output")} />
+            <OutputSection
+              state={state}
+              dispatch={dispatch}
+              errors={{ ...sectionErrors("output"), ...sectionErrors("motion") }}
+            />
           </div>
         </div>
 
         {persistError ? <p className="text-[13px] text-error">{persistError}</p> : null}
+        {applyNotice ? <p className="text-[13px] text-error" role="status">{applyNotice}</p> : null}
       </div>
 
       {/* YAML split view */}
@@ -297,13 +349,13 @@ export default function BriefPage() {
       {/* Sticky action bar */}
       <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-background p-4">
         <div className="mx-auto flex max-w-5xl items-center gap-3">
-          <Button onClick={handleApply} disabled={totalErrors > 0}>
+          <Button onClick={handleApply} disabled={saveBlocked}>
             Apply to run
           </Button>
-          <Button variant="secondary" onClick={() => void handleSave()} disabled={saving || totalErrors > 0}>
+          <Button variant="secondary" onClick={() => void handleSave()} disabled={saving || saveBlocked}>
             {saving ? "Saving..." : "Save & apply"}
           </Button>
-          <Button variant="secondary" onClick={() => setSaveAsId("")} disabled={totalErrors > 0}>
+          <Button variant="secondary" onClick={() => setSaveAsId("")} disabled={saveBlocked}>
             Save as...
           </Button>
           <Button variant="ghost" onClick={handleDiscard}>
@@ -347,7 +399,7 @@ export default function BriefPage() {
               autoFocus
             />
             <div className="flex gap-2">
-              <Button onClick={() => handleSaveAs(saveAsId)} disabled={saving || !saveAsId || totalErrors > 0}>
+              <Button onClick={() => handleSaveAs(saveAsId)} disabled={saving || !saveAsId || saveBlocked}>
                 Save
               </Button>
               <Button variant="ghost" onClick={() => setSaveAsId(null)}>

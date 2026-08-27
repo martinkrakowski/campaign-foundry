@@ -14,6 +14,18 @@ const nextConfig: NextConfig = {
     "@campaignfoundry/Distribution",
     "@campaignfoundry/shared",
   ],
+  // The workspace packages are raw TypeScript with NodeNext-style `.js` import
+  // specifiers; map the alias so webpack resolves them to the `.ts` sources.
+  webpack(config) {
+    config.resolve = {
+      ...config.resolve,
+      extensionAlias: {
+        ...(config.resolve?.extensionAlias ?? {}),
+        ".js": [".ts", ".tsx", ".js"],
+      },
+    };
+    return config;
+  },
   async rewrites() {
     return [{ source: "/api/pipeline/:path*", destination: `${API_ORIGIN}/:path*` }];
   },

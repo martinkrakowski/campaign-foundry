@@ -1,6 +1,6 @@
 import { describe, test, expect, afterEach } from "vitest";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
-import { setCapabilities, getCapabilities } from "../../../lib/capabilities.js";
+import { setCapabilities } from "../../../lib/capabilities.js";
 
 const mount = (handler: EventHandler) => {
   const app = createApp();

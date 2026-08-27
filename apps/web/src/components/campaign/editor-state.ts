@@ -1,4 +1,5 @@
 import type { CampaignBrief, CopyPool, Product, Treatment, VariationPolicy } from "@campaignfoundry/CampaignOrchestration";
+import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
 
 export const LAYOUT_OPTIONS = ["headline-top", "headline-bottom"] as const;
 export const TONE_OPTIONS = ["bold", "subtle"] as const;
@@ -6,6 +7,8 @@ export const BACKGROUND_OPTIONS = ["procedural", "asset-pool", "genai"] as const
 export const PALETTE_SHIFT_OPTIONS = [0, 0.1, 0.2] as const;
 export const HEADLINE_POOL_REF = "pool://copy";
 export const STATIC_PLATFORMS = ["instagram-feed", "linkedin", "x"] as const;
+/** Every distribution platform id in profile order — the toggle order for Output. */
+export const PLATFORM_ORDER: readonly string[] = Object.keys(PLATFORM_PROFILES);
 
 export type CampaignMode = "brief" | "variation";
 
@@ -287,7 +290,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return { ...state, formats: next };
     }
     case "togglePlatform":
-      return { ...state, platforms: toggleOrdered(state.platforms, action.value, STATIC_PLATFORMS) };
+      return { ...state, platforms: toggleOrdered(state.platforms, action.value, PLATFORM_ORDER) };
     case "setPool": {
       if (action.briefId !== state.briefId) return state;
       const none = approvedHeadlines(action.pool) === 0;
@@ -306,7 +309,9 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       };
     }
     case "load": {
-      return fromBrief(action.brief, action.entry);
+      // Capabilities describe the host, not the brief — a brief switch (including
+      // the run-context sync re-adopting the active brief) must not forget them.
+      return { ...fromBrief(action.brief, action.entry), capabilities: state.capabilities };
     }
     case "apply": {
       return { ...state, appliedSnapshot: toBrief(state) };
@@ -324,9 +329,12 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     }
     case "discard": {
       if (state.source.kind === "file" && state.source.savedSnapshot) {
-        return fromBrief(state.source.savedSnapshot, { file: state.source.file, revision: state.source.revision });
+        return {
+          ...fromBrief(state.source.savedSnapshot, { file: state.source.file, revision: state.source.revision }),
+          capabilities: state.capabilities,
+        };
       }
-      return initialEditorState(state.mode);
+      return { ...initialEditorState(state.mode), capabilities: state.capabilities };
     }
     case "setCapabilities":
       return { ...state, capabilities: action.capabilities };

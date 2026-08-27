@@ -1,5 +1,5 @@
 import { describe, test, expect, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { initialEditorState, type EditorState } from "../editor-state";
 import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, OutputSection } from "../sections";
@@ -80,15 +80,38 @@ describe("OutputSection", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "togglePlatform", value: "linkedin" });
   });
 
-  test("motion cannot be selected here — its controls arrive with the policy section", async () => {
+  test("motion is selectable once the capability is known to be on (or unknown)", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
     render(<OutputSection state={state()} dispatch={dispatch} errors={{}} />);
 
     const motion = screen.getByRole("button", { name: "motion" }) as HTMLButtonElement;
+    expect(motion.disabled).toBe(false);
+    await user.click(motion);
+    expect(dispatch).toHaveBeenCalledWith({ type: "toggleFormat", value: "motion" });
+  });
+
+  test("motion stays unavailable with the probe's reason while the capability is off", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    render(
+      <OutputSection
+        state={state({ capabilities: { motion: false, reason: "no ffmpeg" } })}
+        dispatch={dispatch}
+        errors={{}}
+      />,
+    );
+
+    const motion = screen.getByRole("button", { name: "motion" }) as HTMLButtonElement;
     expect(motion.disabled).toBe(true);
+    expect(screen.getByText(/Motion is not available on this host: no ffmpeg/)).toBeTruthy();
     await user.click(motion);
     expect(dispatch).not.toHaveBeenCalledWith({ type: "toggleFormat", value: "motion" });
+  });
+
+  test("a capability-off probe without a reason falls back to a generic one", () => {
+    render(<OutputSection state={state({ capabilities: { motion: false } })} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.getByText(/Motion is not available on this host: capability off/)).toBeTruthy();
   });
 
   test("a brief that already declares motion still shows it as selected", () => {
@@ -111,6 +134,131 @@ describe("OutputSection", () => {
     render(<OutputSection state={state()} dispatch={vi.fn()} errors={{ formats: "pick a format", platforms: "pick a platform" }} />);
     expect(screen.getByText("pick a format")).toBeTruthy();
     expect(screen.getByText("pick a platform")).toBeTruthy();
+  });
+
+  test("motion kinds and durations appear only when motion is a requested format", () => {
+    const { unmount } = render(<OutputSection state={state()} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.queryByRole("button", { name: "ken-burns-in" })).toBeNull();
+    expect(screen.queryByText("Durations (seconds)")).toBeNull();
+    unmount();
+
+    render(<OutputSection state={state({ formats: ["static", "motion"] })} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.getByRole("button", { name: "ken-burns-in" })).toBeTruthy();
+    expect(screen.getByText("Durations (seconds)")).toBeTruthy();
+  });
+
+  test("motion kinds toggle, durations edit, add and remove", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    render(
+      <OutputSection
+        state={state({ formats: ["motion"], motion: ["ken-burns-in"], duration: [5] })}
+        dispatch={dispatch}
+        errors={{}}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "accent-wipe" }));
+    expect(dispatch).toHaveBeenCalledWith({ type: "toggleMotion", value: "accent-wipe" });
+
+    fireEvent.change(screen.getByLabelText("Duration 1 (seconds)"), { target: { value: "8" } });
+    expect(dispatch).toHaveBeenCalledWith({ type: "setDuration", index: 0, value: 8 });
+
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    expect(dispatch).toHaveBeenCalledWith({ type: "removeDuration", index: 0 });
+
+    await user.click(screen.getByRole("button", { name: "Add duration" }));
+    expect(dispatch).toHaveBeenCalledWith({ type: "addDuration" });
+  });
+
+  test("motion controls are disabled with the reason while the capability is off (D12)", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    render(
+      <OutputSection
+        state={{
+          ...state({
+            formats: ["static", "motion"],
+            motion: ["ken-burns-in"],
+            duration: [6],
+            capabilities: { motion: false, reason: "no ffmpeg" },
+          }),
+        }}
+        dispatch={dispatch}
+        errors={{}}
+      />,
+    );
+
+    expect((screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Duration 1 (seconds)") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Add duration" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Remove" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: "ken-burns-in" }));
+    expect(dispatch).not.toHaveBeenCalledWith({ type: "toggleMotion", value: "ken-burns-in" });
+  });
+
+  test("renders motion kind and duration errors", () => {
+    render(
+      <OutputSection state={state({ formats: ["motion"] })} dispatch={vi.fn()} errors={{ motion: "pick a kind", duration: "pick a duration" }} />,
+    );
+    expect(screen.getByText("pick a kind")).toBeTruthy();
+    expect(screen.getByText("pick a duration")).toBeTruthy();
+  });
+
+  test("only platforms compatible with the requested formats are offered", () => {
+    // static only: the motion platforms are not offered
+    const { unmount } = render(<OutputSection state={state({ formats: ["static"] })} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.getByRole("button", { name: "instagram-feed" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "instagram-reel" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "tiktok" })).toBeNull();
+    unmount();
+
+    // static + motion: every profile is offered
+    render(<OutputSection state={state({ formats: ["static", "motion"] })} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.getByRole("button", { name: "instagram-story" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "youtube-short" })).toBeTruthy();
+  });
+
+  test("a capability-off host hides motion platforms but keeps the brief's own read-only (D12)", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    render(
+      <OutputSection
+        state={state({
+          formats: ["static", "motion"],
+          platforms: ["instagram-feed", "instagram-reel"],
+          capabilities: { motion: false, reason: "no ffmpeg" },
+        })}
+        dispatch={dispatch}
+        errors={{}}
+      />,
+    );
+
+    const reel = screen.getByRole("button", { name: "instagram-reel" }) as HTMLButtonElement;
+    expect(reel.disabled).toBe(true);
+    await user.click(reel);
+    expect(dispatch).not.toHaveBeenCalledWith({ type: "togglePlatform", value: "instagram-reel" });
+    expect(screen.queryByRole("button", { name: "tiktok" })).toBeNull();
+    expect((screen.getByRole("button", { name: "instagram-feed" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  test("a format-mismatched platform can still be deselected so the error has a way out", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    render(
+      <OutputSection
+        state={state({ formats: ["motion"], platforms: ["instagram-feed", "instagram-reel"] })}
+        dispatch={dispatch}
+        errors={{}}
+      />,
+    );
+
+    // instagram-feed packages only static and only motion is requested — offered?
+    // No: it is not offered, but it is selected, so it stays visible and clickable.
+    const feed = screen.getByRole("button", { name: "instagram-feed" }) as HTMLButtonElement;
+    expect(feed.disabled).toBe(false);
+    await user.click(feed);
+    expect(dispatch).toHaveBeenCalledWith({ type: "togglePlatform", value: "instagram-feed" });
   });
 });
 
