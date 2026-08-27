@@ -12,6 +12,7 @@ import {
   SUPPORTED_AXES,
   SUPPORTED_FORMATS,
 } from "../load-brief.js";
+import type { Capabilities } from "../../lib/capabilities.js";
 
 const valid = {
   id: "camp",
@@ -178,8 +179,6 @@ describe("parseBrief v2 fields", () => {
     ["a non-integer perProduct", { ...valid, variation: { coverage: { perProduct: 1.5 } } }, /perProduct/],
     ["a non-object axes", { ...valid, variation: { axes: [] } }, /variation.axes/],
     ["a null axes", { ...valid, variation: { axes: null } }, /variation.axes/],
-    ["the motion axis", { ...valid, variation: { axes: { motion: ["ken-burns-in"] } } }, /motion/],
-    ["the duration axis", { ...valid, variation: { axes: { duration: [6] } } }, /duration/],
     ["an unknown axis key", { ...valid, variation: { axes: { flavour: ["x"] } } }, /flavour/],
     ["axes.headline with another pool", { ...valid, variation: { axes: { headline: "pool://other" } } }, /variation.axes.headline.*"pool:\/\/other"/],
     ["axes.headline as a list", { ...valid, variation: { axes: { headline: ["pool://copy"] } } }, /variation.axes.headline/],
@@ -216,13 +215,15 @@ describe("parseBrief v2 fields", () => {
     ["a null output", { ...valid, output: null }, /"output" must be an object/],
     ["empty output.formats", { ...valid, output: { formats: [] } }, /formats/],
     ["a non-array output.formats", { ...valid, output: { formats: "static" } }, /formats/],
-    ["the motion format", { ...valid, output: { formats: ["motion"] } }, /motion/],
     ["a non-string format", { ...valid, output: { formats: [1] } }, /format/],
     ["empty output.platforms", { ...valid, output: { platforms: [] } }, /platforms/],
     ["a non-array output.platforms", { ...valid, output: { platforms: "instagram-feed" } }, /platforms/],
     ["an empty-string platform", { ...valid, output: { platforms: [""] } }, /platforms/],
     ["a non-string platform", { ...valid, output: { platforms: [1] } }, /platforms/],
   ])("rejects %s", (_label, input, message) => {
+    // Structural rules only. The motion axis, duration axis and motion format are
+    // capability rules, not structural ones: since D15 they parse cleanly in authoring
+    // mode, and both modes are asserted in the two motion describes below.
     expect(() => parseBrief(input)).toThrow(message);
   });
 });
@@ -298,15 +299,15 @@ const motionBrief = (over: Record<string, unknown> = {}) => ({
 
 describe("parseBrief motion allowlist (D8, gated on the ffmpeg capability)", () => {
   test("accepts motion, duration, formats: motion, and motion platforms when the capability is on", () => {
-    const brief = parseBrief(motionBrief(), MOTION_ON);
+    const brief = parseBrief(motionBrief(), { capabilities: MOTION_ON, enforceCapabilities: true });
     expect(brief.variation?.axes?.motion).toEqual(["ken-burns-in", "headline-rise"]);
     expect(brief.variation?.axes?.duration).toEqual([6]);
     expect(brief.output?.formats).toEqual(["static", "motion"]);
     expect(brief.output?.platforms).toEqual(["instagram-feed", "instagram-reel"]);
     // Either axis alone is fine (duration defaults in the planner).
-    expect(parseBrief(motionBrief({ variation: { count: 2, axes: { motion: ["accent-wipe"] } } }), MOTION_ON).variation?.axes?.duration).toBeUndefined();
+    expect(parseBrief(motionBrief({ variation: { count: 2, axes: { motion: ["accent-wipe"] } } }), { capabilities: MOTION_ON, enforceCapabilities: true }).variation?.axes?.duration).toBeUndefined();
     for (const id of ["instagram-story", "tiktok", "youtube-short"]) {
-      expect(parseBrief(motionBrief({ output: { formats: ["motion"], platforms: [id] } }), MOTION_ON).output?.platforms).toEqual([id]);
+      expect(parseBrief(motionBrief({ output: { formats: ["motion"], platforms: [id] } }), { capabilities: MOTION_ON, enforceCapabilities: true }).output?.platforms).toEqual([id]);
     }
   });
 
@@ -316,12 +317,12 @@ describe("parseBrief motion allowlist (D8, gated on the ffmpeg capability)", () 
     ["the motion format", { ...valid, output: { formats: ["motion"] } }, /format "motion": motion output is unavailable \(ffmpeg -version exited 1\)/],
     ["a motion platform", { ...valid, output: { platforms: ["instagram-reel"] } }, /platform "instagram-reel": motion output is unavailable/],
   ])("rejects %s with the probe reason when the capability is off", (_label, input, message) => {
-    expect(() => parseBrief(input, MOTION_OFF)).toThrow(message);
+    expect(() => parseBrief(input, { capabilities: MOTION_OFF, enforceCapabilities: true })).toThrow(message);
   });
 
   test("the default accessor is the boot probe snapshot (not probed → off) and a reasonless flag has a fallback", () => {
-    expect(() => parseBrief(motionBrief())).toThrow(/motion output is unavailable \(not probed\)/);
-    expect(() => parseBrief(motionBrief(), { motion: false })).toThrow(/\(ffmpeg capability is off\)/);
+    expect(() => parseBrief(motionBrief(), { enforceCapabilities: true })).toThrow(/motion output is unavailable \(not probed\)/);
+    expect(() => parseBrief(motionBrief(), { capabilities: { motion: false }, enforceCapabilities: true })).toThrow(/\(ffmpeg capability is off\)/);
   });
 
   test.each([
@@ -333,7 +334,7 @@ describe("parseBrief motion allowlist (D8, gated on the ffmpeg capability)", () 
     ["an unknown platform", motionBrief({ output: { platforms: ["myspace"] } }), /Unknown output platform "myspace"/],
     ["an unknown format", motionBrief({ output: { formats: ["gif"] } }), /Unsupported output format "gif"/],
   ])("rejects %s even with the capability on", (_label, input, message) => {
-    expect(() => parseBrief(input, MOTION_ON)).toThrow(message);
+    expect(() => parseBrief(input, { capabilities: MOTION_ON, enforceCapabilities: true })).toThrow(message);
   });
 
   test.each([
@@ -342,11 +343,11 @@ describe("parseBrief motion allowlist (D8, gated on the ffmpeg capability)", () 
     ["no formats (static) + a motion-only platform", { platforms: ["instagram-reel"] }, /platform "instagram-reel" packages only \[motion\], which output.formats \[static\] does not request/],
     ["a format no requested platform packages", { formats: ["static", "motion"], platforms: ["instagram-reel"] }, /format "static" is requested but none of output.platforms \[instagram-reel\] can package it/],
   ])("rejects incompatible formats/platforms: %s", (_label, output, message) => {
-    expect(() => parseBrief(motionBrief({ output }), MOTION_ON)).toThrow(message);
+    expect(() => parseBrief(motionBrief({ output }), { capabilities: MOTION_ON, enforceCapabilities: true })).toThrow(message);
   });
 
   test("accepts formats/platforms that agree: static, mixed, and motion-only", () => {
-    const parse = (output: Record<string, unknown>) => parseBrief(motionBrief({ output }), MOTION_ON).output;
+    const parse = (output: Record<string, unknown>) => parseBrief(motionBrief({ output }), { capabilities: MOTION_ON, enforceCapabilities: true }).output;
     expect(parse({ formats: ["static"], platforms: ["instagram-feed"] })?.formats).toEqual(["static"]);
     expect(parse({ formats: ["static", "motion"], platforms: ["instagram-feed", "tiktok"] })?.formats).toEqual(["static", "motion"]);
     expect(parse({ formats: ["motion"], platforms: ["instagram-reel", "youtube-short"] })?.formats).toEqual(["motion"]);
@@ -359,25 +360,25 @@ describe("parseBrief motion allowlist (D8, gated on the ffmpeg capability)", () 
       variation: { ...v2Brief.variation, axes: { ...staticAxes, motion: [] } },
       output: { formats: ["motion"], platforms: ["instagram-reel"] },
     });
-    expect(() => parseBrief(empty, MOTION_ON)).toThrow(
+    expect(() => parseBrief(empty, { capabilities: MOTION_ON, enforceCapabilities: true })).toThrow(
       /"variation.axes.motion" must select at least one motion kind when output.formats includes "motion"/,
     );
     const absent = motionBrief({
       variation: { ...v2Brief.variation, axes: staticAxes },
       output: { formats: ["motion"], platforms: ["instagram-reel"] },
     });
-    expect(parseBrief(absent, MOTION_ON).variation?.axes?.motion).toBeUndefined();
+    expect(parseBrief(absent, { capabilities: MOTION_ON, enforceCapabilities: true }).variation?.axes?.motion).toBeUndefined();
     // Without the motion format an empty axis is merely inert.
     const inert = motionBrief({
       variation: { ...v2Brief.variation, axes: { ...staticAxes, motion: [] } },
       output: { formats: ["static"], platforms: ["instagram-feed"] },
     });
-    expect(parseBrief(inert, MOTION_ON).output?.formats).toEqual(["static"]);
+    expect(parseBrief(inert, { capabilities: MOTION_ON, enforceCapabilities: true }).output?.formats).toEqual(["static"]);
   });
 
   test("static platforms are accepted regardless of the capability; unknown ids are not", () => {
-    expect(parseBrief({ ...valid, output: { platforms: ["instagram-feed", "linkedin", "x"] } }, MOTION_OFF).output?.platforms).toHaveLength(3);
-    expect(() => parseBrief({ ...valid, output: { platforms: ["myspace"] } }, MOTION_OFF)).toThrow(/Unknown output platform/);
+    expect(parseBrief({ ...valid, output: { platforms: ["instagram-feed", "linkedin", "x"] } }, { capabilities: MOTION_OFF, enforceCapabilities: true }).output?.platforms).toHaveLength(3);
+    expect(() => parseBrief({ ...valid, output: { platforms: ["myspace"] } }, { capabilities: MOTION_OFF, enforceCapabilities: true })).toThrow(/Unknown output platform/);
   });
 
   test("loadBrief forwards the capability", async () => {
@@ -385,10 +386,45 @@ describe("parseBrief motion allowlist (D8, gated on the ffmpeg capability)", () 
     try {
       const path = join(dir, "motion.json");
       writeFileSync(path, JSON.stringify(motionBrief()));
-      await expect(loadBrief(path)).rejects.toThrow(/motion output is unavailable/);
-      expect((await loadBrief(path, MOTION_ON)).output?.formats).toEqual(["static", "motion"]);
+      await expect(loadBrief(path, { enforceCapabilities: true })).rejects.toThrow(/motion output is unavailable/);
+      expect((await loadBrief(path, { capabilities: MOTION_ON, enforceCapabilities: true })).output?.formats).toEqual(["static", "motion"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("parseBrief D15 authoring vs enforcing mode", () => {
+  const MOTION_OFF: Capabilities = { motion: false, reason: "test off" };
+  const motionBriefWithAxis = motionBrief({ variation: { ...v2Brief.variation, axes: { motion: ["accent-wipe"] } } });
+  const motionBriefWithFormat = motionBrief({ variation: { ...v2Brief.variation }, output: { formats: ["motion"] } });
+  const motionPlatform = "instagram-reel"; // requires motion
+  const motionBriefWithPlatform = motionBrief({ variation: { ...v2Brief.variation }, output: { formats: ["motion"], platforms: [motionPlatform] } });
+
+  test("authoring mode (default) allows motion axis when capability is off", () => {
+    const parsed = parseBrief(motionBriefWithAxis, { enforceCapabilities: false });
+    expect(parsed.variation?.axes?.motion).toEqual(["accent-wipe"]);
+  });
+
+  test("authoring mode allows motion format when capability is off", () => {
+    const parsed = parseBrief(motionBriefWithFormat, { enforceCapabilities: false });
+    expect(parsed.output?.formats).toContain("motion");
+  });
+
+  test("authoring mode allows motion platform when capability is off", () => {
+    const parsed = parseBrief(motionBriefWithPlatform, { enforceCapabilities: false });
+    expect(parsed.output?.platforms).toContain(motionPlatform);
+  });
+
+  test("enforcing mode throws for motion axis when capability is off", () => {
+    expect(() => parseBrief(motionBriefWithAxis, { capabilities: MOTION_OFF, enforceCapabilities: true })).toThrow(/Unsupported variation axis "motion": motion output is unavailable/);
+  });
+
+  test("enforcing mode throws for motion format when capability is off", () => {
+    expect(() => parseBrief(motionBriefWithFormat, { capabilities: MOTION_OFF, enforceCapabilities: true })).toThrow(/Unsupported output format "motion": motion output is unavailable/);
+  });
+
+  test("enforcing mode throws for motion platform when capability is off", () => {
+    expect(() => parseBrief(motionBriefWithPlatform, { capabilities: MOTION_OFF, enforceCapabilities: true })).toThrow(/Unsupported output format "motion": motion output is unavailable/);
   });
 });

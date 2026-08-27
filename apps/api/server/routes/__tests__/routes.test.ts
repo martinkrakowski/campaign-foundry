@@ -124,6 +124,19 @@ describe("POST /campaigns/generate", () => {
     expect(((await report.json()) as { assets: unknown[] }).assets).toHaveLength(6);
   });
 
+  test("refuses a motion brief with 400 while the capability is off (D15 enforcing mode)", async () => {
+    // generate is a run path: authoring mode is for listing and persistence only, so a
+    // brief this host cannot produce must be refused here rather than deep in the pipeline.
+    setCapabilities({ motion: false, reason: "ffmpeg-static binary is not available" });
+    try {
+      const res = await call(brief({ output: { formats: ["motion"], platforms: ["instagram-reel"] } }));
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toMatch(/motion output is unavailable/);
+    } finally {
+      setCapabilities({ motion: false, reason: "not probed" });
+    }
+  });
+
   test("returns 400 with a default message when body parsing throws a non-Error", async () => {
     const g = globalThis as Record<string, unknown>;
     const original = g.readBody;
