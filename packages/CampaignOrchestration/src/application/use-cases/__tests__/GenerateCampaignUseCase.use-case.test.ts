@@ -294,6 +294,19 @@ describe("GenerateCampaignUseCase — selective regeneration", () => {
     expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
   });
 
+  test("a mixed target list is refused on a classic brief — nothing is silently dropped", async () => {
+    const d = deps();
+    const result = await new GenerateCampaignUseCase(d).execute(baseBrief(), {
+      regenerateOnly: [
+        { productId: "alpha", aspectRatio: "1:1", treatment: "default" },
+        { productId: "alpha", variantIndex: 0 },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/came from a randomized run/);
+    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+  });
+
   test("an empty target list is a no-op run (no cells, no proofs)", async () => {
     const d = deps();
     const result = await new GenerateCampaignUseCase(d).execute(baseBrief(), { regenerateOnly: [] });
@@ -527,6 +540,29 @@ describe("GenerateCampaignUseCase — variation", () => {
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error.message).toMatch(/came from a classic run, but the brief is now a randomized campaign/);
     expect(planner.replan).not.toHaveBeenCalled();
+    expect(d.proceduralGenerator.resolveBackground).not.toHaveBeenCalled();
+  });
+
+  test("a mixed target list is refused on a randomized brief — nothing is silently dropped", async () => {
+    const planner = fakePlanner(fakePlan([fakeVariant(), fakeVariant({ index: 1, productId: "beta" })]));
+    const d = deps({ planner });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), {
+      regenerateOnly: [
+        { productId: "alpha", variantIndex: 0, attempt: 1 },
+        { productId: "alpha", aspectRatio: "1:1", treatment: "default" },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/came from a classic run/);
+    expect(planner.replan).not.toHaveBeenCalled();
+  });
+
+  test("an empty target list is a no-op run on a randomized brief too", async () => {
+    const planner = fakePlanner(fakePlan([fakeVariant()]));
+    const d = deps({ planner });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief(), { regenerateOnly: [] });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.value.assets).toEqual([]);
     expect(d.proceduralGenerator.resolveBackground).not.toHaveBeenCalled();
   });
 

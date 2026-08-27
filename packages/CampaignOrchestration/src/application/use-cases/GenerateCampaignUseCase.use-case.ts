@@ -156,10 +156,11 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
           ),
         )
       : null;
-    // Targets present but none classic-shaped: they came from a randomized run and
-    // the brief is classic now. Without this check every cell is skipped and the run
-    // reports success having regenerated nothing.
-    if (targets !== undefined && targets.length > 0 && targetKeys !== null && targetKeys.size === 0) {
+    // Every target must be keyed for this mode. A randomized-shaped one came from a
+    // run produced before the brief was switched to classic; without this check it is
+    // silently dropped — and a list of only such targets skips every cell, reporting a
+    // successful run that regenerated nothing. An empty list stays a no-op run.
+    if (targets !== undefined && targets.length > 0 && targets.some(isVariationTarget)) {
       return err(new Error(RE_ROLL_MODE_MISMATCH.randomizedTargetsOnClassic));
     }
     const isTarget = (productId: string, ratioValue: string, treatmentId: string): boolean =>
@@ -311,13 +312,13 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     let variants: readonly Variant[];
     const attemptByIndex = new Map<number, number>();
     if (targets) {
-      const variationTargets = targets.filter(isVariationTarget);
-      if (variationTargets.length === 0) {
-        // The targets came from a run produced under the other mode — a classic
-        // report re-rolled after the brief was switched to randomized. Say so, and
-        // say what to do, instead of a bare "do not match".
+      // Every target must be keyed for this mode. A classic-shaped one came from a run
+      // produced before the brief was switched to randomized; say so and say what to
+      // do, rather than silently dropping it. An empty list stays a no-op run.
+      if (targets.length > 0 && targets.some((target) => !isVariationTarget(target))) {
         return err(new Error(RE_ROLL_MODE_MISMATCH.classicTargetsOnRandomized));
       }
+      const variationTargets = targets.filter(isVariationTarget);
       const seen = new Set<number>();
       const unique = variationTargets.filter((target) => {
         if (seen.has(target.variantIndex)) return false;
