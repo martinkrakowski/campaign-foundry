@@ -16,7 +16,11 @@ const BASE_DISTANCE_AXES = 6;
 export function maxMinDistance(state: EditorState): number {
   let axes = BASE_DISTANCE_AXES;
   if (state.variation.headline) axes += 1;
-  if (state.motion.length > 0) axes += 2;
+  // Mirror VariationPolicy.vo's `motionEnabled = wantsMotion && motion.length > 0`.
+  // Counting retained kinds while `motion` is not a requested format would let a
+  // static draft pass with a minDistance the planner then rejects — `durationSec`
+  // is drawn only on motion slots, so it follows `motion`.
+  if (state.formats.includes("motion") && state.motion.length > 0) axes += 2;
   return axes;
 }
 
@@ -184,13 +188,19 @@ export function validateOutput(state: EditorState): FieldErrors {
     .filter((profile): profile is PlatformProfile => profile !== undefined);
   for (const profile of profiles) {
     if (!profile.formats.some((format) => state.formats.includes(format))) {
-      errors.platforms = `Platform "${profile.id}" packages only [${profile.formats.join(", ")}], which output.formats [${state.formats.join(", ")}] does not request.`;
+      // The API states the rejection; the editor has to say what to do about it.
+      errors.platforms = `"${profile.id}" only packages ${profile.formats.join(" or ")} — request that format, or remove the platform.`;
       break;
     }
   }
   for (const format of state.formats) {
     if (!profiles.some((profile) => (profile.formats as readonly string[]).includes(format))) {
-      errors.formats = `Output format "${format}" is requested but none of output.platforms [${state.platforms.join(", ")}] can package it.`;
+      // Name the platforms that would satisfy it rather than only the ones that do not:
+      // selecting a format makes its platforms appear, and the message should point there.
+      const candidates = Object.values(PLATFORM_PROFILES)
+        .filter((profile) => (profile.formats as readonly string[]).includes(format))
+        .map((profile) => profile.id);
+      errors.formats = `No selected platform packages "${format}" — add one of: ${candidates.join(", ")}.`;
       break;
     }
   }

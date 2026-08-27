@@ -137,7 +137,7 @@ export type EditorAction =
   | { type: "setPool"; briefId: string; pool: CopyPool | null }
   | { type: "loadPool"; briefId: string; pool: CopyPool | null }
   | { type: "load"; brief: CampaignBrief; entry?: { file: string; revision?: string } }
-  | { type: "apply" }
+  | { type: "apply"; applied?: CampaignBrief }
   | { type: "save"; saved?: CampaignBrief }
   | { type: "restore"; state: EditorState }
   | { type: "discard" }
@@ -314,10 +314,17 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return { ...fromBrief(action.brief, action.entry), capabilities: state.capabilities };
     }
     case "apply": {
-      return { ...state, appliedSnapshot: toBrief(state) };
+      // Snapshot what was actually applied, not whatever the reducer holds when the
+      // dispatch lands. Save & apply awaits the network first, so recomputing here
+      // would record edits made during the request as applied when the run has the
+      // pre-await brief — the same trap the `save` action carries `saved` for.
+      return { ...state, appliedSnapshot: action.applied ?? toBrief(state) };
     }
     case "restore":
-      return action.state;
+      // A draft persisted before the probe answered (or by an older editor) carries
+      // stale capabilities. Keep the verdict this session already has, or restoring
+      // would re-enable motion on a host that has said it cannot produce it.
+      return { ...action.state, capabilities: state.capabilities ?? action.state.capabilities };
     case "save": {
       // Snapshot what was actually persisted, not whatever the reducer holds when the
       // response lands — edits made during the request must stay dirty.

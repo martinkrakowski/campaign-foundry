@@ -552,6 +552,38 @@ describe("BriefPage — data flow", () => {
     await waitFor(() => expect(screen.queryByText("Headline Pool")).toBeNull());
   });
 
+  test("the scrolling column clears the fixed action bar", async () => {
+    routes({});
+    const { container } = renderWithRun(<BriefPage />);
+    await waitForEditorReady();
+
+    // The bar is `fixed`, so the column cannot account for it: without explicit
+    // clearance its last control — the platform buttons — sits underneath and cannot
+    // be scrolled into view. Tailwind's `sm:p-8` also overrode the old `pb-12`.
+    const column = container.querySelector(".overflow-y-auto") as HTMLElement;
+    const bar = screen.getByTestId("action-bar");
+    expect(column).toBeTruthy();
+    expect(bar).toBeTruthy();
+
+    // 1px border + p-4 twice + an h-10 button, plus room for the strip to wrap
+    const clearance = Number.parseInt(column.style.paddingBottom, 10);
+    expect(clearance).toBeGreaterThan(73);
+  });
+
+  test("the YAML split panel clears it too", async () => {
+    const user = userEvent.setup();
+    routes({});
+    const { container } = renderWithRun(<BriefPage />);
+    await waitForEditorReady();
+
+    await user.click(screen.getByText("YAML split on"));
+    const panels = Array.from(container.querySelectorAll<HTMLElement>("[style*='padding-bottom']"));
+    expect(panels.length).toBe(2); // the editor column and the split panel
+    for (const panel of panels) {
+      expect(Number.parseInt(panel.style.paddingBottom, 10)).toBeGreaterThan(73);
+    }
+  });
+
   test("the mode toggle switches between classic and randomized", async () => {
     const user = userEvent.setup();
     routes({});
@@ -644,7 +676,12 @@ describe("BriefPage — capabilities and motion", () => {
 
     await user.click(screen.getAllByText("New brief...")[0]);
     await user.click(await screen.findByText("clip"));
-    await waitFor(() => expect(motionToggle().disabled).toBe(true));
+    // the verdict lands: the motion *kinds* go read-only, but the format toggle stays
+    // operable because this draft already requests motion and needs a way out
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled).toBe(true),
+    );
+    expect(motionToggle().disabled).toBe(false);
 
     // D7: the brief is unrunnable here but still savable, so Save & apply is enabled —
     // and having applied it, it owes the user the same reason Apply gives.
@@ -779,8 +816,13 @@ describe("BriefPage — capabilities and motion", () => {
     await user.click(await screen.findByText("clip"));
     await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe("clip"));
 
-    // the probe's verdict lands and the controls go read-only with its reason
-    await waitFor(() => expect(motionToggle().disabled).toBe(true));
+    // the probe's verdict lands and the controls go read-only with its reason. The
+    // format toggle itself stays operable — the draft already requests motion, so
+    // gating it would trap the user with a compatibility error and no control to fix it.
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled).toBe(true),
+    );
+    expect(motionToggle().disabled).toBe(false);
     expect(screen.getByText(/Motion is not available on this host: no ffmpeg/)).toBeTruthy();
     expect((screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled).toBe(true);
     const duration = screen.getByLabelText("Duration 1 (seconds)") as HTMLInputElement;
@@ -828,7 +870,7 @@ describe("BriefPage — capabilities and motion", () => {
 
     expect(
       await screen.findByText(
-        /Platform "instagram-reel" packages only \[motion\], which output\.formats \[static\] does not request/,
+        /"instagram-reel" only packages motion — request that format, or remove the platform\./,
       ),
     ).toBeTruthy();
     await waitFor(() =>

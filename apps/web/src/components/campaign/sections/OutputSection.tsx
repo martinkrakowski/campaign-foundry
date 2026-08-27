@@ -42,11 +42,15 @@ export function OutputSection({ state, dispatch, errors }: { state: EditorState;
           <h3 className="mb-2 font-mono text-[11px] uppercase tracking-widest text-text-muted">Formats</h3>
           <div className="flex gap-2">
             {["static", "motion"].map((format) => {
-              const gated = format === "motion" && motionOff;
+              // Gating prevents *selecting* motion, never deselecting it. A draft that
+              // already requests motion when a capability-off verdict lands must keep a
+              // way out, or compatibility validation blocks Save with no control to fix it.
+              const selected = state.formats.includes(format);
+              const gated = format === "motion" && motionOff && !selected;
               return (
                 <Button
                   key={format}
-                  variant={state.formats.includes(format) ? "primary" : "secondary"}
+                  variant={selected ? "primary" : "secondary"}
                   size="sm"
                   disabled={gated}
                   title={gated ? `Motion is not available on this host: ${motionReason}` : undefined}

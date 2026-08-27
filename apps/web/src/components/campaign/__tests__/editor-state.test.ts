@@ -358,6 +358,24 @@ describe("editorReducer — load, apply, save, discard", () => {
     expect(next.appliedSnapshot).toMatchObject({ id: "camp" });
   });
 
+  test("apply records the brief handed to it, not the state at dispatch time", () => {
+    const state = { ...base(), briefId: "camp" };
+    // Save & apply awaits the network before dispatching, so the draft may have moved
+    // on; the run holds the pre-await brief and the snapshot must match it
+    const applied = toBrief(state);
+    const edited = reduce(state, { type: "patch", patch: { campaignMessage: "typed during save" } });
+    const next = reduce(edited, { type: "apply", applied });
+
+    expect(next.appliedSnapshot).toEqual(applied);
+    // the edit made mid-request is therefore still unapplied, which is the truth
+    expect(isDirtySinceApply(next)).toBe(true);
+  });
+
+  test("apply falls back to the current draft when handed nothing", () => {
+    const next = reduce({ ...base(), briefId: "camp" }, { type: "apply" });
+    expect(next.appliedSnapshot).toMatchObject({ id: "camp" });
+  });
+
   test("save on a new draft promotes the source to a file", () => {
     const next = reduce({ ...base(), briefId: "camp" }, { type: "save" });
     expect(next.source).toMatchObject({ kind: "file", file: "camp.yaml", loadedId: "camp", revision: undefined });
@@ -678,9 +696,27 @@ describe("variation policy round-trip", () => {
 });
 
 describe("restore", () => {
-  test("reinstates a recovered draft wholesale", () => {
+  test("reinstates a recovered draft", () => {
     const draft = { ...base(), briefId: "recovered", campaignMessage: "from storage" };
-    expect(reduce(base(), { type: "restore", state: draft })).toBe(draft);
+    expect(reduce(base(), { type: "restore", state: draft })).toMatchObject({
+      briefId: "recovered",
+      campaignMessage: "from storage",
+    });
+  });
+
+  test("keeps the probe's verdict rather than the draft's stale one", () => {
+    const probed = { ...base(), capabilities: { motion: false, reason: "no ffmpeg" } };
+    // the draft was persisted before the probe answered
+    const draft = { ...base(), briefId: "recovered", capabilities: null };
+    expect(reduce(probed, { type: "restore", state: draft })).toMatchObject({
+      briefId: "recovered",
+      capabilities: { motion: false, reason: "no ffmpeg" },
+    });
+  });
+
+  test("takes the draft's verdict when this session has none", () => {
+    const draft = { ...base(), capabilities: { motion: true } };
+    expect(reduce(base(), { type: "restore", state: draft }).capabilities).toEqual({ motion: true });
   });
 });
 
