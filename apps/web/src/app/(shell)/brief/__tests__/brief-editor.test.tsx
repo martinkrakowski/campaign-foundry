@@ -558,31 +558,31 @@ describe("BriefPage — data flow", () => {
     await waitFor(() => expect(screen.queryByText("Headline Pool")).toBeNull());
   });
 
-  test("the action bar is part of the view, not a floating strip over the whole window", async () => {
+  test("the view flows and the shell scrolls it, like every other view; the bar sticks inside that", async () => {
     routes({});
     const { container } = renderWithRun(<BriefPage />);
     await waitForEditorReady();
-    const bar = screen.getByTestId("action-bar");
-    // in flow at the foot of this view: never `fixed`, so it cannot cover the left bar,
-    // and the scrolling column sits above it inside the same root
-    expect(bar.className).not.toMatch(/\bfixed\b/);
     const root = container.firstElementChild as HTMLElement;
+    // no forced height and no inner scroller: the shell's main container is the one
+    // that scrolls, so /brief behaves like /grid instead of scrolling inside itself
+    expect(root.className).not.toMatch(/\bh-full\b/);
+    expect(root.querySelector(".overflow-y-auto:not(.sticky)")).toBeNull();
+    const bar = screen.getByTestId("action-bar");
+    expect(bar.className).toMatch(/\bsticky\b/);
+    expect(bar.className).not.toMatch(/\bfixed\b/);
     expect(root.contains(bar)).toBe(true);
-    const column = root.querySelector(".overflow-y-auto") as HTMLElement;
-    expect(column).toBeTruthy();
-    expect(column.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(column.style.paddingBottom).toBe("");
   });
 
-  test("the YAML split panel scrolls on its own", async () => {
+  test("the YAML split panel pins beside the form and scrolls on its own", async () => {
     const user = userEvent.setup();
     routes({});
-    const { container } = renderWithRun(<BriefPage />);
+    renderWithRun(<BriefPage />);
     await waitForEditorReady();
     await user.click(screen.getByText("YAML split on"));
-    const panels = Array.from(container.querySelectorAll<HTMLElement>(".overflow-y-auto"));
-    expect(panels.length).toBe(2); // the editor column and the split panel
-    expect(screen.getByText(/"targetRegion"/)).toBeTruthy();
+    const pre = screen.getByText(/"targetRegion"/);
+    const panel = pre.closest(".sticky") as HTMLElement;
+    expect(panel).toBeTruthy();
+    expect(panel.className).toMatch(/overflow-y-auto/);
   });
 
   test("the mode toggle switches between classic and randomized", async () => {

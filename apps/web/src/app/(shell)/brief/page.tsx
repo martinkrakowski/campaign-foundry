@@ -326,10 +326,13 @@ export default function BriefPage() {
   };
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex min-h-0 flex-1">
+    // No h-full / inner overflow: like every other view, this one flows and the
+    // shell's main container is the scroller. The action bar and the YAML panel stay
+    // put with `sticky`, which is scoped to that container — never the viewport.
+    <div className="flex flex-col">
+      <div className="flex items-start">
         {/* Main content */}
-        <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-6 overflow-y-auto p-4 sm:p-8">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 sm:p-8">
           {/* Header with selector, mode toggle, status chip */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -397,7 +400,7 @@ export default function BriefPage() {
 
         {/* YAML split view */}
         {showYamlSplit && (
-          <div className="w-96 shrink-0 overflow-y-auto border-l border-border bg-surface p-4">
+          <div className="sticky top-0 max-h-screen w-96 shrink-0 self-start overflow-y-auto border-l border-border bg-surface p-4">
             <pre className="overflow-auto text-[11px] text-text-primary">
               {JSON.stringify(toBrief(state), null, 2)}
             </pre>
@@ -406,7 +409,7 @@ export default function BriefPage() {
       </div>
 
       {/* Action bar: in flow at the foot of this view, so it never covers the left bar */}
-      <div data-testid="action-bar" className="flex shrink-0 items-center gap-3 border-t border-border bg-background p-4">
+      <div data-testid="action-bar" className="sticky bottom-0 z-10 flex shrink-0 items-center gap-3 border-t border-border bg-background p-4">
         <Button variant="ghost" onClick={() => setShowYamlSplit(!showYamlSplit)}>
           YAML split {showYamlSplit ? "off" : "on"}
         </Button>
