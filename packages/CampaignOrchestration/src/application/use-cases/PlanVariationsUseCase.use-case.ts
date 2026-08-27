@@ -7,6 +7,8 @@ import type { VariationPlan } from "../../domain/value-objects/VariationPlan.vo.
 import { DISTANCE_AXES, VariationPolicy, type PlanInput } from "../../domain/value-objects/VariationPolicy.vo.js";
 
 /** Re-roll bound: 64 draws from `seedFrom(briefId, index, attempt)`. */
+import { EXHAUSTIVE_MAX_SPACE, enumerateAxes, exhaustiveAccept, shortfallMessage } from "./PlanCapacity.js";
+
 const REPLAN_MAX_DRAWS = 64;
 
 /** Encode frame rate; the estimate's `frames` and the generator's `fps` agree on it. */
@@ -61,7 +63,7 @@ export class PlanVariationsUseCase {
 
     const budget = policy.count * 3;
     const rng = new SeededRandom(seedFrom(brief.id, String(policy.seed)));
-    const accepted: Variant[] = [];
+    let accepted: Variant[] = [];
     let drawn = 0;
     let turn = 0;
 
@@ -92,11 +94,17 @@ export class PlanVariationsUseCase {
     }
 
     if (accepted.length < policy.count) {
-      return err(
-        new Error(
-          `Variation plan shortfall: accepted ${accepted.length} of count ${policy.count} (axisProductSize ${policy.axisProductSize}, minDistance ${policy.minDistance}).`,
-        ),
-      );
+      // The random draw (kept first so every plan it can satisfy stays golden) has a
+      // budget of 3 × count, which is hopeless in a tight space — a motion-only brief
+      // sits at one aspect ratio, since every motion platform is 9:16. Search the
+      // whole space instead, seeded, before deciding the brief really cannot fit.
+      const space = enumerateAxes(policy);
+      const exhaustive =
+        space.length <= EXHAUSTIVE_MAX_SPACE ? exhaustiveAccept(space, policy, brief.id, deficient) : accepted;
+      if (exhaustive.length < policy.count) {
+        return err(new Error(shortfallMessage(policy, space, Math.max(accepted.length, exhaustive.length))));
+      }
+      accepted = exhaustive; // the coverage check below applies to either search
     }
 
     const unmet = firstUnmetCoverage(accepted, policy);
@@ -278,3 +286,4 @@ function toPlan(briefId: string, policy: VariationPolicy, variants: readonly Var
     briefId,
   };
 }
+
