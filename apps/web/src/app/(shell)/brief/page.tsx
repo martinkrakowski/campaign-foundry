@@ -189,10 +189,14 @@ export default function BriefPage() {
   // away from motion, or a capability verdict landing — re-evaluates it, and storing
   // it would leave the page claiming motion is unavailable after that stopped being
   // true. Both Apply and Save & apply set the snapshot, so both surface it.
-  const applyNotice =
-    state.appliedSnapshot !== null && !isDirtySinceApply(state)
-      ? motionUnavailableReason(state)
-      : undefined;
+  const applied = state.appliedSnapshot !== null && !isDirtySinceApply(state);
+  const applyRefusal = applied ? motionUnavailableReason(state) : undefined;
+  // Apply changes state the user cannot see from here — the pipeline lives in the top
+  // bar — so say plainly what happened and what runs it. Without this, Apply looked
+  // like it did nothing at all.
+  const applyNotice = applied
+    ? (applyRefusal ?? `Applied — Generate in the top bar will run "${state.briefId}".`)
+    : undefined;
 
   /** Section errors before the first validation pass lands. */
   const sectionErrors = (section: string): FieldErrors => errors[section] ?? {};
@@ -206,6 +210,16 @@ export default function BriefPage() {
     // Carry the revision through: handleSave sends it back as the conditional-write
     // guard, so dropping it here would silently downgrade every save to last-write-wins.
     dispatch({ type: "load", brief: entry.brief, entry: { file: entry.file, revision: entry.revision } });
+    // Picking a brief is choosing which campaign to work on, so it becomes the active
+    // one — the same thing the shell's picker does with `setBrief`. Without this the
+    // editor and the pipeline disagree: Generate would run whatever was active before,
+    // so choosing a motion brief here and running it produced the previous brief's
+    // output. Typed edits still need Apply; only the choice of brief is immediate.
+    // No `applied` here: the reducer processes this after the load, so it snapshots the
+    // canonical `toBrief` of the loaded draft. Passing the file's brief instead would
+    // differ by key order alone and read as dirty the moment it was applied.
+    dispatch({ type: "apply" });
+    setRunBrief(entry.brief);
   };
 
   const createNew = () => {
@@ -366,7 +380,11 @@ export default function BriefPage() {
         </div>
 
         {persistError ? <p className="text-[13px] text-error">{persistError}</p> : null}
-        {applyNotice ? <p className="text-[13px] text-error" role="status">{applyNotice}</p> : null}
+        {applyNotice ? (
+          <p className={applyRefusal ? "text-[13px] text-error" : "text-[13px] text-success"} role="status">
+            {applyNotice}
+          </p>
+        ) : null}
       </div>
 
       {/* YAML split view */}

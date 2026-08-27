@@ -584,6 +584,54 @@ describe("BriefPage — data flow", () => {
     }
   });
 
+  test("choosing a brief makes it the one Generate will run", async () => {
+    const user = userEvent.setup();
+    const motion = {
+      file: "clip.yaml",
+      revision: "r1",
+      brief: {
+        ...brief("clip"),
+        mode: "variation",
+        variation: {
+          count: 4,
+          axes: {
+            layout: ["headline-top"], tone: ["bold"],
+            background: { source: ["procedural"] }, paletteShift: [0],
+            motion: ["ken-burns-in"], duration: [6],
+          },
+        },
+        output: { formats: ["static", "motion"], platforms: ["linkedin", "instagram-reel"] },
+      },
+    };
+    routes({ list: () => json({ briefs: [motion] }), capabilities: () => json({ motion: true }) });
+    renderWithRun(<BriefPage />);
+
+    await user.click(screen.getAllByText("New brief...")[0]);
+    await user.click(await screen.findByText("clip"));
+
+    // Without this the editor and the pipeline disagree: Generate lives in the top bar
+    // and runs the run-context brief, so picking a motion brief here and running it
+    // produced the previously active brief's output.
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toMatch(/Applied — Generate in the top bar will run "clip"/),
+    );
+  });
+
+  test("Apply says what it did rather than appearing to do nothing", async () => {
+    const user = userEvent.setup();
+    routes({ capabilities: () => json({ motion: true }) });
+    renderWithRun(<BriefPage />);
+    await waitForEditorReady();
+
+    // a freshly adopted brief is already applied; edit it so Apply has work to do
+    await user.type(screen.getByLabelText("Campaign Message"), "!");
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+
+    await user.click(screen.getByText("Apply to run"));
+    const status = await screen.findByRole("status");
+    expect(status.textContent).toMatch(/Applied — Generate in the top bar will run/);
+  });
+
   test("the mode toggle switches between classic and randomized", async () => {
     const user = userEvent.setup();
     routes({});

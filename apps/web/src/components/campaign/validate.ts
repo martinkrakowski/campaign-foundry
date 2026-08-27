@@ -223,6 +223,10 @@ export function validateMotion(state: EditorState): FieldErrors {
     )
   ) {
     errors.duration = `Durations must be whole seconds between ${MIN_DURATION_SEC} and ${MAX_DURATION_SEC}.`;
+  } else if (new Set(state.duration).size !== state.duration.length) {
+    // The planner de-duplicates this axis, so a repeat draws nothing — say so rather
+    // than letting it look like an extra clip length.
+    errors.duration = "Each duration must be distinct — the planner draws each length once.";
   }
   return errors;
 }
