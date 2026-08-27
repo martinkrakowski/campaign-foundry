@@ -219,7 +219,7 @@ export default function BriefPage() {
 
   const handleApply = () => {
     const brief = toBrief(state);
-    dispatch({ type: "apply" });
+    dispatch({ type: "apply", applied: brief });
     setRunBrief(brief);
     // D7: applying a motion brief on a host that cannot run it must not pretend it
     // will produce clips — surface the probe's reason (the text the API's 400 would
@@ -239,9 +239,8 @@ export default function BriefPage() {
       // D3: "Save & apply" does both. Pass the brief that was actually persisted so
       // edits made while the request was in flight stay dirty.
       dispatch({ type: "save", saved: brief });
-      dispatch({ type: "apply" });
+      dispatch({ type: "apply", applied: brief });
       setRunBrief(brief);
-      // "Save & apply" applies, so it owes the same refusal notice Apply gives.
         purgeDraftFromStorage(state);
       await loadBriefs();
     } catch (error) {

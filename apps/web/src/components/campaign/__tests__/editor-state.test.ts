@@ -358,6 +358,24 @@ describe("editorReducer — load, apply, save, discard", () => {
     expect(next.appliedSnapshot).toMatchObject({ id: "camp" });
   });
 
+  test("apply records the brief handed to it, not the state at dispatch time", () => {
+    const state = { ...base(), briefId: "camp" };
+    // Save & apply awaits the network before dispatching, so the draft may have moved
+    // on; the run holds the pre-await brief and the snapshot must match it
+    const applied = toBrief(state);
+    const edited = reduce(state, { type: "patch", patch: { campaignMessage: "typed during save" } });
+    const next = reduce(edited, { type: "apply", applied });
+
+    expect(next.appliedSnapshot).toEqual(applied);
+    // the edit made mid-request is therefore still unapplied, which is the truth
+    expect(isDirtySinceApply(next)).toBe(true);
+  });
+
+  test("apply falls back to the current draft when handed nothing", () => {
+    const next = reduce({ ...base(), briefId: "camp" }, { type: "apply" });
+    expect(next.appliedSnapshot).toMatchObject({ id: "camp" });
+  });
+
   test("save on a new draft promotes the source to a file", () => {
     const next = reduce({ ...base(), briefId: "camp" }, { type: "save" });
     expect(next.source).toMatchObject({ kind: "file", file: "camp.yaml", loadedId: "camp", revision: undefined });
