@@ -10,6 +10,10 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./aspect-ratios": {
+      "types": "./src/domain/value-objects/aspect-ratios.ts",
+      "default": "./src/domain/value-objects/aspect-ratios.ts"
+    },
     "./motion-kinds": {
       "types": "./src/domain/value-objects/MotionKind.vo.ts",
       "default": "./src/domain/value-objects/MotionKind.vo.ts"

@@ -44,6 +44,12 @@ export interface CampaignBrief {
     readonly axes?: {
       readonly layout?: readonly string[];
       readonly tone?: readonly string[];
+      /**
+       * The requested aspect-ratio subset (additive). Absent → every ratio,
+       * so briefs written before this axis existed are unchanged; the planner
+       * still applies its motion narrowing on top of the selection.
+       */
+      readonly ratio?: readonly string[];
       readonly background?: { readonly source?: readonly string[] };
       readonly paletteShift?: readonly number[];
       readonly headline?: string;

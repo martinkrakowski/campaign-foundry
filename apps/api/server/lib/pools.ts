@@ -145,7 +145,8 @@ export function wantsHeadlinePool(brief: CampaignBrief): boolean {
 }
 
 /**
- * Plan-time input for a brief — everything the brief itself cannot carry:
+ * Plan-time input for a brief — everything the planner resolves on the brief's
+ * behalf:
  * - `headlines`: the approved texts of `briefs/<id>/pools.json` when the brief
  *   requests `headline: pool://copy`. A missing pool yields no headlines — the
  *   planner then fails loud naming the pool file. An invalid pool file is an
@@ -153,13 +154,18 @@ export function wantsHeadlinePool(brief: CampaignBrief): boolean {
  *   both fail loud with it.
  * - `motionRatios`: the ratios of the requested motion platforms (see
  *   `motionRatiosFor`), present only when the brief lists `output.platforms`.
+ * - `ratios`: the brief's `variation.axes.ratio` selection, present only when
+ *   the brief carries the axis (absent → every ratio). The parser has already
+ *   bounded it to supported values; the policy re-checks.
  */
 export async function planInputFor(brief: CampaignBrief): Promise<Result<PlanInput, Error>> {
   const motion = motionRatiosFor(brief.output?.platforms);
-  if (!wantsHeadlinePool(brief)) return ok(motion);
+  const requested = brief.variation?.axes?.ratio as PlanInput["ratios"];
+  const ratios = requested === undefined ? {} : { ratios: requested };
+  if (!wantsHeadlinePool(brief)) return ok({ ...ratios, ...motion });
   try {
     const pool = await readPool(brief.id);
-    return ok({ headlines: pool ? approvedTexts(pool) : [], ...motion });
+    return ok({ ...ratios, headlines: pool ? approvedTexts(pool) : [], ...motion });
   } catch (error) {
     if (error instanceof InvalidCopyPoolError) return err(error);
     throw error;

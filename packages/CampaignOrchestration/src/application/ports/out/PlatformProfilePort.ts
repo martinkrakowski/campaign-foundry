@@ -1,4 +1,4 @@
-import type { AspectRatioValue } from "../../../domain/value-objects/AspectRatio.vo.js";
+import type { AspectRatioValue } from "../../../domain/value-objects/aspect-ratios.js";
 import type { SafeInsets } from "./CompositorPort.js";
 
 /**

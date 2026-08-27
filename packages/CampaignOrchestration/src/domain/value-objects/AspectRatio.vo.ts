@@ -1,13 +1,5 @@
 import { ok, err, type Result } from "@campaignfoundry/shared";
-
-export type AspectRatioValue = "1:1" | "9:16" | "16:9";
-
-/** Canvas pixel dimensions per ratio (DeterministicLayerStacking contract). */
-const DIMENSIONS: Record<AspectRatioValue, { width: number; height: number }> = {
-  "1:1": { width: 1080, height: 1080 },
-  "9:16": { width: 1080, height: 1920 },
-  "16:9": { width: 1920, height: 1080 },
-};
+import { RATIO_DIMENSIONS, RATIO_VALUES, type AspectRatioValue } from "./aspect-ratios.js";
 
 /**
  * AspectRatio — immutable value object pairing a supported ratio with its
@@ -21,20 +13,18 @@ export class AspectRatio {
   ) {}
 
   static create(value: string): Result<AspectRatio, Error> {
-    if (!(value in DIMENSIONS)) {
+    if (!(RATIO_VALUES as readonly string[]).includes(value)) {
       return err(
-        new Error(`Unsupported aspect ratio "${value}" (expected one of 1:1, 9:16, 16:9)`),
+        new Error(`Unsupported aspect ratio "${value}" (expected one of ${RATIO_VALUES.join(", ")})`),
       );
     }
     const v = value as AspectRatioValue;
-    return ok(new AspectRatio(v, DIMENSIONS[v].width, DIMENSIONS[v].height));
+    return ok(new AspectRatio(v, RATIO_DIMENSIONS[v].width, RATIO_DIMENSIONS[v].height));
   }
 
   /** Every supported ratio — the full set produced for each product. */
   static all(): AspectRatio[] {
-    return (Object.keys(DIMENSIONS) as AspectRatioValue[]).map(
-      (v) => new AspectRatio(v, DIMENSIONS[v].width, DIMENSIONS[v].height),
-    );
+    return RATIO_VALUES.map((v) => new AspectRatio(v, RATIO_DIMENSIONS[v].width, RATIO_DIMENSIONS[v].height));
   }
 
   /** Filesystem-safe form, e.g. "1x1" — colons are invalid in paths. */

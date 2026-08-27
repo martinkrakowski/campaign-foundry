@@ -254,6 +254,19 @@ describe("planInputFor / pooledPlanner", () => {
     expect(await planInputFor(brief({ variation: undefined }))).toEqual({ success: true, value: {} });
   });
 
+  test("carries the brief's ratio selection, and only when the brief has the axis", async () => {
+    const { planInputFor } = await filesFor(dir);
+    const selected = brief({ variation: { count: 2, axes: { ratio: ["1:1", "16:9"] } } });
+    expect(await planInputFor(selected)).toEqual({ success: true, value: { ratios: ["1:1", "16:9"] } });
+    // absent → the key is absent, so the policy draws every ratio as before
+    expect(await planInputFor(brief({ variation: { count: 2, axes: {} } }))).toEqual({ success: true, value: {} });
+    // and it composes with the headline pool input
+    const pooled = await planInputFor(
+      brief({ variation: { count: 2, axes: { headline: "pool://copy", ratio: ["9:16"] } } }),
+    );
+    expect(pooled).toEqual({ success: true, value: { ratios: ["9:16"], headlines: [] } });
+  });
+
   test("returns the approved texts when the brief draws from pool://copy, or an empty list without a pool", async () => {
     const { planInputFor, wantsHeadlinePool, writePool } = await filesFor(dir);
     expect(wantsHeadlinePool(brief())).toBe(true);

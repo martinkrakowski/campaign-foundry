@@ -333,6 +333,107 @@ describe("VariationPolicy.fromBrief", () => {
   });
 });
 
+describe("VariationPolicy requested ratio subset", () => {
+  test("narrows ratios and axisProductSize to the requested subset", () => {
+    const result = VariationPolicy.fromBrief(brief({ variation: { count: 4 } }), { ratios: ["1:1", "16:9"] });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.ratios).toEqual(["1:1", "16:9"]);
+    // 2 products × 2 ratios × 2 layouts × 2 tones × 1 background × 1 shift
+    expect(result.value.axisProductSize).toBe(2 * 2 * 2 * 2 * 1 * 1);
+  });
+
+  test("de-duplicates the requested subset before sizing the axis", () => {
+    const result = VariationPolicy.fromBrief(brief({ variation: { count: 4 } }), { ratios: ["9:16", "9:16"] });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.ratios).toEqual(["9:16"]);
+    expect(result.value.axisProductSize).toBe(2 * 1 * 2 * 2 * 1 * 1);
+  });
+
+  test("an absent ratios input is byte-for-byte today's behaviour", () => {
+    const golden = VariationPolicy.fromBrief(brief({ variation: { count: 12, seed: 7, minDistance: 1 } }));
+    expect(golden.success).toBe(true);
+    if (!golden.success) return;
+    expect(golden.value.ratios).toEqual(["1:1", "9:16", "16:9"]);
+    expect(golden.value.policyHash).toBe(
+      "7181107a6ce42df96357800416bf26bf89007fd3dbd2b9792aab83323adefcf9",
+    );
+    // …including the empty-motionRatios refusal, whose message is unchanged
+    const motionOnly = brief({
+      variation: { count: 4, axes: { motion: ["ken-burns-in"], duration: [4] } },
+      output: { formats: ["motion"], platforms: ["instagram-reel"] },
+    });
+    const refused = VariationPolicy.fromBrief(motionOnly, { motionRatios: [] });
+    expect(refused.success).toBe(false);
+    if (!refused.success) {
+      expect(refused.error.message).toBe(
+        'output.formats requests only "motion" but none of output.platforms package it at any aspect ratio.',
+      );
+    }
+  });
+
+  test("a requested value that is not an AspectRatioValue is rejected naming the field", () => {
+    const result = VariationPolicy.fromBrief(brief({ variation: { count: 4 } }), {
+      ratios: ["4:5"] as never,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toBe(
+        'Invalid variation.axes.ratio: "4:5" is not a supported aspect ratio (expected one of 1:1, 9:16, 16:9).',
+      );
+    }
+  });
+
+  test("a motion-only brief narrows the requested subset by the motion filter", () => {
+    const motionOnly = brief({
+      variation: { count: 4, axes: { motion: ["ken-burns-in"], duration: [4] } },
+      output: { formats: ["motion"], platforms: ["instagram-reel"] },
+    });
+    const result = VariationPolicy.fromBrief(motionOnly, { ratios: ["1:1", "9:16", "16:9"], motionRatios: ["9:16"] });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.ratios).toEqual(["9:16"]);
+    expect(result.value.axisProductSize).toBe(2 * 1 * 2 * 2 * 1 * 1);
+  });
+
+  test("a mixed brief keeps every requested ratio — its non-motion ratios are the stills it asked for", () => {
+    const mixed = brief({
+      variation: { count: 4, axes: { motion: ["ken-burns-in"], duration: [4] } },
+      output: { formats: ["static", "motion"], platforms: ["instagram-reel"] },
+    });
+    const result = VariationPolicy.fromBrief(mixed, { ratios: ["1:1", "16:9"], motionRatios: ["9:16"] });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.mixStatic).toBe(true);
+    expect(result.value.ratios).toEqual(["1:1", "16:9"]);
+  });
+
+  test("a requested selection emptied by the motion narrowing names both ratio sets", () => {
+    const motionOnly = brief({
+      variation: { count: 4, axes: { motion: ["ken-burns-in"], duration: [4] } },
+      output: { formats: ["motion"], platforms: ["instagram-reel"] },
+    });
+    const result = VariationPolicy.fromBrief(motionOnly, { ratios: ["1:1", "16:9"], motionRatios: ["9:16"] });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toBe(
+        'output.formats requests only "motion", which the requested platforms package at [9:16], but variation.axes.ratio selects [1:1, 16:9] — select one of those ratios or add the static format.',
+      );
+    }
+  });
+
+  test("an explicitly empty selection is refused as the author's, not blamed on motion", () => {
+    const result = VariationPolicy.fromBrief(brief({ variation: { count: 4 } }), { ratios: [] });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toBe(
+        "Invalid variation.axes.ratio: select at least one aspect ratio (expected one of 1:1, 9:16, 16:9).",
+      );
+    }
+  });
+});
+
 describe("VariationPolicy headline axis", () => {
   const pooled = brief({ variation: { count: 12, seed: 7, minDistance: 1, axes: { headline: "pool://copy" } } });
 
