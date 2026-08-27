@@ -100,6 +100,8 @@ Even so, this is a smaller change than the timestamp version, not a larger one.
 | **M4** | Med | **`layoutHeadline` already runs per frame.** 180 frames × a measure-and-shrink loop, today, for text that never changes. Adding beats without memoization multiplies it; D6's memoization removes it outright. |
 | **H4** | High | **The dwell floor as first written checked the average, not the beat.** `beats × MIN_DWELL ≤ min(duration)` passes weights `[5, 1, 1]` at 5 s while the two light beats get 0.71 s each — the exact unreadable flash the rule exists to prevent. The floor must bind the thinnest beat. → D3. |
 | **H5** | High | **Nothing carried the timeline from the brief to the compositor.** E2.4 added `VideoCompositeRequest.timeline` and E1.2 added `CampaignBrief.copy.timeline`, but no task connected them: `renderMotionVariant` spreads a `CompositeRequest` built by its caller, which has no timeline field. → E3.5. |
+| **H6** | High | **Unbounded weights overflow the normalizer.** `Number.isInteger(1e308)` is `true`, so a bare `weight ≥ 1` check accepts it; eight such beats give `Σw = Infinity`, every share becomes `w / Σw = 0`, and the windows collapse to a single beat. The D3 floor would catch it at *run* time, but E4.2 validates structure in *authoring* mode, so the editor would render nonsense first. → `MAX_WEIGHT`. |
+| **M7** | Med | **`keyBeat` is an index that nothing maintained.** E5.1 added `reorder` and `remove` with no invariant, so reordering silently changes which text the poster shows and removing the key beat leaves the index dangling. → §3.4a. |
 | **M5** | Med | **`beatAt(resolved, 1)` matched no beat.** `writeFrames` renders `t = 1` on every clip's last frame (`i / (frames - 1)`), and every window was half-open. → §3.2. |
 | **M6** | Med | **An empty duration axis made the floor vacuous.** `min([])` is `Infinity`, so `timelineProblem` would pass any timeline on a brief with no `axes.duration` — which still runs, at 6 s. → D3. |
 | **L1** | Low | **`DEFAULT_DURATION_SEC` disagrees across layers:** `6` in `GenerateCampaignUseCase` (the actual fallback), `5` in `editor-state.ts` (the first duration the editor offers). A brief with no duration axis runs 6 s while the editor's affordance says 5. |
@@ -115,7 +117,8 @@ Even so, this is a smaller change than the timestamp version, not a larger one.
 copy:
   timeline:
     transition: fade        # cut | fade          (D9)
-    keyBeat: 1              # 1-based; posters and stills use this beat's text (D7)
+    keyBeat: 1              # 1-based; the POSTER's copy (D7). Stills are unaffected:
+                            # they keep campaignMessage (Q2, and D10 requires it)
     beats:
       - { text: "New season, new kit", weight: 2 }
       - { text: "Built for the cold",  weight: 3 }
@@ -130,8 +133,9 @@ any renderer without a timeline. `copy.timeline` is additive and optional (D10).
 ```ts
 export const MIN_DWELL_SEC = 1.2;
 export const MAX_BEATS = 8;
+export const MAX_WEIGHT = 20;   // Σw must stay finite — see below
 
-export interface CopyBeat   { readonly text: string; readonly weight: number }
+export interface CopyBeat   { readonly text: string; readonly weight: number }  // 1..MAX_WEIGHT
 export interface CopyTimeline {
   readonly beats: readonly CopyBeat[];
   readonly transition: "cut" | "fade";
@@ -146,7 +150,14 @@ export interface ResolvedBeat {
                              // by design: a fade is authored in seconds.
 }
 
-/** Beats → t-windows. Duration is needed only to bound the fade width (D9). */
+/**
+ * Beats → t-windows. Duration is needed only to bound the fade width (D9).
+ *
+ * Weights are bounded to [1, MAX_WEIGHT] by the parser, the VO and the editor alike, because
+ * `Number.isInteger(1e308)` is `true`: eight such beats sum to `Infinity`, every share becomes
+ * `w / Infinity = 0`, and the windows collapse. MAX_WEIGHT is not merely a guard — the D3 floor
+ * already makes a ratio beyond about 8:1 unusable at any legal duration, so 20 is generous.
+ */
 export function resolveTimeline(t: CopyTimeline, durationSec: number): readonly ResolvedBeat[];
 
 /**
@@ -179,7 +190,8 @@ a tolerance, not for equality.
 
 - `prepare` resolves the timeline once, fits every beat, takes the **minimum** fitted size across
   beats (D6) and re-lays every beat at that size, caching by text.
-- `draw` picks `beatAt(prepared.timeline, t)`; with `mix > 0` it paints the outgoing beat at
+- `draw` picks `beatAt(prepared.timeline, copyT ?? t)` — **`copyT`, not `t`**, or D7's poster
+  argument is inert; with `mix > 0` it paints the outgoing beat at
   `1 - mix` and the incoming at `mix`. `headline-rise` applies its `dy`/`alpha` **per beat**,
   against that beat's local progress (Q1).
 - With `prepared.timeline === undefined`, `draw` takes today's branch, untouched.
@@ -197,6 +209,19 @@ a tolerance, not for equality.
 - The existing deduped legal-copy sweep grows the timeline's beat texts (D4) — one line at `:362`.
 - `GeneratedAsset.descriptor` records `beats: n` so the grid and report can show it.
 - `PlanCapacity` is untouched (D5: the timeline is not an axis).
+
+#### `keyBeat`'s mutation invariant
+
+`keyBeat` is a persisted 1-based *index*, so every reducer action that moves or removes a beat has
+to maintain it or the poster silently changes:
+
+| Action | Rule |
+|---|---|
+| **reorder** | `keyBeat` follows the beat it pointed at to its new position — the selected *text* must not change because rows moved. |
+| **remove** a beat *before* `keyBeat` | decrement, so the same beat stays selected. |
+| **remove** the key beat itself | keep the index, which now names the beat that shifted into the slot; if it was last, select the new last. Never leave it dangling. |
+| **remove** a beat *after* `keyBeat`, or **add** anywhere | unchanged. |
+| always | clamp into `[1, beats.length]`. The parser rejects out-of-range (E4.2), so `fromBrief` may trust its input; the editor is what must never produce one. |
 
 ### 3.5 Editor (`apps/web`)
 
@@ -251,14 +276,14 @@ The Copy section gains a **Timeline** sub-panel, revealed when `formats` include
 | # | Task | Files |
 |---|------|-------|
 | E4.1 | `parseBrief` accepts `copy.timeline`; structural validation in authoring mode, D3 floor + capability in running mode (D11) | `load-brief.ts` |
-| E4.2 | Reject: empty beats, `weight < 1`, non-integer weight, `keyBeat` out of range, `> MAX_BEATS`, unknown `transition` — each naming the field, per the existing parser idiom | same |
+| E4.2 | Reject: empty beats, non-integer weight, **`weight` outside `[1, MAX_WEIGHT]`**, `keyBeat` out of range, `> MAX_BEATS`, unknown `transition` — each naming the field, per the existing parser idiom. Includes an overflow-boundary case (`1e308` is an integer and passes a bare `weight ≥ 1`) | same |
 | E4.3 | Reject the two combinations D5 declares invalid: `copy.timeline` **with** `axes.headline: pool://copy`, and `copy.timeline` on a brief that cannot render motion (classic mode, or `formats` without `motion`). Both in **authoring** mode — they are structural, not capability, errors | same |
 
 ### E5 — Editor
 
 | # | Task | Files |
 |---|------|-------|
-| E5.1 | `EditorState.timeline` + reducer actions (add/remove/reorder/setText/setWeight/setKeyBeat/setTransition); `toBrief`/`fromBrief` round-trip incl. capability-off preservation | `editor-state.ts` |
+| E5.1 | `EditorState.timeline` + reducer actions (add/remove/reorder/setText/setWeight/setKeyBeat/setTransition); `toBrief`/`fromBrief` round-trip incl. capability-off preservation. **`keyBeat` follows the beat, not the index** — see the invariant below; tested for reorder-across-the-key-beat, remove-the-key-beat and remove-before-it | `editor-state.ts` |
 | E5.2 | `TimelineSection` sub-panel: beat rows, Stepper weights, Add disabled with a reason at the D3 floor. The floor is re-evaluated on **every** mutation — add, remove, reorder, weight change *and duration-axis change* — since narrowing the axis breaches it with no control to disable | `sections/CopySection.tsx` + new component |
 | E5.3 | Proportion bar with per-duration second labels | same |
 | E5.4 | **Insert from pool** — the editor's pool UI is `HeadlinePoolDrawer.tsx`; `HeadlinePoolPanel` is wizard-internal and typed to `WizardState`, so this **extracts** a shared approved-text source rather than reusing one. Budget it as such (D4) | `campaign/HeadlinePoolDrawer.tsx` |
@@ -283,7 +308,13 @@ The Copy section gains a **Timeline** sub-panel, revealed when `formats` include
   identity through it is a separate change nothing here budgets.
 - Every beat is represented in `sampledFrames`; the recorded `complianceScore` is the minimum across
   a set that includes one frame from each beat.
-- The poster of a `ken-burns-out` motion variant and of a `ken-burns-in` one show the **same** beat.
+- The poster of a `ken-burns-out` motion variant and of a `ken-burns-in` one show the **same** beat,
+  and a brief with `keyBeat: 2` posters beat 2 — the case that fails if `draw` selects on `t`
+  instead of `copyT ?? t`.
+- Reordering beats does not change which text the poster shows; removing the key beat leaves a
+  valid selection; neither produces an out-of-range `keyBeat` in `toBrief` output.
+- The parser rejects `weight: 1e308` by the bound, not by the dwell floor — authoring mode must
+  refuse it before the editor ever renders it.
 - The editor **flags** every dwell-floor breach and the running paths **reject** it. *Add beat* is
   disabled with a reason naming the shortest duration — but that only prevents breaching by adding:
   narrowing the duration axis afterwards breaches the floor with every control still enabled. The
