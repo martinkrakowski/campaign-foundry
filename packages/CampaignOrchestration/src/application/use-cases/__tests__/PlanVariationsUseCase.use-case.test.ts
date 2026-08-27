@@ -132,7 +132,7 @@ describe("PlanVariationsUseCase.plan", () => {
     if (!result.success) {
       expect(result.error.message).toMatch(/accepted/);
       expect(result.error.message).toMatch(/count 12/);
-      expect(result.error.message).toMatch(/axisProductSize 24/);
+      expect(result.error.message).toMatch(/Variation plan shortfall: accepted \d+ of count \d+\. At minDistance \d+ this brief can yield (at most|no more than) \d+ distinct variants \(24 combinations/);
       expect(result.error.message).toMatch(/minDistance 6/);
     }
   });
@@ -601,6 +601,62 @@ describe("PlanVariationsUseCase — motion axes", () => {
       expect(next.value.variants[0].aspectRatio).toBe("9:16");
       expect(next.value.variants[0].motion).toBeDefined();
     }
+  });
+
+  test("a tight motion-only brief plans up to its capacity where the random draw fell short", () => {
+    // The reported case: one kind, one duration, three palettes, two products at 9:16
+    // → 24 points; at minDistance 2 the exact maximum is 8. The 3 × count random draw
+    // accepted 7; the exhaustive search must reach 8.
+    const result = planner().plan(
+      motionBrief({
+        variation: { count: 8, minDistance: 2, axes: { paletteShift: [0, 0.1, 0.2], motion: ["ken-burns-out"], duration: [5] } },
+        output: { formats: ["motion"], platforms: ["instagram-reel"] },
+      }),
+      { motionRatios: ["9:16"] },
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.variants).toHaveLength(8);
+    expect(result.value.variants.every((v) => v.aspectRatio === "9:16" && v.motion !== undefined)).toBe(true);
+  });
+
+  test("a space too large to search exhaustively still gets an honest bound on shortfall", () => {
+    // 2 × 3 × 2 × 2 × 3 backgrounds × 10 palettes × 6 headlines = 4320 points, past the
+    // exhaustive limit. At minDistance 7 (every active axis must differ) the product axis
+    // caps the set at 2, so the random draw falls short and the bound is reported.
+    const result = planner().plan(
+      motionBrief({
+        variation: {
+          count: 12,
+          seed: 7,
+          minDistance: 7,
+          axes: {
+            background: { source: ["procedural", "asset-pool", "genai"] },
+            paletteShift: [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45],
+            headline: "pool://copy",
+          },
+        },
+        output: { formats: ["static"] },
+      }),
+      { headlines: ["a", "b", "c", "d", "e", "f"] },
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.message).toMatch(/can yield no more than \d+ distinct variants \(4320 combinations\)/);
+  });
+
+  test("a count beyond capacity says what the capacity is and how to fix it", () => {
+    const result = planner().plan(
+      motionBrief({
+        variation: { count: 12, minDistance: 2, axes: { paletteShift: [0, 0.1, 0.2], motion: ["ken-burns-out"], duration: [5] } },
+        output: { formats: ["motion"], platforms: ["instagram-reel"] },
+      }),
+      { motionRatios: ["9:16"] },
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.message).toMatch(/can yield at most 8 distinct variants \(24 combinations — every motion platform is 9:16/);
+    expect(result.error.message).toMatch(/lower count to 8, lower minDistance \(at 1 the maximum is 24\)/);
   });
 
   test("in a mixed plan, replan of a ratio no motion platform packages stays a still", () => {
