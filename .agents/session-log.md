@@ -950,3 +950,47 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Left open:**
   - Motion glyphs, ratio frames, palette swatches and the variation contact
     sheet (explicitly out of scope for this task).
+
+---
+
+## 2026-08-27 — ratio panels: selectable aspect ratios in the brief
+
+- **Mode:** Implementer
+- **Changes:**
+  - Domain: `PlanInput.ratios` (the requested subset, absent → all); `fromBrief`
+    narrows requested-first-then-motion, validates members, and its empty-ratios
+    refusal now distinguishes an explicitly empty selection from one emptied by
+    the motion narrowing (naming both ratio sets + the fix). `RATIO_VALUES` and
+    the canvas dimensions moved to a pure `aspect-ratios` leaf with a package
+    subpath (`./aspect-ratios`, the `./motion-kinds` precedent) — the VO's Result
+    idiom imports shared, whose root reaches node:fs, so the class cannot cross
+    into the web client.
+  - Parser: `variation.axes.ratio` accepted in authoring (array, non-empty,
+    members ∈ RATIO_VALUES, deduped); `"ratio"` joined SUPPORTED_AXES.
+    `planInputFor` bridges the brief's axis into `PlanInput.ratios`, so plan,
+    generate and the estimate all honour it.
+  - Web: `RatioFrame` (true-proportion frame, tokens, aria-hidden) in the kit;
+    `RatioPanel` on `AxisCard` (frame, pixel spec, allocation, shared
+    `≥ N each` floor, excluded state with reason); the Coverage-per-ratio
+    Stepper moved beside the panels with the `floor N × M selected = X of count Y`
+    readout (text-error + fix when over). `validate.ts` mirrors the non-empty
+    rule and the floor-vs-count constraint; `axisProductSize`/`drawableRatios`
+    narrowed to the selection. `toBrief` writes `axes.ratio` only when it
+    constrains, so full selections round-trip key-free.
+- **Decisions:**
+  - The task named "VariationPolicyInput"; the interface is `PlanInput` —
+    gained `ratios` there, with `planInputFor` as the bridge from the brief.
+  - Allocation is the round-robin deal of `count` across the drawable ratios
+    (the planner's own coverage round-robin), so shares stay ≥ the floor while
+    the numbers differ per panel; excluded/unselected ratios read 0.
+  - The floor readout's M is the drawable count (what the planner multiplies),
+    not the raw selection — a motion-only brief's excluded panels make the
+    difference visible at allocation 0.
+  - An excluded+selected ratio stays clickable (gating blocks entering, leaving
+    must stay possible — DESIGN.md §1.5); excluded+unselected is disabled with
+    the reason rendered, never a bare disabled box.
+- **Left open:**
+  - `coverage.perProduct` has the same single-scalar coupling; it belongs with
+    Products (separate lane, untouched).
+  - DESIGN.md §4 not edited (AGENTS.md files-never-edit); the RatioFrame /
+    RatioPanel extension is recorded in the PR body's design-review record.
