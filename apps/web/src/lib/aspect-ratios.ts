@@ -1,6 +1,11 @@
 /**
- * The aspect ratios the pipeline renders, in display order. Mirrors the domain's
- * AspectRatio set (1:1, 9:16, 16:9). Single source for the UI so counts/ordering
- * don't drift if the set changes.
+ * The aspect ratios the pipeline renders, in display order.
+ *
+ * Re-exported from the domain rather than restated: `RATIO_VALUES` is the set
+ * `AspectRatio.create` accepts and `VariationPolicy` enumerates, so a list
+ * written here would be a second source of truth that drifts the first time the
+ * set changes — which is exactly what this module's previous comment promised
+ * it prevented, while the domain gained its own list beside it. Kept as a
+ * `@/lib` module so existing importers do not need to reach into the package.
  */
-export const ASPECT_RATIOS = ["1:1", "9:16", "16:9"] as const;
+export { RATIO_VALUES as ASPECT_RATIOS } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
