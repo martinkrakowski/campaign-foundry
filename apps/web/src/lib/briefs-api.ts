@@ -53,7 +53,15 @@ export async function getCapabilities(): Promise<HostCapabilities | null> {
     return null;
   }
   if (!res.ok) return null;
-  const data = await parseJsonBody(res);
+  // The body is a stream: it can still fail after fetch resolved. A rejection here
+  // would escape into the caller's `void load()` as an unhandled rejection and leave
+  // capabilities unresolved, so degrade to "unknown" like every other failure.
+  let data: unknown;
+  try {
+    data = await parseJsonBody(res);
+  } catch {
+    return null;
+  }
   if (typeof data !== "object" || data === null) return null;
   const motion = (data as { motion?: unknown }).motion;
   if (typeof motion !== "boolean") return null;

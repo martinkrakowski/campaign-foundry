@@ -124,7 +124,7 @@ export function PolicySection({ state, dispatch, errors }: { state: EditorState;
           <Field
             label="Min Distance"
             error={errors.minDistance}
-            hint={`Whole seconds, 0–${maxMinDistance(state)} — the number of active axes`}
+            hint={`Whole numbers, 0–${maxMinDistance(state)} — the number of active axes`}
           >
             <Input
               type="number"

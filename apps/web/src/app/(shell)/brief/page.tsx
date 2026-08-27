@@ -77,9 +77,15 @@ export default function BriefPage() {
     const load = async () => {
       const capabilities = await getCapabilities();
       if (cancelled || capabilities === null) return;
-      if (isTransientCapabilities(capabilities) && retries < CAPABILITIES_MAX_RETRIES) {
-        retries += 1;
-        timer = setTimeout(() => void load(), CAPABILITIES_RETRY_MS);
+      if (isTransientCapabilities(capabilities)) {
+        // Still probing. Retry, and if it never settles leave capabilities unknown
+        // rather than committing a snapshot we know is transient — "not probed" is
+        // not a verdict, and gating on it would report a false negative with a
+        // meaningless reason. A later focus refetch reopens the window.
+        if (retries < CAPABILITIES_MAX_RETRIES) {
+          retries += 1;
+          timer = setTimeout(() => void load(), CAPABILITIES_RETRY_MS);
+        }
         return;
       }
       dispatch({ type: "setCapabilities", capabilities });
@@ -212,6 +218,8 @@ export default function BriefPage() {
       dispatch({ type: "save", saved: brief });
       dispatch({ type: "apply" });
       setRunBrief(brief);
+      // "Save & apply" applies, so it owes the same refusal notice Apply gives.
+      setApplyNotice(motionUnavailableReason(state));
       purgeDraftFromStorage(state);
       await loadBriefs();
     } catch (error) {

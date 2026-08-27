@@ -591,7 +591,7 @@ describe("BriefPage — capabilities and motion", () => {
     expect(screen.getByText(/Motion is not available on this host: no ffmpeg/)).toBeTruthy();
   });
 
-  test("an exhausted probe window settles on the transient answer and says so", async () => {
+  test("a probe that never settles leaves motion ungated rather than falsely unavailable", async () => {
     let calls = 0;
     routes({
       capabilities: () => {
@@ -601,10 +601,61 @@ describe("BriefPage — capabilities and motion", () => {
     });
     renderWithRun(<BriefPage />);
 
-    // the initial call plus the bounded retries, then the snapshot is taken as the verdict
+    // the initial call plus the bounded retries, and then it gives up
     await waitFor(() => expect(calls).toBe(4));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(calls).toBe(4);
+
+    // "not probed" is not a verdict: committing it would report a false negative with
+    // a meaningless reason, so the editor stays ungated and the API refuses at run time
+    expect(motionToggle().disabled).toBe(false);
+    expect(screen.queryByText(/not probed/)).toBeNull();
+  });
+
+  test("Save & apply carries the same refusal notice that Apply does", async () => {
+    const user = userEvent.setup();
+    const motionBrief = {
+      file: "clip.yaml",
+      revision: "r1",
+      brief: {
+        ...brief("clip"),
+        mode: "variation",
+        // a complete motion policy: kinds and durations present, so the only thing
+        // wrong with this brief on this host is that the host cannot run it
+        variation: {
+          count: 4,
+          axes: {
+            layout: ["headline-top"],
+            tone: ["bold"],
+            background: { source: ["procedural"] },
+            paletteShift: [0],
+            motion: ["ken-burns-in"],
+            duration: [6],
+          },
+        },
+        output: { formats: ["static", "motion"], platforms: ["linkedin", "instagram-reel"] },
+      },
+    };
+    routes({
+      list: () => json({ briefs: [motionBrief] }),
+      capabilities: () => json({ motion: false, reason: "no ffmpeg" }),
+    });
+    renderWithRun(<BriefPage />);
+
+    await user.click(screen.getAllByText("New brief...")[0]);
+    await user.click(await screen.findByText("clip"));
     await waitFor(() => expect(motionToggle().disabled).toBe(true));
-    expect(screen.getByText(/not probed/)).toBeTruthy();
+
+    // D7: the brief is unrunnable here but still savable, so Save & apply is enabled —
+    // and having applied it, it owes the user the same reason Apply gives.
+    const save = screen.getByText("Save & apply").closest("button") as HTMLButtonElement;
+    await waitFor(() => expect(save.disabled).toBe(false));
+    await user.click(save);
+
+    // the Output section already shows this as a field error; the notice is the
+    // separate status the action bar owes after applying
+    const notice = await screen.findByRole("status");
+    expect(notice.textContent).toMatch(/Motion format is not available: no ffmpeg/);
   });
 
   test("the capabilities are refetched when the window regains focus", async () => {

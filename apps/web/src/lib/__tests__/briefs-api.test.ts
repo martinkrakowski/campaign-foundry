@@ -433,6 +433,19 @@ describe("copy pool calls", () => {
   });
 });
 
+describe("getCapabilities body failures", () => {
+  test("a body that fails mid-stream degrades to unknown instead of rejecting", async () => {
+    // fetch resolves, then the stream errors — a rejection here would escape the
+    // caller's `void load()` as an unhandled rejection and leave motion unresolved
+    vi.mocked(globalThis.fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.reject(new Error("stream died")),
+    } as unknown as Response);
+    await expect(getCapabilities()).resolves.toBeNull();
+  });
+});
+
 describe("updateBrief", () => {
   test("appends the revision as the conditional-write guard, and omits it when absent", async () => {
     const urls: string[] = [];
