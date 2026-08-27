@@ -139,6 +139,10 @@ export const seedPersistedRun = (
   opts: { halted?: boolean; id?: string; policyHash?: string; seed?: number } = {},
 ) => {
   const id = opts.id ?? "seed";
+  // A classic brief never produces `variantIndex` assets, so a run carrying them must
+  // sit under a randomized brief — otherwise the fixture models a state the app cannot
+  // reach, and the re-roll mode guard (rightly) refuses it.
+  const randomized = assets.some((asset) => asset.variantIndex !== undefined);
   localStorage.setItem("cf:brief-picked", "1");
   localStorage.setItem(
     "cf:brief",
@@ -152,6 +156,7 @@ export const seedPersistedRun = (
         { id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" },
         { id: "beta", name: "Beta", primaryColor: "#E0218A", logoPath: "b.png" },
       ],
+      ...(randomized ? { mode: "variation", variation: { count: Math.max(1, assets.length) } } : {}),
     }),
   );
   mockPipelineApi({

@@ -2,6 +2,7 @@ import { describe, test, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, Fragment } from "react";
+import { useEffect } from "react";
 import { renderWithRun, seedPersistedRun, makeAsset, exerciseFocusTrap, json, mockPipelineApi } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import { CommandBar } from "../CommandBar";
@@ -81,6 +82,34 @@ describe("CommandBar", () => {
     expect(within(dialog).getByText(/1 rejected/)).toBeTruthy();
     await user.click(within(dialog).getByText("Regenerate rejected"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  test("cannot re-roll a classic run once the brief is randomized — the control is disabled and says why", async () => {
+    const user = userEvent.setup();
+    localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/1:1/default": "rejected" }));
+    seedPersistedRun([makeAsset()]);
+    // switch the (same) brief to a randomized campaign after the classic run is showing
+    const Randomize = () => {
+      const { brief, setBrief, hasRun } = useRun();
+      // only once the persisted run has attached — setBrief before that would race the restore
+      useEffect(() => {
+        if (hasRun && brief.mode !== "variation") {
+          setBrief({ ...brief, mode: "variation", variation: { count: 1 } } as never);
+        }
+      }, [hasRun, brief, setBrief]);
+      return null;
+    };
+    renderWithRun(
+      <>
+        <Randomize />
+        <CommandBar onToggleTelemetry={() => {}} />
+      </>,
+    );
+    const regen = (await screen.findByText(/Regenerate/)).closest("button") as HTMLButtonElement;
+    await waitFor(() => expect(regen.disabled).toBe(true));
+    expect(screen.getByRole("status").textContent).toMatch(/came from a classic run, but the brief is now a randomized campaign/);
+    await user.click(regen);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   test("does not call /campaigns/plan for a classic brief", async () => {

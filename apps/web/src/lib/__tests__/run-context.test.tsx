@@ -200,6 +200,8 @@ describe("RunProvider — review decisions", () => {
         }),
     });
     const { result } = setup();
+    // a variation run can only exist under a randomized brief
+    act(() => result.current.setBrief({ ...result.current.brief, mode: "variation", variation: { count: 1 } } as never));
     await act(async () => {
       await result.current.execute();
     });
@@ -242,6 +244,8 @@ describe("RunProvider — review decisions", () => {
       job: () => jobOk({ halted: false, assets: [variant], log: { entries: [] } }),
     });
     const { result } = setup();
+    // a variation run can only exist under a randomized brief
+    act(() => result.current.setBrief({ ...result.current.brief, mode: "variation", variation: { count: 1 } } as never));
     await act(async () => {
       await result.current.execute();
     });
@@ -284,6 +288,8 @@ describe("RunProvider — review decisions", () => {
       job: () => jobOk({ halted: false, assets: [{ ...variant, attempt: 4 }], log: { entries: [] } }),
     });
     const { result } = setup();
+    // a variation run can only exist under a randomized brief
+    act(() => result.current.setBrief({ ...result.current.brief, mode: "variation", variation: { count: 1 } } as never));
     await waitFor(() => expect(result.current.assets).toHaveLength(1));
     act(() => result.current.decide("alpha/v2", "rejected"));
     await act(async () => {
@@ -1379,5 +1385,66 @@ describe("RunProvider — estimate and packaging", () => {
     });
     expect(result.current.packageError).toBe("Network error");
   });
+
+describe("re-roll across a mode change", () => {
+  test("refuses to re-roll a classic run once the brief is randomized, and says why", async () => {
+    const bodies: unknown[] = [];
+    mockPipelineApi({
+      post: (_url, init) => {
+        bodies.push(JSON.parse(init.body as string));
+        return json({ jobId: "job-1" }, 202);
+      },
+      job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [], campaignId: "camp" } }),
+    });
+    const { result } = setup();
+    act(() => result.current.setBrief({ ...result.current.brief, id: "camp" }));
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.runMode).toBe("brief");
+    expect(result.current.rerollBlockedReason).toBeNull();
+
+    // the brief becomes a randomized campaign; the classic run stays on screen
+    act(() =>
+      result.current.setBrief({ ...result.current.brief, mode: "variation", variation: { count: 1 } } as never),
+    );
+    expect(result.current.assets).toHaveLength(1);
+    expect(result.current.rerollBlockedReason).toMatch(/came from a classic run, but the brief is now a randomized campaign/);
+
+    act(() => result.current.decide("alpha/1:1/default", "rejected"));
+    const before = bodies.length;
+    await act(async () => {
+      await result.current.regenerateRejected();
+    });
+    // nothing was sent — classic targets against a randomized brief can only fail
+    expect(bodies.length).toBe(before);
+    expect(result.current.error).toMatch(/cannot be re-rolled\. Run the full campaign/);
+  });
+
+  test("the other direction blocks too, and a matching mode does not", async () => {
+    mockPipelineApi({
+      post: () => json({ jobId: "job-1" }, 202),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ variantIndex: 0, outputPath: "alpha/1x1/v0.png" })],
+          log: { entries: [], campaignId: "camp" },
+        }),
+    });
+    const { result } = setup();
+    act(() =>
+      result.current.setBrief({ ...result.current.brief, id: "camp", mode: "variation", variation: { count: 1 } } as never),
+    );
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.runMode).toBe("variation");
+    expect(result.current.rerollBlockedReason).toBeNull();
+
+    act(() => result.current.setBrief({ ...result.current.brief, mode: "brief" } as never));
+    expect(result.current.rerollBlockedReason).toMatch(/came from a randomized run, but the brief is now a classic campaign/);
+  });
+});
+
 });
 

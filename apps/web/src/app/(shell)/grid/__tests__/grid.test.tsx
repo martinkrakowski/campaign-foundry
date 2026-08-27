@@ -103,6 +103,9 @@ describe("GridPage", () => {
         targetAudience: "a",
         campaignMessage: "Hi",
         products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
+        // a variation run (variantIndex assets) can only exist under a randomized brief
+        mode: "variation",
+        variation: { count: 1 },
       }),
     );
     localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/v0": "rejected" }));

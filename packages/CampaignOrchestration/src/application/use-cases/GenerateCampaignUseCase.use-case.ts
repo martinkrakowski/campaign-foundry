@@ -14,6 +14,14 @@ import type {
   CampaignPipelinePort,
 } from "../ports/in/CampaignPipelinePort.js";
 import { isVariationTarget } from "../ports/in/CampaignPipelinePort.js";
+
+/** A re-roll only makes sense against a run produced by the brief's current mode. */
+export const RE_ROLL_MODE_MISMATCH = {
+  classicTargetsOnRandomized:
+    "The rejected creatives came from a classic run, but the brief is now a randomized campaign — the mode changed since that run, so they cannot be re-rolled; run the full campaign.",
+  randomizedTargetsOnClassic:
+    "The rejected creatives came from a randomized run, but the brief is now a classic campaign — the mode changed since that run, so they cannot be re-rolled; run the full campaign.",
+} as const;
 import type { CompliancePort } from "../ports/out/CompliancePort.js";
 import type { CompositeRequest, CompositorPort, SafeInsets } from "../ports/out/CompositorPort.js";
 import type { ExportPort } from "../ports/out/ExportPort.js";
@@ -148,6 +156,13 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
           ),
         )
       : null;
+    // Every target must be keyed for this mode. A randomized-shaped one came from a
+    // run produced before the brief was switched to classic; without this check it is
+    // silently dropped — and a list of only such targets skips every cell, reporting a
+    // successful run that regenerated nothing. An empty list stays a no-op run.
+    if (targets !== undefined && targets.length > 0 && targets.some(isVariationTarget)) {
+      return err(new Error(RE_ROLL_MODE_MISMATCH.randomizedTargetsOnClassic));
+    }
     const isTarget = (productId: string, ratioValue: string, treatmentId: string): boolean =>
       targetKeys === null || targetKeys.has(`${productId}/${ratioValue}/${treatmentId}`);
 
@@ -297,10 +312,13 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     let variants: readonly Variant[];
     const attemptByIndex = new Map<number, number>();
     if (targets) {
-      const variationTargets = targets.filter(isVariationTarget);
-      if (variationTargets.length === 0) {
-        return err(new Error("targets do not match the brief mode"));
+      // Every target must be keyed for this mode. A classic-shaped one came from a run
+      // produced before the brief was switched to randomized; say so and say what to
+      // do, rather than silently dropping it. An empty list stays a no-op run.
+      if (targets.length > 0 && targets.some((target) => !isVariationTarget(target))) {
+        return err(new Error(RE_ROLL_MODE_MISMATCH.classicTargetsOnRandomized));
       }
+      const variationTargets = targets.filter(isVariationTarget);
       const seen = new Set<number>();
       const unique = variationTargets.filter((target) => {
         if (seen.has(target.variantIndex)) return false;

@@ -18,7 +18,19 @@ type Confirm = "run" | "regenerate";
 
 /** Floating bottom orchestrator bar: status, telemetry toggle, regenerate, Execute. */
 export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
-  const { execute, regenerateRejected, loading, error, hasRun, halted, brief, assets, decisions, setEstimate } =
+  const {
+    execute,
+    regenerateRejected,
+    loading,
+    error,
+    hasRun,
+    halted,
+    brief,
+    assets,
+    decisions,
+    setEstimate,
+    rerollBlockedReason,
+  } =
     useRun();
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [plan, setPlan] = useState<PlanResult | null>(null);
@@ -150,11 +162,17 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
 
         <div className="flex items-center gap-2">
           {/* Re-roll just the rejected creatives — only meaningful once some exist. */}
+          {rejectedCount > 0 && rerollBlockedReason !== null && (
+            <p role="status" className="max-w-xs text-right text-[11px] leading-tight text-warning">
+              {rerollBlockedReason}
+            </p>
+          )}
           {rejectedCount > 0 && (
             <button
               type="button"
               onClick={() => setConfirm("regenerate")}
-              disabled={loading}
+              disabled={loading || rerollBlockedReason !== null}
+              title={rerollBlockedReason ?? undefined}
               aria-haspopup="dialog"
               className="flex shrink-0 items-center space-x-2 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-[13px] text-text-primary transition-colors hover:bg-border-hover disabled:cursor-not-allowed disabled:text-text-muted sm:px-4"
             >
