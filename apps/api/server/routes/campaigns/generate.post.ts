@@ -33,7 +33,7 @@ export default defineEventHandler(async (event) => {
     const body: unknown = await readBody(event);
     // Envelope form carries a `brief` field; a bare brief is the body itself.
     const isEnvelope = typeof body === "object" && body !== null && "brief" in body;
-    brief = parseBrief(isEnvelope ? (body as { brief: unknown }).brief : body);
+    brief = parseBrief(isEnvelope ? (body as { brief: unknown }).brief : body, { enforceCapabilities: true });
     regenerateOnly = isEnvelope
       ? parseRegenerateOnly((body as { regenerateOnly?: unknown }).regenerateOnly)
       : undefined;

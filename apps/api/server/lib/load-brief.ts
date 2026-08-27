@@ -337,9 +337,31 @@ function validateTreatments(value: unknown): void {
 /**
  * Structurally validate an untrusted value into a CampaignBrief. Business rules
  * live in the use case. `capabilities` gates the motion allowlist (D8); it defaults
- * to the boot probe's snapshot and is injectable so tests can flip it.
+  * to the boot probe's snapshot and is injectable so tests can flip it.
  */
-export function parseBrief(data: unknown, capabilities: Capabilities = getCapabilities()): CampaignBrief {
+/** How a brief is validated: authoring accepts what this host cannot run (D7/D12/D15). */
+export interface ParseBriefOptions {
+  /** Probe snapshot to validate against; defaults to the boot probe. */
+  capabilities?: Capabilities;
+  /** Enforce the motion capability. Authoring (listing, persistence) leaves this false. */
+  enforceCapabilities?: boolean;
+}
+
+/**
+ * Structurally validate an untrusted value into a CampaignBrief. Business rules live in
+ * the use case.
+ *
+ * `enforceCapabilities` defaults to **false**: a brief that names motion is structurally
+ * valid everywhere, so it can be listed and saved on a host with no ffmpeg (D7/D12/D15).
+ * The run paths — plan and generate — pass `true` and refuse what this host cannot make.
+ */
+export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): CampaignBrief {
+  const capabilities = opts.capabilities ?? getCapabilities();
+  const enforceCapabilities = opts.enforceCapabilities ?? false;
+
+  // When not enforcing capabilities, pretend motion is available to skip capability checks
+  const effectiveCapabilities: Capabilities = enforceCapabilities ? capabilities : { motion: true };
+
   if (typeof data !== "object" || data === null) {
     throw new Error("Campaign brief must be an object.");
   }
@@ -361,8 +383,8 @@ export function parseBrief(data: unknown, capabilities: Capabilities = getCapabi
   }
   validateTreatments(record.treatments);
   validateMode(record.mode);
-  validateVariation(record.variation, capabilities);
-  validateOutput(record.output, capabilities);
+  validateVariation(record.variation, effectiveCapabilities);
+  validateOutput(record.output, effectiveCapabilities);
   validateMotionAxisRequested(record);
   // A randomized campaign has no meaning without a total: `count` is the planner's
   // one required input (plan D13), so demand it up front rather than at run time.
@@ -425,16 +447,16 @@ export function parseRegenerateOnly(value: unknown): RegenerationTarget[] | unde
 
 /**
  * Parse a brief from bytes already read; `path` only selects the format
- * (.json vs .yaml/.yml). The parsed brief is validated against the
- * current capabilities.
+ * (.json vs .yaml/.yml). Validation follows `opts` — authoring by default.
  */
-export function parseBriefText(path: string, raw: string, capabilities?: Capabilities): CampaignBrief {
+
+export function parseBriefText(path: string, raw: string, opts: ParseBriefOptions = {}): CampaignBrief {
   const data = extname(path).toLowerCase() === ".json" ? JSON.parse(raw) : yaml.load(raw);
-  return parseBrief(data, capabilities);
+  return parseBrief(data, opts);
 }
 
 /** Load and parse a brief from a .yaml / .yml / .json file. */
-export async function loadBrief(path: string, capabilities?: Capabilities): Promise<CampaignBrief> {
+export async function loadBrief(path: string, opts: ParseBriefOptions = {}): Promise<CampaignBrief> {
   const raw = await readFile(path, "utf8");
-  return parseBriefText(path, raw, capabilities);
+  return parseBriefText(path, raw, opts);
 }

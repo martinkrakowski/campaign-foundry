@@ -12,7 +12,7 @@ import { planInputFor } from "../../lib/pools.js";
 export default defineEventHandler(async (event) => {
   let brief;
   try {
-    brief = parseBrief(await readBody(event));
+    brief = parseBrief(await readBody(event), { enforceCapabilities: true });
   } catch (error) {
     setResponseStatus(event, 400);
     return { error: error instanceof Error ? error.message : "Invalid campaign brief" };
