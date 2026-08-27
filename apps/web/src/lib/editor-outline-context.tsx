@@ -18,6 +18,12 @@ export interface EditorOutline {
   sections: OutlineSection[];
   /** Scroll the named section into view. */
   navigate: (id: string) => void;
+  /**
+   * Editor sections that live in the left bar itself (the variation policy and the
+   * output controls). Elements are data: the page owns the state and dispatch, the
+   * bar only places them.
+   */
+  panels?: ReactNode;
 }
 
 interface EditorOutlineContextValue {

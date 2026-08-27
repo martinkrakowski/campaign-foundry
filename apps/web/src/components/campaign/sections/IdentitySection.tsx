@@ -16,15 +16,21 @@ export function SectionShell({
   title,
   children,
   errorCount,
+  compact = false,
 }: {
   id: string;
   title: string;
   children: React.ReactNode;
   errorCount?: number;
+  /** Sidebar placement: the bar's own heading scale, tighter rhythm. */
+  compact?: boolean;
 }) {
   return (
-    <section id={id} aria-labelledby={`${id}-heading`} className="space-y-4 scroll-mt-24">
-      <h2 id={`${id}-heading`} className="flex items-center gap-2 text-lg font-semibold text-white">
+    <section id={id} aria-labelledby={`${id}-heading`} className={compact ? "space-y-3 scroll-mt-4" : "space-y-4 scroll-mt-24"}>
+      <h2
+        id={`${id}-heading`}
+        className={compact ? "flex items-center gap-2 text-[13px] font-bold text-text-primary" : "flex items-center gap-2 text-lg font-semibold text-white"}
+      >
         {title}
         {errorCount ? (
           <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-error px-1.5 text-[11px] font-bold text-white">

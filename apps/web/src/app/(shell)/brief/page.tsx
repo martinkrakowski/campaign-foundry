@@ -196,10 +196,25 @@ export default function BriefPage() {
         errorCount: keys.reduce((sum, key) => sum + Object.keys(errors[key] ?? {}).length, 0),
       })),
       navigate: scrollToFirstError,
+      // The two sections that live in the bar. Elements are data; state and dispatch
+      // stay here, the bar only places them.
+      panels: (
+        <>
+          {state.mode === "variation" ? (
+            <PolicySection state={state} dispatch={dispatch} errors={sectionErrors("policy")} compact />
+          ) : null}
+          <OutputSection
+            state={state}
+            dispatch={dispatch}
+            errors={{ ...sectionErrors("output"), ...sectionErrors("motion") }}
+            compact
+          />
+        </>
+      ),
     });
     return () => setOutline(null);
-    // scrollToFirstError only reads the DOM, so it is stable in effect.
-  }, [errors, state.mode, setOutline]);
+    // scrollToFirstError and sectionErrors only read what `state`/`errors` already cover.
+  }, [state, errors, setOutline]);
 
   // Derived, not stored: the refusal describes the draft *as applied*, so it holds
   // exactly while the applied snapshot still matches the draft. Any edit — switching
@@ -378,16 +393,7 @@ export default function BriefPage() {
                 <TreatmentsSection state={state} dispatch={dispatch} errors={sectionErrors("treatments")} />
               ) : null}
             </div>
-            {state.mode === "variation" ? (
-              <PolicySection state={state} dispatch={dispatch} errors={sectionErrors("policy")} />
-            ) : null}
-            <div id="output">
-              <OutputSection
-                state={state}
-                dispatch={dispatch}
-                errors={{ ...sectionErrors("output"), ...sectionErrors("motion") }}
-              />
-            </div>
+            {/* Variation policy and Output live in the left bar — see the outline effect */}
           </div>
 
           {persistError ? <p className="text-[13px] text-error">{persistError}</p> : null}

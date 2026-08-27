@@ -45,6 +45,12 @@ export function EditorOutline({ onNavigate }: { onNavigate?: () => void }) {
           ))}
         </nav>
       </Accordion>
+      {outline.panels ? (
+        <>
+          <div className="h-px w-full bg-border" />
+          <div className="space-y-5">{outline.panels}</div>
+        </>
+      ) : null}
       <div className="h-px w-full bg-border" />
     </>
   );

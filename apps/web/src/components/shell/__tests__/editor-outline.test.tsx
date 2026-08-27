@@ -109,6 +109,18 @@ describe("EditorOutline", () => {
     expect(container.innerHTML).toBe("");
   });
 
+  test("renders the sections the editor places in the bar, under the list", () => {
+    const withPanels: Outline = { ...outline(), panels: <p>policy controls live here</p> };
+    render(
+      <EditorOutlineProvider>
+        <Publish outline={withPanels} />
+        <EditorOutline />
+      </EditorOutlineProvider>,
+    );
+    expect(screen.getByText("Sections")).toBeTruthy();
+    expect(screen.getByText("policy controls live here")).toBeTruthy();
+  });
+
   test("using the hook outside the provider fails loudly", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const Probe = () => {

@@ -5,6 +5,17 @@ import { renderWithRun, json } from "@/__tests__/helpers";
 import { API } from "@/lib/run-context";
 import { fromBrief, saveDraftToStorage } from "@/components/campaign/editor-state";
 import BriefPage from "../page";
+import { useEditorOutline } from "@/lib/editor-outline-context";
+
+/** Places the sections the page publishes to the left bar (Variation policy, Output). */
+const BarPanels = () => useEditorOutline().outline?.panels ?? null;
+/** The page plus the bar panels it publishes, as a user would see them together. */
+const Editor = () => (
+  <>
+    <BriefPage />
+    <BarPanels />
+  </>
+);
 
 /** Save actions live behind the "Save" menu now: open it, then pick the item. */
 const saveVia = async (user: ReturnType<typeof userEvent.setup>, item: "Save & apply" | "Save as") => {
@@ -83,7 +94,7 @@ describe("BriefPage — data flow", () => {
 
   test("loads the brief list on mount and again when the window regains focus", async () => {
     const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
 
     await waitFor(() => expect(calls.filter((c) => c.method === "GET").length).toBeGreaterThan(0));
     const onMount = calls.filter((c) => c.method === "GET").length;
@@ -94,7 +105,7 @@ describe("BriefPage — data flow", () => {
   test("a failing list is logged rather than thrown", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     routes({ list: () => json({ error: "boom" }, 500) });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     await waitFor(() => expect(error).toHaveBeenCalledWith("Failed to load briefs:", expect.anything()));
     error.mockRestore();
   });
@@ -102,7 +113,7 @@ describe("BriefPage — data flow", () => {
   test("selecting a brief loads it, and saving sends back the revision it was loaded with", async () => {
     const user = userEvent.setup();
     const calls = routes({ list: () => json({ briefs: [entry("camp", "rev-abc")] }) });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     await waitFor(() => expect(calls.length).toBeGreaterThan(0));
 
     await user.click(screen.getByText("New brief..."));
@@ -121,7 +132,7 @@ describe("BriefPage — data flow", () => {
   test("a new draft is saved with a POST carrying what was typed", async () => {
     const user = userEvent.setup();
     const calls = routes({});
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     await waitForEditorReady();
 
     // The editor adopts the shell's active brief, so reach a genuinely blank draft the
@@ -158,7 +169,7 @@ describe("BriefPage — data flow", () => {
   test("a failed save surfaces the message", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }), put: () => json({ error: "conflict" }, 409) });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
 
     await user.click(screen.getByText("New brief..."));
     await user.click(await screen.findByText("camp"));
@@ -171,7 +182,7 @@ describe("BriefPage — data flow", () => {
   test("Save as... creates a copy under the new id and closes the dialog", async () => {
     const user = userEvent.setup();
     const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     await fillValidDraft(user);
 
     await saveVia(user, "Save as");
@@ -185,7 +196,7 @@ describe("BriefPage — data flow", () => {
   test("a failed Save as... keeps the dialog open and shows why", async () => {
     const user = userEvent.setup();
     routes({ post: () => json({ error: "already exists" }, 409) });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     await fillValidDraft(user);
 
     await saveVia(user, "Save as");
@@ -199,7 +210,7 @@ describe("BriefPage — data flow", () => {
   test("the Save as... dialog can be dismissed", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     await fillValidDraft(user);
 
     await saveVia(user, "Save as");
@@ -210,7 +221,7 @@ describe("BriefPage — data flow", () => {
   test("New brief... returns the editor to a blank draft", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
 
     await user.click(screen.getByText("New brief..."));
     await user.click(await screen.findByText("camp"));
@@ -225,7 +236,7 @@ describe("BriefPage — data flow", () => {
   test("Apply to run moves the status chip off the unapplied state", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
 
     expect(screen.getByText("Draft not applied")).toBeTruthy();
     await fillValidDraft(user);
@@ -236,7 +247,7 @@ describe("BriefPage — data flow", () => {
   test("Discard throws away the edit", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     await waitForEditorReady();
 
     const before = (screen.getByLabelText("Campaign Message") as HTMLInputElement).value;
@@ -255,7 +266,7 @@ describe("BriefPage — data flow", () => {
   test("the YAML split shows the serialized brief and hides the contents list", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     await waitForEditorReady();
 
     await user.click(screen.getByText("YAML split on"));
@@ -267,7 +278,7 @@ describe("BriefPage — data flow", () => {
   test("an error chip scrolls to its section", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     await waitForEditorReady();
 
     // The editor opens on the shell's active brief, which is valid — clear a required
@@ -305,7 +316,7 @@ describe("BriefPage — data flow", () => {
       },
     };
     routes({ list: () => json({ briefs: [randomized] }) });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
 
     await user.click(screen.getAllByText("New brief...")[0]);
     await user.click(await screen.findByText("rand"));
@@ -335,7 +346,7 @@ describe("BriefPage — data flow", () => {
       brief: { ...brief("clip"), output: { formats: ["static", "motion"], platforms: ["linkedin"] } },
     };
     routes({ list: () => json({ briefs: [motion] }) });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
 
     await user.click(screen.getAllByText("New brief...")[0]);
     await user.click(await screen.findByText("clip"));
@@ -367,7 +378,7 @@ describe("BriefPage — data flow", () => {
     const edited = fromBrief(brief("camp") as never, { file: "camp.yaml", revision: "r1" });
     saveDraftToStorage({ ...edited, campaignMessage: "unsaved work" });
 
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     await user.click(screen.getAllByText(/^(New brief\.\.\.|summer-hydration-2026)$/)[0]);
     await user.click(await screen.findByText("camp"));
 
@@ -380,7 +391,7 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     globalThis.confirm = vi.fn(() => false);
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
 
     await user.type(screen.getByLabelText("Campaign Message"), "!");
     const before = (screen.getByLabelText("Brief ID") as HTMLInputElement).value;
@@ -396,7 +407,7 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     globalThis.confirm = vi.fn(() => false);
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
 
     await user.type(screen.getByLabelText("Campaign Message"), "!");
     const before = (screen.getByLabelText("Brief ID") as HTMLInputElement).value;
@@ -411,7 +422,7 @@ describe("BriefPage — data flow", () => {
   test("Apply, Save and Save as… all refuse an invalid draft", async () => {
     const user = userEvent.setup();
     const calls = routes({});
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
 
     // Wait for the editor to adopt the active brief first: clearing a field the sync is
     // about to repopulate leaves the draft valid again and the buttons enabled.
@@ -434,7 +445,7 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     globalThis.confirm = vi.fn(() => false);
     const calls = routes({ list: () => json({ briefs: [entry("taken", "r1")] }) });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
@@ -449,7 +460,7 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     globalThis.confirm = vi.fn(() => true);
     const calls = routes({ list: () => json({ briefs: [entry("taken", "r1")] }) });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
@@ -469,7 +480,7 @@ describe("BriefPage — data flow", () => {
         return posts === 1 ? json({ error: "already exists" }, 409) : json({ file: "copy.yaml", brief: brief("copy") }, 201);
       },
     });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
@@ -490,7 +501,7 @@ describe("BriefPage — data flow", () => {
         return json({ error: "already exists" }, 409);
       },
     });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
@@ -505,7 +516,7 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     globalThis.confirm = vi.fn(() => true);
     routes({ post: () => json({ error: "disk full" }, 500) });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
@@ -517,7 +528,7 @@ describe("BriefPage — data flow", () => {
 
   test("the active brief is re-attached to its file when the listing knows it", async () => {
     const calls = routes({ list: () => json({ briefs: [entry("summer-hydration-2026", "rev-live")] }) });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
 
     // the shell's active brief appears in the listing, so the editor adopts that entry's
     // file identity and can save conditionally rather than as a new draft
@@ -543,7 +554,7 @@ describe("BriefPage — data flow", () => {
       },
     };
     routes({ list: () => json({ briefs: [randomized] }) });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
 
     await user.click(screen.getAllByText("New brief...")[0]);
     await user.click(await screen.findByText("rand"));
@@ -560,7 +571,7 @@ describe("BriefPage — data flow", () => {
 
   test("the view flows and the shell scrolls it, like every other view; the bar sticks inside that", async () => {
     routes({});
-    const { container } = renderWithRun(<BriefPage />);
+    const { container } = renderWithRun(<Editor />);
     await waitForEditorReady();
     const root = container.firstElementChild as HTMLElement;
     // no forced height and no inner scroller: the shell's main container is the one
@@ -576,7 +587,7 @@ describe("BriefPage — data flow", () => {
   test("the YAML split panel pins beside the form and scrolls on its own", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     await waitForEditorReady();
     await user.click(screen.getByText("YAML split on"));
     const pre = screen.getByText(/"targetRegion"/);
@@ -588,7 +599,7 @@ describe("BriefPage — data flow", () => {
   test("the mode toggle switches between classic and randomized", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
 
     // the section heading, not the inner "Treatments (n)" counter
     const sectionHeading = () => screen.queryByRole("heading", { name: /4 · Treatments/ });
@@ -617,7 +628,7 @@ describe("BriefPage — capabilities and motion", () => {
         return calls <= 1 ? json({ motion: false, reason: "not probed" }) : json({ motion: false, reason: "no ffmpeg" });
       },
     });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
 
     await waitFor(() => expect(calls).toBe(2));
     await waitFor(() => expect(motionToggle().disabled).toBe(true));
@@ -632,7 +643,7 @@ describe("BriefPage — capabilities and motion", () => {
         return json({ motion: false, reason: "not probed" });
       },
     });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
 
     // the initial call plus the bounded retries, and then it gives up
     await waitFor(() => expect(calls).toBe(4));
@@ -673,7 +684,7 @@ describe("BriefPage — capabilities and motion", () => {
       list: () => json({ briefs: [motionBrief] }),
       capabilities: () => json({ motion: false, reason: "no ffmpeg" }),
     });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
 
     await user.click(screen.getAllByText("New brief...")[0]);
     await user.click(await screen.findByText("clip"));
@@ -704,7 +715,7 @@ describe("BriefPage — capabilities and motion", () => {
         return calls === 1 ? json({ motion: true }) : json({ motion: false, reason: "no ffmpeg" });
       },
     });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
 
     await waitFor(() => expect(calls).toBe(1));
     expect(motionToggle().disabled).toBe(false);
@@ -723,7 +734,7 @@ describe("BriefPage — capabilities and motion", () => {
       }
       return Promise.resolve(json({ halted: false, assets: [], log: null }));
     });
-    const { unmount } = renderWithRun(<BriefPage />);
+    const { unmount } = renderWithRun(<Editor />);
     unmount();
 
     answer?.(json({ motion: false, reason: "no ffmpeg" }));
@@ -734,7 +745,7 @@ describe("BriefPage — capabilities and motion", () => {
   test("a motion brief authored from scratch saves with its motion policy (host with motion)", async () => {
     const user = userEvent.setup();
     const calls = routes({});
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     await waitForEditorReady();
 
     await user.click(screen.getAllByText("New brief...")[0]);
@@ -768,7 +779,7 @@ describe("BriefPage — capabilities and motion", () => {
   test("motion without a kind or a duration blocks Save, and the error reaches its input", async () => {
     const user = userEvent.setup();
     const calls = routes({});
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     await waitForEditorReady();
 
     await user.click(screen.getAllByText("New brief...")[0]);
@@ -811,7 +822,7 @@ describe("BriefPage — capabilities and motion", () => {
       list: () => json({ briefs: [{ file: "clip.yaml", brief: clip, revision: "r1" }] }),
       capabilities: () => json({ motion: false, reason: "no ffmpeg" }),
     });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
 
     await user.click(screen.getAllByText("New brief...")[0]);
     await user.click(await screen.findByText("clip"));
@@ -863,7 +874,7 @@ describe("BriefPage — capabilities and motion", () => {
       brief: { ...brief("odd"), output: { formats: ["static"], platforms: ["instagram-reel"] } },
     };
     routes({ list: () => json({ briefs: [mismatched] }) });
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
 
     await user.click(screen.getAllByText("New brief...")[0]);
     await user.click(await screen.findByText("odd"));
