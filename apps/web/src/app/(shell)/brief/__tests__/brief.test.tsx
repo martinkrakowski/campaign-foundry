@@ -4,6 +4,12 @@ import userEvent from "@testing-library/user-event";
 import { renderWithRun } from "@/__tests__/helpers";
 import BriefPage from "../page";
 
+/** Save actions live behind the "Save" menu now: open it, then pick the item. */
+const saveVia = async (user: ReturnType<typeof userEvent.setup>, item: "Save & apply" | "Save as") => {
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+  await user.click(await screen.findByRole("menuitem", { name: new RegExp(item.replace("&", "&")) }));
+};
+
 beforeEach(() => {
   localStorage.setItem("cf:brief-picked", "1");
   // Mock confirm to return true
@@ -27,12 +33,21 @@ describe("BriefPage E1 Features", () => {
     expect(screen.getByText("Randomized")).toBeTruthy();
   });
 
-  test("has action bar buttons", () => {
+  test("has action bar buttons — YAML split on the left, then Discard, Save, Apply on the right", async () => {
+    const user = userEvent.setup();
     renderWithRun(<BriefPage />);
-    expect(screen.getByText("Apply to run")).toBeTruthy();
-    expect(screen.getByText("Save & apply")).toBeTruthy();
-    expect(screen.getByText("Save as...")).toBeTruthy();
-    expect(screen.getByText("Discard")).toBeTruthy();
+    const bar = screen.getByTestId("action-bar");
+    // the error strip's chips sit in the bar too; the action buttons are the rest
+    const labels = Array.from(bar.querySelectorAll("button"))
+      .filter((b) => !b.classList.contains("rounded-full"))
+      .map((b) => b.textContent?.trim());
+    expect(labels).toEqual(["YAML split on", "Discard", "Save", "Apply to run"]);
+    // a blank draft is invalid, so Save (and Apply) are held back; the menu's own
+    // behaviour is covered in save-menu.test.tsx
+    expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText("Apply to run").closest("button") as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: /^Save$/ }));
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   test("Save as... opens dialog", async () => {
@@ -53,8 +68,8 @@ describe("BriefPage E1 Features", () => {
     await user.type(logos[1], "b.png");
     // Once the dialog is open, "Save as..." matches both the action-bar button and
     // the dialog heading — query by role so each assertion names the one it means.
-    await user.click(screen.getByRole("button", { name: "Save as..." }));
-    expect(screen.getByRole("heading", { name: "Save as..." })).toBeTruthy();
+    await saveVia(user, "Save as");
+    expect(screen.getByRole("dialog", { name: /Save as/ })).toBeTruthy();
     expect(screen.getByLabelText("New brief id")).toBeTruthy();
   });
 
