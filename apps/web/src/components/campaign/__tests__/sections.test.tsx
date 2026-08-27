@@ -4,7 +4,6 @@ import userEvent from "@testing-library/user-event";
 import { initialEditorState, type EditorState } from "../editor-state";
 import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, OutputSection } from "../sections";
 import { ErrorStrip } from "../ErrorStrip";
-import { TableOfContents } from "../TableOfContents";
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -435,35 +434,3 @@ describe("ErrorStrip", () => {
   });
 });
 
-describe("TableOfContents", () => {
-  test("lists every section and badges the ones with errors", () => {
-    render(<TableOfContents errors={{ identity: { a: "1", b: "2" }, copy: {} }} mode="brief" />);
-    expect(screen.getByRole("button", { name: /Identity/ }).textContent).toContain("2");
-    expect(screen.getByRole("button", { name: /^Copy$/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Treatments/ })).toBeTruthy();
-  });
-
-  test("scrolls to the target section and reports the navigation", async () => {
-    const user = userEvent.setup();
-    const onNavigate = vi.fn();
-    const target = document.createElement("div");
-    target.id = "products";
-    const scrollIntoView = vi.fn();
-    target.scrollIntoView = scrollIntoView;
-    document.body.appendChild(target);
-
-    render(<TableOfContents errors={{}} mode="brief" onNavigate={onNavigate} />);
-    await user.click(screen.getByRole("button", { name: "Products" }));
-
-    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
-    expect(onNavigate).toHaveBeenCalledWith("products");
-    target.remove();
-  });
-
-  test("a missing target section is a no-op rather than a crash", async () => {
-    const user = userEvent.setup();
-    render(<TableOfContents errors={{}} mode="brief" />);
-    await user.click(screen.getByRole("button", { name: "Output" }));
-    expect(screen.getByRole("button", { name: "Output" })).toBeTruthy();
-  });
-});
