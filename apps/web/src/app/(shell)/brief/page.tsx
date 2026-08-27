@@ -39,7 +39,8 @@ import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, Outpu
 import { StatusChip } from "@/components/campaign/StatusChip";
 import { ErrorStrip } from "@/components/campaign/ErrorStrip";
 import { SaveMenu } from "@/components/campaign/SaveMenu";
-import { useEditorOutline } from "@/lib/editor-outline-context";
+import { useEditorPanels } from "@/lib/editor-panels-context";
+import { Accordion } from "@/components/shell/Accordion";
 import { scrollToSection } from "@/lib/scroll-to-section";
 import { BriefSelector } from "@/components/campaign/BriefSelector";
 import { HeadlinePoolDrawer } from "@/components/campaign/HeadlinePoolDrawer";
@@ -49,7 +50,7 @@ const LEAVE_PROMPT = "You have unsaved changes. Are you sure you want to leave?"
 export default function BriefPage() {
   const { brief: runBrief, setBrief: setRunBrief } = useRun();
   const { setDirty } = useEditorDirty();
-  const { setOutline } = useEditorOutline();
+  const { setPanels } = useEditorPanels();
   const [state, dispatch] = useReducer(editorReducer, initialEditorState());
   const [errors, setErrors] = useState<Record<string, FieldErrors>>({});
   const [saveBlocked, setSaveBlocked] = useState(false);
@@ -178,44 +179,6 @@ export default function BriefPage() {
 
   const totalErrors = getTotalErrorCount(errors);
 
-  // Publish the section list to the shell's left bar while this editor is mounted.
-  // Randomized briefs swap Treatments for the variation policy.
-  useEffect(() => {
-    const entries: { id: string; label: string; keys: string[] }[] = [
-      { id: "identity", label: "Identity", keys: ["identity"] },
-      { id: "copy", label: "Copy", keys: ["copy"] },
-      { id: "products", label: "Products", keys: ["products"] },
-      ...(state.mode === "variation"
-        ? [{ id: "policy", label: "Variation policy", keys: ["policy"] }]
-        : [{ id: "treatments", label: "Treatments", keys: ["treatments"] }]),
-      { id: "output", label: "Output", keys: ["output", "motion"] },
-    ];
-    setOutline({
-      sections: entries.map(({ id, label, keys }) => ({
-        id,
-        label,
-        errorCount: keys.reduce((sum, key) => sum + Object.keys(errors[key] ?? {}).length, 0),
-      })),
-      navigate: scrollToFirstError,
-      // The two sections that live in the bar. Elements are data; state and dispatch
-      // stay here, the bar only places them.
-      panels: (
-        <>
-          {state.mode === "variation" ? (
-            <PolicySection state={state} dispatch={dispatch} errors={sectionErrors("policy")} compact />
-          ) : null}
-          <OutputSection
-            state={state}
-            dispatch={dispatch}
-            errors={{ ...sectionErrors("output"), ...sectionErrors("motion") }}
-            compact
-          />
-        </>
-      ),
-    });
-    return () => setOutline(null);
-    // scrollToFirstError and sectionErrors only read what `state`/`errors` already cover.
-  }, [state, errors, setOutline]);
 
   // Derived, not stored: the refusal describes the draft *as applied*, so it holds
   // exactly while the applied snapshot still matches the draft. Any edit — switching
@@ -233,6 +196,31 @@ export default function BriefPage() {
 
   /** Section errors before the first validation pass lands. */
   const sectionErrors = (section: string): FieldErrors => errors[section] ?? {};
+
+  // Publish the sections that live in the left bar while this editor is mounted. The
+  // page keeps the state, dispatch and validation and republishes on every change; the
+  // bar only places them.
+  const policyErrors = Object.keys(sectionErrors("policy")).length;
+  useEffect(() => {
+    setPanels(
+      state.mode === "variation" ? (
+        <Accordion
+          title="Variation Policy"
+          aside={
+            policyErrors > 0 ? (
+              <span className="font-mono text-[11px] text-error">
+                {policyErrors} {policyErrors === 1 ? "issue" : "issues"}
+              </span>
+            ) : null
+          }
+        >
+          <PolicySection state={state} dispatch={dispatch} errors={sectionErrors("policy")} compact />
+        </Accordion>
+      ) : null,
+    );
+    return () => setPanels(null);
+    // sectionErrors only reads what `errors` already covers.
+  }, [state, errors, policyErrors, setPanels]);
 
   /** Every path that replaces the draft goes through the same D14 confirmation. */
   const confirmReplace = (): boolean =>
@@ -392,7 +380,11 @@ export default function BriefPage() {
                 <TreatmentsSection state={state} dispatch={dispatch} errors={sectionErrors("treatments")} />
               ) : null}
             </div>
-            {/* Variation policy and Output live in the left bar — see the outline effect */}
+            <OutputSection
+              state={state}
+              dispatch={dispatch}
+              errors={{ ...sectionErrors("output"), ...sectionErrors("motion") }}
+            />
           </div>
 
           {persistError ? <p className="text-[13px] text-error">{persistError}</p> : null}

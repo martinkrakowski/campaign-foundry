@@ -1,7 +1,7 @@
 "use client";
 
 import { Accordion } from "./Accordion";
-import { EditorOutline } from "./EditorOutline";
+import { useEditorPanels } from "@/lib/editor-panels-context";
 import { useRun } from "@/lib/run-context";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 
@@ -69,6 +69,7 @@ export function BrowseBriefsButton({ onActivate }: { onActivate?: () => void }) 
  */
 export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { brief } = useRun();
+  const { panels } = useEditorPanels();
   const { guardedPush } = useGuardedNavigation();
   const aspectsLabel = "1:1, 9:16, 16:9";
 
@@ -80,7 +81,6 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <div className="flex-1 space-y-5 overflow-y-auto p-4">
-        <EditorOutline onNavigate={onNavigate} />
         <Accordion
           title="Campaign Brief"
           aside={
@@ -139,6 +139,14 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             ))}
           </div>
         </Accordion>
+
+        {/* Editor sections the brief page places here — the variation policy. */}
+        {panels ? (
+          <>
+            <div className="h-px w-full bg-border" />
+            {panels}
+          </>
+        ) : null}
     </div>
   );
 }

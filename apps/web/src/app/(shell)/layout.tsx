@@ -4,7 +4,7 @@ import { useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { RunProvider } from "@/lib/run-context";
 import { EditorDirtyProvider } from "@/lib/editor-dirty-context";
-import { EditorOutlineProvider } from "@/lib/editor-outline-context";
+import { EditorPanelsProvider } from "@/lib/editor-panels-context";
 import { Header } from "@/components/shell/Header";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { CommandBar } from "@/components/shell/CommandBar";
@@ -26,7 +26,7 @@ export default function ShellLayout({ children }: { children: ReactNode }) {
   return (
     <RunProvider>
       <EditorDirtyProvider>
-        <EditorOutlineProvider>
+        <EditorPanelsProvider>
         <div className="flex h-full flex-col">
           <Header />
           <div className="relative z-0 flex flex-1 gap-4 overflow-hidden bg-background p-4">
@@ -46,7 +46,7 @@ export default function ShellLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
         <BriefPicker />
-        </EditorOutlineProvider>
+        </EditorPanelsProvider>
       </EditorDirtyProvider>
     </RunProvider>
   );

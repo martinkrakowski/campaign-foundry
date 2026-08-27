@@ -25,21 +25,20 @@ export function SectionShell({
   /** Sidebar placement: the bar's own heading scale, tighter rhythm. */
   compact?: boolean;
 }) {
+  // In the bar the surrounding Accordion is the heading, so render the body only —
+  // two stacked titles would read as two sections.
   const instanceId = useId();
-  const headingId = compact ? `${id}-heading-${instanceId}` : `${id}-heading`;
+  const headingId = `${id}-heading-${instanceId}`;
+  if (compact) {
+    return (
+      <section data-section={id} aria-label={title} className="space-y-3 scroll-mt-4">
+        {children}
+      </section>
+    );
+  }
   return (
-    // In the bar the section may be mounted twice (desktop sidebar + mobile menu), so
-    // it carries a data attribute instead of an id, and its heading id is per instance.
-    <section
-      id={compact ? undefined : id}
-      data-section={id}
-      aria-labelledby={headingId}
-      className={compact ? "space-y-3 scroll-mt-4" : "space-y-4 scroll-mt-24"}
-    >
-      <h2
-        id={headingId}
-        className={compact ? "flex items-center gap-2 text-[13px] font-bold text-text-primary" : "flex items-center gap-2 text-lg font-semibold text-white"}
-      >
+    <section id={id} data-section={id} aria-labelledby={headingId} className="space-y-4 scroll-mt-24">
+      <h2 id={headingId} className="flex items-center gap-2 text-lg font-semibold text-white">
         {title}
         {errorCount ? (
           <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-error px-1.5 text-[11px] font-bold text-white">

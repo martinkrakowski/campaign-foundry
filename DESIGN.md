@@ -111,7 +111,7 @@ The scale as actually used — these are deliberate, keep to them:
 │ 320px      │                                                         │
 │ hidden <lg │   the route's view                                      │
 │            │                                                         │
-│ Sections*  │                                                         │
+│ Campaign   │                                                         │
 │ Campaign   │                                                         │
 │  Brief     │                                                         │
 │ Project Bin│                                                         │
@@ -119,7 +119,7 @@ The scale as actually used — these are deliberate, keep to them:
 │ Create new │ CommandBar (only on /grid): status · Regenerate · Execute│
 │ Browse     │                                                         │
 └────────────┴─────────────────────────────────────────────────────────┘
-* published by the brief editor while it is mounted
+* placed by the brief editor while it is mounted
 ```
 
 - **Header** — brand mark (`bg-brand-primary` square + "Campaign Pipeline"), four route tabs
@@ -151,6 +151,16 @@ Skeletal by design — patterns to extend, not a library.
   for a spinner and sets `aria-busy`. Disabled: `opacity-50`, no pointer events.
 - **Input** — h-10, `bg-background`, token border; `invalid` sets `aria-invalid` and the
   error border. Always paired with a visible label or `aria-label`.
+- **Slider** — a bounded integer whose *bound is the point*: the user is spending a budget
+  (how many creatives, out of what the axes can produce) rather than typing a figure, and
+  the track shows how much room is left. A readout keeps the number legible, since a range
+  alone shows only a position.
+- **Stepper** — a small bounded integer with a handful of sensible settings. It states its
+  bounds by disabling its own buttons and cannot accept the malformed input a free-text
+  number field invites. `allowUnset` adds an explicit "Auto" at the bottom of the range, so
+  an optional field can say *"I have not chosen"* instead of showing an empty box that reads
+  as a mistake. The readout is `role="spinbutton"` with `aria-valuenow`/`min`/`max` — not
+  `<output>`, whose implicit `role="status"` would make every stepper a live region.
 - **Card / CardHeader / CardContent** — `bg-surface`, `border-border`, `rounded-lg`, `shadow-sm`.
 
 ### Shell (`src/components/shell`)
@@ -158,9 +168,13 @@ Skeletal by design — patterns to extend, not a library.
 - **Accordion** — the sidebar's section: bold 13px title, chevron, optional `aside` slot on
   the right (a count, an "Edit" link). Anything placed in the sidebar should be one of these.
 - **Field** (sidebar) — 11px muted label over a `bg-surface-2` value box.
-- **EditorOutline** — the editor's Sections list at the top of the sidebar; rows are
-  full-width buttons, error pills `bg-error/20 text-error font-mono text-[10px]`, an
-  "N issues" aside. Renders nothing unless an editor has published an outline.
+- **Editor panels** — sections a view places in the sidebar rather than its own column. The
+  brief editor publishes its Variation Policy through `EditorPanelsProvider`: rendered
+  elements are the payload, so the page keeps the state, dispatch and validation and the bar
+  only places them — and the mobile menu gets them free, sharing the sidebar's content. A
+  placed section renders as an ordinary `Accordion` (its `aside` carrying the issue count)
+  and drops its own heading (`SectionShell compact`), because two stacked titles read as two
+  sections.
 - **BriefPicker**, **MobileMenu**, **TelemetryDrawer**, **CommandBar** — see §3.
 
 ### Campaign editor (`src/components/campaign`)
@@ -199,10 +213,30 @@ lower minDistance (at 1 the maximum is 24), or add axis values"* to *"shortfall"
 **Text over icons.** Icons accompany labels; they do not replace them. Decorative SVGs are
 `aria-hidden`. Emoji are used only inside the StatusChip, where the label carries the meaning.
 
+**Pick the control from the field's shape, not its storage type.** Everything in a brief is
+a string on the way to YAML; that is not a reason to render a text box. Ask what the value
+*is*:
+
+| The field is… | Control | In this app |
+|---|---|---|
+| a bounded count, where the ceiling matters | **Slider** + readout | `variation.count`, bounded by `axisProductSize` — the editor cannot author a count the planner will refuse |
+| a small bounded integer, often optional | **Stepper** (`allowUnset`) | `minDistance` (0…active axes, "Auto (1)"), `coverage.perProduct` / `perRatio` ("No floor") |
+| a set drawn from a fixed vocabulary | **Toggle chips** | layout, tone, background, palette shift, formats, platforms, motion kinds |
+| an opaque value that is either automatic or exact | **Input + an action** | `variation.seed` — *Pick* fills one, *Clear* returns to automatic |
+| free text | **Input** | ids, region, audience, messages |
+
+A number input is the fallback, not the default. It accepts values the field cannot hold,
+says nothing about the range, and turns a bound into an error message the user meets only
+after typing.
+
 ---
 
 ## 6. Accessibility
 
+- A section placed in the sidebar exists twice below `lg` (the CSS-hidden desktop bar stays
+  mounted while the mobile menu shows the same content), so it carries `data-section` rather
+  than an `id`, and per-instance heading ids. Navigation prefers the copy the browser has
+  actually laid out.
 - Every interactive element has an accessible name: visible text, `aria-label`, or a
   wrapping `<label>`. Inputs never rely on `placeholder` alone.
 - Toggles use `aria-pressed`; menus `aria-haspopup="menu"` + `aria-expanded`; dialogs

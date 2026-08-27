@@ -1,8 +1,9 @@
 import { describe, test, expect, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { CopyPool } from "@campaignfoundry/CampaignOrchestration";
 import { PolicySection } from "../PolicySection";
+import { axisProductSize, maxMinDistance } from "../../validate";
 import {
   initialEditorState,
   editorReducer,
@@ -36,31 +37,105 @@ describe("PolicySection", () => {
   });
 });
 
-describe("PolicySection — numeric fields", () => {
-  test.each([
-    ["Count", "count", "12"],
-    ["Seed (optional)", "seed", ""],
-    ["Min Distance", "minDistance", "2"],
-    ["Coverage per Product", "perProduct", "1"],
-    ["Coverage per Ratio", "perRatio", "1"],
-  ])("%s dispatches setVariation and shows its own error", async (label, field, initial) => {
+describe("PolicySection — the policy numbers", () => {
+  test("Count is a slider bounded by what the axes can actually produce", async () => {
+    const dispatch = vi.fn();
+    // 2 products × 3 ratios × 2 layouts × 2 tones × 1 background × 3 palette shifts
+    const s = state({ variation: { ...state().variation, paletteShift: [0, 0.1, 0.2] } });
+    render(<PolicySection state={s} dispatch={dispatch} errors={{}} />);
+
+    const slider = screen.getByLabelText("Count") as HTMLInputElement;
+    expect(slider.type).toBe("range");
+    expect(slider.min).toBe("1");
+    expect(slider.max).toBe(String(axisProductSize(s)));
+    expect(slider.value).toBe("12");
+
+    fireEvent.change(slider, { target: { value: "20" } });
+    expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field: "count", value: "20" });
+  });
+
+  test("the count readout shows the value against the ceiling, and flags its error", () => {
+    render(<PolicySection state={state()} dispatch={vi.fn()} errors={{ count: "bad count" }} />);
+    expect(screen.getByText("bad count")).toBeTruthy();
+    expect(screen.getByText(/12/).textContent).toMatch(/12\s*\/\s*\d+/);
+  });
+
+  test("Min distance steps within the active axes and can be left to the planner", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
-    render(<PolicySection state={state()} dispatch={dispatch} errors={{ [field]: `bad ${field}` }} />);
+    const s = state();
+    render(<PolicySection state={s} dispatch={dispatch} errors={{}} />);
 
-    const input = screen.getByLabelText(label) as HTMLInputElement;
-    expect(input.value).toBe(initial);
-    await user.type(input, "3");
-    expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field, value: `${initial}3` });
+    const readout = screen.getByRole("spinbutton", { name: "Min distance" });
+    expect(readout.getAttribute("aria-valuemax")).toBe(String(maxMinDistance(s)));
+    expect(readout.textContent).toBe("2");
+
+    await user.click(screen.getByRole("button", { name: "Increase Min distance" }));
+    expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field: "minDistance", value: "3" });
+    await user.click(screen.getByRole("button", { name: "Decrease Min distance" }));
+    expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field: "minDistance", value: "1" });
+  });
+
+  test("an unset min distance reads as the planner's default, and stepping up sets it", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    const s = state();
+    render(
+      <PolicySection state={{ ...s, variation: { ...s.variation, minDistance: "" } }} dispatch={dispatch} errors={{}} />,
+    );
+    expect(screen.getByRole("spinbutton", { name: "Min distance" }).textContent).toBe("Auto (1)");
+    await user.click(screen.getByRole("button", { name: "Increase Min distance" }));
+    expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field: "minDistance", value: "0" });
+  });
+
+  test.each([
+    ["Coverage per product", "perProduct"],
+    ["Coverage per ratio", "perRatio"],
+  ])("%s is an optional floor, shown as such when unset", async (label, field) => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    const s = state();
+    const { unmount } = render(
+      <PolicySection state={{ ...s, variation: { ...s.variation, [field]: "" } }} dispatch={dispatch} errors={{}} />,
+    );
+    expect(screen.getByRole("spinbutton", { name: label }).textContent).toBe("No floor");
+    unmount();
+
+    render(<PolicySection state={s} dispatch={dispatch} errors={{ [field]: `bad ${field}` }} />);
     expect(screen.getByText(`bad ${field}`)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: `Increase ${label}` }));
+    expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field, value: "2" });
+  });
+
+  test("Seed can be typed, picked, or cleared back to automatic", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    const s = state();
+    const { unmount } = render(<PolicySection state={s} dispatch={dispatch} errors={{ seed: "bad seed" }} />);
+    await user.type(screen.getByPlaceholderText("Auto"), "7");
+    expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field: "seed", value: "7" });
+    expect(screen.getByText("bad seed")).toBeTruthy();
+
+    // empty seed → offer to pick one
+    await user.click(screen.getByRole("button", { name: "Pick a seed" }));
+    const picked = dispatch.mock.calls.map((c) => c[0]).find((a) => a.field === "seed" && a.value !== "7");
+    expect(Number(picked.value)).toBeGreaterThanOrEqual(0);
+    unmount();
+
+    // a set seed → offer to clear it
+    dispatch.mockClear();
+    render(
+      <PolicySection state={{ ...s, variation: { ...s.variation, seed: "42" } }} dispatch={dispatch} errors={{}} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Clear the seed" }));
+    expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field: "seed", value: "" });
   });
 
   test("the min-distance help states the bound the active axes actually allow", () => {
     const { unmount } = render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
-    expect(screen.getByText(/Whole numbers, 0–6/)).toBeTruthy();
+    expect(screen.getByText(/up to 6, the active axes/)).toBeTruthy();
     unmount();
 
-    // motion widens the bound by two axes, but only while it is a requested format
     render(
       <PolicySection
         state={state({ formats: ["static", "motion"], motion: ["ken-burns-in"] })}
@@ -68,7 +143,7 @@ describe("PolicySection — numeric fields", () => {
         errors={{}}
       />,
     );
-    expect(screen.getByText(/Whole numbers, 0–8/)).toBeTruthy();
+    expect(screen.getByText(/up to 8, the active axes/)).toBeTruthy();
   });
 });
 

@@ -4,3 +4,5 @@
 export { Button, type ButtonProps } from "./button";
 export { Card, CardHeader, CardContent, type CardProps } from "./card";
 export { Input, type InputProps } from "./input";
+export { Slider, type SliderProps } from "./slider";
+export { Stepper, type StepperProps } from "./stepper";
