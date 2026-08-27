@@ -1,8 +1,12 @@
 import type { EditorState } from "./editor-state";
 import { LAYOUT_OPTIONS, TONE_OPTIONS } from "./editor-state";
+import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
 
 export const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
+/** Whole-second clip durations the API accepts (load-brief's MIN/MAX_DURATION_SEC). */
+export const MIN_DURATION_SEC = 2;
+export const MAX_DURATION_SEC = 30;
 
 export type FieldErrors = Record<string, string>;
 
@@ -155,6 +159,16 @@ export function validatePolicy(state: EditorState): FieldErrors {
   return errors;
 }
 
+/**
+ * D7: a capability being off makes a motion brief *unrunnable* on this host, not
+ * invalid — this string is a status message, never the sole reason Save is blocked.
+ * It quotes the probe's reason, which is the same text the API's 400 would carry.
+ */
+export function motionUnavailableReason(state: EditorState): string | undefined {
+  if (state.capabilities?.motion !== false || !state.formats.includes("motion")) return undefined;
+  return `Motion format is not available: ${state.capabilities.reason ?? "capability off"}.`;
+}
+
 export function validateOutput(state: EditorState): FieldErrors {
   const errors: FieldErrors = {};
   if (state.formats.length === 0) {
@@ -163,9 +177,25 @@ export function validateOutput(state: EditorState): FieldErrors {
   if (state.platforms.length === 0) {
     errors.platforms = "Select at least one platform.";
   }
-  if (state.capabilities?.motion === false && state.formats.includes("motion")) {
-    errors.formats = `Motion format is not available: ${state.capabilities.reason ?? "capability off"}.`;
+  // Client mirror of the API's validateFormatPlatformCompatibility: both directions
+  // matter — a platform with nothing to package, and a format nothing can ship.
+  const profiles = state.platforms
+    .map((id) => PLATFORM_PROFILES[id])
+    .filter((profile): profile is PlatformProfile => profile !== undefined);
+  for (const profile of profiles) {
+    if (!profile.formats.some((format) => state.formats.includes(format))) {
+      errors.platforms = `Platform "${profile.id}" packages only [${profile.formats.join(", ")}], which output.formats [${state.formats.join(", ")}] does not request.`;
+      break;
+    }
   }
+  for (const format of state.formats) {
+    if (!profiles.some((profile) => (profile.formats as readonly string[]).includes(format))) {
+      errors.formats = `Output format "${format}" is requested but none of output.platforms [${state.platforms.join(", ")}] can package it.`;
+      break;
+    }
+  }
+  const unavailable = motionUnavailableReason(state);
+  if (unavailable) errors.formats = unavailable;
   return errors;
 }
 
@@ -177,6 +207,12 @@ export function validateMotion(state: EditorState): FieldErrors {
   }
   if (state.duration.length === 0) {
     errors.duration = "Add at least one duration.";
+  } else if (
+    state.duration.some(
+      (seconds) => !Number.isInteger(seconds) || seconds < MIN_DURATION_SEC || seconds > MAX_DURATION_SEC,
+    )
+  ) {
+    errors.duration = `Durations must be whole seconds between ${MIN_DURATION_SEC} and ${MAX_DURATION_SEC}.`;
   }
   return errors;
 }

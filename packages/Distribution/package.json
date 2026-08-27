@@ -9,6 +9,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./platform-profiles": {
+      "types": "./src/domain/value-objects/PlatformProfile.vo.ts",
+      "default": "./src/domain/value-objects/PlatformProfile.vo.ts"
     }
   },
   "scripts": {

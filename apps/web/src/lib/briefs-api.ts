@@ -20,6 +20,55 @@ export interface AssetUploadResult {
   path: string;
 }
 
+/** What this host can produce, from the API's boot probe (`GET /campaigns/capabilities`). */
+export interface HostCapabilities {
+  motion: boolean;
+  reason?: string;
+}
+
+/** Delay between retries while the probe's answer is still "not probed". */
+export const CAPABILITIES_RETRY_MS = 150;
+/** Give-up point for the boot-probe window; a later focus refetch gets another round. */
+export const CAPABILITIES_MAX_RETRIES = 3;
+
+/**
+ * The capabilities route answers during the boot probe window with
+ * `{ motion: false, reason: "not probed" }`. That is a transient snapshot, not a
+ * verdict — treat it as retry-able rather than disabling motion on its strength.
+ */
+export function isTransientCapabilities(capabilities: HostCapabilities): boolean {
+  return !capabilities.motion && capabilities.reason === "not probed";
+}
+
+/**
+ * The host's capabilities, or `null` when they cannot be known (route missing,
+ * network failure, malformed payload). `null` leaves the editor ungated — an
+ * unreachable probe must not read as "this host cannot do motion".
+ */
+export async function getCapabilities(): Promise<HostCapabilities | null> {
+  let res: Response;
+  try {
+    res = await fetch(`${API}/campaigns/capabilities`);
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  // The body is a stream: it can still fail after fetch resolved. A rejection here
+  // would escape into the caller's `void load()` as an unhandled rejection and leave
+  // capabilities unresolved, so degrade to "unknown" like every other failure.
+  let data: unknown;
+  try {
+    data = await parseJsonBody(res);
+  } catch {
+    return null;
+  }
+  if (typeof data !== "object" || data === null) return null;
+  const motion = (data as { motion?: unknown }).motion;
+  if (typeof motion !== "boolean") return null;
+  const reason = (data as { reason?: unknown }).reason;
+  return typeof reason === "string" ? { motion, reason } : { motion };
+}
+
 export interface PlanEstimate {
   creatives: number;
   axisProductSize: number;

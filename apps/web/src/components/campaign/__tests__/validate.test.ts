@@ -1,6 +1,7 @@
 import { describe, test, expect } from "vitest";
 import {
   maxMinDistance,
+  motionUnavailableReason,
   validateIdentity,
   validateCopy,
   validateProducts,
@@ -43,6 +44,20 @@ describe("maxMinDistance", () => {
     expect(maxMinDistance(state)).toBe(6);
     expect(maxMinDistance(editorReducer(state, { type: "toggleHeadline" }))).toBe(7);
     expect(maxMinDistance({ ...state, motion: ["ken-burns-in"] })).toBe(8);
+  });
+});
+
+describe("motionUnavailableReason", () => {
+  test("is the probe's reason exactly when motion is requested and off, else absent", () => {
+    expect(motionUnavailableReason(valid())).toBeUndefined();
+    expect(motionUnavailableReason(valid({ formats: ["static", "motion"] }))).toBeUndefined();
+    expect(motionUnavailableReason(valid({ capabilities: { motion: true }, formats: ["motion"] }))).toBeUndefined();
+    expect(motionUnavailableReason(valid({ capabilities: { motion: false, reason: "no ffmpeg" }, formats: ["motion"] }))).toBe(
+      "Motion format is not available: no ffmpeg.",
+    );
+    expect(motionUnavailableReason(valid({ capabilities: { motion: false }, formats: ["motion"] }))).toBe(
+      "Motion format is not available: capability off.",
+    );
   });
 });
 
@@ -200,8 +215,40 @@ describe("validateOutput", () => {
     expect(validateOutput(off).formats).toMatch(/not available: no ffmpeg/);
     const noReason = valid({ formats: ["motion"], capabilities: { motion: false } });
     expect(validateOutput(noReason).formats).toMatch(/capability off/);
-    const on = valid({ formats: ["motion"], capabilities: { motion: true } });
+    const on = valid({
+      formats: ["static", "motion"],
+      platforms: ["instagram-feed", "instagram-reel"],
+      capabilities: { motion: true },
+    });
     expect(validateOutput(on).formats).toBeUndefined();
+  });
+
+  test("a platform that packages none of the requested formats is rejected", () => {
+    const errors = validateOutput(valid({ formats: ["motion"], platforms: ["instagram-feed", "instagram-reel"] }));
+    expect(errors.platforms).toMatch(
+      /Platform "instagram-feed" packages only \[static\], which output\.formats \[motion\] does not request/,
+    );
+  });
+
+  test("a requested format no platform can package is rejected", () => {
+    const errors = validateOutput(valid({ formats: ["static", "motion"], platforms: ["instagram-feed", "linkedin", "x"] }));
+    expect(errors.formats).toMatch(
+      /Output format "motion" is requested but none of output\.platforms \[instagram-feed, linkedin, x\] can package it/,
+    );
+  });
+
+  test("a capability-off motion brief with its motion platform selected is structurally compatible", () => {
+    // D12: the compatibility mirror must not add an error a save would be blocked by —
+    // the only complaint is the capability, which does not gate persistence.
+    const errors = validateOutput(
+      valid({
+        formats: ["static", "motion"],
+        platforms: ["instagram-feed", "instagram-reel"],
+        capabilities: { motion: false, reason: "no ffmpeg" },
+      }),
+    );
+    expect(errors.platforms).toBeUndefined();
+    expect(errors.formats).toMatch(/not available: no ffmpeg/);
   });
 });
 
@@ -215,6 +262,15 @@ describe("validateMotion", () => {
     expect(errors.motion).toMatch(/at least one motion kind/);
     expect(errors.duration).toMatch(/at least one duration/);
     expect(validateMotion(valid({ formats: ["motion"], motion: ["ken-burns-in"], duration: [5] }))).toEqual({});
+  });
+
+  test("durations are whole seconds bounded to the API's 2–30 range", () => {
+    expect(validateMotion(valid({ formats: ["motion"], motion: ["ken-burns-in"], duration: [2, 30] })).duration).toBeUndefined();
+    const bad = validateMotion(valid({ formats: ["motion"], motion: ["ken-burns-in"], duration: [1, 31] }));
+    expect(bad.duration).toMatch(/whole seconds between 2 and 30/);
+    expect(
+      validateMotion(valid({ formats: ["motion"], motion: ["ken-burns-in"], duration: [Number.NaN] })).duration,
+    ).toMatch(/whole seconds between 2 and 30/);
   });
 });
 

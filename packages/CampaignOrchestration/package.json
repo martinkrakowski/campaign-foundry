@@ -9,6 +9,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./motion-kinds": {
+      "types": "./src/domain/value-objects/MotionKind.vo.ts",
+      "default": "./src/domain/value-objects/MotionKind.vo.ts"
     }
   },
   "scripts": {

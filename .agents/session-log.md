@@ -860,3 +860,49 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Refuted across the sweep, with reasons on each PR: structured-logger findings (no logger installed; `env.ts` precedent), `Result<T,E>` as an HTTP wire shape, a `JobStore` port at the composition root, "failed batch overwrites earlier outputs" (inherited classic behaviour), "old campaign packages newer bytes" (pre-namespaced render paths, mitigated by `packagedAt`).
 - **Left open:**
   - Deferred by design (plan §Deferred): Phase 8 GenAI video backgrounds, 4:5 ratio, SSE progress, real `done/total`, `withTempProjectRoot`, a structured logger; linux inset golden still unrecorded; wizard has no motion controls yet (bound adds motion axes once they land); grid headline chip.
+
+## 2026-08-26 — E2.3 motion controls, capability gating, platform compatibility (branch feat/e2-motion)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `briefs-api.ts`: `getCapabilities()` client for `GET /campaigns/capabilities`
+    (lenient — route/network/malformed answers return `null`, i.e. "unknown", and
+    never gate motion), `isTransientCapabilities()` for the boot-probe window.
+  - `page.tsx`: capabilities fetched on mount, retried (≤3 × 150 ms) while the
+    route answers `not probed`, refetched on window focus; D7 gating — Save/Save
+    as… blocked by structural errors only (validation re-run with capabilities
+    null), Apply stays clickable when the sole problem is the capability and
+    surfaces `motionUnavailableReason` as a `role="status"` message.
+  - `OutputSection.tsx`: motion format toggle re-enabled (disabled with the
+    probe's reason when off), MOTION_KINDS multi-select, editable 2–30 s duration
+    list, platforms from `PLATFORM_PROFILES` filtered by capability
+    (`isPlatformVisible`) and requested formats, `id="motion"` anchor for the
+    error-strip chip.
+  - `validate.ts`: client mirror of `validateFormatPlatformCompatibility` (both
+    directions), duration bound 2–30, `motionUnavailableReason()` helper.
+  - `editor-state.ts`: `togglePlatform` orders over all profiles
+    (`PLATFORM_ORDER`); `load`/`discard` preserve `state.capabilities` (host
+    facts survive brief switches — the run-context sync re-adopts the active brief
+    on every listing refresh, which previously reset the gating).
+  - `next.config.ts`: webpack `extensionAlias` (`.js` → `.ts`) — first value
+    imports of the workspace packages into the client bundle.
+- **Decisions:**
+  - Subpath exports `./platform-profiles` (Distribution) and `./motion-kinds`
+    (CampaignOrchestration) were added so the client imports the pure domain VOs
+    without dragging node-only adapters (`node:fs`, pdf-lib, `node:crypto` in
+    `VariationPolicy.vo`) into the browser bundle. Additive only; deviation from
+    "work only in apps/web/**" noted on the PR.
+  - D12 read-only rule: capability-hidden platforms are locked (deselecting would
+    strip the file's data), but format-mismatched selections stay deselectable so
+    a compatibility error always has a way out.
+  - Three tests asserting the E2.3-pending state were updated, not weakened:
+    the OutputSection "motion cannot be selected" test, the brief-editor "chip
+    for a section that still has no panel" test (the panel now exists), and
+    validateOutput's capability test (its "capability on" case now needs a motion
+    platform because the compatibility mirror flags `formats: [motion]` with
+    all-static platforms).
+  - Pre-existing `@campaignfoundry/api` lint warning (unused `getCapabilities`
+    import in capabilities.get.test.ts, merged in E2.1) removed — the gate
+    requires 0 warnings and main is red on it.
+- **Left open:**
+  - E3 removes `STATIC_PLATFORMS` and the wizard shims (untouched here).

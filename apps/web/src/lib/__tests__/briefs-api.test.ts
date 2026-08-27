@@ -6,8 +6,10 @@ import {
   createBrief,
   duplicateBrief,
   generatePool,
+  getCapabilities,
   getPool,
   isBriefsApiError,
+  isTransientCapabilities,
   patchPool,
   listBriefs,
   listPackages,
@@ -47,6 +49,44 @@ describe("unknownErrorMessage / isBriefsApiError", () => {
   test("narrows BriefsApiError", () => {
     expect(isBriefsApiError(new BriefsApiError("x", 409))).toBe(true);
     expect(isBriefsApiError(new Error("x"))).toBe(false);
+  });
+});
+
+describe("getCapabilities / isTransientCapabilities", () => {
+  test("returns the probe verdict, with or without a reason", async () => {
+    mockFetch((url) => {
+      expect(url).toBe(`${API}/campaigns/capabilities`);
+      return json({ motion: true });
+    });
+    await expect(getCapabilities()).resolves.toEqual({ motion: true });
+    mockFetch(() => json({ motion: false, reason: "no ffmpeg" }));
+    await expect(getCapabilities()).resolves.toEqual({ motion: false, reason: "no ffmpeg" });
+  });
+
+  test("drops a non-string reason rather than forwarding it", async () => {
+    mockFetch(() => json({ motion: true, reason: 42 }));
+    await expect(getCapabilities()).resolves.toEqual({ motion: true });
+  });
+
+  test("returns null for a failing route, a network error, or a malformed payload", async () => {
+    mockFetch(() => json({ error: "boom" }, 500));
+    await expect(getCapabilities()).resolves.toBeNull();
+    mockFetch(() => Promise.reject(new Error("network")));
+    await expect(getCapabilities()).resolves.toBeNull();
+    mockFetch(() => new Response("null", { status: 200, headers: { "content-type": "application/json" } }));
+    await expect(getCapabilities()).resolves.toBeNull();
+    mockFetch(() => json({ motion: "yes" }));
+    await expect(getCapabilities()).resolves.toBeNull();
+    mockFetch(() => json({}));
+    await expect(getCapabilities()).resolves.toBeNull();
+  });
+
+  test("only the exact boot-probe snapshot is transient", () => {
+    expect(isTransientCapabilities({ motion: false, reason: "not probed" })).toBe(true);
+    expect(isTransientCapabilities({ motion: false, reason: "no ffmpeg" })).toBe(false);
+    expect(isTransientCapabilities({ motion: false })).toBe(false);
+    expect(isTransientCapabilities({ motion: true })).toBe(false);
+    expect(isTransientCapabilities({ motion: true, reason: "not probed" })).toBe(false);
   });
 });
 
@@ -390,6 +430,19 @@ describe("copy pool calls", () => {
       return json({ pool });
     });
     expect(await patchPool("camp", entries)).toEqual(pool);
+  });
+});
+
+describe("getCapabilities body failures", () => {
+  test("a body that fails mid-stream degrades to unknown instead of rejecting", async () => {
+    // fetch resolves, then the stream errors — a rejection here would escape the
+    // caller's `void load()` as an unhandled rejection and leave motion unresolved
+    vi.mocked(globalThis.fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.reject(new Error("stream died")),
+    } as unknown as Response);
+    await expect(getCapabilities()).resolves.toBeNull();
   });
 });
 

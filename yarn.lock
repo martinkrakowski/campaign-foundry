@@ -275,6 +275,7 @@ __metadata:
   resolution: "@campaignfoundry/web@workspace:apps/web"
   dependencies:
     "@campaignfoundry/CampaignOrchestration": "workspace:*"
+    "@campaignfoundry/Distribution": "workspace:*"
     "@eslint/js": "npm:^9.0.0"
     "@types/node": "npm:^20.11.0"
     "@types/react": "npm:^19.0.0"
