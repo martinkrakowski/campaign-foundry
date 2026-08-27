@@ -1,7 +1,7 @@
 "use client";
 
-import type { Dispatch } from "react";
-import { Button, Input, Slider, Stepper } from "@/components/ui";
+import type { Dispatch, ReactNode } from "react";
+import { AxisCard, Button, CreativeGlyph, Input, Slider, Stepper } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import { axisProductSize, maxMinDistance, type FieldErrors } from "@/components/campaign/validate";
@@ -50,6 +50,49 @@ function AxisToggles({
             </button>
           );
         })}
+      </div>
+      {error ? <span className="block text-[11px] text-error">{error}</span> : null}
+    </fieldset>
+  );
+}
+
+/**
+ * The card variant of an axis: each option previews what the compositor will
+ * draw for it (via `render`) instead of naming it alone. Used where the choice
+ * is visual — layout and tone. In the 320px sidebar the grid must hold two
+ * cards per row; wider containers let cards auto-fill.
+ */
+function AxisCards<T extends string>({
+  legend,
+  options,
+  selected,
+  onToggle,
+  error,
+  compact,
+  render,
+}: {
+  legend: string;
+  options: readonly T[];
+  selected: readonly string[];
+  onToggle: (value: string) => void;
+  error?: string;
+  compact: boolean;
+  render: (option: T) => ReactNode;
+}) {
+  return (
+    <fieldset className="space-y-2">
+      <legend className="text-[11px] text-text-muted">{legend}</legend>
+      <div
+        className={cn(
+          "grid gap-2",
+          compact ? "grid-cols-2" : "grid-cols-[repeat(auto-fill,minmax(9rem,1fr))]",
+        )}
+      >
+        {options.map((option) => (
+          <AxisCard key={option} value={option} selected={selected.includes(option)} onToggle={onToggle}>
+            {render(option)}
+          </AxisCard>
+        ))}
       </div>
       {error ? <span className="block text-[11px] text-error">{error}</span> : null}
     </fieldset>
@@ -191,19 +234,23 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
             />
           </Field>
         </div>
-        <AxisToggles
+        <AxisCards
           legend="Layout"
           options={LAYOUT_OPTIONS}
           selected={state.variation.layout}
           onToggle={(value) => dispatch({ type: "toggleLayout", value })}
           error={errors.layout}
+          compact={compact}
+          render={(option) => <CreativeGlyph layout={option} />}
         />
-        <AxisToggles
+        <AxisCards
           legend="Tone"
           options={TONE_OPTIONS}
           selected={state.variation.tone}
           onToggle={(value) => dispatch({ type: "toggleTone", value })}
           error={errors.tone}
+          compact={compact}
+          render={(option) => <CreativeGlyph tone={option} />}
         />
         <AxisToggles
           legend="Background Source"

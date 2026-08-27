@@ -163,6 +163,44 @@ describe("PolicySection — axes", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "toggleBackground", value: BACKGROUND_OPTIONS[2] });
   });
 
+  test("layout and tone cards answer to their raw value as the whole accessible name", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    render(<PolicySection state={state()} dispatch={dispatch} errors={{}} />);
+
+    // the same query 61 assertions across the suite make: role + whole name.
+    // The glyph and any caption inside the card must never extend that name.
+    const top = within(axis("Layout")).getByRole("button", { name: "headline-top" }) as HTMLButtonElement;
+    expect(top.getAttribute("aria-pressed")).toBe("true");
+    await user.click(top);
+    expect(dispatch).toHaveBeenCalledWith({ type: "toggleLayout", value: "headline-top" });
+
+    await user.click(within(axis("Tone")).getByRole("button", { name: "subtle" }));
+    expect(dispatch).toHaveBeenCalledWith({ type: "toggleTone", value: "subtle" });
+
+    // the preview is decoration carried by the card
+    expect(top.querySelector("svg[aria-hidden='true']")).toBeTruthy();
+  });
+
+  test("the non-visual axes keep their plain text toggles", () => {
+    render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    const bg = within(axis("Background Source")).getByRole("button", { name: "procedural" });
+    expect(bg.querySelector("svg")).toBeNull();
+    expect(within(axis("Palette Shift")).getByRole("button", { name: "0.1" })).toBeTruthy();
+    expect(within(axis("Headline")).getByRole("button", { name: HEADLINE_POOL_REF })).toBeTruthy();
+  });
+
+  test("the card grid holds two columns in the 320px sidebar and auto-fills when wide", () => {
+    const { unmount } = render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    const wideGrid = axis("Layout").querySelector("div") as HTMLElement;
+    expect(wideGrid.className).toContain("auto-fill");
+    unmount();
+
+    render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} compact />);
+    const compactGrid = axis("Layout").querySelector("div") as HTMLElement;
+    expect(compactGrid.className).toContain("grid-cols-2");
+  });
+
   test("a selected axis value is marked pressed, an unselected one is not", () => {
     render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
     // background defaults to procedural only

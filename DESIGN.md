@@ -162,6 +162,23 @@ Skeletal by design — patterns to extend, not a library.
   as a mistake. The readout is `role="spinbutton"` with `aria-valuenow`/`min`/`max` — not
   `<output>`, whose implicit `role="status"` would make every stepper a live region.
 - **Card / CardHeader / CardContent** — `bg-surface`, `border-border`, `rounded-lg`, `shadow-sm`.
+- **CreativeGlyph** — a miniature of the creative the compositor will paint, drawn in the
+  compositor's own layer order (photo ground → contrast shade on the headline edge → brand
+  accent band flush to that edge → two text bars). It encodes the two visual axes of a
+  variation policy: `layout` picks which edge carries the shade, band and text; `tone` scales
+  the shade opacity and the text weight (the compositor's own `shadeAlpha`: 0.7 bold, 0.4
+  subtle). The arrangement mirrors `NodeCanvasCompositor.draw`, not the pixels — colours are
+  theme tokens so the miniature reads in both themes. Purely decorative: `aria-hidden`, so
+  the label beside it carries the meaning.
+- **AxisCard** — the selectable card for one value of a fixed-vocabulary axis, generic over
+  the value: it knows how to be chosen (pressed/unpressed, the selected border + tint, a
+  check mark, `focus-visible` ring), not what a choice means — that is the preview it hosts
+  (a `CreativeGlyph` for layout and tone). The accessible name is **exactly the raw option
+  value**, set as an explicit `aria-label` — that label is what fixes the name, since an
+  `aria-label` overrides descendant content. The preview and the check mark are `aria-hidden`
+  because they are decoration; the meta caption is too, as defence in depth, so that dropping
+  the label some day degrades to the bare value rather than to "headline-top shade .7" — which
+  would orphan every `getByRole("button", { name })` query in the suite.
 
 ### Shell (`src/components/shell`)
 
@@ -221,7 +238,7 @@ a string on the way to YAML; that is not a reason to render a text box. Ask what
 |---|---|---|
 | a bounded count, where the ceiling matters | **Slider** + readout | `variation.count`, bounded by `axisProductSize` — the editor cannot author a count the planner will refuse |
 | a small bounded integer, often optional | **Stepper** (`allowUnset`) | `minDistance` (0…active axes, "Auto (1)"), `coverage.perProduct` / `perRatio` ("No floor") |
-| a set drawn from a fixed vocabulary | **Toggle chips** | layout, tone, background, palette shift, formats, platforms, motion kinds |
+| a set drawn from a fixed vocabulary | **Toggle chips** (or **AxisCard** + `CreativeGlyph` when the choice is visual) | background, palette shift, formats, platforms, motion kinds (chips); layout, tone (cards) |
 | an opaque value that is either automatic or exact | **Input + an action** | `variation.seed` — *Pick* fills one, *Clear* returns to automatic |
 | free text | **Input** | ids, region, audience, messages |
 
