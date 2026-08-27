@@ -552,6 +552,38 @@ describe("BriefPage — data flow", () => {
     await waitFor(() => expect(screen.queryByText("Headline Pool")).toBeNull());
   });
 
+  test("the scrolling column clears the fixed action bar", async () => {
+    routes({});
+    const { container } = renderWithRun(<BriefPage />);
+    await waitForEditorReady();
+
+    // The bar is `fixed`, so the column cannot account for it: without explicit
+    // clearance its last control — the platform buttons — sits underneath and cannot
+    // be scrolled into view. Tailwind's `sm:p-8` also overrode the old `pb-12`.
+    const column = container.querySelector(".overflow-y-auto") as HTMLElement;
+    const bar = screen.getByTestId("action-bar");
+    expect(column).toBeTruthy();
+    expect(bar).toBeTruthy();
+
+    // 1px border + p-4 twice + an h-10 button, plus room for the strip to wrap
+    const clearance = Number.parseInt(column.style.paddingBottom, 10);
+    expect(clearance).toBeGreaterThan(73);
+  });
+
+  test("the YAML split panel clears it too", async () => {
+    const user = userEvent.setup();
+    routes({});
+    const { container } = renderWithRun(<BriefPage />);
+    await waitForEditorReady();
+
+    await user.click(screen.getByText("YAML split on"));
+    const panels = Array.from(container.querySelectorAll<HTMLElement>("[style*='padding-bottom']"));
+    expect(panels.length).toBe(2); // the editor column and the split panel
+    for (const panel of panels) {
+      expect(Number.parseInt(panel.style.paddingBottom, 10)).toBeGreaterThan(73);
+    }
+  });
+
   test("the mode toggle switches between classic and randomized", async () => {
     const user = userEvent.setup();
     routes({});

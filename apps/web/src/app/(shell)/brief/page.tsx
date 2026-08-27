@@ -44,6 +44,15 @@ import { HeadlinePoolDrawer } from "@/components/campaign/HeadlinePoolDrawer";
 
 const LEAVE_PROMPT = "You have unsaved changes. Are you sure you want to leave?";
 
+/**
+ * Height of the fixed action bar: 1px top border + p-4 twice + an h-10 button.
+ * The bar is `fixed`, so the scrolling column cannot account for it on its own and
+ * its last control — the platform buttons — ends up underneath it.
+ */
+const ACTION_BAR_HEIGHT = 73;
+/** Room for the error strip inside the bar to wrap, plus visual breathing space. */
+const ACTION_BAR_CLEARANCE = ACTION_BAR_HEIGHT + 56;
+
 export default function BriefPage() {
   const { brief: runBrief, setBrief: setRunBrief } = useRun();
   const { setDirty } = useEditorDirty();
@@ -296,7 +305,10 @@ export default function BriefPage() {
       )}
 
       {/* Main content */}
-      <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-6 overflow-y-auto p-4 pb-12 sm:p-8">
+      <div
+        className="mx-auto flex h-full w-full max-w-5xl flex-col gap-6 overflow-y-auto p-4 sm:p-8"
+        style={{ paddingBottom: ACTION_BAR_CLEARANCE }}
+      >
         {/* Header with selector, mode toggle, status chip */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -360,7 +372,10 @@ export default function BriefPage() {
 
       {/* YAML split view */}
       {showYamlSplit && (
-        <div className="w-96 shrink-0 border-l border-border bg-surface p-4">
+        <div
+          className="w-96 shrink-0 overflow-y-auto border-l border-border bg-surface p-4"
+          style={{ paddingBottom: ACTION_BAR_CLEARANCE }}
+        >
           <pre className="overflow-auto text-[11px] text-text-primary">
             {JSON.stringify(toBrief(state), null, 2)}
           </pre>
@@ -368,7 +383,7 @@ export default function BriefPage() {
       )}
 
       {/* Sticky action bar */}
-      <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-background p-4">
+      <div data-testid="action-bar" className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-background p-4">
         <div className="mx-auto flex max-w-5xl items-center gap-3">
           <Button onClick={handleApply} disabled={saveBlocked}>
             Apply to run
