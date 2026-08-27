@@ -1,8 +1,9 @@
 import { render, fireEvent } from "@testing-library/react";
-import { createElement, type ReactElement } from "react";
+import { createElement, type ReactElement, type ReactNode } from "react";
 import { vi, type Mock } from "vitest";
 import { API, RunProvider, type Asset } from "@/lib/run-context";
 import { EditorDirtyProvider } from "@/lib/editor-dirty-context";
+import { EditorOutlineProvider } from "@/lib/editor-outline-context";
 
 /**
  * Drive a modal's focus trap through every branch: forward-Tab wrap from the last
@@ -24,7 +25,11 @@ export const exerciseFocusTrap = (dialog: HTMLElement) => {
 };
 
 /** Render a UI tree wrapped in the shared RunProvider and EditorDirtyProvider. */
-export const renderWithRun = (ui: ReactElement) => render(createElement(RunProvider, null, createElement(EditorDirtyProvider, null, ui)));
+/** The shell's provider tree, for tests that build it by hand (e.g. a manual rerender). */
+export const ShellProviders = ({ children }: { children: ReactNode }) =>
+  createElement(RunProvider, null, createElement(EditorDirtyProvider, null, createElement(EditorOutlineProvider, null, children)));
+
+export const renderWithRun = (ui: ReactElement) => render(createElement(ShellProviders, null, ui));
 
 export const makeAsset = (over: Partial<Asset> = {}): Asset => ({
   productId: "alpha",

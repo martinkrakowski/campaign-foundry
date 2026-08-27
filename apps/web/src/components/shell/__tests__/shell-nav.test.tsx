@@ -2,9 +2,8 @@ import { describe, test, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { createElement, useEffect, type ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
-import { renderWithRun, seedPersistedRun, nextMock, exerciseFocusTrap, makeAsset } from "@/__tests__/helpers";
-import { RunProvider } from "@/lib/run-context";
-import { EditorDirtyProvider, useEditorDirty } from "@/lib/editor-dirty-context";
+import { renderWithRun, seedPersistedRun, nextMock, exerciseFocusTrap, makeAsset, ShellProviders } from "@/__tests__/helpers";
+import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { Accordion } from "../Accordion";
 import { Sidebar, BrowseBriefsButton, SidebarContent } from "../Sidebar";
 import { Header } from "../Header";
@@ -121,11 +120,9 @@ describe("MobileMenu", () => {
     await screen.findByRole("dialog", { name: "Menu" });
     nextMock().nav.pathname = "/export"; // navigate away
     rerender(
-      <RunProvider>
-        <EditorDirtyProvider>
-          <MobileMenu open onClose={onClose} tabs={tabs} />
-        </EditorDirtyProvider>
-      </RunProvider>,
+      <ShellProviders>
+        <MobileMenu open onClose={onClose} tabs={tabs} />
+      </ShellProviders>,
     );
     await waitFor(() => expect(closed).toBe(true));
   });
@@ -150,13 +147,7 @@ describe("guarded navigation when the editor is dirty", () => {
       useEffect(() => setDirty(true), [setDirty]);
       return null;
     };
-    return render(
-      createElement(
-        RunProvider,
-        null,
-        createElement(EditorDirtyProvider, null, createElement(RaiseDirty), ui),
-      ),
-    );
+    return render(createElement(ShellProviders, null, createElement(RaiseDirty), ui));
   };
 
   beforeEach(() => {
@@ -208,7 +199,7 @@ describe("guarded navigation when the editor is dirty", () => {
 
   test("a header tab click is not intercepted while clean", async () => {
     const user = userEvent.setup();
-    render(createElement(RunProvider, null, createElement(EditorDirtyProvider, null, createElement(Header))));
+    render(createElement(ShellProviders, null, createElement(Header)));
 
     await user.click(screen.getByRole("link", { name: "Compliance" }));
     // no guard, so the Link navigates on its own rather than through router.push

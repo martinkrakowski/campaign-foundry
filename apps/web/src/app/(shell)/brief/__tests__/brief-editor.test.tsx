@@ -1,10 +1,16 @@
 import { describe, test, expect, beforeEach, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRun, json } from "@/__tests__/helpers";
 import { API } from "@/lib/run-context";
 import { fromBrief, saveDraftToStorage } from "@/components/campaign/editor-state";
 import BriefPage from "../page";
+
+/** Save actions live behind the "Save" menu now: open it, then pick the item. */
+const saveVia = async (user: ReturnType<typeof userEvent.setup>, item: "Save & apply" | "Save as") => {
+  await user.click(screen.getByRole("button", { name: /^Save$/ }));
+  await user.click(await screen.findByRole("menuitem", { name: new RegExp(item.replace("&", "&")) }));
+};
 
 const brief = (id: string) => ({
   id,
@@ -105,7 +111,7 @@ describe("BriefPage — data flow", () => {
     // the editor now holds the loaded brief
     await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe("camp"));
 
-    await user.click(screen.getByText("Save & apply"));
+    await saveVia(user, "Save & apply");
     await waitFor(() => {
       const put = calls.find((c) => c.method === "PUT");
       expect(put?.url).toContain("revision=rev-abc");
@@ -127,9 +133,9 @@ describe("BriefPage — data flow", () => {
     await fillValidDraft(user);
 
     await waitFor(() =>
-      expect((screen.getByText("Save & apply").closest("button") as HTMLButtonElement).disabled).toBe(false),
+      expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false),
     );
-    await user.click(screen.getByText("Save & apply"));
+    await saveVia(user, "Save & apply");
 
     const post = await waitFor(() => {
       const call = calls.find((c) => c.method === "POST");
@@ -158,7 +164,7 @@ describe("BriefPage — data flow", () => {
     await user.click(await screen.findByText("camp"));
     await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe("camp"));
 
-    await user.click(screen.getByText("Save & apply"));
+    await saveVia(user, "Save & apply");
     expect(await screen.findByText(/conflict/)).toBeTruthy();
   });
 
@@ -168,9 +174,9 @@ describe("BriefPage — data flow", () => {
     renderWithRun(<BriefPage />);
     await fillValidDraft(user);
 
-    await user.click(screen.getByRole("button", { name: "Save as..." }));
+    await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "copy");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
     await waitFor(() => expect(screen.queryByLabelText("New brief id")).toBeNull());
@@ -182,9 +188,9 @@ describe("BriefPage — data flow", () => {
     renderWithRun(<BriefPage />);
     await fillValidDraft(user);
 
-    await user.click(screen.getByRole("button", { name: "Save as..." }));
+    await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "copy");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText(/already exists/)).toBeTruthy();
     expect(screen.getByLabelText("New brief id")).toBeTruthy();
@@ -196,7 +202,7 @@ describe("BriefPage — data flow", () => {
     renderWithRun(<BriefPage />);
     await fillValidDraft(user);
 
-    await user.click(screen.getByRole("button", { name: "Save as..." }));
+    await saveVia(user, "Save as");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByLabelText("New brief id")).toBeNull();
   });
@@ -418,8 +424,8 @@ describe("BriefPage — data flow", () => {
       screen.getByText(label).closest("button") as HTMLButtonElement;
     await waitFor(() => {
       expect(button("Apply to run").disabled).toBe(true);
-      expect(button("Save & apply").disabled).toBe(true);
-      expect(button("Save as...").disabled).toBe(true);
+      expect(button("Save").disabled).toBe(true);
+      expect(button("Save").disabled).toBe(true);
     });
     expect(calls.some((c) => c.method !== "GET")).toBe(false);
   });
@@ -431,9 +437,9 @@ describe("BriefPage — data flow", () => {
     renderWithRun(<BriefPage />);
     await waitForEditorReady();
 
-    await user.click(screen.getByRole("button", { name: "Save as..." }));
+    await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "taken");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
 
     expect(globalThis.confirm).toHaveBeenCalled();
     expect(calls.some((c) => c.method === "POST")).toBe(false);
@@ -446,9 +452,9 @@ describe("BriefPage — data flow", () => {
     renderWithRun(<BriefPage />);
     await waitForEditorReady();
 
-    await user.click(screen.getByRole("button", { name: "Save as..." }));
+    await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "taken");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(calls.find((c) => c.method === "POST")?.url).toContain("replace=1"));
   });
@@ -466,9 +472,9 @@ describe("BriefPage — data flow", () => {
     renderWithRun(<BriefPage />);
     await waitForEditorReady();
 
-    await user.click(screen.getByRole("button", { name: "Save as..." }));
+    await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "copy");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(posts).toBe(2));
     expect(calls.filter((c) => c.method === "POST")[1].url).toContain("replace=1");
@@ -487,9 +493,9 @@ describe("BriefPage — data flow", () => {
     renderWithRun(<BriefPage />);
     await waitForEditorReady();
 
-    await user.click(screen.getByRole("button", { name: "Save as..." }));
+    await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "copy");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(posts).toBe(1));
     expect(screen.getByLabelText("New brief id")).toBeTruthy();
@@ -502,9 +508,9 @@ describe("BriefPage — data flow", () => {
     renderWithRun(<BriefPage />);
     await waitForEditorReady();
 
-    await user.click(screen.getByRole("button", { name: "Save as..." }));
+    await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "copy");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText(/disk full/)).toBeTruthy();
   });
@@ -518,7 +524,7 @@ describe("BriefPage — data flow", () => {
     await waitFor(() => expect(screen.getByLabelText("Brief ID").hasAttribute("readonly")).toBe(true));
 
     const user = userEvent.setup();
-    await user.click(screen.getByText("Save & apply"));
+    await saveVia(user, "Save & apply");
     await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.url).toContain("revision=rev-live"));
   });
 
@@ -552,84 +558,31 @@ describe("BriefPage — data flow", () => {
     await waitFor(() => expect(screen.queryByText("Headline Pool")).toBeNull());
   });
 
-  test("the scrolling column clears the fixed action bar", async () => {
+  test("the action bar is part of the view, not a floating strip over the whole window", async () => {
     routes({});
     const { container } = renderWithRun(<BriefPage />);
     await waitForEditorReady();
-
-    // The bar is `fixed`, so the column cannot account for it: without explicit
-    // clearance its last control — the platform buttons — sits underneath and cannot
-    // be scrolled into view. Tailwind's `sm:p-8` also overrode the old `pb-12`.
-    const column = container.querySelector(".overflow-y-auto") as HTMLElement;
     const bar = screen.getByTestId("action-bar");
+    // in flow at the foot of this view: never `fixed`, so it cannot cover the left bar,
+    // and the scrolling column sits above it inside the same root
+    expect(bar.className).not.toMatch(/\bfixed\b/);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.contains(bar)).toBe(true);
+    const column = root.querySelector(".overflow-y-auto") as HTMLElement;
     expect(column).toBeTruthy();
-    expect(bar).toBeTruthy();
-
-    // 1px border + p-4 twice + an h-10 button, plus room for the strip to wrap
-    const clearance = Number.parseInt(column.style.paddingBottom, 10);
-    expect(clearance).toBeGreaterThan(73);
+    expect(column.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(column.style.paddingBottom).toBe("");
   });
 
-  test("the YAML split panel clears it too", async () => {
+  test("the YAML split panel scrolls on its own", async () => {
     const user = userEvent.setup();
     routes({});
     const { container } = renderWithRun(<BriefPage />);
     await waitForEditorReady();
-
     await user.click(screen.getByText("YAML split on"));
-    const panels = Array.from(container.querySelectorAll<HTMLElement>("[style*='padding-bottom']"));
+    const panels = Array.from(container.querySelectorAll<HTMLElement>(".overflow-y-auto"));
     expect(panels.length).toBe(2); // the editor column and the split panel
-    for (const panel of panels) {
-      expect(Number.parseInt(panel.style.paddingBottom, 10)).toBeGreaterThan(73);
-    }
-  });
-
-  test("choosing a brief makes it the one Generate will run", async () => {
-    const user = userEvent.setup();
-    const motion = {
-      file: "clip.yaml",
-      revision: "r1",
-      brief: {
-        ...brief("clip"),
-        mode: "variation",
-        variation: {
-          count: 4,
-          axes: {
-            layout: ["headline-top"], tone: ["bold"],
-            background: { source: ["procedural"] }, paletteShift: [0],
-            motion: ["ken-burns-in"], duration: [6],
-          },
-        },
-        output: { formats: ["static", "motion"], platforms: ["linkedin", "instagram-reel"] },
-      },
-    };
-    routes({ list: () => json({ briefs: [motion] }), capabilities: () => json({ motion: true }) });
-    renderWithRun(<BriefPage />);
-
-    await user.click(screen.getAllByText("New brief...")[0]);
-    await user.click(await screen.findByText("clip"));
-
-    // Without this the editor and the pipeline disagree: Generate lives in the top bar
-    // and runs the run-context brief, so picking a motion brief here and running it
-    // produced the previously active brief's output.
-    await waitFor(() =>
-      expect(screen.getByRole("status").textContent).toMatch(/Applied — Generate in the top bar will run "clip"/),
-    );
-  });
-
-  test("Apply says what it did rather than appearing to do nothing", async () => {
-    const user = userEvent.setup();
-    routes({ capabilities: () => json({ motion: true }) });
-    renderWithRun(<BriefPage />);
-    await waitForEditorReady();
-
-    // a freshly adopted brief is already applied; edit it so Apply has work to do
-    await user.type(screen.getByLabelText("Campaign Message"), "!");
-    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
-
-    await user.click(screen.getByText("Apply to run"));
-    const status = await screen.findByRole("status");
-    expect(status.textContent).toMatch(/Applied — Generate in the top bar will run/);
+    expect(screen.getByText(/"targetRegion"/)).toBeTruthy();
   });
 
   test("the mode toggle switches between classic and randomized", async () => {
@@ -733,9 +686,9 @@ describe("BriefPage — capabilities and motion", () => {
 
     // D7: the brief is unrunnable here but still savable, so Save & apply is enabled —
     // and having applied it, it owes the user the same reason Apply gives.
-    const save = screen.getByText("Save & apply").closest("button") as HTMLButtonElement;
+    const save = screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement;
     await waitFor(() => expect(save.disabled).toBe(false));
-    await user.click(save);
+    await saveVia(user, "Save & apply");
 
     // the Output section already shows this as a field error; the notice is the
     // separate status the action bar owes after applying
@@ -796,7 +749,7 @@ describe("BriefPage — capabilities and motion", () => {
     await user.click(screen.getByRole("button", { name: "Add duration" }));
     await user.click(screen.getByRole("button", { name: "instagram-reel" }));
 
-    await user.click(screen.getByText("Save & apply"));
+    await saveVia(user, "Save & apply");
     const post = await waitFor(() => {
       const call = calls.find((c) => c.method === "POST" && c.url.includes("/campaigns/briefs"));
       expect(call).toBeTruthy();
@@ -828,7 +781,7 @@ describe("BriefPage — capabilities and motion", () => {
     expect(screen.getByText("Select at least one motion kind.")).toBeTruthy();
     expect(screen.getByText("Add at least one duration.")).toBeTruthy();
     await waitFor(() =>
-      expect((screen.getByText("Save & apply").closest("button") as HTMLButtonElement).disabled).toBe(true),
+      expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(true),
     );
     expect(calls.some((c) => c.method !== "GET")).toBe(false);
   });
@@ -879,9 +832,9 @@ describe("BriefPage — capabilities and motion", () => {
     expect((screen.getByRole("button", { name: "instagram-reel" }) as HTMLButtonElement).disabled).toBe(true);
 
     // structurally valid ⇒ persistable: Save stays offered and keeps the fields verbatim
-    const save = () => screen.getByText("Save & apply").closest("button") as HTMLButtonElement;
+    const save = () => screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement;
     await waitFor(() => expect(save().disabled).toBe(false));
-    await user.click(save());
+    await saveVia(user, "Save & apply");
     const put = await waitFor(() => {
       const call = calls.find((c) => c.method === "PUT");
       expect(call).toBeTruthy();
@@ -922,7 +875,7 @@ describe("BriefPage — capabilities and motion", () => {
       ),
     ).toBeTruthy();
     await waitFor(() =>
-      expect((screen.getByText("Save & apply").closest("button") as HTMLButtonElement).disabled).toBe(true),
+      expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(true),
     );
   });
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { Accordion } from "./Accordion";
+import { EditorOutline } from "./EditorOutline";
 import { useRun } from "@/lib/run-context";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 
@@ -79,6 +80,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <div className="flex-1 space-y-5 overflow-y-auto p-4">
+        <EditorOutline onNavigate={onNavigate} />
         <Accordion
           title="Campaign Brief"
           aside={
