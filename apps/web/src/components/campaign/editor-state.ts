@@ -317,7 +317,10 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return { ...state, appliedSnapshot: toBrief(state) };
     }
     case "restore":
-      return action.state;
+      // A draft persisted before the probe answered (or by an older editor) carries
+      // stale capabilities. Keep the verdict this session already has, or restoring
+      // would re-enable motion on a host that has said it cannot produce it.
+      return { ...action.state, capabilities: state.capabilities ?? action.state.capabilities };
     case "save": {
       // Snapshot what was actually persisted, not whatever the reducer holds when the
       // response lands — edits made during the request must stay dirty.

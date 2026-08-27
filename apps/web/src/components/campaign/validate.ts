@@ -16,7 +16,11 @@ const BASE_DISTANCE_AXES = 6;
 export function maxMinDistance(state: EditorState): number {
   let axes = BASE_DISTANCE_AXES;
   if (state.variation.headline) axes += 1;
-  if (state.motion.length > 0) axes += 2;
+  // Mirror VariationPolicy.vo's `motionEnabled = wantsMotion && motion.length > 0`.
+  // Counting retained kinds while `motion` is not a requested format would let a
+  // static draft pass with a minDistance the planner then rejects — `durationSec`
+  // is drawn only on motion slots, so it follows `motion`.
+  if (state.formats.includes("motion") && state.motion.length > 0) axes += 2;
   return axes;
 }
 

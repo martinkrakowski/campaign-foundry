@@ -60,8 +60,14 @@ describe("PolicySection — numeric fields", () => {
     expect(screen.getByText(/Whole numbers, 0–6/)).toBeTruthy();
     unmount();
 
-    // motion widens the bound by two axes; the text must follow, not hardcode six
-    render(<PolicySection state={state({ motion: ["ken-burns-in"] })} dispatch={vi.fn()} errors={{}} />);
+    // motion widens the bound by two axes, but only while it is a requested format
+    render(
+      <PolicySection
+        state={state({ formats: ["static", "motion"], motion: ["ken-burns-in"] })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
     expect(screen.getByText(/Whole numbers, 0–8/)).toBeTruthy();
   });
 });

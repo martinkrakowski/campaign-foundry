@@ -678,9 +678,27 @@ describe("variation policy round-trip", () => {
 });
 
 describe("restore", () => {
-  test("reinstates a recovered draft wholesale", () => {
+  test("reinstates a recovered draft", () => {
     const draft = { ...base(), briefId: "recovered", campaignMessage: "from storage" };
-    expect(reduce(base(), { type: "restore", state: draft })).toBe(draft);
+    expect(reduce(base(), { type: "restore", state: draft })).toMatchObject({
+      briefId: "recovered",
+      campaignMessage: "from storage",
+    });
+  });
+
+  test("keeps the probe's verdict rather than the draft's stale one", () => {
+    const probed = { ...base(), capabilities: { motion: false, reason: "no ffmpeg" } };
+    // the draft was persisted before the probe answered
+    const draft = { ...base(), briefId: "recovered", capabilities: null };
+    expect(reduce(probed, { type: "restore", state: draft })).toMatchObject({
+      briefId: "recovered",
+      capabilities: { motion: false, reason: "no ffmpeg" },
+    });
+  });
+
+  test("takes the draft's verdict when this session has none", () => {
+    const draft = { ...base(), capabilities: { motion: true } };
+    expect(reduce(base(), { type: "restore", state: draft }).capabilities).toEqual({ motion: true });
   });
 });
 

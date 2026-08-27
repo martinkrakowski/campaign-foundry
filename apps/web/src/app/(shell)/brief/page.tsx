@@ -22,6 +22,7 @@ import {
   initialEditorState,
   toBrief,
   isDirtySinceSave,
+  isDirtySinceApply,
   isPristine,
   getDraftKey,
   saveDraftToStorage,
@@ -56,7 +57,6 @@ export default function BriefPage() {
   const [saveAsId, setSaveAsId] = useState<string | null>(null);
   const [showYamlSplit, setShowYamlSplit] = useState(false);
   const [poolDrawerOpen, setPoolDrawerOpen] = useState(false);
-  const [applyNotice, setApplyNotice] = useState<string | undefined>();
 
   // Load briefs on mount and set up focus listener
   useEffect(() => {
@@ -74,9 +74,12 @@ export default function BriefPage() {
     let cancelled = false;
     let retries = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const load = async () => {
+    // Mount and focus requests overlap, and responses can land out of order. Stamp
+    // each round so a slow older answer cannot replace a newer verdict.
+    let generation = 0;
+    const load = async (round: number) => {
       const capabilities = await getCapabilities();
-      if (cancelled || capabilities === null) return;
+      if (cancelled || round !== generation || capabilities === null) return;
       if (isTransientCapabilities(capabilities)) {
         // Still probing. Retry, and if it never settles leave capabilities unknown
         // rather than committing a snapshot we know is transient — "not probed" is
@@ -84,16 +87,18 @@ export default function BriefPage() {
         // meaningless reason. A later focus refetch reopens the window.
         if (retries < CAPABILITIES_MAX_RETRIES) {
           retries += 1;
-          timer = setTimeout(() => void load(), CAPABILITIES_RETRY_MS);
+          timer = setTimeout(() => void load(round), CAPABILITIES_RETRY_MS);
         }
         return;
       }
       dispatch({ type: "setCapabilities", capabilities });
     };
-    void load();
+    void load(generation);
     const handleFocus = () => {
       retries = 0;
-      void load();
+      generation += 1;
+      clearTimeout(timer);
+      void load(generation);
     };
     window.addEventListener("focus", handleFocus);
     return () => {
@@ -170,6 +175,16 @@ export default function BriefPage() {
 
   const totalErrors = getTotalErrorCount(errors);
 
+  // Derived, not stored: the refusal describes the draft *as applied*, so it holds
+  // exactly while the applied snapshot still matches the draft. Any edit — switching
+  // away from motion, or a capability verdict landing — re-evaluates it, and storing
+  // it would leave the page claiming motion is unavailable after that stopped being
+  // true. Both Apply and Save & apply set the snapshot, so both surface it.
+  const applyNotice =
+    state.appliedSnapshot !== null && !isDirtySinceApply(state)
+      ? motionUnavailableReason(state)
+      : undefined;
+
   /** Section errors before the first validation pass lands. */
   const sectionErrors = (section: string): FieldErrors => errors[section] ?? {};
 
@@ -200,7 +215,6 @@ export default function BriefPage() {
     // D7: applying a motion brief on a host that cannot run it must not pretend it
     // will produce clips — surface the probe's reason (the text the API's 400 would
     // quote) as the status message. Run still refuses it server-side.
-    setApplyNotice(motionUnavailableReason(state));
   };
 
   const handleSave = async () => {
@@ -219,8 +233,7 @@ export default function BriefPage() {
       dispatch({ type: "apply" });
       setRunBrief(brief);
       // "Save & apply" applies, so it owes the same refusal notice Apply gives.
-      setApplyNotice(motionUnavailableReason(state));
-      purgeDraftFromStorage(state);
+        purgeDraftFromStorage(state);
       await loadBriefs();
     } catch (error) {
       setPersistError(unknownErrorMessage(error, "Save failed"));

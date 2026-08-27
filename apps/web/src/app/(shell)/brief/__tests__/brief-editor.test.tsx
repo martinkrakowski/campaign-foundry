@@ -644,7 +644,12 @@ describe("BriefPage — capabilities and motion", () => {
 
     await user.click(screen.getAllByText("New brief...")[0]);
     await user.click(await screen.findByText("clip"));
-    await waitFor(() => expect(motionToggle().disabled).toBe(true));
+    // the verdict lands: the motion *kinds* go read-only, but the format toggle stays
+    // operable because this draft already requests motion and needs a way out
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled).toBe(true),
+    );
+    expect(motionToggle().disabled).toBe(false);
 
     // D7: the brief is unrunnable here but still savable, so Save & apply is enabled —
     // and having applied it, it owes the user the same reason Apply gives.
@@ -779,8 +784,13 @@ describe("BriefPage — capabilities and motion", () => {
     await user.click(await screen.findByText("clip"));
     await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe("clip"));
 
-    // the probe's verdict lands and the controls go read-only with its reason
-    await waitFor(() => expect(motionToggle().disabled).toBe(true));
+    // the probe's verdict lands and the controls go read-only with its reason. The
+    // format toggle itself stays operable — the draft already requests motion, so
+    // gating it would trap the user with a compatibility error and no control to fix it.
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled).toBe(true),
+    );
+    expect(motionToggle().disabled).toBe(false);
     expect(screen.getByText(/Motion is not available on this host: no ffmpeg/)).toBeTruthy();
     expect((screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled).toBe(true);
     const duration = screen.getByLabelText("Duration 1 (seconds)") as HTMLInputElement;

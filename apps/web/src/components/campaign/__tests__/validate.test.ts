@@ -39,11 +39,21 @@ const valid = (over: Partial<EditorState> = {}): EditorState => ({
 });
 
 describe("maxMinDistance", () => {
-  test("is six axes by default, seven with the headline pool, nine with motion", () => {
+  test("is six axes by default and seven with the headline pool", () => {
     const state = valid();
     expect(maxMinDistance(state)).toBe(6);
     expect(maxMinDistance(editorReducer(state, { type: "toggleHeadline" }))).toBe(7);
-    expect(maxMinDistance({ ...state, motion: ["ken-burns-in"] })).toBe(8);
+  });
+
+  test("motion adds two axes only while it is a requested format", () => {
+    const state = valid();
+    // kinds retained after switching motion off are inert — VariationPolicy.vo counts
+    // them only when `output.formats` includes motion, and the client must agree or a
+    // draft passes here and is rejected by the planner
+    expect(maxMinDistance({ ...state, motion: ["ken-burns-in"] })).toBe(6);
+    expect(maxMinDistance({ ...state, formats: ["static", "motion"], motion: ["ken-burns-in"] })).toBe(8);
+    // requesting motion without kinds draws nothing, so it adds nothing
+    expect(maxMinDistance({ ...state, formats: ["static", "motion"], motion: [] })).toBe(6);
   });
 });
 
