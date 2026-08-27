@@ -98,13 +98,13 @@ function HeadlineAxisToggle({ state, dispatch }: { state: EditorState; dispatch:
   );
 }
 
-export function PolicySection({ state, dispatch, errors }: { state: EditorState; dispatch: Dispatch<EditorAction>; errors: FieldErrors }) {
+export function PolicySection({ state, dispatch, errors, compact = false }: { state: EditorState; dispatch: Dispatch<EditorAction>; errors: FieldErrors; compact?: boolean }) {
   if (state.mode !== "variation") return null;
 
   return (
-    <SectionShell id="policy" title="4 · Variation Policy" errorCount={Object.keys(errors).length}>
+    <SectionShell id="policy" title="4 · Variation Policy" errorCount={Object.keys(errors).length} compact={compact}>
       <div className="space-y-6">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className={compact ? "grid grid-cols-1 gap-3" : "grid grid-cols-1 gap-4 sm:grid-cols-3"}>
           <Field label="Count" error={errors.count}>
             <Input
               type="number"
@@ -134,7 +134,7 @@ export function PolicySection({ state, dispatch, errors }: { state: EditorState;
             />
           </Field>
         </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className={compact ? "grid grid-cols-1 gap-3" : "grid grid-cols-1 gap-4 sm:grid-cols-2"}>
           <Field label="Coverage per Product" error={errors.perProduct}>
             <Input
               type="number"

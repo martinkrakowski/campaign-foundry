@@ -3,6 +3,17 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRun } from "@/__tests__/helpers";
 import BriefPage from "../page";
+import { useEditorOutline } from "@/lib/editor-outline-context";
+
+/** Places the sections the page publishes to the left bar (Variation policy, Output). */
+const BarPanels = () => useEditorOutline().outline?.panels ?? null;
+/** The page plus the bar panels it publishes, as a user would see them together. */
+const Editor = () => (
+  <>
+    <BriefPage />
+    <BarPanels />
+  </>
+);
 
 /** Save actions live behind the "Save" menu now: open it, then pick the item. */
 const saveVia = async (user: ReturnType<typeof userEvent.setup>, item: "Save & apply" | "Save as") => {
@@ -18,24 +29,24 @@ beforeEach(() => {
 
 describe("BriefPage E1 Features", () => {
   test("renders the editor with status chip", () => {
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     expect(screen.getByText("Draft not applied")).toBeTruthy();
   });
 
   test("has BriefSelector component", () => {
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     expect(screen.getByRole("button", { name: /New brief/ })).toBeTruthy();
   });
 
   test("has mode toggle buttons", () => {
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     expect(screen.getByText("Classic")).toBeTruthy();
     expect(screen.getByText("Randomized")).toBeTruthy();
   });
 
   test("has action bar buttons — YAML split on the left, then Discard, Save, Apply on the right", async () => {
     const user = userEvent.setup();
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     const bar = screen.getByTestId("action-bar");
     // the error strip's chips sit in the bar too; the action buttons are the rest
     const labels = Array.from(bar.querySelectorAll("button"))
@@ -52,7 +63,7 @@ describe("BriefPage E1 Features", () => {
 
   test("Save as... opens dialog", async () => {
     const user = userEvent.setup();
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     // Save as… is disabled while the draft has validation errors, so fill it in first.
     await user.type(screen.getByLabelText("Brief ID"), "fresh");
     await user.type(screen.getByLabelText("Target Region"), "DE");
@@ -75,7 +86,7 @@ describe("BriefPage E1 Features", () => {
 
   test("YAML split toggle", async () => {
     const user = userEvent.setup();
-    renderWithRun(<BriefPage />);
+    renderWithRun(<Editor />);
     await user.click(screen.getByText("YAML split on"));
     expect(screen.getByText("YAML split off")).toBeTruthy();
   });

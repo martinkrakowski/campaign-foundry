@@ -40,6 +40,7 @@ import { StatusChip } from "@/components/campaign/StatusChip";
 import { ErrorStrip } from "@/components/campaign/ErrorStrip";
 import { SaveMenu } from "@/components/campaign/SaveMenu";
 import { useEditorOutline } from "@/lib/editor-outline-context";
+import { scrollToSection } from "@/lib/scroll-to-section";
 import { BriefSelector } from "@/components/campaign/BriefSelector";
 import { HeadlinePoolDrawer } from "@/components/campaign/HeadlinePoolDrawer";
 
@@ -196,10 +197,25 @@ export default function BriefPage() {
         errorCount: keys.reduce((sum, key) => sum + Object.keys(errors[key] ?? {}).length, 0),
       })),
       navigate: scrollToFirstError,
+      // The two sections that live in the bar. Elements are data; state and dispatch
+      // stay here, the bar only places them.
+      panels: (
+        <>
+          {state.mode === "variation" ? (
+            <PolicySection state={state} dispatch={dispatch} errors={sectionErrors("policy")} compact />
+          ) : null}
+          <OutputSection
+            state={state}
+            dispatch={dispatch}
+            errors={{ ...sectionErrors("output"), ...sectionErrors("motion") }}
+            compact
+          />
+        </>
+      ),
     });
     return () => setOutline(null);
-    // scrollToFirstError only reads the DOM, so it is stable in effect.
-  }, [errors, state.mode, setOutline]);
+    // scrollToFirstError and sectionErrors only read what `state`/`errors` already cover.
+  }, [state, errors, setOutline]);
 
   // Derived, not stored: the refusal describes the draft *as applied*, so it holds
   // exactly while the applied snapshot still matches the draft. Any edit — switching
@@ -321,15 +337,16 @@ export default function BriefPage() {
     purgeDraftFromStorage(state);
   };
 
-  const scrollToFirstError = (section: string) => {
-    document.getElementById(section)?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
+  const scrollToFirstError = (section: string) => scrollToSection(section);
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex min-h-0 flex-1">
+    // No h-full / inner overflow: like every other view, this one flows and the
+    // shell's main container is the scroller. The action bar and the YAML panel stay
+    // put with `sticky`, which is scoped to that container — never the viewport.
+    <div className="flex flex-col">
+      <div className="flex items-start">
         {/* Main content */}
-        <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-6 overflow-y-auto p-4 sm:p-8">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 sm:p-8">
           {/* Header with selector, mode toggle, status chip */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -361,30 +378,21 @@ export default function BriefPage() {
 
           {/* Sections */}
           <div className="space-y-8">
-            <div id="identity">
+            <div>
               <IdentitySection state={state} dispatch={dispatch} errors={sectionErrors("identity")} />
             </div>
-            <div id="copy">
+            <div>
               <CopySection state={state} dispatch={dispatch} errors={sectionErrors("copy")} onOpenPool={() => setPoolDrawerOpen(true)} />
             </div>
-            <div id="products">
+            <div>
               <ProductsSection state={state} dispatch={dispatch} errors={sectionErrors("products")} />
             </div>
-            <div id="treatments">
+            <div>
               {state.mode === "brief" ? (
                 <TreatmentsSection state={state} dispatch={dispatch} errors={sectionErrors("treatments")} />
               ) : null}
             </div>
-            {state.mode === "variation" ? (
-              <PolicySection state={state} dispatch={dispatch} errors={sectionErrors("policy")} />
-            ) : null}
-            <div id="output">
-              <OutputSection
-                state={state}
-                dispatch={dispatch}
-                errors={{ ...sectionErrors("output"), ...sectionErrors("motion") }}
-              />
-            </div>
+            {/* Variation policy and Output live in the left bar — see the outline effect */}
           </div>
 
           {persistError ? <p className="text-[13px] text-error">{persistError}</p> : null}
@@ -397,7 +405,7 @@ export default function BriefPage() {
 
         {/* YAML split view */}
         {showYamlSplit && (
-          <div className="w-96 shrink-0 overflow-y-auto border-l border-border bg-surface p-4">
+          <div className="sticky top-0 max-h-screen w-96 shrink-0 self-start overflow-y-auto border-l border-border bg-surface p-4">
             <pre className="overflow-auto text-[11px] text-text-primary">
               {JSON.stringify(toBrief(state), null, 2)}
             </pre>
@@ -406,7 +414,7 @@ export default function BriefPage() {
       </div>
 
       {/* Action bar: in flow at the foot of this view, so it never covers the left bar */}
-      <div data-testid="action-bar" className="flex shrink-0 items-center gap-3 border-t border-border bg-background p-4">
+      <div data-testid="action-bar" className="sticky bottom-0 z-10 flex shrink-0 items-center gap-3 border-t border-border bg-background p-4">
         <Button variant="ghost" onClick={() => setShowYamlSplit(!showYamlSplit)}>
           YAML split {showYamlSplit ? "off" : "on"}
         </Button>

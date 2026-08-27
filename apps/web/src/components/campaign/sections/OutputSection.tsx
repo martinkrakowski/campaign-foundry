@@ -8,7 +8,7 @@ import type { EditorState, EditorAction } from "@/components/campaign/editor-sta
 import { MIN_DURATION_SEC, MAX_DURATION_SEC, type FieldErrors } from "@/components/campaign/validate";
 import { SectionShell } from "./IdentitySection";
 
-export function OutputSection({ state, dispatch, errors }: { state: EditorState; dispatch: Dispatch<EditorAction>; errors: FieldErrors }) {
+export function OutputSection({ state, dispatch, errors, compact = false }: { state: EditorState; dispatch: Dispatch<EditorAction>; errors: FieldErrors; compact?: boolean }) {
   const motionRequested = state.formats.includes("motion");
   // Unknown capabilities (probe unreachable) must not read as "no motion" — only a
   // definite false from the probe gates anything.
@@ -36,7 +36,7 @@ export function OutputSection({ state, dispatch, errors }: { state: EditorState;
   };
 
   return (
-    <SectionShell id="output" title="5 · Output" errorCount={Object.keys(errors).filter((k) => k === "formats" || k === "platforms").length}>
+    <SectionShell id="output" title="5 · Output" errorCount={Object.keys(errors).filter((k) => k === "formats" || k === "platforms").length} compact={compact}>
       <div className="space-y-4">
         <div>
           <h3 className="mb-2 font-mono text-[11px] uppercase tracking-widest text-text-muted">Formats</h3>
