@@ -427,4 +427,28 @@ describe("parseBrief D15 authoring vs enforcing mode", () => {
   test("enforcing mode throws for motion platform when capability is off", () => {
     expect(() => parseBrief(motionBriefWithPlatform, { capabilities: MOTION_OFF, enforceCapabilities: true })).toThrow(/Unsupported output format "motion": motion output is unavailable/);
   });
+
+describe("motion requires a randomized campaign", () => {
+  const classicMotion = { ...valid, output: { formats: ["motion"], platforms: ["instagram-reel"] } };
+
+  test("run paths refuse a classic brief that requests motion — it would render stills", () => {
+    expect(() => parseBrief(classicMotion, { capabilities: { motion: true }, enforceCapabilities: true })).toThrow(
+      /requires mode "variation" — a classic campaign renders stills only/,
+    );
+  });
+
+  test("authoring mode still accepts it, so the file stays listed and fixable", () => {
+    expect(parseBrief(classicMotion).output?.formats).toEqual(["motion"]);
+  });
+
+  test("a randomized brief requesting motion is unaffected", () => {
+    const randomized = {
+      ...classicMotion,
+      mode: "variation",
+      variation: { count: 1, axes: { motion: ["ken-burns-in"], duration: [4] } },
+    };
+    expect(parseBrief(randomized, { capabilities: { motion: true }, enforceCapabilities: true }).mode).toBe("variation");
+  });
+});
+
 });

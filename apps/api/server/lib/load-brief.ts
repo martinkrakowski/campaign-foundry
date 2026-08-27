@@ -386,6 +386,19 @@ export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): Campaig
   validateVariation(record.variation, effectiveCapabilities);
   validateOutput(record.output, effectiveCapabilities);
   validateMotionAxisRequested(record);
+  // Motion is a variation axis: only the planner draws clips, and the classic
+  // product × ratio × treatment matrix has no motion path, so a classic brief that
+  // requests `formats: motion` would silently render stills. Refuse it on the run
+  // paths. Authoring mode still accepts it so the file stays listed and can be fixed
+  // in the editor rather than vanishing from the picker (the D15 split, applied here).
+  if (enforceCapabilities && record.mode !== "variation") {
+    const formats = (record.output as Record<string, unknown> | undefined)?.formats;
+    if (Array.isArray(formats) && formats.includes(MOTION_FORMAT)) {
+      throw new Error(
+        `Output format "${MOTION_FORMAT}" requires mode "variation" — a classic campaign renders stills only.`,
+      );
+    }
+  }
   // A randomized campaign has no meaning without a total: `count` is the planner's
   // one required input (plan D13), so demand it up front rather than at run time.
   if (record.mode === "variation") {
