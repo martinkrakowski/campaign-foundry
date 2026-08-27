@@ -132,6 +132,7 @@ export type EditorAction =
   | { type: "toggleFormat"; value: string }
   | { type: "togglePlatform"; value: string }
   | { type: "setPool"; briefId: string; pool: CopyPool | null }
+  | { type: "loadPool"; briefId: string; pool: CopyPool | null }
   | { type: "load"; brief: CampaignBrief; entry?: { file: string; revision?: string } }
   | { type: "apply" }
   | { type: "save"; saved?: CampaignBrief }
@@ -295,6 +296,13 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         pool: action.pool,
         headlineAxisDropped: none && (state.headlineAxisDropped || state.variation.headline),
         variation: { ...state.variation, headline: state.variation.headline && !none },
+      };
+    }
+    case "loadPool": {
+      if (action.briefId !== state.briefId) return state;
+      return {
+        ...state,
+        pool: action.pool,
       };
     }
     case "load": {

@@ -1,6 +1,7 @@
 "use client";
 
 import type { FieldErrors } from "./validate";
+import type { CampaignMode } from "./editor-state";
 
 interface TocEntry {
   id: string;
@@ -13,20 +14,28 @@ const SECTIONS: TocEntry[] = [
   { id: "copy", label: "Copy", section: "copy" },
   { id: "products", label: "Products", section: "products" },
   { id: "treatments", label: "Treatments", section: "treatments" },
+  { id: "policy", label: "Variation Policy", section: "policy" },
   { id: "output", label: "Output", section: "output" },
 ];
 
 interface TableOfContentsProps {
   errors: Record<string, FieldErrors>;
+  mode: CampaignMode;
   onNavigate?: (sectionId: string) => void;
 }
 
-export function TableOfContents({ errors, onNavigate }: TableOfContentsProps) {
+export function TableOfContents({ errors, mode, onNavigate }: TableOfContentsProps) {
   const getErrorCount = (section: string): number => {
     const sectionErrors = errors[section];
     if (!sectionErrors) return 0;
     return Object.keys(sectionErrors).length;
   };
+
+  const visibleSections = SECTIONS.filter((entry) => {
+    if (entry.section === "treatments") return mode === "brief";
+    if (entry.section === "policy") return mode === "variation";
+    return true;
+  });
 
   const scrollToSection = (sectionId: string) => {
     const element = document.getElementById(sectionId);
@@ -41,7 +50,7 @@ export function TableOfContents({ errors, onNavigate }: TableOfContentsProps) {
       <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-text-muted">
         Sections
       </p>
-      {SECTIONS.map((entry) => {
+      {visibleSections.map((entry) => {
         const errorCount = getErrorCount(entry.section);
         const hasErrors = errorCount > 0;
 

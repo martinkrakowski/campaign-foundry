@@ -308,6 +308,28 @@ describe("editorReducer — pool and capabilities", () => {
     expect(next.headlineAxisDropped).toBe(false);
   });
 
+  test("loadPool for a different brief is ignored", () => {
+    const state = { ...base(), briefId: "camp", pool: null };
+    const next = reduce(state, { type: "loadPool", briefId: "other", pool: pool(["approved"]) });
+    expect(next.pool).toBeNull();
+    expect(next).toBe(state);
+  });
+
+  test("loadPool for current brief updates pool without touching variation", () => {
+    const state = reduce({ ...base(), briefId: "camp" }, { type: "toggleHeadline" });
+    expect(state.variation.headline).toBe(true);
+    const next = reduce(state, { type: "loadPool", briefId: "camp", pool: pool([]) });
+    expect(next.pool).toEqual(pool([]));
+    expect(next.variation.headline).toBe(true);
+    expect(next.headlineAxisDropped).toBe(false);
+  });
+
+  test("loadPool with null pool clears previous pool", () => {
+    const state = { ...base(), briefId: "camp", pool: pool(["approved"]) };
+    const next = reduce(state, { type: "loadPool", briefId: "camp", pool: null });
+    expect(next.pool).toBeNull();
+  });
+
   test("setCapabilities stores the probe result", () => {
     const next = reduce(base(), { type: "setCapabilities", capabilities: { motion: false, reason: "no ffmpeg" } });
     expect(next.capabilities).toEqual({ motion: false, reason: "no ffmpeg" });

@@ -275,10 +275,9 @@ describe("BriefPage — data flow", () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
   });
 
-  test("an error chip for a section that has no panel is a no-op, not a crash", async () => {
+  test("the Policy chip now scrolls to a real section", async () => {
     const user = userEvent.setup();
-    // A randomized brief whose policy is invalid raises Policy errors, but E1 renders no
-    // policy panel (it arrives in E2.2) — so the chip's scroll target does not exist.
+    // E2.2 gives randomized briefs a policy panel, so this chip finally has a target.
     const randomized = {
       file: "rand.yaml",
       revision: "r1",
@@ -294,17 +293,52 @@ describe("BriefPage — data flow", () => {
     routes({ list: () => json({ briefs: [randomized] }) });
     renderWithRun(<BriefPage />);
 
-    await user.click(screen.getByText("New brief..."));
+    await user.click(screen.getAllByText("New brief...")[0]);
     await user.click(await screen.findByText("rand"));
 
-    const chip = (await screen.findAllByRole("button", { name: /Policy/ })).find((b) =>
+    const section = await waitFor(() => {
+      const el = document.getElementById("policy");
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+    const scrollIntoView = vi.fn();
+    section.scrollIntoView = scrollIntoView;
+
+    const chip = Array.from(document.querySelectorAll<HTMLElement>("button.rounded-full")).find((b) =>
       /Policy/.test(b.textContent ?? ""),
     ) as HTMLElement;
     expect(chip).toBeTruthy();
-    expect(document.getElementById("policy")).toBeNull();
+    await user.click(chip);
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+  });
+
+  test("a chip for a section that still has no panel is a no-op, not a crash", async () => {
+    const user = userEvent.setup();
+    // Motion errors have no panel until E2.3, so scrollToFirstError's defensive
+    // branch still needs to hold.
+    const motion = {
+      file: "clip.yaml",
+      revision: "r1",
+      brief: { ...brief("clip"), output: { formats: ["static", "motion"], platforms: ["linkedin"] } },
+    };
+    routes({ list: () => json({ briefs: [motion] }) });
+    renderWithRun(<BriefPage />);
+
+    await user.click(screen.getAllByText("New brief...")[0]);
+    await user.click(await screen.findByText("clip"));
+
+    const chip = await waitFor(() => {
+      const found = Array.from(document.querySelectorAll<HTMLElement>("button.rounded-full")).find((b) =>
+        /Motion/.test(b.textContent ?? ""),
+      );
+      expect(found).toBeTruthy();
+      return found as HTMLElement;
+    });
+    expect(document.getElementById("motion")).toBeNull();
 
     await user.click(chip);
-    expect(chip).toBeTruthy();
+    expect(document.getElementById("motion")).toBeNull();
+    expect(screen.getAllByText(/Motion/)).toHaveLength(1);
   });
 
   test("unsaved edits come back when the brief they belong to is reopened", async () => {
@@ -474,6 +508,36 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     await user.click(screen.getByText("Save & apply"));
     await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.url).toContain("revision=rev-live"));
+  });
+
+  test("the headline pool drawer opens from Copy and closes again", async () => {
+    const user = userEvent.setup();
+    const randomized = {
+      file: "rand.yaml",
+      revision: "r1",
+      brief: {
+        ...brief("rand"),
+        mode: "variation",
+        variation: {
+          count: 4,
+          axes: { layout: ["headline-top"], tone: ["bold"], background: { source: ["procedural"] }, paletteShift: [0] },
+        },
+      },
+    };
+    routes({ list: () => json({ briefs: [randomized] }) });
+    renderWithRun(<BriefPage />);
+
+    await user.click(screen.getAllByText("New brief...")[0]);
+    await user.click(await screen.findByText("rand"));
+    await waitFor(() => expect(document.getElementById("policy")).toBeTruthy());
+
+    // the drawer is only reachable from the Copy section, and only for a randomized brief
+    expect(screen.queryByText("Headline Pool")).toBeNull();
+    await user.click(screen.getByText("Manage Headline Pool"));
+    expect(await screen.findByText("Headline Pool")).toBeTruthy();
+
+    await user.click(screen.getByText("Close"));
+    await waitFor(() => expect(screen.queryByText("Headline Pool")).toBeNull());
   });
 
   test("the mode toggle switches between classic and randomized", async () => {
