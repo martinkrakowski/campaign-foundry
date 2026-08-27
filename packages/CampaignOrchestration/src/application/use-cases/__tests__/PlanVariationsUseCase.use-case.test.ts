@@ -570,28 +570,46 @@ describe("PlanVariationsUseCase — motion axes", () => {
     expect(clips.every((v) => v.aspectRatio === "9:16")).toBe(true);
     expect(result.value.estimate.frames).toBe(clips.length * 4 * 30);
 
-    // Every requested platform is static: no ratio can ship a clip, so none is drawn.
+    // Every requested platform is static: no ratio can ship a clip. A motion-only brief
+    // here used to plan every slot as a still the brief never asked for — it is refused.
     const staticOnly = planner().plan(
       motionBrief({ output: { formats: ["motion"], platforms: ["instagram-feed"] } }),
       { motionRatios: [] },
     );
-    expect(staticOnly.success).toBe(true);
-    if (!staticOnly.success) return;
-    expect(staticOnly.value.policy.motionRatios).toEqual([]);
-    expect(staticOnly.value.variants.every((v) => v.motion === undefined)).toBe(true);
-    expect(staticOnly.value.estimate.frames).toBe(0);
-
-    // No motionRatios in the input keeps every ratio eligible.
-    const unrestricted = planner().plan(motionBrief());
-    expect(unrestricted.success).toBe(true);
-    if (!unrestricted.success) return;
-    expect(unrestricted.value.policy.motionRatios).toEqual(["1:1", "9:16", "16:9"]);
-    expect(unrestricted.value.variants.some((v) => v.motion !== undefined && v.aspectRatio !== "9:16")).toBe(true);
+    expect(staticOnly.success).toBe(false);
+    if (!staticOnly.success) {
+      expect(staticOnly.error.message).toMatch(/requests only "motion" but none of output\.platforms package it/);
+    }
   });
 
-  test("replan of a ratio no motion platform packages stays a still", () => {
+  test("a motion-only brief on a motion platform plans clips at every slot — the reported bug", () => {
+    // formats [motion] + platforms [instagram-reel] used to draw 16:9 and 1:1 slots that
+    // could not be motion and "stayed stills". The ratio axis now narrows to motionRatios.
     const planned = planner().plan(
       motionBrief({ output: { formats: ["motion"], platforms: ["instagram-reel"] } }),
+      { motionRatios: ["9:16"] },
+    );
+    expect(planned.success).toBe(true);
+    if (!planned.success) return;
+    expect(planned.value.policy.ratios).toEqual(["9:16"]);
+    expect(planned.value.variants.length).toBeGreaterThan(0);
+    expect(planned.value.variants.every((v) => v.aspectRatio === "9:16" && v.motion !== undefined)).toBe(true);
+    // and a replan cannot leave the motion ratios either
+    const next = planner().replan(planned.value, 0, 1);
+    expect(next.success).toBe(true);
+    if (next.success) {
+      expect(next.value.variants[0].aspectRatio).toBe("9:16");
+      expect(next.value.variants[0].motion).toBeDefined();
+    }
+  });
+
+  test("in a mixed plan, replan of a ratio no motion platform packages stays a still", () => {
+    // The static format is requested too, so a non-motion ratio is a legitimate still.
+    const planned = planner().plan(
+      motionBrief({
+        variation: { count: 12, seed: 7, minDistance: 1, axes: { motion: ["ken-burns-in"], duration: [4] } },
+        output: { formats: ["static", "motion"], platforms: ["instagram-feed", "instagram-reel"] },
+      }),
       { motionRatios: ["9:16"] },
     );
     expect(planned.success).toBe(true);

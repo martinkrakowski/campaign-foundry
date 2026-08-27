@@ -172,8 +172,21 @@ export class VariationPolicy {
     const paletteShiftResult = requirePaletteShift(paletteShift);
     if (!paletteShiftResult.success) return paletteShiftResult;
     const productIds = unique(brief.products.map((product) => product.id));
-    const ratios = AspectRatio.all().map((ratio) => ratio.value);
-    const motionRatios = unique(input.motionRatios ?? ratios);
+    const allRatios = AspectRatio.all().map((ratio) => ratio.value);
+    const motionRatios = unique(input.motionRatios ?? allRatios);
+    // A motion-only brief (`formats: [motion]`, no still slot) can only be drawn at
+    // ratios a requested motion platform packages: a slot at any other ratio would
+    // "stay a still" — a still the brief never asked for. Narrow the ratio axis to
+    // `motionRatios` for that case; a mixed plan keeps every ratio, since its
+    // non-motion ratios are legitimately the stills the static format requested.
+    const ratios = motionEnabled && !mixStatic ? allRatios.filter((ratio) => motionRatios.includes(ratio)) : allRatios;
+    if (ratios.length === 0) {
+      return err(
+        new Error(
+          `output.formats requests only "motion" but none of output.platforms package it at any aspect ratio.`,
+        ),
+      );
+    }
     // A mixed plan adds exactly one still slot per base combination — the still
     // carries no duration, so it is not multiplied by |duration|.
     const axisProductSize =

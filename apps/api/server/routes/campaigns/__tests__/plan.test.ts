@@ -70,6 +70,25 @@ describe("POST /campaigns/plan", () => {
     expect(body.estimate.frames).toBe(motion.length * 4 * 30);
   });
 
+  test("a motion-only brief on a motion platform yields clips at every slot, never stills", async () => {
+    // The reported bug: formats [motion] + platforms [instagram-reel] planned two
+    // static 16:9 / 1:1 variants and zero clips. The ratio axis drew from all three
+    // ratios while only 9:16 could be motion, so every slot "stayed a still" the
+    // brief never asked for.
+    setCapabilities({ motion: true });
+    const res = await call(
+      variationBrief({
+        variation: { count: 4, seed: 7, minDistance: 1, axes: { motion: ["ken-burns-in"], duration: [4] } },
+        output: { formats: ["motion"], platforms: ["instagram-reel"] },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { variants: Array<{ aspectRatio: string; motion?: string }> };
+    expect(body.variants.length).toBeGreaterThan(0);
+    expect(body.variants.every((v) => v.aspectRatio === "9:16")).toBe(true);
+    expect(body.variants.every((v) => v.motion !== undefined)).toBe(true);
+  });
+
   test("motion platforms narrow clips to their ratio (instagram-reel → 9:16 only)", async () => {
     setCapabilities({ motion: true });
     const res = await call(

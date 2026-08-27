@@ -223,13 +223,15 @@ describe("VariationPolicy.fromBrief", () => {
     });
     const all = VariationPolicy.fromBrief(motion);
     const vertical = VariationPolicy.fromBrief(motion, { motionRatios: ["9:16", "9:16"] });
-    const none = VariationPolicy.fromBrief(motion, { motionRatios: [] });
-    expect(all.success && vertical.success && none.success).toBe(true);
-    if (!all.success || !vertical.success || !none.success) return;
+    expect(all.success && vertical.success).toBe(true);
+    if (!all.success || !vertical.success) return;
     expect(all.value.motionRatios).toEqual(["1:1", "9:16", "16:9"]);
     expect(vertical.value.motionRatios).toEqual(["9:16"]);
-    expect(none.value.motionRatios).toEqual([]);
     expect(vertical.value.policyHash).not.toBe(all.value.policyHash);
+    // A motion-only brief with no ratio it can be motion at used to succeed here and
+    // then plan every slot as a still — the defect this rule closes. It is refused.
+    const none = VariationPolicy.fromBrief(motion, { motionRatios: [] });
+    expect(none.success).toBe(false);
 
     const still = brief({ variation: { count: 12, seed: 7, minDistance: 1 } });
     const golden = VariationPolicy.fromBrief(still);
@@ -416,4 +418,39 @@ describe("VariationPolicy headline axis", () => {
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error.message).toMatch(/Unsupported headline axis "pool:\/\/other"/);
   });
+
+describe("motion-only briefs draw only at ratios a motion platform packages", () => {
+  const motionOnly = (formats: readonly string[]) =>
+    brief({
+      variation: { count: 4, axes: { motion: ["ken-burns-in"], duration: [4] } },
+      output: { formats: [...formats] as never, platforms: ["instagram-reel"] },
+    });
+
+  test("the ratio axis narrows to motionRatios, so no slot can fall back to a still", () => {
+    const result = VariationPolicy.fromBrief(motionOnly(["motion"]), { motionRatios: ["9:16"] });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.motionEnabled).toBe(true);
+    expect(result.value.mixStatic).toBe(false);
+    expect(result.value.ratios).toEqual(["9:16"]);
+    // axisProductSize follows the narrowed axis: 2 products × 1 ratio × 2 layouts × 2 tones × 1 × 1
+    expect(result.value.axisProductSize).toBe(2 * 1 * 2 * 2 * 1 * 1);
+  });
+
+  test("a mixed brief keeps every ratio — its non-motion ratios are the stills it asked for", () => {
+    const result = VariationPolicy.fromBrief(motionOnly(["static", "motion"]), { motionRatios: ["9:16"] });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.mixStatic).toBe(true);
+    expect(result.value.ratios).toEqual(["1:1", "9:16", "16:9"]);
+  });
+
+  test("a motion-only brief whose platforms package motion at no ratio is refused, not rendered as stills", () => {
+    const result = VariationPolicy.fromBrief(motionOnly(["motion"]), { motionRatios: [] });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.message).toMatch(/requests only "motion" but none of output\.platforms package it/);
+  });
+});
+
 });
