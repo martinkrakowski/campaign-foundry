@@ -906,3 +906,47 @@ To keep this file out of version control, add `.agents/session-log.md` to
     requires 0 warnings and main is red on it.
 - **Left open:**
   - E3 removes `STATIC_PLATFORMS` and the wizard shims (untouched here).
+
+## 2026-08-27 — axis glyph cards for layout and tone (branch feat/axis-glyph)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `ui/creative-glyph.tsx`: `CreativeGlyph` — a pure SVG miniature of what
+    `NodeCanvasCompositor.draw` paints, in its layer order (photo ground →
+    contrast shade on the headline edge → brand accent band flush to that edge →
+    two text bars). `layout` picks the edge (mirroring the compositor's 0.55h /
+    0.45h shade start and the 5 % solid band), `tone` scales shade opacity and
+    bar weight with the compositor's own `shadeAlpha` (0.7 bold / 0.4 subtle,
+    cited in a comment). Colours are theme tokens only (`fill-text-muted`,
+    `fill-brand-primary`, `fill-text-primary`, `text-background` driving
+    `currentColor` gradient stops); the drawing is `aria-hidden` +
+    `focusable="false"`. Gradient ids are per-instance (`useId`) so side-by-side
+    glyphs cannot cross-paint through a duplicate `url(#id)`.
+  - `ui/axis-card.tsx`: `AxisCard` — the generic selectable card for one
+    fixed-vocabulary value. Accessible name is exactly the raw value (explicit
+    `aria-label`); glyph wrapper, check mark and optional meta are
+    `aria-hidden` so nothing can concatenate into the name. Selected treatment
+    follows `AxisToggles` (`border-brand-primary bg-surface-2` + check), plus
+    `focus-visible` ring and disabled handling consistent with the kit.
+  - `PolicySection.tsx`: new `AxisCards` group (generic over the option type,
+    options straight from `LAYOUT_OPTIONS` / `TONE_OPTIONS`, glyph via a render
+    prop) used for the Layout and Tone axes; grid is `grid-cols-2` in compact
+    (320 px sidebar) and auto-fill `minmax(9rem,1fr)` otherwise. `AxisToggles`
+    kept for the other axes; fieldset/legend and error lines unchanged.
+  - `DESIGN.md`: both primitives added to the UI-kit section (incl. the
+    accessible-name rule); the control-choice table now routes visual-vocabulary
+    fields to axis cards.
+- **Decisions:**
+  - The accessible-name invariant drove the card's structure: `aria-label`
+    overrides content, so the visible value text can stay (it keeps
+    `getByText` queries working) while glyph/meta/check are hidden. Verified by
+    whole-name `getByRole` tests with `meta` set, and by count: web suite
+    563 → 578 passing, zero regressions.
+  - Glyph defaults for the omitted axis (layout → `headline-top`, tone →
+    `bold`): an axis card previews one axis at a time, so the other dimension
+    pins to a fixed representative value rather than inventing a third state.
+  - `LayoutOption`/`ToneOption` are aliases of the domain's `LayoutKind` /
+    `ToneKind` (type-only import) — no second list of option values anywhere.
+- **Left open:**
+  - Motion glyphs, ratio frames, palette swatches and the variation contact
+    sheet (explicitly out of scope for this task).
