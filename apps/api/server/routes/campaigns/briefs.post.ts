@@ -1,6 +1,10 @@
 import { basename } from "node:path";
 import { errorMessage } from "@campaignfoundry/shared";
 import {
+  extractSourceAssetBriefIds,
+  rewriteAssetPaths,
+} from "../../lib/asset-files.js";
+import {
   briefYamlPath,
   createBriefFile,
   findBriefFileById,
@@ -12,6 +16,7 @@ import {
   SYMLINK_WRITE_ERROR,
 } from "../../lib/brief-files.js";
 import { parseBrief } from "../../lib/load-brief.js";
+import { getAssetStore } from "../../lib/ports/index.js";
 
 /**
  * POST /campaigns/briefs — persist a campaign brief.
@@ -21,6 +26,10 @@ import { parseBrief } from "../../lib/load-brief.js";
  * (repeated `replace` still counts; the first value wins). Replace rewrites that
  * same file in its own format. Creates use exclusive `wx` writes under
  * `projectRoot()/briefs/`.
+ *
+ * Save as… copies any brief-scoped assets from source brief IDs (`assets/inputs/<from>/*`)
+ * into `assets/inputs/<brief.id>/*` and rewrites both logoPath and inputAsset paths,
+ * while leaving root-level shared assets (`assets/inputs/*.png`) untouched (L5.5).
  */
 export default defineEventHandler(async (event) => {
   let brief;
@@ -39,6 +48,13 @@ export default defineEventHandler(async (event) => {
   if (existing && !replace) {
     setResponseStatus(event, 409);
     return { error: `Brief "${brief.id}" already exists.` };
+  }
+
+  // Copy any brief-scoped assets and rewrite paths before writing the new brief (Save as…)
+  const sourceBriefIds = extractSourceAssetBriefIds(brief, brief.id);
+  for (const fromId of sourceBriefIds) {
+    await getAssetStore().copyAssets(fromId, brief.id);
+    brief = rewriteAssetPaths(brief, fromId, brief.id);
   }
 
   const filePath = existing ?? briefYamlPath(brief.id);

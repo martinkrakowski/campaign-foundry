@@ -9,6 +9,7 @@ import { Sidebar, BrowseBriefsButton, SidebarContent } from "../Sidebar";
 import { useEditorPanels } from "@/lib/editor-panels-context";
 import { Header } from "../Header";
 import { MobileMenu } from "../MobileMenu";
+import * as briefsApi from "@/lib/briefs-api";
 
 beforeEach(() => {
   nextMock().nav.pathname = "/grid";
@@ -39,11 +40,55 @@ describe("Accordion", () => {
 });
 
 describe("Sidebar", () => {
-  test("renders the brief fields and product bin", () => {
+  test("renders the brief fields and project bin with real assets", async () => {
+    vi.spyOn(briefsApi, "listAssets").mockResolvedValueOnce({
+      assets: [
+        { name: "hydra-logo.png", type: "image/png", size: 1024, thumbnailUrl: "data:image/png;base64,AAA" },
+        { name: "trail-logo.png", type: "image/png", size: 2048, thumbnailUrl: "" },
+      ],
+    });
     renderWithRun(<Sidebar />);
     expect(screen.getByText("summer-hydration-2026")).toBeTruthy();
-    expect(screen.getByText("2 assets")).toBeTruthy();
-    expect(screen.getByText("Hydra Bottle")).toBeTruthy();
+    expect(screen.getByText("Project Bin")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByText("2 assets")).toBeTruthy();
+      expect(screen.getByText("hydra-logo.png")).toBeTruthy();
+      expect(screen.getByText("trail-logo.png")).toBeTruthy();
+    });
+  });
+
+  test("renders empty state in Project Bin when no assets exist", async () => {
+    vi.spyOn(briefsApi, "listAssets").mockResolvedValueOnce({ assets: [] });
+    renderWithRun(<Sidebar />);
+    await waitFor(() => {
+      expect(screen.getByText("0 assets")).toBeTruthy();
+      expect(screen.getByText("No assets uploaded yet.")).toBeTruthy();
+    });
+  });
+
+  test("handles asset list failure gracefully", async () => {
+    vi.spyOn(briefsApi, "listAssets").mockRejectedValueOnce(new Error("Network error"));
+    renderWithRun(<Sidebar />);
+    await waitFor(() => {
+      expect(screen.getByText("0 assets")).toBeTruthy();
+      expect(screen.getByText("No assets uploaded yet.")).toBeTruthy();
+    });
+  });
+
+  test("ignores listAssets response on unmount (resolve and reject)", () => {
+    let resolveP: (v: { assets: briefsApi.AssetEntry[] }) => void = () => {};
+    const pendingP = new Promise<{ assets: briefsApi.AssetEntry[] }>((r) => (resolveP = r));
+    vi.spyOn(briefsApi, "listAssets").mockReturnValueOnce(pendingP);
+    const { unmount } = renderWithRun(<Sidebar />);
+    unmount();
+    resolveP({ assets: [] });
+
+    let rejectP: (err: unknown) => void = () => {};
+    const pendingR = new Promise<{ assets: briefsApi.AssetEntry[] }>((_, r) => (rejectP = r));
+    vi.spyOn(briefsApi, "listAssets").mockReturnValueOnce(pendingR);
+    const { unmount: unmount2 } = renderWithRun(<Sidebar />);
+    unmount2();
+    rejectP(new Error("aborted"));
   });
 
   test("Browse briefs opens the picker", async () => {

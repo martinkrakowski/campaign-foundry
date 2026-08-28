@@ -896,4 +896,146 @@ describe("authoring briefs", () => {
     }
   });
 
+  describe("L5.5: Save as... and duplicate copy assets and rewrite brief-scoped paths", () => {
+    test("Save as (POST /campaigns/briefs) copies brief-scoped logoPath and inputAsset while leaving root assets untouched", async () => {
+      const { create } = await api();
+      const assetsDir = join(dir, "assets", "inputs");
+      mkdirSync(join(assetsDir, "src-camp"), { recursive: true });
+      writeFileSync(join(assetsDir, "src-camp", "logo.png"), "SOURCE-LOGO-BYTES");
+      writeFileSync(join(assetsDir, "src-camp", "bg.jpg"), "SOURCE-BG-BYTES");
+      writeFileSync(join(assetsDir, "hydra-logo.png"), "DEMO-LOGO-BYTES");
+      writeFileSync(join(assetsDir, "reuse-bg.png"), "DEMO-BG-BYTES");
+
+      const saveAsPayload = brief({
+        id: "target-camp",
+        products: [
+          {
+            id: "prod-uploaded",
+            name: "Uploaded Product",
+            primaryColor: "#1473E6",
+            logoPath: "assets/inputs/src-camp/logo.png",
+            inputAsset: "assets/inputs/src-camp/bg.jpg",
+          },
+          {
+            id: "prod-shared",
+            name: "Shared Product",
+            primaryColor: "#E0218A",
+            logoPath: "assets/inputs/hydra-logo.png",
+            inputAsset: "assets/inputs/reuse-bg.png",
+          },
+        ],
+      });
+
+      const res = await create()(jsonReq("http://x/campaigns/briefs", "POST", saveAsPayload));
+      expect(res.status).toBe(201);
+
+      // Brief-scoped assets copied to target-camp/
+      expect(readFileSync(join(assetsDir, "target-camp", "logo.png"), "utf8")).toBe("SOURCE-LOGO-BYTES");
+      expect(readFileSync(join(assetsDir, "target-camp", "bg.jpg"), "utf8")).toBe("SOURCE-BG-BYTES");
+
+      // Root-level shared assets survive unchanged
+      expect(readFileSync(join(assetsDir, "hydra-logo.png"), "utf8")).toBe("DEMO-LOGO-BYTES");
+      expect(readFileSync(join(assetsDir, "reuse-bg.png"), "utf8")).toBe("DEMO-BG-BYTES");
+
+      // Brief on disk has paths rewritten for brief-scoped assets only
+      const savedBrief = await loadBrief(yamlPath("target-camp.yaml"));
+      expect(savedBrief.products[0].logoPath).toBe("assets/inputs/target-camp/logo.png");
+      expect(savedBrief.products[0].inputAsset).toBe("assets/inputs/target-camp/bg.jpg");
+      expect(savedBrief.products[1].logoPath).toBe("assets/inputs/hydra-logo.png");
+      expect(savedBrief.products[1].inputAsset).toBe("assets/inputs/reuse-bg.png");
+    });
+
+    test("POST /campaigns/briefs/:id/duplicate copies brief assets and rewrites logoPath and inputAsset", async () => {
+      const { create, duplicate } = await api();
+      const assetsDir = join(dir, "assets", "inputs");
+      mkdirSync(join(assetsDir, "dup-src"), { recursive: true });
+      writeFileSync(join(assetsDir, "dup-src", "logo.png"), "DUP-LOGO-BYTES");
+      writeFileSync(join(assetsDir, "dup-src", "bg.jpg"), "DUP-BG-BYTES");
+      writeFileSync(join(assetsDir, "hydra-logo.png"), "DEMO-LOGO-BYTES");
+      writeFileSync(join(assetsDir, "reuse-bg.png"), "DEMO-BG-BYTES");
+
+      const initialBrief = brief({
+        id: "dup-src",
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#1473E6",
+            logoPath: "assets/inputs/dup-src/logo.png",
+            inputAsset: "assets/inputs/dup-src/bg.jpg",
+          },
+          {
+            id: "p2",
+            name: "P2",
+            primaryColor: "#E0218A",
+            logoPath: "assets/inputs/hydra-logo.png",
+            inputAsset: "assets/inputs/reuse-bg.png",
+          },
+        ],
+      });
+
+      await create()(jsonReq("http://x/campaigns/briefs", "POST", initialBrief));
+
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/dup-src/duplicate", "POST", { newId: "dup-dest" }),
+      );
+      expect(res.status).toBe(201);
+
+      // Copied assets exist under dup-dest/
+      expect(readFileSync(join(assetsDir, "dup-dest", "logo.png"), "utf8")).toBe("DUP-LOGO-BYTES");
+      expect(readFileSync(join(assetsDir, "dup-dest", "bg.jpg"), "utf8")).toBe("DUP-BG-BYTES");
+
+      // Root demo assets untouched
+      expect(readFileSync(join(assetsDir, "hydra-logo.png"), "utf8")).toBe("DEMO-LOGO-BYTES");
+      expect(readFileSync(join(assetsDir, "reuse-bg.png"), "utf8")).toBe("DEMO-BG-BYTES");
+
+      // Duplicated brief on disk has rewritten paths
+      const dupBrief = await loadBrief(yamlPath("dup-dest.yaml"));
+      expect(dupBrief.id).toBe("dup-dest");
+      expect(dupBrief.products[0].logoPath).toBe("assets/inputs/dup-dest/logo.png");
+      expect(dupBrief.products[0].inputAsset).toBe("assets/inputs/dup-dest/bg.jpg");
+      expect(dupBrief.products[1].logoPath).toBe("assets/inputs/hydra-logo.png");
+      expect(dupBrief.products[1].inputAsset).toBe("assets/inputs/reuse-bg.png");
+    });
+
+    test("POST /campaigns/briefs/:id/duplicate also copies assets from third-party source brief IDs", async () => {
+      const { duplicate } = await api();
+      const assetsDir = join(dir, "assets", "inputs");
+      mkdirSync(join(assetsDir, "third-camp"), { recursive: true });
+      writeFileSync(join(assetsDir, "third-camp", "extra.png"), "THIRD-PARTY-ASSET");
+
+      const { dumpBrief } = await import("../../../lib/brief-files.js");
+      const initialBrief = brief({
+        id: "source-camp",
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#1473E6",
+            logoPath: "assets/inputs/third-camp/extra.png",
+          },
+        ],
+      });
+
+      mkdirSync(join(dir, "briefs"), { recursive: true });
+      writeFileSync(yamlPath("source-camp.yaml"), dumpBrief(initialBrief));
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/source-camp/duplicate", "POST", { newId: "dest-camp" }),
+      );
+      expect(res.status).toBe(201);
+      expect(readFileSync(join(assetsDir, "dest-camp", "extra.png"), "utf8")).toBe("THIRD-PARTY-ASSET");
+    });
+  });
+
+  test("GET /campaigns/briefs returns empty array when brief store throws", async () => {
+    const { list } = await api();
+    const { getBriefStore } = await import("../../../lib/ports/index.js");
+    const spy = vi.spyOn(getBriefStore(), "listBriefs").mockRejectedValueOnce(new Error("Disk failure"));
+    const res = await list()(new Request("http://x/campaigns/briefs"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ briefs: [] });
+    spy.mockRestore();
+  });
 });
+
+

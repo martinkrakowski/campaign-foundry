@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, extname, resolve } from "node:path";
+import { lstat, readFile } from "node:fs/promises";
+import { extname, resolve } from "node:path";
 import * as yaml from "js-yaml";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { projectRoot } from "@campaignfoundry/shared";
+import { projectRoot, errorMessage } from "@campaignfoundry/shared";
 import { resolveConfined } from "./confined-path.js";
-import { loadBrief } from "./load-brief.js";
+import { getBriefStore } from "./ports/index.js";
 
 /** Formats the loader understands — listing and id lookup accept these (case-insensitive). */
 export const BRIEF_SOURCE_EXTS = [".yaml", ".yml", ".json"] as const;
@@ -94,17 +94,7 @@ export async function findBriefFile(
   id: string,
   exts: readonly string[] = BRIEF_SOURCE_EXTS,
 ): Promise<string | undefined> {
-  const dir = briefsDir();
-  for (const ext of exts) {
-    const candidate = resolveConfined(dir, `${id}${ext}`);
-    try {
-      const st = await lstat(candidate);
-      if (st.isFile()) return candidate;
-    } catch {
-      // missing at this extension — try the next
-    }
-  }
-  return undefined;
+  return getBriefStore().findBriefFile(id, exts);
 }
 
 /**
@@ -115,37 +105,18 @@ export async function findBriefFile(
 export async function findBriefById(
   id: string,
 ): Promise<{ path: string; brief: CampaignBrief } | undefined> {
-  const dir = briefsDir();
-  let names: string[];
-  try {
-    const entries = await readdir(dir, { withFileTypes: true });
-    names = entries
-      .filter((e) => e.isFile() && isBriefSourceName(e.name))
-      .map((e) => e.name)
-      .sort();
-  } catch {
-    return undefined;
-  }
-  for (const name of names) {
-    const filePath = resolve(dir, name);
-    try {
-      const brief = await loadBrief(filePath);
-      if (brief.id === id) return { path: filePath, brief };
-    } catch {
-      // skip a malformed brief rather than treating it as a match
-    }
-  }
-  return undefined;
+  const found = await getBriefStore().findBriefById(id);
+  if (!found) return undefined;
+  return { path: resolve(briefsDir(), found.file), brief: found.brief };
 }
 
 export async function findBriefFileById(id: string): Promise<string | undefined> {
-  return (await findBriefById(id))?.path;
+  return getBriefStore().findBriefFileById(id);
 }
 
 /** Exclusive create — fails with EEXIST if anything is already at `path`. */
 export async function createBriefFile(path: string, brief: CampaignBrief): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, serializeBrief(path, brief), { encoding: "utf8", flag: "wx" });
+  await getBriefStore().createBrief(brief);
 }
 
 /** Overwrite an existing regular file in its own format; refuse a symlink. */
@@ -154,7 +125,7 @@ export async function rewriteBriefFile(path: string, brief: CampaignBrief): Prom
   if (st.isSymbolicLink()) {
     throw new Error(SYMLINK_WRITE_ERROR);
   }
-  await writeFile(path, serializeBrief(path, brief), "utf8");
+  await getBriefStore().rewriteBrief(brief);
 }
 
 /**
@@ -163,17 +134,15 @@ export async function rewriteBriefFile(path: string, brief: CampaignBrief): Prom
  */
 export async function replaceBriefFile(path: string, brief: CampaignBrief): Promise<void> {
   try {
-    await rewriteBriefFile(path, brief);
-  } catch (error) {
-    if (isErrno(error, "ENOENT")) {
-      await createBriefFile(path, brief);
-      return;
+    const st = await lstat(path);
+    if (st.isSymbolicLink()) {
+      throw new Error(SYMLINK_WRITE_ERROR);
     }
-    throw error;
+  } catch (error) {
+    if (errorMessage(error) === SYMLINK_WRITE_ERROR) throw error;
   }
+  await getBriefStore().replaceBrief(brief);
 }
-
-const briefChains = new Map<string, Promise<unknown>>();
 
 /**
  * Serialise revision-check→write sections per brief id within this process, so a
@@ -181,15 +150,5 @@ const briefChains = new Map<string, Promise<unknown>>();
  * Errors in `fn` do not poison the chain.
  */
 export function withBriefLock<T>(briefId: string, fn: () => Promise<T>): Promise<T> {
-  const previous = briefChains.get(briefId) ?? Promise.resolve();
-  const run = previous.then(fn, fn);
-  const settled = run.then(
-    () => undefined,
-    () => undefined,
-  );
-  briefChains.set(briefId, settled);
-  void settled.then(() => {
-    if (briefChains.get(briefId) === settled) briefChains.delete(briefId);
-  });
-  return run;
+  return getBriefStore().withBriefLock(briefId, fn);
 }

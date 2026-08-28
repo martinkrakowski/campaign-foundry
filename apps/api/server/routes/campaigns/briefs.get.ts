@@ -1,53 +1,18 @@
-import { readdir, readFile } from "node:fs/promises";
-import { resolve } from "node:path";
 import { errorMessage } from "@campaignfoundry/shared";
-import { BRIEF_SOURCE_EXTS, briefsDir, hashBytes } from "../../lib/brief-files.js";
-import { parseBriefText } from "../../lib/load-brief.js";
-
-const BRIEF_PATTERN = new RegExp(
-  `(?:${BRIEF_SOURCE_EXTS.map((ext) => ext.replace(".", "\\.")).join("|")})$`,
-  "i",
-);
+import { getBriefStore } from "../../lib/ports/index.js";
 
 /**
- * GET /campaigns/briefs — list the campaign briefs available under `<repo>/briefs`,
+ * GET /campaigns/briefs — list the campaign briefs available in the brief store,
  * each parsed so the UI's brief picker can show a summary and load one without a
  * second request. Unparseable files are skipped (a malformed brief shouldn't break
- * the list). Directory is fixed (no user input), so there's no traversal surface.
+ * the list).
  */
 export default defineEventHandler(async () => {
-  const dir = briefsDir();
-  let files: string[];
   try {
-    // withFileTypes + isFile() lists only regular files; symlinks (isFile() is false
-    // for them) are skipped, so a symlink dropped into briefs/ can't make us read a
-    // file outside the directory — defense-in-depth on the "fixed directory" assumption.
-    const entries = await readdir(dir, { withFileTypes: true });
-    files = entries
-      .filter((e) => e.isFile() && BRIEF_PATTERN.test(e.name))
-      .map((e) => e.name)
-      .sort();
+    const briefs = await getBriefStore().listBriefs();
+    return { briefs };
   } catch (error) {
-    console.warn(`[briefs] could not read ${dir}: ${errorMessage(error)}`);
+    console.warn(`[briefs] could not read briefs: ${errorMessage(error)}`);
     return { briefs: [] };
   }
-
-  const briefs = [];
-  for (const file of files) {
-    try {
-      const filePath = resolve(dir, file);
-      // Hash the bytes as they are on disk, not a re-encoded decode of them: the
-      // write path hashes raw bytes, and a file that is not valid UTF-8 would
-      // otherwise get a listing revision no conditional write could ever match.
-      const bytes = await readFile(filePath);
-      const revision = hashBytes(bytes);
-      const brief = parseBriefText(filePath, bytes.toString("utf8"));
-      briefs.push({ file, brief, revision });
-    } catch (error) {
-      // Skip a malformed/invalid brief rather than failing the whole list — but log
-      // it so a reviewer can see why their brief isn't appearing in the picker.
-      console.warn(`[briefs] skipped ${file}: ${errorMessage(error)}`);
-    }
-  }
-  return { briefs };
 });

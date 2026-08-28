@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
+import { getBriefStore } from "./ports/index.js";
 import * as yaml from "js-yaml";
 import {
   HEADLINE_POOL_REF,
@@ -504,6 +504,5 @@ export function parseBriefText(path: string, raw: string, opts: ParseBriefOption
 
 /** Load and parse a brief from a .yaml / .yml / .json file. */
 export async function loadBrief(path: string, opts: ParseBriefOptions = {}): Promise<CampaignBrief> {
-  const raw = await readFile(path, "utf8");
-  return parseBriefText(path, raw, opts);
+  return getBriefStore().readBrief(path, opts);
 }

@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { projectRoot } from "@campaignfoundry/shared";
 import { resolveConfined } from "./confined-path.js";
 
@@ -48,4 +49,68 @@ export function assetAbsPath(briefId: string, name: string): string {
 export async function writeAssetFile(path: string, bytes: Buffer): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, bytes, { flag: "wx" });
+}
+
+/**
+ * Rewrite a single repo-relative asset path from `fromBriefId` to `toBriefId`.
+ * If the path starts with `assets/inputs/<fromBriefId>/`, it is rewritten to
+ * `assets/inputs/<toBriefId>/...`. Any other path (e.g. shared demo assets at
+ * `assets/inputs/*.png`) is returned unchanged.
+ */
+export function rewriteAssetPath(path: string, fromBriefId: string, toBriefId: string): string {
+  const prefix = `assets/inputs/${fromBriefId}/`;
+  if (path.startsWith(prefix)) {
+    return `assets/inputs/${toBriefId}/${path.slice(prefix.length)}`;
+  }
+  return path;
+}
+
+/**
+ * Rewrite all brief-scoped asset paths (`logoPath` and `inputAsset` across all products)
+ * on a brief from `fromBriefId` to `toBriefId`. Shared root assets (`assets/inputs/*.png`)
+ * are left untouched.
+ */
+export function rewriteAssetPaths(
+  brief: CampaignBrief,
+  fromBriefId: string,
+  toBriefId: string,
+): CampaignBrief {
+  if (!brief.products || !Array.isArray(brief.products)) return brief;
+  const products = brief.products.map((product) => {
+    let updated = product;
+    if (typeof product.logoPath === "string") {
+      const rewrittenLogo = rewriteAssetPath(product.logoPath, fromBriefId, toBriefId);
+      if (rewrittenLogo !== product.logoPath) {
+        updated = { ...updated, logoPath: rewrittenLogo };
+      }
+    }
+    if (typeof product.inputAsset === "string") {
+      const rewrittenInput = rewriteAssetPath(product.inputAsset, fromBriefId, toBriefId);
+      if (rewrittenInput !== product.inputAsset) {
+        updated = { ...updated, inputAsset: rewrittenInput };
+      }
+    }
+    return updated;
+  });
+  return { ...brief, products };
+}
+
+/**
+ * Extract distinct source brief IDs referenced by any brief-scoped asset paths
+ * (`assets/inputs/<fromId>/...`) in a brief's products.
+ */
+export function extractSourceAssetBriefIds(brief: CampaignBrief, targetBriefId: string): string[] {
+  if (!brief.products || !Array.isArray(brief.products)) return [];
+  const fromIds = new Set<string>();
+  for (const product of brief.products) {
+    for (const p of [product.logoPath, product.inputAsset]) {
+      if (typeof p === "string") {
+        const match = /^assets\/inputs\/([^/]+)\/.+$/.exec(p);
+        if (match && match[1] !== targetBriefId) {
+          fromIds.add(match[1]);
+        }
+      }
+    }
+  }
+  return Array.from(fromIds);
 }
