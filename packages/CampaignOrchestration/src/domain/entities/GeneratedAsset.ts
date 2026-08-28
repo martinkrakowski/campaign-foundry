@@ -1,4 +1,4 @@
-import type { AspectRatioValue } from "../value-objects/AspectRatio.vo.js";
+import type { AspectRatioValue } from "../value-objects/aspect-ratios.js";
 import type { BackgroundSource } from "../value-objects/BackgroundSource.vo.js";
 import type { LayoutKind, ToneKind } from "../value-objects/Treatment.vo.js";
 import type { MotionKind } from "../value-objects/MotionKind.vo.js";

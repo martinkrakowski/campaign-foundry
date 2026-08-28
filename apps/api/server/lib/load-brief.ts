@@ -5,6 +5,7 @@ import {
   HEADLINE_POOL_REF,
   LAYOUT_VALUES,
   MOTION_KINDS,
+  RATIO_VALUES,
   SAFE_ID_PATTERN,
   TONE_VALUES,
   type CampaignBrief,
@@ -25,7 +26,7 @@ export function assertSafeId(value: unknown, label: string): asserts value is st
 }
 
 /** Supported variation axes — always accepted (`headline` only as `pool://copy`). */
-export const SUPPORTED_AXES = ["layout", "tone", "background", "paletteShift", "headline"] as const;
+export const SUPPORTED_AXES = ["layout", "tone", "ratio", "background", "paletteShift", "headline"] as const;
 
 /** Motion axes — accepted only while the ffmpeg capability is on (D8). */
 export const MOTION_AXES = ["motion", "duration"] as const;
@@ -113,6 +114,36 @@ function validatePaletteShift(value: unknown): void {
   }
 }
 
+/**
+ * `ratio` requests a subset of the three canvases: a non-empty, de-duplicated
+ * array of supported ratios. Absent means every ratio, so a brief without the
+ * key parses exactly as before. A structural rule, not a capability one — the
+ * motion narrowing is applied by the planner, not the parser.
+ */
+function validateRatioAxis(value: unknown): void {
+  if (!Array.isArray(value)) {
+    throw new Error('Campaign brief field "variation.axes.ratio" must be an array.');
+  }
+  if (value.length === 0) {
+    throw new Error(
+      'Campaign brief field "variation.axes.ratio" must select at least one aspect ratio (omit it for all).',
+    );
+  }
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== "string" || !(RATIO_VALUES as readonly string[]).includes(entry)) {
+      throw new Error(`Campaign brief field "variation.axes.ratio" has unsupported value ${JSON.stringify(entry)}.`);
+    }
+    if (seen.has(entry)) {
+      // The planner de-duplicates this axis, so a repeat would draw nothing.
+      throw new Error(
+        `Campaign brief field "variation.axes.ratio" repeats ${JSON.stringify(entry)} — list each ratio once.`,
+      );
+    }
+    seen.add(entry);
+  }
+}
+
 /** Why motion is unavailable, for the parser's message; the probe's reason when it gave one. */
 function motionUnavailable(capabilities: Capabilities): string {
   return `motion output is unavailable (${capabilities.reason ?? "ffmpeg capability is off"})`;
@@ -177,6 +208,9 @@ function validateAxes(value: unknown, capabilities: Capabilities): void {
   }
   if (value.tone !== undefined) {
     assertAllowedStringArray(value.tone, "variation.axes.tone", TONE_VALUES);
+  }
+  if (value.ratio !== undefined) {
+    validateRatioAxis(value.ratio);
   }
   if (value.background !== undefined) {
     validateBackground(value.background);

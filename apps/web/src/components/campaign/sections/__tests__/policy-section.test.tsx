@@ -57,7 +57,8 @@ describe("PolicySection — the policy numbers", () => {
   test("the count readout shows the value against the ceiling, and flags its error", () => {
     render(<PolicySection state={state()} dispatch={vi.fn()} errors={{ count: "bad count" }} />);
     expect(screen.getByText("bad count")).toBeTruthy();
-    expect(screen.getByText(/12/).textContent).toMatch(/12\s*\/\s*\d+/);
+    // anchored to the bare value: the ratio panels carry their own "N of count" texts
+    expect(screen.getByText(/^12$/).textContent).toMatch(/12\s*\/\s*\d+/);
   });
 
   test("Min distance steps within the active axes and can be left to the planner", async () => {
@@ -234,6 +235,185 @@ describe("PolicySection — axes", () => {
   test("the heading carries a badge counting the section's errors", () => {
     render(<PolicySection state={state()} dispatch={vi.fn()} errors={{ count: "a", seed: "b" }} />);
     expect(screen.getByRole("heading", { name: /Variation Policy/ }).textContent).toContain("2");
+  });
+});
+
+describe("PolicySection — aspect ratio panels", () => {
+  const ratioFieldset = () => axis("Aspect ratios");
+
+  test("each panel answers to its raw ratio as the whole accessible name", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    render(<PolicySection state={state()} dispatch={dispatch} errors={{}} />);
+
+    const square = within(ratioFieldset()).getByRole("button", { name: "1:1" }) as HTMLButtonElement;
+    expect(square.getAttribute("aria-pressed")).toBe("true");
+    await user.click(square);
+    expect(dispatch).toHaveBeenCalledWith({ type: "toggleRatio", value: "1:1" });
+
+    // the frame and the floor are decoration carried by the card — they must never
+    // extend the name (the invariant every getByRole query leans on)
+    expect(square.querySelector("svg[aria-hidden='true']")).toBeTruthy();
+    expect(within(square).getByText("≥ 1 each").getAttribute("aria-hidden")).toBe("true");
+  });
+
+  test("each panel shows its pixel spec, and never invents a per-ratio allocation", () => {
+    render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    const fieldset = ratioFieldset();
+    expect(within(fieldset).getByText("1080 × 1080")).toBeTruthy();
+    expect(within(fieldset).getByText("1080 × 1920")).toBeTruthy();
+    expect(within(fieldset).getByText("1920 × 1080")).toBeTruthy();
+    // The planner round-robins only the deficient coverage axes and then fills to
+    // `count` from a seeded random draw, so above the floor no ratio has a
+    // predictable share. A panel must not claim one.
+    expect(within(fieldset).queryByText(/\d+ of \d+/)).toBeNull();
+  });
+
+  test("the floor is one setting: the same ≥ N each on every panel, and 'no floor' when unset", () => {
+    const { unmount } = render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.getAllByText("≥ 1 each")).toHaveLength(3);
+    unmount();
+
+    render(
+      <PolicySection
+        state={{ ...state(), variation: { ...state().variation, perRatio: "" } }}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
+    expect(screen.getAllByText("no floor")).toHaveLength(3);
+  });
+
+  test("the constraint readout binds the floor to the selection and turns red when it cannot fit", () => {
+    const { unmount } = render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    const ok = screen.getByText("floor 1 × 3 selected = 3 of count 12");
+    expect(ok.className).toContain("text-text-muted");
+    unmount();
+
+    render(
+      <PolicySection
+        state={{ ...state(), variation: { ...state().variation, perRatio: "2", count: "5" } }}
+        dispatch={vi.fn()}
+        errors={{ perRatio: "coverage.perRatio 2 × 3 selected ratios exceeds count 5" }}
+      />,
+    );
+    const over = screen.getByText(/floor 2 × 3 selected = 6 of count 5/);
+    expect(over.className).toContain("text-error");
+    expect(over.textContent).toMatch(/lower the floor, raise the count, or select fewer ratios/);
+  });
+
+  test("an excluded panel is muted with its reason, and the reason names the motion-capable ratios", () => {
+    render(
+      <PolicySection
+        state={state({
+          formats: ["motion"],
+          platforms: ["instagram-reel"],
+          motion: ["ken-burns-in"],
+          duration: [4],
+        })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
+    // instagram-reel packages motion at 9:16 only: the other two canvases are excluded
+    const reasons = screen.getAllByText(/Excluded — motion-only output can draw \[9:16\] only/);
+    expect(reasons).toHaveLength(2);
+
+    // The reason must reach assistive technology. It is referenced by
+    // aria-describedby rather than nested as content, because content would join
+    // the accessible name and break every getByRole({ name }) query in the suite.
+    const square = within(ratioFieldset()).getByRole("button", { name: "1:1" });
+    const describedBy = square.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    const description = document.getElementById(describedBy as string);
+    expect(description?.textContent).toMatch(/Excluded — motion-only output can draw \[9:16\] only/);
+    expect(description?.getAttribute("aria-hidden")).toBeNull();
+  });
+
+  test("an excluded ratio the brief already selects stays clickable — deselecting is the way out", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    render(
+      <PolicySection
+        state={state({
+          formats: ["motion"],
+          platforms: ["instagram-reel"],
+          motion: ["ken-burns-in"],
+          duration: [4],
+          variation: { ...state().variation, ratio: ["1:1"] },
+        })}
+        dispatch={dispatch}
+        errors={{}}
+      />,
+    );
+    const square = within(ratioFieldset()).getByRole("button", { name: "1:1" }) as HTMLButtonElement;
+    expect(square.getAttribute("aria-pressed")).toBe("true");
+    expect(square.disabled).toBe(false);
+    await user.click(square);
+    expect(dispatch).toHaveBeenCalledWith({ type: "toggleRatio", value: "1:1" });
+  });
+
+  test("an excluded ratio that is not selected cannot be switched on", () => {
+    render(
+      <PolicySection
+        state={state({
+          formats: ["motion"],
+          platforms: ["instagram-reel"],
+          motion: ["ken-burns-in"],
+          duration: [4],
+          variation: { ...state().variation, ratio: ["9:16"] },
+        })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
+    const square = within(ratioFieldset()).getByRole("button", { name: "1:1" }) as HTMLButtonElement;
+    expect(square.disabled).toBe(true);
+    expect(screen.getAllByText(/Excluded — motion-only output can draw \[9:16\] only/)).toHaveLength(2);
+  });
+
+  test("the exclusion reason says so plainly when no selected platform packages motion at any ratio", () => {
+    render(
+      <PolicySection
+        state={state({ formats: ["motion"], platforms: ["instagram-feed"], motion: ["ken-burns-in"] })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
+    expect(screen.getAllByText(/Excluded — no selected platform packages motion at any ratio/)).toHaveLength(3);
+  });
+
+  test("the coverage-per-ratio stepper sits inside the ratio fieldset, beside its effect", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    render(<PolicySection state={state()} dispatch={dispatch} errors={{}} />);
+    const fieldset = ratioFieldset();
+    expect(within(fieldset).getByRole("spinbutton", { name: "Coverage per ratio" })).toBeTruthy();
+    expect(within(fieldset).getByRole("button", { name: "Increase Coverage per ratio" })).toBeTruthy();
+    await user.click(within(fieldset).getByRole("button", { name: "Increase Coverage per ratio" }));
+    expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field: "perRatio", value: "2" });
+  });
+
+  test("the panel grid holds two columns in the 320px sidebar and auto-fills when wide", () => {
+    const { unmount } = render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    const wideGrid = ratioFieldset().querySelector("div.grid") as HTMLElement;
+    expect(wideGrid.className).toContain("auto-fill");
+    unmount();
+
+    render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} compact />);
+    const compactGrid = ratioFieldset().querySelector("div.grid") as HTMLElement;
+    expect(compactGrid.className).toContain("grid-cols-2");
+  });
+
+  test("a selection with no ratio left renders the section's own error", () => {
+    render(
+      <PolicySection
+        state={{ ...state(), variation: { ...state().variation, ratio: [] } }}
+        dispatch={vi.fn()}
+        errors={{ ratio: "Select at least one aspect ratio." }}
+      />,
+    );
+    expect(screen.getByText("Select at least one aspect ratio.")).toBeTruthy();
   });
 });
 

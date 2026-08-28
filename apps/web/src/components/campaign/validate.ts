@@ -12,23 +12,35 @@ export type FieldErrors = Record<string, string>;
 
 const UINT32_MAX = 0xffffffff;
 const BASE_DISTANCE_AXES = 6;
-/** 1:1, 9:16, 16:9 — the canvases the pipeline renders. */
-const ALL_RATIOS = 3;
 
-/** Ratios a slot can be drawn at, mirroring VariationPolicy: a motion-only brief is
- * limited to the ratios its motion platforms package. */
-function drawableRatios(state: EditorState): number {
-  const motionOnly = state.formats.includes("motion") && !state.formats.includes("static");
-  if (!motionOnly) return ALL_RATIOS;
-  const ratios = new Set(
+/** Ratios the requested platforms package motion at — the motion filter's allowlist. */
+export function motionPackagedRatios(state: EditorState): Set<string> {
+  return new Set(
     state.platforms
       .map((id) => PLATFORM_PROFILES[id])
       .filter((profile): profile is PlatformProfile => profile !== undefined)
       .filter((profile) => (profile.formats as readonly string[]).includes("motion"))
       .map((profile) => profile.ratio),
   );
-  return ratios.size;
 }
+
+/** True while the motion narrowing applies: a motion-only brief has no still slot to fall back to. */
+function motionOnly(state: EditorState): boolean {
+  return state.formats.includes("motion") && !state.formats.includes("static");
+}
+
+/**
+ * Ratios a slot can be drawn at, mirroring VariationPolicy: the requested
+ * subset, narrowed by the motion filter for a motion-only brief (the ratios its
+ * motion platforms package). Empty when every selected ratio is excluded.
+ */
+export function drawableRatios(state: EditorState): string[] {
+  const requested = state.variation.ratio;
+  if (!motionOnly(state)) return [...requested];
+  const packaged = motionPackagedRatios(state);
+  return requested.filter((ratio) => packaged.has(ratio));
+}
+
 
 /**
  * How many distinct variants this brief's axes can produce — the planner's hard
@@ -40,7 +52,7 @@ export function axisProductSize(state: EditorState): number {
   const mixStatic = motionEnabled && state.formats.includes("static");
   return (
     Math.max(1, state.products.filter((product) => product.id.length > 0).length) *
-    Math.max(1, drawableRatios(state)) *
+    Math.max(1, drawableRatios(state).length) *
     Math.max(1, state.variation.layout.length) *
     Math.max(1, state.variation.tone.length) *
     Math.max(1, state.variation.background.length) *
@@ -188,6 +200,30 @@ export function validatePolicy(state: EditorState): FieldErrors {
   }
   if (!isOptionalIntegerAtLeast(state.variation.perRatio, 0)) {
     errors.perRatio = "coverage.perRatio must be an integer >= 0.";
+  }
+  if (state.variation.ratio.length === 0) {
+    errors.ratio = "Select at least one aspect ratio.";
+  }
+  // The planner refuses a plan whose ratio floor cannot fit the count
+  // (perRatio × the ratios it will draw > count); the editor says so before
+  // the run instead of surfacing the shortfall as a plan error.
+  const floor = Number.parseInt(state.variation.perRatio, 10) || 0;
+  const drawable = drawableRatios(state);
+  const drawableCount = drawable.length;
+  // A selection the motion narrowing empties parses cleanly and saves, then
+  // VariationPolicy.fromBrief refuses it at plan time. D7 keeps Save open for a
+  // structurally valid brief, but the editor must still say the brief cannot run
+  // — otherwise the only feedback is a failed run.
+  if (state.variation.ratio.length > 0 && drawableCount === 0) {
+    const packaged = [...motionPackagedRatios(state)];
+    errors.ratio =
+      packaged.length > 0
+        ? `None of the selected ratios can be drawn: motion-only output can draw [${packaged.join(", ")}] only — select one of those, or add the static format.`
+        : "None of the selected ratios can be drawn: no selected platform packages motion at any ratio — add the static format, or a platform that packages motion.";
+  }
+  const count = Number.parseInt(state.variation.count, 10) || 0;
+  if (floor > 0 && floor * drawableCount > count) {
+    errors.perRatio = `coverage.perRatio ${floor} × ${drawableCount} selected ratios exceeds count ${count} — lower the floor, raise the count, or select fewer ratios.`;
   }
   if (state.variation.layout.length === 0) errors.layout = "Select at least one layout.";
   if (state.variation.tone.length === 0) errors.tone = "Select at least one tone.";

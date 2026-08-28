@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { err, ok, seedFrom, type Result } from "@campaignfoundry/shared";
 import type { CampaignBrief } from "../entities/CampaignBrief.js";
-import { AspectRatio, type AspectRatioValue } from "./AspectRatio.vo.js";
+import { AspectRatio } from "./AspectRatio.vo.js";
+import type { AspectRatioValue } from "./aspect-ratios.js";
 import { LAYOUT_VALUES, TONE_VALUES, type LayoutKind, type ToneKind } from "./Treatment.vo.js";
 import { MOTION_KINDS, type MotionKind } from "./MotionKind.vo.js";
 
@@ -43,17 +44,21 @@ const MIN_DURATION_SEC = 2;
 const MAX_DURATION_SEC = 30;
 
 /**
- * Plan-time inputs the brief cannot carry (the domain never reads files or
- * the profile table):
+ * Plan-time inputs resolved by the caller (the domain never reads files or the
+ * profile table, and the policy reads its axes from one place):
  * - `headlines` are the approved texts of the brief's copy pool, loaded by
  *   the caller when `axes.headline` is `pool://copy`.
  * - `motionRatios` are the canvas ratios of the requested motion-capable
  *   platforms, resolved by the caller from `output.platforms`. Absent → every
  *   ratio may carry a clip; empty → none can be packaged, so none is drawn.
+ * - `ratios` is the requested subset of the ratio axis, resolved by the caller
+ *   from `variation.axes.ratio`. Absent → every ratio (the behaviour before
+ *   the axis was authorable); empty → the author selected none.
  */
 export interface PlanInput {
   readonly headlines?: readonly string[];
   readonly motionRatios?: readonly AspectRatioValue[];
+  readonly ratios?: readonly AspectRatioValue[];
 }
 
 export interface VariationCoverage {
@@ -174,16 +179,36 @@ export class VariationPolicy {
     const productIds = unique(brief.products.map((product) => product.id));
     const allRatios = AspectRatio.all().map((ratio) => ratio.value);
     const motionRatios = unique(input.motionRatios ?? allRatios);
-    // A motion-only brief (`formats: [motion]`, no still slot) can only be drawn at
-    // ratios a requested motion platform packages: a slot at any other ratio would
-    // "stay a still" — a still the brief never asked for. Narrow the ratio axis to
-    // `motionRatios` for that case; a mixed plan keeps every ratio, since its
-    // non-motion ratios are legitimately the stills the static format requested.
-    const ratios = motionEnabled && !mixStatic ? allRatios.filter((ratio) => motionRatios.includes(ratio)) : allRatios;
+    const ratiosResult = requireRatios(input.ratios, allRatios);
+    if (!ratiosResult.success) return ratiosResult;
+    // The author's selection narrows first, then the motion filter: a motion-only
+    // brief (`formats: [motion]`, no still slot) can only be drawn at ratios a
+    // requested motion platform packages: a slot at any other ratio would
+    // "stay a still" — a still the brief never asked for. A mixed plan keeps every
+    // requested ratio, since its non-motion ratios are legitimately the stills
+    // the static format requested.
+    const requested = unique(ratiosResult.value ?? allRatios);
+    const ratios = motionEnabled && !mixStatic ? requested.filter((ratio) => motionRatios.includes(ratio)) : requested;
     if (ratios.length === 0) {
+      // Absent input keeps today's message byte-for-byte: the only way an
+      // unrestricted ratio axis empties is motionRatios being empty.
+      if (input.ratios === undefined) {
+        return err(
+          new Error(
+            `output.formats requests only "motion" but none of output.platforms package it at any aspect ratio.`,
+          ),
+        );
+      }
+      if (requested.length === 0) {
+        return err(
+          new Error(
+            `Invalid variation.axes.ratio: select at least one aspect ratio (expected one of ${allRatios.join(", ")}).`,
+          ),
+        );
+      }
       return err(
         new Error(
-          `output.formats requests only "motion" but none of output.platforms package it at any aspect ratio.`,
+          `output.formats requests only "motion", which the requested platforms package at [${motionRatios.join(", ")}], but variation.axes.ratio selects [${requested.join(", ")}] — select one of those ratios or add the static format.`,
         ),
       );
     }
@@ -270,6 +295,24 @@ function requireMotion(values: readonly MotionKind[], wantsMotion: boolean): Res
   for (const kind of values) {
     if (!(MOTION_KINDS as readonly string[]).includes(kind)) {
       return err(new Error("Invalid motion."));
+    }
+  }
+  return ok(values);
+}
+
+/** The requested ratio subset must name supported ratios — the parser guarantees it, this is the domain's own check. */
+function requireRatios(
+  values: readonly AspectRatioValue[] | undefined,
+  allRatios: readonly AspectRatioValue[],
+): Result<readonly AspectRatioValue[] | undefined, Error> {
+  if (values === undefined) return ok(undefined);
+  for (const value of values) {
+    if (!(allRatios as readonly string[]).includes(value)) {
+      return err(
+        new Error(
+          `Invalid variation.axes.ratio: ${JSON.stringify(value)} is not a supported aspect ratio (expected one of ${allRatios.join(", ")}).`,
+        ),
+      );
     }
   }
   return ok(values);

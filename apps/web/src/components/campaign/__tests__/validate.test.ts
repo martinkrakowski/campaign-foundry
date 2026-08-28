@@ -1,7 +1,9 @@
 import { describe, test, expect } from "vitest";
 import {
   axisProductSize,
+  drawableRatios,
   maxMinDistance,
+  motionPackagedRatios,
   motionUnavailableReason,
   validateIdentity,
   validateCopy,
@@ -118,6 +120,78 @@ describe("axisProductSize", () => {
       pool: { entries: [{ id: "a", text: "x", status: "approved" }, { id: "b", text: "y", status: "approved" }] },
     } as unknown as typeof base;
     expect(axisProductSize(pooled)).toBe(axisProductSize(base) * 2);
+  });
+
+  test("a requested ratio subset shrinks the space; a motion-only brief intersects it", () => {
+    const narrowed = { ...valid(), variation: { ...valid().variation, ratio: ["1:1", "16:9"] } };
+    expect(axisProductSize(narrowed)).toBe(axisProductSize(valid()) / 3 * 2);
+
+    const reel = valid({
+      formats: ["motion"],
+      platforms: ["instagram-reel"],
+      motion: ["ken-burns-in"],
+      duration: [4],
+      variation: { ...valid().variation, ratio: ["1:1", "9:16"] },
+    });
+    // instagram-reel packages motion at 9:16 only, so the draw narrows to one ratio
+    expect(drawableRatios(reel)).toEqual(["9:16"]);
+    expect(axisProductSize(reel)).toBe(2 * 1 * 2 * 2 * 1 * 3 * 1);
+  });
+});
+
+describe("drawableRatios", () => {
+  test("a static or mixed brief draws every selected ratio", () => {
+    expect(drawableRatios(valid())).toEqual(["1:1", "9:16", "16:9"]);
+    const narrowed = { ...valid(), variation: { ...valid().variation, ratio: ["16:9"] } };
+    expect(drawableRatios(narrowed)).toEqual(["16:9"]);
+    const mixed = valid({ formats: ["static", "motion"], platforms: ["instagram-reel"], motion: ["ken-burns-in"] });
+    expect(drawableRatios(mixed)).toEqual(["1:1", "9:16", "16:9"]);
+  });
+
+  test("motionPackagedRatios lists the ratios of requested motion platforms only", () => {
+    const reel = valid({ platforms: ["instagram-feed", "instagram-reel", "tiktok"] });
+    expect([...motionPackagedRatios(reel)].sort()).toEqual(["9:16"]);
+    expect(motionPackagedRatios(valid({ platforms: ["instagram-feed", "linkedin"] })).size).toBe(0);
+  });
+
+  test("a selection the narrowing empties is flagged in the editor, not left to the run", () => {
+    // Structurally valid, so D7 keeps Save open — but VariationPolicy.fromBrief
+    // refuses it at plan time, so the editor has to say the brief cannot run.
+    const noneDrawable = valid({
+      mode: "variation",
+      formats: ["motion"],
+      platforms: ["instagram-reel"],
+      motion: ["ken-burns-in"],
+      variation: { ...valid().variation, ratio: ["1:1", "16:9"] },
+    });
+    expect(validatePolicy(noneDrawable).ratio).toMatch(
+      /None of the selected ratios can be drawn: motion-only output can draw \[9:16\] only/,
+    );
+
+    // and when no platform packages motion at all, the fix named is different
+    const noMotionPlatform = valid({
+      mode: "variation",
+      formats: ["motion"],
+      platforms: ["instagram-feed", "linkedin"],
+      motion: ["ken-burns-in"],
+      variation: { ...valid().variation, ratio: ["1:1"] },
+    });
+    expect(validatePolicy(noMotionPlatform).ratio).toMatch(
+      /no selected platform packages motion at any ratio/,
+    );
+
+    // a selection that still has a drawable member is not flagged
+    expect(validatePolicy(valid({ mode: "variation" })).ratio).toBeUndefined();
+  });
+
+  test("a selection the motion narrowing empties draws nothing at all", () => {
+    const allExcluded = valid({
+      formats: ["motion"],
+      platforms: ["instagram-reel"],
+      motion: ["ken-burns-in"],
+      variation: { ...valid().variation, ratio: ["1:1"] },
+    });
+    expect(drawableRatios(allExcluded)).toEqual([]);
   });
 });
 
@@ -258,8 +332,23 @@ describe("validatePolicy", () => {
   test("every axis list must keep at least one value", () => {
     expect(validatePolicy(randomized({ layout: [] })).layout).toMatch(/at least one layout/);
     expect(validatePolicy(randomized({ tone: [] })).tone).toMatch(/at least one tone/);
+    expect(validatePolicy(randomized({ ratio: [] })).ratio).toMatch(/at least one aspect ratio/);
     expect(validatePolicy(randomized({ background: [] })).background).toMatch(/at least one background/);
     expect(validatePolicy(randomized({ paletteShift: [] })).paletteShift).toMatch(/at least one palette/);
+  });
+
+  test("the ratio floor must fit the count: perRatio × the ratios the plan draws", () => {
+    // 1 × 3 = 3 of 12 fits
+    expect(validatePolicy(randomized()).perRatio).toBeUndefined();
+    // 2 × 3 = 6 of 5 does not — the planner would refuse it
+    const over = validatePolicy(randomized({ perRatio: "2", count: "5" }));
+    expect(over.perRatio).toMatch(/coverage\.perRatio 2 × 3 selected ratios exceeds count 5/);
+    expect(over.perRatio).toMatch(/lower the floor, raise the count, or select fewer ratios/);
+    // selecting a third ratio is what can make a valid floor impossible
+    const twoRatios = { ...randomized({ perRatio: "2", count: "5" }).variation, ratio: ["1:1", "16:9"] };
+    expect(validatePolicy({ ...randomized(), variation: twoRatios }).perRatio).toBeUndefined();
+    // an unset floor never trips it, whatever the count parses to
+    expect(validatePolicy(randomized({ perRatio: "", count: "-5" })).perRatio).toBeUndefined();
   });
 });
 

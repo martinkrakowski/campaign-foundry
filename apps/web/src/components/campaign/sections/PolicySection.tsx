@@ -1,10 +1,19 @@
 "use client";
 
 import type { Dispatch, ReactNode } from "react";
+import { RATIO_DIMENSIONS, RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { AxisCard, Button, CreativeGlyph, Input, Slider, Stepper } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
-import { axisProductSize, maxMinDistance, type FieldErrors } from "@/components/campaign/validate";
+import { RATIO_OPTIONS } from "@/components/campaign/editor-state";
+import { RatioPanel } from "@/components/campaign/RatioPanel";
+import {
+  axisProductSize,
+  drawableRatios,
+  maxMinDistance,
+  motionPackagedRatios,
+  type FieldErrors,
+} from "@/components/campaign/validate";
 import { SectionShell, Field } from "./IdentitySection";
 import {
   LAYOUT_OPTIONS,
@@ -101,6 +110,82 @@ function AxisCards<T extends string>({
 
 const HEADLINE_POOL_EMPTY =
   "The headline pool has no approved entries — approve at least one in the Copy step.";
+
+/**
+ * The ratio axis: the three canvas panels, the coverage-per-ratio Stepper that
+ * sets their shared floor, and the constraint readout that binds the two — the
+ * Stepper sits beside the panels so the cause (the floor) and its effect (each
+ * panel's share of the count) stay in one place.
+ */
+function RatioAxis({
+  state,
+  dispatch,
+  errors,
+  compact,
+}: {
+  state: EditorState;
+  dispatch: Dispatch<EditorAction>;
+  errors: FieldErrors;
+  compact: boolean;
+}) {
+  const count = Math.max(0, Number.parseInt(state.variation.count, 10) || 0);
+  const floor = Math.max(0, Number.parseInt(state.variation.perRatio, 10) || 0);
+  const drawable = drawableRatios(state);
+  // The same motion narrowing the policy applies: a motion-only plan draws only
+  // the ratios its requested platforms package.
+  const motionOnly = state.formats.includes("motion") && !state.formats.includes("static");
+  const packaged = motionPackagedRatios(state);
+  const motionRatios = RATIO_OPTIONS.filter((ratio) => packaged.has(ratio));
+  const ratioFloorTotal = floor * drawable.length;
+  // Mirrors the planner's refusal (perRatio × ratios it will draw > count), so
+  // the coupling surfaces before the run instead of as a shortfall error after.
+  const over = floor > 0 && ratioFloorTotal > count;
+  const reason =
+    motionRatios.length > 0
+      ? `Excluded — motion-only output can draw [${motionRatios.join(", ")}] only; add the static format to draw this ratio.`
+      : "Excluded — no selected platform packages motion at any ratio; add the static format to draw this ratio.";
+
+  return (
+    <fieldset className="space-y-2">
+      <legend className="text-[11px] text-text-muted">Aspect ratios</legend>
+      <Field label="Coverage per ratio" error={errors.perRatio} hint="Fewest creatives each aspect ratio must get">
+        <Stepper
+          aria-label="Coverage per ratio"
+          min={0}
+          max={Math.max(1, Number.parseInt(state.variation.count, 10) || 1)}
+          value={state.variation.perRatio}
+          invalid={Boolean(errors.perRatio)}
+          allowUnset
+          unsetLabel="No floor"
+          onChange={(value) => dispatch({ type: "setVariation", field: "perRatio", value })}
+        />
+      </Field>
+      <p className={cn("text-[11px]", over ? "text-error" : "text-text-muted")}>
+        floor {floor} × {drawable.length} selected = {ratioFloorTotal} of count {count}
+        {over ? " — lower the floor, raise the count, or select fewer ratios" : ""}
+      </p>
+      <div
+        className={cn(
+          "grid gap-2",
+          compact ? "grid-cols-2" : "grid-cols-[repeat(auto-fill,minmax(9rem,1fr))]",
+        )}
+      >
+        {RATIO_VALUES.map((value) => (
+          <RatioPanel
+            key={value}
+            ratio={{ value, ...RATIO_DIMENSIONS[value] }}
+            selected={state.variation.ratio.includes(value)}
+            excluded={motionOnly && !packaged.has(value)}
+            reason={motionOnly ? reason : undefined}
+            floor={floor}
+            onToggle={(value) => dispatch({ type: "toggleRatio", value })}
+          />
+        ))}
+      </div>
+      {errors.ratio ? <span className="block text-[11px] text-error">{errors.ratio}</span> : null}
+    </fieldset>
+  );
+}
 
 function HeadlineAxisToggle({ state, dispatch }: { state: EditorState; dispatch: Dispatch<EditorAction> }) {
   const poolLoaded = state.pool !== null;
@@ -221,19 +306,8 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
               onChange={(value) => dispatch({ type: "setVariation", field: "perProduct", value })}
             />
           </Field>
-          <Field label="Coverage per ratio" error={errors.perRatio} hint="Fewest creatives each aspect ratio must get">
-            <Stepper
-              aria-label="Coverage per ratio"
-              min={0}
-              max={Math.max(1, Number.parseInt(state.variation.count, 10) || 1)}
-              value={state.variation.perRatio}
-              invalid={Boolean(errors.perRatio)}
-              allowUnset
-              unsetLabel="No floor"
-              onChange={(value) => dispatch({ type: "setVariation", field: "perRatio", value })}
-            />
-          </Field>
         </div>
+        <RatioAxis state={state} dispatch={dispatch} errors={errors} compact={compact} />
         <AxisCards
           legend="Layout"
           options={LAYOUT_OPTIONS}

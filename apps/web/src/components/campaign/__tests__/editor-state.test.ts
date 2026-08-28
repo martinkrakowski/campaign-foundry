@@ -248,6 +248,21 @@ describe("editorReducer — variation axes", () => {
     expect(state.variation.paletteShift).toEqual([PALETTE_SHIFT_OPTIONS[1], PALETTE_SHIFT_OPTIONS[2]]);
   });
 
+  test("ratio toggles remove a selected canvas and re-add it in canonical order", () => {
+    const off = reduce(base(), { type: "toggleRatio", value: "9:16" });
+    expect(off.variation.ratio).toEqual(["1:1", "16:9"]);
+    const reordered = reduce(off, { type: "toggleRatio", value: "9:16" });
+    expect(reordered.variation.ratio).toEqual(["1:1", "9:16", "16:9"]);
+    // deselecting down to none is possible (validation flags it, the state keeps it)
+    const none = reduce(
+      base(),
+      { type: "toggleRatio", value: "1:1" },
+      { type: "toggleRatio", value: "9:16" },
+      { type: "toggleRatio", value: "16:9" },
+    );
+    expect(none.variation.ratio).toEqual([]);
+  });
+
   test("toggleHeadline flips the flag", () => {
     const on = reduce(base(), { type: "toggleHeadline" });
     expect(on.variation.headline).toBe(true);
@@ -497,6 +512,17 @@ describe("toBrief", () => {
     const on = reduce(state, { type: "toggleHeadline" });
     expect(toBrief(on).variation?.axes).toMatchObject({ headline: HEADLINE_POOL_REF });
   });
+
+  test("the ratio axis is emitted only when the selection constrains", () => {
+    const state = filled({ mode: "variation" });
+    // a full selection is the default (absent → every ratio): no key, byte-stable
+    expect(toBrief(state).variation?.axes).not.toHaveProperty("ratio");
+    const narrowed = reduce(state, { type: "toggleRatio", value: "9:16" });
+    expect(toBrief(narrowed).variation?.axes).toMatchObject({ ratio: ["1:1", "16:9"] });
+    // re-selecting the full set drops the key again — it no longer constrains
+    const restored = reduce(narrowed, { type: "toggleRatio", value: "9:16" });
+    expect(toBrief(restored).variation?.axes).not.toHaveProperty("ratio");
+  });
 });
 
 describe("fromBrief", () => {
@@ -707,6 +733,21 @@ describe("variation policy round-trip", () => {
   test("a classic brief still gets the editor's randomized defaults", () => {
     const state = fromBrief(savedBrief(), { file: "camp.yaml" });
     expect(state.variation).toMatchObject({ count: "12", minDistance: "2", perProduct: "1", perRatio: "1" });
+  });
+
+  test("a requested ratio subset round-trips, and a brief without the axis keeps every ratio", () => {
+    const policy = randomized.variation as { axes: Record<string, unknown> };
+    const selected = {
+      ...randomized,
+      variation: { ...policy, axes: { ...policy.axes, ratio: ["1:1", "16:9"] } },
+    } as unknown as CampaignBrief;
+    const state = fromBrief(selected, { file: "camp.yaml" });
+    expect(state.variation.ratio).toEqual(["1:1", "16:9"]);
+    expect(toBrief(state).variation?.axes).toMatchObject({ ratio: ["1:1", "16:9"] });
+    // no key → all three selected, and saving back stays key-free
+    const plain = fromBrief(randomized, { file: "camp.yaml" });
+    expect(plain.variation.ratio).toEqual(["1:1", "9:16", "16:9"]);
+    expect(toBrief(plain).variation?.axes).not.toHaveProperty("ratio");
   });
 });
 

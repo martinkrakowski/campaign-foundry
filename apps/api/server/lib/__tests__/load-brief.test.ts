@@ -99,7 +99,7 @@ const v2Brief = {
 
 describe("parseBrief v2 fields", () => {
   test("SUPPORTED_AXES and SUPPORTED_FORMATS lock the P0 allowlist; motion is a gated extension", () => {
-    expect(SUPPORTED_AXES).toEqual(["layout", "tone", "background", "paletteShift", "headline"]);
+    expect(SUPPORTED_AXES).toEqual(["layout", "tone", "ratio", "background", "paletteShift", "headline"]);
     expect(SUPPORTED_FORMATS).toEqual(["static"]);
     expect(MOTION_AXES).toEqual(["motion", "duration"]);
     expect(MOTION_FORMAT).toBe("motion");
@@ -108,6 +108,30 @@ describe("parseBrief v2 fields", () => {
   test("accepts headline: pool://copy — the only supported pool reference", () => {
     const parsed = parseBrief({ ...valid, variation: { axes: { headline: "pool://copy" } } });
     expect(parsed.variation?.axes?.headline).toBe("pool://copy");
+  });
+
+  test("accepts a requested ratio subset and preserves it verbatim", () => {
+    const parsed = parseBrief({ ...valid, variation: { count: 2, axes: { ratio: ["16:9", "1:1"] } } });
+    expect(parsed.variation?.axes?.ratio).toEqual(["16:9", "1:1"]);
+  });
+
+  test("a brief with no ratio key parses exactly as before — absent means every ratio", () => {
+    const parsed = parseBrief(v2Brief);
+    expect(parsed.variation?.axes?.ratio).toBeUndefined();
+    expect(Object.keys(parsed.variation?.axes ?? {})).toEqual(
+      Object.keys(v2Brief.variation.axes),
+    );
+    expect(parsed.variation).toEqual(v2Brief.variation);
+  });
+
+  test.each([
+    ["a non-array ratio", { ...valid, variation: { axes: { ratio: "1:1" } } }, /variation\.axes\.ratio.*must be an array/],
+    ["an empty ratio list", { ...valid, variation: { axes: { ratio: [] } } }, /variation\.axes\.ratio.*at least one/],
+    ["an unsupported ratio value", { ...valid, variation: { axes: { ratio: ["4:5"] } } }, /variation\.axes\.ratio.*"4:5"/],
+    ["a non-string ratio value", { ...valid, variation: { axes: { ratio: [1] } } }, /variation\.axes\.ratio.*1/],
+    ["a repeated ratio", { ...valid, variation: { axes: { ratio: ["9:16", "9:16"] } } }, /variation\.axes\.ratio.*"9:16".*once/],
+  ])("rejects %s", (_label, input, message) => {
+    expect(() => parseBrief(input)).toThrow(message);
   });
 
   test("classic briefs omit v2 fields — they are not required", () => {
