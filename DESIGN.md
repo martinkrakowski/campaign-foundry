@@ -202,10 +202,20 @@ Skeletal by design — patterns to extend, not a library.
   never saved* · 🟡 *Applied, unsaved edits* · 🟢 *Saved & applied*.
 - **ErrorStrip** — one `rounded-full` chip per section with errors, red border/tint, count
   pill; clicking scrolls to the section. Lives in the action bar.
-- **SaveMenu** — "Save ▾" opening upward (it sits in a footer): *Save & apply*, *Save as…*,
-  each with a one-line description. `role="menu"` / `menuitem`, Escape and outside-click close.
+- **SaveMenu** — "Save ▾" opening upward (it sits in a footer): *Save & apply*,
+  *Save as…*, each with a one-line description. `role="menu"` / `menuitem`, Escape and outside-click close.
 - **EstimatePanel**, **HeadlinePoolDrawer**, **BriefSelector** — panels; a panel that can be
   in a loading, empty, error or unavailable state renders each one explicitly.
+- **StatusLine** (L1.3) — `role="status"`, progressive sentence that updates as the brief is
+  filled in: *New brief — fill Identity, Copy, Products and Output to make it runnable* →
+  *Almost there — fill Products to make it runnable* → *Ready — Apply to run, or Save & apply
+  to keep it* → *Applied — press Generate in the top bar to make ${briefId}*. Refusal
+  sentence on Apply/Save with errors.
+- **ErrorPill** (L1.3) — 16px count, red background, white text, rounded full. Used in
+  `SectionShell` and sidebar accordion aside.
+- **FloatingBar** (L1.4) — `absolute bottom-6 left-1/2 z-20 w-full max-w-[800px] -translate-x-1/2
+  rounded-xl border border-border bg-surface p-2 shadow-2xl`, positioned inside main
+  column's scroll container, never viewport. Contains StatusLine, ErrorStrip, action buttons.
 
 ---
 
@@ -235,7 +245,7 @@ a string on the way to YAML; that is not a reason to render a text box. Ask what
 *is*:
 
 | The field is… | Control | In this app |
-|---|---|---|
+| --- | --- | --- |
 | a bounded count, where the ceiling matters | **Slider** + readout | `variation.count`, bounded by `axisProductSize` — the editor cannot author a count the planner will refuse |
 | a small bounded integer, often optional | **Stepper** (`allowUnset`) | `minDistance` (0…active axes, "Auto (1)"), `coverage.perProduct` / `perRatio` ("No floor") |
 | a set drawn from a fixed vocabulary | **Toggle chips** (or **AxisCard** + `CreativeGlyph` when the choice is visual) | background, palette shift, formats, platforms, motion kinds (chips); layout, tone (cards) |
@@ -246,9 +256,19 @@ A number input is the fallback, not the default. It accepts values the field can
 says nothing about the range, and turns a bound into an error message the user meets only
 after typing.
 
----
+## 6. Copy (house style, Appendix B)
 
-## 6. Accessibility
+1. **One voice, one file.** All user-facing strings live in `messages.ts`; no string in `validate.ts` or section files.
+2. **Name the remedy.** An error says what to change, not only what is wrong: *"No selected platform packages 'motion' — add one of: instagram-story, instagram-reel…"*.
+3. **No jargon.** Strings must not contain `[`, `>=`, `×`, `variation.`, `coverage.`, `axis`, `axes`, `draw`, `floor`, `package`, `planner`, `parser`, nor raw format/ratio/platform ids (`static`, `motion`, `9:16`, `instagram-feed`).
+4. **Display names for values.** Formats, ratios, platforms are referred to by their display names (`Still images`, `Video`, `Square`, `Tall`, `Wide`, `Instagram Feed`) — never raw keys.
+5. **Progressive status.** The `StatusLine` speaks one sentence that changes as the brief is filled in, never multiple notices.
+6. **Tone rules (D13):**
+   - **RED** = a structural error on a touched field or after an attempt, and the refusal sentence.
+   - **AMBER** = *cannot run here* (never counted in pills/chips, never blocks Save).
+   - **MUTED** = everything else (derived readouts, clamp notices).
+
+## 7. Accessibility
 
 - A section placed in the sidebar exists twice below `lg` (the CSS-hidden desktop bar stays
   mounted while the mobile menu shows the same content), so it carries `data-section` rather

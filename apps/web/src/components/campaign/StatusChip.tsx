@@ -21,29 +21,24 @@ export function StatusChip({ state }: StatusChipProps) {
 
   let label: string;
   let color: string;
-  let icon: string;
 
   if (!hasApplied) {
     label = "Draft not applied";
-    color = "bg-red-500/20 text-red-400 border-red-500/50";
-    icon = "🔴";
+    color = "bg-error/20 text-error border-error/50";
   } else if (isNew) {
     label = "Applied, never saved";
-    color = "bg-orange-500/20 text-orange-400 border-orange-500/50";
-    icon = "🟠";
+    color = "bg-warning/20 text-warning border-warning/50";
   } else if (dirtySave || dirtyApply) {
     label = "Applied, unsaved edits";
-    color = "bg-yellow-500/20 text-yellow-400 border-yellow-500/50";
-    icon = "🟡";
+    color = "bg-yellow-400/20 text-yellow-400 border-yellow-400/50";
   } else {
     label = "Saved & applied";
-    color = "bg-green-500/20 text-green-400 border-green-500/50";
-    icon = "🟢";
+    color = "bg-success/20 text-success border-success/50";
   }
 
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium ${color}`}>
-      <span>{icon}</span>
+      <span aria-hidden="true" className="w-2 h-2 rounded-full bg-current" />
       <span>{label}</span>
     </span>
   );

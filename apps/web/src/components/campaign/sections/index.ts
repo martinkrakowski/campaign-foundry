@@ -5,3 +5,11 @@ export { ProductsSection } from "./ProductsSection";
 export { TreatmentsSection } from "./TreatmentsSection";
 export { OutputSection } from "./OutputSection";
 export { PolicySection } from "./PolicySection";
+
+/** Section order by mode (D17). */
+export function sectionOrder(mode: "brief" | "variation"): string[] {
+  if (mode === "variation") {
+    return ["identity", "copy", "products", "output", "policy"];
+  }
+  return ["identity", "copy", "products", "treatments", "output"];
+}

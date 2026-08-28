@@ -23,7 +23,7 @@ function ProductRow({ product, index, dispatch, uploadingKeys, onLogoFile, error
   return (
     <div className="space-y-3 rounded-lg border border-border bg-surface p-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="Name" error={errors[`product-${index}-name`]}>
+        <Field fieldKey={`product-${index}-name`} label="Name" error={errors[`product-${index}-name`]}>
           <Input
             value={product.name}
             onChange={(e) =>
@@ -32,7 +32,7 @@ function ProductRow({ product, index, dispatch, uploadingKeys, onLogoFile, error
             invalid={Boolean(errors[`product-${index}-name`])}
           />
         </Field>
-        <Field label="ID" error={errors[`product-${index}-id`]}>
+        <Field fieldKey={`product-${index}-id`} label="ID" error={errors[`product-${index}-id`]}>
           <Input
             value={product.id}
             onChange={(e) =>
@@ -43,7 +43,7 @@ function ProductRow({ product, index, dispatch, uploadingKeys, onLogoFile, error
         </Field>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="Primary Colour" error={errors[`product-${index}-color`]}>
+        <Field fieldKey={`product-${index}-color`} label="Primary Colour" error={errors[`product-${index}-color`]}>
           <Input
             value={product.primaryColor}
             onChange={(e) =>
@@ -52,7 +52,7 @@ function ProductRow({ product, index, dispatch, uploadingKeys, onLogoFile, error
             invalid={Boolean(errors[`product-${index}-color`])}
           />
         </Field>
-        <Field label="Logo Path" error={errors[`product-${index}-logo`]}>
+        <Field fieldKey={`product-${index}-logo`} label="Logo Path" error={errors[`product-${index}-logo`]}>
           <div className="flex gap-2">
             <Input
               value={product.logoPath}

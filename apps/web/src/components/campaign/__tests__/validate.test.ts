@@ -1,4 +1,5 @@
 import { describe, test, expect } from "vitest";
+import * as messages from "@/components/campaign/messages";
 import {
   axisProductSize,
   drawableRatios,
@@ -61,15 +62,15 @@ describe("maxMinDistance", () => {
 });
 
 describe("motionUnavailableReason", () => {
-  test("is the probe's reason exactly when motion is requested and off, else absent", () => {
+  test("says video is unavailable exactly when motion is requested and the probe is off", () => {
     expect(motionUnavailableReason(valid())).toBeUndefined();
     expect(motionUnavailableReason(valid({ formats: ["static", "motion"] }))).toBeUndefined();
     expect(motionUnavailableReason(valid({ capabilities: { motion: true }, formats: ["motion"] }))).toBeUndefined();
     expect(motionUnavailableReason(valid({ capabilities: { motion: false, reason: "no ffmpeg" }, formats: ["motion"] }))).toBe(
-      "Motion format is not available: no ffmpeg.",
+      messages.formatsMotionUnavailable,
     );
     expect(motionUnavailableReason(valid({ capabilities: { motion: false }, formats: ["motion"] }))).toBe(
-      "Motion format is not available: capability off.",
+      messages.formatsMotionUnavailable,
     );
   });
 });
@@ -164,9 +165,7 @@ describe("drawableRatios", () => {
       motion: ["ken-burns-in"],
       variation: { ...valid().variation, ratio: ["1:1", "16:9"] },
     });
-    expect(validatePolicy(noneDrawable).ratio).toMatch(
-      /None of the selected ratios can be drawn: motion-only output can draw \[9:16\] only/,
-    );
+    expect(validatePolicy(noneDrawable).ratio).toBe(messages.ratioNoneDrawablePackaged(["Tall"]));
 
     // and when no platform packages motion at all, the fix named is different
     const noMotionPlatform = valid({
@@ -176,9 +175,7 @@ describe("drawableRatios", () => {
       motion: ["ken-burns-in"],
       variation: { ...valid().variation, ratio: ["1:1"] },
     });
-    expect(validatePolicy(noMotionPlatform).ratio).toMatch(
-      /no selected platform packages motion at any ratio/,
-    );
+    expect(validatePolicy(noMotionPlatform).ratio).toBe(messages.ratioNoneDrawableNone());
 
     // a selection that still has a drawable member is not flagged
     expect(validatePolicy(valid({ mode: "variation" })).ratio).toBeUndefined();
@@ -197,7 +194,7 @@ describe("drawableRatios", () => {
 
 describe("validateIdentity", () => {
   test("rejects an id that is not a path-safe slug", () => {
-    expect(validateIdentity(valid({ briefId: "Not Safe" })).briefId).toMatch(/Lowercase letters/);
+    expect(validateIdentity(valid({ briefId: "Not Safe" })).briefId).toBe(messages.briefId);
     expect(validateIdentity(valid())).toEqual({});
   });
 
@@ -231,8 +228,8 @@ describe("validateCopy", () => {
 
   test("region and audience are filed under Identity, where their inputs live", () => {
     const errors = validateIdentity(valid({ targetRegion: " ", targetAudience: "" }));
-    expect(errors.targetRegion).toMatch(/Target region is required/);
-    expect(errors.targetAudience).toMatch(/Target audience is required/);
+    expect(errors.targetRegion).toBe(messages.targetRegion);
+    expect(errors.targetAudience).toBe(messages.targetAudience);
     expect(validateCopy(valid({ targetRegion: " ", targetAudience: "" }))).toEqual({});
   });
 });
@@ -240,10 +237,10 @@ describe("validateCopy", () => {
 describe("validateProducts", () => {
   test("classic needs two unique products, randomized needs one", () => {
     expect(validateProducts(valid())).toEqual({});
-    expect(validateProducts(valid({ products: [product()] })).products).toMatch(/at least 2 unique products/);
+    expect(validateProducts(valid({ products: [product()] })).products).toBe(messages.products(2, "Classic"));
     expect(validateProducts(valid({ mode: "variation", products: [product()] }))).toEqual({});
-    expect(validateProducts(valid({ mode: "variation", products: [] })).products).toMatch(
-      /randomized campaign requires at least 1 unique product\./,
+    expect(validateProducts(valid({ mode: "variation", products: [] })).products).toBe(
+      messages.products(1, "Randomized"),
     );
   });
 
@@ -257,11 +254,11 @@ describe("validateProducts", () => {
         ],
       }),
     );
-    expect(errors["product-0-id"]).toMatch(/path-safe slug/);
-    expect(errors["product-2-id"]).toMatch(/Duplicate product id "alpha"/);
-    expect(errors["product-1-name"]).toMatch(/Name is required/);
-    expect(errors["product-1-color"]).toMatch(/6-digit hex/);
-    expect(errors["product-1-logo"]).toMatch(/Logo path is required/);
+    expect(errors["product-0-id"]).toBe(messages.productId);
+    expect(errors["product-2-id"]).toBe(messages.productIdDuplicate("alpha"));
+    expect(errors["product-1-name"]).toBe(messages.productName);
+    expect(errors["product-1-color"]).toBe(messages.productColor);
+    expect(errors["product-1-logo"]).toBe(messages.productLogo);
   });
 });
 
@@ -283,10 +280,10 @@ describe("validateTreatments", () => {
         ],
       }),
     );
-    expect(errors["treatment-1-id"]).toMatch(/Duplicate treatment id "ok"/);
-    expect(errors["treatment-1-layout"]).toMatch(/Invalid layout/);
-    expect(errors["treatment-1-tone"]).toMatch(/Invalid tone/);
-    expect(errors["treatment-2-id"]).toMatch(/path-safe slug/);
+    expect(errors["treatment-1-id"]).toBe(messages.treatmentIdDuplicate("ok"));
+    expect(errors["treatment-1-layout"]).toBe(messages.treatmentLayout);
+    expect(errors["treatment-1-tone"]).toBe(messages.treatmentTone);
+    expect(errors["treatment-2-id"]).toBe(messages.treatmentId);
   });
 });
 
@@ -301,40 +298,40 @@ describe("validatePolicy", () => {
   });
 
   test("count must be an integer of at least one", () => {
-    expect(validatePolicy(randomized({ count: "" })).count).toMatch(/integer >= 1/);
-    expect(validatePolicy(randomized({ count: "0" })).count).toMatch(/integer >= 1/);
-    expect(validatePolicy(randomized({ count: "1.5" })).count).toMatch(/integer >= 1/);
+    expect(validatePolicy(randomized({ count: "" })).count).toBe(messages.count);
+    expect(validatePolicy(randomized({ count: "0" })).count).toBe(messages.count);
+    expect(validatePolicy(randomized({ count: "1.5" })).count).toBe(messages.count);
     expect(validatePolicy(randomized({ count: "3" })).count).toBeUndefined();
   });
 
   test("seed is optional but bounded to uint32", () => {
     expect(validatePolicy(randomized({ seed: "" })).seed).toBeUndefined();
     expect(validatePolicy(randomized({ seed: "0" })).seed).toBeUndefined();
-    expect(validatePolicy(randomized({ seed: "nope" })).seed).toMatch(/\[0, 2\^32\)/);
-    expect(validatePolicy(randomized({ seed: "-1" })).seed).toMatch(/\[0, 2\^32\)/);
-    expect(validatePolicy(randomized({ seed: "4294967296" })).seed).toMatch(/\[0, 2\^32\)/);
+    expect(validatePolicy(randomized({ seed: "nope" })).seed).toBe(messages.seed);
+    expect(validatePolicy(randomized({ seed: "-1" })).seed).toBe(messages.seed);
+    expect(validatePolicy(randomized({ seed: "4294967296" })).seed).toBe(messages.seed);
   });
 
   test("minDistance is bounded by the number of active axes", () => {
     expect(validatePolicy(randomized({ minDistance: "6" })).minDistance).toBeUndefined();
-    expect(validatePolicy(randomized({ minDistance: "7" })).minDistance).toMatch(/\[0, 6\]/);
-    expect(validatePolicy(randomized({ minDistance: "-1" })).minDistance).toMatch(/\[0, 6\]/);
+    expect(validatePolicy(randomized({ minDistance: "7" })).minDistance).toBe(messages.minDistance(6));
+    expect(validatePolicy(randomized({ minDistance: "-1" })).minDistance).toBe(messages.minDistance(6));
     expect(validatePolicy(randomized({ minDistance: "" })).minDistance).toBeUndefined();
     expect(validatePolicy(randomized({ headline: true, minDistance: "7" })).minDistance).toBeUndefined();
   });
 
   test("coverage fields are optional integers of at least zero", () => {
     expect(validatePolicy(randomized({ perProduct: "", perRatio: "" }))).toEqual({});
-    expect(validatePolicy(randomized({ perProduct: "1.5" })).perProduct).toMatch(/integer >= 0/);
-    expect(validatePolicy(randomized({ perRatio: "x" })).perRatio).toMatch(/integer >= 0/);
+    expect(validatePolicy(randomized({ perProduct: "1.5" })).perProduct).toBe(messages.perProduct);
+    expect(validatePolicy(randomized({ perRatio: "x" })).perRatio).toBe(messages.perRatio);
   });
 
   test("every axis list must keep at least one value", () => {
-    expect(validatePolicy(randomized({ layout: [] })).layout).toMatch(/at least one layout/);
-    expect(validatePolicy(randomized({ tone: [] })).tone).toMatch(/at least one tone/);
-    expect(validatePolicy(randomized({ ratio: [] })).ratio).toMatch(/at least one aspect ratio/);
-    expect(validatePolicy(randomized({ background: [] })).background).toMatch(/at least one background/);
-    expect(validatePolicy(randomized({ paletteShift: [] })).paletteShift).toMatch(/at least one palette/);
+    expect(validatePolicy(randomized({ layout: [] })).layout).toBe(messages.layout);
+    expect(validatePolicy(randomized({ tone: [] })).tone).toBe(messages.tone);
+    expect(validatePolicy(randomized({ ratio: [] })).ratio).toBe(messages.ratio);
+    expect(validatePolicy(randomized({ background: [] })).background).toBe(messages.background);
+    expect(validatePolicy(randomized({ paletteShift: [] })).paletteShift).toBe(messages.paletteShift);
   });
 
   test("the ratio floor must fit the count: perRatio × the ratios the plan draws", () => {
@@ -342,8 +339,7 @@ describe("validatePolicy", () => {
     expect(validatePolicy(randomized()).perRatio).toBeUndefined();
     // 2 × 3 = 6 of 5 does not — the planner would refuse it
     const over = validatePolicy(randomized({ perRatio: "2", count: "5" }));
-    expect(over.perRatio).toMatch(/coverage\.perRatio 2 × 3 selected ratios exceeds count 5/);
-    expect(over.perRatio).toMatch(/lower the floor, raise the count, or select fewer ratios/);
+    expect(over.perRatio).toBe(messages.perRatioExceeds(3, 2, 5));
     // selecting a third ratio is what can make a valid floor impossible
     const twoRatios = { ...randomized({ perRatio: "2", count: "5" }).variation, ratio: ["1:1", "16:9"] };
     expect(validatePolicy({ ...randomized(), variation: twoRatios }).perRatio).toBeUndefined();
@@ -357,15 +353,15 @@ describe("validateOutput", () => {
   // ("switch to Randomized") correctly outranks every capability/compatibility message.
   test("formats and platforms must be non-empty", () => {
     expect(validateOutput(valid())).toEqual({});
-    expect(validateOutput(valid({ formats: [] })).formats).toMatch(/at least one format/);
-    expect(validateOutput(valid({ platforms: [] })).platforms).toMatch(/at least one platform/);
+    expect(validateOutput(valid({ formats: [] })).formats).toBe(messages.formats);
+    expect(validateOutput(valid({ platforms: [] })).platforms).toBe(messages.platforms);
   });
 
   test("motion is refused while the capability is off, with the probe's reason", () => {
     const off = valid({ mode: "variation", formats: ["static", "motion"], capabilities: { motion: false, reason: "no ffmpeg" } });
-    expect(validateOutput(off).formats).toMatch(/not available: no ffmpeg/);
+    expect(validateOutput(off).formats).toBe(messages.formatsMotionUnavailable);
     const noReason = valid({ mode: "variation", formats: ["motion"], capabilities: { motion: false } });
-    expect(validateOutput(noReason).formats).toMatch(/capability off/);
+    expect(validateOutput(noReason).formats).toBe(messages.formatsMotionUnavailable);
     const on = valid({ mode: "variation", formats: ["static", "motion"],
       platforms: ["instagram-feed", "instagram-reel"],
       capabilities: { motion: true },
@@ -376,7 +372,7 @@ describe("validateOutput", () => {
   test("a platform packaging none of the requested formats says how to resolve it", () => {
     const errors = validateOutput(valid({ formats: ["motion"], platforms: ["instagram-feed", "instagram-reel"] }));
     expect(errors.platforms).toBe(
-      '"instagram-feed" only packages static — request that format, or remove the platform.',
+      messages.platformsIncompatible("Instagram Feed", ["Still images"]),
     );
   });
 
@@ -385,7 +381,7 @@ describe("validateOutput", () => {
     // the remedy, not just the rejection: these four appear in the picker the moment
     // motion is requested, so the message points straight at them
     expect(errors.formats).toBe(
-      'No selected platform packages "motion" — add one of: instagram-story, instagram-reel, tiktok, youtube-short.',
+      messages.formatsUnsupported("Video", ["Instagram Story", "Instagram Reel", "TikTok", "YouTube Short"]),
     );
   });
 
@@ -399,21 +395,21 @@ describe("validateOutput", () => {
       }),
     );
     expect(errors.platforms).toBeUndefined();
-    expect(errors.formats).toMatch(/not available: no ffmpeg/);
+    expect(errors.formats).toBe(messages.formatsMotionUnavailable);
   });
 });
 
 describe("validateOutput — motion needs a randomized campaign", () => {
   test("a classic brief requesting motion is told to switch mode", () => {
     const errors = validateOutput(valid({ mode: "brief", formats: ["motion"], platforms: ["instagram-reel"] }));
-    expect(errors.formats).toMatch(/requires a randomized campaign — switch the mode to Randomized/);
+    expect(errors.formats).toBe(messages.formatsMotionNeedsRandomized);
   });
 
   test("the mode rule outranks the capability message — it is the root cause", () => {
     const errors = validateOutput(
       valid({ mode: "brief", formats: ["motion"], platforms: ["instagram-reel"], capabilities: { motion: false, reason: "no ffmpeg" } }),
     );
-    expect(errors.formats).toMatch(/switch the mode to Randomized/);
+    expect(errors.formats).toBe(messages.formatsMotionNeedsRandomized);
   });
 
   test("a randomized brief requesting motion on a motion platform is clean", () => {
@@ -428,18 +424,18 @@ describe("validateMotion", () => {
 
   test("a motion request needs at least one kind and one duration", () => {
     const errors = validateMotion(valid({ formats: ["motion"] }));
-    expect(errors.motion).toMatch(/at least one motion kind/);
-    expect(errors.duration).toMatch(/at least one duration/);
+    expect(errors.motion).toBe(messages.motion);
+    expect(errors.duration).toBe(messages.duration);
     expect(validateMotion(valid({ formats: ["motion"], motion: ["ken-burns-in"], duration: [5] }))).toEqual({});
   });
 
   test("durations are whole seconds bounded to the API's 2–30 range", () => {
     expect(validateMotion(valid({ formats: ["motion"], motion: ["ken-burns-in"], duration: [2, 30] })).duration).toBeUndefined();
     const bad = validateMotion(valid({ formats: ["motion"], motion: ["ken-burns-in"], duration: [1, 31] }));
-    expect(bad.duration).toMatch(/whole seconds between 2 and 30/);
+    expect(bad.duration).toBe(messages.durationRange(2, 30));
     expect(
       validateMotion(valid({ formats: ["motion"], motion: ["ken-burns-in"], duration: [Number.NaN] })).duration,
-    ).toMatch(/whole seconds between 2 and 30/);
+    ).toBe(messages.durationRange(2, 30));
   });
 });
 
@@ -448,7 +444,7 @@ describe("validateMotion — duplicate durations", () => {
     const errors = validateMotion(
       valid({ formats: ["static", "motion"], motion: ["ken-burns-in"], duration: [6, 6] }),
     );
-    expect(errors.duration).toMatch(/Each duration must be distinct/);
+    expect(errors.duration).toBe(messages.durationDuplicate);
   });
 
   test("distinct lengths pass", () => {
