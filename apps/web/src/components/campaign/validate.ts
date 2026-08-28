@@ -1,13 +1,6 @@
 import { MAX_DURATION_SEC, MIN_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import type { EditorState } from "./editor-state";
-import {
-  LAYOUT_OPTIONS,
-  TONE_OPTIONS,
-  approvedHeadlines,
-  axisProductSize,
-  drawableRatios,
-  motionPackagedRatios,
-} from "./editor-state";
+import { LAYOUT_OPTIONS, TONE_OPTIONS, drawableRatios, motionPackagedRatios } from "./editor-state";
 
 // The draw-size helpers moved to `editor-state.ts` (the reducer's clamp needs them, and
 // the two modules were importing each other); re-exported here for their old callers.
