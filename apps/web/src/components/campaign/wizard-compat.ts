@@ -5,6 +5,7 @@ import {
   approvedHeadlines as baseApprovedHeadlines,
   PLAN_DEBOUNCE_MS as BASE_PLAN_DEBOUNCE_MS,
   emptyProduct,
+  allocateProduct,
 } from "./editor-state";
 
 export const WIZARD_STEPS = ["type", "products", "copy", "policy", "output", "review"] as const;
@@ -146,11 +147,7 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
       };
     }
     case "addProduct":
-      return {
-        ...state,
-        products: [...state.products, emptyProduct(state.nextProductKey)],
-        nextProductKey: state.nextProductKey + 1,
-      };
+      return { ...state, ...allocateProduct(state.products, state.nextProductKey) };
     case "removeProduct":
       return { ...state, products: state.products.filter((product) => product.key !== action.key) };
     case "setVariation":

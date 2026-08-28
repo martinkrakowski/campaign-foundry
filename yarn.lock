@@ -277,6 +277,7 @@ __metadata:
     "@campaignfoundry/CampaignOrchestration": "workspace:*"
     "@campaignfoundry/Distribution": "workspace:*"
     "@eslint/js": "npm:^9.0.0"
+    "@types/js-yaml": "npm:^4.0.9"
     "@types/node": "npm:^20.11.0"
     "@types/react": "npm:^19.0.0"
     "@types/react-dom": "npm:^19.0.0"

@@ -17,7 +17,7 @@ export type FieldErrors = Record<string, string>;
 function toEditorState(state: WizardState): EditorState {
   // This is a simplified conversion - in reality, we'd need a proper conversion
   // For now, return a minimal EditorState
-    return {
+  return {
     source: { kind: "new", tempId: "temp" },
     mode: state.mode,
     briefId: state.briefId,
@@ -46,6 +46,7 @@ function toEditorState(state: WizardState): EditorState {
     duration: [],
     formats: ["static"],
     platforms: state.platforms,
+    outputExplicit: true,
     pool: state.pool,
     headlineAxisDropped: false,
     appliedSnapshot: null,

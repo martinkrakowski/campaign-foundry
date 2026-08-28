@@ -43,6 +43,22 @@ export function nextKeyAfter(products: ProductDraft[]): number {
   return numericKeys.length > 0 ? Math.max(...numericKeys) + 1 : 1;
 }
 
+/**
+ * The one allocation path for a new product: append a draft keyed `nextKey` and
+ * burn the counter. `editorReducer.addProduct` and `wizardReducer.addProduct`
+ * both call this — they were verbatim copies, and a third copy is how the
+ * module-level counter regressed in the first place.
+ */
+export function allocateProduct(
+  products: ProductDraft[],
+  nextKey: number,
+): { products: ProductDraft[]; nextProductKey: number } {
+  return {
+    products: [...products, emptyProduct(nextKey)],
+    nextProductKey: nextKey + 1,
+  };
+}
+
 export function slugify(value: string): string {
   return value
     .toLowerCase()
@@ -113,6 +129,14 @@ export interface EditorState {
   duration: number[];
   formats: string[];
   platforms: string[];
+  /**
+   * Whether the output block must be written even when it equals the absent-key
+   * default (static × the static platforms): true when the loaded brief declared
+   * `output`, or the user has toggled a format or platform. A default-valued
+   * output that was never declared serialises as the absent key instead — the
+   * static platforms carry zero insets (D11), so both forms render identically.
+   */
+  outputExplicit: boolean;
   pool: CopyPool | null;
   headlineAxisDropped: boolean;
   appliedSnapshot: CampaignBrief | null;
@@ -185,6 +209,7 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
     duration: [],
     formats: ["static"],
     platforms: [...STATIC_PLATFORMS],
+    outputExplicit: false,
     pool: null,
     headlineAxisDropped: false,
     appliedSnapshot: null,
@@ -225,11 +250,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       };
     }
     case "addProduct":
-      return {
-        ...state,
-        products: [...state.products, emptyProduct(state.nextProductKey)],
-        nextProductKey: state.nextProductKey + 1,
-      };
+      return { ...state, ...allocateProduct(state.products, state.nextProductKey) };
     case "removeProduct":
       return { ...state, products: state.products.filter((product) => product.key !== action.key) };
     case "setTreatment": {
@@ -310,10 +331,16 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       const next = state.formats.includes(action.value)
         ? state.formats.filter((f) => f !== action.value)
         : [...state.formats, action.value];
-      return { ...state, formats: next };
+      // The user has spoken about output: it must persist even if the toggles
+      // happen to land back on the absent-key default.
+      return { ...state, formats: next, outputExplicit: true };
     }
     case "togglePlatform":
-      return { ...state, platforms: toggleOrdered(state.platforms, action.value, PLATFORM_ORDER) };
+      return {
+        ...state,
+        platforms: toggleOrdered(state.platforms, action.value, PLATFORM_ORDER),
+        outputExplicit: true,
+      };
     case "setPool": {
       if (action.briefId !== state.briefId) return state;
       const none = approvedHeadlines(action.pool) === 0;
@@ -391,17 +418,29 @@ function toTreatment(draft: TreatmentDraft): Treatment {
 }
 
 export function toBrief(state: EditorState): CampaignBrief {
+  // `mode` and `output` are optional in CampaignBrief — absent means the classic
+  // static pipeline, which is exactly what a fresh draft holds. Writing them
+  // unconditionally grew every classic brief on save (and made a freshly loaded
+  // file read as dirty: its snapshot carried no such keys), so they are emitted
+  // only when they say something the absent key would not: a variation mode, or
+  // an output the loaded brief declared, the user has toggled, or that diverges
+  // from the default. Rendering is unaffected either way — the static platforms
+  // keep zero insets (D11) — same discipline the ratio axis already follows.
+  const isDefaultOutput =
+    state.formats.length === 1 &&
+    state.formats[0] === "static" &&
+    state.platforms.length === STATIC_PLATFORMS.length &&
+    STATIC_PLATFORMS.every((platform) => state.platforms.includes(platform));
   const brief: CampaignBrief = {
     id: state.briefId,
     targetRegion: state.targetRegion,
     targetAudience: state.targetAudience,
     campaignMessage: state.campaignMessage,
     products: state.products.map(toProduct),
-    mode: state.mode,
-    output: {
-      formats: [...state.formats],
-      platforms: [...state.platforms],
-    },
+    ...(state.mode === "variation" ? { mode: state.mode } : {}),
+    ...(state.outputExplicit || !isDefaultOutput
+      ? { output: { formats: [...state.formats], platforms: [...state.platforms] } }
+      : {}),
   };
   const localized = state.localizedMessage.trim();
   const withCopy = localized ? { ...brief, localizedMessage: localized } : brief;
@@ -475,7 +514,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
   const axes = variation?.axes as Record<string, unknown> | undefined;
   const num = (value: unknown): string => (typeof value === "number" ? String(value) : "");
   const coverage = variation?.coverage as { perProduct?: number; perRatio?: number } | undefined;
-    return {
+  return {
     source,
     mode: brief.mode ?? "brief",
     briefId: brief.id,
@@ -503,6 +542,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
     duration: list(axes?.duration, []),
     formats,
     platforms,
+    outputExplicit: brief.output !== undefined,
     pool: null,
     headlineAxisDropped: false,
     appliedSnapshot: null,
@@ -616,7 +656,11 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     return p;
   }) as ProductDraft[];
   const storedNextProductKey = typeof raw.nextProductKey === "number" && raw.nextProductKey > 0 ? raw.nextProductKey : undefined;
-  const nextProductKey = storedNextProductKey ?? nextKeyAfter(products);
+  // A stored counter is trusted only above the keys it must outlive: a stale one
+  // (≤ an existing key) would make addProduct mint a duplicate and removeProduct
+  // delete two products — the very collision D16 exists to prevent. A counter
+  // burned past the keys still wins; product keys only need to be unique.
+  const nextProductKey = Math.max(storedNextProductKey ?? 0, nextKeyAfter(products));
   return {
     ...initial,
     ...raw,
@@ -630,6 +674,7 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     duration: list(raw.duration, initial.duration),
     formats: list(raw.formats, initial.formats),
     platforms: list(raw.platforms, initial.platforms),
+    outputExplicit: raw.outputExplicit === true,
   } as EditorState;
 }
 

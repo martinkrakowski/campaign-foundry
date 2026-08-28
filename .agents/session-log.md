@@ -994,3 +994,55 @@ To keep this file out of version control, add `.agents/session-log.md` to
     Products (separate lane, untouched).
   - DESIGN.md §4 not edited (AGENTS.md files-never-edit); the RatioFrame /
     RatioPanel extension is recorded in the PR body's design-review record.
+
+## 2026-08-27 — D16 remediation round 2 (PR #89, branch feat/l0-deterministic-product-keys)
+
+- **Mode:** Implementer (remediation)
+- **Changes:**
+  - Tests: `ProductsSection.test.tsx` lost its nonexistent
+    `@testing-library/jest-dom/vitest` import (5× TS2339, file never loaded) and
+    moved to `sections/__tests__/` beside `policy-section.test.tsx`; assertions
+    use the suite's `toBeTruthy()`/`getAttribute("aria-invalid")` style. The
+    corpus round-trip test imports js-yaml's named `load` (default import is
+    `undefined` under this config) with `js-yaml` + `@types/js-yaml` as apps/web
+    devDependencies (test-only). The five upload tests select the hidden input
+    via `getAllByLabelText("Upload product logo")[0]` instead of the removed
+    product-keyed testid.
+  - Serialization: `toBrief` omits `mode`/`output` when they equal the
+    absent-key defaults; `EditorState.outputExplicit` (set by `fromBrief` when
+    the brief declared `output`, by `toggleFormat`/`togglePlatform`, repaired by
+    `normalizeDraftState`) keeps a declared or touched output written even at
+    default values. All seven `briefs/*.yaml` now round-trip byte-for-byte —
+    the four classic ones previously grew `mode: brief` + a default `output`
+    on every load→save (and read as dirty on load). Render-neutral: the static
+    platforms carry zero insets (D11), so absent ≡ default output.
+  - Counter: `normalizeDraftState` clamps
+    `nextProductKey = Math.max(stored ?? 0, nextKeyAfter(products))` — a stale
+    stored counter ≤ an existing key minted duplicates on `addProduct`.
+  - `allocateProduct(products, nextKey)` shared by `editorReducer.addProduct`
+    and `wizardReducer.addProduct` (verbatim copies before).
+  - New SSR/CSR determinism test: `renderToString` twice from independent
+    `initialEditorState()`s → identical file-input ids (client useId is a
+    never-resetting global counter, so identity is only observable
+    server-side and through hydration); hydrate → client adopts the SSR ids;
+    leak probe with keys 41/42 over every id/data-* attribute value.
+- **Decisions:**
+  - The corpus briefs' byte-for-byte gate forced the serialization fix, not a
+    fixture edit or a loosened comparison: `sample-pooled`/`sample-randomized`
+    carry an explicit default-valued `output`, so omission alone can't be the
+    rule — presence must survive the round-trip (`outputExplicit`).
+  - `mode: brief` is omitted outright (absent means classic in the domain);
+    an explicit `mode: brief` in a hand-written file would be dropped on save —
+    semantically identical, no corpus fixture has it, D7/L4.1 will formalise
+    presence rules.
+  - The determinism test's "no id contains a product key" probe uses keys
+    41/42: React's positional ids (`_R_35_`) and counter ids (`_r_1_`) contain
+    small digits, so keys 1/2 from `initialEditorState()` would false-positive.
+- **Left open:**
+  - JSON.stringify key-order still makes `isDirtySinceSave` true right after
+    loading a variation file (toBrief builds `output` before `variation`; the
+    file order is the reverse) — pre-existing on main, out of this round's
+    scope.
+  - `normalizeDraftState`'s positional key repair can still collide with a
+    later valid key (CodeRabbit's dedupe note) — needs the repair pass to
+    track taken keys; deferred with the review note.
