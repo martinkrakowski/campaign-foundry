@@ -731,7 +731,8 @@ describe("draft storage", () => {
       motion: "ken-burns-in",
       duration: 5,
       platforms: null,
-      variation: { ...state.variation, headline: "yes", count: 12 },
+      // 7, not 12: the default is "12", so a coerced String(12) would pass by accident
+      variation: { ...state.variation, headline: "yes", count: 7 },
     };
     localStorage.setItem(getDraftKey(state), JSON.stringify({ state: corrupt, timestamp: 1 }));
     const restored = loadDraftFromStorage(state) as EditorState;
