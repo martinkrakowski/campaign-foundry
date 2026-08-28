@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import * as messages from "@/components/campaign/messages";
+import { screen, waitFor, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRun, json } from "@/__tests__/helpers";
 import { API } from "@/lib/run-context";
@@ -275,6 +276,20 @@ describe("BriefPage — data flow", () => {
     expect(screen.queryByText(/"targetRegion"/)).toBeNull();
   });
 
+  test("touching the same field twice does not churn the touched set", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<Editor />);
+    await waitForEditorReady();
+
+    // Blur the same field twice: the second pass takes the "already touched" path.
+    const region = screen.getByLabelText("Target Region");
+    await user.clear(region);
+    fireEvent.blur(region);
+    fireEvent.blur(region); // the second pass takes the "already touched" path
+    expect(await screen.findByText(messages.targetRegion)).toBeTruthy();
+  });
+
   test("an error chip scrolls to its section", async () => {
     const user = userEvent.setup();
     routes({});
@@ -284,6 +299,9 @@ describe("BriefPage — data flow", () => {
     // The editor opens on the shell's active brief, which is valid — clear a required
     // field so Identity actually has something to report.
     await user.clear(screen.getByLabelText("Target Region"));
+    // D1: nothing is red until the field is touched or an attempt is made. Blurring the
+    // field is what a user does next, and it is what makes the chip appear.
+    await user.tab();
 
     // "Identity" labels a table-of-contents button too, and both carry a count badge —
     // so pick the chip out of the ErrorStrip by its pill styling.
@@ -579,7 +597,10 @@ describe("BriefPage — data flow", () => {
     expect(root.className).not.toMatch(/\bh-full\b/);
     expect(root.querySelector(".overflow-y-auto:not(.sticky)")).toBeNull();
     const bar = screen.getByTestId("action-bar");
-    expect(bar.className).toMatch(/\bsticky\b/);
+    // U8: the bar floats like the grid's pipeline bar — absolutely positioned inside
+    // the column's own scroll container. `fixed` would pin it to the viewport and let
+    // it cover the 320px sidebar, which is the bug #79 fixed once already.
+    expect(bar.className).toMatch(/\babsolute\b/);
     expect(bar.className).not.toMatch(/\bfixed\b/);
     expect(root.contains(bar)).toBe(true);
   });
@@ -606,10 +627,10 @@ describe("BriefPage — data flow", () => {
     // empty an axis entirely → one issue; empty a second → two
     await user.click(await screen.findByRole("button", { name: "headline-top" }));
     await user.click(screen.getByRole("button", { name: "headline-bottom" }));
-    await waitFor(() => expect(screen.getByText("1 issue")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("1 issue")).toBeTruthy());
     await user.click(screen.getByRole("button", { name: "bold" }));
     await user.click(screen.getByRole("button", { name: "subtle" }));
-    await waitFor(() => expect(screen.getByText("2 issues")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("2 issues")).toBeTruthy());
   });
 
   test("the mode toggle switches between classic and randomized", async () => {
@@ -720,7 +741,7 @@ describe("BriefPage — capabilities and motion", () => {
     // the Output section already shows this as a field error; the notice is the
     // separate status the action bar owes after applying
     const notice = await screen.findByRole("status");
-    expect(notice.textContent).toMatch(/Motion format is not available: no ffmpeg/);
+    expect(notice.textContent).toBe(messages.statusApplyRefusal);
   });
 
   test("the capabilities are refetched when the window regains focus", async () => {
@@ -805,8 +826,8 @@ describe("BriefPage — capabilities and motion", () => {
     await user.click(screen.getByText("Randomized"));
     await user.click(screen.getByRole("button", { name: "motion" }));
 
-    expect(screen.getByText("Select at least one motion kind.")).toBeTruthy();
-    expect(screen.getByText("Add at least one duration.")).toBeTruthy();
+    expect(screen.getByText(messages.motion)).toBeTruthy();
+    expect(screen.getByText(messages.duration)).toBeTruthy();
     await waitFor(() =>
       expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(true),
     );
@@ -877,7 +898,7 @@ describe("BriefPage — capabilities and motion", () => {
 
     // Apply is not blocked by the capability, and it reports the refusal
     await user.click(screen.getByText("Apply to run"));
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Motion format is not available: no ffmpeg."));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(messages.statusApplyRefusal));
   });
 
   test("an incompatible format/platform pair is reported in the editor, not only by the API", async () => {
@@ -898,7 +919,7 @@ describe("BriefPage — capabilities and motion", () => {
 
     expect(
       await screen.findByText(
-        /"instagram-reel" only packages motion — request that format, or remove the platform\./,
+        messages.platformsIncompatible("instagram-reel", ["Video"]),
       ),
     ).toBeTruthy();
     await waitFor(() =>

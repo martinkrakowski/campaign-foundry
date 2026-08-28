@@ -4,6 +4,9 @@ import { useId, type Dispatch } from "react";
 import { Input } from "@/components/ui";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import type { FieldErrors } from "@/components/campaign/validate";
+import { keyForLabel } from "@/components/campaign/error-sections";
+import { ErrorPill } from "@/components/ui/error-pill";
+import { useSectionMode } from "@/components/campaign/SectionModeContext";
 
 export interface SectionProps {
   state: EditorState;
@@ -17,6 +20,7 @@ export function SectionShell({
   children,
   errorCount,
   compact = false,
+  onBlurCapture,
 }: {
   id: string;
   title: string;
@@ -24,27 +28,47 @@ export function SectionShell({
   errorCount?: number;
   /** Sidebar placement: the bar's own heading scale, tighter rhythm. */
   compact?: boolean;
+  /** Blur capture for field touch tracking (owned by L1.1). */
+  onBlurCapture?: React.FocusEventHandler<HTMLElement>;
 }) {
+  const mode = useSectionMode();
+  // D17: Derive numeral from id and mode
+  const order = mode === "variation"
+    ? ["identity", "copy", "products", "output", "policy"]
+    : ["identity", "copy", "products", "treatments", "output"];
+  const index = order.indexOf(id);
+  const numeral = index >= 0 ? String(index + 1).padStart(2, "0") : "";
+  // Strip leading "N · " from title (e.g., "1 · Identity" → "Identity")
+  const strippedTitle = title.replace(/^\d+ · /, "");
+  const displayTitle = numeral ? `${numeral} · ${strippedTitle}` : strippedTitle;
+
   // In the bar the surrounding Accordion is the heading, so render the body only —
   // two stacked titles would read as two sections.
   const instanceId = useId();
   const headingId = `${id}-heading-${instanceId}`;
   if (compact) {
     return (
-      <section data-section={id} aria-label={title} className="space-y-3 scroll-mt-4">
+      <section
+        data-section={id}
+        aria-label={displayTitle}
+        className="space-y-3 scroll-mt-4"
+        onBlurCapture={onBlurCapture}
+      >
         {children}
       </section>
     );
   }
   return (
-    <section id={id} data-section={id} aria-labelledby={headingId} className="space-y-4 scroll-mt-24">
+    <section
+      id={id}
+      data-section={id}
+      aria-labelledby={headingId}
+      className="space-y-4 scroll-mt-24"
+      onBlurCapture={onBlurCapture}
+    >
       <h2 id={headingId} className="flex items-center gap-2 text-lg font-semibold text-white">
-        {title}
-        {errorCount ? (
-          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-error px-1.5 text-[11px] font-bold text-white">
-            {errorCount}
-          </span>
-        ) : null}
+        {displayTitle}
+        {errorCount ? <ErrorPill count={errorCount} /> : null}
       </h2>
       {children}
     </section>
@@ -56,14 +80,17 @@ export function Field({
   error,
   hint,
   children,
+  fieldKey,
 }: {
   label: string;
   error?: string;
   hint?: string;
   children: React.ReactNode;
+  fieldKey?: string;
 }) {
+  const derivedKey = fieldKey ?? keyForLabel(label);
   return (
-    <div>
+    <div data-field-key={derivedKey}>
       <label className="block">
         <span className="mb-1.5 block text-[11px] text-text-muted">{label}</span>
         {children}

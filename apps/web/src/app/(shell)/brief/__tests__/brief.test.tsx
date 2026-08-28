@@ -44,15 +44,20 @@ describe("BriefPage E1 Features", () => {
     expect(screen.getByText("Randomized")).toBeTruthy();
   });
 
-  test("has action bar buttons — YAML split on the left, then Discard, Save, Apply on the right", async () => {
+  test("has action bar buttons — Discard, Apply and Save, with YAML split behind the overflow", async () => {
     const user = userEvent.setup();
     renderWithRun(<Editor />);
     const bar = screen.getByTestId("action-bar");
     // the error strip's chips sit in the bar too; the action buttons are the rest
+    // the primary row only: error-strip chips are pills, and the ⋯ overflow's contents
+    // are behind a <details> — both are in the bar's DOM but not in the row of verbs.
     const labels = Array.from(bar.querySelectorAll("button"))
-      .filter((b) => !b.classList.contains("rounded-full"))
+      .filter((b) => !b.classList.contains("rounded-full") && !b.closest("details"))
       .map((b) => b.textContent?.trim());
-    expect(labels).toEqual(["YAML split on", "Discard", "Save", "Apply to run"]);
+    // D3: the bar carries the status sentence and the three verbs; the YAML split
+    // moved out of the primary row into the ⋯ overflow so the sentence has room.
+    expect(labels).toEqual(expect.arrayContaining(["Discard", "Save", "Apply to run"]));
+    expect(labels).not.toContain("YAML split on");
     // a blank draft is invalid, so Save (and Apply) are held back; the menu's own
     // behaviour is covered in save-menu.test.tsx
     expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(true);

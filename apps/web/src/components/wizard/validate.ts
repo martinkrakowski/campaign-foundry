@@ -7,6 +7,7 @@ import {
 } from "@/components/campaign/validate";
 import { RATIO_OPTIONS, nextKeyAfter } from "@/components/campaign/editor-state";
 import type { EditorState } from "@/components/campaign/editor-state";
+import * as messages from "@/components/campaign/messages";
 
 const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
@@ -61,7 +62,7 @@ export function maxMinDistance(state: WizardState): number {
 export function validateType(state: WizardState): FieldErrors {
   const errors: FieldErrors = {};
   if (!SAFE_ID_PATTERN.test(state.briefId)) {
-    errors.briefId = "Lowercase letters, digits and hyphens only (max 64) — used as the reload key.";
+    errors.briefId = messages.briefId;
   }
   return errors;
 }
@@ -72,24 +73,24 @@ export function validateProducts(state: WizardState): FieldErrors {
   const ids = state.products.map((product) => product.id);
   const unique = new Set(ids.filter((id) => id.length > 0));
   if (unique.size < min) {
-    errors.products = `A ${state.mode === "variation" ? "randomized" : "classic"} campaign requires at least ${min} unique product${min === 1 ? "" : "s"}.`;
+    errors.products = messages.products(min, state.mode === "variation" ? "Randomized" : "Classic");
   }
   const seen = new Set<string>();
   state.products.forEach((product, index) => {
     if (!SAFE_ID_PATTERN.test(product.id)) {
       errors[`product-${index}-id`] =
-        "Product id must be a path-safe slug (lowercase letters, digits, hyphens; max 64).";
+        messages.productId;
     } else if (seen.has(product.id)) {
-      errors[`product-${index}-id`] = `Duplicate product id "${product.id}".`;
+      errors[`product-${index}-id`] = messages.productIdDuplicate(product.id);
     } else {
       seen.add(product.id);
     }
-    if (product.name.trim() === "") errors[`product-${index}-name`] = "Name is required.";
+    if (product.name.trim() === "") errors[`product-${index}-name`] = messages.productName;
     if (!HEX_COLOR_PATTERN.test(product.primaryColor)) {
-      errors[`product-${index}-color`] = "Colour must be a 6-digit hex value (e.g. #1473E6).";
+      errors[`product-${index}-color`] = messages.productColor;
     }
     if (product.logoPath.trim() === "") {
-      errors[`product-${index}-logo`] = "Logo path is required (upload or enter a path).";
+      errors[`product-${index}-logo`] = messages.productLogo;
     }
   });
   return errors;
@@ -97,9 +98,9 @@ export function validateProducts(state: WizardState): FieldErrors {
 
 export function validateCopy(state: WizardState): FieldErrors {
   const errors: FieldErrors = {};
-  if (state.targetRegion.trim() === "") errors.targetRegion = "Target region is required.";
-  if (state.targetAudience.trim() === "") errors.targetAudience = "Target audience is required.";
-  if (state.campaignMessage.trim() === "") errors.campaignMessage = "Campaign message is required.";
+  if (state.targetRegion.trim() === "") errors.targetRegion = messages.targetRegion;
+  if (state.targetAudience.trim() === "") errors.targetAudience = messages.targetAudience;
+  if (state.campaignMessage.trim() === "") errors.campaignMessage = messages.campaignMessage;
   return errors;
 }
 
@@ -112,7 +113,7 @@ export function validatePolicy(state: WizardState): FieldErrors {
 export function validateOutput(state: WizardState): FieldErrors {
   const errors: FieldErrors = {};
   if (state.platforms.length === 0) {
-    errors.platforms = "Select at least one platform.";
+    errors.platforms = messages.platforms;
   }
   return errors;
 }

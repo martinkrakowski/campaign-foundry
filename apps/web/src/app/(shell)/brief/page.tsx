@@ -1,6 +1,6 @@
 "use client";
 
-import { useReducer, useState, useEffect } from "react";
+import { useReducer, useState, useEffect, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { useRun } from "@/lib/run-context";
@@ -37,8 +37,12 @@ import {
 } from "@/components/campaign/validate";
 import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, OutputSection, PolicySection } from "@/components/campaign/sections";
 import { StatusChip } from "@/components/campaign/StatusChip";
+import { StatusLine } from "@/components/campaign/StatusLine";
 import { ErrorStrip } from "@/components/campaign/ErrorStrip";
+import { ErrorPill } from "@/components/ui/error-pill";
 import { SaveMenu } from "@/components/campaign/SaveMenu";
+import { FloatingBar } from "@/components/shell/FloatingBar";
+import { SectionModeContext } from "@/components/campaign/SectionModeContext";
 import { useEditorPanels } from "@/lib/editor-panels-context";
 import { Accordion } from "@/components/shell/Accordion";
 import { scrollToSection } from "@/lib/scroll-to-section";
@@ -61,6 +65,23 @@ export default function BriefPage() {
   const [saveAsId, setSaveAsId] = useState<string | null>(null);
   const [showYamlSplit, setShowYamlSplit] = useState(false);
   const [poolDrawerOpen, setPoolDrawerOpen] = useState(false);
+  // L1.1: Touched/attempted state for error display gating
+  const [touched, setTouched] = useState<Set<string>>(new Set());
+  // D1: a control that is not a `Field` (an axis card, a chip, a stepper) still means
+  // "the user has been here". Interacting anywhere inside a section marks that section,
+  // so its errors become visible without every control having to know its own key.
+  const [touchedSections, setTouchedSections] = useState<Set<string>>(new Set());
+  // `motion` errors are validated separately but rendered inside Output, and the policy
+  // panel is published into the sidebar — so a touch on the host section reveals them.
+  const SECTION_HOSTS: Record<string, string> = { motion: "output" };
+  const touchSectionFromEvent = useCallback((event: { target: EventTarget | null }) => {
+    // React click/focus events inside this subtree always target an element, so there
+    // is no non-Element case to branch on here.
+    const el = (event.target as Element).closest("[data-section]");
+    const section = el?.getAttribute("data-section");
+    if (section) setTouchedSections((prev) => (prev.has(section) ? prev : new Set([...prev, section])));
+  }, []);
+  const [attempted, setAttempted] = useState(false);
 
   // Load briefs on mount and set up focus listener
   useEffect(() => {
@@ -177,7 +198,37 @@ export default function BriefPage() {
     }
   };
 
-  const totalErrors = getTotalErrorCount(errors);
+  // L1.1: Compute visible errors (gated by touched/attempted)
+  const visibleErrors = useMemo(() => {
+    if (attempted) return errors;
+    const filtered: Record<string, FieldErrors> = {};
+    for (const [section, sectionErrors] of Object.entries(errors)) {
+      const filteredSection: FieldErrors = {};
+      for (const [key, msg] of Object.entries(sectionErrors)) {
+        const host = SECTION_HOSTS[section] ?? section;
+        if (touched.has(key) || touchedSections.has(section) || touchedSections.has(host)) filteredSection[key] = msg;
+      }
+      if (Object.keys(filteredSection).length > 0) filtered[section] = filteredSection;
+    }
+    return filtered;
+  }, [errors, touched, touchedSections, attempted]);
+
+  // L1.1: Touch field on blur
+  const handleMainBlur = useCallback((e: React.FocusEvent<HTMLElement>) => {
+    const target = e.target as HTMLElement;
+    const field = target.closest('[data-field-key]') as HTMLElement | null;
+    if (field) {
+      // Every `data-field-key` in the tree comes from error-sections.ts, and the
+      // coverage test proves that set matches what validateState emits — so a key
+      // found here is known by construction.
+      // The element matched `[data-field-key]`, so the attribute is present by
+      // construction. A Set add is idempotent, so there is nothing to branch on.
+      const key = field.getAttribute("data-field-key") as string;
+      setTouched((prev) => new Set(prev).add(key));
+    }
+  }, []);
+
+  const sectionErrorsVisible = (section: string): FieldErrors => visibleErrors[section] ?? {};
 
 
   // Derived, not stored: the refusal describes the draft *as applied*, so it holds
@@ -190,37 +241,36 @@ export default function BriefPage() {
   // Apply changes state the user cannot see from here — the pipeline lives in the top
   // bar — so say plainly what happened and what runs it. Without this, Apply looked
   // like it did nothing at all.
-  const applyNotice = applied
-    ? (applyRefusal ?? `Applied — Generate in the top bar will run "${state.briefId}".`)
-    : undefined;
 
   /** Section errors before the first validation pass lands. */
-  const sectionErrors = (section: string): FieldErrors => errors[section] ?? {};
 
-  // Publish the sections that live in the left bar while this editor is mounted. The
-  // page keeps the state, dispatch and validation and republishes on every change; the
-  // bar only places them.
-  const policyErrors = Object.keys(sectionErrors("policy")).length;
-  useEffect(() => {
-    setPanels(
-      state.mode === "variation" ? (
-        <Accordion
-          title="Variation Policy"
-          aside={
-            policyErrors > 0 ? (
-              <span className="font-mono text-[11px] text-error">
-                {policyErrors} {policyErrors === 1 ? "issue" : "issues"}
-              </span>
-            ) : null
-          }
-        >
-          <PolicySection state={state} dispatch={dispatch} errors={sectionErrors("policy")} compact />
-        </Accordion>
-      ) : null,
-    );
-    return () => setPanels(null);
-    // sectionErrors only reads what `errors` already covers.
-  }, [state, errors, policyErrors, setPanels]);
+   // Publish the sections that live in the left bar while this editor is mounted. The
+   // page keeps the state, dispatch and validation and republishes on every change; the
+   // bar only places them.
+   const policyErrors = Object.keys(sectionErrorsVisible("policy")).length;
+   useEffect(() => {
+     setPanels(
+       state.mode === "variation" ? (
+         // The panel renders in the sidebar, outside this page's DOM subtree, so it
+         // needs its own capture: a click on an axis card there is still "the user
+         // has been to the policy section" (D1).
+         <div onClickCapture={touchSectionFromEvent} data-section="policy">
+         <Accordion
+           title="Variation Policy"
+           aside={
+             policyErrors > 0 ? (
+               <ErrorPill count={policyErrors} />
+             ) : null
+           }
+         >
+           <PolicySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("policy")} compact />
+         </Accordion>
+         </div>
+       ) : null,
+     );
+     return () => setPanels(null);
+     // sectionErrors only reads what `errors` already covers.
+   }, [state, errors, policyErrors, setPanels, touchSectionFromEvent]);
 
   /** Every path that replaces the draft goes through the same D14 confirmation. */
   const confirmReplace = (): boolean =>
@@ -241,6 +291,8 @@ export default function BriefPage() {
     // differ by key order alone and read as dirty the moment it was applied.
     dispatch({ type: "apply" });
     setRunBrief(entry.brief);
+    // L1.1: Loaded brief shows real errors at once
+    setAttempted(true);
   };
 
   const createNew = () => {
@@ -250,12 +302,18 @@ export default function BriefPage() {
       type: "load",
       brief: { id: "", targetRegion: "", targetAudience: "", campaignMessage: "", products: [] } as CampaignBrief,
     });
+    // L1.1: New brief resets touched/attempted
+    setAttempted(false);
+    setTouched(new Set());
+    setTouchedSections(new Set());
   };
 
   const handleApply = () => {
     const brief = toBrief(state);
     dispatch({ type: "apply", applied: brief });
     setRunBrief(brief);
+    // L1.1: Apply sets attempted
+    setAttempted(true);
     // D7: applying a motion brief on a host that cannot run it must not pretend it
     // will produce clips — surface the probe's reason (the text the API's 400 would
     // quote) as the status message. Run still refuses it server-side.
@@ -264,6 +322,8 @@ export default function BriefPage() {
   const handleSave = async () => {
     setSaving(true);
     setPersistError(undefined);
+    // L1.1: Save sets attempted
+    setAttempted(true);
     try {
       const brief = toBrief(state);
       if (state.source.kind === "file") {
@@ -288,6 +348,8 @@ export default function BriefPage() {
   const handleSaveAs = async (newId: string) => {
     setSaving(true);
     setPersistError(undefined);
+    // L1.1: Save as sets attempted
+    setAttempted(true);
     try {
       const brief = toBrief(state);
       const newBrief = { ...brief, id: newId };
@@ -323,6 +385,10 @@ export default function BriefPage() {
   const handleDiscard = () => {
     dispatch({ type: "discard" });
     purgeDraftFromStorage(state);
+    // L1.1: Discard resets touched/attempted
+    setAttempted(false);
+    setTouched(new Set());
+    setTouchedSections(new Set());
   };
 
   const scrollToFirstError = (section: string) => scrollToSection(section);
@@ -333,8 +399,12 @@ export default function BriefPage() {
     // put with `sticky`, which is scoped to that container — never the viewport.
     <div className="flex flex-col">
       <div className="flex items-start">
-        {/* Main content */}
-        <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 sm:p-8">
+       <SectionModeContext.Provider value={state.mode}>
+           {/* Main content */}
+            <div
+              className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 sm:p-8 pb-24"
+              onBlurCapture={handleMainBlur} onClickCapture={touchSectionFromEvent}
+            >
           {/* Header with selector, mode toggle, status chip */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -366,33 +436,27 @@ export default function BriefPage() {
 
           {/* Sections */}
           <div className="space-y-8">
-            <div>
-              <IdentitySection state={state} dispatch={dispatch} errors={sectionErrors("identity")} />
-            </div>
-            <div>
-              <CopySection state={state} dispatch={dispatch} errors={sectionErrors("copy")} onOpenPool={() => setPoolDrawerOpen(true)} />
-            </div>
-            <div>
-              <ProductsSection state={state} dispatch={dispatch} errors={sectionErrors("products")} />
-            </div>
-            <div>
-              {state.mode === "brief" ? (
-                <TreatmentsSection state={state} dispatch={dispatch} errors={sectionErrors("treatments")} />
-              ) : null}
-            </div>
-            <OutputSection
-              state={state}
-              dispatch={dispatch}
-              errors={{ ...sectionErrors("output"), ...sectionErrors("motion") }}
-            />
+             <div>
+               <IdentitySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("identity")} />
+             </div>
+             <div>
+               <CopySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("copy")} onOpenPool={() => setPoolDrawerOpen(true)} />
+             </div>
+             <div>
+               <ProductsSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("products")} />
+             </div>
+             <div>
+               {state.mode === "brief" ? (
+                 <TreatmentsSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("treatments")} />
+               ) : null}
+             </div>
+             <OutputSection
+               state={state}
+               dispatch={dispatch}
+               errors={{ ...sectionErrorsVisible("output"), ...sectionErrorsVisible("motion") }}
+             />
           </div>
 
-          {persistError ? <p className="text-[13px] text-error">{persistError}</p> : null}
-          {applyNotice ? (
-            <p className={applyRefusal ? "text-[13px] text-error" : "text-[13px] text-success"} role="status">
-              {applyNotice}
-            </p>
-          ) : null}
         </div>
 
         {/* YAML split view */}
@@ -402,30 +466,56 @@ export default function BriefPage() {
               {JSON.stringify(toBrief(state), null, 2)}
             </pre>
           </div>
-        )}
+         )}
+        </SectionModeContext.Provider>
       </div>
 
-      {/* Action bar: in flow at the foot of this view, so it never covers the left bar */}
-      <div data-testid="action-bar" className="sticky bottom-0 z-10 flex shrink-0 items-center gap-3 border-t border-border bg-background p-4">
-        <Button variant="ghost" onClick={() => setShowYamlSplit(!showYamlSplit)}>
-          YAML split {showYamlSplit ? "off" : "on"}
-        </Button>
-        <div className="min-w-0 flex-1">
-          {totalErrors > 0 ? <ErrorStrip errors={errors} onErrorClick={scrollToFirstError} /> : null}
-        </div>
-        <Button variant="ghost" onClick={handleDiscard}>
-          Discard
-        </Button>
-        <SaveMenu
-          disabled={saveBlocked}
-          saving={saving}
-          onSaveAndApply={() => void handleSave()}
-          onSaveAs={() => setSaveAsId("")}
-        />
-        <Button onClick={handleApply} disabled={saveBlocked}>
-          Apply to run
-        </Button>
-      </div>
+      {/* Floating bar (L1.4) */}
+       <FloatingBar data-testid="action-bar">
+         <div className="flex items-center gap-3 w-full">
+           <StatusLine
+             state={state}
+             attempted={attempted}
+             applyRefusal={applyRefusal}
+             persistError={persistError}
+             onScrollToSection={scrollToFirstError}
+           />
+           <div className="min-w-0 flex-1">
+             {getTotalErrorCount(visibleErrors) > 0 ? <ErrorStrip errors={visibleErrors} onErrorClick={scrollToFirstError} /> : null}
+           </div>
+           <Button variant="ghost" onClick={handleDiscard}>
+             Discard
+           </Button>
+           <SaveMenu
+             disabled={saveBlocked}
+             saving={saving}
+             onSaveAndApply={() => void handleSave()}
+             onSaveAs={() => setSaveAsId("")}
+           />
+           <Button onClick={handleApply} disabled={saveBlocked}>
+             Apply to run
+           </Button>
+           {/* D3: the bar's primary row is the status sentence and the three verbs.
+               Developer affordances live behind the overflow so the sentence has room. */}
+           <details className="relative">
+             <summary
+               className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md text-text-muted hover:bg-surface-2 hover:text-text-primary"
+               aria-label="More actions"
+             >
+               ⋯
+             </summary>
+             <div className="absolute bottom-full right-0 z-30 mb-2 min-w-[200px] rounded-md border border-border bg-surface p-1 shadow-2xl">
+               <button
+                 type="button"
+                 className="w-full rounded-sm px-3 py-2 text-left text-[13px] text-text-primary hover:bg-surface-2"
+                 onClick={() => setShowYamlSplit(!showYamlSplit)}
+               >
+                 YAML split {showYamlSplit ? "off" : "on"}
+               </button>
+             </div>
+           </details>
+         </div>
+       </FloatingBar>
 
        {/* Headline pool drawer */}
        <HeadlinePoolDrawer

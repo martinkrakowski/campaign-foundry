@@ -1,6 +1,8 @@
 import type { EditorState } from "./editor-state";
 import { LAYOUT_OPTIONS, TONE_OPTIONS, approvedHeadlines } from "./editor-state";
 import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
+import * as messages from "./messages";
+import { formatDisplayName } from "./display-names";
 
 export const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
@@ -97,18 +99,18 @@ function isOptionalIntegerInRange(value: string, min: number, max: number): bool
 export function validateIdentity(state: EditorState, existingIds?: string[]): FieldErrors {
   const errors: FieldErrors = {};
   if (!SAFE_ID_PATTERN.test(state.briefId)) {
-    errors.briefId = "Lowercase letters, digits and hyphens only (max 64) — used as the reload key.";
+    errors.briefId = messages.briefId;
   }
   // Region and audience are rendered by the Identity section, so their errors belong to
   // it — filed under Copy they would never reach their inputs, and the error strip would
   // scroll past the fields actually blocking Save.
-  if (state.targetRegion.trim() === "") errors.targetRegion = "Target region is required.";
-  if (state.targetAudience.trim() === "") errors.targetAudience = "Target audience is required.";
+  if (state.targetRegion.trim() === "") errors.targetRegion = messages.targetRegion;
+  if (state.targetAudience.trim() === "") errors.targetAudience = messages.targetAudience;
   if (existingIds) {
     const conflictingId = state.briefId;
     if (state.source.kind === "new") {
       if (existingIds.includes(conflictingId)) {
-        errors.briefId = `A brief with id "${conflictingId}" already exists.`;
+        errors.briefId = messages.briefIdDuplicate(conflictingId);
       }
     } else {
       // state.source.kind === "file"
@@ -116,7 +118,7 @@ export function validateIdentity(state: EditorState, existingIds?: string[]): Fi
       if (source.loadedId !== state.briefId) {
         const otherIds = existingIds.filter((id) => id !== source.loadedId);
         if (otherIds.includes(conflictingId)) {
-          errors.briefId = `A brief with id "${conflictingId}" already exists.`;
+          errors.briefId = messages.briefIdDuplicate(conflictingId);
         }
       }
     }
@@ -126,7 +128,7 @@ export function validateIdentity(state: EditorState, existingIds?: string[]): Fi
 
 export function validateCopy(state: EditorState): FieldErrors {
   const errors: FieldErrors = {};
-  if (state.campaignMessage.trim() === "") errors.campaignMessage = "Campaign message is required.";
+  if (state.campaignMessage.trim() === "") errors.campaignMessage = messages.campaignMessage;
   return errors;
 }
 
@@ -136,24 +138,23 @@ export function validateProducts(state: EditorState): FieldErrors {
   const ids = state.products.map((product) => product.id);
   const unique = new Set(ids.filter((id) => id.length > 0));
   if (unique.size < min) {
-    errors.products = `A ${state.mode === "variation" ? "randomized" : "classic"} campaign requires at least ${min} unique product${min === 1 ? "" : "s"}.`;
+    errors.products = messages.products(min, state.mode === "variation" ? "Randomized" : "Classic");
   }
   const seen = new Set<string>();
   state.products.forEach((product, index) => {
     if (!SAFE_ID_PATTERN.test(product.id)) {
-      errors[`product-${index}-id`] =
-        "Product id must be a path-safe slug (lowercase letters, digits, hyphens; max 64).";
+      errors[`product-${index}-id`] = messages.productId;
     } else if (seen.has(product.id)) {
-      errors[`product-${index}-id`] = `Duplicate product id "${product.id}".`;
+      errors[`product-${index}-id`] = messages.productIdDuplicate(product.id);
     } else {
       seen.add(product.id);
     }
-    if (product.name.trim() === "") errors[`product-${index}-name`] = "Name is required.";
+    if (product.name.trim() === "") errors[`product-${index}-name`] = messages.productName;
     if (!HEX_COLOR_PATTERN.test(product.primaryColor)) {
-      errors[`product-${index}-color`] = "Colour must be a 6-digit hex value (e.g. #1473E6).";
+      errors[`product-${index}-color`] = messages.productColor;
     }
     if (product.logoPath.trim() === "") {
-      errors[`product-${index}-logo`] = "Logo path is required (upload or enter a path).";
+      errors[`product-${index}-logo`] = messages.productLogo;
     }
   });
   return errors;
@@ -165,18 +166,17 @@ export function validateTreatments(state: EditorState): FieldErrors {
   const seen = new Set<string>();
   state.treatments.forEach((treatment, index) => {
     if (!SAFE_ID_PATTERN.test(treatment.id)) {
-      errors[`treatment-${index}-id`] =
-        "Treatment id must be a path-safe slug (lowercase letters, digits, hyphens; max 64).";
+      errors[`treatment-${index}-id`] = messages.treatmentId;
     } else if (seen.has(treatment.id)) {
-      errors[`treatment-${index}-id`] = `Duplicate treatment id "${treatment.id}".`;
+      errors[`treatment-${index}-id`] = messages.treatmentIdDuplicate(treatment.id);
     } else {
       seen.add(treatment.id);
     }
     if (!LAYOUT_OPTIONS.includes(treatment.layout as never)) {
-      errors[`treatment-${index}-layout`] = `Invalid layout. Choose from: ${LAYOUT_OPTIONS.join(", ")}.`;
+      errors[`treatment-${index}-layout`] = messages.treatmentLayout;
     }
     if (!TONE_OPTIONS.includes(treatment.tone as never)) {
-      errors[`treatment-${index}-tone`] = `Invalid tone. Choose from: ${TONE_OPTIONS.join(", ")}.`;
+      errors[`treatment-${index}-tone`] = messages.treatmentTone;
     }
   });
   return errors;
@@ -186,23 +186,23 @@ export function validatePolicy(state: EditorState): FieldErrors {
   const errors: FieldErrors = {};
   if (state.mode !== "variation") return errors;
   if (!isIntegerAtLeast(state.variation.count, 1)) {
-    errors.count = "variation.count must be an integer >= 1.";
+    errors.count = messages.count;
   }
   if (!isOptionalIntegerInRange(state.variation.seed, 0, UINT32_MAX)) {
-    errors.seed = "variation.seed must be an integer in [0, 2^32).";
+    errors.seed = messages.seed;
   }
   const maxDistance = maxMinDistance(state);
   if (!isOptionalIntegerInRange(state.variation.minDistance, 0, maxDistance)) {
-    errors.minDistance = `variation.minDistance must be an integer in [0, ${maxDistance}] (the active axes).`;
+    errors.minDistance = messages.minDistance(maxDistance);
   }
   if (!isOptionalIntegerAtLeast(state.variation.perProduct, 0)) {
-    errors.perProduct = "coverage.perProduct must be an integer >= 0.";
+    errors.perProduct = messages.perProduct;
   }
   if (!isOptionalIntegerAtLeast(state.variation.perRatio, 0)) {
-    errors.perRatio = "coverage.perRatio must be an integer >= 0.";
+    errors.perRatio = messages.perRatio;
   }
   if (state.variation.ratio.length === 0) {
-    errors.ratio = "Select at least one aspect ratio.";
+    errors.ratio = messages.ratio;
   }
   // The planner refuses a plan whose ratio floor cannot fit the count
   // (perRatio × the ratios it will draw > count); the editor says so before
@@ -218,20 +218,20 @@ export function validatePolicy(state: EditorState): FieldErrors {
     const packaged = [...motionPackagedRatios(state)];
     errors.ratio =
       packaged.length > 0
-        ? `None of the selected ratios can be drawn: motion-only output can draw [${packaged.join(", ")}] only — select one of those, or add the static format.`
-        : "None of the selected ratios can be drawn: no selected platform packages motion at any ratio — add the static format, or a platform that packages motion.";
+        ? messages.ratioNoneDrawablePackaged(packaged)
+        : messages.ratioNoneDrawableNone();
   }
   const count = Number.parseInt(state.variation.count, 10) || 0;
   if (floor > 0 && floor * drawableCount > count) {
-    errors.perRatio = `coverage.perRatio ${floor} × ${drawableCount} selected ratios exceeds count ${count} — lower the floor, raise the count, or select fewer ratios.`;
+    errors.perRatio = messages.perRatioExceeds(drawableCount, floor, count);
   }
-  if (state.variation.layout.length === 0) errors.layout = "Select at least one layout.";
-  if (state.variation.tone.length === 0) errors.tone = "Select at least one tone.";
+  if (state.variation.layout.length === 0) errors.layout = messages.layout;
+  if (state.variation.tone.length === 0) errors.tone = messages.tone;
   if (state.variation.background.length === 0) {
-    errors.background = "Select at least one background source.";
+    errors.background = messages.background;
   }
   if (state.variation.paletteShift.length === 0) {
-    errors.paletteShift = "Select at least one palette shift.";
+    errors.paletteShift = messages.paletteShift;
   }
   return errors;
 }
@@ -243,16 +243,16 @@ export function validatePolicy(state: EditorState): FieldErrors {
  */
 export function motionUnavailableReason(state: EditorState): string | undefined {
   if (state.capabilities?.motion !== false || !state.formats.includes("motion")) return undefined;
-  return `Motion format is not available: ${state.capabilities.reason ?? "capability off"}.`;
+  return messages.formatsMotionUnavailable;
 }
 
 export function validateOutput(state: EditorState): FieldErrors {
   const errors: FieldErrors = {};
   if (state.formats.length === 0) {
-    errors.formats = "Select at least one format.";
+    errors.formats = messages.formats;
   }
   if (state.platforms.length === 0) {
-    errors.platforms = "Select at least one platform.";
+    errors.platforms = messages.platforms;
   }
   // Client mirror of the API's validateFormatPlatformCompatibility: both directions
   // matter — a platform with nothing to package, and a format nothing can ship.
@@ -262,7 +262,7 @@ export function validateOutput(state: EditorState): FieldErrors {
   for (const profile of profiles) {
     if (!profile.formats.some((format) => state.formats.includes(format))) {
       // The API states the rejection; the editor has to say what to do about it.
-      errors.platforms = `"${profile.id}" only packages ${profile.formats.join(" or ")} — request that format, or remove the platform.`;
+      errors.platforms = messages.platformsIncompatible(profile.id, (profile.formats as string[]).map(formatDisplayName));
       break;
     }
   }
@@ -273,17 +273,17 @@ export function validateOutput(state: EditorState): FieldErrors {
       const candidates = Object.values(PLATFORM_PROFILES)
         .filter((profile) => (profile.formats as readonly string[]).includes(format))
         .map((profile) => profile.id);
-      errors.formats = `No selected platform packages "${format}" — add one of: ${candidates.join(", ")}.`;
+      errors.formats = messages.formatsUnsupported(formatDisplayName(format), candidates);
       break;
     }
   }
   const unavailable = motionUnavailableReason(state);
-  if (unavailable) errors.formats = unavailable;
+  if (unavailable) errors.formats = messages.formatsMotionUnavailable;
   // Motion is drawn by the variation planner only; the classic matrix renders stills.
   // This is structural, not a capability, so it blocks Save — the remedy is a mode
   // switch, and it outranks the capability message because it is the root cause.
   if (state.mode !== "variation" && state.formats.includes("motion")) {
-    errors.formats = "Motion output requires a randomized campaign — switch the mode to Randomized.";
+    errors.formats = messages.formatsMotionNeedsRandomized;
   }
   return errors;
 }
@@ -292,20 +292,20 @@ export function validateMotion(state: EditorState): FieldErrors {
   const errors: FieldErrors = {};
   if (!state.formats.includes("motion")) return errors;
   if (state.motion.length === 0) {
-    errors.motion = "Select at least one motion kind.";
+    errors.motion = messages.motion;
   }
   if (state.duration.length === 0) {
-    errors.duration = "Add at least one duration.";
+    errors.duration = messages.duration;
   } else if (
     state.duration.some(
       (seconds) => !Number.isInteger(seconds) || seconds < MIN_DURATION_SEC || seconds > MAX_DURATION_SEC,
     )
   ) {
-    errors.duration = `Durations must be whole seconds between ${MIN_DURATION_SEC} and ${MAX_DURATION_SEC}.`;
+    errors.duration = messages.durationRange(MIN_DURATION_SEC, MAX_DURATION_SEC);
   } else if (new Set(state.duration).size !== state.duration.length) {
     // The planner de-duplicates this axis, so a repeat draws nothing — say so rather
     // than letting it look like an extra clip length.
-    errors.duration = "Each duration must be distinct — the planner draws each length once.";
+    errors.duration = messages.durationDuplicate;
   }
   return errors;
 }

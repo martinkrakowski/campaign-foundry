@@ -1,4 +1,5 @@
 import { describe, test, expect } from "vitest";
+import * as messages from "@/components/campaign/messages";
 import { hasErrors, maxMinDistance, validateStep } from "../validate";
 import { emptyProduct, initialWizardState, type WizardState } from "../wizard-state";
 
@@ -29,28 +30,28 @@ describe("validateStep", () => {
   });
 
   test("type requires a path-safe brief id", () => {
-    expect(validateStep("type", initialWizardState).briefId).toMatch(/Lowercase letters/);
+    expect(validateStep("type", initialWizardState).briefId).toBe(messages.briefId);
     expect(validateStep("type", { ...initialWizardState, briefId: "camp" })).toEqual({});
   });
 
   test("products require unique path-safe ids, hex colours, names, logos, and a mode minimum", () => {
     const empty = validateStep("products", initialWizardState);
-    expect(empty.products).toMatch(/classic/);
-    expect(empty["product-0-id"]).toMatch(/path-safe/);
-    expect(empty["product-0-name"]).toMatch(/required/);
-    expect(empty["product-0-logo"]).toMatch(/Logo path/);
+    expect(empty.products).toBe(messages.products(2, "Classic"));
+    expect(empty["product-0-id"]).toBe(messages.productId);
+    expect(empty["product-0-name"]).toBe(messages.productName);
+    expect(empty["product-0-logo"]).toBe(messages.productLogo);
 
     const badColor: WizardState = {
       ...initialWizardState,
       products: [{ ...validProducts()[0], primaryColor: "blue" }, validProducts()[1]],
     };
-    expect(validateStep("products", badColor)["product-0-color"]).toMatch(/hex/);
+    expect(validateStep("products", badColor)["product-0-color"]).toBe(messages.productColor);
 
     const dup: WizardState = {
       ...initialWizardState,
       products: [validProducts()[0], { ...validProducts()[1], id: "alpha" }],
     };
-    expect(validateStep("products", dup)["product-1-id"]).toMatch(/Duplicate/);
+    expect(validateStep("products", dup)["product-1-id"]).toBe(messages.productIdDuplicate("alpha"));
 
     expect(validateStep("products", { ...initialWizardState, products: validProducts() })).toEqual({});
 
@@ -63,14 +64,14 @@ describe("validateStep", () => {
     expect(
       validateStep("products", { ...initialWizardState, mode: "variation", products: [emptyProduct(1)] })
         .products,
-    ).toMatch(/randomized/);
+    ).toBe(messages.products(1, "Randomized"));
   });
 
   test("copy requires region, audience, and message", () => {
     const errors = validateStep("copy", initialWizardState);
-    expect(errors.targetRegion).toMatch(/required/);
-    expect(errors.targetAudience).toMatch(/required/);
-    expect(errors.campaignMessage).toMatch(/required/);
+    expect(errors.targetRegion).toBe(messages.targetRegion);
+    expect(errors.targetAudience).toBe(messages.targetAudience);
+    expect(errors.campaignMessage).toBe(messages.campaignMessage);
     expect(
       validateStep("copy", {
         ...initialWizardState,
@@ -84,25 +85,21 @@ describe("validateStep", () => {
   test("policy is skipped for classic and checks numeric fields when randomized", () => {
     expect(validateStep("policy", initialWizardState)).toEqual({});
     const base: WizardState = { ...initialWizardState, mode: "variation" };
-    expect(validateStep("policy", { ...base, variation: { ...base.variation, count: "" } }).count).toMatch(
-      /integer/,
-    );
-    expect(validateStep("policy", { ...base, variation: { ...base.variation, seed: "nope" } }).seed).toMatch(
-      /integer in \[0, 2\^32\)/,
-    );
+    expect(validateStep("policy", { ...base, variation: { ...base.variation, count: "" } }).count).toBe(messages.count);
+    expect(validateStep("policy", { ...base, variation: { ...base.variation, seed: "nope" } }).seed).toBe(messages.seed);
     expect(
       validateStep("policy", { ...base, variation: { ...base.variation, seed: "1.5" } }).seed,
-    ).toMatch(/integer/);
+    ).toBe(messages.seed);
     expect(
       validateStep("policy", { ...base, variation: { ...base.variation, seed: "4294967296" } }).seed,
-    ).toMatch(/2\^32/);
+    ).toBe(messages.seed);
     // The bound follows the active axes: six without the headline axis, seven with it.
     expect(
       validateStep("policy", { ...base, variation: { ...base.variation, minDistance: "-1" } }).minDistance,
-    ).toMatch(/\[0, 6\]/);
+    ).toBe(messages.minDistance(6));
     expect(
       validateStep("policy", { ...base, variation: { ...base.variation, minDistance: "7" } }).minDistance,
-    ).toMatch(/\[0, 6\]/);
+    ).toBe(messages.minDistance(6));
     expect(
       validateStep("policy", { ...base, variation: { ...base.variation, minDistance: "6" } }).minDistance,
     ).toBeUndefined();
@@ -114,14 +111,14 @@ describe("validateStep", () => {
     ).toBeUndefined();
     expect(
       validateStep("policy", { ...pooled, variation: { ...pooled.variation, minDistance: "8" } }).minDistance,
-    ).toMatch(/\[0, 7\]/);
+    ).toBe(messages.minDistance(7));
 
     expect(
       validateStep("policy", { ...base, variation: { ...base.variation, perProduct: "1.5" } }).perProduct,
-    ).toMatch(/integer/);
+    ).toBe(messages.perProduct);
     expect(
       validateStep("policy", { ...base, variation: { ...base.variation, perRatio: "x" } }).perRatio,
-    ).toMatch(/integer/);
+    ).toBe(messages.perRatio);
     expect(validateStep("policy", base)).toEqual({});
     expect(
       validateStep("policy", {
@@ -137,21 +134,21 @@ describe("validateStep", () => {
     ).toEqual({});
     expect(
       validateStep("policy", { ...base, variation: { ...base.variation, layout: [] } }).layout,
-    ).toMatch(/at least one/);
+    ).toBe(messages.layout);
     expect(
       validateStep("policy", { ...base, variation: { ...base.variation, tone: [] } }).tone,
-    ).toMatch(/at least one/);
+    ).toBe(messages.tone);
     expect(
       validateStep("policy", { ...base, variation: { ...base.variation, background: [] } }).background,
-    ).toMatch(/at least one/);
+    ).toBe(messages.background);
     expect(
       validateStep("policy", { ...base, variation: { ...base.variation, paletteShift: [] } }).paletteShift,
-    ).toMatch(/at least one/);
+    ).toBe(messages.paletteShift);
   });
 
   test("output requires at least one platform; review has no extra checks", () => {
-    expect(validateStep("output", { ...initialWizardState, platforms: [] }).platforms).toMatch(
-      /at least one/,
+    expect(validateStep("output", { ...initialWizardState, platforms: [] }).platforms).toBe(
+      messages.platforms,
     );
     expect(validateStep("output", initialWizardState)).toEqual({});
     expect(validateStep("review", initialWizardState)).toEqual({});
