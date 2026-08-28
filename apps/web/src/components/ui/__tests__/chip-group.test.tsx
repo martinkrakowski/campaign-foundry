@@ -204,3 +204,23 @@ describe("ChipGroup gating reaches the mirror input", () => {
     expect((screen.getByLabelText("Target Region") as HTMLInputElement).readOnly).toBe(true);
   });
 });
+
+describe("the custom value is a named, gated field", () => {
+  test("the Other… input carries the name the caller gives it", async () => {
+    const user = userEvent.setup();
+    render(
+      <ChipGroup
+        label="Target Region"
+        options={["DE"]}
+        value=""
+        onChange={vi.fn()}
+        allowOther
+        otherLabel="Other…"
+        otherInputLabel="Target Region — other"
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Other…" }));
+    // the group's own label names the group, never the textbox inside it
+    expect(screen.getByRole("textbox", { name: "Target Region — other" })).toBeTruthy();
+  });
+});

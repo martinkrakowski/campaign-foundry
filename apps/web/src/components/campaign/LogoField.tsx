@@ -92,6 +92,11 @@ export function LogoField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         aria-invalid={invalid || undefined}
+        // The mirror of the visible controls has to mirror their gating too, or the
+        // users who cannot see that the field is unavailable are the ones still able
+        // to change it.
+        disabled={disabled}
+        readOnly={readOnly}
         tabIndex={-1}
       />
 

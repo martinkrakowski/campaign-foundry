@@ -32,6 +32,8 @@ export const briefIdCopyAria = "Copy brief ID";
 export const targetRegionLabel = "Target Region";
 export const targetRegionOther = "Other…";
 export const targetRegionOtherPlaceholder = "e.g. LATAM";
+/** Names the free-text box the Other… chip reveals; the group label cannot name it. */
+export const targetRegionOtherInputLabel = "Target Region — other";
 export const targetAudienceLabel = "Target Audience";
 export const targetAudiencePlaceholder = "e.g. urban outdoor enthusiasts, 25-40";
 

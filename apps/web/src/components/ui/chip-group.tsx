@@ -17,6 +17,11 @@ export interface ChipGroupProps {
   readonly otherLabel?: string;
   /** Placeholder for the custom text input. */
   readonly otherPlaceholder?: string;
+  /**
+   * Accessible name for the custom text input. A `role="group"` label names the group,
+   * never a textbox inside it, so without this the custom value is an unnamed field.
+   */
+  readonly otherInputLabel?: string;
   readonly invalid?: boolean;
   readonly disabled?: boolean;
   readonly readOnly?: boolean;
@@ -37,6 +42,7 @@ export function ChipGroup({
   onChange,
   allowOther = false,
   otherLabel,
+  otherInputLabel,
   otherPlaceholder,
   invalid = false,
   disabled = false,
@@ -127,6 +133,9 @@ export function ChipGroup({
             invalid={invalid}
             disabled={disabled}
             readOnly={readOnly}
+            // A `role="group"` label names the group, never the textbox inside it, so
+            // without this the custom value is an unnamed field.
+            aria-label={otherInputLabel}
             autoFocus
           />
         </div>

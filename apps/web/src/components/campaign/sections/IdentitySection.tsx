@@ -167,6 +167,7 @@ export function IdentitySection({ state, dispatch, errors }: SectionProps) {
         <Field fieldKey="targetRegion" label={messages.targetRegionLabel} error={errors.targetRegion} as="div">
           <ChipGroup
             label={messages.targetRegionLabel}
+            otherInputLabel={messages.targetRegionOtherInputLabel}
             options={REGION_OPTIONS}
             value={state.targetRegion}
             onChange={(value) => dispatch({ type: "patch", patch: { targetRegion: value } })}

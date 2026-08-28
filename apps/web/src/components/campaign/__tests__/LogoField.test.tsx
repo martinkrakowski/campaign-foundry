@@ -197,3 +197,14 @@ describe("LogoField", () => {
     expect(onChange).toHaveBeenCalledWith("updated.png");
   });
 });
+
+describe("LogoField gating reaches the mirror input", () => {
+  test("a disabled or read-only field closes its assistive-tech input too", () => {
+    const { unmount } = render(<LogoField value="a.png" onChange={vi.fn()} disabled />);
+    expect((screen.getByLabelText("Logo Path") as HTMLInputElement).disabled).toBe(true);
+    unmount();
+
+    render(<LogoField value="a.png" onChange={vi.fn()} readOnly />);
+    expect((screen.getByLabelText("Logo Path") as HTMLInputElement).readOnly).toBe(true);
+  });
+});
