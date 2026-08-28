@@ -105,6 +105,16 @@ describe("rewriteAssetPath and rewriteAssetPaths", () => {
     expect(rewriteAssetPath("assets/inputs/old-camp/nested/bg.jpg", "old-camp", "new-camp")).toBe(
       "assets/inputs/new-camp/nested/bg.jpg",
     );
+    expect(
+      rewriteAssetPath("assets/inputs/old-camp/logo.png", "old-camp", "new-camp", {
+        "logo.png": "logo-disambiguated.png",
+      }),
+    ).toBe("assets/inputs/new-camp/logo-disambiguated.png");
+    expect(
+      rewriteAssetPath("assets/inputs/old-camp/logo.png", "old-camp", "new-camp", {
+        "assets/inputs/old-camp/logo.png": "assets/inputs/new-camp/logo-custom.png",
+      }),
+    ).toBe("assets/inputs/new-camp/logo-custom.png");
   });
 
   test("leaves root-level assets and different brief ids untouched", async () => {

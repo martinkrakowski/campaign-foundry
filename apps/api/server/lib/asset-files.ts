@@ -47,13 +47,26 @@ export function assetAbsPath(briefId: string, name: string): string {
 /**
  * Rewrite a single repo-relative asset path from `fromBriefId` to `toBriefId`.
  * If the path starts with `assets/inputs/<fromBriefId>/`, it is rewritten to
- * `assets/inputs/<toBriefId>/...`. Any other path (e.g. shared demo assets at
- * `assets/inputs/*.png`) is returned unchanged.
+ * `assets/inputs/<toBriefId>/...`. If pathMap contains an explicit mapping for the
+ * path or subpath, that mapped target path is used (e.g. for collision resolution).
+ * Any other path (e.g. shared demo assets at `assets/inputs/*.png`) is returned unchanged.
  */
-export function rewriteAssetPath(path: string, fromBriefId: string, toBriefId: string): string {
+export function rewriteAssetPath(
+  path: string,
+  fromBriefId: string,
+  toBriefId: string,
+  pathMap?: Record<string, string>,
+): string {
+  if (pathMap && path in pathMap) {
+    return pathMap[path];
+  }
   const prefix = `assets/inputs/${fromBriefId}/`;
   if (path.startsWith(prefix)) {
-    return `assets/inputs/${toBriefId}/${path.slice(prefix.length)}`;
+    const subpath = path.slice(prefix.length);
+    if (pathMap && subpath in pathMap) {
+      return `assets/inputs/${toBriefId}/${pathMap[subpath]}`;
+    }
+    return `assets/inputs/${toBriefId}/${subpath}`;
   }
   return path;
 }
@@ -67,18 +80,19 @@ export function rewriteAssetPaths(
   brief: CampaignBrief,
   fromBriefId: string,
   toBriefId: string,
+  pathMap?: Record<string, string>,
 ): CampaignBrief {
   if (!brief.products || !Array.isArray(brief.products)) return brief;
   const products = brief.products.map((product) => {
     let updated = product;
     if (typeof product.logoPath === "string") {
-      const rewrittenLogo = rewriteAssetPath(product.logoPath, fromBriefId, toBriefId);
+      const rewrittenLogo = rewriteAssetPath(product.logoPath, fromBriefId, toBriefId, pathMap);
       if (rewrittenLogo !== product.logoPath) {
         updated = { ...updated, logoPath: rewrittenLogo };
       }
     }
     if (typeof product.inputAsset === "string") {
-      const rewrittenInput = rewriteAssetPath(product.inputAsset, fromBriefId, toBriefId);
+      const rewrittenInput = rewriteAssetPath(product.inputAsset, fromBriefId, toBriefId, pathMap);
       if (rewrittenInput !== product.inputAsset) {
         updated = { ...updated, inputAsset: rewrittenInput };
       }

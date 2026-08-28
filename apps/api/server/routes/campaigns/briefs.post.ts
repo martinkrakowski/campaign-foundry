@@ -1,3 +1,4 @@
+import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
 import {
   extractSourceAssetBriefIds,
@@ -25,7 +26,7 @@ import { getAssetStore, getBriefStore } from "../../lib/ports/index.js";
  * while leaving root-level shared assets (`assets/inputs/*.png`) untouched (L5.5).
  */
 export default defineEventHandler(async (event) => {
-  let brief;
+  let brief: CampaignBrief;
   try {
     brief = parseBrief(await readBody(event));
   } catch (error) {
@@ -37,21 +38,33 @@ export default defineEventHandler(async (event) => {
   const replace = (Array.isArray(rawReplace) ? rawReplace[0] : rawReplace) === "1";
   const rawRevision = getQuery(event).revision;
   const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
-  const existing = await getBriefStore().findBriefFileById(brief.id);
-  if (existing && !replace) {
-    setResponseStatus(event, 409);
-    return { error: `Brief "${brief.id}" already exists.` };
-  }
-
-  // Copy any brief-scoped assets and rewrite paths before writing the new brief (Save as…)
-  const sourceBriefIds = extractSourceAssetBriefIds(brief, brief.id);
-  for (const fromId of sourceBriefIds) {
-    await getAssetStore().copyAssets(fromId, brief.id);
-    brief = rewriteAssetPaths(brief, fromId, brief.id);
-  }
-
   try {
     const stored = await getBriefStore().withBriefLock(brief.id, async () => {
+      const existing = await getBriefStore().findBriefFileById(brief.id);
+      if (existing && !replace) {
+        const existErr = new Error(`Brief "${brief.id}" already exists.`);
+        (existErr as { code?: string }).code = "EEXIST";
+        throw existErr;
+      }
+
+      // Copy any brief-scoped assets and rewrite paths only after validation succeeds (Save as…)
+      const sourceBriefIds = extractSourceAssetBriefIds(brief, brief.id);
+      if (sourceBriefIds.length > 0) {
+        if (replace && expectedRevision !== undefined) {
+          const currentRev = await getBriefStore().getRevision(brief.id);
+          if (currentRev !== expectedRevision) {
+            const conflictErr = new Error("Brief was modified by another user.");
+            (conflictErr as { code?: string; revision?: string }).code = "ECONFLICT";
+            (conflictErr as { revision?: string }).revision = currentRev;
+            throw conflictErr;
+          }
+        }
+        for (const fromId of sourceBriefIds) {
+          const pathMap = await getAssetStore().copyAssets(fromId, brief.id);
+          brief = rewriteAssetPaths(brief, fromId, brief.id, pathMap);
+        }
+      }
+
       if (replace) {
         return await getBriefStore().replaceBrief(brief, { expectedRevision });
       }

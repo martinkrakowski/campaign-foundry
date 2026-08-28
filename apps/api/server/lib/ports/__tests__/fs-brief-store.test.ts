@@ -54,34 +54,42 @@ describe("FsBriefStore", () => {
     expect(list[1].revision).toBe(hashBytes(Buffer.from(yamlB, "utf8")));
   });
 
-  test("findBriefById finds brief by domain id and findBriefFileById returns file path", async () => {
+  test("findBriefById finds brief by domain id and findBriefFileById returns file key", async () => {
     await store.createBrief(minimalBrief);
     const found = await store.findBriefById("test-camp");
     expect(found).toBeDefined();
     expect(found?.brief.id).toBe("test-camp");
     expect(found?.file).toBe("test-camp.yaml");
 
-    const filePath = await store.findBriefFileById("test-camp");
-    expect(filePath).toBe(join(dir, "test-camp.yaml"));
+    const fileKey = await store.findBriefFileById("test-camp");
+    expect(fileKey).toBe("test-camp.yaml");
 
     expect(await store.findBriefById("missing")).toBeUndefined();
     expect(await store.findBriefFileById("missing")).toBeUndefined();
   });
 
-  test("findBriefFile checks extensions in order", async () => {
+  test("findBriefFile checks extensions in order and returns relative file key", async () => {
     writeFileSync(join(dir, "both.yml"), "id: both\n");
     writeFileSync(join(dir, "both.yaml"), "id: both\n");
-    expect(await store.findBriefFile("both")).toBe(join(dir, "both.yaml"));
+    expect(await store.findBriefFile("both")).toBe("both.yaml");
     expect(await store.findBriefFile("missing")).toBeUndefined();
+    expect(await store.findBriefFile("../traversal")).toBeUndefined();
   });
 
-  test("readBrief parses brief by key or absolute path", async () => {
+  test("readBrief parses brief by key or domain id and rejects unconfined paths", async () => {
     await store.createBrief(minimalBrief);
     const fromKey = await store.readBrief("test-camp.yaml");
     expect(fromKey.id).toBe("test-camp");
 
-    const fromAbs = await store.readBrief(join(dir, "test-camp.yaml"));
-    expect(fromAbs.id).toBe("test-camp");
+    const fromId = await store.readBrief("test-camp");
+    expect(fromId.id).toBe("test-camp");
+
+    const fromConfinedPath = await store.readBrief(join(dir, "test-camp.yaml"));
+    expect(fromConfinedPath.id).toBe("test-camp");
+
+    // Security: rejects absolute paths outside this.dir and traversal
+    await expect(store.readBrief("/etc/hosts")).rejects.toThrow(/Path escapes the allowed directory/);
+    await expect(store.readBrief("../../etc/passwd")).rejects.toThrow(/Path escapes the allowed directory/);
   });
 
   test("createBrief creates file exclusively and fails with EEXIST if duplicate", async () => {
@@ -153,19 +161,23 @@ describe("FsBriefStore", () => {
     expect(replaced.brief.campaignMessage).toBe("Replaced");
   });
 
-  test("getRevision computes sha256 hash or returns undefined on missing", async () => {
+  test("getRevision computes sha256 hash or returns undefined on missing/unconfined", async () => {
     const created = await store.createBrief(minimalBrief);
     expect(await store.getRevision("test-camp")).toBe(created.revision);
     expect(await store.getRevision(join(dir, "test-camp.yaml"))).toBe(created.revision);
     expect(await store.getRevision("non-existent")).toBeUndefined();
+    expect(await store.getRevision("/etc/hosts")).toBeUndefined();
+    expect(await store.getRevision("../../escape.yaml")).toBeUndefined();
   });
 
-  test("exists returns true when file exists and false when missing", async () => {
+  test("exists returns true when file exists and false when missing/unconfined", async () => {
     expect(await store.exists("test-camp")).toBe(false);
     await store.createBrief(minimalBrief);
     expect(await store.exists("test-camp")).toBe(true);
     expect(await store.exists(join(dir, "test-camp.yaml"))).toBe(true);
     expect(await store.exists("missing-camp")).toBe(false);
+    expect(await store.exists("/etc/hosts")).toBe(false);
+    expect(await store.exists("../../escape.yaml")).toBe(false);
   });
 
   test("createBrief refuses to write through a symlink", async () => {

@@ -1,5 +1,6 @@
-import { extname } from "node:path";
-import { getBriefStore } from "./ports/index.js";
+import { readFile } from "node:fs/promises";
+import { extname, isAbsolute, resolve } from "node:path";
+import { projectRoot } from "@campaignfoundry/shared";
 import * as yaml from "js-yaml";
 import {
   HEADLINE_POOL_REF,
@@ -504,5 +505,7 @@ export function parseBriefText(path: string, raw: string, opts: ParseBriefOption
 
 /** Load and parse a brief from a .yaml / .yml / .json file. */
 export async function loadBrief(path: string, opts: ParseBriefOptions = {}): Promise<CampaignBrief> {
-  return getBriefStore().readBrief(path, opts);
+  const filePath = isAbsolute(path) ? path : resolve(projectRoot(), path);
+  const raw = await readFile(filePath, "utf8");
+  return parseBriefText(filePath, raw, opts);
 }

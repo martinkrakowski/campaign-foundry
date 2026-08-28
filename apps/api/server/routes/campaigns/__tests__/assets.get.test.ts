@@ -67,7 +67,7 @@ describe("GET /campaigns/assets", () => {
     expect(await res.json()).toEqual({ assets: [] });
   });
 
-  test("returns listed assets sorted by name with type, size, and data URI thumbnail", async () => {
+  test("returns listed assets sorted by name with type, size, and fetchable thumbnail URL", async () => {
     const briefDir = join(dir, "assets", "inputs", "camp");
     mkdirSync(briefDir, { recursive: true });
     writeFileSync(join(briefDir, "logo-b.png"), png);
@@ -83,12 +83,43 @@ describe("GET /campaigns/assets", () => {
     expect(body.assets[0].name).toBe("logo-b.png");
     expect(body.assets[0].type).toBe("image/png");
     expect(body.assets[0].size).toBe(png.length);
-    expect(body.assets[0].thumbnailUrl).toBe(`data:image/png;base64,${png.toString("base64")}`);
+    expect(body.assets[0].thumbnailUrl).toBe("/api/pipeline/campaigns/assets?briefId=camp&name=logo-b.png");
 
     expect(body.assets[1].name).toBe("photo-a.jpg");
     expect(body.assets[1].type).toBe("image/jpeg");
     expect(body.assets[1].size).toBe(jpeg.length);
-    expect(body.assets[1].thumbnailUrl).toBe(`data:image/jpeg;base64,${jpeg.toString("base64")}`);
+    expect(body.assets[1].thumbnailUrl).toBe("/api/pipeline/campaigns/assets?briefId=camp&name=photo-a.jpg");
+  });
+
+  test("serves raw asset content with content-type when name query parameter is supplied", async () => {
+    const briefDir = join(dir, "assets", "inputs", "camp");
+    mkdirSync(briefDir, { recursive: true });
+    writeFileSync(join(briefDir, "logo.png"), png);
+    writeFileSync(join(briefDir, "photo.jpg"), jpeg);
+
+    const handler = await web(dir);
+
+    // PNG asset (including repeated name query parameter)
+    const resPng = await get(handler, "?briefId=camp&name=logo.png&name=other.png");
+    expect(resPng.status).toBe(200);
+    expect(resPng.headers.get("content-type")).toBe("image/png");
+    const receivedPng = Buffer.from(await resPng.arrayBuffer());
+    expect(receivedPng).toEqual(png);
+
+    // JPEG asset
+    const resJpeg = await get(handler, "?briefId=camp&name=photo.jpg");
+    expect(resJpeg.status).toBe(200);
+    expect(resJpeg.headers.get("content-type")).toBe("image/jpeg");
+    const receivedJpeg = Buffer.from(await resJpeg.arrayBuffer());
+    expect(receivedJpeg).toEqual(jpeg);
+
+    // Missing asset -> 404
+    const resMissing = await get(handler, "?briefId=camp&name=missing.png");
+    expect(resMissing.status).toBe(404);
+
+    // Invalid asset name -> 400
+    const resInvalid = await get(handler, "?briefId=camp&name=../invalid.png");
+    expect(resInvalid.status).toBe(400);
   });
 
   test("returns empty list on store list failure", async () => {

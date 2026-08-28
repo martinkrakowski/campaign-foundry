@@ -16,12 +16,12 @@ export function Accordion({ title, aside, defaultOpen = true, children }: Accord
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="mb-4 flex w-full items-center justify-between text-text-primary transition-colors hover:text-white"
-      >
-        <span className="flex items-center gap-2">
+      <div className="mb-4 flex w-full items-center justify-between text-text-primary">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex flex-1 items-center gap-2 text-left transition-colors hover:text-white"
+        >
           <svg
             className={cn("h-3.5 w-3.5 transition-transform", open ? "rotate-0" : "-rotate-90")}
             fill="none"
@@ -32,9 +32,9 @@ export function Accordion({ title, aside, defaultOpen = true, children }: Accord
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
           </svg>
           <span className="text-[13px] font-bold">{title}</span>
-        </span>
+        </button>
         {aside}
-      </button>
+      </div>
       {open && <div className="space-y-4">{children}</div>}
     </div>
   );

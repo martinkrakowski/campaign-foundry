@@ -1,5 +1,5 @@
 import { lstat, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, isAbsolute, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { projectRoot, errorMessage } from "@campaignfoundry/shared";
 import { resolveConfined } from "../confined-path.js";
@@ -19,11 +19,15 @@ import {
  * Stores briefs under `<projectRoot>/briefs/*.yaml` (or .yml / .json).
  */
 export class FsBriefStore implements BriefStorePort {
-  private readonly dir: string;
+  private readonly customDir?: string;
   private readonly lockChains = new Map<string, Promise<unknown>>();
 
   constructor(dir?: string) {
-    this.dir = dir ? resolve(dir) : resolve(projectRoot(), "briefs");
+    if (dir) this.customDir = resolve(dir);
+  }
+
+  private get dir(): string {
+    return this.customDir ?? resolve(projectRoot(), "briefs");
   }
 
   getBriefsDir(): string {
@@ -65,7 +69,7 @@ export class FsBriefStore implements BriefStorePort {
 
   async findBriefFileById(id: string): Promise<string | undefined> {
     const found = await this.findBriefById(id);
-    return found ? resolve(this.dir, found.file) : undefined;
+    return found?.file;
   }
 
   async findBriefFile(
@@ -73,24 +77,21 @@ export class FsBriefStore implements BriefStorePort {
     exts: readonly string[] = BRIEF_SOURCE_EXTS,
   ): Promise<string | undefined> {
     for (const ext of exts) {
-      const candidate = resolveConfined(this.dir, `${id}${ext}`);
+      const fileName = `${id}${ext}`;
       try {
+        const candidate = resolveConfined(this.dir, fileName);
         const st = await lstat(candidate);
-        if (st.isFile()) return candidate;
+        if (st.isFile()) return fileName;
       } catch {
-        // missing at this extension — try next
+        // missing at this extension or invalid — try next
       }
     }
     return undefined;
   }
 
   async readBrief(fileOrKey: string, opts: ParseBriefOptions = {}): Promise<CampaignBrief> {
-    let filePath = isAbsolute(fileOrKey) ? fileOrKey : resolve(projectRoot(), fileOrKey);
-    try {
-      await lstat(filePath);
-    } catch {
-      filePath = resolve(this.dir, fileOrKey);
-    }
+    const file = (await this.findBriefFileById(fileOrKey)) ?? fileOrKey;
+    const filePath = resolveConfined(this.dir, file);
     const raw = await readFile(filePath, "utf8");
     return parseBriefText(filePath, raw, opts);
   }
@@ -116,8 +117,8 @@ export class FsBriefStore implements BriefStorePort {
     brief: CampaignBrief,
     options?: { expectedRevision?: string },
   ): Promise<StoredBrief> {
-    const filePath = await this.findBriefFileById(brief.id);
-    if (!filePath) {
+    const file = await this.findBriefFileById(brief.id);
+    if (!file) {
       // Check if there is an inode (e.g. symlink) at canonical path
       const candidate = resolveConfined(this.dir, `${brief.id}.yaml`);
       try {
@@ -132,6 +133,7 @@ export class FsBriefStore implements BriefStorePort {
       (err as { code?: string }).code = "ENOENT";
       throw err;
     }
+    const filePath = resolveConfined(this.dir, file);
     if (options?.expectedRevision) {
       const currentRev = hashBytes(await readFile(filePath));
       if (currentRev !== options.expectedRevision) {
@@ -151,8 +153,8 @@ export class FsBriefStore implements BriefStorePort {
     brief: CampaignBrief,
     options?: { expectedRevision?: string },
   ): Promise<StoredBrief> {
-    const candidate =
-      (await this.findBriefFileById(brief.id)) ?? resolveConfined(this.dir, `${brief.id}.yaml`);
+    const file = await this.findBriefFileById(brief.id);
+    const candidate = resolveConfined(this.dir, file ?? `${brief.id}.yaml`);
     try {
       const st = await lstat(candidate);
       if (st.isSymbolicLink()) {
@@ -173,9 +175,8 @@ export class FsBriefStore implements BriefStorePort {
 
   async getRevision(fileOrId: string): Promise<string | undefined> {
     try {
-      const filePath = isAbsolute(fileOrId)
-        ? fileOrId
-        : (await this.findBriefFileById(fileOrId)) ?? resolve(this.dir, fileOrId);
+      const file = (await this.findBriefFileById(fileOrId)) ?? fileOrId;
+      const filePath = resolveConfined(this.dir, file);
       const bytes = await readFile(filePath);
       return hashBytes(bytes);
     } catch {
@@ -185,9 +186,8 @@ export class FsBriefStore implements BriefStorePort {
 
   async exists(fileOrId: string): Promise<boolean> {
     try {
-      const filePath = isAbsolute(fileOrId)
-        ? fileOrId
-        : (await this.findBriefFileById(fileOrId)) ?? resolveConfined(this.dir, fileOrId);
+      const file = (await this.findBriefFileById(fileOrId)) ?? fileOrId;
+      const filePath = resolveConfined(this.dir, file);
       await lstat(filePath);
       return true;
     } catch {

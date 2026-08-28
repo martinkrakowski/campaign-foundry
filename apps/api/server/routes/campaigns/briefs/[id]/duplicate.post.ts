@@ -44,22 +44,25 @@ export default defineEventHandler(async (event) => {
     return { error: `Brief "${id}" not found.` };
   }
 
-  if (await getBriefStore().findBriefById(newId)) {
-    setResponseStatus(event, 409);
-    return { error: `Brief "${newId}" already exists.` };
-  }
-
-  // Copy assets from source brief to new brief, and any referenced brief-scoped assets
-  await getAssetStore().copyAssets(id, newId);
-  let brief = rewriteAssetPaths({ ...source.brief, id: newId }, id, newId);
-  const additionalSourceIds = extractSourceAssetBriefIds(brief, newId);
-  for (const fromId of additionalSourceIds) {
-    await getAssetStore().copyAssets(fromId, newId);
-    brief = rewriteAssetPaths(brief, fromId, newId);
-  }
-
   try {
-    const created = await getBriefStore().createBrief(brief);
+    const created = await getBriefStore().withBriefLock(newId, async () => {
+      if (await getBriefStore().findBriefById(newId)) {
+        const existErr = new Error(`Brief "${newId}" already exists.`);
+        (existErr as { code?: string }).code = "EEXIST";
+        throw existErr;
+      }
+
+      // Copy assets from source brief to new brief, and any referenced brief-scoped assets
+      const sourceMap = await getAssetStore().copyAssets(id, newId);
+      let brief = rewriteAssetPaths({ ...source.brief, id: newId }, id, newId, sourceMap);
+      const additionalSourceIds = extractSourceAssetBriefIds(brief, newId);
+      for (const fromId of additionalSourceIds) {
+        const addMap = await getAssetStore().copyAssets(fromId, newId);
+        brief = rewriteAssetPaths(brief, fromId, newId, addMap);
+      }
+
+      return await getBriefStore().createBrief(brief);
+    });
     setResponseStatus(event, 201);
     return { file: created.file, brief: created.brief };
   } catch (error) {

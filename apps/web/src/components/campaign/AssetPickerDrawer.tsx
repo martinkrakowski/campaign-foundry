@@ -3,13 +3,8 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { listAssets, unknownErrorMessage, type AssetEntry } from "@/lib/briefs-api";
-
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+import { formatBytes, listAssets, unknownErrorMessage, type AssetEntry } from "@/lib/briefs-api";
+export { formatBytes };
 
 export interface AssetPickerDrawerProps {
   briefId: string;

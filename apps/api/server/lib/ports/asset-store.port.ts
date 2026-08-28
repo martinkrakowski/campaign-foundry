@@ -23,6 +23,12 @@ export interface AssetStorePort {
   writeAsset(briefId: string, name: string, bytes: Buffer): Promise<{ path: string }>;
 
   /**
+   * Read raw bytes of an asset stored under a campaign brief.
+   * Returns undefined if missing or unreadable.
+   */
+  readAsset(briefId: string, name: string): Promise<Buffer | undefined>;
+
+  /**
    * List assets available for a brief.
    * Returns empty array if no assets exist.
    */
@@ -30,9 +36,10 @@ export interface AssetStorePort {
 
   /**
    * Copy all brief-scoped assets from one brief to another (`fromBriefId` -> `toBriefId`).
-   * Creates the target asset directory/prefix if missing. No-op if source has no assets.
+   * Creates the target asset directory/prefix if missing. Preserves nested paths and disambiguates collisions.
+   * Returns a map of relative source asset path -> relative destination asset path.
    */
-  copyAssets(fromBriefId: string, toBriefId: string): Promise<void>;
+  copyAssets(fromBriefId: string, toBriefId: string): Promise<Record<string, string>>;
 
   /**
    * Compute the canonical relative path for an asset (`assets/inputs/<briefId>/<name>`).

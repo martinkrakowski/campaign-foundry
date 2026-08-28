@@ -5,8 +5,8 @@ import { Accordion } from "./Accordion";
 import { useEditorPanels, usePanelSink } from "@/lib/editor-panels-context";
 import { useRun } from "@/lib/run-context";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
-import { listAssets, type AssetEntry } from "@/lib/briefs-api";
-import { formatBytes } from "@/components/campaign/AssetPickerDrawer";
+import { listAssets, formatBytes, type AssetEntry } from "@/lib/briefs-api";
+import { AssetPickerDrawer } from "@/components/campaign/AssetPickerDrawer";
 
 /**
  * Floating left panel: the campaign brief (read-only) and the project asset bin.
@@ -77,16 +77,19 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { guardedPush } = useGuardedNavigation();
   const aspectsLabel = "1:1, 9:16, 16:9";
   const [assets, setAssets] = useState<AssetEntry[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
-    listAssets(brief.id, controller.signal)
+    setAssets([]);
+    const requestedId = brief.id;
+    listAssets(requestedId, controller.signal)
       .then((res) => {
-        if (!cancelled) setAssets(res.assets);
+        if (!cancelled && brief.id === requestedId) setAssets(res.assets);
       })
       .catch(() => {
-        if (!cancelled) setAssets([]);
+        if (!cancelled && brief.id === requestedId) setAssets([]);
       });
     return () => {
       cancelled = true;
@@ -136,9 +139,18 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <Accordion
           title="Project Bin"
           aside={
-            <span className="text-[11px] font-mono text-text-muted">
-              {assets.length} {assets.length === 1 ? "asset" : "assets"}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono text-text-muted">
+                {assets.length} {assets.length === 1 ? "asset" : "assets"}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPickerOpen(true)}
+                className="text-[11px] font-medium text-text-muted transition-colors hover:text-white"
+              >
+                Browse
+              </button>
+            </div>
           }
         >
           {assets.length === 0 ? (
@@ -148,7 +160,8 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               {assets.map((asset) => (
                 <div
                   key={asset.name}
-                  className="flex items-center space-x-3 rounded-lg border border-border bg-surface-2 p-2"
+                  onClick={() => setPickerOpen(true)}
+                  className="flex cursor-pointer items-center space-x-3 rounded-lg border border-border bg-surface-2 p-2 transition-colors hover:border-border-hover"
                 >
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-surface">
                     {asset.thumbnailUrl ? (
@@ -178,6 +191,12 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             </div>
           )}
         </Accordion>
+
+        <AssetPickerDrawer
+          briefId={brief.id}
+          open={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+        />
 
         {/* Editor sections the brief page places here — the variation policy. */}
         {panels ? (

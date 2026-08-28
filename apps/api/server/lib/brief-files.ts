@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { lstat, readFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import * as yaml from "js-yaml";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
@@ -69,20 +70,20 @@ export function hashBytes(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-/** Compute SHA-256 hex digest of a file's raw bytes via the brief store. */
+/** Compute SHA-256 hex digest of a file's raw bytes. */
 export async function hashFile(path: string): Promise<string> {
-  const rev = await getBriefStore().getRevision(path);
-  if (rev === undefined) {
-    const err = new Error(`File not found: ${path}`);
-    (err as { code?: string }).code = "ENOENT";
-    throw err;
-  }
-  return rev;
+  const bytes = await readFile(path);
+  return hashBytes(bytes);
 }
 
-/** True if anything (file, dir, symlink) exists at `path` in the store. */
+/** True if anything (file, dir, symlink) exists at `path`. */
 export async function pathExists(path: string): Promise<boolean> {
-  return getBriefStore().exists(path);
+  try {
+    await lstat(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -93,7 +94,8 @@ export async function findBriefFile(
   id: string,
   exts: readonly string[] = BRIEF_SOURCE_EXTS,
 ): Promise<string | undefined> {
-  return getBriefStore().findBriefFile(id, exts);
+  const file = await getBriefStore().findBriefFile(id, exts);
+  return file ? resolve(briefsDir(), file) : undefined;
 }
 
 /**
@@ -110,7 +112,8 @@ export async function findBriefById(
 }
 
 export async function findBriefFileById(id: string): Promise<string | undefined> {
-  return getBriefStore().findBriefFileById(id);
+  const file = await getBriefStore().findBriefFileById(id);
+  return file ? resolve(briefsDir(), file) : undefined;
 }
 
 /** Exclusive create — fails with EEXIST if anything is already at `path`. */

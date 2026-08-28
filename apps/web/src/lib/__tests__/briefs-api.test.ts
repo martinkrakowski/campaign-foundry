@@ -5,6 +5,7 @@ import {
   BriefsApiError,
   createBrief,
   duplicateBrief,
+  formatBytes,
   generatePool,
   getCapabilities,
   getPool,
@@ -41,7 +42,7 @@ const mockFetch = (handler: (url: string, init: RequestInit) => Response | Promi
   );
 };
 
-describe("unknownErrorMessage / isBriefsApiError", () => {
+describe("unknownErrorMessage / isBriefsApiError / formatBytes", () => {
   test("returns the Error message or the fallback", () => {
     expect(unknownErrorMessage(new Error("boom"), "fallback")).toBe("boom");
     expect(unknownErrorMessage("nope", "fallback")).toBe("fallback");
@@ -50,6 +51,12 @@ describe("unknownErrorMessage / isBriefsApiError", () => {
   test("narrows BriefsApiError", () => {
     expect(isBriefsApiError(new BriefsApiError("x", 409))).toBe(true);
     expect(isBriefsApiError(new Error("x"))).toBe(false);
+  });
+
+  test("formats bytes across units", () => {
+    expect(formatBytes(500)).toBe("500 B");
+    expect(formatBytes(1024)).toBe("1.0 KB");
+    expect(formatBytes(1048576)).toBe("1.0 MB");
   });
 });
 
