@@ -441,6 +441,14 @@ export function toBrief(state: EditorState): CampaignBrief {
   };
 }
 
+/**
+ * An array-valued input, or `fallback` when it is anything else. Shared by the
+ * two places untyped JSON becomes an EditorState — `fromBrief` (a brief from
+ * disk or the API) and `normalizeDraftState` (a draft from localStorage) — so
+ * every reducer that calls `.filter`/`.includes` on a list can trust it is one.
+ */
+const list = <T,>(value: unknown, fallback: T[]): T[] => (Array.isArray(value) ? [...(value as T[])] : fallback);
+
 export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision?: string }): EditorState {
   const tempId = generateTempId();
   const source: EditorSource = entry
@@ -456,7 +464,6 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
   const variation = brief.variation;
   const axes = variation?.axes as Record<string, unknown> | undefined;
   const num = (value: unknown): string => (typeof value === "number" ? String(value) : "");
-  const list = <T,>(value: unknown, fallback: T[]): T[] => (Array.isArray(value) ? [...(value as T[])] : fallback);
   const coverage = variation?.coverage as { perProduct?: number; perRatio?: number } | undefined;
   return {
     source,
@@ -530,11 +537,80 @@ export function loadDraftFromStorage(state: EditorState): EditorState | null {
   const raw = localStorage.getItem(key);
   if (!raw) return null;
   try {
-    const draft = JSON.parse(raw);
-    return draft.state ?? null;
+    const draft = JSON.parse(raw) as { state?: unknown };
+    if (typeof draft.state !== "object" || draft.state === null) return null;
+    return normalizeDraftState(draft.state as Record<string, unknown>);
   } catch {
     return null;
   }
+}
+
+/**
+ * Rebuilds a persisted draft over the EditorState shape THIS build expects, so
+ * a draft an older build wrote — missing a field this build reads
+ * unconditionally — restores instead of crashing render. `restore`'s own
+ * comment already named the hazard ("a draft persisted... by an older editor")
+ * but only ever patched `capabilities`; #85 added `variation.ratio` and nothing
+ * filled the gap, so `toBrief`'s `state.variation.ratio.length` threw on mount
+ * for every session with a pre-#85 draft, before `purgeDraftFromStorage` ever
+ * ran — the stale draft survived reload and only `localStorage.clear()`
+ * recovered.
+ *
+ * Same rigor as `fromBrief`, its sibling deserializer: every list a reducer
+ * calls array methods on goes through `list()`, every enum is checked against
+ * its legal values, and what the draft actually set still wins — this fills
+ * gaps and repairs wrong-typed fields, it never discards a valid value (D11's
+ * whole reason for existing). Each repaired key is re-asserted explicitly
+ * after the `...raw` spread; a key left to the spread keeps the draft's value
+ * even when that value is wrong, which is exactly how the first cut of this
+ * function let an invalid `mode` through.
+ *
+ * `initialEditorState` mints a temp id and two product keys that are usually
+ * discarded here. `fromBrief` does the same on every load; a fresh identity is
+ * the only correct fallback for a draft that lost its own, and a burnt counter
+ * value costs nothing — product keys need only be unique.
+ */
+function normalizeDraftState(raw: Record<string, unknown>): EditorState {
+  const mode: CampaignMode = raw.mode === "variation" ? "variation" : "brief";
+  const initial = initialEditorState(mode);
+  const str = (value: unknown, fallback: string): string => (typeof value === "string" ? value : fallback);
+  const rawSource = raw.source as Partial<EditorSource> | null | undefined;
+  const source: EditorSource =
+    rawSource !== null &&
+    typeof rawSource === "object" &&
+    (rawSource.kind === "new" || rawSource.kind === "file")
+      ? (rawSource as EditorSource)
+      : initial.source;
+  const v = (typeof raw.variation === "object" && raw.variation !== null ? raw.variation : {}) as Record<
+    string,
+    unknown
+  >;
+  const variation: EditorState["variation"] = {
+    count: str(v.count, initial.variation.count),
+    seed: str(v.seed, initial.variation.seed),
+    minDistance: str(v.minDistance, initial.variation.minDistance),
+    perProduct: str(v.perProduct, initial.variation.perProduct),
+    perRatio: str(v.perRatio, initial.variation.perRatio),
+    layout: list(v.layout, initial.variation.layout),
+    tone: list(v.tone, initial.variation.tone),
+    ratio: list(v.ratio, initial.variation.ratio),
+    background: list(v.background, initial.variation.background),
+    paletteShift: list(v.paletteShift, initial.variation.paletteShift),
+    headline: typeof v.headline === "boolean" ? v.headline : initial.variation.headline,
+  };
+  return {
+    ...initial,
+    ...raw,
+    source,
+    mode,
+    products: list(raw.products, initial.products),
+    treatments: list(raw.treatments, initial.treatments),
+    variation,
+    motion: list(raw.motion, initial.motion),
+    duration: list(raw.duration, initial.duration),
+    formats: list(raw.formats, initial.formats),
+    platforms: list(raw.platforms, initial.platforms),
+  } as EditorState;
 }
 
 export function purgeDraftFromStorage(state: EditorState): void {

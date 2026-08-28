@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, vi, afterEach } from "vitest";
 import type { CampaignBrief, CopyPool } from "@campaignfoundry/CampaignOrchestration";
 import {
   LAYOUT_OPTIONS,
+  RATIO_OPTIONS,
   TONE_OPTIONS,
   PALETTE_SHIFT_OPTIONS,
   STATIC_PLATFORMS,
@@ -627,6 +628,126 @@ describe("draft storage", () => {
     expect(loadDraftFromStorage(state)).toBeNull();
     localStorage.setItem(getDraftKey(state), JSON.stringify({ timestamp: 1 }));
     expect(loadDraftFromStorage(state)).toBeNull();
+  });
+
+  test("a pre-#85 draft with no ratio axis restores instead of crashing toBrief", () => {
+    // The exact regression: an older build's draft.state has no `variation.ratio`
+    // key at all (JSON.stringify never wrote one, because the field did not exist
+    // yet). toBrief's `state.variation.ratio.length` throws on an unnormalized
+    // restore — this proves the load path itself, not just the reducer.
+    const state = { ...base(), briefId: "camp" };
+    const legacyVariation: Record<string, unknown> = { ...state.variation };
+    delete legacyVariation.ratio;
+    const legacyDraft = { ...state, variation: legacyVariation };
+    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: legacyDraft, timestamp: 1 }));
+
+    const restored = loadDraftFromStorage(state);
+    expect(restored).not.toBeNull();
+    // Absent means every ratio — the same semantics toBrief already gives an
+    // absent `axes.ratio` on the brief itself.
+    expect(restored?.variation.ratio).toEqual([...RATIO_OPTIONS]);
+    expect(() => toBrief(restored as EditorState)).not.toThrow();
+  });
+
+  test("a draft missing an entire top-level field (not just a variation key) still restores", () => {
+    const state = { ...base(), briefId: "camp", campaignMessage: "hi" };
+    const legacy: Record<string, unknown> = { ...state };
+    delete legacy.headlineAxisDropped;
+    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: legacy, timestamp: 1 }));
+
+    const restored = loadDraftFromStorage(state);
+    expect(restored?.headlineAxisDropped).toBe(false);
+    // What the draft actually specified still wins over the default.
+    expect(restored?.campaignMessage).toBe("hi");
+  });
+
+  test("normalization never overrides a key the draft actually set", () => {
+    const state = { ...base(), briefId: "camp" };
+    const draft = { ...state, variation: { ...state.variation, ratio: ["9:16"] }, formats: ["motion"] };
+    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: draft, timestamp: 1 }));
+
+    const restored = loadDraftFromStorage(state);
+    expect(restored?.variation.ratio).toEqual(["9:16"]);
+    expect(restored?.formats).toEqual(["motion"]);
+  });
+
+  test("a draft whose mode the old build never wrote still resolves to a valid mode", () => {
+    const state = { ...base(), briefId: "camp" };
+    const legacy: Record<string, unknown> = { ...state };
+    delete legacy.mode;
+    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: legacy, timestamp: 1 }));
+    expect(loadDraftFromStorage(state)?.mode).toBe("brief");
+  });
+
+  test("a variation value that is present but not an object falls back to the default shape", () => {
+    const state = { ...base(), briefId: "camp" };
+    const corrupt = { ...state, variation: null };
+    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: corrupt, timestamp: 1 }));
+    expect(loadDraftFromStorage(state)?.variation).toEqual(base().variation);
+  });
+
+  test("a present mode survives, and an invalid one falls back to brief instead of leaking", () => {
+    const state = { ...base(), briefId: "camp" };
+    const store = (mode: unknown) =>
+      localStorage.setItem(getDraftKey(state), JSON.stringify({ state: { ...state, mode }, timestamp: 1 }));
+    // The first cut of normalizeDraftState validated mode but then let the raw
+    // spread overwrite it: a garbage string restored verbatim. Both legal values
+    // must round-trip and every other value must collapse to the default.
+    store("variation");
+    expect(loadDraftFromStorage(state)?.mode).toBe("variation");
+    store("brief");
+    expect(loadDraftFromStorage(state)?.mode).toBe("brief");
+    store("totally-not-a-real-mode");
+    expect(loadDraftFromStorage(state)?.mode).toBe("brief");
+    store(null);
+    expect(loadDraftFromStorage(state)?.mode).toBe("brief");
+  });
+
+  test("a wrong-typed list is repaired, so the reducer cannot later call .filter on a string", () => {
+    const state = { ...base(), briefId: "camp" };
+    const corrupt = {
+      ...state,
+      formats: "motion",
+      variation: { ...state.variation, ratio: "9:16", layout: 42 },
+    };
+    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: corrupt, timestamp: 1 }));
+    const restored = loadDraftFromStorage(state) as EditorState;
+    expect(restored.variation.ratio).toEqual([...RATIO_OPTIONS]);
+    expect(restored.variation.layout).toEqual([...LAYOUT_OPTIONS]);
+    expect(restored.formats).toEqual(["static"]);
+    // toggleOrdered runs `.includes` and `.filter` on the list — the failure the
+    // unrepaired string would have produced on the user's next click.
+    expect(() => reduce(restored, { type: "toggleRatio", value: "1:1" })).not.toThrow();
+    expect(reduce(restored, { type: "toggleRatio", value: "1:1" }).variation.ratio).toEqual(["9:16", "16:9"]);
+  });
+
+  test("every other repaired field takes its default when the draft's value is not its type", () => {
+    const state = { ...base(), briefId: "camp", campaignMessage: "kept" };
+    const corrupt = {
+      ...state,
+      source: null,
+      products: "not a list",
+      treatments: { id: "t" },
+      motion: "ken-burns-in",
+      duration: 5,
+      platforms: null,
+      variation: { ...state.variation, headline: "yes", count: 12 },
+    };
+    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: corrupt, timestamp: 1 }));
+    const restored = loadDraftFromStorage(state) as EditorState;
+    expect(restored.source.kind).toBe("new");
+    expect(restored.products).toHaveLength(2);
+    expect(restored.treatments).toEqual([]);
+    expect(restored.motion).toEqual([]);
+    expect(restored.duration).toEqual([]);
+    expect(restored.platforms).toEqual(base().platforms);
+    expect(restored.variation.headline).toBe(false);
+    expect(restored.variation.count).toBe("12");
+    // and a valid value beside them is untouched
+    expect(restored.campaignMessage).toBe("kept");
+    // the repaired draft is a complete EditorState: every consumer of it works
+    expect(() => toBrief(restored)).not.toThrow();
+    expect(() => getDraftKey(restored)).not.toThrow();
   });
 
   test("every storage helper is inert where localStorage is unavailable", () => {
