@@ -57,7 +57,9 @@ export default function BriefPage() {
   const { setPanels } = useEditorPanels();
   const [state, dispatch] = useReducer(editorReducer, initialEditorState());
   const [errors, setErrors] = useState<Record<string, FieldErrors>>({});
-  const [saveBlocked, setSaveBlocked] = useState(false);
+  // Not a boolean: the section that blocks is what the refusal needs to scroll to, and
+  // deriving it here keeps "is it blocked" and "where" from disagreeing. null = valid.
+  const [blockedAt, setBlockedAt] = useState<string | null>(null);
   const [briefs, setBriefs] = useState<BriefEntry[]>([]);
   const [briefsLoaded, setBriefsLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -170,7 +172,10 @@ export default function BriefPage() {
     // makes the draft unrunnable on this host, not unsavable — so the gating check
     // runs the same validation with the capability unknown. The API parses saves in
     // authoring mode; a motion brief must round-trip on a host without ffmpeg.
-    setSaveBlocked(getTotalErrorCount(validateState({ ...state, capabilities: null }, existingIds)) > 0);
+    const structural = validateState({ ...state, capabilities: null }, existingIds);
+    setBlockedAt(
+      Object.keys(structural).find((section) => getTotalErrorCount({ [section]: structural[section] }) > 0) ?? null,
+    );
   }, [state, briefs]);
 
   // Update dirty state. The provider outlives this route, so clear the flag on unmount —
@@ -315,10 +320,8 @@ export default function BriefPage() {
   // status sentence refusing, and the view scrolled to the first problem.
   const refuseInvalid = (): boolean => {
     setAttempted(true);
-    if (!saveBlocked) return false;
-    const all = validateState({ ...state, capabilities: null }, briefs.map((b) => b.brief.id));
-    const first = Object.keys(all).find((section) => getTotalErrorCount({ [section]: all[section] }) > 0);
-    if (first) scrollToFirstError(first);
+    if (blockedAt === null) return false;
+    scrollToFirstError(blockedAt);
     return true;
   };
 
