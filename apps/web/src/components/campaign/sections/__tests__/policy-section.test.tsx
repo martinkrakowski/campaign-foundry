@@ -1,8 +1,9 @@
-import { describe, test, expect, vi } from "vitest";
+import { describe, test, expect, vi, afterEach } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { CopyPool } from "@campaignfoundry/CampaignOrchestration";
 import { PolicySection } from "../PolicySection";
+import * as messages from "../../messages";
 import { axisProductSize, maxMinDistance } from "../../validate";
 import {
   initialEditorState,
@@ -25,6 +26,22 @@ const state = (over: Partial<EditorState> = {}): EditorState => ({
   ...over,
 });
 
+// The Disclosure remembers it was opened, in localStorage — so a test that opens it
+// would otherwise decide the starting state of every test after it.
+afterEach(() => localStorage.clear());
+
+/**
+ * Render with Advanced open. Most of what this panel offers lives behind that door
+ * (D6), and the Disclosure remembers its state in localStorage — so open it only when
+ * it is actually closed, or a second test in the same file would close it again.
+ */
+const renderOpen = (ui: Parameters<typeof render>[0]) => {
+  const result = render(ui);
+  const advanced = screen.getByRole("button", { name: "Advanced" });
+  if (advanced.getAttribute("aria-expanded") !== "true") fireEvent.click(advanced);
+  return result;
+};
+
 /** The fieldset for a given legend, so a toggle is addressed unambiguously. */
 const axis = (legend: string) => screen.getByText(legend).closest("fieldset") as HTMLElement;
 
@@ -42,7 +59,7 @@ describe("PolicySection — the policy numbers", () => {
     const dispatch = vi.fn();
     // 2 products × 3 ratios × 2 layouts × 2 tones × 1 background × 3 palette shifts
     const s = state({ variation: { ...state().variation, paletteShift: [0, 0.1, 0.2] } });
-    render(<PolicySection state={s} dispatch={dispatch} errors={{}} />);
+    renderOpen(<PolicySection state={s} dispatch={dispatch} errors={{}} />);
 
     const slider = screen.getByLabelText("Count") as HTMLInputElement;
     expect(slider.type).toBe("range");
@@ -57,15 +74,15 @@ describe("PolicySection — the policy numbers", () => {
   test("the count readout shows the value against the ceiling, and flags its error", () => {
     render(<PolicySection state={state()} dispatch={vi.fn()} errors={{ count: "bad count" }} />);
     expect(screen.getByText("bad count")).toBeTruthy();
-    // anchored to the bare value: the ratio panels carry their own "N of count" texts
-    expect(screen.getByText(/^12$/).textContent).toMatch(/12\s*\/\s*\d+/);
+    // the readout is a sentence: the ask, then the ceiling the axes impose
+    expect(screen.getByText(messages.countReadout(12, axisProductSize(state())))).toBeTruthy();
   });
 
   test("Min distance steps within the active axes and can be left to the planner", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
     const s = state();
-    render(<PolicySection state={s} dispatch={dispatch} errors={{}} />);
+    renderOpen(<PolicySection state={s} dispatch={dispatch} errors={{}} />);
 
     const readout = screen.getByRole("spinbutton", { name: "Min distance" });
     expect(readout.getAttribute("aria-valuemax")).toBe(String(maxMinDistance(s)));
@@ -81,7 +98,7 @@ describe("PolicySection — the policy numbers", () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
     const s = state();
-    render(
+    renderOpen(
       <PolicySection state={{ ...s, variation: { ...s.variation, minDistance: "" } }} dispatch={dispatch} errors={{}} />,
     );
     expect(screen.getByRole("spinbutton", { name: "Min distance" }).textContent).toBe("Auto (1)");
@@ -96,13 +113,13 @@ describe("PolicySection — the policy numbers", () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
     const s = state();
-    const { unmount } = render(
+    const { unmount } = renderOpen(
       <PolicySection state={{ ...s, variation: { ...s.variation, [field]: "" } }} dispatch={dispatch} errors={{}} />,
     );
     expect(screen.getByRole("spinbutton", { name: label }).textContent).toBe("No floor");
     unmount();
 
-    render(<PolicySection state={s} dispatch={dispatch} errors={{ [field]: `bad ${field}` }} />);
+    renderOpen(<PolicySection state={s} dispatch={dispatch} errors={{ [field]: `bad ${field}` }} />);
     expect(screen.getByText(`bad ${field}`)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: `Increase ${label}` }));
     expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field, value: "2" });
@@ -112,7 +129,7 @@ describe("PolicySection — the policy numbers", () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
     const s = state();
-    const { unmount } = render(<PolicySection state={s} dispatch={dispatch} errors={{ seed: "bad seed" }} />);
+    const { unmount } = renderOpen(<PolicySection state={s} dispatch={dispatch} errors={{ seed: "bad seed" }} />);
     await user.type(screen.getByPlaceholderText("Auto"), "7");
     expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field: "seed", value: "7" });
     expect(screen.getByText("bad seed")).toBeTruthy();
@@ -125,7 +142,7 @@ describe("PolicySection — the policy numbers", () => {
 
     // a set seed → offer to clear it
     dispatch.mockClear();
-    render(
+    renderOpen(
       <PolicySection state={{ ...s, variation: { ...s.variation, seed: "42" } }} dispatch={dispatch} errors={{}} />,
     );
     await user.click(screen.getByRole("button", { name: "Clear the seed" }));
@@ -133,11 +150,11 @@ describe("PolicySection — the policy numbers", () => {
   });
 
   test("the min-distance help states the bound the active axes actually allow", () => {
-    const { unmount } = render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    const { unmount } = renderOpen(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
     expect(screen.getByText(/up to 6, the active axes/)).toBeTruthy();
     unmount();
 
-    render(
+    renderOpen(
       <PolicySection
         state={state({ formats: ["static", "motion"], motion: ["ken-burns-in"] })}
         dispatch={vi.fn()}
@@ -148,11 +165,27 @@ describe("PolicySection — the policy numbers", () => {
   });
 });
 
+describe("PolicySection — the clamp notice", () => {
+  test("a lowered count says so, and says nothing when nothing was lowered", () => {
+    const { unmount } = render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.queryByText(/Lowered to/)).toBeNull();
+    unmount();
+
+    // the reducer sets countNotice when a narrowing makes the ask impossible
+    const lowered = editorReducer(
+      editorReducer(state(), { type: "setVariation", field: "count", value: String(axisProductSize(state())) }),
+      { type: "toggleLayout", value: LAYOUT_OPTIONS[0] },
+    );
+    render(<PolicySection state={lowered} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.getByText(messages.countLowered(lowered.countNotice as number))).toBeTruthy();
+  });
+});
+
 describe("PolicySection — axes", () => {
   test("layout, tone and background toggle through their own actions", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
-    render(<PolicySection state={state()} dispatch={dispatch} errors={{}} />);
+    renderOpen(<PolicySection state={state()} dispatch={dispatch} errors={{}} />);
 
     await user.click(within(axis("Layout")).getByText(LAYOUT_OPTIONS[0]));
     expect(dispatch).toHaveBeenCalledWith({ type: "toggleLayout", value: LAYOUT_OPTIONS[0] });
@@ -183,12 +216,16 @@ describe("PolicySection — axes", () => {
     expect(top.querySelector("svg[aria-hidden='true']")).toBeTruthy();
   });
 
-  test("the non-visual axes keep their plain text toggles", () => {
-    render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
+  test("every advanced axis shows what it does, and is still named by its raw value", () => {
+    renderOpen(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    // D18: the picture is decoration; the accessible name stays the value the brief
+    // stores, so a screen reader and the YAML agree.
     const bg = within(axis("Background Source")).getByRole("button", { name: "procedural" });
-    expect(bg.querySelector("svg")).toBeNull();
-    expect(within(axis("Palette Shift")).getByRole("button", { name: "0.1" })).toBeTruthy();
-    expect(within(axis("Headline")).getByRole("button", { name: HEADLINE_POOL_REF })).toBeTruthy();
+    expect(bg.querySelector("svg")).toBeTruthy();
+    expect(bg.textContent).toContain("A pattern we draw");
+    const swatch = within(axis("Palette Shift")).getByRole("button", { name: "0.1" });
+    expect(swatch.querySelector("span[style]")?.getAttribute("style")).toContain("background-color");
+    expect(screen.getByRole("switch", { name: HEADLINE_POOL_REF })).toBeTruthy();
   });
 
   test("the card grid holds two columns in the 320px sidebar and auto-fills when wide", () => {
@@ -203,23 +240,31 @@ describe("PolicySection — axes", () => {
   });
 
   test("a selected axis value is marked pressed, an unselected one is not", () => {
-    render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    renderOpen(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
     // background defaults to procedural only
     const bg = within(axis("Background Source"));
-    expect(bg.getByText("procedural").getAttribute("aria-pressed")).toBe("true");
-    expect(bg.getByText("genai").getAttribute("aria-pressed")).toBe("false");
+    expect(bg.getByRole("button", { name: "procedural" }).getAttribute("aria-pressed")).toBe("true");
+    expect(bg.getByRole("button", { name: "genai" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  test("a brief with no products still draws its swatches, from the kit's own blue", () => {
+    renderOpen(<PolicySection state={state({ products: [] })} dispatch={vi.fn()} errors={{}} />);
+    const swatch = within(axis("Palette Shift"))
+      .getByRole("button", { name: "0" })
+      .querySelector("span[style]") as HTMLElement;
+    expect(swatch.style.backgroundColor).not.toBe("");
   });
 
   test("palette shift toggles numerically", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
-    render(<PolicySection state={state()} dispatch={dispatch} errors={{}} />);
-    await user.click(within(axis("Palette Shift")).getByText(String(PALETTE_SHIFT_OPTIONS[1])));
+    renderOpen(<PolicySection state={state()} dispatch={dispatch} errors={{}} />);
+    await user.click(within(axis("Palette Shift")).getByRole("button", { name: String(PALETTE_SHIFT_OPTIONS[1]) }));
     expect(dispatch).toHaveBeenCalledWith({ type: "togglePalette", value: PALETTE_SHIFT_OPTIONS[1] });
   });
 
   test("each axis renders its own error", () => {
-    render(
+    renderOpen(
       <PolicySection
         state={state()}
         dispatch={vi.fn()}
@@ -406,7 +451,7 @@ describe("PolicySection — aspect ratio panels", () => {
   });
 
   test("a selection with no ratio left renders the section's own error", () => {
-    render(
+    renderOpen(
       <PolicySection
         state={{ ...state(), variation: { ...state().variation, ratio: [] } }}
         dispatch={vi.fn()}
@@ -418,26 +463,29 @@ describe("PolicySection — aspect ratio panels", () => {
 });
 
 describe("PolicySection — the headline axis and its pool", () => {
-  const headlineToggle = () => within(axis("Headline")).getByText(HEADLINE_POOL_REF);
+  // the axis is a switch row now: a real role="switch" whose name is the pool ref, so
+  // the state is read from aria-checked rather than aria-pressed
+  const headlineToggle = () =>
+    screen.getByRole("switch", { name: HEADLINE_POOL_REF }) as HTMLButtonElement;
 
   test("an unloaded pool is reported as unloaded, not as empty", () => {
-    render(<PolicySection state={state({ pool: null })} dispatch={vi.fn()} errors={{}} />);
+    renderOpen(<PolicySection state={state({ pool: null })} dispatch={vi.fn()} errors={{}} />);
     expect(screen.getByText(/Headline pool not loaded/)).toBeTruthy();
     expect(screen.queryByText(/no approved entries/)).toBeNull();
     // and it must not be disabled on the strength of a pool nobody fetched
-    expect((headlineToggle() as HTMLButtonElement).disabled).toBe(false);
+    expect(headlineToggle().disabled).toBe(false);
   });
 
   test("a loaded pool with nothing approved blocks the axis and says why", () => {
-    render(<PolicySection state={state({ pool: pool(["pending", "rejected"]) })} dispatch={vi.fn()} errors={{}} />);
+    renderOpen(<PolicySection state={state({ pool: pool(["pending", "rejected"]) })} dispatch={vi.fn()} errors={{}} />);
     expect(screen.getByText(/no approved entries/)).toBeTruthy();
-    expect((headlineToggle() as HTMLButtonElement).disabled).toBe(true);
+    expect(headlineToggle().disabled).toBe(true);
   });
 
   test("a loaded pool with approved entries reports the count and allows the toggle", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
-    render(
+    renderOpen(
       <PolicySection state={state({ pool: pool(["approved", "approved", "pending"]) })} dispatch={dispatch} errors={{}} />,
     );
     expect(screen.getByText("2 approved headlines")).toBeTruthy();
@@ -446,7 +494,7 @@ describe("PolicySection — the headline axis and its pool", () => {
   });
 
   test("one approved entry is described in the singular", () => {
-    render(<PolicySection state={state({ pool: pool(["approved"]) })} dispatch={vi.fn()} errors={{}} />);
+    renderOpen(<PolicySection state={state({ pool: pool(["approved"]) })} dispatch={vi.fn()} errors={{}} />);
     expect(screen.getByText("1 approved headline")).toBeTruthy();
   });
 
@@ -455,27 +503,27 @@ describe("PolicySection — the headline axis and its pool", () => {
     const dispatch = vi.fn();
     // loadPool no longer clears the axis for the user, so the toggle is the only way out
     const stuck = editorReducer(state({ pool: pool(["pending"]) }), { type: "toggleHeadline" });
-    render(<PolicySection state={stuck} dispatch={dispatch} errors={{}} />);
+    renderOpen(<PolicySection state={stuck} dispatch={dispatch} errors={{}} />);
 
-    const toggle = headlineToggle() as HTMLButtonElement;
-    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    const toggle = headlineToggle();
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
     expect(toggle.disabled).toBe(false);
     await user.click(toggle);
     expect(dispatch).toHaveBeenCalledWith({ type: "toggleHeadline" });
   });
 
   test("an axis that is off stays blocked while the pool has nothing approved", () => {
-    render(<PolicySection state={state({ pool: pool(["pending"]) })} dispatch={vi.fn()} errors={{}} />);
-    expect((headlineToggle() as HTMLButtonElement).disabled).toBe(true);
+    renderOpen(<PolicySection state={state({ pool: pool(["pending"]) })} dispatch={vi.fn()} errors={{}} />);
+    expect(headlineToggle().disabled).toBe(true);
   });
 
   test("the toggle reflects whether the axis is on", () => {
     const on = editorReducer(state({ pool: pool(["approved"]) }), { type: "toggleHeadline" });
-    const { unmount } = render(<PolicySection state={on} dispatch={vi.fn()} errors={{}} />);
-    expect(headlineToggle().getAttribute("aria-pressed")).toBe("true");
+    const { unmount } = renderOpen(<PolicySection state={on} dispatch={vi.fn()} errors={{}} />);
+    expect(headlineToggle().getAttribute("aria-checked")).toBe("true");
     unmount();
 
-    render(<PolicySection state={state({ pool: pool(["approved"]) })} dispatch={vi.fn()} errors={{}} />);
-    expect(headlineToggle().getAttribute("aria-pressed")).toBe("false");
+    renderOpen(<PolicySection state={state({ pool: pool(["approved"]) })} dispatch={vi.fn()} errors={{}} />);
+    expect(headlineToggle().getAttribute("aria-checked")).toBe("false");
   });
 });

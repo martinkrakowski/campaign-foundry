@@ -180,6 +180,28 @@ Skeletal by design — patterns to extend, not a library.
   the label some day degrades to the bare value rather than to "headline-top shade .7" — which
   would orphan every `getByRole("button", { name })` query in the suite.
 
+- **ModePanel** (L2.1) — the two campaign modes as pictures at the top of the sidebar, one
+  per `AxisCard`: Classic draws one creative, Randomized draws a fan of them. It is the
+  first decision a brief makes, so it is the first thing the bar shows.
+- **Disclosure** (L2.4) — one door over everything a first-timer does not need. Closed by
+  default; the open state is remembered per `id` in `localStorage` (`cf:disclosure:<id>`),
+  so opening Advanced once is not punished on every later visit. A blocked or absent store
+  reads as closed and never throws. `aria-expanded` / `aria-controls`; ordinary flow, not a
+  dialog — no focus trap, no Escape handling.
+- **PreviewCard** (L2.4) — `AxisCard`'s horizontal sibling, for options whose preview is a
+  picture of the *result* rather than a miniature of the creative: the background sources
+  (a drawn pattern, your own images, made by AI). Same a11y contract as every card in the
+  kit — the accessible name is exactly the raw value, and the picture, the caption and the
+  check mark are all `aria-hidden`. Anything assistive tech must hear goes through
+  `aria-describedby`, which never joins the name.
+- **SwatchChip** (L2.4) — one palette-shift value, filled with that value applied to the
+  first product's colour, so the shift stops being a bare number. The hue rotation is
+  preview-only (`hueShiftHex`); the brief keeps the raw values.
+- **SwitchRow** (L2.4) — a labelled boolean with room for a status line, for optional axes
+  that read as a sentence ("Vary the headline too · 2 approved headlines"). A real
+  `role="switch"`: `aria-checked` carries the state, the knob is decoration. Gating blocks
+  entering a state, never leaving one — off must stay clickable.
+
 ### Shell (`src/components/shell`)
 
 - **Accordion** — the sidebar's section: bold 13px title, chevron, optional `aside` slot on
@@ -213,13 +235,44 @@ Skeletal by design — patterns to extend, not a library.
   sentence on Apply/Save with errors.
 - **ErrorPill** (L1.3) — 16px count, red background, white text, rounded full. Used in
   `SectionShell` and sidebar accordion aside.
-- **FloatingBar** (L1.4) — `absolute bottom-6 left-1/2 z-20 w-full max-w-[800px] -translate-x-1/2
-  rounded-xl border border-border bg-surface p-2 shadow-2xl`, positioned inside main
-  column's scroll container, never viewport. Contains StatusLine, ErrorStrip, action buttons.
+- **FloatingBar** (L1.4) — `sticky bottom-6 z-20 mx-auto w-full max-w-[800px] rounded-xl
+  border border-border bg-surface p-2 shadow-2xl`. `sticky`, not `absolute` and not
+  `fixed`: it must stay at the bottom of the main column's own scroll box, so a long
+  brief scrolls *under* it. `absolute` anchors it to the content and it scrolls away;
+  `fixed` anchors it to the viewport and it covers the 320px sidebar. Contains
+  StatusLine, ErrorStrip and the action buttons — none of which is ever disabled by
+  invalidity: pressing a verb is how a user asks what is wrong, so the refusal is
+  spoken (see §5).
 
 ---
 
 ## 5. Patterns
+
+**Five things, then a door.** A section shows only what a first-timer must decide; the rest
+goes behind one `Disclosure` titled *Advanced*. For the variation policy those five are: how
+many (Count), which shapes (Aspect ratios), which layouts, which tones, and what you will get
+(Estimate). Seed, minimum distance, the coverage floors, background sources, palette shift and
+the headline axis all live behind the door, which remembers that it was opened.
+
+**A number the user cannot have is lowered, and says so.** Narrowing an axis below the
+requested count clamps it to what the axes can produce and states the new figure once
+(`role="status"`); the next edit to the count takes the notice down. A silent clamp and a
+red error are both worse: one hides the change, the other blames the user for it.
+
+**An axis cannot be emptied.** Toggling the last selected value of an axis is refused by the
+reducer rather than accepted and reported as an error: an axis with no values draws nothing,
+and a control that lets you break the brief and then scolds you is worse than one that holds.
+The ratio axis is the exception — it can be emptied, and says so.
+
+**The estimate is a sentence, not a field dump.** *You will get 12 ads — 6 square, 6 tall —
+for 2 products. No AI image calls.* The planner's own vocabulary (`axisProductSize`,
+`genaiCalls`, `feasible`) never reaches the screen.
+
+**Nothing is disabled for being invalid.** Pressing a primary verb is how a user asks what is
+wrong, and a dead button cannot answer. Apply, Save and Save as stay live; an invalid draft is
+answered by revealing every error, saying the refusal in the status line, and scrolling to the
+first problem. Only work in flight (`saving`) disables a control.
+
 
 **Status feedback.** Anything that changes state the user cannot see from where they are
 says so in a `role="status"` line next to the control — *"Applied — Generate in the top bar

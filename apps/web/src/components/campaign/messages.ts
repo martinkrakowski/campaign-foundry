@@ -225,3 +225,47 @@ export function joinList(items: string[]): string {
   if (items.length <= 1) return items.join("");
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
+
+/**
+ * The estimate as a sentence rather than a field dump (D2/D6): a first-timer should
+ * learn what they are about to get without knowing what an "axis product size" is.
+ * The ratio labels are display names — the raw values stay on the ratio panels (D18).
+ */
+export function estimateSentence(parts: {
+  readonly creatives: number;
+  readonly ratios: readonly { readonly label: string; readonly count: number }[];
+  readonly products: number;
+  readonly genaiCalls: number;
+}): string {
+  const ads = `${parts.creatives} ad${parts.creatives === 1 ? "" : "s"}`;
+  const split =
+    parts.ratios.length > 1
+      ? ` — ${parts.ratios.map((r) => `${r.count} ${r.label.toLowerCase()}`).join(", ")} —`
+      : "";
+  const products = `${parts.products} product${parts.products === 1 ? "" : "s"}`;
+  const ai =
+    parts.genaiCalls === 0
+      ? "No AI image calls."
+      : `${parts.genaiCalls} AI image call${parts.genaiCalls === 1 ? "" : "s"}.`;
+  return `You will get ${ads}${split} for ${products}. ${ai}`;
+}
+
+/** The estimate cannot be drawn yet, because the brief is not far enough along. */
+export const estimateNotReady = "Fill in the brief and the estimate appears here.";
+/** The estimate is being worked out. */
+export const estimateWorking = "Working out what you will get…";
+/** The planner could not be reached; the brief is unaffected. */
+export const estimateUnavailable = "Cannot work out the estimate right now.";
+
+/** The count slider's readout: what you asked for, against what the axes can make. */
+export function countReadout(count: number, ceiling: number): string {
+  return `${count} ad${count === 1 ? "" : "s"} · up to ${ceiling}`;
+}
+
+/**
+ * Said once, when narrowing an axis leaves the requested count impossible. It reports
+ * rather than blames: the number moved, and this is why.
+ */
+export function countLowered(ceiling: number): string {
+  return `Lowered to ${ceiling} — that is every different ad these choices can make.`;
+}

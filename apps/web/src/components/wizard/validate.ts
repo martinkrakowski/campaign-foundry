@@ -5,7 +5,7 @@ import {
   maxMinDistance as campaignMaxMinDistance,
   validatePolicy as campaignValidatePolicy,
 } from "@/components/campaign/validate";
-import { RATIO_OPTIONS, nextKeyAfter } from "@/components/campaign/editor-state";
+import { RATIO_OPTIONS, nextKeyAfter , initialEditorState } from "@/components/campaign/editor-state";
 import type { EditorState } from "@/components/campaign/editor-state";
 import * as messages from "@/components/campaign/messages";
 
@@ -19,6 +19,7 @@ function toEditorState(state: WizardState): EditorState {
   // This is a simplified conversion - in reality, we'd need a proper conversion
   // For now, return a minimal EditorState
   return {
+    ...initialEditorState(state.mode),
     source: { kind: "new", tempId: "temp" },
     mode: state.mode,
     briefId: state.briefId,

@@ -6,15 +6,15 @@ import { renderWithRun, json } from "@/__tests__/helpers";
 import { API } from "@/lib/run-context";
 import { fromBrief, saveDraftToStorage } from "@/components/campaign/editor-state";
 import BriefPage from "../page";
-import { useEditorPanels } from "@/lib/editor-panels-context";
 
-/** Places the sections the page publishes to the left bar (the variation policy). */
-const BarPanels = () => useEditorPanels().panels ?? null;
-/** The page plus the bar panels it publishes, as a user would see them together. */
+/**
+ * The page as a user meets it. `renderWithRun` supplies the outlet that stands in for
+ * the sidebar, so the panels the page publishes are placed exactly once — placing them
+ * here as well would make every published control exist twice.
+ */
 const Editor = () => (
   <>
     <BriefPage />
-    <BarPanels />
   </>
 );
 
@@ -639,13 +639,39 @@ describe("BriefPage — data flow", () => {
     await waitForEditorReady();
     await user.click(screen.getByText("Randomized"));
 
-    // empty an axis entirely → one issue; empty a second → two
-    await user.click(await screen.findByRole("button", { name: "headline-top" }));
-    await user.click(screen.getByRole("button", { name: "headline-bottom" }));
+    // one bad number → one issue; a second → two. Numbers, not axes: an axis cannot
+    // be emptied any more (see the guard below), so it can no longer be an error.
+    // the seed lives behind the Advanced door (D6), and the Field label wraps both the
+    // input and its Pick button, so the input is addressed by role
+    await user.click(await screen.findByRole("button", { name: "Advanced" }));
+    await user.type(await screen.findByRole("spinbutton", { name: "Seed" }), "-1");
     await waitFor(() => expect(screen.getByLabelText("1 issue")).toBeTruthy());
-    await user.click(screen.getByRole("button", { name: "bold" }));
-    await user.click(screen.getByRole("button", { name: "subtle" }));
+    // Count, Min distance and the coverage floors are bounded controls that cannot be
+    // driven out of range, so the second issue comes from emptying the ratio axis.
+    for (const ratio of ["1:1", "9:16", "16:9"]) {
+      await user.click(screen.getByRole("button", { name: ratio }));
+    }
     await waitFor(() => expect(screen.getByLabelText("2 issues")).toBeTruthy());
+  });
+
+  test("an axis keeps its last option — deselecting it would draw nothing", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<Editor />);
+    await waitForEditorReady();
+    await user.click(screen.getByText("Randomized"));
+
+    // turn the layout axis down to its last option, then press that one: the guard
+    // holds it selected rather than letting the draw collapse to an axis with no values.
+    const card = async (name: string) =>
+      (await screen.findByRole("button", { name })) as HTMLButtonElement;
+    await user.click(await card("headline-top"));
+    const last = await card("headline-bottom");
+    expect(last.getAttribute("aria-pressed")).toBe("true");
+    await user.click(last);
+    expect((await card("headline-bottom")).getAttribute("aria-pressed")).toBe("true");
+    // and with the axis intact the panel reports nothing wrong
+    expect(screen.queryByLabelText(/issue/)).toBeNull();
   });
 
   test("the mode toggle switches between classic and randomized", async () => {

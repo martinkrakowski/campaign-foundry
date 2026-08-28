@@ -17,6 +17,10 @@
     "./motion-kinds": {
       "types": "./src/domain/value-objects/MotionKind.vo.ts",
       "default": "./src/domain/value-objects/MotionKind.vo.ts"
+    },
+    "./variation-defaults": {
+      "types": "./src/domain/value-objects/variation-defaults.ts",
+      "default": "./src/domain/value-objects/variation-defaults.ts"
     }
   },
   "scripts": {

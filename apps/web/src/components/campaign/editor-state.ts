@@ -1,14 +1,28 @@
 import type { CampaignBrief, CopyPool, Product, Treatment, VariationPolicy } from "@campaignfoundry/CampaignOrchestration";
+// The leaf, never the barrel: the barrel re-exports the infrastructure adapters, which
+// pull node:fs/path/crypto into the browser bundle.
+import {
+  DEFAULT_BACKGROUND_SOURCES,
+  HEADLINE_POOL_REF,
+  MAX_DURATION_SEC,
+  MIN_DURATION_SEC,
+} from "@campaignfoundry/CampaignOrchestration/variation-defaults";
+
+// Re-exported, not restated: every one of these is the domain's own value, and the
+// editor's copies of them were exactly the drift the leaf exists to prevent (D18).
+export { HEADLINE_POOL_REF, MAX_DURATION_SEC, MIN_DURATION_SEC };
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
-import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
+import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
+
 
 export const LAYOUT_OPTIONS = ["headline-top", "headline-bottom"] as const;
 export const TONE_OPTIONS = ["bold", "subtle"] as const;
 export const BACKGROUND_OPTIONS = ["procedural", "asset-pool", "genai"] as const;
 export const PALETTE_SHIFT_OPTIONS = [0, 0.1, 0.2] as const;
+/** The two campaign modes in panel order (D4) — `brief` (Classic) first. */
+export const MODE_OPTIONS: readonly CampaignMode[] = ["brief", "variation"];
 /** The canvas ratios the pipeline renders — the domain's RATIO_VALUES, in its order. */
 export const RATIO_OPTIONS: readonly string[] = RATIO_VALUES;
-export const HEADLINE_POOL_REF = "pool://copy";
 export const STATIC_PLATFORMS = ["instagram-feed", "linkedin", "x"] as const;
 /** Every distribution platform id in profile order — the toggle order for Output. */
 export const PLATFORM_ORDER: readonly string[] = Object.keys(PLATFORM_PROFILES);
@@ -139,6 +153,12 @@ export interface EditorState {
   outputExplicit: boolean;
   pool: CopyPool | null;
   headlineAxisDropped: boolean;
+  /**
+   * The count the reducer last lowered because the axes could no longer produce it
+   * (D13) — shown once beside the slider, cleared by the next count edit or by any
+   * axis toggle that does not clamp. Derived UI state: never serialized.
+   */
+  countNotice: number | null;
   appliedSnapshot: CampaignBrief | null;
   capabilities: { motion: boolean; reason?: string } | null;
 }
@@ -201,7 +221,7 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
       layout: [...LAYOUT_OPTIONS],
       tone: [...TONE_OPTIONS],
       ratio: [...RATIO_OPTIONS],
-      background: ["procedural"],
+      background: [...DEFAULT_BACKGROUND_SOURCES],
       paletteShift: [...PALETTE_SHIFT_OPTIONS],
       headline: false,
     },
@@ -212,6 +232,7 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
     outputExplicit: false,
     pool: null,
     headlineAxisDropped: false,
+    countNotice: null,
     appliedSnapshot: null,
     capabilities: null,
   };
@@ -222,7 +243,84 @@ function toggleOrdered<T>(list: readonly T[], value: T, order: readonly T[]): T[
   return order.filter((item) => next.includes(item));
 }
 
-export function editorReducer(state: EditorState, action: EditorAction): EditorState {
+
+/*
+ * How big the draw is. These three live here rather than in `validate.ts` because the
+ * reducer needs them — the count clamp cannot run without knowing the ceiling — and
+ * having validate own them made the two modules import each other. `validate.ts`
+ * re-exports all three, so every existing caller is unaffected.
+ */
+
+/** Ratios the requested platforms package motion at — the motion filter's allowlist. */
+export function motionPackagedRatios(state: EditorState): Set<string> {
+  return new Set(
+    state.platforms
+      .map((id) => PLATFORM_PROFILES[id])
+      .filter((profile): profile is PlatformProfile => profile !== undefined)
+      .filter((profile) => (profile.formats as readonly string[]).includes("motion"))
+      .map((profile) => profile.ratio),
+  );
+}
+
+/** True while the motion narrowing applies: a motion-only brief has no still slot to fall back to. */
+function motionOnly(state: EditorState): boolean {
+  return state.formats.includes("motion") && !state.formats.includes("static");
+}
+
+/**
+ * Ratios a slot can be drawn at, mirroring VariationPolicy: the requested
+ * subset, narrowed by the motion filter for a motion-only brief (the ratios its
+ * motion platforms package). Empty when every selected ratio is excluded.
+ */
+export function drawableRatios(state: EditorState): string[] {
+  const requested = state.variation.ratio;
+  if (!motionOnly(state)) return [...requested];
+  const packaged = motionPackagedRatios(state);
+  return requested.filter((ratio) => packaged.has(ratio));
+}
+
+/**
+ * How many distinct variants this brief's axes can produce — the planner's hard
+ * ceiling on `count`, mirroring `VariationPolicy.axisProductSize`. Drives the count
+ * slider's bound, so the editor cannot author a count the planner will refuse.
+ */
+export function axisProductSize(state: EditorState): number {
+  const motionEnabled = state.formats.includes("motion") && state.motion.length > 0;
+  const mixStatic = motionEnabled && state.formats.includes("static");
+  return (
+    Math.max(1, state.products.filter((product) => product.id.length > 0).length) *
+    Math.max(1, drawableRatios(state).length) *
+    Math.max(1, state.variation.layout.length) *
+    Math.max(1, state.variation.tone.length) *
+    Math.max(1, state.variation.background.length) *
+    Math.max(1, state.variation.paletteShift.length) *
+    Math.max(1, state.variation.headline ? approvedHeadlines(state.pool) : 1) *
+    (motionEnabled ? state.motion.length * Math.max(1, state.duration.length) + (mixStatic ? 1 : 0) : 1)
+  );
+}
+
+/**
+ * D13/D6: when an axis toggle shrinks what the axes can produce below the count, the
+ * count comes down with it (the planner would refuse anything higher) and the editor
+ * says so once, beside the slider. Any toggle that does not clamp clears the notice —
+ * it describes the latest clamp only, never history.
+ */
+function withCountClamp(state: EditorState): EditorState {
+  const axisMax = axisProductSize(state);
+  const count = Number.parseInt(state.variation.count, 10) || 0;
+  if (count > axisMax) {
+    return {
+      ...state,
+      variation: { ...state.variation, count: String(axisMax) },
+      countNotice: axisMax,
+    };
+  }
+  // Nothing to clamp. Keep the same object when there is also no notice to take down,
+  // so a refused action stays identity-equal for the callers that check.
+  return state.countNotice === null ? state : { ...state, countNotice: null };
+}
+
+function reduceEditor(state: EditorState, action: EditorAction): EditorState {
   switch (action.type) {
     case "setMode": {
       return { ...state, mode: action.mode };
@@ -272,39 +370,42 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         ...state,
         treatments: state.treatments.filter((_, index) => index !== action.index),
       };
-    case "setVariation":
+    case "setVariation": {
+      // Setting the count by hand answers the notice — it has said its one thing.
+      if (action.field === "count") {
+        return { ...state, countNotice: null, variation: { ...state.variation, count: action.value } };
+      }
       return { ...state, variation: { ...state.variation, [action.field]: action.value } };
-    case "toggleLayout":
-      return {
-        ...state,
-        variation: { ...state.variation, layout: toggleOrdered(state.variation.layout, action.value, LAYOUT_OPTIONS) },
-      };
-    case "toggleTone":
-      return {
-        ...state,
-        variation: { ...state.variation, tone: toggleOrdered(state.variation.tone, action.value, TONE_OPTIONS) },
-      };
+    }
+    case "toggleLayout": {
+      // Min-one guard (D6): the last selected value cannot be deselected — the click
+      // is a no-op, which deletes the "select at least one" error by construction.
+      const layout = toggleOrdered(state.variation.layout, action.value, LAYOUT_OPTIONS);
+      if (layout.length === 0) return state;
+      return { ...state, variation: { ...state.variation, layout } };
+    }
+    case "toggleTone": {
+      const tone = toggleOrdered(state.variation.tone, action.value, TONE_OPTIONS);
+      if (tone.length === 0) return state;
+      return { ...state, variation: { ...state.variation, tone } };
+    }
     case "toggleRatio":
       return {
         ...state,
         variation: { ...state.variation, ratio: toggleOrdered(state.variation.ratio, action.value, RATIO_OPTIONS) },
       };
-    case "toggleBackground":
-      return {
-        ...state,
-        variation: {
-          ...state.variation,
-          background: toggleOrdered(state.variation.background, action.value, BACKGROUND_OPTIONS),
-        },
-      };
-    case "togglePalette":
-      return {
-        ...state,
-        variation: {
-          ...state.variation,
-          paletteShift: toggleOrdered(state.variation.paletteShift, action.value, PALETTE_SHIFT_OPTIONS),
-        },
-      };
+    case "toggleBackground": {
+      // Same guard as layout and tone. The domain multiplies these axes by their raw
+      // length, so an empty one makes a policy that can produce nothing at all.
+      const background = toggleOrdered(state.variation.background, action.value, BACKGROUND_OPTIONS);
+      if (background.length === 0) return state;
+      return { ...state, variation: { ...state.variation, background } };
+    }
+    case "togglePalette": {
+      const paletteShift = toggleOrdered(state.variation.paletteShift, action.value, PALETTE_SHIFT_OPTIONS);
+      if (paletteShift.length === 0) return state;
+      return { ...state, variation: { ...state.variation, paletteShift } };
+    }
     case "toggleHeadline":
       return { ...state, variation: { ...state.variation, headline: !state.variation.headline } };
     case "toggleMotion": {
@@ -534,7 +635,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
       layout: list(axes?.layout, [...LAYOUT_OPTIONS]),
       tone: list(axes?.tone, [...TONE_OPTIONS]),
       ratio: list(axes?.ratio, [...RATIO_OPTIONS]),
-      background: list((axes?.background as { source?: unknown } | undefined)?.source, ["procedural"]),
+      background: list((axes?.background as { source?: unknown } | undefined)?.source, [...DEFAULT_BACKGROUND_SOURCES]),
       paletteShift: list(axes?.paletteShift, [...PALETTE_SHIFT_OPTIONS]),
       headline: axes?.headline === HEADLINE_POOL_REF,
     },
@@ -545,6 +646,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
     outputExplicit: brief.output !== undefined,
     pool: null,
     headlineAxisDropped: false,
+    countNotice: null,
     appliedSnapshot: null,
     capabilities: null,
   };
@@ -679,6 +781,8 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     formats: list(raw.formats, initial.formats),
     platforms: list(raw.platforms, initial.platforms),
     outputExplicit: raw.outputExplicit === true,
+    // The count notice is one-time UI, not part of the draft it describes.
+    countNotice: null,
   } as EditorState;
 }
 
@@ -689,8 +793,6 @@ export function purgeDraftFromStorage(state: EditorState): void {
 }
 
 /** Clip lengths the API accepts, mirroring load-brief's MIN/MAX_DURATION_SEC. */
-export const MIN_DURATION_SEC = 2;
-export const MAX_DURATION_SEC = 30;
 /** The default length a first duration is offered at. */
 export const DEFAULT_DURATION_SEC = 5;
 
@@ -716,4 +818,23 @@ export function canPlan(state: EditorState): boolean {
     state.products.some((product) => product.id.length > 0) &&
     parseInt(state.variation.count, 10) >= 1
   );
+}
+
+/**
+ * Every action goes through the clamp, because almost every action can move the
+ * ceiling: dropping a ratio, a product, a motion kind, a duration, a format, a
+ * platform, or the headlines the pool approves all shrink what the axes can produce.
+ * Clamping only where the plan first noticed it (layout and tone) left every other
+ * path to be refused by the planner instead — the very thing the clamp exists to
+ * prevent.
+ *
+ * Two actions are exempt: one that changed nothing (the axis guards return the same
+ * state), and the user setting the count by hand, which is them answering the notice
+ * rather than provoking a new one.
+ */
+export function editorReducer(state: EditorState, action: EditorAction): EditorState {
+  const next = reduceEditor(state, action);
+  if (next === state) return state;
+  if (action.type === "setVariation" && action.field === "count") return next;
+  return withCountClamp(next);
 }

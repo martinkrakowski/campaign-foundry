@@ -48,13 +48,15 @@ import { Accordion } from "@/components/shell/Accordion";
 import { scrollToSection } from "@/lib/scroll-to-section";
 import { BriefSelector } from "@/components/campaign/BriefSelector";
 import { HeadlinePoolDrawer } from "@/components/campaign/HeadlinePoolDrawer";
+import { ModePanel } from "@/components/ui/mode-panel";
+import type { CampaignMode } from "@/components/campaign/editor-state";
 
 const LEAVE_PROMPT = "You have unsaved changes. Are you sure you want to leave?";
 
 export default function BriefPage() {
   const { brief: runBrief, setBrief: setRunBrief } = useRun();
   const { setDirty } = useEditorDirty();
-  const { setPanels } = useEditorPanels();
+  const { setPanels, setTopPanels } = useEditorPanels();
   const [state, dispatch] = useReducer(editorReducer, initialEditorState());
   const [errors, setErrors] = useState<Record<string, FieldErrors>>({});
   // Not a boolean: the section that blocks is what the refusal needs to scroll to, and
@@ -249,33 +251,41 @@ export default function BriefPage() {
 
   /** Section errors before the first validation pass lands. */
 
-   // Publish the sections that live in the left bar while this editor is mounted. The
-   // page keeps the state, dispatch and validation and republishes on every change; the
-   // bar only places them.
-   const policyErrors = Object.keys(sectionErrorsVisible("policy")).length;
-   useEffect(() => {
-     setPanels(
-       state.mode === "variation" ? (
-         // The panel renders in the sidebar, outside this page's DOM subtree, so it
-         // needs its own capture: a click on an axis card there is still "the user
-         // has been to the policy section" (D1).
-         <div onClickCapture={touchSectionFromEvent} data-section="policy">
-         <Accordion
-           title="Variation Policy"
-           aside={
-             policyErrors > 0 ? (
-               <ErrorPill count={policyErrors} />
-             ) : null
-           }
-         >
-           <PolicySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("policy")} compact />
-         </Accordion>
-         </div>
-       ) : null,
-     );
-     return () => setPanels(null);
-     // sectionErrors only reads what `errors` already covers.
-   }, [state, errors, policyErrors, setPanels, touchSectionFromEvent]);
+  // D4/U1: the mode chooser is the first decision a brief makes, so it is the first
+  // thing the bar shows. Published like every other editor panel — the page keeps the
+  // dispatch, the bar only places it — which also gives the mobile menu the chooser.
+  useEffect(() => {
+    setTopPanels(<ModePanel mode={state.mode} onSetMode={(mode: CampaignMode) => dispatch({ type: "setMode", mode })} />);
+    return () => setTopPanels(null);
+  }, [state.mode, setTopPanels]);
+
+  // Publish the sections that live in the left bar while this editor is mounted. The
+  // page keeps the state, dispatch and validation and republishes on every change; the
+  // bar only places them.
+  const policyErrors = Object.keys(sectionErrorsVisible("policy")).length;
+  useEffect(() => {
+    setPanels(
+      state.mode === "variation" ? (
+        // The panel renders in the sidebar, outside this page's DOM subtree, so it
+        // needs its own capture: a click on an axis card there is still "the user
+        // has been to the policy section" (D1).
+        <div onClickCapture={touchSectionFromEvent} data-section="policy">
+        <Accordion
+          title="Variation Policy"
+          aside={
+            policyErrors > 0 ? (
+              <ErrorPill count={policyErrors} />
+            ) : null
+          }
+        >
+          <PolicySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("policy")} compact />
+        </Accordion>
+        </div>
+      ) : null,
+    );
+    return () => setPanels(null);
+    // sectionErrors only reads what `errors` already covers.
+  }, [state, errors, policyErrors, setPanels, touchSectionFromEvent]);
 
   /** Every path that replaces the draft goes through the same D14 confirmation. */
   const confirmReplace = (): boolean =>
@@ -429,22 +439,6 @@ export default function BriefPage() {
                 onCreateNew={createNew}
               />
               <StatusChip state={state} />
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant={state.mode === "brief" ? "primary" : "secondary"}
-                size="sm"
-                onClick={() => dispatch({ type: "setMode", mode: "brief" })}
-              >
-                Classic
-              </Button>
-              <Button
-                variant={state.mode === "variation" ? "primary" : "secondary"}
-                size="sm"
-                onClick={() => dispatch({ type: "setMode", mode: "variation" })}
-              >
-                Randomized
-              </Button>
             </div>
           </div>
 

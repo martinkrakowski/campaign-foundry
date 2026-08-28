@@ -5,16 +5,32 @@ import { AspectRatio } from "./AspectRatio.vo.js";
 import type { AspectRatioValue } from "./aspect-ratios.js";
 import { LAYOUT_VALUES, TONE_VALUES, type LayoutKind, type ToneKind } from "./Treatment.vo.js";
 import { MOTION_KINDS, type MotionKind } from "./MotionKind.vo.js";
+// The axis vocabulary and its defaults live in a leaf the browser can also import;
+// this module hashes with node:crypto and so cannot be bundled. Re-exported here so
+// the VO's public surface is unchanged.
+import {
+  HEADLINE_POOL_REF,
+  DEFAULT_BACKGROUND_SOURCES,
+  DEFAULT_DURATION,
+  DEFAULT_MOTION,
+  DEFAULT_PALETTE_SHIFT,
+  MAX_DURATION_SEC,
+  MIN_DURATION_SEC,
+  type BackgroundAxisSource,
+} from "./variation-defaults.js";
 
-/**
- * Background *axis* values from the brief parser (`procedural` | `asset-pool` | `genai`).
- * Distinct from the rendered-asset BackgroundSource (firefly/imagen/…).
- */
-export const BACKGROUND_AXIS_SOURCES = ["procedural", "asset-pool", "genai"] as const;
-export type BackgroundAxisSource = (typeof BACKGROUND_AXIS_SOURCES)[number];
+export {
+  BACKGROUND_AXIS_SOURCES,
+  DEFAULT_BACKGROUND_SOURCES,
+  DEFAULT_DURATION,
+  DEFAULT_MOTION,
+  DEFAULT_PALETTE_SHIFT,
+  HEADLINE_POOL_REF,
+  MAX_DURATION_SEC,
+  MIN_DURATION_SEC,
+  type BackgroundAxisSource,
+} from "./variation-defaults.js";
 
-/** The only supported pool reference for the `headline` axis. */
-export const HEADLINE_POOL_REF = "pool://copy";
 
 /** Hamming axes — a candidate must differ in at least `minDistance` of these. */
 export const DISTANCE_AXES = [
@@ -30,18 +46,6 @@ export const DISTANCE_AXES = [
 ] as const;
 
 const UINT32_MAX = 0xffffffff;
-const DEFAULT_BACKGROUND_SOURCES: readonly BackgroundAxisSource[] = ["procedural"];
-const DEFAULT_PALETTE_SHIFT: readonly number[] = [0];
-/**
- * Motion axis default when `output.formats` requests "motion" but the brief
- * lists no `axes.motion`: every kind. A brief that asks for clips gets clips;
- * a static brief (no motion format) draws no motion kinds at all.
- */
-const DEFAULT_MOTION: readonly MotionKind[] = MOTION_KINDS;
-/** Clip length in whole seconds; the parser bounds it to [2, 30]. */
-const DEFAULT_DURATION: readonly number[] = [6];
-const MIN_DURATION_SEC = 2;
-const MAX_DURATION_SEC = 30;
 
 /**
  * Plan-time inputs resolved by the caller (the domain never reads files or the
