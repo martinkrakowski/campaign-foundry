@@ -8,6 +8,8 @@ import { keyForLabel } from "@/components/campaign/error-sections";
 import { ErrorPill } from "@/components/ui/error-pill";
 import { useSectionMode } from "@/components/campaign/SectionModeContext";
 
+import * as messages from "@/components/campaign/messages";
+
 export const REGION_OPTIONS = ["GLOBAL", "EU", "DE", "UK", "US", "APAC"] as const;
 
 export interface SectionProps {
@@ -138,46 +140,48 @@ export function IdentitySection({ state, dispatch, errors }: SectionProps) {
   return (
     <SectionShell id="identity" title="1 · Identity" errorCount={countErrors(errors)}>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field fieldKey="briefId" label="Campaign Name" error={errors.briefId}>
+        <Field fieldKey="briefId" label={messages.campaignNameLabel} error={errors.briefId}>
           <Input
-            aria-label="Brief ID"
+            aria-label={messages.campaignNameLabel}
             value={campaignNameValue}
             readOnly={readOnly}
-            placeholder="e.g. Summer Launch"
+            placeholder={messages.campaignNamePlaceholder}
             onChange={(e) => dispatch({ type: "patch", patch: { campaignName: e.target.value } })}
             invalid={Boolean(errors.briefId)}
           />
           <div className="mt-1 flex items-center justify-between font-mono text-[11px] text-text-muted">
             <span className="truncate max-w-[200px] sm:max-w-xs" title={state.briefId || undefined}>
-              {state.briefId ? state.briefId : "This is the brief id — made from the name"}
+              {state.briefId ? state.briefId : messages.briefIdReadout}
             </span>
             <button
               type="button"
               onClick={copyBriefId}
               disabled={!state.briefId}
               className="font-mono text-[10px] uppercase tracking-wider text-text-muted transition-colors hover:text-white disabled:opacity-40"
-              aria-label="Copy brief ID"
+              aria-label={messages.briefIdCopyAria}
             >
-              {copied ? "Copied ✓" : "Copy"}
+              {copied ? messages.briefIdCopied : messages.briefIdCopy}
             </button>
           </div>
         </Field>
-        <Field fieldKey="targetRegion" label="Target Region" error={errors.targetRegion} as="div">
+        <Field fieldKey="targetRegion" label={messages.targetRegionLabel} error={errors.targetRegion} as="div">
           <ChipGroup
-            label="Target Region"
+            label={messages.targetRegionLabel}
             options={REGION_OPTIONS}
             value={state.targetRegion}
             onChange={(value) => dispatch({ type: "patch", patch: { targetRegion: value } })}
             allowOther
+            otherLabel={messages.targetRegionOther}
+            otherPlaceholder={messages.targetRegionOtherPlaceholder}
             invalid={Boolean(errors.targetRegion)}
           />
         </Field>
       </div>
-      <Field fieldKey="targetAudience" label="Target Audience" error={errors.targetAudience}>
+      <Field fieldKey="targetAudience" label={messages.targetAudienceLabel} error={errors.targetAudience}>
         <Input
-          aria-label="Target Audience"
+          aria-label={messages.targetAudienceLabel}
           value={state.targetAudience}
-          placeholder="e.g. urban outdoor enthusiasts, 25-40"
+          placeholder={messages.targetAudiencePlaceholder}
           onChange={(e) => dispatch({ type: "patch", patch: { targetAudience: e.target.value } })}
           invalid={Boolean(errors.targetAudience)}
         />

@@ -25,7 +25,7 @@ describe("IdentitySection", () => {
     const dispatch = vi.fn();
     render(<IdentitySection state={state({ briefId: "", campaignName: "" })} dispatch={dispatch} errors={{}} />);
 
-    fireEvent.change(screen.getByLabelText("Brief ID"), { target: { value: "New Name" } });
+    fireEvent.change(screen.getByLabelText("Campaign Name"), { target: { value: "New Name" } });
     expect(dispatch).toHaveBeenCalledWith({ type: "patch", patch: { campaignName: "New Name" } });
     await user.type(screen.getByLabelText("Target Region"), "D");
     expect(dispatch).toHaveBeenCalledWith({ type: "patch", patch: { targetRegion: "D" } });
@@ -35,7 +35,7 @@ describe("IdentitySection", () => {
 
   test("the brief id is editable on a new draft and read-only once loaded from a file", () => {
     const { unmount } = render(<IdentitySection state={state()} dispatch={vi.fn()} errors={{}} />);
-    expect(screen.getByLabelText("Brief ID").hasAttribute("readonly")).toBe(false);
+    expect(screen.getByLabelText("Campaign Name").hasAttribute("readonly")).toBe(false);
     unmount();
 
     render(
@@ -45,7 +45,7 @@ describe("IdentitySection", () => {
         errors={{}}
       />,
     );
-    expect(screen.getByLabelText("Brief ID").hasAttribute("readonly")).toBe(true);
+    expect(screen.getByLabelText("Campaign Name").hasAttribute("readonly")).toBe(true);
   });
 
   test("copy brief ID writes to clipboard and shows temporary feedback", async () => {
@@ -140,12 +140,23 @@ describe("CopySection", () => {
     const dispatch = vi.fn();
     render(<CopySection state={state()} dispatch={dispatch} errors={{ campaignMessage: "required", localizedMessage: "odd" }} />);
 
-    await user.type(screen.getByLabelText("Campaign Message"), "H");
+    await user.type(screen.getByLabelText("Headline"), "H");
     expect(dispatch).toHaveBeenCalledWith({ type: "patch", patch: { campaignMessage: "H" } });
-    await user.type(screen.getByLabelText("Localized Message (optional)"), "x");
+    await user.type(screen.getByLabelText("Localized headline (optional)"), "x");
     expect(dispatch).toHaveBeenCalledWith({ type: "patch", patch: { localizedMessage: "x" } });
     expect(screen.getByText("required")).toBeTruthy();
     expect(screen.getByText("odd")).toBeTruthy();
+  });
+
+  test("renders live character counter and warns on exceeding max limit", () => {
+    const { unmount } = render(<CopySection state={state({ campaignMessage: "Stay wild" })} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.getByText("9 / 60")).toBeTruthy();
+    unmount();
+
+    render(<CopySection state={state({ campaignMessage: "a".repeat(65) })} dispatch={vi.fn()} errors={{}} />);
+    const counter = screen.getByText("65 / 60");
+    expect(counter).toBeTruthy();
+    expect(counter.className).toContain("text-error");
   });
 });
 

@@ -13,7 +13,7 @@ export interface ChipGroupProps {
   readonly onChange: (value: string) => void;
   /** Whether to render the 'Other…' escape chip that reveals custom text input. */
   readonly allowOther?: boolean;
-  /** Label for the other chip (defaults to "Other…"). */
+  /** Label for the other chip. */
   readonly otherLabel?: string;
   /** Placeholder for the custom text input. */
   readonly otherPlaceholder?: string;
@@ -36,8 +36,8 @@ export function ChipGroup({
   value,
   onChange,
   allowOther = false,
-  otherLabel = "Other…",
-  otherPlaceholder = "e.g. LATAM",
+  otherLabel,
+  otherPlaceholder,
   invalid = false,
   disabled = false,
   readOnly = false,
@@ -62,7 +62,7 @@ export function ChipGroup({
     <div role="group" aria-label={label ? `${label} options` : undefined} className="space-y-2">
       <input
         type="text"
-        aria-label={label ?? "Target Region"}
+        aria-label={label}
         className="sr-only"
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -92,7 +92,7 @@ export function ChipGroup({
             </button>
           );
         })}
-        {allowOther ? (
+        {allowOther && otherLabel ? (
           <button
             type="button"
             aria-label={otherLabel}

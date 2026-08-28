@@ -2,8 +2,10 @@
 
 import type { Dispatch } from "react";
 import { Button, Input } from "@/components/ui";
+import { cn } from "@/lib/cn";
+import * as messages from "@/components/campaign/messages";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
-import type { FieldErrors } from "@/components/campaign/validate";
+import { MAX_HEADLINE_LENGTH, type FieldErrors } from "@/components/campaign/validate";
 import { SectionShell, Field } from "./IdentitySection";
 
 export function CopySection({
@@ -23,26 +25,32 @@ export function CopySection({
       title="2 · Copy"
       errorCount={Object.keys(errors).filter((k) => k.startsWith("copy") || k === "campaignMessage" || k === "localizedMessage").length}
     >
-      <Field fieldKey="campaignMessage" label="Headline" error={errors.campaignMessage}>
+      <Field fieldKey="campaignMessage" label={messages.headlineLabel} error={errors.campaignMessage}>
         <div className="space-y-1">
           <Input
-            aria-label="Campaign Message"
+            aria-label={messages.headlineLabel}
             value={state.campaignMessage}
-            placeholder="e.g. Stay wild. Stay hydrated."
+            placeholder={messages.headlinePlaceholder}
             onChange={(e) => dispatch({ type: "patch", patch: { campaignMessage: e.target.value } })}
             invalid={Boolean(errors.campaignMessage)}
           />
-          <div className="flex justify-end text-[11px] text-text-muted">
-            <span>{state.campaignMessage.length} / 60</span>
+          <div className="flex justify-end text-[11px]">
+            <span
+              className={cn(
+                state.campaignMessage.length > MAX_HEADLINE_LENGTH ? "text-error font-medium" : "text-text-muted",
+              )}
+            >
+              {messages.headlineCounter(state.campaignMessage.length, MAX_HEADLINE_LENGTH)}
+            </span>
           </div>
         </div>
       </Field>
 
-      <Field fieldKey="localizedMessage" label="Localized headline (optional)" error={errors.localizedMessage}>
+      <Field fieldKey="localizedMessage" label={messages.localizedHeadlineLabel} error={errors.localizedMessage}>
         <Input
-          aria-label="Localized Message (optional)"
+          aria-label={messages.localizedHeadlineLabel}
           value={state.localizedMessage}
-          placeholder="e.g. Bleib wild. Bleib hydriert."
+          placeholder={messages.localizedHeadlinePlaceholder}
           onChange={(e) => dispatch({ type: "patch", patch: { localizedMessage: e.target.value } })}
           invalid={Boolean(errors.localizedMessage)}
         />
@@ -51,8 +59,8 @@ export function CopySection({
       {state.mode === "variation" ? (
         <div className="mt-2">
           <Button variant="ghost" size="sm" type="button" onClick={onOpenPool}>
-            Extra headlines…
-            <span className="sr-only">Manage Headline Pool</span>
+            {messages.extraHeadlines}
+            <span className="sr-only">{messages.extraHeadlinesAria}</span>
           </Button>
         </div>
       ) : null}

@@ -240,9 +240,9 @@ Skeletal by design — patterns to extend, not a library.
 - **Sections** (`sections/*`) — each is a `SectionShell` (numbered `text-lg` heading with an
   error-count badge) of `Field`s (11px label, control, 11px error line beneath).
 - **LogoField** (L3.4) — brand asset upload rendered as a dashed drop tile that transforms into an
-  image thumbnail once populated. The path is relegated to 10px monospace meta, elevating visual
-  identity over filesystem mechanics. Houses the *Upload* action and an optional *Choose from bin*
-  affordance (when wired), with explicit uploading states.
+  image thumbnail (or file-type badge when unrendered directly) once populated. The path is relegated
+  to 10px monospace meta, elevating visual identity over filesystem mechanics. Houses the *Upload* action
+  and an optional *Choose from bin* affordance (when wired), with explicit uploading states.
 - **StatusChip** — four states, colour *and* icon: 🔴 *Draft not applied* · 🟠 *Applied,
   never saved* · 🟡 *Applied, unsaved edits* · 🟢 *Saved & applied*.
 - **ErrorStrip** — one `rounded-full` chip per section with errors, red border/tint, count

@@ -25,15 +25,28 @@ describe("ChipGroup", () => {
     expect(onChange).toHaveBeenCalledWith("EU");
   });
 
-  test("does not render Other button when allowOther is false", () => {
-    render(<ChipGroup options={OPTIONS} value="DE" onChange={vi.fn()} allowOther={false} />);
+  test("does not render Other button when allowOther is false or otherLabel is omitted", () => {
+    const { unmount } = render(<ChipGroup options={OPTIONS} value="DE" onChange={vi.fn()} allowOther={false} otherLabel="Other…" />);
+    expect(screen.queryByRole("button", { name: "Other…" })).toBeNull();
+    unmount();
+
+    render(<ChipGroup options={OPTIONS} value="DE" onChange={vi.fn()} allowOther={true} />);
     expect(screen.queryByRole("button", { name: "Other…" })).toBeNull();
   });
 
   test("clicking Other reveals free text input and fires onChange", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<ChipGroup options={OPTIONS} value="DE" onChange={onChange} allowOther />);
+    render(
+      <ChipGroup
+        options={OPTIONS}
+        value="DE"
+        onChange={onChange}
+        allowOther
+        otherLabel="Other…"
+        otherPlaceholder="e.g. LATAM"
+      />,
+    );
 
     const otherButton = screen.getByRole("button", { name: "Other…" });
     expect(otherButton.getAttribute("aria-pressed")).toBe("false");
@@ -52,19 +65,46 @@ describe("ChipGroup", () => {
 
   test("clicking Other when value is already empty or custom does not clear custom value", () => {
     const onChange = vi.fn();
-    const { rerender } = render(<ChipGroup options={OPTIONS} value="LATAM" onChange={onChange} allowOther />);
+    const { rerender } = render(
+      <ChipGroup
+        options={OPTIONS}
+        value="LATAM"
+        onChange={onChange}
+        allowOther
+        otherLabel="Other…"
+        otherPlaceholder="e.g. LATAM"
+      />,
+    );
 
     const otherButton = screen.getByRole("button", { name: "Other…" });
     fireEvent.click(otherButton);
     expect(onChange).not.toHaveBeenCalled();
 
-    rerender(<ChipGroup options={OPTIONS} value="" onChange={onChange} allowOther />);
+    rerender(
+      <ChipGroup
+        options={OPTIONS}
+        value=""
+        onChange={onChange}
+        allowOther
+        otherLabel="Other…"
+        otherPlaceholder="e.g. LATAM"
+      />,
+    );
     fireEvent.click(otherButton);
     expect(onChange).not.toHaveBeenCalled();
   });
 
   test("automatically reveals custom input when value is not in options", () => {
-    render(<ChipGroup options={OPTIONS} value="FR" onChange={vi.fn()} allowOther />);
+    render(
+      <ChipGroup
+        options={OPTIONS}
+        value="FR"
+        onChange={vi.fn()}
+        allowOther
+        otherLabel="Other…"
+        otherPlaceholder="e.g. LATAM"
+      />,
+    );
     const otherButton = screen.getByRole("button", { name: "Other…" });
     expect(otherButton.getAttribute("aria-pressed")).toBe("true");
 
@@ -75,14 +115,32 @@ describe("ChipGroup", () => {
   test("clicking an option chip while custom input is open resets custom state", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    const { rerender } = render(<ChipGroup options={OPTIONS} value="FR" onChange={onChange} allowOther />);
+    const { rerender } = render(
+      <ChipGroup
+        options={OPTIONS}
+        value="FR"
+        onChange={onChange}
+        allowOther
+        otherLabel="Other…"
+        otherPlaceholder="e.g. LATAM"
+      />,
+    );
 
     expect(screen.getByPlaceholderText("e.g. LATAM")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "UK" }));
     expect(onChange).toHaveBeenCalledWith("UK");
 
-    rerender(<ChipGroup options={OPTIONS} value="UK" onChange={onChange} allowOther />);
+    rerender(
+      <ChipGroup
+        options={OPTIONS}
+        value="UK"
+        onChange={onChange}
+        allowOther
+        otherLabel="Other…"
+        otherPlaceholder="e.g. LATAM"
+      />,
+    );
     expect(screen.queryByPlaceholderText("e.g. LATAM")).toBeNull();
     expect(screen.getByRole("button", { name: "UK" }).getAttribute("aria-pressed")).toBe("true");
   });
@@ -100,7 +158,14 @@ describe("ChipGroup", () => {
 
   test("disabled and readOnly disable the buttons", () => {
     const { rerender } = render(
-      <ChipGroup options={OPTIONS} value="DE" onChange={vi.fn()} allowOther disabled={true} />,
+      <ChipGroup
+        options={OPTIONS}
+        value="DE"
+        onChange={vi.fn()}
+        allowOther
+        otherLabel="Other…"
+        disabled={true}
+      />,
     );
 
     const deButton = screen.getByRole("button", { name: "DE" }) as HTMLButtonElement;
@@ -109,7 +174,16 @@ describe("ChipGroup", () => {
     const otherButton = screen.getByRole("button", { name: "Other…" }) as HTMLButtonElement;
     expect(otherButton.disabled).toBe(true);
 
-    rerender(<ChipGroup options={OPTIONS} value="DE" onChange={vi.fn()} allowOther readOnly={true} />);
+    rerender(
+      <ChipGroup
+        options={OPTIONS}
+        value="DE"
+        onChange={vi.fn()}
+        allowOther
+        otherLabel="Other…"
+        readOnly={true}
+      />,
+    );
     const euButton = screen.getByRole("button", { name: "EU" }) as HTMLButtonElement;
     expect(euButton.disabled).toBe(true);
   });

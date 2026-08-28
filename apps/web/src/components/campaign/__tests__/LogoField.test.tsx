@@ -63,7 +63,7 @@ describe("LogoField", () => {
     expect(onChooseFromBin).toHaveBeenCalled();
   });
 
-  test("set state renders image thumbnail, 10px path meta, and Replace button", async () => {
+  test("set state without direct image URL renders file extension badge, path meta, and Replace button", async () => {
     const user = userEvent.setup();
     const onUploadFile = vi.fn();
     render(
@@ -74,10 +74,8 @@ describe("LogoField", () => {
       />,
     );
 
-    const img = screen.getByRole("img", { name: "Product logo preview" }) as HTMLImageElement;
-    expect(img).toBeTruthy();
-    expect(img.src).toContain("assets/inputs/camp/logo.png");
-
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getByText("PNG")).toBeTruthy();
     expect(screen.getByText("assets/inputs/camp/logo.png")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Replace" })).toBeTruthy();
 
@@ -87,16 +85,37 @@ describe("LogoField", () => {
     expect(clickSpy).toHaveBeenCalled();
   });
 
-  test("supports data URI, absolute paths, and http URLs for image preview", () => {
+  test("set state with filename lacking extension degrades to IMG badge", () => {
+    render(<LogoField value="custom-logo" onChange={vi.fn()} onUploadFile={vi.fn()} />);
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getByText("IMG")).toBeTruthy();
+  });
+
+  test("renders image thumbnail when thumbnailUrl prop is provided", () => {
+    render(
+      <LogoField
+        value="assets/inputs/camp/logo.png"
+        thumbnailUrl="data:image/png;base64,thumbdata"
+        onChange={vi.fn()}
+        onUploadFile={vi.fn()}
+      />,
+    );
+
+    const img = screen.getByRole("img", { name: "Product logo preview" }) as HTMLImageElement;
+    expect(img).toBeTruthy();
+    expect(img.src).toBe("data:image/png;base64,thumbdata");
+  });
+
+  test("supports data URI, blob URL, and http URLs for image preview", () => {
     const { rerender } = render(
       <LogoField value="data:image/png;base64,123" onChange={vi.fn()} onUploadFile={vi.fn()} />,
     );
     let img = screen.getByRole("img", { name: "Product logo preview" }) as HTMLImageElement;
     expect(img.src).toBe("data:image/png;base64,123");
 
-    rerender(<LogoField value="/root-logo.png" onChange={vi.fn()} onUploadFile={vi.fn()} />);
+    rerender(<LogoField value="blob:http://localhost/1234" onChange={vi.fn()} onUploadFile={vi.fn()} />);
     img = screen.getByRole("img", { name: "Product logo preview" }) as HTMLImageElement;
-    expect(img.src).toContain("/root-logo.png");
+    expect(img.src).toBe("blob:http://localhost/1234");
 
     rerender(<LogoField value="https://example.com/logo.png" onChange={vi.fn()} onUploadFile={vi.fn()} />);
     img = screen.getByRole("img", { name: "Product logo preview" }) as HTMLImageElement;

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Dispatch } from "react";
 import { Button, Input, SwatchPicker } from "@/components/ui";
+import * as messages from "@/components/campaign/messages";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import type { FieldErrors } from "@/components/campaign/validate";
 import { SectionShell, Field } from "./IdentitySection";
@@ -32,10 +33,10 @@ function ProductRow({
   return (
     <div className="space-y-4 rounded-lg border border-border bg-surface p-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field fieldKey={`product-${index}-name`} label="Name" error={errors[`product-${index}-name`]}>
+        <Field fieldKey={`product-${index}-name`} label={messages.productNameLabel} error={errors[`product-${index}-name`]}>
           <Input
             value={product.name}
-            placeholder="e.g. Hydra Bottle"
+            placeholder={messages.productNamePlaceholder}
             onChange={(e) =>
               dispatch({ type: "setProduct", key: product.key, patch: { name: e.target.value } })
             }
@@ -44,14 +45,14 @@ function ProductRow({
         </Field>
         <Field
           fieldKey={`product-${index}-id`}
-          label="ID"
+          label={messages.productIdLabel}
           error={errors[`product-${index}-id`]}
           as={showIdInput ? "label" : "div"}
         >
           {showIdInput ? (
             <Input
               value={product.id}
-              placeholder="e.g. hydra-bottle"
+              placeholder={messages.productIdPlaceholder}
               onChange={(e) =>
                 dispatch({ type: "setProduct", key: product.key, patch: { id: e.target.value } })
               }
@@ -61,19 +62,19 @@ function ProductRow({
           ) : (
             <div className="flex h-10 items-center justify-between rounded-md border border-border bg-surface-2 px-3">
               <span className="font-mono text-[12px] text-text-primary truncate">
-                {product.id || "derived from name"}
+                {product.id || messages.productIdReadout}
               </span>
               <button
                 type="button"
                 onClick={() => setEditingId(true)}
                 className="font-mono text-[11px] text-text-muted hover:text-white transition-colors"
-                aria-label="Edit product ID"
+                aria-label={messages.productIdEditAria}
               >
-                Edit
+                {messages.productIdEdit}
               </button>
               <input
                 type="text"
-                aria-label="ID"
+                aria-label={messages.productIdLabel}
                 className="sr-only"
                 value={product.id}
                 onChange={(e) =>
@@ -89,12 +90,12 @@ function ProductRow({
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field
           fieldKey={`product-${index}-color`}
-          label="Primary Colour"
+          label={messages.productColorLabel}
           error={errors[`product-${index}-color`]}
           as="div"
         >
           <SwatchPicker
-            label="Primary Colour"
+            label={messages.productColorLabel}
             value={product.primaryColor}
             onChange={(hex) =>
               dispatch({ type: "setProduct", key: product.key, patch: { primaryColor: hex } })
@@ -104,7 +105,7 @@ function ProductRow({
         </Field>
         <Field
           fieldKey={`product-${index}-logo`}
-          label="Logo"
+          label={messages.productLogoLabel}
           error={errors[`product-${index}-logo`]}
           as="div"
         >
@@ -127,7 +128,7 @@ function ProductRow({
           type="button"
           onClick={() => dispatch({ type: "removeProduct", key: product.key })}
         >
-          Remove
+          {messages.productRemove}
         </Button>
       </div>
     </div>
@@ -166,7 +167,7 @@ export function ProductsSection({
           patch: { logoPath: `assets/inputs/${state.briefId}/${name}` },
         });
       } else {
-        setUploadError(unknownErrorMessage(error, "Upload failed"));
+        setUploadError(unknownErrorMessage(error, messages.productUploadErrorFallback));
       }
     } finally {
       setUploadingKeys((prev) => {
@@ -187,15 +188,15 @@ export function ProductsSection({
       {uploadError ? <p className="text-[13px] text-error">{uploadError}</p> : null}
       {state.mode === "brief" && state.products.length === 1 ? (
         <p className="text-[11px] text-text-muted">
-          Classic mode needs two different products — add a second one below.
+          {messages.productsClassicHint}
         </p>
       ) : null}
       <div className="flex items-center justify-between">
         <h3 className="font-mono text-[11px] uppercase tracking-widest text-text-muted">
-          Products ({state.products.length})
+          {messages.productsHeading(state.products.length)}
         </h3>
         <Button variant="secondary" size="sm" type="button" onClick={() => dispatch({ type: "addProduct" })}>
-          Add product
+          {messages.addProduct}
         </Button>
       </div>
       {state.products.map((product, index) => (

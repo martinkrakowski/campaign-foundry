@@ -1082,6 +1082,20 @@ describe("deterministic product keys (D16)", () => {
     expect(repaired.outputExplicit).toBe(false);
   });
 
+  test("a legacy restored draft without campaignName backfills campaignName from briefId", () => {
+    const raw = { briefId: "legacy-brief-slug", products: [] as never[] };
+    const normalized = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    expect(normalized.campaignName).toBe("legacy-brief-slug");
+    expect(normalized.briefId).toBe("legacy-brief-slug");
+  });
+
+  test("a restored draft with explicit campaignName preserves it", () => {
+    const raw = { briefId: "my-slug", campaignName: "My Campaign", products: [] as never[] };
+    const normalized = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    expect(normalized.campaignName).toBe("My Campaign");
+    expect(normalized.briefId).toBe("my-slug");
+  });
+
   test("addProduct after fromBrief uses deterministic counter", () => {
     const brief = savedBrief({
       products: [

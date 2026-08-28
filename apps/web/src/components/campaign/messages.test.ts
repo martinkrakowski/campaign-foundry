@@ -46,6 +46,8 @@ describe("messages jargon test", () => {
     strings.push(messages.formatsUnsupported("Video", ["Instagram Story"]));
     strings.push(messages.statusApplied("test-id"));
     strings.push(messages.durationRange(2, 30));
+    strings.push(messages.headlineCounter(10, 60));
+    strings.push(messages.productsHeading(2));
 
     for (const str of strings) {
       for (const term of forbidden) {

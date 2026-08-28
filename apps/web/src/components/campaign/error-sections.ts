@@ -1,13 +1,17 @@
 
 /** Maps user-facing field labels to their error keys. */
 const LABEL_TO_KEY: Record<string, string> = {
+  "Campaign Name": "briefId",
   "Brief ID": "briefId",
   "Target Region": "targetRegion",
   "Target Audience": "targetAudience",
+  "Headline": "campaignMessage",
   "Campaign Message": "campaignMessage",
   "Product ID": "product-0-id",
   "Name": "product-0-name",
+  "Primary Colour": "product-0-color",
   "Colour": "product-0-color",
+  "Logo": "product-0-logo",
   "Logo Path": "product-0-logo",
   "Treatment ID": "treatment-0-id",
   "Layout": "treatment-0-layout",

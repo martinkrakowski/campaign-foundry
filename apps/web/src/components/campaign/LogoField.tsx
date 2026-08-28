@@ -3,10 +3,13 @@
 import { useId, type ChangeEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import * as messages from "@/components/campaign/messages";
 
 export interface LogoFieldProps {
   /** The current logo path (e.g. "assets/inputs/camp/hydra-logo.png"). */
   readonly value: string;
+  /** Optional resolved thumbnail data URL or preview URL (e.g. from L5 asset store or local upload). */
+  readonly thumbnailUrl?: string;
   /** Callback when logo path changes. */
   readonly onChange: (path: string) => void;
   /** Callback when a local file is picked for upload. */
@@ -27,13 +30,14 @@ export interface LogoFieldProps {
 
 /**
  * Brand asset upload control that renders as a dashed tile when unset and transitions
- * to an image thumbnail once set (D12 / L3.4).
+ * to an image thumbnail or filename badge once set (D12 / L3.4).
  *
  * Displays the asset path as 10px monospace metadata and houses the Upload action.
  * The Choose from bin action renders only when wired via `onChooseFromBin`.
  */
 export function LogoField({
   value,
+  thumbnailUrl,
   onChange,
   onUploadFile,
   onChooseFromBin,
@@ -55,10 +59,20 @@ export function LogoField({
   };
 
   const hasLogo = value.trim().length > 0;
+  // A direct URL (data:, blob:, http:, https:) or an explicit thumbnailUrl resolves
+  // directly in the browser; raw filesystem paths (assets/inputs/...) have no route
+  // serving them yet, so degrade honestly to a file-type badge rather than a broken <img>.
   const imageSrc =
-    value.startsWith("http") || value.startsWith("data:") || value.startsWith("/")
+    thumbnailUrl ||
+    (value.startsWith("data:") ||
+    value.startsWith("blob:") ||
+    value.startsWith("http://") ||
+    value.startsWith("https://")
       ? value
-      : `/${value}`;
+      : undefined);
+
+  const extMatch = value.match(/\.([a-zA-Z0-9]+)$/);
+  const fileExt = extMatch ? extMatch[1].toUpperCase() : "IMG";
 
   return (
     <div className="space-y-1.5">
@@ -67,13 +81,13 @@ export function LogoField({
         id={inputId}
         accept="image/png,image/jpeg"
         className="hidden"
-        aria-label="Upload product logo"
+        aria-label={messages.logoUploadAria}
         disabled={disabled || readOnly || uploading}
         onChange={handleFileChange}
       />
       <input
         type="text"
-        aria-label="Logo Path"
+        aria-label={messages.logoPathAria}
         className="sr-only"
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -89,12 +103,18 @@ export function LogoField({
           )}
         >
           <div className="flex items-center gap-3 min-w-0">
-            <div className="size-10 shrink-0 overflow-hidden rounded border border-border bg-black/40 p-1 flex items-center justify-center">
-              <img
-                src={imageSrc}
-                alt="Product logo preview"
-                className="max-h-full max-w-full object-contain"
-              />
+            <div className="size-10 shrink-0 overflow-hidden rounded border border-border bg-surface-2/60 p-1 flex items-center justify-center">
+              {imageSrc ? (
+                <img
+                  src={imageSrc}
+                  alt={messages.logoPreviewAlt}
+                  className="max-h-full max-w-full object-contain"
+                />
+              ) : (
+                <span className="font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted">
+                  {fileExt}
+                </span>
+              )}
             </div>
             <div className="min-w-0 flex-1">
               <span
@@ -113,7 +133,7 @@ export function LogoField({
               onClick={() => document.getElementById(inputId)?.click()}
               disabled={disabled || readOnly || uploading}
             >
-              {uploading ? "Uploading..." : "Replace"}
+              {uploading ? messages.logoUploading : messages.logoReplace}
             </Button>
             {onChooseFromBin ? (
               <Button
@@ -123,7 +143,7 @@ export function LogoField({
                 onClick={onChooseFromBin}
                 disabled={disabled || readOnly || uploading}
               >
-                Choose from bin
+                {messages.logoChooseFromBin}
               </Button>
             ) : null}
           </div>
@@ -144,7 +164,7 @@ export function LogoField({
               />
             </svg>
           </div>
-          <p className="text-[11px] text-text-muted">No logo yet — upload a PNG or JPEG</p>
+          <p className="text-[11px] text-text-muted">{messages.logoEmpty}</p>
           <div className="flex items-center gap-2">
             <Button
               variant="secondary"
@@ -153,7 +173,7 @@ export function LogoField({
               onClick={() => document.getElementById(inputId)?.click()}
               disabled={disabled || readOnly || uploading}
             >
-              {uploading ? "Uploading..." : "Upload"}
+              {uploading ? messages.logoUploading : messages.logoUpload}
             </Button>
             {onChooseFromBin ? (
               <Button
@@ -163,7 +183,7 @@ export function LogoField({
                 onClick={onChooseFromBin}
                 disabled={disabled || readOnly || uploading}
               >
-                Choose from bin
+                {messages.logoChooseFromBin}
               </Button>
             ) : null}
           </div>

@@ -40,17 +40,8 @@ export interface ProductDraft {
   idTouched: boolean;
 }
 
-/** The 8 canonical product swatches available in the brand palette. */
-export const SWATCH_PALETTE = [
-  "#1473E6",
-  "#E0218A",
-  "#FF7A00",
-  "#10B981",
-  "#8B5CF6",
-  "#F59E0B",
-  "#EF4444",
-  "#06B6D4",
-] as const;
+import { SWATCH_PALETTE } from "../ui/swatch-picker";
+export { SWATCH_PALETTE };
 
 export function emptyProduct(key: number, primaryColor = "#1473E6"): ProductDraft {
   return {
