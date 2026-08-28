@@ -27,3 +27,32 @@ describe("display names", () => {
     expect(platformDisplayName("not-a-platform")).toBe("not-a-platform");
   });
 });
+
+describe("the display-name rule reaches the messages a user reads", () => {
+  test("no validator message leaks a raw platform id, format or ratio", async () => {
+    const { validateOutput, validatePolicy } = await import("../validate");
+    const { initialEditorState } = await import("../editor-state");
+    const raw = ["instagram-feed", "instagram-reel", "tiktok", "youtube-short", "static", "motion", "9:16", "1:1", "16:9"];
+
+    // a platform that packages none of the requested formats, and a format no platform takes
+    const incompatible = { ...initialEditorState("variation"), formats: ["motion"], platforms: ["instagram-feed"] };
+    // a motion-only brief whose chosen shapes cannot be drawn
+    const narrowed = {
+      ...initialEditorState("variation"),
+      formats: ["motion"],
+      platforms: ["instagram-reel"],
+      motion: ["ken-burns-in"],
+      variation: { ...initialEditorState("variation").variation, ratio: ["1:1"] },
+    };
+    const shown = [
+      ...Object.values(validateOutput(incompatible as never)),
+      ...Object.values(validatePolicy(narrowed as never)),
+    ];
+    expect(shown.length).toBeGreaterThan(0);
+    for (const message of shown) {
+      for (const token of raw) {
+        expect(message).not.toContain(token);
+      }
+    }
+  });
+});

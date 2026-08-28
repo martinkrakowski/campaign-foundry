@@ -919,7 +919,7 @@ describe("BriefPage — capabilities and motion", () => {
 
     expect(
       await screen.findByText(
-        messages.platformsIncompatible("instagram-reel", ["Video"]),
+        messages.platformsIncompatible("Instagram Reel", ["Video"]),
       ),
     ).toBeTruthy();
     await waitFor(() =>

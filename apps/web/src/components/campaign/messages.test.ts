@@ -25,6 +25,8 @@ describe("messages jargon test", () => {
     "[", ">=", "×", "variation.", "coverage.", "axis", "axes", "draw", "floor", "package", "planner", "parser",
     // the raw values a user must never see — display-names.ts converts them at the call site
     "static", "motion", "9:16", "1:1", "16:9", "pool://copy", "procedural", "asset-pool", "genai",
+    // raw platform ids are jargon too — display-names.ts converts them at the call site
+    "instagram-feed", "instagram-story", "instagram-reel", "tiktok", "youtube-short", "linkedin",
   ];
 
   test("no message contains forbidden jargon", () => {

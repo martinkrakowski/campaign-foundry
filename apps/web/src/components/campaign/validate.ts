@@ -2,7 +2,7 @@ import type { EditorState } from "./editor-state";
 import { LAYOUT_OPTIONS, TONE_OPTIONS, approvedHeadlines } from "./editor-state";
 import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
 import * as messages from "./messages";
-import { formatDisplayName } from "./display-names";
+import { formatDisplayName, platformDisplayName, ratioDisplayName } from "./display-names";
 
 export const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
@@ -218,7 +218,7 @@ export function validatePolicy(state: EditorState): FieldErrors {
     const packaged = [...motionPackagedRatios(state)];
     errors.ratio =
       packaged.length > 0
-        ? messages.ratioNoneDrawablePackaged(packaged)
+        ? messages.ratioNoneDrawablePackaged(packaged.map(ratioDisplayName))
         : messages.ratioNoneDrawableNone();
   }
   const count = Number.parseInt(state.variation.count, 10) || 0;
@@ -239,7 +239,7 @@ export function validatePolicy(state: EditorState): FieldErrors {
 /**
  * D7: a capability being off makes a motion brief *unrunnable* on this host, not
  * invalid — this string is a status message, never the sole reason Save is blocked.
- * It quotes the probe's reason, which is the same text the API's 400 would carry.
+ * It no longer quotes the probe's raw reason — Appendix A keeps that for a tooltip; this is the sentence a user reads.
  */
 export function motionUnavailableReason(state: EditorState): string | undefined {
   if (state.capabilities?.motion !== false || !state.formats.includes("motion")) return undefined;
@@ -262,7 +262,7 @@ export function validateOutput(state: EditorState): FieldErrors {
   for (const profile of profiles) {
     if (!profile.formats.some((format) => state.formats.includes(format))) {
       // The API states the rejection; the editor has to say what to do about it.
-      errors.platforms = messages.platformsIncompatible(profile.id, (profile.formats as string[]).map(formatDisplayName));
+      errors.platforms = messages.platformsIncompatible(platformDisplayName(profile.id), (profile.formats as string[]).map(formatDisplayName));
       break;
     }
   }
@@ -273,7 +273,7 @@ export function validateOutput(state: EditorState): FieldErrors {
       const candidates = Object.values(PLATFORM_PROFILES)
         .filter((profile) => (profile.formats as readonly string[]).includes(format))
         .map((profile) => profile.id);
-      errors.formats = messages.formatsUnsupported(formatDisplayName(format), candidates);
+      errors.formats = messages.formatsUnsupported(formatDisplayName(format), candidates.map(platformDisplayName));
       break;
     }
   }

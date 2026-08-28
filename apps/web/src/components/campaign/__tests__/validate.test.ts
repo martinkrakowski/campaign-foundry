@@ -165,7 +165,7 @@ describe("drawableRatios", () => {
       motion: ["ken-burns-in"],
       variation: { ...valid().variation, ratio: ["1:1", "16:9"] },
     });
-    expect(validatePolicy(noneDrawable).ratio).toBe(messages.ratioNoneDrawablePackaged(["9:16"]));
+    expect(validatePolicy(noneDrawable).ratio).toBe(messages.ratioNoneDrawablePackaged(["Tall"]));
 
     // and when no platform packages motion at all, the fix named is different
     const noMotionPlatform = valid({
@@ -372,7 +372,7 @@ describe("validateOutput", () => {
   test("a platform packaging none of the requested formats says how to resolve it", () => {
     const errors = validateOutput(valid({ formats: ["motion"], platforms: ["instagram-feed", "instagram-reel"] }));
     expect(errors.platforms).toBe(
-      messages.platformsIncompatible("instagram-feed", ["Still images"]),
+      messages.platformsIncompatible("Instagram Feed", ["Still images"]),
     );
   });
 
@@ -381,7 +381,7 @@ describe("validateOutput", () => {
     // the remedy, not just the rejection: these four appear in the picker the moment
     // motion is requested, so the message points straight at them
     expect(errors.formats).toBe(
-      messages.formatsUnsupported("Video", ["instagram-story", "instagram-reel", "tiktok", "youtube-short"]),
+      messages.formatsUnsupported("Video", ["Instagram Story", "Instagram Reel", "TikTok", "YouTube Short"]),
     );
   });
 

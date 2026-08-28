@@ -35,7 +35,7 @@ export function TreatmentsSection({ state, dispatch, errors }: { state: EditorSt
             </Field>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Layout" error={errors[`treatment-${index}-layout`]}>
+            <Field fieldKey={`treatment-${index}-layout`} label="Layout" error={errors[`treatment-${index}-layout`]}>
               <select
                 value={treatment.layout}
                 onChange={(e) =>
@@ -48,7 +48,7 @@ export function TreatmentsSection({ state, dispatch, errors }: { state: EditorSt
                 ))}
               </select>
             </Field>
-            <Field label="Tone" error={errors[`treatment-${index}-tone`]}>
+            <Field fieldKey={`treatment-${index}-tone`} label="Tone" error={errors[`treatment-${index}-tone`]}>
               <select
                 value={treatment.tone}
                 onChange={(e) =>

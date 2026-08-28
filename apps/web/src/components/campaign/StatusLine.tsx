@@ -6,6 +6,10 @@ import { getTotalErrorCount, validateState } from "./validate";
 import * as messages from "./messages";
 import { isDirtySinceApply } from "./editor-state";
 
+// The label a user reads is not always the section's id: the policy panel is titled
+// "Variety" in the bar but its element is data-section="policy".
+const SECTION_TARGETS: Record<string, string> = { Variety: "policy" };
+
 function getIncompleteSections(state: EditorState): string[] {
   const errors = validateState(state);
   const sections: string[] = [];
@@ -67,7 +71,7 @@ export function StatusLine({
           key={section}
           type="button"
           className="ml-1 text-brand-primary hover:underline"
-          onClick={() => onScrollToSection(section.toLowerCase())}
+          onClick={() => onScrollToSection(SECTION_TARGETS[section] ?? section.toLowerCase())}
         >
           {section}
         </button>
