@@ -11,7 +11,7 @@
 
 | ID | Decision | Consequence |
 |----|----------|-------------|
-| **D1** | **One editor, one route.** `/brief` becomes *the* campaign editor for both new and existing briefs; `/new` and the step wizard are removed. | The sidebar's **Edit** and **Create new** both land on `/brief` (the latter with a blank draft). The `New campaign` header tab from #62 is removed. |
+| **D1** | ✅ **Landed.** **One editor, one route.** `/brief` becomes *the* campaign editor for both new and existing briefs; `/new` and the step wizard are removed. | The sidebar's **Edit** and **Create new** both land on `/brief` (the latter with a blank draft). The `New campaign` header tab from #62 is removed. |
 | **D2** | **Brief selector, not a text id.** The editor header carries a **Brief** combobox: every entry from `GET /campaigns/briefs` plus **New brief…**. Choosing an entry loads it; **New brief…** resets the draft. The id itself is edited in the Identity section like any other field. | No dependency on a YAML file to start: a new brief exists in memory and can be run immediately; **Save** is what creates the file. |
 | **D3** | **Two verbs, not three.** The editor edits a *draft*. **Apply to run** commits it to `run-context.setBrief` (in-memory, today's HITL loop). **Save & apply** persists via the briefs API (`POST`; `?replace=1` after the D9 guard; `PUT` when saving the brief that was loaded) **and** applies — committing to disk always means "this is the truth". | Closes the state-triangle trap (save-but-not-applied, applied-but-not-saved). The action bar's status chip makes the remaining two states legible (D11). Picker-switch race fix from #51 stays in force. |
 | **D4** | **Sections, not steps.** The page is one scrollable form in sections with a sticky action bar; the wizard's step components become section components. Mode (Classic / Randomized) is a toggle at the top that shows/hides the mode-specific sections. | The wizard reducer (`wizard-state.ts`) becomes the editor reducer; `Wizard.tsx` (stepper) and the Review step go away — the YAML preview becomes a collapsible panel in the action bar. |
@@ -174,9 +174,9 @@ Three PRs, sequential (each edits the same files), each green at the 100 % gate.
 
 | # | Task | File(s) |
 |---|------|---------|
-| E3.1 | Delete `/new`, `Wizard.tsx`, Review step, `STATIC_PLATFORMS`; drop the **New campaign** header tab (revert of #62's tab; keep the sidebar button). | `app/(shell)/new/**`, `components/wizard/**`, `Header.tsx` |
-| E3.2 | Remove the `components/wizard/*` re-export shims; migrate/delete wizard tests (entry points were already repointed in E1.3). | `components/wizard/**`, tests |
-| E3.3 | README (Modes/authoring), plan `2026-08-25` deferred list (wizard motion controls → done), session log. | docs |
+| E3.1 | ✅ **Shipped, except `STATIC_PLATFORMS`** — it is not wizard-only: `editor-state.ts` uses it for a new brief's default platforms, for the "still the defaults" check and in `fromBrief`. L4.1 replaces it with `derive.ts`. `/new` redirects to `/brief/new` rather than 404ing. Delete `/new`, `Wizard.tsx`, Review step, `STATIC_PLATFORMS`; drop the **New campaign** header tab (revert of #62's tab; keep the sidebar button). | `app/(shell)/new/**`, `components/wizard/**`, `Header.tsx` |
+| E3.2 | ✅ **Shipped.** Remove the `components/wizard/*` re-export shims; migrate/delete wizard tests (entry points were already repointed in E1.3). | `components/wizard/**`, tests |
+| E3.3 | ✅ **Shipped** (README, DESIGN.md routes). Plan `2026-08-25` deferred list and session log remain. README (Modes/authoring), plan `2026-08-25` deferred list (wizard motion controls → done), session log. | docs |
 
 **Acceptance:** no route or link to `/new` remains; `yarn test:cov` 100 %; README screenshots/paths updated.
 

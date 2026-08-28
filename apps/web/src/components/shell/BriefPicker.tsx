@@ -98,13 +98,12 @@ export function BriefPicker() {
   };
 
   const createNew = () => {
-    if (isDirty) {
-      if (!window.confirm("You have unsaved changes. Are you sure you want to leave?")) {
-        return;
-      }
-    }
     closeBriefPicker();
-    guardedPush("/brief");
+    // The blank editor is a route, so this is a plain navigation: it used to land on
+    // `/brief`, which adopts the active brief — the campaign the user was leaving came
+    // straight back. `guardedPush` carries the unsaved-changes prompt, so asking here
+    // as well would show the same dialog twice.
+    guardedPush("/brief/new");
   };
 
   const confirmDuplicate = async () => {

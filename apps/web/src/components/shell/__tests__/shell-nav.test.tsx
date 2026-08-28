@@ -162,13 +162,14 @@ describe("MobileMenu", () => {
 });
 
 describe("Create new", () => {
-  test("the sidebar's Create new button navigates to /brief", async () => {
+  test("the sidebar's Create new button navigates to /brief/new", async () => {
     const { BrowseBriefsButton } = await import("../Sidebar");
     const onActivate = vi.fn();
     renderWithRun(createElement(BrowseBriefsButton, { onActivate }));
     await userEvent.setup().click(screen.getByRole("button", { name: /create new/i }));
     expect(onActivate).toHaveBeenCalled();
-    expect(nextMock().router.push).toHaveBeenCalledWith("/brief");
+    // the blank editor is its own route: landing on /brief would adopt the active brief
+    expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new");
   });
 });
 
@@ -206,7 +207,7 @@ describe("guarded navigation when the editor is dirty", () => {
 
     await user.click(screen.getByRole("button", { name: /Create new/ }));
     expect(onActivate).toHaveBeenCalled();
-    expect(nextMock().router.push).toHaveBeenCalledWith("/brief");
+    expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new");
   });
 
   test("the sidebar's Edit link routes through the guard and dismisses the overlay", async () => {

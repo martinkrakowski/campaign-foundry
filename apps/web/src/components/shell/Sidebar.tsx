@@ -33,7 +33,7 @@ export function BrowseBriefsButton({ onActivate }: { onActivate?: () => void }) 
           onActivate?.();
           // guardedPush already prompts when the editor is dirty — confirming here too
           // would show the same dialog twice.
-          guardedPush("/brief");
+          guardedPush("/brief/new");
         }}
         className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-primary px-3 py-2 text-[12px] font-medium text-white transition-colors hover:bg-brand-primary-hover"
       >

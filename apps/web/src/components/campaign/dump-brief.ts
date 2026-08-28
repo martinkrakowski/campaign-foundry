@@ -1,5 +1,12 @@
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 
+/**
+ * The brief serialiser the editor's round-trip test writes through, kept byte-compatible
+ * with the API's own `dumpBrief`. It lived under `components/wizard/` until the wizard
+ * was deleted; it was never wizard UI, and the "no existing brief changes behaviour"
+ * check depends on it.
+ */
+
 /** Same key order as the API `dumpBrief` (copied; do not import from apps/api). */
 export const BRIEF_KEY_ORDER = [
   "id",

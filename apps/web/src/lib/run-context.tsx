@@ -215,6 +215,22 @@ const BRIEF_PICKED_KEY = "cf:brief-picked";
 /** localStorage key for the active brief, so a reload restores it (and its run) not DEFAULT. */
 const BRIEF_KEY = "cf:brief";
 
+/**
+ * The id of the brief the shell will restore on a cold load, or null. Effects in the
+ * children run before the provider's own restore, so a child that needs to know which
+ * campaign is being left cannot wait for `brief` to arrive — by then it may have
+ * cleared the very key the restore was about to read.
+ */
+export function readStoredBriefId(): string | null {
+  if (typeof localStorage === "undefined") return null;
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(BRIEF_KEY) ?? "null");
+    return isStoredBrief(parsed) ? parsed.id : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Minimal shape guard for a brief restored from storage (don't trust hand-edited JSON). */
 function isStoredBrief(value: unknown): value is CampaignBrief {
   if (typeof value !== "object" || value === null) return false;
@@ -398,8 +414,12 @@ export function RunProvider({ children }: { children: ReactNode }) {
       setBriefState(next);
       setError(null);
       // Remember the active brief so a reload restores it (and its run) instead of DEFAULT.
+      // The blank brief clears the key instead: there is no campaign to come back to, and
+      // leaving the previous one in storage is how a reload after "New brief" used to put
+      // it back on screen.
       try {
-        localStorage.setItem(BRIEF_KEY, JSON.stringify(next));
+        if (next.id) localStorage.setItem(BRIEF_KEY, JSON.stringify(next));
+        else localStorage.removeItem(BRIEF_KEY);
       } catch {
         /* storage unavailable — brief just won't persist across reloads */
       }

@@ -27,13 +27,13 @@ const route = (opts: { briefs?: unknown; post?: (url: string, init: RequestInit)
 };
 
 describe("BriefPicker create / duplicate", () => {
-  test("Create new closes the picker and navigates to /brief", async () => {
+  test("Create new closes the picker and navigates to /brief/new", async () => {
     const user = userEvent.setup();
     route({ briefs: [] });
     renderWithRun(<BriefPicker />);
     await screen.findByText(/No briefs found/);
     await user.click(screen.getByText("Create new"));
-    expect(nextMock().router.push).toHaveBeenCalledWith("/brief");
+    expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new");
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Load a campaign brief" })).toBeNull());
   });
 

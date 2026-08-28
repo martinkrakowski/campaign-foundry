@@ -672,9 +672,21 @@ export function isDirtySinceApply(state: EditorState): boolean {
   return JSON.stringify(toBrief(state)) !== JSON.stringify(state.appliedSnapshot);
 }
 
+export function draftKeyFor(id: string): string {
+  return `cf:draft:${id}`;
+}
+
 export function getDraftKey(state: EditorState): string {
   const id = state.source.kind === "file" ? state.source.loadedId : state.source.tempId;
-  return `cf:draft:${id}`;
+  return draftKeyFor(id);
+}
+
+/**
+ * The empty brief — what "no campaign" is, for both the editor and the shell. A blank
+ * `id` is the marker: nothing can be saved, listed or run under it.
+ */
+export function blankBrief(): CampaignBrief {
+  return { id: "", targetRegion: "", targetAudience: "", campaignMessage: "", products: [] } as CampaignBrief;
 }
 
 export function saveDraftToStorage(state: EditorState): void {
@@ -787,9 +799,18 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
 }
 
 export function purgeDraftFromStorage(state: EditorState): void {
+  purgeDraftById(state.source.kind === "file" ? state.source.loadedId : state.source.tempId);
+}
+
+/**
+ * Drop a draft by the id it belongs to, for the caller that no longer holds its state —
+ * starting a new brief abandons the one being left, and the prompt that preceded it
+ * said so. A draft left behind resurrects those edits the next time the brief is
+ * opened, which is the opposite of what "leave" promised.
+ */
+export function purgeDraftById(id: string): void {
   if (typeof localStorage === "undefined") return;
-  const key = getDraftKey(state);
-  localStorage.removeItem(key);
+  localStorage.removeItem(draftKeyFor(id));
 }
 
 /** Clip lengths the API accepts, mirroring load-brief's MIN/MAX_DURATION_SEC. */
