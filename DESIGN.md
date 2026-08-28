@@ -103,6 +103,17 @@ The scale as actually used — these are deliberate, keep to them:
 
 ## 3. Shell anatomy
 
+**Routes.** `/grid` (the app opens here), `/brief`, `/brief/new`, `/compliance`,
+`/export`, `/runs`. There is one campaign editor and it lives at `/brief`; `/brief/new`
+is that same editor started empty, and `/new` — the step wizard's old address — redirects
+to it. Making the blank start a *route* rather than a button's side effect is what keeps
+"the user asked for an empty brief" true for the whole life of the page: the editor
+otherwise adopts whichever brief the shell has active, and a blank draft is pristine, so
+it passes every dirty guard that would have held that off. Arriving there also releases
+the campaign being left — the shell's active brief and its saved draft both — because a
+brief nobody is editing must not still be the one **Generate** would run.
+
+
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │ Header   [brand mark] Campaign Pipeline   Grid Compliance Export Runs │  h-14, model picker, ☰ < lg

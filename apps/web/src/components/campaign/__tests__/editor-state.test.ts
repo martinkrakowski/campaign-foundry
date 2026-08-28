@@ -30,7 +30,7 @@ import {
   type EditorState,
   type EditorAction,
 } from "../editor-state";
-import { dumpBrief } from "../../wizard/dump-brief";
+import { dumpBrief } from "../dump-brief";
 import { load } from "js-yaml";
 import fs from "node:fs";
 import path from "node:path";

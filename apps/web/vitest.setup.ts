@@ -34,6 +34,13 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   localStorage.clear();
+  // `restoreAllMocks` does not touch a plain `vi.fn()`, so the router mocks below keep
+  // their call history for the whole file — and an assertion like
+  // `expect(router.replace).toHaveBeenCalledWith("/brief")` then passes on a call some
+  // earlier test made. Clear them so each test asserts its own navigation.
+  for (const fn of Object.values(router)) fn.mockClear();
+  redirect.mockClear();
+  nav.pathname = "/grid";
 });
 
 // Next's client navigation hooks need a router context that doesn't exist under

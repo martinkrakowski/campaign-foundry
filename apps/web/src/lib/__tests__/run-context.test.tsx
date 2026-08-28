@@ -333,6 +333,33 @@ describe("RunProvider — brief picker & persistence", () => {
     expect(result.current.decisions).toEqual({});
   });
 
+  test("setBrief drops the stored brief when it is cleared", async () => {
+    const { result } = setup();
+    await act(async () => {
+      result.current.setBrief({
+        id: "keeper",
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "m",
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+      } as never);
+    });
+    expect(localStorage.getItem("cf:brief")).not.toBeNull();
+
+    // the blank brief is not a campaign to come back to: leaving it in storage is how a
+    // reload after "New brief" used to put the previous one back on screen
+    await act(async () => {
+      result.current.setBrief({
+        id: "",
+        targetRegion: "",
+        targetAudience: "",
+        campaignMessage: "",
+        products: [],
+      } as never);
+    });
+    expect(localStorage.getItem("cf:brief")).toBeNull();
+  });
+
   test("setBrief keeps the current run when the id already matches", async () => {
     mockPipelineApi({
       job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [], campaignId: "summer-hydration-2026" } }),

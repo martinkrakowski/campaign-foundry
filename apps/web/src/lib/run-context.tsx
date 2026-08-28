@@ -398,8 +398,12 @@ export function RunProvider({ children }: { children: ReactNode }) {
       setBriefState(next);
       setError(null);
       // Remember the active brief so a reload restores it (and its run) instead of DEFAULT.
+      // The blank brief clears the key instead: there is no campaign to come back to, and
+      // leaving the previous one in storage is how a reload after "New brief" used to put
+      // it back on screen.
       try {
-        localStorage.setItem(BRIEF_KEY, JSON.stringify(next));
+        if (next.id) localStorage.setItem(BRIEF_KEY, JSON.stringify(next));
+        else localStorage.removeItem(BRIEF_KEY);
       } catch {
         /* storage unavailable — brief just won't persist across reloads */
       }

@@ -1,8 +1,27 @@
-import { describe, test, expect, beforeEach } from "vitest";
+import { describe, test, expect, beforeEach, vi } from "vitest";
+import { useEffect } from "react";
+import { render } from "@testing-library/react";
+import { ShellProviders } from "@/__tests__/helpers";
+import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { EMPTY_REPORT, json, mockPipelineApi, nextMock, renderWithRun } from "@/__tests__/helpers";
 import { BriefPicker } from "../BriefPicker";
+
+/** The picker with the editor claiming unsaved changes, so the guard prompts. */
+const renderDirty = (ui: React.ReactElement) => {
+  const RaiseDirty = () => {
+    const { setDirty } = useEditorDirty();
+    useEffect(() => setDirty(true), [setDirty]);
+    return null;
+  };
+  return render(
+    <ShellProviders>
+      <RaiseDirty />
+      {ui}
+    </ShellProviders>,
+  );
+};
 
 beforeEach(() => localStorage.removeItem("cf:brief-picked"));
 
@@ -27,13 +46,13 @@ const route = (opts: { briefs?: unknown; post?: (url: string, init: RequestInit)
 };
 
 describe("BriefPicker create / duplicate", () => {
-  test("Create new closes the picker and navigates to /brief", async () => {
+  test("Create new closes the picker and navigates to /brief/new", async () => {
     const user = userEvent.setup();
     route({ briefs: [] });
     renderWithRun(<BriefPicker />);
     await screen.findByText(/No briefs found/);
     await user.click(screen.getByText("Create new"));
-    expect(nextMock().router.push).toHaveBeenCalledWith("/brief");
+    expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new");
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Load a campaign brief" })).toBeNull());
   });
 
@@ -54,6 +73,21 @@ describe("BriefPicker create / duplicate", () => {
     await user.type(screen.getByLabelText("New brief id"), "demo-copy{Enter}");
     await waitFor(() => expect(JSON.parse(localStorage.getItem("cf:brief") ?? "{}").id).toBe("demo-copy"));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Load a campaign brief" })).toBeNull());
+  });
+
+  test("declining the unsaved-changes prompt leaves the picker open", async () => {
+    const user = userEvent.setup();
+    globalThis.confirm = vi.fn(() => false);
+    route({});
+    renderDirty(<BriefPicker />);
+    await screen.findByText("demo.yaml");
+
+    await user.click(screen.getByRole("button", { name: /Create new/ }));
+
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+    // the picker closing on a refused navigation dismisses the very list the user is
+    // still choosing from
+    expect(screen.getByRole("dialog", { name: "Load a campaign brief" })).toBeTruthy();
   });
 
   test("rejects an unsafe duplicate id, surfaces API errors, and cancels", async () => {

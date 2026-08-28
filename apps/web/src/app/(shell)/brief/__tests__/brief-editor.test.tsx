@@ -2,10 +2,11 @@ import { describe, test, expect, beforeEach, vi } from "vitest";
 import * as messages from "@/components/campaign/messages";
 import { screen, waitFor, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderWithRun, json } from "@/__tests__/helpers";
-import { API } from "@/lib/run-context";
+import { renderWithRun, json, nextMock } from "@/__tests__/helpers";
+import { API, useRun } from "@/lib/run-context";
 import { fromBrief, saveDraftToStorage } from "@/components/campaign/editor-state";
 import BriefPage from "../page";
+import NewBriefPage from "../new/page";
 
 /**
  * The page as a user meets it. `renderWithRun` supplies the outlet that stands in for
@@ -17,6 +18,25 @@ const Editor = () => (
     <BriefPage />
   </>
 );
+
+/** `/brief/new` — the same editor, started empty. */
+const NewEditor = () => <NewBriefPage />;
+
+/**
+ * The blank route with a way to make the shell hand it a campaign *after* it has
+ * settled — what the picker does when it is used from another view.
+ */
+const NewEditorWithPicker = () => {
+  const { setBrief } = useRun();
+  return (
+    <>
+      <button type="button" onClick={() => setBrief(brief("camp") as never)}>
+        shell picks camp
+      </button>
+      <NewBriefPage />
+    </>
+  );
+};
 
 /** Save actions live behind the "Save" menu now: open it, then pick the item. */
 const saveVia = async (user: ReturnType<typeof userEvent.setup>, item: "Save & apply" | "Save as") => {
@@ -133,13 +153,9 @@ describe("BriefPage — data flow", () => {
   test("a new draft is saved with a POST carrying what was typed", async () => {
     const user = userEvent.setup();
     const calls = routes({});
-    renderWithRun(<Editor />);
-    await waitForEditorReady();
-
-    // The editor adopts the shell's active brief, so reach a genuinely blank draft the
-    // way a user would rather than typing on top of the populated fields.
-    await user.click(screen.getAllByText("New brief...")[0]);
-    await user.click(screen.getAllByText("New brief...").slice(-1)[0]);
+    // A blank draft is a route now, so ask for it directly instead of clicking the
+    // editor back to empty.
+    renderWithRun(<NewEditor />);
     await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
 
     await fillValidDraft(user);
@@ -219,7 +235,7 @@ describe("BriefPage — data flow", () => {
     expect(screen.queryByLabelText("New brief id")).toBeNull();
   });
 
-  test("New brief... returns the editor to a blank draft", async () => {
+  test("New brief... asks for the blank route rather than emptying the form in place", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<Editor />);
@@ -231,7 +247,157 @@ describe("BriefPage — data flow", () => {
     // reopen and choose the create-new row
     await user.click(screen.getAllByText("camp")[0]);
     await user.click(screen.getByText("New brief..."));
+    expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new");
+  });
+
+  test("the blank route stays blank, however loud the shell is about its active brief", async () => {
+    localStorage.setItem("cf:brief", JSON.stringify(brief("camp")));
+    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<NewEditor />);
+
+    // wait for the listing, which is what used to trigger the adoption: a blank draft is
+    // pristine, so the dirty guard let it through and `camp` landed in the form. The
+    // route is what refuses it now.
+    await waitFor(() => expect(calls.some((c) => c.url.includes("/campaigns/briefs"))).toBe(true));
+    expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Target Region") as HTMLInputElement).value).toBe("");
+  });
+
+  test("choosing a campaign while on the blank route takes you to it", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<NewEditorWithPicker />);
+    // let the listing land: from here the adopt-the-active-brief effect is armed
+    await waitFor(() => expect(screen.getByText("Randomized")).toBeTruthy());
+
+    await user.click(screen.getByRole("button", { name: "shell picks camp" }));
+
+    // There is a campaign again, so this page has stopped describing a new brief. It
+    // must not keep the choice and show an empty form, and it must not throw the choice
+    // away either — both of which this route managed at different points.
+    await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief"));
+    expect(JSON.parse(localStorage.getItem("cf:brief") ?? "null")?.id).toBe("camp");
+  });
+
+  test("New brief... on the blank route empties the form in place", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
     await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
+    await fillValidDraft(user, "typed");
+    expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe("typed");
+
+    // there is nowhere to navigate to from here, so the row has to do the work itself
+    // (the router mock is shared across this file, so count pushes rather than assert
+    // it was never called)
+    const pushesBefore = nextMock().router.push.mock.calls.length;
+    await user.click(screen.getAllByText("New brief...")[0]);
+    await user.click(screen.getAllByText("New brief...").slice(-1)[0]);
+    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
+    expect((screen.getByLabelText("Target Region") as HTMLInputElement).value).toBe("");
+    expect(nextMock().router.push.mock.calls.length).toBe(pushesBefore);
+  });
+
+  test("declining the prompt keeps what was typed on the blank route", async () => {
+    const user = userEvent.setup();
+    globalThis.confirm = vi.fn(() => false);
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
+    await fillValidDraft(user, "typed");
+
+    await user.click(screen.getAllByText("New brief...")[0]);
+    await user.click(screen.getAllByText("New brief...").slice(-1)[0]);
+
+    expect(globalThis.confirm).toHaveBeenCalled();
+    expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe("typed");
+  });
+
+  test("Save as... on the blank route also stops the URL calling it new", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
+    await fillValidDraft(user, "fresh");
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), "elsewhere");
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
+
+    await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief"));
+  });
+
+  test("Save as... keeps the copy's revision, so the next save still guards the write", async () => {
+    const user = userEvent.setup();
+    const calls = routes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      post: () => json({ file: "copy.yaml", brief: brief("copy"), revision: "rev-copy" }, 201),
+    });
+    renderWithRun(<Editor />);
+    await waitForEditorReady();
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), "copy");
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
+    await waitFor(() => expect(screen.queryByLabelText("New brief id")).toBeNull());
+
+    // saving the copy must send the revision the POST handed back; without it the write
+    // silently drops to last-write-wins, the trap `loadBrief` carries the revision to avoid
+    await saveVia(user, "Save & apply");
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "PUT" && c.url.includes("revision=rev-copy"))).toBe(true),
+    );
+  });
+
+  test("Apply on the blank route keeps the brief it just applied", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
+    await fillValidDraft(user, "fresh");
+
+    await user.click(screen.getByText("Apply to run").closest("button") as HTMLButtonElement);
+
+    // the release must not fire again on the brief this page just created: applying is
+    // how a campaign becomes the active one, and clearing it here leaves Generate with
+    // nothing to run
+    await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief"));
+    expect(JSON.parse(localStorage.getItem("cf:brief") ?? "null")?.id).toBe("fresh");
+  });
+
+  test("arriving on the blank route lets go of the campaign being left", async () => {
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    // the shell is on `camp`, with unsaved edits to it in storage
+    localStorage.setItem("cf:brief", JSON.stringify(brief("camp")));
+    saveDraftToStorage(fromBrief(brief("camp"), { file: "camp.yaml" }));
+
+    renderWithRun(<NewEditor />);
+
+    // the shell no longer claims camp is the campaign being worked on, so the selector
+    // cannot advertise it and Generate cannot run it
+    await waitFor(() => expect(localStorage.getItem("cf:brief")).toBeNull());
+    // …but camp's unsaved work is untouched. Getting here does not always follow the
+    // unsaved-changes prompt — from any other view there is no mounted editor to call
+    // itself dirty — so deleting the draft would be destroying work nobody was asked
+    // about, and D11 recovery exists to keep exactly this.
+    expect(localStorage.getItem("cf:draft:camp")).not.toBeNull();
+  });
+
+  test("saving on the blank route stops the URL calling it new", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
+
+    await fillValidDraft(user, "fresh");
+    await saveVia(user, "Save & apply");
+
+    // otherwise a reload would blank the brief that was just saved
+    await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief"));
   });
 
   test("Apply to run moves the status chip off the unapplied state", async () => {
@@ -823,11 +989,7 @@ describe("BriefPage — capabilities and motion", () => {
   test("a motion brief authored from scratch saves with its motion policy (host with motion)", async () => {
     const user = userEvent.setup();
     const calls = routes({});
-    renderWithRun(<Editor />);
-    await waitForEditorReady();
-
-    await user.click(screen.getAllByText("New brief...")[0]);
-    await user.click(screen.getAllByText("New brief...").slice(-1)[0]);
+    renderWithRun(<NewEditor />);
     await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
     await fillValidDraft(user);
     await user.click(screen.getByText("Randomized"));
@@ -857,11 +1019,7 @@ describe("BriefPage — capabilities and motion", () => {
   test("motion without a kind or a duration blocks Save, and the error reaches its input", async () => {
     const user = userEvent.setup();
     const calls = routes({});
-    renderWithRun(<Editor />);
-    await waitForEditorReady();
-
-    await user.click(screen.getAllByText("New brief...")[0]);
-    await user.click(screen.getAllByText("New brief...").slice(-1)[0]);
+    renderWithRun(<NewEditor />);
     await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
     await fillValidDraft(user);
     await user.click(screen.getByText("Randomized"));

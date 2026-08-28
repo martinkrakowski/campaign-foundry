@@ -242,10 +242,10 @@ headlines from the pool with `variation.axes.headline: pool://copy` (the only
 supported pool reference); the planner resolves the approved texts at plan time
 and `headline` becomes a Hamming axis. A missing or fully-rejected pool is a
 422 on `POST /campaigns/plan` and a failed job on generate, naming
-`briefs/<id>/pools.json`. The wizard's Copy step curates the pool (generate,
-approve/reject, edit) and the policy step unlocks the axis once one entry is
-approved. The wizard sends its draft brief inline, so Generate works before
-Save; on Save the pool already exists under that id.
+`briefs/<id>/pools.json`. The editor's headline drawer curates the pool (generate,
+approve/reject, edit) and the Variety panel unlocks the axis once one entry is
+approved. Apply sends the draft brief inline, so Generate works before Save; on
+Save the pool already exists under that id.
 
 ```bash
 # Generate headlines (default count 10, max 25), run the legal gate, persist
@@ -429,7 +429,7 @@ curl -X POST http://localhost:3001/campaigns/plan \
 #   422 when count cannot be reached (the message carries the shortfall); 400 if not a variation brief
 ```
 
-The wizard's policy step and the command bar call this to show the estimate
+The editor's estimate panel and the command bar call this to show the estimate
 before **Run**.
 
 Identity and re-rolls: a variant is `productId/v<index>` (`seed` is provenance
