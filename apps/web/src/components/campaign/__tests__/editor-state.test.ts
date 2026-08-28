@@ -28,6 +28,10 @@ import {
   type EditorState,
   type EditorAction,
 } from "../editor-state";
+import { dumpBrief } from "../../wizard/dump-brief";
+import yaml from "js-yaml";
+import fs from "node:fs";
+import path from "node:path";
 
 const reduce = (state: EditorState, ...actions: EditorAction[]): EditorState =>
   actions.reduce(editorReducer, state);
@@ -967,15 +971,14 @@ describe("deterministic product keys (D16)", () => {
 
   test("toBrief output contains no key or nextProductKey", () => {
     const state = base();
-    const brief = toBrief(state);
-    expect("key" in brief).toBe(false);
-    expect("nextProductKey" in brief).toBe(false);
-    // Also check products don't have key
-    if (brief.products) {
-      brief.products.forEach((p) => {
-        expect("key" in p).toBe(false);
-      });
-    }
+    const brief = savedBrief({
+      products: [{ id: "a", name: "A", primaryColor: "#000", logoPath: "" }],
+    });
+    const stateWithProduct = fromBrief(brief);
+    const roundTripped = toBrief(stateWithProduct);
+    const serialised = JSON.stringify(roundTripped);
+    expect(serialised).not.toContain('"key"');
+    expect(serialised).not.toContain('"nextProductKey"');
   });
 
   test("removeProduct removes exactly one by key", () => {
@@ -992,5 +995,22 @@ describe("deterministic product keys (D16)", () => {
     expect(removed.products).toHaveLength(4);
     expect(removed.products.map((p) => p.key)).not.toContain(3);
     expect(removed.products.map((p) => p.key)).toEqual([1, 2, 4, 5]);
+  });
+});
+
+describe("whole-corpus round-trip", () => {
+  const briefDir = path.join(process.cwd(), "briefs");
+  const files = fs.readdirSync(briefDir).filter((f) => f.endsWith(".yaml"));
+
+  test.each(files)("%s round-trips fromBrief → toBrief → serialise byte-for-byte", (file) => {
+    const filePath = path.join(briefDir, file);
+    const yamlText = fs.readFileSync(filePath, "utf-8");
+    const parsed = yaml.load(yamlText) as CampaignBrief;
+    const entry = { file, revision: undefined as unknown as undefined };
+    const state = fromBrief(parsed, entry);
+    const roundTrippedBrief = toBrief(state);
+    const originalSerialised = dumpBrief(parsed);
+    const roundTrippedSerialised = dumpBrief(roundTrippedBrief);
+    expect(roundTrippedSerialised).toBe(originalSerialised);
   });
 });

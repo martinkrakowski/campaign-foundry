@@ -9,19 +9,19 @@ import { SectionShell, Field } from "./IdentitySection";
 import { uploadAsset, isBriefsApiError, unknownErrorMessage } from "@/lib/briefs-api";
 import { assetFileName, fileToBase64 } from "@/components/campaign/editor-state";
 
-function ProductRow({ product, index, dispatch, uploadingKeys, onLogoFile }: {
+function ProductRow({ product, index, dispatch, uploadingKeys, onLogoFile, errors }: {
   product: EditorState["products"][number];
   index: number;
   dispatch: Dispatch<EditorAction>;
   uploadingKeys: ReadonlySet<number>;
   onLogoFile: (key: number, productId: string, event: ChangeEvent<HTMLInputElement>) => void;
+  errors: FieldErrors;
 }) {
   const uploadId = useId();
   const inputId = `logo-upload-${uploadId}`;
-  const errors = {} as FieldErrors; // Errors are passed from parent
 
   return (
-    <div key={product.key} className="space-y-3 rounded-lg border border-border bg-surface p-4">
+    <div className="space-y-3 rounded-lg border border-border bg-surface p-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Name" error={errors[`product-${index}-name`]}>
           <Input
@@ -61,14 +61,14 @@ function ProductRow({ product, index, dispatch, uploadingKeys, onLogoFile }: {
               }
               invalid={Boolean(errors[`product-${index}-logo`])}
             />
-            <input
-              type="file"
-              accept="image/png,image/jpeg"
-              className="hidden"
-              id={inputId}
-              data-testid={`logo-upload-${product.key}`}
-              onChange={(e) => void onLogoFile(product.key, product.id, e)}
-            />
+             <input
+               type="file"
+               accept="image/png,image/jpeg"
+               className="hidden"
+               id={inputId}
+               aria-label="Upload product logo"
+               onChange={(e) => void onLogoFile(product.key, product.id, e)}
+             />
             <Button
               variant="secondary"
               size="sm"
@@ -145,6 +145,7 @@ export function ProductsSection({ state, dispatch, errors }: { state: EditorStat
           dispatch={dispatch}
           uploadingKeys={uploadingKeys}
           onLogoFile={onLogoFile}
+          errors={errors}
         />
       ))}
     </SectionShell>

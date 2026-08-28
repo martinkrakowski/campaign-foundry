@@ -38,6 +38,11 @@ export function emptyProduct(key: number): ProductDraft {
   };
 }
 
+export function nextKeyAfter(products: ProductDraft[]): number {
+  const numericKeys = products.map((p) => p.key).filter((k): k is number => typeof k === "number" && k > 0);
+  return numericKeys.length > 0 ? Math.max(...numericKeys) + 1 : 1;
+}
+
 export function slugify(value: string): string {
   return value
     .toLowerCase()
@@ -604,10 +609,14 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     paletteShift: list(v.paletteShift, initial.variation.paletteShift),
     headline: typeof v.headline === "boolean" ? v.headline : initial.variation.headline,
   };
-  const products = list(raw.products, initial.products);
+  const products = list(raw.products, initial.products).map((p, i) => {
+    if (typeof p.key !== "number" || p.key <= 0) {
+      return { ...p, key: i + 1 };
+    }
+    return p;
+  }) as ProductDraft[];
   const storedNextProductKey = typeof raw.nextProductKey === "number" && raw.nextProductKey > 0 ? raw.nextProductKey : undefined;
-  const maxKey = products.length > 0 ? Math.max(...products.map((p) => p.key)) : 0;
-  const nextProductKey = storedNextProductKey ?? maxKey + 1;
+  const nextProductKey = storedNextProductKey ?? nextKeyAfter(products);
   return {
     ...initial,
     ...raw,

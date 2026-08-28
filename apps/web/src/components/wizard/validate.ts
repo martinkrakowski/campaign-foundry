@@ -5,7 +5,7 @@ import {
   maxMinDistance as campaignMaxMinDistance,
   validatePolicy as campaignValidatePolicy,
 } from "@/components/campaign/validate";
-import { RATIO_OPTIONS } from "@/components/campaign/editor-state";
+import { RATIO_OPTIONS, nextKeyAfter } from "@/components/campaign/editor-state";
 import type { EditorState } from "@/components/campaign/editor-state";
 
 const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -25,8 +25,8 @@ function toEditorState(state: WizardState): EditorState {
     targetAudience: state.targetAudience,
     campaignMessage: state.campaignMessage,
     localizedMessage: "",
-    products: state.products,
-    nextProductKey: Math.max(...state.products.map((p) => p.key), 0) + 1,
+    products: [],
+    nextProductKey: nextKeyAfter(state.products as unknown as import("@/components/campaign/editor-state").ProductDraft[]),
     treatments: [],
     variation: {
       count: state.variation.count,
