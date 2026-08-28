@@ -2,7 +2,7 @@
 
 import { useReducer, useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Button } from "@/components/ui";
-import { useRun, readStoredBriefId } from "@/lib/run-context";
+import { useRun } from "@/lib/run-context";
 import { useRouter } from "next/navigation";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
@@ -29,7 +29,6 @@ import {
   saveDraftToStorage,
   loadDraftFromStorage,
   purgeDraftFromStorage,
-  purgeDraftById,
   blankBrief,
 } from "@/components/campaign/editor-state";
 import {
@@ -194,15 +193,12 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   useEffect(() => {
     if (!blank || releasedRef.current) return;
     releasedRef.current = true;
-    // Only a brief the shell was deliberately given has a draft worth abandoning, and
-    // only storage can say which that is: on a cold load this runs before the provider
-    // restores, so `runBrief` is still the seeded default — truthy, and the wrong
-    // campaign. Clearing below also removes the key that restore was about to read.
-    // Its draft goes with it: the prompt that precedes this said those edits were being
-    // left behind, and one that quietly resurrects them the next time the brief is
-    // opened makes a liar of it.
-    const leaving = readStoredBriefId();
-    if (leaving) purgeDraftById(leaving);
+    // The active brief only — not its autosaved draft. Reaching this page is not always
+    // preceded by the unsaved-changes prompt: the dirty flag belongs to a mounted
+    // editor, so coming here from any other view asks nothing, and a draft deleted then
+    // is work the D11 recovery exists to keep. Letting go of the campaign is what stops
+    // the selector advertising it and Generate running it; the draft stays where it is,
+    // and comes back if its brief is opened again.
     setRunBrief(blankBrief());
   }, [blank, setRunBrief]);
 
@@ -457,6 +453,9 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
         await createBrief(newBrief, { replace: true });
       }
       dispatch({ type: "load", brief: newBrief, entry: { file: `${newId}.yaml` } });
+      // The editor is on the copy now, so the shell must be too — otherwise Generate
+      // runs the brief this one was copied from, which is the trap `loadBrief` documents.
+      setRunBrief(newBrief);
       purgeDraftFromStorage(state);
       await loadBriefs();
       setSaveAsId(null);

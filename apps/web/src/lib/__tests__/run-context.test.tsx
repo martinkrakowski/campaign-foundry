@@ -2,7 +2,7 @@ import { describe, test, expect, vi, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { assetIdentity } from "@campaignfoundry/CampaignOrchestration";
-import { RunProvider, useRun, assetKey, assetLabel, readStoredBriefId, type Asset } from "@/lib/run-context";
+import { RunProvider, useRun, assetKey, assetLabel, type Asset } from "@/lib/run-context";
 import { json, jobOk, mockPipelineApi, EMPTY_REPORT } from "@/__tests__/helpers";
 
 const wrapper = ({ children }: { children: ReactNode }) => createElement(RunProvider, null, children);
@@ -331,33 +331,6 @@ describe("RunProvider — brief picker & persistence", () => {
     const { result } = setup();
     await waitFor(() => expect(result.current.brief.id).toBe("summer-hydration-2026")); // falls back to default
     expect(result.current.decisions).toEqual({});
-  });
-
-  test("readStoredBriefId answers what a cold load would restore, and nothing else", () => {
-    // The blank editor asks this before it clears the key, because on a cold load the
-    // provider has not restored yet and `brief` is still the seeded default.
-    expect(readStoredBriefId()).toBeNull();
-
-    localStorage.setItem("cf:brief", "{ not json");
-    expect(readStoredBriefId()).toBeNull();
-
-    // a shape the restore itself would reject is not an answer either
-    localStorage.setItem("cf:brief", JSON.stringify({ id: "half", products: [] }));
-    expect(readStoredBriefId()).toBeNull();
-
-    localStorage.setItem(
-      "cf:brief",
-      JSON.stringify({
-        id: "stored-brief",
-        products: [{ id: "p1", name: "P1", primaryColor: "#111111" }],
-      }),
-    );
-    expect(readStoredBriefId()).toBe("stored-brief");
-
-    // and on the server, where there is no storage to read
-    vi.stubGlobal("localStorage", undefined);
-    expect(readStoredBriefId()).toBeNull();
-    vi.unstubAllGlobals();
   });
 
   test("setBrief drops the stored brief when it is cleared", async () => {

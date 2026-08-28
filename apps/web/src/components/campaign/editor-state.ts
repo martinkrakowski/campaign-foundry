@@ -799,18 +799,8 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
 }
 
 export function purgeDraftFromStorage(state: EditorState): void {
-  purgeDraftById(state.source.kind === "file" ? state.source.loadedId : state.source.tempId);
-}
-
-/**
- * Drop a draft by the id it belongs to, for the caller that no longer holds its state —
- * starting a new brief abandons the one being left, and the prompt that preceded it
- * said so. A draft left behind resurrects those edits the next time the brief is
- * opened, which is the opposite of what "leave" promised.
- */
-export function purgeDraftById(id: string): void {
   if (typeof localStorage === "undefined") return;
-  localStorage.removeItem(draftKeyFor(id));
+  localStorage.removeItem(getDraftKey(state));
 }
 
 /** Clip lengths the API accepts, mirroring load-brief's MIN/MAX_DURATION_SEC. */

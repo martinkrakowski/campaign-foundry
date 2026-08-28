@@ -277,7 +277,6 @@ describe("BriefPage — data flow", () => {
     // away either — both of which this route managed at different points.
     await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief"));
     expect(JSON.parse(localStorage.getItem("cf:brief") ?? "null")?.id).toBe("camp");
-    expect(localStorage.getItem("cf:draft:camp")).toBeNull();
   });
 
   test("New brief... on the blank route empties the form in place", async () => {
@@ -346,20 +345,22 @@ describe("BriefPage — data flow", () => {
     expect(JSON.parse(localStorage.getItem("cf:brief") ?? "null")?.id).toBe("fresh");
   });
 
-  test("arriving on the blank route lets go of the brief being left", async () => {
+  test("arriving on the blank route lets go of the campaign being left", async () => {
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     // the shell is on `camp`, with unsaved edits to it in storage
     localStorage.setItem("cf:brief", JSON.stringify(brief("camp")));
     saveDraftToStorage(fromBrief(brief("camp"), { file: "camp.yaml" }));
-    expect(localStorage.getItem("cf:draft:camp")).not.toBeNull();
 
     renderWithRun(<NewEditor />);
 
-    // the draft is gone — the prompt that precedes this said the edits were being left
-    await waitFor(() => expect(localStorage.getItem("cf:draft:camp")).toBeNull());
-    // and the shell no longer claims camp is the campaign being worked on, so the
-    // selector cannot advertise it and Generate cannot run it
+    // the shell no longer claims camp is the campaign being worked on, so the selector
+    // cannot advertise it and Generate cannot run it
     await waitFor(() => expect(localStorage.getItem("cf:brief")).toBeNull());
+    // …but camp's unsaved work is untouched. Getting here does not always follow the
+    // unsaved-changes prompt — from any other view there is no mounted editor to call
+    // itself dirty — so deleting the draft would be destroying work nobody was asked
+    // about, and D11 recovery exists to keep exactly this.
+    expect(localStorage.getItem("cf:draft:camp")).not.toBeNull();
   });
 
   test("saving on the blank route stops the URL calling it new", async () => {
