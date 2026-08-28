@@ -2,14 +2,12 @@ import { errorMessage } from "@campaignfoundry/shared";
 import {
   ASSET_NAME_PATTERN,
   MAX_ASSET_BYTES,
-  assetAbsPath,
-  assetRelPath,
   decodeBase64,
   hasAllowedImageMagic,
-  writeAssetFile,
 } from "../../lib/asset-files.js";
 import { isExistsError } from "../../lib/brief-files.js";
 import { assertSafeId } from "../../lib/load-brief.js";
+import { getAssetStore } from "../../lib/ports/index.js";
 
 /**
  * POST /campaigns/assets — store a PNG/JPEG under `assets/inputs/<briefId>/<name>`.
@@ -64,17 +62,15 @@ export default defineEventHandler(async (event) => {
     return { error: "Asset must be a PNG or JPEG image." };
   }
 
-  const absPath = assetAbsPath(briefId, name);
-  const rel = assetRelPath(briefId, name);
   try {
-    await writeAssetFile(absPath, bytes);
+    const result = await getAssetStore().writeAsset(briefId, name, bytes);
+    setResponseStatus(event, 201);
+    return { path: result.path };
   } catch (error) {
     if (isExistsError(error)) {
       setResponseStatus(event, 409);
-      return { error: `Asset "${rel}" already exists.` };
+      return { error: `Asset "${getAssetStore().assetRelPath(briefId, name)}" already exists.` };
     }
     throw error;
   }
-  setResponseStatus(event, 201);
-  return { path: rel };
 });

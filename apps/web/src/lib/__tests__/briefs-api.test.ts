@@ -5,12 +5,14 @@ import {
   BriefsApiError,
   createBrief,
   duplicateBrief,
+  formatBytes,
   generatePool,
   getCapabilities,
   getPool,
   isBriefsApiError,
   isTransientCapabilities,
   patchPool,
+  listAssets,
   listBriefs,
   listPackages,
   packageCampaign,
@@ -40,7 +42,7 @@ const mockFetch = (handler: (url: string, init: RequestInit) => Response | Promi
   );
 };
 
-describe("unknownErrorMessage / isBriefsApiError", () => {
+describe("unknownErrorMessage / isBriefsApiError / formatBytes", () => {
   test("returns the Error message or the fallback", () => {
     expect(unknownErrorMessage(new Error("boom"), "fallback")).toBe("boom");
     expect(unknownErrorMessage("nope", "fallback")).toBe("fallback");
@@ -49,6 +51,12 @@ describe("unknownErrorMessage / isBriefsApiError", () => {
   test("narrows BriefsApiError", () => {
     expect(isBriefsApiError(new BriefsApiError("x", 409))).toBe(true);
     expect(isBriefsApiError(new Error("x"))).toBe(false);
+  });
+
+  test("formats bytes across units", () => {
+    expect(formatBytes(500)).toBe("500 B");
+    expect(formatBytes(1024)).toBe("1.0 KB");
+    expect(formatBytes(1048576)).toBe("1.0 MB");
   });
 });
 
@@ -480,3 +488,41 @@ describe("updateBrief", () => {
     expect(urls[0]).toContain("a%20b");
   });
 });
+
+describe("listAssets", () => {
+  const mockAssets = [
+    { name: "logo.png", type: "image/png", size: 1024, thumbnailUrl: "data:image/png;base64,123" },
+  ];
+
+  test("fetches assets for a briefId", async () => {
+    mockFetch((url) => {
+      expect(url).toBe(`${API}/campaigns/assets?briefId=camp%201`);
+      return json({ assets: mockAssets });
+    });
+    await expect(listAssets("camp 1")).resolves.toEqual({ assets: mockAssets });
+  });
+
+  test("returns empty list on 404", async () => {
+    mockFetch(() => json({ error: "Not found" }, 404));
+    await expect(listAssets("camp")).resolves.toEqual({ assets: [] });
+  });
+
+  test("returns empty list on malformed payload", async () => {
+    mockFetch(() => json({ assets: "not-array" }));
+    await expect(listAssets("camp")).resolves.toEqual({ assets: [] });
+    mockFetch(() => new Response("", { status: 200 }));
+    await expect(listAssets("camp")).resolves.toEqual({ assets: [] });
+  });
+
+  test("throws on network error or HTTP failure", async () => {
+    vi.mocked(globalThis.fetch).mockRejectedValue(new TypeError("offline"));
+    await expect(listAssets("camp")).rejects.toMatchObject({ message: "Network error", status: 0 });
+
+    mockFetch(() => json({ error: "Invalid briefId" }, 400));
+    await expect(listAssets("camp")).rejects.toMatchObject({ message: "Invalid briefId", status: 400 });
+
+    mockFetch(() => new Response("", { status: 500 }));
+    await expect(listAssets("camp")).rejects.toMatchObject({ message: "Request failed (HTTP 500)", status: 500 });
+  });
+});
+

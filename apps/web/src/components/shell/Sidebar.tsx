@@ -1,9 +1,12 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { Accordion } from "./Accordion";
 import { useEditorPanels, usePanelSink } from "@/lib/editor-panels-context";
 import { useRun } from "@/lib/run-context";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
+import { listAssets, formatBytes, type AssetEntry } from "@/lib/briefs-api";
+import { AssetPickerDrawer } from "@/components/campaign/AssetPickerDrawer";
 
 /**
  * Floating left panel: the campaign brief (read-only) and the project asset bin.
@@ -73,6 +76,26 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   usePanelSink();
   const { guardedPush } = useGuardedNavigation();
   const aspectsLabel = "1:1, 9:16, 16:9";
+  const [assets, setAssets] = useState<AssetEntry[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    setAssets([]);
+    const requestedId = brief.id;
+    listAssets(requestedId, controller.signal)
+      .then((res) => {
+        if (!cancelled && brief.id === requestedId) setAssets(res.assets);
+      })
+      .catch(() => {
+        if (!cancelled && brief.id === requestedId) setAssets([]);
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [brief.id]);
 
   const handleEditClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -116,31 +139,64 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <Accordion
           title="Project Bin"
           aside={
-            <span className="text-[11px] font-mono text-text-muted">
-              {brief.products.length} assets
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono text-text-muted">
+                {assets.length} {assets.length === 1 ? "asset" : "assets"}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPickerOpen(true)}
+                className="text-[11px] font-medium text-text-muted transition-colors hover:text-white"
+              >
+                Browse
+              </button>
+            </div>
           }
         >
-          <div className="space-y-2">
-            {brief.products.map((product) => (
-              <div
-                key={product.id}
-                className="flex items-center space-x-3 rounded-lg border border-border bg-surface-2 p-2"
-              >
+          {assets.length === 0 ? (
+            <div className="text-[12px] text-text-muted">No assets uploaded yet.</div>
+          ) : (
+            <div className="space-y-2">
+              {assets.map((asset) => (
                 <div
-                  className="flex h-10 w-10 items-center justify-center rounded-md border border-border text-lg font-bold"
-                  style={{ color: product.primaryColor }}
+                  key={asset.name}
+                  onClick={() => setPickerOpen(true)}
+                  className="flex cursor-pointer items-center space-x-3 rounded-lg border border-border bg-surface-2 p-2 transition-colors hover:border-border-hover"
                 >
-                  {product.name.charAt(0)}
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-surface">
+                    {asset.thumbnailUrl ? (
+                      <img
+                        src={asset.thumbnailUrl}
+                        alt={asset.name}
+                        className="h-full w-full object-contain"
+                      />
+                    ) : (
+                      <span className="font-mono text-[9px] text-text-muted">
+                        {(asset.type ?? "image/png").replace("image/", "").toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-mono text-xs text-text-primary" title={asset.name}>
+                      {asset.name}
+                    </div>
+                    <div className="font-mono text-[10px] text-text-muted">
+                      <span className="uppercase tracking-wider">{(asset.type ?? "image/png").replace("image/", "")}</span>
+                      <span> · </span>
+                      <span>{formatBytes(asset.size ?? 0)}</span>
+                    </div>
+                  </div>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-xs text-text-primary">{product.name}</div>
-                  <div className="font-mono text-[10px] uppercase text-text-muted">{product.id}</div>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </Accordion>
+
+        <AssetPickerDrawer
+          briefId={brief.id}
+          open={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+        />
 
         {/* Editor sections the brief page places here — the variation policy. */}
         {panels ? (

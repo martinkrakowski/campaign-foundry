@@ -1,17 +1,16 @@
-import { basename } from "node:path";
+import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
 import {
-  briefYamlPath,
-  createBriefFile,
-  findBriefFileById,
-  hashFile,
+  extractSourceAssetBriefIds,
+  rewriteAssetPaths,
+} from "../../lib/asset-files.js";
+import {
   isExistsError,
   isErrno,
-  replaceBriefFile,
-  withBriefLock,
   SYMLINK_WRITE_ERROR,
 } from "../../lib/brief-files.js";
 import { parseBrief } from "../../lib/load-brief.js";
+import { getAssetStore, getBriefStore } from "../../lib/ports/index.js";
 
 /**
  * POST /campaigns/briefs — persist a campaign brief.
@@ -21,9 +20,13 @@ import { parseBrief } from "../../lib/load-brief.js";
  * (repeated `replace` still counts; the first value wins). Replace rewrites that
  * same file in its own format. Creates use exclusive `wx` writes under
  * `projectRoot()/briefs/`.
+ *
+ * Save as… copies any brief-scoped assets from source brief IDs (`assets/inputs/<from>/*`)
+ * into `assets/inputs/<brief.id>/*` and rewrites both logoPath and inputAsset paths,
+ * while leaving root-level shared assets (`assets/inputs/*.png`) untouched (L5.5).
  */
 export default defineEventHandler(async (event) => {
-  let brief;
+  let brief: CampaignBrief;
   try {
     brief = parseBrief(await readBody(event));
   } catch (error) {
@@ -35,35 +38,40 @@ export default defineEventHandler(async (event) => {
   const replace = (Array.isArray(rawReplace) ? rawReplace[0] : rawReplace) === "1";
   const rawRevision = getQuery(event).revision;
   const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
-  const existing = await findBriefFileById(brief.id);
-  if (existing && !replace) {
-    setResponseStatus(event, 409);
-    return { error: `Brief "${brief.id}" already exists.` };
-  }
-
-  const filePath = existing ?? briefYamlPath(brief.id);
-  let result: { error?: string; revision?: string } | undefined;
   try {
-    await withBriefLock(brief.id, async () => {
-      if (replace && existing && expectedRevision) {
-        try {
-          const currentRevision = await hashFile(existing);
-          if (currentRevision !== expectedRevision) {
-            result = { error: "Brief was modified by another user.", revision: currentRevision };
-            return;
+    const stored = await getBriefStore().withBriefLock(brief.id, async () => {
+      const existing = await getBriefStore().findBriefFileById(brief.id);
+      if (existing && !replace) {
+        const existErr = new Error(`Brief "${brief.id}" already exists.`);
+        (existErr as { code?: string }).code = "EEXIST";
+        throw existErr;
+      }
+
+      // Copy any brief-scoped assets and rewrite paths only after validation succeeds (Save as…)
+      const sourceBriefIds = extractSourceAssetBriefIds(brief, brief.id);
+      if (sourceBriefIds.length > 0) {
+        if (replace && expectedRevision !== undefined) {
+          const currentRev = await getBriefStore().getRevision(brief.id);
+          if (currentRev !== expectedRevision) {
+            const conflictErr = new Error("Brief was modified by another user.");
+            (conflictErr as { code?: string; revision?: string }).code = "ECONFLICT";
+            (conflictErr as { revision?: string }).revision = currentRev;
+            throw conflictErr;
           }
-        } catch (error) {
-          if (isErrno(error, "ENOENT")) {
-            // File was deleted between the lookup and the hash — fall through to create
-            return;
-          }
-          throw error;
+        }
+        for (const fromId of sourceBriefIds) {
+          const pathMap = await getAssetStore().copyAssets(fromId, brief.id);
+          brief = rewriteAssetPaths(brief, fromId, brief.id, pathMap);
         }
       }
 
-      if (replace) await replaceBriefFile(filePath, brief);
-      else await createBriefFile(filePath, brief);
+      if (replace) {
+        return await getBriefStore().replaceBrief(brief, { expectedRevision });
+      }
+      return await getBriefStore().createBrief(brief);
     });
+    setResponseStatus(event, 201);
+    return { file: stored.file, brief: stored.brief };
   } catch (error) {
     if (errorMessage(error) === SYMLINK_WRITE_ERROR) {
       setResponseStatus(event, 400);
@@ -73,14 +81,13 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, 409);
       return { error: `Brief "${brief.id}" already exists.` };
     }
+    if (isErrno(error, "ECONFLICT")) {
+      setResponseStatus(event, 409);
+      return {
+        error: "Brief was modified by another user.",
+        revision: (error as { revision?: string }).revision,
+      };
+    }
     throw error;
   }
-
-  if (result?.error) {
-    setResponseStatus(event, 409);
-    return result;
-  }
-
-  setResponseStatus(event, 201);
-  return { file: basename(filePath), brief };
 });

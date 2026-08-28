@@ -196,6 +196,19 @@ export async function duplicateBrief(id: string, newId: string): Promise<BriefEn
   );
 }
 
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export interface AssetEntry {
+  name: string;
+  type: string;
+  size: number;
+  thumbnailUrl: string;
+}
+
 export async function uploadAsset(input: {
   briefId: string;
   name: string;
@@ -206,6 +219,31 @@ export async function uploadAsset(input: {
     throw new BriefsApiError("Invalid response", 200);
   }
   return { path: (data as { path: string }).path };
+}
+
+/**
+ * List assets stored for a campaign brief (`GET /campaigns/assets?briefId=`).
+ * 404 is treated as an empty list, matching the other collection routes.
+ */
+export async function listAssets(
+  briefId: string,
+  signal?: AbortSignal,
+): Promise<{ assets: AssetEntry[] }> {
+  let res: Response;
+  try {
+    res = await fetch(`${API}/campaigns/assets?briefId=${encodeURIComponent(briefId)}`, { signal });
+  } catch {
+    throw new BriefsApiError("Network error", 0);
+  }
+  if (res.status === 404) return { assets: [] };
+  const data = await parseJsonBody(res);
+  if (!res.ok) {
+    throw new BriefsApiError(errorFrom(data, `Request failed (HTTP ${res.status})`), res.status);
+  }
+  if (typeof data !== "object" || data === null || !Array.isArray((data as { assets?: unknown }).assets)) {
+    return { assets: [] };
+  }
+  return data as { assets: AssetEntry[] };
 }
 
 function isEstimate(value: unknown): value is PlanEstimate {

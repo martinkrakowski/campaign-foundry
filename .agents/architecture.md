@@ -40,3 +40,44 @@ even if the folder names change.
 2. If it crosses a boundary, define/extend a port (interface) rather than
    reaching across directly.
 3. Put the test next to the module (see `.agents/testing.md`).
+
+## Storage Ports & Cloud Storage Boundary (API)
+
+Briefs and assets in `apps/api` are isolated behind hexagonal storage ports defined in
+`apps/api/server/lib/ports/`:
+
+- **`BriefStorePort`** (`brief-store.port.ts`): abstracts loading, listing, creating,
+  rewriting, replacing, and revision hashing of campaign briefs. Brief IDs serve as
+  logical store keys with no leaked filesystem or filename semantics.
+- **`AssetStorePort`** (`asset-store.port.ts`): abstracts writing, listing, and
+  copying (`copyAssets(from, to)`) of campaign assets (logos, background images).
+
+No `node:fs`, path joining, or `process.cwd()` may leak through route handlers or port
+interfaces into callers.
+
+### S3 Adapter Shape
+
+When transitioning from the local filesystem (`FsBriefStore`, `FsAssetStore`) to cloud
+storage (e.g. AWS S3, Cloudflare R2, GCS), adapters implement the exact same port interfaces:
+
+```ts
+export class S3BriefStore implements BriefStorePort {
+  constructor(private readonly s3: S3Client, private readonly bucket: string, private readonly prefix = "briefs/") {}
+
+  // Maps brief.id -> s3://bucket/briefs/<id>.yaml
+  // - listBriefs: ListObjectsV2Command + GetObjectCommand; ETag or SHA-256 digest as revision
+  // - createBrief: PutObjectCommand with If-None-Match: "*" (exclusive create)
+  // - rewriteBrief / replaceBrief: PutObjectCommand with If-Match for revision concurrency
+  // - withBriefLock: distributed lease (e.g. DynamoDB / Redis lock) or S3 conditional write
+}
+
+export class S3AssetStore implements AssetStorePort {
+  constructor(private readonly s3: S3Client, private readonly bucket: string, private readonly prefix = "assets/inputs/") {}
+
+  // Maps (briefId, name) -> s3://bucket/assets/inputs/<briefId>/<name>
+  // - writeAsset: PutObjectCommand with If-None-Match: "*"
+  // - listAssets: ListObjectsV2Command (Prefix: assets/inputs/<briefId>/) + metadata/presigned URL or data URL
+  // - copyAssets: ListObjectsV2Command + CopyObjectCommand (fromPrefix -> toPrefix)
+}
+```
+
