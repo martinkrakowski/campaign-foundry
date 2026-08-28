@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, vi, afterEach } from "vitest";
 import type { CampaignBrief, CopyPool } from "@campaignfoundry/CampaignOrchestration";
 import { axisProductSize } from "../validate";
 import {
+  BACKGROUND_OPTIONS,
   LAYOUT_OPTIONS,
   RATIO_OPTIONS,
   TONE_OPTIONS,
@@ -1156,14 +1157,55 @@ describe("the count clamp and its one-time notice", () => {
     expect(answered.variation.count).toBe("3");
   });
 
-  test("another variation field leaves the notice standing — it is about the count", () => {
+  test("the notice is said once: the next thing the user does takes it down", () => {
     const noticed = editorReducer(
       editorReducer(variation(), { type: "setVariation", field: "count", value: String(axisProductSize(variation())) }),
       { type: "toggleLayout", value: LAYOUT_OPTIONS[0] },
     );
+    expect(noticed.countNotice).not.toBeNull();
+
     const seeded = editorReducer(noticed, { type: "setVariation", field: "seed", value: "42" });
-    expect(seeded.countNotice).toBe(noticed.countNotice);
+    expect(seeded.countNotice).toBeNull();
     expect(seeded.variation.seed).toBe("42");
+    // and the count it was lowered to stands — the notice going does not undo the clamp
+    expect(seeded.variation.count).toBe(noticed.variation.count);
+  });
+
+  test("every axis that shrinks the ceiling clamps, not just layout and tone", () => {
+    const atCeiling = (s: EditorState) =>
+      editorReducer(s, { type: "setVariation", field: "count", value: String(axisProductSize(s)) });
+
+    // a ratio: the planner would have refused this policy before, rather than the
+    // editor lowering the count for it
+    const ratioed = editorReducer(atCeiling(variation()), { type: "toggleRatio", value: RATIO_OPTIONS[0] });
+    expect(Number(ratioed.variation.count)).toBe(axisProductSize(ratioed));
+    expect(ratioed.countNotice).toBe(axisProductSize(ratioed));
+
+    // and a product, which is not a variation axis at all
+    const twoProducts = { ...variation(), products: [emptyProduct(1), emptyProduct(2)] };
+    const named = editorReducer(
+      editorReducer(twoProducts, { type: "setProduct", key: 1, patch: { id: "alpha" } }),
+      { type: "setProduct", key: 2, patch: { id: "beta" } },
+    );
+    const dropped = editorReducer(atCeiling(named), { type: "removeProduct", key: 2 });
+    expect(Number(dropped.variation.count)).toBe(axisProductSize(dropped));
+  });
+
+  test("the last background and the last palette shift hold, like every other axis", () => {
+    let s = variation();
+    for (const option of BACKGROUND_OPTIONS.filter((o) => s.variation.background.includes(o)).slice(0, -1)) {
+      s = editorReducer(s, { type: "toggleBackground", value: option });
+    }
+    const lastBackground = s.variation.background;
+    expect(lastBackground.length).toBe(1);
+    expect(editorReducer(s, { type: "toggleBackground", value: lastBackground[0] })).toBe(s);
+
+    for (const shift of s.variation.paletteShift.slice(0, -1)) {
+      s = editorReducer(s, { type: "togglePalette", value: shift });
+    }
+    const lastShift = s.variation.paletteShift;
+    expect(lastShift.length).toBe(1);
+    expect(editorReducer(s, { type: "togglePalette", value: lastShift[0] })).toBe(s);
   });
 });
 

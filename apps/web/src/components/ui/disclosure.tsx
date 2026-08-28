@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useId, type ReactNode } from "react";
+import { useEffect, useState, useId, type ReactNode } from "react";
 import { cn } from "../../lib/cn";
 
 const STORAGE_PREFIX = "cf:disclosure:";
@@ -34,7 +34,13 @@ function writeStoredOpen(id: string, open: boolean): void {
  * flow, not a dialog — it never traps focus and needs no Escape handling.
  */
 export function Disclosure({ id, title, children }: { id: string; title: string; children: ReactNode }): ReactNode {
-  const [open, setOpen] = useState(() => readStoredOpen(id));
+  // Closed on the first render, always: the server has no storage, so reading it in the
+  // initializer would render closed there and open here, and hydration would mismatch.
+  // The remembered state is applied on mount instead.
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (readStoredOpen(id)) setOpen(true);
+  }, [id]);
   const panelId = `disclosure-panel-${useId()}`;
   return (
     <div className="rounded-lg border border-border bg-surface">

@@ -315,10 +315,12 @@ function withCountClamp(state: EditorState): EditorState {
       countNotice: axisMax,
     };
   }
-  return { ...state, countNotice: null };
+  // Nothing to clamp. Keep the same object when there is also no notice to take down,
+  // so a refused action stays identity-equal for the callers that check.
+  return state.countNotice === null ? state : { ...state, countNotice: null };
 }
 
-export function editorReducer(state: EditorState, action: EditorAction): EditorState {
+function reduceEditor(state: EditorState, action: EditorAction): EditorState {
   switch (action.type) {
     case "setMode": {
       return { ...state, mode: action.mode };
@@ -380,34 +382,30 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       // is a no-op, which deletes the "select at least one" error by construction.
       const layout = toggleOrdered(state.variation.layout, action.value, LAYOUT_OPTIONS);
       if (layout.length === 0) return state;
-      return withCountClamp({ ...state, variation: { ...state.variation, layout } });
+      return { ...state, variation: { ...state.variation, layout } };
     }
     case "toggleTone": {
       const tone = toggleOrdered(state.variation.tone, action.value, TONE_OPTIONS);
       if (tone.length === 0) return state;
-      return withCountClamp({ ...state, variation: { ...state.variation, tone } });
+      return { ...state, variation: { ...state.variation, tone } };
     }
     case "toggleRatio":
       return {
         ...state,
         variation: { ...state.variation, ratio: toggleOrdered(state.variation.ratio, action.value, RATIO_OPTIONS) },
       };
-    case "toggleBackground":
-      return withCountClamp({
-        ...state,
-        variation: {
-          ...state.variation,
-          background: toggleOrdered(state.variation.background, action.value, BACKGROUND_OPTIONS),
-        },
-      });
-    case "togglePalette":
-      return withCountClamp({
-        ...state,
-        variation: {
-          ...state.variation,
-          paletteShift: toggleOrdered(state.variation.paletteShift, action.value, PALETTE_SHIFT_OPTIONS),
-        },
-      });
+    case "toggleBackground": {
+      // Same guard as layout and tone. The domain multiplies these axes by their raw
+      // length, so an empty one makes a policy that can produce nothing at all.
+      const background = toggleOrdered(state.variation.background, action.value, BACKGROUND_OPTIONS);
+      if (background.length === 0) return state;
+      return { ...state, variation: { ...state.variation, background } };
+    }
+    case "togglePalette": {
+      const paletteShift = toggleOrdered(state.variation.paletteShift, action.value, PALETTE_SHIFT_OPTIONS);
+      if (paletteShift.length === 0) return state;
+      return { ...state, variation: { ...state.variation, paletteShift } };
+    }
     case "toggleHeadline":
       return { ...state, variation: { ...state.variation, headline: !state.variation.headline } };
     case "toggleMotion": {
@@ -820,4 +818,23 @@ export function canPlan(state: EditorState): boolean {
     state.products.some((product) => product.id.length > 0) &&
     parseInt(state.variation.count, 10) >= 1
   );
+}
+
+/**
+ * Every action goes through the clamp, because almost every action can move the
+ * ceiling: dropping a ratio, a product, a motion kind, a duration, a format, a
+ * platform, or the headlines the pool approves all shrink what the axes can produce.
+ * Clamping only where the plan first noticed it (layout and tone) left every other
+ * path to be refused by the planner instead — the very thing the clamp exists to
+ * prevent.
+ *
+ * Two actions are exempt: one that changed nothing (the axis guards return the same
+ * state), and the user setting the count by hand, which is them answering the notice
+ * rather than provoking a new one.
+ */
+export function editorReducer(state: EditorState, action: EditorAction): EditorState {
+  const next = reduceEditor(state, action);
+  if (next === state) return state;
+  if (action.type === "setVariation" && action.field === "count") return next;
+  return withCountClamp(next);
 }
