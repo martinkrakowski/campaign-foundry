@@ -263,7 +263,7 @@ describe("BriefPage — data flow", () => {
     expect((screen.getByLabelText("Target Region") as HTMLInputElement).value).toBe("");
   });
 
-  test("a brief pushed at the blank route is released again, and the form stays blank", async () => {
+  test("choosing a campaign while on the blank route takes you to it", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<NewEditorWithPicker />);
@@ -272,11 +272,12 @@ describe("BriefPage — data flow", () => {
 
     await user.click(screen.getByRole("button", { name: "shell picks camp" }));
 
-    // The page lets go of it again, and nothing of `camp` reaches the form. (The adopt
-    // effect's own `blank` guard is defence in depth here rather than the mechanism
-    // under test: releasing the brief converges on the same blank form either way.)
-    await waitFor(() => expect(localStorage.getItem("cf:brief")).toBeNull());
-    expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe("");
+    // There is a campaign again, so this page has stopped describing a new brief. It
+    // must not keep the choice and show an empty form, and it must not throw the choice
+    // away either — both of which this route managed at different points.
+    await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief"));
+    expect(JSON.parse(localStorage.getItem("cf:brief") ?? "null")?.id).toBe("camp");
+    expect(localStorage.getItem("cf:draft:camp")).toBeNull();
   });
 
   test("New brief... on the blank route empties the form in place", async () => {
@@ -327,6 +328,22 @@ describe("BriefPage — data flow", () => {
     );
 
     await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief"));
+  });
+
+  test("Apply on the blank route keeps the brief it just applied", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
+    await fillValidDraft(user, "fresh");
+
+    await user.click(screen.getByText("Apply to run").closest("button") as HTMLButtonElement);
+
+    // the release must not fire again on the brief this page just created: applying is
+    // how a campaign becomes the active one, and clearing it here leaves Generate with
+    // nothing to run
+    await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief"));
+    expect(JSON.parse(localStorage.getItem("cf:brief") ?? "null")?.id).toBe("fresh");
   });
 
   test("arriving on the blank route lets go of the brief being left", async () => {

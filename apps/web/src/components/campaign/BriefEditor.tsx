@@ -1,6 +1,6 @@
 "use client";
 
-import { useReducer, useState, useEffect, useMemo, useCallback } from "react";
+import { useReducer, useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Button } from "@/components/ui";
 import { useRun, readStoredBriefId } from "@/lib/run-context";
 import { useRouter } from "next/navigation";
@@ -185,28 +185,42 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
 
   // Arriving here means the last campaign is no longer the one being worked on. Let go
   // of it in the shell too: while it stayed active the selector kept advertising it and
-  // Generate would have run it, and its draft would have resurrected the edits the
-  // "unsaved changes" prompt just said were being left behind.
+  // Generate would have run it.
   //
-  // Not mount-only: on a cold load of this route the provider restores the active brief
-  // from storage a tick later, so a one-shot effect would read the default and let the
-  // real one arrive behind it. Watching the id closes that window, and clearing is
-  // idempotent — the blank brief has no id, so the next run stops at the guard.
-  //
-  // `source.kind` is the other half: once this page has saved, it holds a real brief and
-  // `save` has turned the source into a file, so there is nothing here to let go of.
+  // Once, on arrival — this releases the brief the page *found*, never one it goes on to
+  // create. Watching `runBrief.id` instead would fire again the moment Apply makes the
+  // new draft active and throw it straight back away.
+  const releasedRef = useRef(false);
   useEffect(() => {
-    if (!blank || state.source.kind !== "new") return;
-    // Storage first, and not merely as a fallback: on a cold load this effect runs
-    // before the provider restores the active brief, so `runBrief` is still the seeded
-    // default — truthy, and the wrong campaign. The stored id is the one the shell was
-    // about to work on, and clearing below removes the very key that restore would read,
-    // so it has to be asked first. `runBrief` covers the case where nothing was stored.
-    const leaving = readStoredBriefId() ?? runBrief.id;
-    if (!leaving) return;
-    purgeDraftById(leaving);
+    if (!blank || releasedRef.current) return;
+    releasedRef.current = true;
+    // Only a brief the shell was deliberately given has a draft worth abandoning, and
+    // only storage can say which that is: on a cold load this runs before the provider
+    // restores, so `runBrief` is still the seeded default — truthy, and the wrong
+    // campaign. Clearing below also removes the key that restore was about to read.
+    // Its draft goes with it: the prompt that precedes this said those edits were being
+    // left behind, and one that quietly resurrects them the next time the brief is
+    // opened makes a liar of it.
+    const leaving = readStoredBriefId();
+    if (leaving) purgeDraftById(leaving);
     setRunBrief(blankBrief());
-  }, [blank, runBrief.id, state.source.kind, setRunBrief]);
+  }, [blank, setRunBrief]);
+
+  // …and the moment there is a campaign again, this page has stopped describing a new
+  // brief, so the URL must stop saying so. Applying, saving, saving-as and choosing one
+  // in the shell all arrive here as the same transition — no campaign, then one — which
+  // is why none of those handlers navigates for itself.
+  //
+  // The transition is what matters, not the value: on the first commit `runBrief` is
+  // still whatever the release above is in the middle of clearing, and reacting to that
+  // would bounce straight back off this route.
+  const previousBriefId = useRef(runBrief.id);
+  useEffect(() => {
+    const previous = previousBriefId.current;
+    previousBriefId.current = runBrief.id;
+    if (!blank || !releasedRef.current) return;
+    if (previous === "" && runBrief.id !== "") router.replace("/brief");
+  }, [blank, runBrief.id, router]);
 
   // Validate on state change
   useEffect(() => {
@@ -409,9 +423,6 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
       dispatch({ type: "apply", applied: brief });
       setRunBrief(brief);
       purgeDraftFromStorage(state);
-      // The draft has an id and a file now, so the "new" route no longer describes it —
-      // and a reload here would otherwise blank the brief that was just saved.
-      if (blank) router.replace("/brief");
       await loadBriefs();
     } catch (error) {
       setPersistError(unknownErrorMessage(error, "Save failed"));
@@ -447,8 +458,6 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
       }
       dispatch({ type: "load", brief: newBrief, entry: { file: `${newId}.yaml` } });
       purgeDraftFromStorage(state);
-      // Saved under an id, so this is no longer a new brief (see handleSave).
-      if (blank) router.replace("/brief");
       await loadBriefs();
       setSaveAsId(null);
     } catch (error) {
