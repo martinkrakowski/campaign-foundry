@@ -78,8 +78,17 @@ export interface PlanEstimate {
   frames?: number;
 }
 
+/**
+ * One planned creative, as `plan.post.ts` serializes it. Only the fields the editor
+ * reads are declared; the route sends more.
+ */
+export interface PlanVariant {
+  readonly aspectRatio?: string;
+  readonly productId?: string;
+}
+
 export type PlanResult =
-  | { kind: "ok"; policyHash: string; seed: number; estimate: PlanEstimate; variants: unknown[] }
+  | { kind: "ok"; policyHash: string; seed: number; estimate: PlanEstimate; variants: PlanVariant[] }
   | { kind: "infeasible"; error: string }
   | { kind: "unavailable" };
 

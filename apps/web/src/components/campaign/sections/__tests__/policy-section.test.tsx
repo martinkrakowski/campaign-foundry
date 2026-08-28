@@ -25,6 +25,18 @@ const state = (over: Partial<EditorState> = {}): EditorState => ({
   ...over,
 });
 
+/**
+ * Render with Advanced open. Most of what this panel offers lives behind that door
+ * (D6), and the Disclosure remembers its state in localStorage — so open it only when
+ * it is actually closed, or a second test in the same file would close it again.
+ */
+const renderOpen = (ui: Parameters<typeof render>[0]) => {
+  const result = render(ui);
+  const advanced = screen.getByRole("button", { name: "Advanced" });
+  if (advanced.getAttribute("aria-expanded") !== "true") fireEvent.click(advanced);
+  return result;
+};
+
 /** The fieldset for a given legend, so a toggle is addressed unambiguously. */
 const axis = (legend: string) => screen.getByText(legend).closest("fieldset") as HTMLElement;
 
@@ -42,7 +54,7 @@ describe("PolicySection — the policy numbers", () => {
     const dispatch = vi.fn();
     // 2 products × 3 ratios × 2 layouts × 2 tones × 1 background × 3 palette shifts
     const s = state({ variation: { ...state().variation, paletteShift: [0, 0.1, 0.2] } });
-    render(<PolicySection state={s} dispatch={dispatch} errors={{}} />);
+    renderOpen(<PolicySection state={s} dispatch={dispatch} errors={{}} />);
 
     const slider = screen.getByLabelText("Count") as HTMLInputElement;
     expect(slider.type).toBe("range");
@@ -81,7 +93,7 @@ describe("PolicySection — the policy numbers", () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
     const s = state();
-    render(
+    renderOpen(
       <PolicySection state={{ ...s, variation: { ...s.variation, minDistance: "" } }} dispatch={dispatch} errors={{}} />,
     );
     expect(screen.getByRole("spinbutton", { name: "Min distance" }).textContent).toBe("Auto (1)");
@@ -96,13 +108,13 @@ describe("PolicySection — the policy numbers", () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
     const s = state();
-    const { unmount } = render(
+    const { unmount } = renderOpen(
       <PolicySection state={{ ...s, variation: { ...s.variation, [field]: "" } }} dispatch={dispatch} errors={{}} />,
     );
     expect(screen.getByRole("spinbutton", { name: label }).textContent).toBe("No floor");
     unmount();
 
-    render(<PolicySection state={s} dispatch={dispatch} errors={{ [field]: `bad ${field}` }} />);
+    renderOpen(<PolicySection state={s} dispatch={dispatch} errors={{ [field]: `bad ${field}` }} />);
     expect(screen.getByText(`bad ${field}`)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: `Increase ${label}` }));
     expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field, value: "2" });
@@ -152,7 +164,7 @@ describe("PolicySection — axes", () => {
   test("layout, tone and background toggle through their own actions", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
-    render(<PolicySection state={state()} dispatch={dispatch} errors={{}} />);
+    renderOpen(<PolicySection state={state()} dispatch={dispatch} errors={{}} />);
 
     await user.click(within(axis("Layout")).getByText(LAYOUT_OPTIONS[0]));
     expect(dispatch).toHaveBeenCalledWith({ type: "toggleLayout", value: LAYOUT_OPTIONS[0] });
@@ -183,12 +195,16 @@ describe("PolicySection — axes", () => {
     expect(top.querySelector("svg[aria-hidden='true']")).toBeTruthy();
   });
 
-  test("the non-visual axes keep their plain text toggles", () => {
-    render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
+  test("every advanced axis shows what it does, and is still named by its raw value", () => {
+    renderOpen(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    // D18: the picture is decoration; the accessible name stays the value the brief
+    // stores, so a screen reader and the YAML agree.
     const bg = within(axis("Background Source")).getByRole("button", { name: "procedural" });
-    expect(bg.querySelector("svg")).toBeNull();
-    expect(within(axis("Palette Shift")).getByRole("button", { name: "0.1" })).toBeTruthy();
-    expect(within(axis("Headline")).getByRole("button", { name: HEADLINE_POOL_REF })).toBeTruthy();
+    expect(bg.querySelector("svg")).toBeTruthy();
+    expect(bg.textContent).toContain("A pattern we draw");
+    const swatch = within(axis("Palette Shift")).getByRole("button", { name: "0.1" });
+    expect(swatch.querySelector("span[style]")?.getAttribute("style")).toContain("background-color");
+    expect(screen.getByRole("switch", { name: HEADLINE_POOL_REF })).toBeTruthy();
   });
 
   test("the card grid holds two columns in the 320px sidebar and auto-fills when wide", () => {
@@ -203,23 +219,31 @@ describe("PolicySection — axes", () => {
   });
 
   test("a selected axis value is marked pressed, an unselected one is not", () => {
-    render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    renderOpen(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
     // background defaults to procedural only
     const bg = within(axis("Background Source"));
-    expect(bg.getByText("procedural").getAttribute("aria-pressed")).toBe("true");
-    expect(bg.getByText("genai").getAttribute("aria-pressed")).toBe("false");
+    expect(bg.getByRole("button", { name: "procedural" }).getAttribute("aria-pressed")).toBe("true");
+    expect(bg.getByRole("button", { name: "genai" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  test("a brief with no products still draws its swatches, from the kit's own blue", () => {
+    renderOpen(<PolicySection state={state({ products: [] })} dispatch={vi.fn()} errors={{}} />);
+    const swatch = within(axis("Palette Shift"))
+      .getByRole("button", { name: "0" })
+      .querySelector("span[style]") as HTMLElement;
+    expect(swatch.style.backgroundColor).not.toBe("");
   });
 
   test("palette shift toggles numerically", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
-    render(<PolicySection state={state()} dispatch={dispatch} errors={{}} />);
-    await user.click(within(axis("Palette Shift")).getByText(String(PALETTE_SHIFT_OPTIONS[1])));
+    renderOpen(<PolicySection state={state()} dispatch={dispatch} errors={{}} />);
+    await user.click(within(axis("Palette Shift")).getByRole("button", { name: String(PALETTE_SHIFT_OPTIONS[1]) }));
     expect(dispatch).toHaveBeenCalledWith({ type: "togglePalette", value: PALETTE_SHIFT_OPTIONS[1] });
   });
 
   test("each axis renders its own error", () => {
-    render(
+    renderOpen(
       <PolicySection
         state={state()}
         dispatch={vi.fn()}
@@ -406,7 +430,7 @@ describe("PolicySection — aspect ratio panels", () => {
   });
 
   test("a selection with no ratio left renders the section's own error", () => {
-    render(
+    renderOpen(
       <PolicySection
         state={{ ...state(), variation: { ...state().variation, ratio: [] } }}
         dispatch={vi.fn()}
@@ -418,26 +442,29 @@ describe("PolicySection — aspect ratio panels", () => {
 });
 
 describe("PolicySection — the headline axis and its pool", () => {
-  const headlineToggle = () => within(axis("Headline")).getByText(HEADLINE_POOL_REF);
+  // the axis is a switch row now: a real role="switch" whose name is the pool ref, so
+  // the state is read from aria-checked rather than aria-pressed
+  const headlineToggle = () =>
+    screen.getByRole("switch", { name: HEADLINE_POOL_REF }) as HTMLButtonElement;
 
   test("an unloaded pool is reported as unloaded, not as empty", () => {
-    render(<PolicySection state={state({ pool: null })} dispatch={vi.fn()} errors={{}} />);
+    renderOpen(<PolicySection state={state({ pool: null })} dispatch={vi.fn()} errors={{}} />);
     expect(screen.getByText(/Headline pool not loaded/)).toBeTruthy();
     expect(screen.queryByText(/no approved entries/)).toBeNull();
     // and it must not be disabled on the strength of a pool nobody fetched
-    expect((headlineToggle() as HTMLButtonElement).disabled).toBe(false);
+    expect(headlineToggle().disabled).toBe(false);
   });
 
   test("a loaded pool with nothing approved blocks the axis and says why", () => {
-    render(<PolicySection state={state({ pool: pool(["pending", "rejected"]) })} dispatch={vi.fn()} errors={{}} />);
+    renderOpen(<PolicySection state={state({ pool: pool(["pending", "rejected"]) })} dispatch={vi.fn()} errors={{}} />);
     expect(screen.getByText(/no approved entries/)).toBeTruthy();
-    expect((headlineToggle() as HTMLButtonElement).disabled).toBe(true);
+    expect(headlineToggle().disabled).toBe(true);
   });
 
   test("a loaded pool with approved entries reports the count and allows the toggle", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
-    render(
+    renderOpen(
       <PolicySection state={state({ pool: pool(["approved", "approved", "pending"]) })} dispatch={dispatch} errors={{}} />,
     );
     expect(screen.getByText("2 approved headlines")).toBeTruthy();
@@ -446,7 +473,7 @@ describe("PolicySection — the headline axis and its pool", () => {
   });
 
   test("one approved entry is described in the singular", () => {
-    render(<PolicySection state={state({ pool: pool(["approved"]) })} dispatch={vi.fn()} errors={{}} />);
+    renderOpen(<PolicySection state={state({ pool: pool(["approved"]) })} dispatch={vi.fn()} errors={{}} />);
     expect(screen.getByText("1 approved headline")).toBeTruthy();
   });
 
@@ -455,27 +482,27 @@ describe("PolicySection — the headline axis and its pool", () => {
     const dispatch = vi.fn();
     // loadPool no longer clears the axis for the user, so the toggle is the only way out
     const stuck = editorReducer(state({ pool: pool(["pending"]) }), { type: "toggleHeadline" });
-    render(<PolicySection state={stuck} dispatch={dispatch} errors={{}} />);
+    renderOpen(<PolicySection state={stuck} dispatch={dispatch} errors={{}} />);
 
-    const toggle = headlineToggle() as HTMLButtonElement;
-    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    const toggle = headlineToggle();
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
     expect(toggle.disabled).toBe(false);
     await user.click(toggle);
     expect(dispatch).toHaveBeenCalledWith({ type: "toggleHeadline" });
   });
 
   test("an axis that is off stays blocked while the pool has nothing approved", () => {
-    render(<PolicySection state={state({ pool: pool(["pending"]) })} dispatch={vi.fn()} errors={{}} />);
-    expect((headlineToggle() as HTMLButtonElement).disabled).toBe(true);
+    renderOpen(<PolicySection state={state({ pool: pool(["pending"]) })} dispatch={vi.fn()} errors={{}} />);
+    expect(headlineToggle().disabled).toBe(true);
   });
 
   test("the toggle reflects whether the axis is on", () => {
     const on = editorReducer(state({ pool: pool(["approved"]) }), { type: "toggleHeadline" });
-    const { unmount } = render(<PolicySection state={on} dispatch={vi.fn()} errors={{}} />);
-    expect(headlineToggle().getAttribute("aria-pressed")).toBe("true");
+    const { unmount } = renderOpen(<PolicySection state={on} dispatch={vi.fn()} errors={{}} />);
+    expect(headlineToggle().getAttribute("aria-checked")).toBe("true");
     unmount();
 
-    render(<PolicySection state={state({ pool: pool(["approved"]) })} dispatch={vi.fn()} errors={{}} />);
-    expect(headlineToggle().getAttribute("aria-pressed")).toBe("false");
+    renderOpen(<PolicySection state={state({ pool: pool(["approved"]) })} dispatch={vi.fn()} errors={{}} />);
+    expect(headlineToggle().getAttribute("aria-checked")).toBe("false");
   });
 });

@@ -9,3 +9,7 @@ export { Input, type InputProps } from "./input";
 export { RatioFrame, type RatioFrameProps, type RatioOption } from "./ratio-frame";
 export { Slider, type SliderProps } from "./slider";
 export { Stepper, type StepperProps } from "./stepper";
+export { Disclosure } from "./disclosure";
+export { PreviewCard, type PreviewCardProps } from "./preview-card";
+export { SwatchChip, hueShiftHex, type SwatchChipProps } from "./swatch-chip";
+export { SwitchRow, type SwitchRowProps } from "./switch-row";

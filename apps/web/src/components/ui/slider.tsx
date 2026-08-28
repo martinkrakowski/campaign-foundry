@@ -16,11 +16,6 @@ export interface SliderProps {
    * bound better than the bare numbers do (the count slider's "12 ads · up to 24…").
    */
   readout?: ReactNode;
-  /**
-   * Word ticks under the track, spread evenly (a little · some · very). Decorative:
-   * aria-hidden, because the numbers on the track remain the truth.
-   */
-  ticks?: readonly string[];
 }
 
 /**
@@ -38,7 +33,6 @@ export function Slider({
   invalid = false,
   suffix,
   readout,
-  ticks,
   "aria-label": ariaLabel,
 }: SliderProps): ReactNode {
   const safeMax = Math.max(min, max);
@@ -77,15 +71,6 @@ export function Slider({
           </span>
         )}
       </div>
-      {ticks ? (
-        <div className="flex justify-between px-1" aria-hidden="true">
-          {ticks.map((tick) => (
-            <span key={tick} className="text-[10px] text-text-muted">
-              {tick}
-            </span>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }

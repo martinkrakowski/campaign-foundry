@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, vi, afterEach } from "vitest";
 import type { CampaignBrief, CopyPool } from "@campaignfoundry/CampaignOrchestration";
+import { axisProductSize } from "../validate";
 import {
   LAYOUT_OPTIONS,
   RATIO_OPTIONS,
@@ -1109,5 +1110,79 @@ describe("whole-corpus round-trip", () => {
     const originalSerialised = dumpBrief(parsed);
     const roundTrippedSerialised = dumpBrief(roundTrippedBrief);
     expect(roundTrippedSerialised).toBe(originalSerialised);
+  });
+});
+
+describe("the count clamp and its one-time notice", () => {
+  const variation = (): EditorState => ({ ...initialEditorState(), mode: "variation", briefId: "camp" });
+
+  test("narrowing an axis below the count lowers the count and says so, once", () => {
+    const start = variation();
+    const ceiling = axisProductSize(start);
+    const atCeiling = editorReducer(start, { type: "setVariation", field: "count", value: String(ceiling) });
+    expect(atCeiling.countNotice).toBeNull();
+
+    // half the layouts go, so half the combinations do: the count cannot stand
+    const narrowed = editorReducer(atCeiling, { type: "toggleLayout", value: LAYOUT_OPTIONS[0] });
+    const lowered = axisProductSize(narrowed);
+    expect(lowered).toBeLessThan(ceiling);
+    expect(narrowed.variation.count).toBe(String(lowered));
+    expect(narrowed.countNotice).toBe(lowered);
+  });
+
+  test("a count that still fits is left alone, and clears a standing notice", () => {
+    const start = variation();
+    const narrowed = editorReducer(
+      editorReducer(start, { type: "setVariation", field: "count", value: String(axisProductSize(start)) }),
+      { type: "toggleLayout", value: LAYOUT_OPTIONS[0] },
+    );
+    expect(narrowed.countNotice).not.toBeNull();
+
+    // widening it back leaves the (now small) count alone and takes the notice down
+    const widened = editorReducer(narrowed, { type: "toggleLayout", value: LAYOUT_OPTIONS[0] });
+    expect(widened.countNotice).toBeNull();
+    expect(widened.variation.count).toBe(narrowed.variation.count);
+  });
+
+  test("setting the count by hand answers the notice", () => {
+    const noticed = editorReducer(
+      editorReducer(variation(), { type: "setVariation", field: "count", value: String(axisProductSize(variation())) }),
+      { type: "toggleLayout", value: LAYOUT_OPTIONS[0] },
+    );
+    expect(noticed.countNotice).not.toBeNull();
+
+    const answered = editorReducer(noticed, { type: "setVariation", field: "count", value: "3" });
+    expect(answered.countNotice).toBeNull();
+    expect(answered.variation.count).toBe("3");
+  });
+
+  test("another variation field leaves the notice standing — it is about the count", () => {
+    const noticed = editorReducer(
+      editorReducer(variation(), { type: "setVariation", field: "count", value: String(axisProductSize(variation())) }),
+      { type: "toggleLayout", value: LAYOUT_OPTIONS[0] },
+    );
+    const seeded = editorReducer(noticed, { type: "setVariation", field: "seed", value: "42" });
+    expect(seeded.countNotice).toBe(noticed.countNotice);
+    expect(seeded.variation.seed).toBe("42");
+  });
+});
+
+describe("the axis min-one guard", () => {
+  const variation = (): EditorState => ({ ...initialEditorState(), mode: "variation", briefId: "camp" });
+
+  test("the last tone stays selected, exactly as the last layout does", () => {
+    const oneTone = editorReducer(variation(), { type: "toggleTone", value: TONE_OPTIONS[0] });
+    expect(oneTone.variation.tone).toEqual([TONE_OPTIONS[1]]);
+
+    const refused = editorReducer(oneTone, { type: "toggleTone", value: TONE_OPTIONS[1] });
+    expect(refused).toBe(oneTone);
+  });
+
+  test("a count that is not a number at all counts as zero, so nothing is clamped", () => {
+    const blank = { ...variation(), variation: { ...variation().variation, count: "" } };
+    const narrowed = editorReducer(blank, { type: "toggleLayout", value: LAYOUT_OPTIONS[0] });
+    // 0 is never above the ceiling, so the count is left as the user typed it
+    expect(narrowed.variation.count).toBe("");
+    expect(narrowed.countNotice).toBeNull();
   });
 });

@@ -3,15 +3,15 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRun } from "@/__tests__/helpers";
 import BriefPage from "../page";
-import { useEditorPanels } from "@/lib/editor-panels-context";
 
-/** Places the sections the page publishes to the left bar (the variation policy). */
-const BarPanels = () => useEditorPanels().panels ?? null;
-/** The page plus the bar panels it publishes, as a user would see them together. */
+/**
+ * The page as a user meets it. `renderWithRun` supplies the outlet that stands in for
+ * the sidebar, so the panels the page publishes are placed exactly once — placing them
+ * here as well would make every published control exist twice.
+ */
 const Editor = () => (
   <>
     <BriefPage />
-    <BarPanels />
   </>
 );
 

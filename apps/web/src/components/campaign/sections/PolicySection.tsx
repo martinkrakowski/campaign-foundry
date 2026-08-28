@@ -2,7 +2,18 @@
 
 import type { Dispatch, ReactNode } from "react";
 import { RATIO_DIMENSIONS, RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
-import { AxisCard, Button, CreativeGlyph, Input, Slider, Stepper } from "@/components/ui";
+import {
+  AxisCard,
+  Button,
+  CreativeGlyph,
+  Disclosure,
+  Input,
+  PreviewCard,
+  Slider,
+  Stepper,
+  SwatchChip,
+  SwitchRow,
+} from "@/components/ui";
 import { cn } from "@/lib/cn";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import { RATIO_OPTIONS } from "@/components/campaign/editor-state";
@@ -25,45 +36,6 @@ import {
 } from "@/components/campaign/editor-state";
 import { EstimatePanel } from "@/components/campaign/EstimatePanel";
 
-function AxisToggles({
-  legend,
-  options,
-  selected,
-  onToggle,
-  error,
-}: {
-  legend: string;
-  options: readonly string[];
-  selected: readonly string[];
-  onToggle: (value: string) => void;
-  error?: string;
-}) {
-  return (
-    <fieldset className="space-y-2">
-      <legend className="text-[11px] text-text-muted">{legend}</legend>
-      <div className="flex flex-wrap gap-2">
-        {options.map((option) => {
-          const on = selected.includes(option);
-          return (
-            <button
-              key={option}
-              type="button"
-              aria-pressed={on}
-              onClick={() => onToggle(option)}
-              className={cn(
-                "rounded-md border px-3 py-1.5 font-mono text-[12px] transition-colors",
-                on ? "border-brand-primary bg-surface-2 text-white" : "border-border text-text-muted",
-              )}
-            >
-              {option}
-            </button>
-          );
-        })}
-      </div>
-      {error ? <span className="block text-[11px] text-error">{error}</span> : null}
-    </fieldset>
-  );
-}
 
 /**
  * The card variant of an axis: each option previews what the compositor will
@@ -187,6 +159,55 @@ function RatioAxis({
   );
 }
 
+/**
+ * What each background source paints, at chip size. Pictures rather than the bare
+ * enum: "procedural" means nothing until you see the pattern it draws (D6).
+ */
+const BACKGROUND_PREVIEW: Record<(typeof BACKGROUND_OPTIONS)[number], { readonly meta: string; readonly paint: ReactNode }> = {
+  procedural: {
+    meta: "A pattern we draw",
+    paint: (
+      <span className="block size-10 overflow-hidden rounded-md border border-border">
+        <svg viewBox="0 0 40 40" focusable="false" aria-hidden="true" className="size-full">
+          <rect width="40" height="40" fill="var(--color-surface-2)" />
+          {[0, 10, 20, 30].map((x) =>
+            [0, 10, 20, 30].map((y) => (
+              <circle key={`${x}-${y}`} cx={x + 5} cy={y + 5} r="2.5" fill="var(--color-brand-primary)" opacity="0.55" />
+            )),
+          )}
+        </svg>
+      </span>
+    ),
+  },
+  "asset-pool": {
+    meta: "Your own images",
+    paint: (
+      <span className="block size-10 overflow-hidden rounded-md border border-border">
+        <svg viewBox="0 0 40 40" focusable="false" aria-hidden="true" className="size-full">
+          <rect width="40" height="40" fill="var(--color-surface-2)" />
+          <path d="M4 30l9-11 7 8 5-5 11 12z" fill="var(--color-brand-primary)" opacity="0.6" />
+          <circle cx="28" cy="12" r="4" fill="var(--color-brand-primary)" opacity="0.8" />
+        </svg>
+      </span>
+    ),
+  },
+  genai: {
+    meta: "Made by AI",
+    paint: (
+      <span className="block size-10 overflow-hidden rounded-md border border-border">
+        <svg viewBox="0 0 40 40" focusable="false" aria-hidden="true" className="size-full">
+          <rect width="40" height="40" fill="var(--color-surface-2)" />
+          <path
+            d="M20 8l2.6 7.4L30 18l-7.4 2.6L20 28l-2.6-7.4L10 18l7.4-2.6z"
+            fill="var(--color-brand-primary)"
+            opacity="0.85"
+          />
+        </svg>
+      </span>
+    ),
+  },
+};
+
 function HeadlineAxisToggle({ state, dispatch }: { state: EditorState; dispatch: Dispatch<EditorAction> }) {
   const poolLoaded = state.pool !== null;
   const approvedCount = approvedHeadlines(state.pool);
@@ -198,30 +219,18 @@ function HeadlineAxisToggle({ state, dispatch }: { state: EditorState; dispatch:
   const blocked = poolLoaded && !hasApproved;
   const disabled = blocked && !on;
   return (
-    <fieldset className="space-y-2">
-      <legend className="text-[11px] text-text-muted">Headline</legend>
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          aria-pressed={on}
-          disabled={disabled}
-          onClick={() => dispatch({ type: "toggleHeadline" })}
-          className={cn(
-            "rounded-md border px-3 py-1.5 font-mono text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-            on ? "border-brand-primary bg-surface-2 text-white" : "border-border text-text-muted",
-          )}
-        >
-          {HEADLINE_POOL_REF}
-        </button>
-        <span className="text-[11px] text-text-muted">
-          {!poolLoaded
-            ? "Headline pool not loaded. Open the headline drawer to view available headlines."
-            : !hasApproved
-              ? HEADLINE_POOL_EMPTY
-              : `${approvedCount} approved headline${approvedCount === 1 ? "" : "s"}`}
-        </span>
-      </div>
-    </fieldset>
+    <SwitchRow
+      label={HEADLINE_POOL_REF}
+      checked={on}
+      disabled={disabled}
+      onToggle={() => dispatch({ type: "toggleHeadline" })}
+    >
+      {!poolLoaded
+        ? "Headline pool not loaded. Open the headline drawer to view available headlines."
+        : !hasApproved
+          ? HEADLINE_POOL_EMPTY
+          : `${approvedCount} approved headline${approvedCount === 1 ? "" : "s"}`}
+    </SwitchRow>
   );
 }
 
@@ -268,6 +277,9 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
               <Input
                 type="number"
                 placeholder="Auto"
+                // the Field label wraps both this input and the Pick button, so it names
+                // neither on its own — the input carries its own name.
+                aria-label="Seed"
                 value={state.variation.seed}
                 invalid={Boolean(errors.seed)}
                 onChange={(e) => dispatch({ type: "setVariation", field: "seed", value: e.target.value })}
@@ -289,24 +301,6 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
             </div>
           </Field>
         </div>
-        <div className={compact ? "space-y-4" : "grid grid-cols-1 gap-4 sm:grid-cols-2"}>
-          <Field
-            label="Coverage per product"
-            error={errors.perProduct}
-            hint="Fewest creatives each product must get"
-          >
-            <Stepper
-              aria-label="Coverage per product"
-              min={0}
-              max={Math.max(1, Number.parseInt(state.variation.count, 10) || 1)}
-              value={state.variation.perProduct}
-              invalid={Boolean(errors.perProduct)}
-              allowUnset
-              unsetLabel="No floor"
-              onChange={(value) => dispatch({ type: "setVariation", field: "perProduct", value })}
-            />
-          </Field>
-        </div>
         <RatioAxis state={state} dispatch={dispatch} errors={errors} compact={compact} />
         <AxisCards
           legend="Layout"
@@ -326,39 +320,65 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
           compact={compact}
           render={(option) => <CreativeGlyph tone={option} />}
         />
-        <AxisToggles
-          legend="Background Source"
-          options={BACKGROUND_OPTIONS}
-          selected={state.variation.background}
-          onToggle={(value) => dispatch({ type: "toggleBackground", value })}
-          error={errors.background}
-        />
+        {/* D6: five things up front, the rest behind one door that remembers it was
+            opened. Nothing here is required to plan a campaign. */}
+        <Disclosure id="policy-advanced" title="Advanced">
+        <div className={compact ? "space-y-4" : "grid grid-cols-1 gap-4 sm:grid-cols-2"}>
+          <Field
+            label="Coverage per product"
+            error={errors.perProduct}
+            hint="Fewest creatives each product must get"
+          >
+            <Stepper
+              aria-label="Coverage per product"
+              min={0}
+              max={Math.max(1, Number.parseInt(state.variation.count, 10) || 1)}
+              value={state.variation.perProduct}
+              invalid={Boolean(errors.perProduct)}
+              allowUnset
+              unsetLabel="No floor"
+              onChange={(value) => dispatch({ type: "setVariation", field: "perProduct", value })}
+            />
+          </Field>
+        </div>
+        <fieldset className="space-y-2">
+          <legend className="text-[11px] text-text-muted">Background Source</legend>
+          <div className="space-y-2">
+            {BACKGROUND_OPTIONS.map((option) => (
+              <PreviewCard
+                key={option}
+                value={option}
+                selected={state.variation.background.includes(option)}
+                meta={BACKGROUND_PREVIEW[option].meta}
+                onToggle={(value: string) =>
+                  dispatch({ type: "toggleBackground", value: value as (typeof BACKGROUND_OPTIONS)[number] })
+                }
+              >
+                {BACKGROUND_PREVIEW[option].paint}
+              </PreviewCard>
+            ))}
+          </div>
+          {errors.background ? <span className="block text-[11px] text-error">{errors.background}</span> : null}
+        </fieldset>
         <fieldset className="space-y-2">
           <legend className="text-[11px] text-text-muted">Palette Shift</legend>
           <div className="flex flex-wrap gap-2">
-            {PALETTE_SHIFT_OPTIONS.map((option) => {
-              const on = state.variation.paletteShift.includes(option);
-              return (
-                <button
-                  key={option}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() => dispatch({ type: "togglePalette", value: option })}
-                  className={cn(
-                    "rounded-md border px-3 py-1.5 font-mono text-[12px] transition-colors",
-                    on ? "border-brand-primary bg-surface-2 text-white" : "border-border text-text-muted",
-                  )}
-                >
-                  {option}
-                </button>
-              );
-            })}
+            {PALETTE_SHIFT_OPTIONS.map((option) => (
+              <SwatchChip
+                key={option}
+                value={option}
+                selected={state.variation.paletteShift.includes(option)}
+                baseColor={state.products[0]?.primaryColor ?? "#1473E6"}
+                onToggle={(value: number) => dispatch({ type: "togglePalette", value })}
+              />
+            ))}
           </div>
           {errors.paletteShift ? (
             <span className="block text-[11px] text-error">{errors.paletteShift}</span>
           ) : null}
         </fieldset>
-        <HeadlineAxisToggle state={state} dispatch={dispatch} />
+          <HeadlineAxisToggle state={state} dispatch={dispatch} />
+        </Disclosure>
         <EstimatePanel state={state} />
       </div>
     </SectionShell>

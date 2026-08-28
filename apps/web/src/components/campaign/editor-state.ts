@@ -1,11 +1,7 @@
-import {
-  DEFAULT_BACKGROUND_SOURCES,
-  type CampaignBrief,
-  type CopyPool,
-  type Product,
-  type Treatment,
-  type VariationPolicy,
-} from "@campaignfoundry/CampaignOrchestration";
+import type { CampaignBrief, CopyPool, Product, Treatment, VariationPolicy } from "@campaignfoundry/CampaignOrchestration";
+// The leaf, never the barrel: the barrel re-exports the infrastructure adapters, which
+// pull node:fs/path/crypto into the browser bundle.
+import { DEFAULT_BACKGROUND_SOURCES } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
 import { axisProductSize } from "./validate";

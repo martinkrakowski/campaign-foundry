@@ -1,5 +1,6 @@
 import { describe, test, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import * as messages from "../messages";
 import { EstimatePanel } from "../EstimatePanel";
 import { initialEditorState, editorReducer, PLAN_DEBOUNCE_MS, type EditorState } from "../editor-state";
 import { API } from "@/lib/run-context";
@@ -17,7 +18,10 @@ const OK_PLAN = {
   policyHash: "abc",
   seed: 7,
   estimate: { creatives: 12, axisProductSize: 4, feasible: true, genaiCalls: 3 },
-  variants: [],
+  variants: [
+    ...Array.from({ length: 6 }, () => ({ aspectRatio: "1:1", productId: "alpha" })),
+    ...Array.from({ length: 6 }, () => ({ aspectRatio: "9:16", productId: "alpha" })),
+  ],
 };
 
 describe("EstimatePanel", () => {
@@ -33,7 +37,7 @@ describe("EstimatePanel", () => {
   test("asks for nothing until the draft is plannable", () => {
     const before = vi.mocked(globalThis.fetch).mock.calls.length;
     render(<EstimatePanel state={initialEditorState()} />);
-    expect(screen.getByText("Fill required fields to estimate.")).toBeTruthy();
+    expect(screen.getByText(messages.estimateNotReady)).toBeTruthy();
     expect(vi.mocked(globalThis.fetch).mock.calls.length).toBe(before);
   });
 
@@ -41,11 +45,16 @@ describe("EstimatePanel", () => {
     vi.mocked(globalThis.fetch).mockResolvedValue(json(OK_PLAN));
     render(<EstimatePanel state={planReady()} />);
 
-    expect(screen.getByText("Estimating…")).toBeTruthy();
-    expect(await screen.findByText("12")).toBeTruthy();
-    expect(screen.getByText("4")).toBeTruthy();
-    expect(screen.getByText("yes")).toBeTruthy();
-    expect(screen.getByText("3")).toBeTruthy();
+    expect(screen.getByText(messages.estimateWorking)).toBeTruthy();
+    // D2/D6: a sentence, not a field dump — the total, how it splits across the
+    // ratios by their display names, the products it covers, and the AI cost.
+    expect(await screen.findByText(/You will get 12 ads/)).toBeTruthy();
+    const sentence = screen.getByText(/You will get 12 ads/).textContent ?? "";
+    expect(sentence).toContain("6 square, 6 tall");
+    expect(sentence).toMatch(/for \d+ products?\./);
+    expect(sentence).toContain("3 AI image calls.");
+    // and none of the planner's own vocabulary leaks out
+    expect(sentence).not.toMatch(/axisProductSize|genaiCalls|feasible|9:16/);
   });
 
   test("an infeasible plan shows the reason the API gave", async () => {
@@ -59,13 +68,15 @@ describe("EstimatePanel", () => {
       json({ ...OK_PLAN, estimate: { ...OK_PLAN.estimate, feasible: false } }),
     );
     render(<EstimatePanel state={planReady()} />);
-    expect(await screen.findByText("no")).toBeTruthy();
+    // feasibility is not a word the sentence uses: an infeasible plan comes back as
+    // kind "infeasible" and says why. A feasible=false "ok" plan still reads normally.
+    expect(await screen.findByText(/You will get/)).toBeTruthy();
   });
 
   test("a 5xx degrades to 'estimate unavailable' rather than hanging", async () => {
     vi.mocked(globalThis.fetch).mockResolvedValue(json({ error: "boom" }, 503));
     render(<EstimatePanel state={planReady()} />);
-    expect(await screen.findByText("estimate unavailable")).toBeTruthy();
+    expect(await screen.findByText(messages.estimateUnavailable)).toBeTruthy();
   });
 
   test("a rejection degrades too — the panel must never sit on 'Estimating…' forever", async () => {
@@ -77,7 +88,7 @@ describe("EstimatePanel", () => {
       text: () => Promise.reject(new Error("stream died")),
     } as unknown as Response);
     render(<EstimatePanel state={planReady()} />);
-    expect(await screen.findByText("estimate unavailable")).toBeTruthy();
+    expect(await screen.findByText(messages.estimateUnavailable)).toBeTruthy();
   });
 
   test("a non-Error rejection is handled too", async () => {
@@ -87,7 +98,7 @@ describe("EstimatePanel", () => {
       text: () => Promise.reject("not an error object"),
     } as unknown as Response);
     render(<EstimatePanel state={planReady()} />);
-    expect(await screen.findByText("estimate unavailable")).toBeTruthy();
+    expect(await screen.findByText(messages.estimateUnavailable)).toBeTruthy();
   });
 
   test("an abort is the effect cleaning up, not a failure to report", async () => {
@@ -100,8 +111,8 @@ describe("EstimatePanel", () => {
     render(<EstimatePanel state={planReady()} />);
     await tick(PLAN_DEBOUNCE_MS + 120);
     // stays on the in-flight message rather than claiming the estimate failed
-    expect(screen.getByText("Estimating…")).toBeTruthy();
-    expect(screen.queryByText("estimate unavailable")).toBeNull();
+    expect(screen.getByText(messages.estimateWorking)).toBeTruthy();
+    expect(screen.queryByText(messages.estimateUnavailable)).toBeNull();
   });
 
   test("a body-stream rejection after unmount is dropped", async () => {
@@ -116,7 +127,7 @@ describe("EstimatePanel", () => {
     await tick(PLAN_DEBOUNCE_MS + 40);
     unmount();
     await tick(120);
-    expect(screen.queryByText("estimate unavailable")).toBeNull();
+    expect(screen.queryByText(messages.estimateUnavailable)).toBeNull();
   });
 
   test("a plan that resolves after unmount is dropped", async () => {
@@ -138,7 +149,7 @@ describe("EstimatePanel", () => {
     await tick(PLAN_DEBOUNCE_MS + 40);
     unmount();
     await tick(120);
-    expect(screen.queryByText("estimate unavailable")).toBeNull();
+    expect(screen.queryByText(messages.estimateUnavailable)).toBeNull();
   });
 
   test("the request is re-issued when the motion axes change", async () => {
@@ -157,10 +168,10 @@ describe("EstimatePanel", () => {
     vi.mocked(globalThis.fetch).mockResolvedValue(json(OK_PLAN));
     const ready = planReady();
     const { rerender } = render(<EstimatePanel state={ready} />);
-    expect(await screen.findByText("12")).toBeTruthy();
+    expect(await screen.findByText(/You will get 12 ads/)).toBeTruthy();
 
     rerender(<EstimatePanel state={{ ...ready, mode: "brief" }} />);
-    expect(screen.getByText("Fill required fields to estimate.")).toBeTruthy();
+    expect(screen.getByText(messages.estimateNotReady)).toBeTruthy();
   });
 
   test("the request is re-issued when the requested formats change", async () => {
@@ -173,5 +184,57 @@ describe("EstimatePanel", () => {
     rerender(<EstimatePanel state={{ ...ready, formats: ["static", "motion"] }} />);
     await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.length).toBeGreaterThan(before));
     expect(String(vi.mocked(globalThis.fetch).mock.calls[0][0])).toContain(`${API}/campaigns/plan`);
+  });
+});
+
+describe("EstimatePanel — the ratio split", () => {
+  test("a variant without a ratio joins no bucket, and the total still comes from the estimate", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      json({
+        ...OK_PLAN,
+        estimate: { ...OK_PLAN.estimate, creatives: 3, genaiCalls: 0 },
+        variants: [{ aspectRatio: "1:1" }, { productId: "alpha" }, { aspectRatio: "1:1" }],
+      }),
+    );
+    render(<EstimatePanel state={planReady()} />);
+    const sentence = await screen.findByText(/You will get 3 ads/);
+    // two of the three carry a ratio, so the split names one bucket and is left off;
+    // the count the user reads is the planner's, not the buckets' sum
+    expect(sentence.textContent).toBe("You will get 3 ads for 2 products. No AI image calls.");
+  });
+});
+
+describe("estimateSentence", () => {
+  const parts = {
+    creatives: 12,
+    ratios: [
+      { label: "Square", count: 6 },
+      { label: "Tall", count: 6 },
+    ],
+    products: 2,
+    genaiCalls: 0,
+  };
+
+  test("reads as the plan's own sentence", () => {
+    expect(messages.estimateSentence(parts)).toBe(
+      "You will get 12 ads — 6 square, 6 tall — for 2 products. No AI image calls.",
+    );
+  });
+
+  test("a single ratio needs no split, and one of anything is singular", () => {
+    expect(
+      messages.estimateSentence({
+        creatives: 1,
+        ratios: [{ label: "Square", count: 1 }],
+        products: 1,
+        genaiCalls: 1,
+      }),
+    ).toBe("You will get 1 ad for 1 product. 1 AI image call.");
+  });
+
+  test("no ratios at all still says what you get", () => {
+    expect(messages.estimateSentence({ creatives: 4, ratios: [], products: 2, genaiCalls: 9 })).toBe(
+      "You will get 4 ads for 2 products. 9 AI image calls.",
+    );
   });
 });
