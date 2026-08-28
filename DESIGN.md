@@ -212,6 +212,14 @@ Skeletal by design — patterns to extend, not a library.
   that read as a sentence ("Vary the headline too · 2 approved headlines"). A real
   `role="switch"`: `aria-checked` carries the state, the knob is decoration. Gating blocks
   entering a state, never leaving one — off must stay clickable.
+- **ChipGroup** (L3.2) — a labelled set of single-select chips with an *Other…* escape that
+  reveals a free-text input. Same a11y contract as `AxisCard` — the accessible name of every option
+  chip is exactly its raw value (`aria-label={option}`), keeping queries and assistive tech stable.
+  Used for fixed vocabularies that allow custom values, such as Target Region.
+- **SwatchPicker** (L3.4) — an 8-swatch colour selector paired with a mono hex readout. Swatches
+  carry `aria-label` with their hex value; the active swatch reflects both click selection and
+  typed hex matches. It offers the brand palette at a single click while preserving arbitrary
+  hex inputs for custom themes.
 
 ### Shell (`src/components/shell`)
 
@@ -231,6 +239,10 @@ Skeletal by design — patterns to extend, not a library.
 
 - **Sections** (`sections/*`) — each is a `SectionShell` (numbered `text-lg` heading with an
   error-count badge) of `Field`s (11px label, control, 11px error line beneath).
+- **LogoField** (L3.4) — brand asset upload rendered as a dashed drop tile that transforms into an
+  image thumbnail once populated. The path is relegated to 10px monospace meta, elevating visual
+  identity over filesystem mechanics. Houses the *Upload* action and an optional *Choose from bin*
+  affordance (when wired), with explicit uploading states.
 - **StatusChip** — four states, colour *and* icon: 🔴 *Draft not applied* · 🟠 *Applied,
   never saved* · 🟡 *Applied, unsaved edits* · 🟢 *Saved & applied*.
 - **ErrorStrip** — one `rounded-full` chip per section with errors, red border/tint, count

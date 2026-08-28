@@ -13,3 +13,5 @@ export { Disclosure } from "./disclosure";
 export { PreviewCard, type PreviewCardProps } from "./preview-card";
 export { SwatchChip, hueShiftHex, type SwatchChipProps } from "./swatch-chip";
 export { SwitchRow, type SwitchRowProps } from "./switch-row";
+export { ChipGroup, type ChipGroupProps } from "./chip-group";
+export { SwatchPicker, SWATCH_PALETTE, type SwatchPickerProps } from "./swatch-picker";

@@ -96,7 +96,11 @@ const fillValidDraft = async (user: ReturnType<typeof userEvent.setup>, id = "fr
   await user.type(screen.getByLabelText("Target Region"), "DE");
   await user.type(screen.getByLabelText("Target Audience"), "a");
   await user.type(screen.getByLabelText("Campaign Message"), "Hi");
-  const names = screen.getAllByLabelText("Name");
+  let names = screen.getAllByLabelText("Name");
+  if (names.length < 2) {
+    await user.click(screen.getByRole("button", { name: "Add product" }));
+    names = screen.getAllByLabelText("Name");
+  }
   await user.type(names[0], "A");
   await user.type(names[1], "B");
   const logos = screen

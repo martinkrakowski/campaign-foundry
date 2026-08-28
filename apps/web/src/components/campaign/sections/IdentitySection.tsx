@@ -1,12 +1,14 @@
 "use client";
 
-import { useId, type Dispatch } from "react";
-import { Input } from "@/components/ui";
+import { useId, useState, useRef, useEffect, type Dispatch } from "react";
+import { Input, ChipGroup } from "@/components/ui";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import type { FieldErrors } from "@/components/campaign/validate";
 import { keyForLabel } from "@/components/campaign/error-sections";
 import { ErrorPill } from "@/components/ui/error-pill";
 import { useSectionMode } from "@/components/campaign/SectionModeContext";
+
+export const REGION_OPTIONS = ["GLOBAL", "EU", "DE", "UK", "US", "APAC"] as const;
 
 export interface SectionProps {
   state: EditorState;
@@ -81,20 +83,23 @@ export function Field({
   hint,
   children,
   fieldKey,
+  as = "label",
 }: {
   label: string;
   error?: string;
   hint?: string;
   children: React.ReactNode;
   fieldKey?: string;
+  as?: "label" | "div";
 }) {
   const derivedKey = fieldKey ?? keyForLabel(label);
+  const Wrapper = as;
   return (
     <div data-field-key={derivedKey}>
-      <label className="block">
+      <Wrapper className="block">
         <span className="mb-1.5 block text-[11px] text-text-muted">{label}</span>
         {children}
-      </label>
+      </Wrapper>
       {hint ? <span className="mt-1 block text-[11px] text-text-muted">{hint}</span> : null}
       {error ? <span className="mt-1 block text-[11px] text-error">{error}</span> : null}
     </div>
@@ -103,28 +108,76 @@ export function Field({
 
 export function IdentitySection({ state, dispatch, errors }: SectionProps) {
   const readOnly = state.source.kind === "file";
+  const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    },
+    [],
+  );
+
+  const copyBriefId = async () => {
+    if (!state.briefId || !navigator.clipboard) return;
+    try {
+      await navigator.clipboard.writeText(state.briefId);
+      setCopied(true);
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // clipboard unavailable — skip silently
+    }
+  };
+
+  const campaignNameValue =
+    state.source.kind === "file"
+      ? state.briefId
+      : state.campaignName || state.briefId;
+
   return (
     <SectionShell id="identity" title="1 · Identity" errorCount={countErrors(errors)}>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="Brief ID" error={errors.briefId}>
+        <Field fieldKey="briefId" label="Campaign Name" error={errors.briefId}>
           <Input
-            value={state.briefId}
+            aria-label="Brief ID"
+            value={campaignNameValue}
             readOnly={readOnly}
-            onChange={(e) => dispatch({ type: "patch", patch: { briefId: e.target.value } })}
+            placeholder="e.g. Summer Launch"
+            onChange={(e) => dispatch({ type: "patch", patch: { campaignName: e.target.value } })}
             invalid={Boolean(errors.briefId)}
           />
+          <div className="mt-1 flex items-center justify-between font-mono text-[11px] text-text-muted">
+            <span className="truncate max-w-[200px] sm:max-w-xs" title={state.briefId || undefined}>
+              {state.briefId ? state.briefId : "This is the brief id — made from the name"}
+            </span>
+            <button
+              type="button"
+              onClick={copyBriefId}
+              disabled={!state.briefId}
+              className="font-mono text-[10px] uppercase tracking-wider text-text-muted transition-colors hover:text-white disabled:opacity-40"
+              aria-label="Copy brief ID"
+            >
+              {copied ? "Copied ✓" : "Copy"}
+            </button>
+          </div>
         </Field>
-        <Field label="Target Region" error={errors.targetRegion}>
-          <Input
+        <Field fieldKey="targetRegion" label="Target Region" error={errors.targetRegion} as="div">
+          <ChipGroup
+            label="Target Region"
+            options={REGION_OPTIONS}
             value={state.targetRegion}
-            onChange={(e) => dispatch({ type: "patch", patch: { targetRegion: e.target.value } })}
+            onChange={(value) => dispatch({ type: "patch", patch: { targetRegion: value } })}
+            allowOther
             invalid={Boolean(errors.targetRegion)}
           />
         </Field>
       </div>
-      <Field label="Target Audience" error={errors.targetAudience}>
+      <Field fieldKey="targetAudience" label="Target Audience" error={errors.targetAudience}>
         <Input
+          aria-label="Target Audience"
           value={state.targetAudience}
+          placeholder="e.g. urban outdoor enthusiasts, 25-40"
           onChange={(e) => dispatch({ type: "patch", patch: { targetAudience: e.target.value } })}
           invalid={Boolean(errors.targetAudience)}
         />

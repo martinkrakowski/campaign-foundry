@@ -141,11 +141,13 @@ describe("fileToBase64", () => {
 });
 
 describe("initialEditorState", () => {
-  test("defaults to brief mode with two blank products and every static platform", () => {
+  test("defaults to brief mode with one blank product and every static platform", () => {
     const state = initialEditorState();
     expect(state.mode).toBe("brief");
     expect(state.source.kind).toBe("new");
-    expect(state.products).toHaveLength(2);
+    expect(state.campaignName).toBe("");
+    expect(state.briefId).toBe("");
+    expect(state.products).toHaveLength(1);
     expect(state.platforms).toEqual([...STATIC_PLATFORMS]);
     expect(state.formats).toEqual(["static"]);
   });
@@ -158,6 +160,19 @@ describe("initialEditorState", () => {
 describe("editorReducer — identity and copy", () => {
   test("setMode switches mode", () => {
     expect(reduce(base(), { type: "setMode", mode: "variation" }).mode).toBe("variation");
+  });
+
+  test("patching campaignName on a new draft derives briefId via slugify", () => {
+    const next = reduce(base(), { type: "patch", patch: { campaignName: "Summer Launch 2026!" } });
+    expect(next.campaignName).toBe("Summer Launch 2026!");
+    expect(next.briefId).toBe("summer-launch-2026");
+  });
+
+  test("patching campaignName on a file-loaded draft does not re-derive briefId", () => {
+    const fileState = fromBrief(savedBrief({ id: "original-id" }), { file: "original-id.yaml" });
+    const next = reduce(fileState, { type: "patch", patch: { campaignName: "Renamed Campaign" } });
+    expect(next.campaignName).toBe("Renamed Campaign");
+    expect(next.briefId).toBe("original-id");
   });
 
   test("patch merges fields without touching the pool when briefId is unchanged", () => {
@@ -186,7 +201,7 @@ describe("editorReducer — identity and copy", () => {
 
 describe("editorReducer — products", () => {
   test("setProduct patches only the matching key", () => {
-    const state = base();
+    const state = { ...base(), products: [emptyProduct(1), emptyProduct(2)] };
     const [first, second] = state.products;
     const next = reduce(state, { type: "setProduct", key: first.key, patch: { primaryColor: "#000000" } });
     expect(next.products[0].primaryColor).toBe("#000000");
@@ -209,10 +224,22 @@ describe("editorReducer — products", () => {
 
   test("addProduct appends and removeProduct drops by key", () => {
     const added = reduce(base(), { type: "addProduct" });
-    expect(added.products).toHaveLength(3);
+    expect(added.products).toHaveLength(2);
     const removed = reduce(added, { type: "removeProduct", key: added.products[1].key });
-    expect(removed.products).toHaveLength(2);
+    expect(removed.products).toHaveLength(1);
     expect(removed.products.map((p) => p.key)).not.toContain(added.products[1].key);
+  });
+
+  test("addProduct picks the next unused swatch from SWATCH_PALETTE and wraps around", () => {
+    let state = base(); // key 1 has #1473E6 (index 0)
+    for (let i = 1; i < 8; i++) {
+      state = reduce(state, { type: "addProduct" });
+    }
+    expect(state.products).toHaveLength(8);
+    // All 8 swatches used; 9th product wraps around
+    const ninth = reduce(state, { type: "addProduct" });
+    expect(ninth.products).toHaveLength(9);
+    expect(ninth.products[8].primaryColor).toBe("#1473E6");
   });
 });
 
@@ -581,8 +608,8 @@ describe("fromBrief", () => {
     });
   });
 
-  test("a brief with no products falls back to two blank drafts", () => {
-    expect(fromBrief(savedBrief({ products: [] })).products).toHaveLength(2);
+  test("a brief with no products falls back to one blank draft", () => {
+    expect(fromBrief(savedBrief({ products: [] })).products).toHaveLength(1);
   });
 
   test("loaded products are marked as having a deliberate id", () => {
@@ -800,7 +827,7 @@ describe("draft storage", () => {
     localStorage.setItem(getDraftKey(state), JSON.stringify({ state: corrupt, timestamp: 1 }));
     const restored = loadDraftFromStorage(state) as EditorState;
     expect(restored.source.kind).toBe("new");
-    expect(restored.products).toHaveLength(2);
+    expect(restored.products).toHaveLength(1);
     expect(restored.treatments).toEqual([]);
     expect(restored.motion).toEqual([]);
     expect(restored.duration).toEqual([]);

@@ -23,8 +23,10 @@ describe("IdentitySection", () => {
   test("dispatches a patch for each field", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
-    render(<IdentitySection state={state()} dispatch={dispatch} errors={{}} />);
+    render(<IdentitySection state={state({ briefId: "", campaignName: "" })} dispatch={dispatch} errors={{}} />);
 
+    fireEvent.change(screen.getByLabelText("Brief ID"), { target: { value: "New Name" } });
+    expect(dispatch).toHaveBeenCalledWith({ type: "patch", patch: { campaignName: "New Name" } });
     await user.type(screen.getByLabelText("Target Region"), "D");
     expect(dispatch).toHaveBeenCalledWith({ type: "patch", patch: { targetRegion: "D" } });
     await user.type(screen.getByLabelText("Target Audience"), "a");
@@ -44,6 +46,85 @@ describe("IdentitySection", () => {
       />,
     );
     expect(screen.getByLabelText("Brief ID").hasAttribute("readonly")).toBe(true);
+  });
+
+  test("copy brief ID writes to clipboard and shows temporary feedback", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+      writable: true,
+    });
+
+    const { unmount } = render(<IdentitySection state={state({ briefId: "camp-summer" })} dispatch={vi.fn()} errors={{}} />);
+
+    const copyBtn = screen.getByRole("button", { name: "Copy brief ID" });
+    expect(copyBtn.textContent).toBe("Copy");
+
+    // Click once
+    fireEvent.click(copyBtn);
+    expect(writeText).toHaveBeenCalledWith("camp-summer");
+    await waitFor(() => expect(copyBtn.textContent).toBe("Copied ✓"));
+
+    // Click second time while timer active
+    fireEvent.click(copyBtn);
+
+    // Unmount while timer active to exercise cleanup
+    unmount();
+  });
+
+  test("copy brief ID resets feedback after timeout", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+      writable: true,
+    });
+
+    render(<IdentitySection state={state({ briefId: "camp-summer" })} dispatch={vi.fn()} errors={{}} />);
+    const copyBtn = screen.getByRole("button", { name: "Copy brief ID" });
+
+    fireEvent.click(copyBtn);
+    await waitFor(() => expect(copyBtn.textContent).toBe("Copied ✓"));
+
+    await new Promise((r) => setTimeout(r, 1600));
+    expect(copyBtn.textContent).toBe("Copy");
+  });
+
+  test("copy brief ID does nothing when clipboard is unavailable", () => {
+    Object.defineProperty(navigator, "clipboard", {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+
+    render(<IdentitySection state={state({ briefId: "camp-summer" })} dispatch={vi.fn()} errors={{}} />);
+    const copyBtn = screen.getByRole("button", { name: "Copy brief ID" });
+
+    fireEvent.click(copyBtn);
+    expect(copyBtn.textContent).toBe("Copy");
+  });
+
+  test("copy brief ID handles clipboard errors gracefully", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+      writable: true,
+    });
+
+    render(<IdentitySection state={state({ briefId: "camp-summer" })} dispatch={vi.fn()} errors={{}} />);
+    const copyBtn = screen.getByRole("button", { name: "Copy brief ID" });
+
+    fireEvent.click(copyBtn);
+    expect(writeText).toHaveBeenCalledWith("camp-summer");
+  });
+
+  test("empty brief id disables copy button and shows placeholder", () => {
+    render(<IdentitySection state={state({ briefId: "", campaignName: "" })} dispatch={vi.fn()} errors={{}} />);
+    const copyBtn = screen.getByRole("button", { name: "Copy brief ID" }) as HTMLButtonElement;
+    expect(copyBtn.disabled).toBe(true);
+    expect(screen.getByText("This is the brief id — made from the name")).toBeTruthy();
   });
 
   test("shows a per-field error and a count badge on the heading", () => {
@@ -343,6 +424,28 @@ describe("ProductsSection", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "removeProduct", key });
   });
 
+  test("clicking Edit reveals the product ID text input", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    const s = state({ products: [{ key: 1, id: "hydra", name: "Hydra", primaryColor: "#1473E6", logoPath: "", inputAsset: "", idTouched: false }] });
+    render(<ProductsSection state={s} dispatch={dispatch} errors={{}} />);
+
+    const editBtn = screen.getByRole("button", { name: "Edit product ID" });
+    expect(editBtn).toBeTruthy();
+    await user.click(editBtn);
+
+    const input = screen.getByDisplayValue("hydra");
+    expect(input).toBeTruthy();
+    fireEvent.change(input, { target: { value: "hydra-v2" } });
+    expect(dispatch).toHaveBeenCalledWith({ type: "setProduct", key: 1, patch: { id: "hydra-v2" } });
+  });
+
+  test("classic mode shows a hint when only one product exists", () => {
+    const s = state({ mode: "brief", products: [emptyProduct(1)] });
+    render(<ProductsSection state={s} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.getByText("Classic mode needs two different products — add a second one below.")).toBeTruthy();
+  });
+
   test("an upload stores the path the API returns", async () => {
     const dispatch = vi.fn();
     mockFetch(() => json({ path: "assets/inputs/camp/alpha-logo.png" }, 201));
@@ -425,9 +528,9 @@ describe("ProductsSection", () => {
     expect(ssrFileIds(html2)).toEqual(ssrFileIds(html1));
     expect(ssrFileIds(html1)).toHaveLength(first.products.length);
 
-    // The same tree keyed differently (41, 42) must render the same ids — if an
+    // The same tree keyed differently (41) must render the same ids — if an
     // id embedded its product key, moving the keys would move the ids.
-    const keyed: EditorState = { ...initialEditorState(), products: [emptyProduct(41), emptyProduct(42)] };
+    const keyed: EditorState = { ...initialEditorState(), products: [emptyProduct(41)] };
     const html3 = renderToString(<ProductsSection state={keyed} dispatch={vi.fn()} errors={{}} />);
     expect(ssrFileIds(html3)).toEqual(ssrFileIds(html1));
 
