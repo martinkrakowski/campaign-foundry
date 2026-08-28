@@ -67,11 +67,15 @@ describe("BriefPage E1 Features", () => {
     const user = userEvent.setup();
     renderWithRun(<Editor />);
     // Save as… is disabled while the draft has validation errors, so fill it in first.
-    await user.type(screen.getByLabelText("Brief ID"), "fresh");
+    await user.type(screen.getByLabelText("Campaign Name"), "fresh");
     await user.type(screen.getByLabelText("Target Region"), "DE");
     await user.type(screen.getByLabelText("Target Audience"), "a");
-    await user.type(screen.getByLabelText("Campaign Message"), "Hi");
-    const names = screen.getAllByLabelText("Name");
+    await user.type(screen.getByLabelText("Headline"), "Hi");
+    let names = screen.getAllByLabelText("Name");
+    if (names.length < 2) {
+      await user.click(screen.getByRole("button", { name: "Add product" }));
+      names = screen.getAllByLabelText("Name");
+    }
     await user.type(names[0], "A");
     await user.type(names[1], "B");
     const logos = screen

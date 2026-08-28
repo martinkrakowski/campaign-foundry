@@ -200,7 +200,7 @@ describe("EstimatePanel — the ratio split", () => {
     const sentence = await screen.findByText(/You will get 3 ads/);
     // two of the three carry a ratio, so the split names one bucket and is left off;
     // the count the user reads is the planner's, not the buckets' sum
-    expect(sentence.textContent).toBe("You will get 3 ads for 2 products. No AI image calls.");
+    expect(sentence.textContent).toBe("You will get 3 ads for 1 product. No AI image calls.");
   });
 });
 

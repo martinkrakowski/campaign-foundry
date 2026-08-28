@@ -40,12 +40,15 @@ export interface ProductDraft {
   idTouched: boolean;
 }
 
-export function emptyProduct(key: number): ProductDraft {
+import { SWATCH_PALETTE } from "../ui/swatch-picker";
+export { SWATCH_PALETTE };
+
+export function emptyProduct(key: number, primaryColor = "#1473E6"): ProductDraft {
   return {
     key,
     id: "",
     name: "",
-    primaryColor: "#1473E6",
+    primaryColor,
     logoPath: "",
     inputAsset: "",
     idTouched: false,
@@ -58,17 +61,24 @@ export function nextKeyAfter(products: ProductDraft[]): number {
 }
 
 /**
- * The one allocation path for a new product: append a draft keyed `nextKey` and
- * burn the counter. `editorReducer.addProduct` and `wizardReducer.addProduct`
- * both call this — they were verbatim copies, and a third copy is how the
- * module-level counter regressed in the first place.
+ * Returns the next unused swatch in SWATCH_PALETTE for a new product, or wraps around.
+ */
+export function nextUnusedSwatch(products: readonly ProductDraft[]): string {
+  const used = new Set(products.map((p) => p.primaryColor.toUpperCase()));
+  return SWATCH_PALETTE.find((c) => !used.has(c.toUpperCase())) ?? SWATCH_PALETTE[products.length % SWATCH_PALETTE.length];
+}
+
+/**
+ * The one allocation path for a new product: append a draft keyed `nextKey` with
+ * the next unused swatch and burn the counter.
  */
 export function allocateProduct(
   products: ProductDraft[],
   nextKey: number,
 ): { products: ProductDraft[]; nextProductKey: number } {
+  const nextColor = nextUnusedSwatch(products);
   return {
-    products: [...products, emptyProduct(nextKey)],
+    products: [...products, emptyProduct(nextKey, nextColor)],
     nextProductKey: nextKey + 1,
   };
 }
@@ -118,6 +128,7 @@ export type EditorSource =
 export interface EditorState {
   source: EditorSource;
   mode: CampaignMode;
+  campaignName: string;
   briefId: string;
   targetRegion: string;
   targetAudience: string;
@@ -165,7 +176,7 @@ export interface EditorState {
 
 export type EditorAction =
   | { type: "setMode"; mode: CampaignMode }
-  | { type: "patch"; patch: Partial<Pick<EditorState, "briefId" | "targetRegion" | "targetAudience" | "campaignMessage" | "localizedMessage">> }
+  | { type: "patch"; patch: Partial<Pick<EditorState, "campaignName" | "briefId" | "targetRegion" | "targetAudience" | "campaignMessage" | "localizedMessage">> }
   | { type: "setProduct"; key: number; patch: Partial<ProductDraft> }
   | { type: "addProduct" }
   | { type: "removeProduct"; key: number }
@@ -204,13 +215,14 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
   return {
     source: { kind: "new", tempId },
     mode,
+    campaignName: "",
     briefId: "",
     targetRegion: "",
     targetAudience: "",
     campaignMessage: "",
     localizedMessage: "",
-    products: [emptyProduct(1), emptyProduct(2)],
-    nextProductKey: 3,
+    products: [emptyProduct(1)],
+    nextProductKey: 2,
     treatments: [],
     variation: {
       count: "12",
@@ -326,8 +338,15 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       return { ...state, mode: action.mode };
     }
     case "patch": {
-      const next = { ...state, ...action.patch };
-      if (action.patch.briefId === undefined || action.patch.briefId === state.briefId) return next;
+      let patch = action.patch;
+      if (patch.campaignName !== undefined && state.source.kind === "new") {
+        patch = {
+          ...patch,
+          briefId: slugify(patch.campaignName),
+        };
+      }
+      const next = { ...state, ...patch };
+      if (patch.briefId === undefined || patch.briefId === state.briefId) return next;
       return {
         ...next,
         pool: null,
@@ -602,9 +621,9 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
     ? { kind: "file", file: entry.file, loadedId: brief.id, savedSnapshot: brief, revision: entry.revision }
     : { kind: "new", tempId };
   const products = brief.products.length > 0
-    ? brief.products.map((p, i) => ({ ...emptyProduct(i + 1), ...p, idTouched: true }))
-    : [emptyProduct(1), emptyProduct(2)];
-  const nextProductKey = brief.products.length > 0 ? brief.products.length + 1 : 3;
+    ? brief.products.map((p, i) => ({ ...emptyProduct(i + 1, p.primaryColor), ...p, idTouched: true }))
+    : [emptyProduct(1)];
+  const nextProductKey = brief.products.length > 0 ? brief.products.length + 1 : 2;
   const treatments = brief.treatments?.map((t) => ({ id: t.id, layout: t.layout, tone: t.tone })) ?? [];
   const formats = [...(brief.output?.formats ?? ["static"])];
   const platforms = [...(brief.output?.platforms ?? [...STATIC_PLATFORMS])];
@@ -618,6 +637,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
   return {
     source,
     mode: brief.mode ?? "brief",
+    campaignName: brief.id,
     briefId: brief.id,
     targetRegion: brief.targetRegion,
     targetAudience: brief.targetAudience,
@@ -658,6 +678,11 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
  * anything?" has to ask before prompting or auto-saving.
  */
 export function isPristine(state: EditorState): boolean {
+  // `campaignName` is not part of the brief — only its slug is, as `id`. So a name made
+  // entirely of characters the slug strips ("!!!") leaves the brief identical to a blank
+  // one, and comparing briefs alone would call that pristine: the draft would never be
+  // autosaved and leaving would not prompt, so the typed name would vanish without a word.
+  if (state.campaignName !== initialEditorState(state.mode).campaignName) return false;
   return JSON.stringify(toBrief(state)) === JSON.stringify(toBrief(initialEditorState(state.mode)));
 }
 
@@ -779,11 +804,14 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   // delete two products — the very collision D16 exists to prevent. A counter
   // burned past the keys still wins; product keys only need to be unique.
   const nextProductKey = Math.max(storedNextProductKey ?? 0, nextKeyAfter(products));
+  const campaignName = str(raw.campaignName, typeof raw.briefId === "string" ? raw.briefId : "");
   return {
     ...initial,
     ...raw,
     source,
     mode,
+    campaignName,
+    briefId: str(raw.briefId, initial.briefId),
     products,
     nextProductKey,
     treatments: list(raw.treatments, initial.treatments),

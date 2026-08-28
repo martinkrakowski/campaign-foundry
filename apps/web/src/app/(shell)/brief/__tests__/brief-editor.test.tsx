@@ -89,14 +89,18 @@ const routes = (handlers: {
 
 /** The editor adopts the shell's active brief only after the listing arrives. */
 const waitForEditorReady = async () =>
-  waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).not.toBe(""));
+  waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).not.toBe(""));
 
 const fillValidDraft = async (user: ReturnType<typeof userEvent.setup>, id = "fresh") => {
-  await user.type(screen.getByLabelText("Brief ID"), id);
+  await user.type(screen.getByLabelText("Campaign Name"), id);
   await user.type(screen.getByLabelText("Target Region"), "DE");
   await user.type(screen.getByLabelText("Target Audience"), "a");
-  await user.type(screen.getByLabelText("Campaign Message"), "Hi");
-  const names = screen.getAllByLabelText("Name");
+  await user.type(screen.getByLabelText("Headline"), "Hi");
+  let names = screen.getAllByLabelText("Name");
+  if (names.length < 2) {
+    await user.click(screen.getByRole("button", { name: "Add product" }));
+    names = screen.getAllByLabelText("Name");
+  }
   await user.type(names[0], "A");
   await user.type(names[1], "B");
   const logos = screen
@@ -141,7 +145,7 @@ describe("BriefPage — data flow", () => {
     await user.click(await screen.findByText("camp"));
 
     // the editor now holds the loaded brief
-    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
 
     await saveVia(user, "Save & apply");
     await waitFor(() => {
@@ -156,7 +160,7 @@ describe("BriefPage — data flow", () => {
     // A blank draft is a route now, so ask for it directly instead of clicking the
     // editor back to empty.
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
 
     await fillValidDraft(user);
 
@@ -190,7 +194,7 @@ describe("BriefPage — data flow", () => {
 
     await user.click(screen.getByText("New brief..."));
     await user.click(await screen.findByText("camp"));
-    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
 
     await saveVia(user, "Save & apply");
     expect(await screen.findByText(/conflict/)).toBeTruthy();
@@ -242,7 +246,7 @@ describe("BriefPage — data flow", () => {
 
     await user.click(screen.getByText("New brief..."));
     await user.click(await screen.findByText("camp"));
-    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
 
     // reopen and choose the create-new row
     await user.click(screen.getAllByText("camp")[0]);
@@ -259,7 +263,7 @@ describe("BriefPage — data flow", () => {
     // pristine, so the dirty guard let it through and `camp` landed in the form. The
     // route is what refuses it now.
     await waitFor(() => expect(calls.some((c) => c.url.includes("/campaigns/briefs"))).toBe(true));
-    expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("");
     expect((screen.getByLabelText("Target Region") as HTMLInputElement).value).toBe("");
   });
 
@@ -283,9 +287,9 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({});
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
     await fillValidDraft(user, "typed");
-    expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe("typed");
+    expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("typed");
 
     // there is nowhere to navigate to from here, so the row has to do the work itself
     // (the router mock is shared across this file, so count pushes rather than assert
@@ -293,7 +297,7 @@ describe("BriefPage — data flow", () => {
     const pushesBefore = nextMock().router.push.mock.calls.length;
     await user.click(screen.getAllByText("New brief...")[0]);
     await user.click(screen.getAllByText("New brief...").slice(-1)[0]);
-    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
     expect((screen.getByLabelText("Target Region") as HTMLInputElement).value).toBe("");
     expect(nextMock().router.push.mock.calls.length).toBe(pushesBefore);
   });
@@ -303,21 +307,21 @@ describe("BriefPage — data flow", () => {
     globalThis.confirm = vi.fn(() => false);
     routes({});
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
     await fillValidDraft(user, "typed");
 
     await user.click(screen.getAllByText("New brief...")[0]);
     await user.click(screen.getAllByText("New brief...").slice(-1)[0]);
 
     expect(globalThis.confirm).toHaveBeenCalled();
-    expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe("typed");
+    expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("typed");
   });
 
   test("Save as... on the blank route also stops the URL calling it new", async () => {
     const user = userEvent.setup();
     routes({});
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
     await fillValidDraft(user, "fresh");
 
     await saveVia(user, "Save as");
@@ -357,7 +361,7 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({});
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
     await fillValidDraft(user, "fresh");
 
     await user.click(screen.getByText("Apply to run").closest("button") as HTMLButtonElement);
@@ -391,7 +395,7 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     routes({});
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
 
     await fillValidDraft(user, "fresh");
     await saveVia(user, "Save & apply");
@@ -417,16 +421,16 @@ describe("BriefPage — data flow", () => {
     renderWithRun(<Editor />);
     await waitForEditorReady();
 
-    const before = (screen.getByLabelText("Campaign Message") as HTMLInputElement).value;
-    await user.type(screen.getByLabelText("Campaign Message"), " edited");
-    expect((screen.getByLabelText("Campaign Message") as HTMLInputElement).value).not.toBe(before);
+    const before = (screen.getByLabelText("Headline") as HTMLInputElement).value;
+    await user.type(screen.getByLabelText("Headline"), " edited");
+    expect((screen.getByLabelText("Headline") as HTMLInputElement).value).not.toBe(before);
 
     // Discard resets to a blank draft. The run-context sync does not pull the active
     // brief back in — its dependencies have not changed — so the editor stays empty
     // until the user picks something.
     await user.click(screen.getByText("Discard"));
     await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Message") as HTMLInputElement).value).toBe(""),
+      expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe(""),
     );
   });
 
@@ -567,7 +571,7 @@ describe("BriefPage — data flow", () => {
     await user.click(await screen.findByText("camp"));
 
     await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Message") as HTMLInputElement).value).toBe("unsaved work"),
+      expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("unsaved work"),
     );
   });
 
@@ -577,14 +581,14 @@ describe("BriefPage — data flow", () => {
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<Editor />);
 
-    await user.type(screen.getByLabelText("Campaign Message"), "!");
-    const before = (screen.getByLabelText("Brief ID") as HTMLInputElement).value;
+    await user.type(screen.getByLabelText("Headline"), "!");
+    const before = (screen.getByLabelText("Campaign Name") as HTMLInputElement).value;
 
     await user.click(screen.getAllByText(/^(New brief\.\.\.|summer-hydration-2026)$/)[0]);
     await user.click(await screen.findByText("camp"));
 
     expect(globalThis.confirm).toHaveBeenCalled();
-    expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(before);
+    expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(before);
   });
 
   test("declining the prompt keeps the current draft when starting a new brief", async () => {
@@ -593,14 +597,14 @@ describe("BriefPage — data flow", () => {
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<Editor />);
 
-    await user.type(screen.getByLabelText("Campaign Message"), "!");
-    const before = (screen.getByLabelText("Brief ID") as HTMLInputElement).value;
+    await user.type(screen.getByLabelText("Headline"), "!");
+    const before = (screen.getByLabelText("Campaign Name") as HTMLInputElement).value;
 
     await user.click(screen.getAllByText(/^(New brief\.\.\.|summer-hydration-2026)$/)[0]);
     await user.click(screen.getAllByText("New brief...").slice(-1)[0]);
 
     expect(globalThis.confirm).toHaveBeenCalled();
-    expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(before);
+    expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(before);
   });
 
   test("Apply, Save and Save as… all refuse an invalid draft", async () => {
@@ -729,7 +733,7 @@ describe("BriefPage — data flow", () => {
 
     // the shell's active brief appears in the listing, so the editor adopts that entry's
     // file identity and can save conditionally rather than as a new draft
-    await waitFor(() => expect(screen.getByLabelText("Brief ID").hasAttribute("readonly")).toBe(true));
+    await waitFor(() => expect(screen.getByLabelText("Campaign Name").hasAttribute("readonly")).toBe(true));
 
     const user = userEvent.setup();
     await saveVia(user, "Save & apply");
@@ -990,7 +994,7 @@ describe("BriefPage — capabilities and motion", () => {
     const user = userEvent.setup();
     const calls = routes({});
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
     await fillValidDraft(user);
     await user.click(screen.getByText("Randomized"));
 
@@ -1020,7 +1024,7 @@ describe("BriefPage — capabilities and motion", () => {
     const user = userEvent.setup();
     const calls = routes({});
     renderWithRun(<NewEditor />);
-    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe(""));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
     await fillValidDraft(user);
     await user.click(screen.getByText("Randomized"));
     await user.click(screen.getByRole("button", { name: "motion" }));
@@ -1064,7 +1068,7 @@ describe("BriefPage — capabilities and motion", () => {
 
     await user.click(screen.getAllByText("New brief...")[0]);
     await user.click(await screen.findByText("clip"));
-    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe("clip"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("clip"));
 
     // the probe's verdict lands and the controls go read-only with its reason. The
     // format toggle itself stays operable — the draft already requests motion, so
@@ -1116,7 +1120,7 @@ describe("BriefPage — capabilities and motion", () => {
 
     await user.click(screen.getAllByText("New brief...")[0]);
     await user.click(await screen.findByText("odd"));
-    await waitFor(() => expect((screen.getByLabelText("Brief ID") as HTMLInputElement).value).toBe("odd"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("odd"));
 
     expect(
       await screen.findByText(

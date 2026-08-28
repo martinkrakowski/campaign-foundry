@@ -23,8 +23,35 @@ export function briefIdDuplicate(conflictingId: string): string {
 export const targetRegion = "No region yet — pick one of the region chips.";
 /** `targetAudience` */
 export const targetAudience = "No audience yet — tell us who this campaign is for.";
+export const campaignNameLabel = "Campaign Name";
+export const campaignNamePlaceholder = "e.g. Summer Launch";
+export const briefIdReadout = "This is the brief id — made from the name";
+export const briefIdCopy = "Copy";
+export const briefIdCopied = "Copied ✓";
+export const briefIdCopyAria = "Copy brief ID";
+export const targetRegionLabel = "Target Region";
+export const targetRegionOther = "Other…";
+export const targetRegionOtherPlaceholder = "e.g. LATAM";
+/** Names the free-text box the Other… chip reveals; the group label cannot name it. */
+export const targetRegionOtherInputLabel = "Target Region — other";
+export const targetAudienceLabel = "Target Audience";
+export const targetAudiencePlaceholder = "e.g. urban outdoor enthusiasts, 25-40";
+
+// --- Copy ---
+
 /** `campaignMessage` */
 export const campaignMessage = "No message yet — write the one line you want people to remember.";
+/** `campaignMessage.length` */
+export const campaignMessageTooLong = "Headline is longer than 60 characters — make it shorter.";
+export const headlineLabel = "Headline";
+export const headlinePlaceholder = "e.g. Stay wild. Stay hydrated.";
+export function headlineCounter(current: number, max = 60): string {
+  return `${current} / ${max}`;
+}
+export const localizedHeadlineLabel = "Localized headline (optional)";
+export const localizedHeadlinePlaceholder = "e.g. Bleib wild. Bleib hydriert.";
+export const extraHeadlines = "Extra headlines…";
+export const extraHeadlinesAria = "Manage Headline Pool";
 
 // --- Products ---
 
@@ -34,6 +61,23 @@ export function products(min: number, mode: string): string {
   const add = min === 1 ? "one" : "a second one";
   return `A ${mode} campaign needs ${need} — add ${add} below.`;
 }
+export const productsClassicHint = "Classic mode needs two different products — add a second one below.";
+export function productsHeading(count: number): string {
+  return `Products (${count})`;
+}
+export const addProduct = "Add product";
+export const productNameLabel = "Name";
+export const productNamePlaceholder = "e.g. Hydra Bottle";
+export const productIdLabel = "ID";
+export const productIdPlaceholder = "e.g. hydra-bottle";
+export const productIdReadout = "derived from name";
+export const productIdEdit = "Edit";
+export const productIdEditAria = "Edit product ID";
+export const productColorLabel = "Primary Colour";
+export const productColorPlaceholder = "#1473E6";
+export const productLogoLabel = "Logo";
+export const productRemove = "Remove";
+export const productUploadErrorFallback = "Upload failed";
 /** `product-N-id` */
 export const productId = "Product ID can only use small letters, numbers and dashes — try something like acrobat-pro.";
 /** `product-N-id.duplicate` */
@@ -46,6 +90,17 @@ export const productName = "This product has no name yet — type one in.";
 export const productColor = "That colour is not one we can read — pick it with the swatch, or type one like #1473E6.";
 /** `product-N-logo` */
 export const productLogo = "No logo yet — upload one with the Logo button.";
+
+// --- Logo Field ---
+
+export const logoUploadAria = "Upload product logo";
+export const logoPathAria = "Logo Path";
+export const logoPreviewAlt = "Product logo preview";
+export const logoReplace = "Replace";
+export const logoUploading = "Uploading...";
+export const logoChooseFromBin = "Choose from bin";
+export const logoEmpty = "No logo yet — upload a PNG or JPEG";
+export const logoUpload = "Upload";
 
 // --- Treatments ---
 

@@ -89,9 +89,15 @@ export function validateIdentity(state: EditorState, existingIds?: string[]): Fi
   return errors;
 }
 
+export const MAX_HEADLINE_LENGTH = 60;
+
 export function validateCopy(state: EditorState): FieldErrors {
   const errors: FieldErrors = {};
-  if (state.campaignMessage.trim() === "") errors.campaignMessage = messages.campaignMessage;
+  if (state.campaignMessage.trim() === "") {
+    errors.campaignMessage = messages.campaignMessage;
+  } else if (state.campaignMessage.length > MAX_HEADLINE_LENGTH) {
+    errors.campaignMessage = messages.campaignMessageTooLong;
+  }
   return errors;
 }
 

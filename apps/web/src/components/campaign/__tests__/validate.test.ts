@@ -226,6 +226,13 @@ describe("validateCopy", () => {
     expect(Object.keys(validateCopy(valid({ campaignMessage: "  " })))).toEqual(["campaignMessage"]);
   });
 
+  test("enforces headline max length of 60 characters", () => {
+    expect(validateCopy(valid({ campaignMessage: "a".repeat(60) }))).toEqual({});
+    expect(validateCopy(valid({ campaignMessage: "a".repeat(61) })).campaignMessage).toBe(
+      messages.campaignMessageTooLong,
+    );
+  });
+
   test("region and audience are filed under Identity, where their inputs live", () => {
     const errors = validateIdentity(valid({ targetRegion: " ", targetAudience: "" }));
     expect(errors.targetRegion).toBe(messages.targetRegion);
