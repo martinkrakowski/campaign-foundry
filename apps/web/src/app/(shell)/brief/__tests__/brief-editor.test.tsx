@@ -641,7 +641,9 @@ describe("BriefPage — data flow", () => {
 
     // one bad number → one issue; a second → two. Numbers, not axes: an axis cannot
     // be emptied any more (see the guard below), so it can no longer be an error.
-    // the Field label wraps both the input and its Pick button, so query by role
+    // the seed lives behind the Advanced door (D6), and the Field label wraps both the
+    // input and its Pick button, so the input is addressed by role
+    await user.click(await screen.findByRole("button", { name: "Advanced" }));
     await user.type(await screen.findByRole("spinbutton", { name: "Seed" }), "-1");
     await waitFor(() => expect(screen.getByLabelText("1 issue")).toBeTruthy());
     // Count, Min distance and the coverage floors are bounded controls that cannot be

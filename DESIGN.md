@@ -249,10 +249,15 @@ Skeletal by design — patterns to extend, not a library.
 ## 5. Patterns
 
 **Five things, then a door.** A section shows only what a first-timer must decide; the rest
-goes behind one `Disclosure` titled *Advanced*. For the variation policy that is: how many,
-which shapes, which layouts, which tones, and what you will get. Seed, minimum distance,
-coverage floors, background sources, palette shift and the headline axis all live behind the
-door, which remembers that it was opened.
+goes behind one `Disclosure` titled *Advanced*. For the variation policy those five are: how
+many (Count), which shapes (Aspect ratios), which layouts, which tones, and what you will get
+(Estimate). Seed, minimum distance, the coverage floors, background sources, palette shift and
+the headline axis all live behind the door, which remembers that it was opened.
+
+**A number the user cannot have is lowered, and says so.** Narrowing an axis below the
+requested count clamps it to what the axes can produce and states the new figure once
+(`role="status"`); the next edit to the count takes the notice down. A silent clamp and a
+red error are both worse: one hides the change, the other blames the user for it.
 
 **An axis cannot be emptied.** Toggling the last selected value of an axis is refused by the
 reducer rather than accepted and reported as an error: an axis with no values draws nothing,

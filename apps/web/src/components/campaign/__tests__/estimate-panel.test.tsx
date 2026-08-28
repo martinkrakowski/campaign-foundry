@@ -204,6 +204,14 @@ describe("EstimatePanel — the ratio split", () => {
   });
 });
 
+describe("countReadout", () => {
+  test("counts its ads, singular and plural, always against the ceiling", () => {
+    expect(messages.countReadout(1, 24)).toBe("1 ad · up to 24");
+    expect(messages.countReadout(12, 24)).toBe("12 ads · up to 24");
+    expect(messages.countReadout(0, 24)).toBe("0 ads · up to 24");
+  });
+});
+
 describe("estimateSentence", () => {
   const parts = {
     creatives: 12,

@@ -256,3 +256,16 @@ export const estimateNotReady = "Fill in the brief and the estimate appears here
 export const estimateWorking = "Working out what you will get…";
 /** The planner could not be reached; the brief is unaffected. */
 export const estimateUnavailable = "Cannot work out the estimate right now.";
+
+/** The count slider's readout: what you asked for, against what the axes can make. */
+export function countReadout(count: number, ceiling: number): string {
+  return `${count} ad${count === 1 ? "" : "s"} · up to ${ceiling}`;
+}
+
+/**
+ * Said once, when narrowing an axis leaves the requested count impossible. It reports
+ * rather than blames: the number moved, and this is why.
+ */
+export function countLowered(ceiling: number): string {
+  return `Lowered to ${ceiling} — that is every different ad these choices can make.`;
+}

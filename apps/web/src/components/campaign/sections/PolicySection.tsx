@@ -15,6 +15,7 @@ import {
   SwitchRow,
 } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import * as messages from "@/components/campaign/messages";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import { RATIO_OPTIONS } from "@/components/campaign/editor-state";
 import { RatioPanel } from "@/components/campaign/RatioPanel";
@@ -241,7 +242,7 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
   return (
     <SectionShell id="policy" title="4 · Variation Policy" errorCount={Object.keys(errors).length} compact={compact}>
       <div className="space-y-6">
-        <div className={compact ? "space-y-4" : "grid grid-cols-1 gap-4 sm:grid-cols-3"}>
+        <div className="space-y-4">
           <Field
             label="Count"
             error={errors.count}
@@ -253,9 +254,49 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
               max={axisMax}
               value={Number.parseInt(state.variation.count, 10) || 1}
               invalid={Boolean(errors.count)}
+              readout={
+                <span
+                  className={cn(
+                    "shrink-0 rounded-md border px-2 py-0.5 text-[12px] tabular-nums",
+                    errors.count ? "border-error text-error" : "border-border text-text-primary",
+                  )}
+                >
+                  {messages.countReadout(Number.parseInt(state.variation.count, 10) || 0, axisMax)}
+                </span>
+              }
               onChange={(value) => dispatch({ type: "setVariation", field: "count", value: String(value) })}
             />
+            {/* L2.2: the clamp is not silent. It says the number moved and why, once —
+                the next thing the user does to the count takes it down. */}
+            {state.countNotice === null ? null : (
+              <p role="status" className="mt-1 text-[11px] text-text-muted">
+                {messages.countLowered(state.countNotice)}
+              </p>
+            )}
           </Field>
+        </div>
+        <RatioAxis state={state} dispatch={dispatch} errors={errors} compact={compact} />
+        <AxisCards
+          legend="Layout"
+          options={LAYOUT_OPTIONS}
+          selected={state.variation.layout}
+          onToggle={(value) => dispatch({ type: "toggleLayout", value })}
+          error={errors.layout}
+          compact={compact}
+          render={(option) => <CreativeGlyph layout={option} />}
+        />
+        <AxisCards
+          legend="Tone"
+          options={TONE_OPTIONS}
+          selected={state.variation.tone}
+          onToggle={(value) => dispatch({ type: "toggleTone", value })}
+          error={errors.tone}
+          compact={compact}
+          render={(option) => <CreativeGlyph tone={option} />}
+        />
+        {/* D6: five things up front, the rest behind one door that remembers it was
+            opened. Nothing here is required to plan a campaign. */}
+        <Disclosure id="policy-advanced" title="Advanced">
           <Field
             label="Min distance"
             error={errors.minDistance}
@@ -300,29 +341,6 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
               </Button>
             </div>
           </Field>
-        </div>
-        <RatioAxis state={state} dispatch={dispatch} errors={errors} compact={compact} />
-        <AxisCards
-          legend="Layout"
-          options={LAYOUT_OPTIONS}
-          selected={state.variation.layout}
-          onToggle={(value) => dispatch({ type: "toggleLayout", value })}
-          error={errors.layout}
-          compact={compact}
-          render={(option) => <CreativeGlyph layout={option} />}
-        />
-        <AxisCards
-          legend="Tone"
-          options={TONE_OPTIONS}
-          selected={state.variation.tone}
-          onToggle={(value) => dispatch({ type: "toggleTone", value })}
-          error={errors.tone}
-          compact={compact}
-          render={(option) => <CreativeGlyph tone={option} />}
-        />
-        {/* D6: five things up front, the rest behind one door that remembers it was
-            opened. Nothing here is required to plan a campaign. */}
-        <Disclosure id="policy-advanced" title="Advanced">
         <div className={compact ? "space-y-4" : "grid grid-cols-1 gap-4 sm:grid-cols-2"}>
           <Field
             label="Coverage per product"

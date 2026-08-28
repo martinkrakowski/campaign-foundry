@@ -1,10 +1,19 @@
 import type { CampaignBrief, CopyPool, Product, Treatment, VariationPolicy } from "@campaignfoundry/CampaignOrchestration";
 // The leaf, never the barrel: the barrel re-exports the infrastructure adapters, which
 // pull node:fs/path/crypto into the browser bundle.
-import { DEFAULT_BACKGROUND_SOURCES } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
+import {
+  DEFAULT_BACKGROUND_SOURCES,
+  HEADLINE_POOL_REF,
+  MAX_DURATION_SEC,
+  MIN_DURATION_SEC,
+} from "@campaignfoundry/CampaignOrchestration/variation-defaults";
+
+// Re-exported, not restated: every one of these is the domain's own value, and the
+// editor's copies of them were exactly the drift the leaf exists to prevent (D18).
+export { HEADLINE_POOL_REF, MAX_DURATION_SEC, MIN_DURATION_SEC };
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
-import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
-import { axisProductSize } from "./validate";
+import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
+
 
 export const LAYOUT_OPTIONS = ["headline-top", "headline-bottom"] as const;
 export const TONE_OPTIONS = ["bold", "subtle"] as const;
@@ -14,7 +23,6 @@ export const PALETTE_SHIFT_OPTIONS = [0, 0.1, 0.2] as const;
 export const MODE_OPTIONS: readonly CampaignMode[] = ["brief", "variation"];
 /** The canvas ratios the pipeline renders — the domain's RATIO_VALUES, in its order. */
 export const RATIO_OPTIONS: readonly string[] = RATIO_VALUES;
-export const HEADLINE_POOL_REF = "pool://copy";
 export const STATIC_PLATFORMS = ["instagram-feed", "linkedin", "x"] as const;
 /** Every distribution platform id in profile order — the toggle order for Output. */
 export const PLATFORM_ORDER: readonly string[] = Object.keys(PLATFORM_PROFILES);
@@ -233,6 +241,62 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
 function toggleOrdered<T>(list: readonly T[], value: T, order: readonly T[]): T[] {
   const next = list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
   return order.filter((item) => next.includes(item));
+}
+
+
+/*
+ * How big the draw is. These three live here rather than in `validate.ts` because the
+ * reducer needs them — the count clamp cannot run without knowing the ceiling — and
+ * having validate own them made the two modules import each other. `validate.ts`
+ * re-exports all three, so every existing caller is unaffected.
+ */
+
+/** Ratios the requested platforms package motion at — the motion filter's allowlist. */
+export function motionPackagedRatios(state: EditorState): Set<string> {
+  return new Set(
+    state.platforms
+      .map((id) => PLATFORM_PROFILES[id])
+      .filter((profile): profile is PlatformProfile => profile !== undefined)
+      .filter((profile) => (profile.formats as readonly string[]).includes("motion"))
+      .map((profile) => profile.ratio),
+  );
+}
+
+/** True while the motion narrowing applies: a motion-only brief has no still slot to fall back to. */
+function motionOnly(state: EditorState): boolean {
+  return state.formats.includes("motion") && !state.formats.includes("static");
+}
+
+/**
+ * Ratios a slot can be drawn at, mirroring VariationPolicy: the requested
+ * subset, narrowed by the motion filter for a motion-only brief (the ratios its
+ * motion platforms package). Empty when every selected ratio is excluded.
+ */
+export function drawableRatios(state: EditorState): string[] {
+  const requested = state.variation.ratio;
+  if (!motionOnly(state)) return [...requested];
+  const packaged = motionPackagedRatios(state);
+  return requested.filter((ratio) => packaged.has(ratio));
+}
+
+/**
+ * How many distinct variants this brief's axes can produce — the planner's hard
+ * ceiling on `count`, mirroring `VariationPolicy.axisProductSize`. Drives the count
+ * slider's bound, so the editor cannot author a count the planner will refuse.
+ */
+export function axisProductSize(state: EditorState): number {
+  const motionEnabled = state.formats.includes("motion") && state.motion.length > 0;
+  const mixStatic = motionEnabled && state.formats.includes("static");
+  return (
+    Math.max(1, state.products.filter((product) => product.id.length > 0).length) *
+    Math.max(1, drawableRatios(state).length) *
+    Math.max(1, state.variation.layout.length) *
+    Math.max(1, state.variation.tone.length) *
+    Math.max(1, state.variation.background.length) *
+    Math.max(1, state.variation.paletteShift.length) *
+    Math.max(1, state.variation.headline ? approvedHeadlines(state.pool) : 1) *
+    (motionEnabled ? state.motion.length * Math.max(1, state.duration.length) + (mixStatic ? 1 : 0) : 1)
+  );
 }
 
 /**
@@ -731,8 +795,6 @@ export function purgeDraftFromStorage(state: EditorState): void {
 }
 
 /** Clip lengths the API accepts, mirroring load-brief's MIN/MAX_DURATION_SEC. */
-export const MIN_DURATION_SEC = 2;
-export const MAX_DURATION_SEC = 30;
 /** The default length a first duration is offered at. */
 export const DEFAULT_DURATION_SEC = 5;
 

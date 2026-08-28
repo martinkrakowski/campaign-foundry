@@ -1,8 +1,9 @@
-import { describe, test, expect, vi } from "vitest";
+import { describe, test, expect, vi, afterEach } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { CopyPool } from "@campaignfoundry/CampaignOrchestration";
 import { PolicySection } from "../PolicySection";
+import * as messages from "../../messages";
 import { axisProductSize, maxMinDistance } from "../../validate";
 import {
   initialEditorState,
@@ -24,6 +25,10 @@ const state = (over: Partial<EditorState> = {}): EditorState => ({
   briefId: "camp",
   ...over,
 });
+
+// The Disclosure remembers it was opened, in localStorage — so a test that opens it
+// would otherwise decide the starting state of every test after it.
+afterEach(() => localStorage.clear());
 
 /**
  * Render with Advanced open. Most of what this panel offers lives behind that door
@@ -69,15 +74,15 @@ describe("PolicySection — the policy numbers", () => {
   test("the count readout shows the value against the ceiling, and flags its error", () => {
     render(<PolicySection state={state()} dispatch={vi.fn()} errors={{ count: "bad count" }} />);
     expect(screen.getByText("bad count")).toBeTruthy();
-    // anchored to the bare value: the ratio panels carry their own "N of count" texts
-    expect(screen.getByText(/^12$/).textContent).toMatch(/12\s*\/\s*\d+/);
+    // the readout is a sentence: the ask, then the ceiling the axes impose
+    expect(screen.getByText(messages.countReadout(12, axisProductSize(state())))).toBeTruthy();
   });
 
   test("Min distance steps within the active axes and can be left to the planner", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
     const s = state();
-    render(<PolicySection state={s} dispatch={dispatch} errors={{}} />);
+    renderOpen(<PolicySection state={s} dispatch={dispatch} errors={{}} />);
 
     const readout = screen.getByRole("spinbutton", { name: "Min distance" });
     expect(readout.getAttribute("aria-valuemax")).toBe(String(maxMinDistance(s)));
@@ -124,7 +129,7 @@ describe("PolicySection — the policy numbers", () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
     const s = state();
-    const { unmount } = render(<PolicySection state={s} dispatch={dispatch} errors={{ seed: "bad seed" }} />);
+    const { unmount } = renderOpen(<PolicySection state={s} dispatch={dispatch} errors={{ seed: "bad seed" }} />);
     await user.type(screen.getByPlaceholderText("Auto"), "7");
     expect(dispatch).toHaveBeenCalledWith({ type: "setVariation", field: "seed", value: "7" });
     expect(screen.getByText("bad seed")).toBeTruthy();
@@ -137,7 +142,7 @@ describe("PolicySection — the policy numbers", () => {
 
     // a set seed → offer to clear it
     dispatch.mockClear();
-    render(
+    renderOpen(
       <PolicySection state={{ ...s, variation: { ...s.variation, seed: "42" } }} dispatch={dispatch} errors={{}} />,
     );
     await user.click(screen.getByRole("button", { name: "Clear the seed" }));
@@ -145,11 +150,11 @@ describe("PolicySection — the policy numbers", () => {
   });
 
   test("the min-distance help states the bound the active axes actually allow", () => {
-    const { unmount } = render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    const { unmount } = renderOpen(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
     expect(screen.getByText(/up to 6, the active axes/)).toBeTruthy();
     unmount();
 
-    render(
+    renderOpen(
       <PolicySection
         state={state({ formats: ["static", "motion"], motion: ["ken-burns-in"] })}
         dispatch={vi.fn()}
@@ -157,6 +162,22 @@ describe("PolicySection — the policy numbers", () => {
       />,
     );
     expect(screen.getByText(/up to 8, the active axes/)).toBeTruthy();
+  });
+});
+
+describe("PolicySection — the clamp notice", () => {
+  test("a lowered count says so, and says nothing when nothing was lowered", () => {
+    const { unmount } = render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.queryByText(/Lowered to/)).toBeNull();
+    unmount();
+
+    // the reducer sets countNotice when a narrowing makes the ask impossible
+    const lowered = editorReducer(
+      editorReducer(state(), { type: "setVariation", field: "count", value: String(axisProductSize(state())) }),
+      { type: "toggleLayout", value: LAYOUT_OPTIONS[0] },
+    );
+    render(<PolicySection state={lowered} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.getByText(messages.countLowered(lowered.countNotice as number))).toBeTruthy();
   });
 });
 

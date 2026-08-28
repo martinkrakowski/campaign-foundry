@@ -1,5 +1,17 @@
+import { MAX_DURATION_SEC, MIN_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import type { EditorState } from "./editor-state";
-import { LAYOUT_OPTIONS, TONE_OPTIONS, approvedHeadlines } from "./editor-state";
+import {
+  LAYOUT_OPTIONS,
+  TONE_OPTIONS,
+  approvedHeadlines,
+  axisProductSize,
+  drawableRatios,
+  motionPackagedRatios,
+} from "./editor-state";
+
+// The draw-size helpers moved to `editor-state.ts` (the reducer's clamp needs them, and
+// the two modules were importing each other); re-exported here for their old callers.
+export { axisProductSize, drawableRatios, motionPackagedRatios } from "./editor-state";
 import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
 import * as messages from "./messages";
 import { formatDisplayName, platformDisplayName, ratioDisplayName } from "./display-names";
@@ -7,62 +19,20 @@ import { formatDisplayName, platformDisplayName, ratioDisplayName } from "./disp
 export const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 /** Whole-second clip durations the API accepts (load-brief's MIN/MAX_DURATION_SEC). */
-export const MIN_DURATION_SEC = 2;
-export const MAX_DURATION_SEC = 30;
+export { MIN_DURATION_SEC, MAX_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 
 export type FieldErrors = Record<string, string>;
 
 const UINT32_MAX = 0xffffffff;
 const BASE_DISTANCE_AXES = 6;
 
-/** Ratios the requested platforms package motion at — the motion filter's allowlist. */
-export function motionPackagedRatios(state: EditorState): Set<string> {
-  return new Set(
-    state.platforms
-      .map((id) => PLATFORM_PROFILES[id])
-      .filter((profile): profile is PlatformProfile => profile !== undefined)
-      .filter((profile) => (profile.formats as readonly string[]).includes("motion"))
-      .map((profile) => profile.ratio),
-  );
-}
-
-/** True while the motion narrowing applies: a motion-only brief has no still slot to fall back to. */
-function motionOnly(state: EditorState): boolean {
-  return state.formats.includes("motion") && !state.formats.includes("static");
-}
-
-/**
- * Ratios a slot can be drawn at, mirroring VariationPolicy: the requested
- * subset, narrowed by the motion filter for a motion-only brief (the ratios its
- * motion platforms package). Empty when every selected ratio is excluded.
- */
-export function drawableRatios(state: EditorState): string[] {
-  const requested = state.variation.ratio;
-  if (!motionOnly(state)) return [...requested];
-  const packaged = motionPackagedRatios(state);
-  return requested.filter((ratio) => packaged.has(ratio));
-}
 
 
-/**
- * How many distinct variants this brief's axes can produce — the planner's hard
- * ceiling on `count`, mirroring `VariationPolicy.axisProductSize`. Drives the count
- * slider's bound, so the editor cannot author a count the planner will refuse.
- */
-export function axisProductSize(state: EditorState): number {
-  const motionEnabled = state.formats.includes("motion") && state.motion.length > 0;
-  const mixStatic = motionEnabled && state.formats.includes("static");
-  return (
-    Math.max(1, state.products.filter((product) => product.id.length > 0).length) *
-    Math.max(1, drawableRatios(state).length) *
-    Math.max(1, state.variation.layout.length) *
-    Math.max(1, state.variation.tone.length) *
-    Math.max(1, state.variation.background.length) *
-    Math.max(1, state.variation.paletteShift.length) *
-    Math.max(1, state.variation.headline ? approvedHeadlines(state.pool) : 1) *
-    (motionEnabled ? state.motion.length * Math.max(1, state.duration.length) + (mixStatic ? 1 : 0) : 1)
-  );
-}
+
+
+
+
+
 
 export function maxMinDistance(state: EditorState): number {
   let axes = BASE_DISTANCE_AXES;

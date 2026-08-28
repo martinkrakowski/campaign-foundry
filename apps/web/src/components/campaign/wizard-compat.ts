@@ -25,7 +25,8 @@ export const LAYOUT_OPTIONS = ["headline-top", "headline-bottom"] as const;
 export const TONE_OPTIONS = ["bold", "subtle"] as const;
 export const BACKGROUND_OPTIONS = ["procedural", "asset-pool", "genai"] as const;
 export const PALETTE_SHIFT_OPTIONS = [0, 0.1, 0.2] as const;
-export const HEADLINE_POOL_REF = "pool://copy";
+import { HEADLINE_POOL_REF } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
+export { HEADLINE_POOL_REF };
 export const STATIC_PLATFORMS = ["instagram-feed", "linkedin", "x"] as const;
 
 export interface WizardState {

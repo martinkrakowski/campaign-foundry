@@ -41,7 +41,9 @@ export function Disclosure({ id, title, children }: { id: string; title: string;
       <button
         type="button"
         aria-expanded={open}
-        aria-controls={panelId}
+        // only while the panel exists: aria-controls pointing at nothing is a broken
+        // relationship for assistive tech, and the panel is unmounted when closed.
+        {...(open ? { "aria-controls": panelId } : {})}
         onClick={() => {
           const next = !open;
           setOpen(next);
