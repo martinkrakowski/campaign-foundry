@@ -442,17 +442,25 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
         setSaving(false);
         return;
       }
+      // Keep what the API returns: the copy's revision is the conditional-write guard
+      // for the *next* save of it. Dropping it here downgraded that save to
+      // last-write-wins, which is the same trap `loadBrief` carries the revision to avoid.
+      let created;
       try {
-        await createBrief(newBrief, taken ? { replace: true } : {});
+        created = await createBrief(newBrief, taken ? { replace: true } : {});
       } catch (error) {
         if (!isBriefsApiError(error) || error.status !== 409) throw error;
         if (!window.confirm(`A brief with id "${newId}" already exists. Overwrite it?`)) {
           setSaving(false);
           return;
         }
-        await createBrief(newBrief, { replace: true });
+        created = await createBrief(newBrief, { replace: true });
       }
-      dispatch({ type: "load", brief: newBrief, entry: { file: `${newId}.yaml` } });
+      dispatch({
+        type: "load",
+        brief: newBrief,
+        entry: { file: created.file, ...(created.revision === undefined ? {} : { revision: created.revision }) },
+      });
       // The editor is on the copy now, so the shell must be too — otherwise Generate
       // runs the brief this one was copied from, which is the trap `loadBrief` documents.
       setRunBrief(newBrief);

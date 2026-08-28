@@ -329,6 +329,30 @@ describe("BriefPage — data flow", () => {
     await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief"));
   });
 
+  test("Save as... keeps the copy's revision, so the next save still guards the write", async () => {
+    const user = userEvent.setup();
+    const calls = routes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      post: () => json({ file: "copy.yaml", brief: brief("copy"), revision: "rev-copy" }, 201),
+    });
+    renderWithRun(<Editor />);
+    await waitForEditorReady();
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), "copy");
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
+    await waitFor(() => expect(screen.queryByLabelText("New brief id")).toBeNull());
+
+    // saving the copy must send the revision the POST handed back; without it the write
+    // silently drops to last-write-wins, the trap `loadBrief` carries the revision to avoid
+    await saveVia(user, "Save & apply");
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "PUT" && c.url.includes("revision=rev-copy"))).toBe(true),
+    );
+  });
+
   test("Apply on the blank route keeps the brief it just applied", async () => {
     const user = userEvent.setup();
     routes({});

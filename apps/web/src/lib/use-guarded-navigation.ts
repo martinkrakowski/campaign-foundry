@@ -8,17 +8,19 @@ export function useGuardedNavigation() {
   const router = useRouter();
   const { isDirty } = useEditorDirty();
 
+  /** True when the navigation actually happened, so callers can hold their own UI open. */
   const guardedPush = useCallback(
-    (url: string) => {
+    (url: string): boolean => {
       if (isDirty) {
         const confirmed = window.confirm(
           "You have unsaved changes. Are you sure you want to leave?"
         );
         if (!confirmed) {
-          return;
+          return false;
         }
       }
       router.push(url);
+      return true;
     },
     [router, isDirty]
   );

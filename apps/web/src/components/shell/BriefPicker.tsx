@@ -98,12 +98,12 @@ export function BriefPicker() {
   };
 
   const createNew = () => {
-    closeBriefPicker();
     // The blank editor is a route, so this is a plain navigation: it used to land on
     // `/brief`, which adopts the active brief — the campaign the user was leaving came
-    // straight back. `guardedPush` carries the unsaved-changes prompt, so asking here
-    // as well would show the same dialog twice.
-    guardedPush("/brief/new");
+    // straight back. `guardedPush` carries the unsaved-changes prompt, so asking here as
+    // well would show the same dialog twice — and the picker only closes if the user
+    // actually leaves, or declining the prompt would dismiss it anyway.
+    if (guardedPush("/brief/new")) closeBriefPicker();
   };
 
   const confirmDuplicate = async () => {
