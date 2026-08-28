@@ -447,16 +447,29 @@ describe("BriefPage — data flow", () => {
     await waitForEditorReady();
     await user.clear(screen.getByLabelText("Target Region"));
 
+    // D3: the verbs stay pressable — a dead button cannot explain itself. Pressing one
+    // is how the user asks what is wrong, so each refuses out loud instead: nothing is
+    // written, and the errors that were hidden until now become visible.
     // Re-query inside the assertion — React replaces these nodes on re-render, so a
     // reference captured beforehand can be stale by the time the draft turns invalid.
     const button = (label: string) =>
       screen.getByText(label).closest("button") as HTMLButtonElement;
-    await waitFor(() => {
-      expect(button("Apply to run").disabled).toBe(true);
-      expect(button("Save").disabled).toBe(true);
-      expect(button("Save").disabled).toBe(true);
-    });
+    await waitFor(() => expect(screen.getByText("Apply to run").closest("button")).toBeTruthy());
+    expect(button("Apply to run").disabled).toBe(false);
+    expect(button("Save").disabled).toBe(false);
+
+    await user.click(button("Apply to run"));
+    // "Save" opens the menu; the verb the user actually presses is inside it.
+    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), "elsewhere");
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
+
+    // all three refused: no write left the page, and the refusal is on screen
     expect(calls.some((c) => c.method !== "GET")).toBe(false);
+    expect(screen.getByText(messages.targetRegion)).toBeTruthy();
   });
 
   test("Save as… onto an existing id asks before overwriting, and honours a refusal", async () => {
@@ -597,10 +610,12 @@ describe("BriefPage — data flow", () => {
     expect(root.className).not.toMatch(/\bh-full\b/);
     expect(root.querySelector(".overflow-y-auto:not(.sticky)")).toBeNull();
     const bar = screen.getByTestId("action-bar");
-    // U8: the bar floats like the grid's pipeline bar — absolutely positioned inside
-    // the column's own scroll container. `fixed` would pin it to the viewport and let
-    // it cover the 320px sidebar, which is the bug #79 fixed once already.
-    expect(bar.className).toMatch(/\babsolute\b/);
+    // U8: the bar floats like the grid's pipeline bar, and stays floating. `sticky`
+    // pins it to the bottom of the column's own scroll box; `absolute` would anchor it
+    // to the content and let a long brief scroll it off screen, and `fixed` would pin
+    // it to the viewport over the 320px sidebar — the bug #79 fixed once already.
+    expect(bar.className).toMatch(/\bsticky\b/);
+    expect(bar.className).not.toMatch(/\babsolute\b/);
     expect(bar.className).not.toMatch(/\bfixed\b/);
     expect(root.contains(bar)).toBe(true);
   });
@@ -829,8 +844,10 @@ describe("BriefPage — capabilities and motion", () => {
     expect(screen.getByText(messages.motion)).toBeTruthy();
     expect(screen.getByText(messages.duration)).toBeTruthy();
     await waitFor(() =>
-      expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(true),
+      expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false),
     );
+    // D3: Save is live, and pressing it refuses rather than writing.
+    await userEvent.setup().click(screen.getByRole("button", { name: /^Save$/ }));
     expect(calls.some((c) => c.method !== "GET")).toBe(false);
   });
 
@@ -923,7 +940,7 @@ describe("BriefPage — capabilities and motion", () => {
       ),
     ).toBeTruthy();
     await waitFor(() =>
-      expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(true),
+      expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false),
     );
   });
 });

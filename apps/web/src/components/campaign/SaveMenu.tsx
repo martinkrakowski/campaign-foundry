@@ -4,16 +4,18 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui";
 
 /**
+ * D3: there is no validity `disabled` here. An invalid draft must still be able to open
+ * this menu, because choosing an item is how the user asks for the refusal — only an
+ * in-flight write (`saving`) closes the control off.
+ *
  * "Save" as a menu: the two ways to persist a draft — in place, or as a copy — behind
  * one control, so the action bar stays short. Opens upward (it sits in a footer).
  */
 export function SaveMenu({
-  disabled,
   saving,
   onSaveAndApply,
   onSaveAs,
 }: {
-  disabled: boolean;
   saving: boolean;
   onSaveAndApply: () => void;
   onSaveAs: () => void;
@@ -46,7 +48,7 @@ export function SaveMenu({
     <div ref={root} className="relative">
       <Button
         variant="secondary"
-        disabled={disabled || saving}
+        disabled={saving}
         isLoading={saving}
         aria-haspopup="menu"
         aria-expanded={open}

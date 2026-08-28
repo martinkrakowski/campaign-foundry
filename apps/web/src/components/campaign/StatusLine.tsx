@@ -39,43 +39,44 @@ export function StatusLine({
   const applied = state.appliedSnapshot !== null && !isDirtySinceApply(state);
   const isLoaded = state.source.kind === "file";
 
-  const sentence = useMemo(() => {
+  // The sentence is a shape, not a string: the section names inside it ARE the scroll
+  // links (D3). Rendering the joined names as text and then appending buttons with the
+  // same names says every name twice, to the eye and to a screen reader.
+  const sentence = useMemo((): { lead: string; sections: string[]; tail: string } => {
+    const plain = (text: string) => ({ lead: text, sections: [], tail: "" });
     // A failed write is the most recent thing that happened — it outranks the rest.
-    if (persistError) return persistError;
+    if (persistError) return plain(persistError);
     // Applied, but this host cannot run it: D7's "persistable but not runnable",
     // said as information rather than blame (Appendix A `status.applyRefusal`).
-    if (applyRefusal) return messages.statusApplyRefusal;
+    if (applyRefusal) return plain(messages.statusApplyRefusal);
     if (totalErrors > 0 && attempted) {
-      const { lead, tail } = messages.statusNotApplied(totalErrors);
-      return `${lead} ${incompleteSections.join(", ")}${tail}`;
+      return { ...messages.statusNotApplied(totalErrors), sections: incompleteSections };
     }
-    if (applied) {
-      return messages.statusApplied(state.briefId);
-    }
-    if (isLoaded) {
-      return `Loaded ${state.briefId} — Apply to run to stage it.`;
-    }
-    if (incompleteSections.length === 0) {
-      return "Ready — Apply to run, or Save & apply to keep it.";
-    }
-    const { lead, tail } =
-      incompleteSections.length === 1 ? messages.statusAlmostThere() : messages.statusNewBrief();
-    return `${lead} ${incompleteSections.join(", ")}${tail}`;
+    if (applied) return plain(messages.statusApplied(state.briefId));
+    if (isLoaded) return plain(messages.statusLoaded(state.briefId));
+    if (incompleteSections.length === 0) return plain(messages.statusReady);
+    return {
+      ...(incompleteSections.length === 1 ? messages.statusAlmostThere() : messages.statusNewBrief()),
+      sections: incompleteSections,
+    };
   }, [totalErrors, attempted, applied, isLoaded, state.briefId, incompleteSections, applyRefusal, persistError]);
 
   return (
     <p role="status" className="text-[13px] text-text-primary">
-      {sentence}
-      {(totalErrors > 0 && !persistError && !applyRefusal ? incompleteSections : []).map((section) => (
-        <button
-          key={section}
-          type="button"
-          className="ml-1 text-brand-primary hover:underline"
-          onClick={() => onScrollToSection(SECTION_TARGETS[section] ?? section.toLowerCase())}
-        >
-          {section}
-        </button>
+      {sentence.lead}
+      {sentence.sections.map((section, i) => (
+        <span key={section}>
+          {i === 0 ? " " : ", "}
+          <button
+            type="button"
+            className="text-brand-primary hover:underline"
+            onClick={() => onScrollToSection(SECTION_TARGETS[section] ?? section.toLowerCase())}
+          >
+            {section}
+          </button>
+        </span>
       ))}
+      {sentence.tail}
     </p>
   );
 }

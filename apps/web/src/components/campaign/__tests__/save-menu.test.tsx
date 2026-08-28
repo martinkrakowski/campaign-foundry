@@ -9,7 +9,7 @@ const setup = (over: Partial<Parameters<typeof SaveMenu>[0]> = {}) => {
   render(
     <div>
       <button type="button">outside</button>
-      <SaveMenu disabled={false} saving={false} onSaveAndApply={onSaveAndApply} onSaveAs={onSaveAs} {...over} />
+      <SaveMenu saving={false} onSaveAndApply={onSaveAndApply} onSaveAs={onSaveAs} {...over} />
     </div>,
   );
   return { onSaveAndApply, onSaveAs, user: userEvent.setup() };
@@ -59,9 +59,20 @@ describe("SaveMenu", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  test("is held back while disabled or saving", async () => {
-    const { user } = setup({ disabled: true });
+  test("stays open to an invalid draft — the refusal is the menu item's job (D3)", async () => {
+    const { user } = setup({});
     const trigger = screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement;
+    expect(trigger.disabled).toBe(false);
+    await user.click(trigger);
+    expect(screen.getByRole("menu")).toBeTruthy();
+  });
+
+  test("is held back only while a write is in flight", async () => {
+    // while saving the trigger wears a busy label, so find it by its popup role
+    const { user } = setup({ saving: true });
+    const trigger = screen
+      .getAllByRole("button")
+      .find((b) => b.getAttribute("aria-haspopup") === "menu") as HTMLButtonElement;
     expect(trigger.disabled).toBe(true);
     await user.click(trigger);
     expect(screen.queryByRole("menu")).toBeNull();

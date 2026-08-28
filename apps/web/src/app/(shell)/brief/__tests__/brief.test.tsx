@@ -45,7 +45,6 @@ describe("BriefPage E1 Features", () => {
   });
 
   test("has action bar buttons — Discard, Apply and Save, with YAML split behind the overflow", async () => {
-    const user = userEvent.setup();
     renderWithRun(<Editor />);
     const bar = screen.getByTestId("action-bar");
     // the error strip's chips sit in the bar too; the action buttons are the rest
@@ -58,12 +57,10 @@ describe("BriefPage E1 Features", () => {
     // moved out of the primary row into the ⋯ overflow so the sentence has room.
     expect(labels).toEqual(expect.arrayContaining(["Discard", "Save", "Apply to run"]));
     expect(labels).not.toContain("YAML split on");
-    // a blank draft is invalid, so Save (and Apply) are held back; the menu's own
-    // behaviour is covered in save-menu.test.tsx
-    expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByText("Apply to run").closest("button") as HTMLButtonElement).disabled).toBe(true);
-    await user.click(screen.getByRole("button", { name: /^Save$/ }));
-    expect(screen.queryByRole("menu")).toBeNull();
+    // D3: a blank draft is invalid, but the verbs stay pressable so the refusal can be
+    // spoken; the menu's own behaviour is covered in save-menu.test.tsx
+    expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByText("Apply to run").closest("button") as HTMLButtonElement).disabled).toBe(false);
   });
 
   test("Save as... opens dialog", async () => {

@@ -308,22 +308,34 @@ export default function BriefPage() {
     setTouchedSections(new Set());
   };
 
+  // D3: the refusal lives in the handler, never in a `disabled` attribute. A dead
+  // primary button cannot say why it is dead, and it also blocks the one gesture that
+  // reveals the errors — pressing it is how a user asks "what is wrong?". So the verbs
+  // stay live, and an invalid draft is answered: attempted, every error shown, the
+  // status sentence refusing, and the view scrolled to the first problem.
+  const refuseInvalid = (): boolean => {
+    setAttempted(true);
+    if (!saveBlocked) return false;
+    const all = validateState({ ...state, capabilities: null }, briefs.map((b) => b.brief.id));
+    const first = Object.keys(all).find((section) => getTotalErrorCount({ [section]: all[section] }) > 0);
+    if (first) scrollToFirstError(first);
+    return true;
+  };
+
   const handleApply = () => {
+    if (refuseInvalid()) return;
     const brief = toBrief(state);
     dispatch({ type: "apply", applied: brief });
     setRunBrief(brief);
-    // L1.1: Apply sets attempted
-    setAttempted(true);
     // D7: applying a motion brief on a host that cannot run it must not pretend it
     // will produce clips — surface the probe's reason (the text the API's 400 would
     // quote) as the status message. Run still refuses it server-side.
   };
 
   const handleSave = async () => {
+    if (refuseInvalid()) return;
     setSaving(true);
     setPersistError(undefined);
-    // L1.1: Save sets attempted
-    setAttempted(true);
     try {
       const brief = toBrief(state);
       if (state.source.kind === "file") {
@@ -346,10 +358,9 @@ export default function BriefPage() {
   };
 
   const handleSaveAs = async (newId: string) => {
+    if (refuseInvalid()) return;
     setSaving(true);
     setPersistError(undefined);
-    // L1.1: Save as sets attempted
-    setAttempted(true);
     try {
       const brief = toBrief(state);
       const newBrief = { ...brief, id: newId };
@@ -487,12 +498,13 @@ export default function BriefPage() {
              Discard
            </Button>
            <SaveMenu
-             disabled={saveBlocked}
+             /* D3: never a dead primary button — pressing an invalid brief sets
+                `attempted`, reveals every error and speaks the refusal. */
              saving={saving}
              onSaveAndApply={() => void handleSave()}
              onSaveAs={() => setSaveAsId("")}
            />
-           <Button onClick={handleApply} disabled={saveBlocked}>
+           <Button onClick={handleApply}>
              Apply to run
            </Button>
            {/* D3: the bar's primary row is the status sentence and the three verbs.
@@ -548,7 +560,7 @@ export default function BriefPage() {
               autoFocus
             />
             <div className="flex gap-2">
-              <Button onClick={() => handleSaveAs(saveAsId)} disabled={saving || !saveAsId || saveBlocked}>
+              <Button onClick={() => handleSaveAs(saveAsId)} disabled={saving || !saveAsId}>
                 Save
               </Button>
               <Button variant="ghost" onClick={() => setSaveAsId(null)}>
