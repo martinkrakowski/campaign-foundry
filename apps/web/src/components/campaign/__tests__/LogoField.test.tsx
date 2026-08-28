@@ -200,11 +200,11 @@ describe("LogoField", () => {
 
 describe("LogoField gating reaches the mirror input", () => {
   test("a disabled or read-only field closes its assistive-tech input too", () => {
-    const { unmount } = render(<LogoField value="a.png" onChange={vi.fn()} disabled />);
+    const { unmount } = render(<LogoField value="a.png" onChange={vi.fn()} onUploadFile={vi.fn()} disabled />);
     expect((screen.getByLabelText("Logo Path") as HTMLInputElement).disabled).toBe(true);
     unmount();
 
-    render(<LogoField value="a.png" onChange={vi.fn()} readOnly />);
+    render(<LogoField value="a.png" onChange={vi.fn()} onUploadFile={vi.fn()} readOnly />);
     expect((screen.getByLabelText("Logo Path") as HTMLInputElement).readOnly).toBe(true);
   });
 });
