@@ -1,6 +1,6 @@
 import { describe, test, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/vitest";
 import { ProductsSection } from "./ProductsSection";
 import type { EditorState } from "@/components/campaign/editor-state";
 import type { FieldErrors } from "@/components/campaign/validate";
