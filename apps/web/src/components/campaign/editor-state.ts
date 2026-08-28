@@ -1,11 +1,21 @@
-import type { CampaignBrief, CopyPool, Product, Treatment, VariationPolicy } from "@campaignfoundry/CampaignOrchestration";
+import {
+  DEFAULT_BACKGROUND_SOURCES,
+  type CampaignBrief,
+  type CopyPool,
+  type Product,
+  type Treatment,
+  type VariationPolicy,
+} from "@campaignfoundry/CampaignOrchestration";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
+import { axisProductSize } from "./validate";
 
 export const LAYOUT_OPTIONS = ["headline-top", "headline-bottom"] as const;
 export const TONE_OPTIONS = ["bold", "subtle"] as const;
 export const BACKGROUND_OPTIONS = ["procedural", "asset-pool", "genai"] as const;
 export const PALETTE_SHIFT_OPTIONS = [0, 0.1, 0.2] as const;
+/** The two campaign modes in panel order (D4) — `brief` (Classic) first. */
+export const MODE_OPTIONS: readonly CampaignMode[] = ["brief", "variation"];
 /** The canvas ratios the pipeline renders — the domain's RATIO_VALUES, in its order. */
 export const RATIO_OPTIONS: readonly string[] = RATIO_VALUES;
 export const HEADLINE_POOL_REF = "pool://copy";
@@ -139,6 +149,12 @@ export interface EditorState {
   outputExplicit: boolean;
   pool: CopyPool | null;
   headlineAxisDropped: boolean;
+  /**
+   * The count the reducer last lowered because the axes could no longer produce it
+   * (D13) — shown once beside the slider, cleared by the next count edit or by any
+   * axis toggle that does not clamp. Derived UI state: never serialized.
+   */
+  countNotice: number | null;
   appliedSnapshot: CampaignBrief | null;
   capabilities: { motion: boolean; reason?: string } | null;
 }
@@ -201,7 +217,7 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
       layout: [...LAYOUT_OPTIONS],
       tone: [...TONE_OPTIONS],
       ratio: [...RATIO_OPTIONS],
-      background: ["procedural"],
+      background: [...DEFAULT_BACKGROUND_SOURCES],
       paletteShift: [...PALETTE_SHIFT_OPTIONS],
       headline: false,
     },
@@ -212,6 +228,7 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
     outputExplicit: false,
     pool: null,
     headlineAxisDropped: false,
+    countNotice: null,
     appliedSnapshot: null,
     capabilities: null,
   };
@@ -220,6 +237,25 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
 function toggleOrdered<T>(list: readonly T[], value: T, order: readonly T[]): T[] {
   const next = list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
   return order.filter((item) => next.includes(item));
+}
+
+/**
+ * D13/D6: when an axis toggle shrinks what the axes can produce below the count, the
+ * count comes down with it (the planner would refuse anything higher) and the editor
+ * says so once, beside the slider. Any toggle that does not clamp clears the notice —
+ * it describes the latest clamp only, never history.
+ */
+function withCountClamp(state: EditorState): EditorState {
+  const axisMax = axisProductSize(state);
+  const count = Number.parseInt(state.variation.count, 10) || 0;
+  if (count > axisMax) {
+    return {
+      ...state,
+      variation: { ...state.variation, count: String(axisMax) },
+      countNotice: axisMax,
+    };
+  }
+  return { ...state, countNotice: null };
 }
 
 export function editorReducer(state: EditorState, action: EditorAction): EditorState {
@@ -272,39 +308,46 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         ...state,
         treatments: state.treatments.filter((_, index) => index !== action.index),
       };
-    case "setVariation":
+    case "setVariation": {
+      // Setting the count by hand answers the notice — it has said its one thing.
+      if (action.field === "count") {
+        return { ...state, countNotice: null, variation: { ...state.variation, count: action.value } };
+      }
       return { ...state, variation: { ...state.variation, [action.field]: action.value } };
-    case "toggleLayout":
-      return {
-        ...state,
-        variation: { ...state.variation, layout: toggleOrdered(state.variation.layout, action.value, LAYOUT_OPTIONS) },
-      };
-    case "toggleTone":
-      return {
-        ...state,
-        variation: { ...state.variation, tone: toggleOrdered(state.variation.tone, action.value, TONE_OPTIONS) },
-      };
+    }
+    case "toggleLayout": {
+      // Min-one guard (D6): the last selected value cannot be deselected — the click
+      // is a no-op, which deletes the "select at least one" error by construction.
+      const layout = toggleOrdered(state.variation.layout, action.value, LAYOUT_OPTIONS);
+      if (layout.length === 0) return state;
+      return withCountClamp({ ...state, variation: { ...state.variation, layout } });
+    }
+    case "toggleTone": {
+      const tone = toggleOrdered(state.variation.tone, action.value, TONE_OPTIONS);
+      if (tone.length === 0) return state;
+      return withCountClamp({ ...state, variation: { ...state.variation, tone } });
+    }
     case "toggleRatio":
       return {
         ...state,
         variation: { ...state.variation, ratio: toggleOrdered(state.variation.ratio, action.value, RATIO_OPTIONS) },
       };
     case "toggleBackground":
-      return {
+      return withCountClamp({
         ...state,
         variation: {
           ...state.variation,
           background: toggleOrdered(state.variation.background, action.value, BACKGROUND_OPTIONS),
         },
-      };
+      });
     case "togglePalette":
-      return {
+      return withCountClamp({
         ...state,
         variation: {
           ...state.variation,
           paletteShift: toggleOrdered(state.variation.paletteShift, action.value, PALETTE_SHIFT_OPTIONS),
         },
-      };
+      });
     case "toggleHeadline":
       return { ...state, variation: { ...state.variation, headline: !state.variation.headline } };
     case "toggleMotion": {
@@ -534,7 +577,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
       layout: list(axes?.layout, [...LAYOUT_OPTIONS]),
       tone: list(axes?.tone, [...TONE_OPTIONS]),
       ratio: list(axes?.ratio, [...RATIO_OPTIONS]),
-      background: list((axes?.background as { source?: unknown } | undefined)?.source, ["procedural"]),
+      background: list((axes?.background as { source?: unknown } | undefined)?.source, [...DEFAULT_BACKGROUND_SOURCES]),
       paletteShift: list(axes?.paletteShift, [...PALETTE_SHIFT_OPTIONS]),
       headline: axes?.headline === HEADLINE_POOL_REF,
     },
@@ -545,6 +588,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
     outputExplicit: brief.output !== undefined,
     pool: null,
     headlineAxisDropped: false,
+    countNotice: null,
     appliedSnapshot: null,
     capabilities: null,
   };
@@ -679,6 +723,8 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     formats: list(raw.formats, initial.formats),
     platforms: list(raw.platforms, initial.platforms),
     outputExplicit: raw.outputExplicit === true,
+    // The count notice is one-time UI, not part of the draft it describes.
+    countNotice: null,
   } as EditorState;
 }
 

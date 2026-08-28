@@ -30,16 +30,16 @@ export const DISTANCE_AXES = [
 ] as const;
 
 const UINT32_MAX = 0xffffffff;
-const DEFAULT_BACKGROUND_SOURCES: readonly BackgroundAxisSource[] = ["procedural"];
-const DEFAULT_PALETTE_SHIFT: readonly number[] = [0];
+export const DEFAULT_BACKGROUND_SOURCES: readonly BackgroundAxisSource[] = ["procedural"];
+export const DEFAULT_PALETTE_SHIFT: readonly number[] = [0];
 /**
  * Motion axis default when `output.formats` requests "motion" but the brief
  * lists no `axes.motion`: every kind. A brief that asks for clips gets clips;
  * a static brief (no motion format) draws no motion kinds at all.
  */
-const DEFAULT_MOTION: readonly MotionKind[] = MOTION_KINDS;
+export const DEFAULT_MOTION: readonly MotionKind[] = MOTION_KINDS;
 /** Clip length in whole seconds; the parser bounds it to [2, 30]. */
-const DEFAULT_DURATION: readonly number[] = [6];
+export const DEFAULT_DURATION: readonly number[] = [6];
 const MIN_DURATION_SEC = 2;
 const MAX_DURATION_SEC = 30;
 
