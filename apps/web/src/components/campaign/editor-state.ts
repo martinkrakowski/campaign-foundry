@@ -649,12 +649,16 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     paletteShift: list(v.paletteShift, initial.variation.paletteShift),
     headline: typeof v.headline === "boolean" ? v.headline : initial.variation.headline,
   };
-  const products = list(raw.products, initial.products).map((p, i) => {
-    if (typeof p.key !== "number" || p.key <= 0) {
-      return { ...p, key: i + 1 };
-    }
-    return p;
-  }) as ProductDraft[];
+  // A persisted array can hold anything: `list` only proves it is an array, so an
+  // entry that is not a usable object (a `null` from a hand-edited draft, a bare
+  // string) is replaced rather than dereferenced — reading `.key` off it would
+  // throw inside the loader's try/catch and silently discard the whole draft,
+  // losing every recovered edit D11 exists to keep.
+  const products = (list(raw.products, initial.products) as unknown[]).map((entry, i) => {
+    if (typeof entry !== "object" || entry === null) return emptyProduct(i + 1);
+    const draft = entry as ProductDraft;
+    return typeof draft.key === "number" && draft.key > 0 ? draft : { ...draft, key: i + 1 };
+  });
   const storedNextProductKey = typeof raw.nextProductKey === "number" && raw.nextProductKey > 0 ? raw.nextProductKey : undefined;
   // A stored counter is trusted only above the keys it must outlive: a stale one
   // (≤ an existing key) would make addProduct mint a duplicate and removeProduct

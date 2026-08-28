@@ -725,6 +725,28 @@ describe("draft storage", () => {
     expect(loadDraftFromStorage(state)?.variation).toEqual(base().variation);
   });
 
+  test("an unusable product entry is replaced, not dereferenced, so the draft survives", () => {
+    // Reading `.key` off a null entry throws inside loadDraftFromStorage's try/catch,
+    // which returns null — the user loses every recovered edit because one entry was junk.
+    const state = { ...base(), briefId: "camp" };
+    const draft = {
+      ...state,
+      products: [null, "not-a-product", { ...state.products[0], key: 7 }],
+      nextProductKey: 8,
+    };
+    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: draft, timestamp: 1 }));
+
+    const restored = loadDraftFromStorage(state);
+    expect(restored).not.toBeNull();
+    const products = (restored as EditorState).products;
+    expect(products).toHaveLength(3);
+    expect(products.map((p) => p.key)).toEqual([1, 2, 7]);
+    expect(products[0].name).toBe("");
+    expect(products[2].key).toBe(7);
+    // and the counter still outlives every key
+    expect((restored as EditorState).nextProductKey).toBe(8);
+  });
+
   test("a present mode survives, and an invalid one falls back to brief instead of leaking", () => {
     const state = { ...base(), briefId: "camp" };
     const store = (mode: unknown) =>
