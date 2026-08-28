@@ -10,5 +10,6 @@ export * from "./MotionKind.vo.js";
 export * from "./PipelineExecutionLog.vo.js";
 export * from "./PipelineResult.vo.js";
 export * from "./Treatment.vo.js";
+export * from "./variation-defaults.js";
 export * from "./VariationPlan.vo.js";
 export * from "./VariationPolicy.vo.js";
