@@ -18,11 +18,10 @@ export {
   initialWizardState,
   stepsFor,
   wizardReducer,
-  emptyProduct,
   approvedHeadlines,
   toBrief,
   PLAN_DEBOUNCE_MS,
   canPlan,
 } from "@/components/campaign/wizard-compat";
 
-export { slugify, assetFileName, fileToBase64 } from "@/components/campaign/editor-state";
+export { slugify, assetFileName, fileToBase64, emptyProduct } from "@/components/campaign/editor-state";

@@ -26,11 +26,7 @@ export interface ProductDraft {
   idTouched: boolean;
 }
 
-let nextProductKey = 1;
-
-export function emptyProduct(): ProductDraft {
-  const key = nextProductKey;
-  nextProductKey += 1;
+export function emptyProduct(key: number): ProductDraft {
   return {
     key,
     id: "",
@@ -93,6 +89,7 @@ export interface EditorState {
   campaignMessage: string;
   localizedMessage: string;
   products: ProductDraft[];
+  nextProductKey: number;
   treatments: TreatmentDraft[];
   variation: {
     count: string;
@@ -163,7 +160,8 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
     targetAudience: "",
     campaignMessage: "",
     localizedMessage: "",
-    products: [emptyProduct(), emptyProduct()],
+    products: [emptyProduct(1), emptyProduct(2)],
+    nextProductKey: 3,
     treatments: [],
     variation: {
       count: "12",
@@ -222,7 +220,11 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       };
     }
     case "addProduct":
-      return { ...state, products: [...state.products, emptyProduct()] };
+      return {
+        ...state,
+        products: [...state.products, emptyProduct(state.nextProductKey)],
+        nextProductKey: state.nextProductKey + 1,
+      };
     case "removeProduct":
       return { ...state, products: state.products.filter((product) => product.key !== action.key) };
     case "setTreatment": {
@@ -454,7 +456,10 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
   const source: EditorSource = entry
     ? { kind: "file", file: entry.file, loadedId: brief.id, savedSnapshot: brief, revision: entry.revision }
     : { kind: "new", tempId };
-  const products = brief.products.length > 0 ? brief.products.map((p, i) => ({ ...emptyProduct(), key: Date.now() + i, ...p, idTouched: true })) : [emptyProduct(), emptyProduct()];
+  const products = brief.products.length > 0
+    ? brief.products.map((p, i) => ({ ...emptyProduct(i + 1), ...p, idTouched: true }))
+    : [emptyProduct(1), emptyProduct(2)];
+  const nextProductKey = brief.products.length > 0 ? brief.products.length + 1 : 3;
   const treatments = brief.treatments?.map((t) => ({ id: t.id, layout: t.layout, tone: t.tone })) ?? [];
   const formats = [...(brief.output?.formats ?? ["static"])];
   const platforms = [...(brief.output?.platforms ?? [...STATIC_PLATFORMS])];
@@ -465,7 +470,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
   const axes = variation?.axes as Record<string, unknown> | undefined;
   const num = (value: unknown): string => (typeof value === "number" ? String(value) : "");
   const coverage = variation?.coverage as { perProduct?: number; perRatio?: number } | undefined;
-  return {
+    return {
     source,
     mode: brief.mode ?? "brief",
     briefId: brief.id,
@@ -474,6 +479,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
     campaignMessage: brief.campaignMessage,
     localizedMessage: brief.localizedMessage ?? "",
     products,
+    nextProductKey,
     treatments,
     variation: {
       count: variation ? String(variation.count) : "12",
@@ -570,7 +576,7 @@ export function loadDraftFromStorage(state: EditorState): EditorState | null {
  * the only correct fallback for a draft that lost its own, and a burnt counter
  * value costs nothing — product keys need only be unique.
  */
-function normalizeDraftState(raw: Record<string, unknown>): EditorState {
+export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   const mode: CampaignMode = raw.mode === "variation" ? "variation" : "brief";
   const initial = initialEditorState(mode);
   const str = (value: unknown, fallback: string): string => (typeof value === "string" ? value : fallback);
@@ -598,12 +604,17 @@ function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     paletteShift: list(v.paletteShift, initial.variation.paletteShift),
     headline: typeof v.headline === "boolean" ? v.headline : initial.variation.headline,
   };
+  const products = list(raw.products, initial.products);
+  const storedNextProductKey = typeof raw.nextProductKey === "number" && raw.nextProductKey > 0 ? raw.nextProductKey : undefined;
+  const maxKey = products.length > 0 ? Math.max(...products.map((p) => p.key)) : 0;
+  const nextProductKey = storedNextProductKey ?? maxKey + 1;
   return {
     ...initial,
     ...raw,
     source,
     mode,
-    products: list(raw.products, initial.products),
+    products,
+    nextProductKey,
     treatments: list(raw.treatments, initial.treatments),
     variation,
     motion: list(raw.motion, initial.motion),

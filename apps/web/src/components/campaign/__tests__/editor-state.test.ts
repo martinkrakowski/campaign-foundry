@@ -24,6 +24,7 @@ import {
   loadDraftFromStorage,
   purgeDraftFromStorage,
   canPlan,
+  normalizeDraftState,
   type EditorState,
   type EditorAction,
 } from "../editor-state";
@@ -48,8 +49,8 @@ const savedBrief = (over: Partial<CampaignBrief> = {}): CampaignBrief =>
 
 describe("value helpers", () => {
   test("emptyProduct hands out a fresh key each call and sane defaults", () => {
-    const a = emptyProduct();
-    const b = emptyProduct();
+    const a = emptyProduct(1);
+    const b = emptyProduct(2);
     expect(b.key).toBe(a.key + 1);
     expect(a).toMatchObject({ id: "", name: "", primaryColor: "#1473E6", logoPath: "", inputAsset: "", idTouched: false });
   });
@@ -903,5 +904,93 @@ describe("isPristine", () => {
     expect(isPristine(initialEditorState())).toBe(true);
     expect(isPristine(initialEditorState("variation"))).toBe(true);
     expect(isPristine(reduce(base(), { type: "patch", patch: { briefId: "x" } }))).toBe(false);
+  });
+});
+
+describe("deterministic product keys (D16)", () => {
+  test("fromBrief of a 3-product brief yields keys 1, 2, 3 and counter 4", () => {
+    const brief = savedBrief({
+      products: [
+        { id: "a", name: "A", primaryColor: "#000", logoPath: "" },
+        { id: "b", name: "B", primaryColor: "#111", logoPath: "" },
+        { id: "c", name: "C", primaryColor: "#222", logoPath: "" },
+      ],
+    });
+    const state = fromBrief(brief);
+    expect(state.products.map((p) => p.key)).toEqual([1, 2, 3]);
+    expect(state.nextProductKey).toBe(4);
+  });
+
+  test("fromBrief called twice yields identical keys (no Date.now)", () => {
+    const brief = savedBrief({
+      products: [{ id: "a", name: "A", primaryColor: "#000", logoPath: "" }],
+    });
+    const state1 = fromBrief(brief);
+    const state2 = fromBrief(brief);
+    expect(state1.products[0].key).toBe(state2.products[0].key);
+    expect(state1.nextProductKey).toBe(state2.nextProductKey);
+  });
+
+  test("a restored 5-product draft without counter gets nextProductKey = 6", () => {
+    const state = { ...base(), products: [emptyProduct(1), emptyProduct(2), emptyProduct(3), emptyProduct(4), emptyProduct(5)] };
+    const raw = { ...state, nextProductKey: undefined };
+    delete (raw as Record<string, unknown>).nextProductKey;
+    const normalized = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    expect(normalized.nextProductKey).toBe(6);
+  });
+
+  test("a restored draft with stored counter of 42 keeps 42", () => {
+    const state = { ...base(), products: [emptyProduct(1)], nextProductKey: 42 };
+    const normalized = normalizeDraftState(state as unknown as Record<string, unknown>);
+    expect(normalized.nextProductKey).toBe(42);
+  });
+
+  test("a restored draft with no products gets nextProductKey = 1", () => {
+    const raw = { products: [] as never[], nextProductKey: undefined };
+    const normalized = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    expect(normalized.nextProductKey).toBe(1);
+  });
+
+  test("addProduct after fromBrief uses deterministic counter", () => {
+    const brief = savedBrief({
+      products: [
+        { id: "a", name: "A", primaryColor: "#000", logoPath: "" },
+        { id: "b", name: "B", primaryColor: "#111", logoPath: "" },
+      ],
+    });
+    const state = fromBrief(brief);
+    const withAdded = reduce(state, { type: "addProduct" });
+    expect(withAdded.products).toHaveLength(3);
+    expect(withAdded.products[2].key).toBe(3);
+    expect(withAdded.nextProductKey).toBe(4);
+  });
+
+  test("toBrief output contains no key or nextProductKey", () => {
+    const state = base();
+    const brief = toBrief(state);
+    expect("key" in brief).toBe(false);
+    expect("nextProductKey" in brief).toBe(false);
+    // Also check products don't have key
+    if (brief.products) {
+      brief.products.forEach((p) => {
+        expect("key" in p).toBe(false);
+      });
+    }
+  });
+
+  test("removeProduct removes exactly one by key", () => {
+    const state = fromBrief(savedBrief({
+      products: [
+        { id: "a", name: "A", primaryColor: "#000", logoPath: "" },
+        { id: "b", name: "B", primaryColor: "#111", logoPath: "" },
+        { id: "c", name: "C", primaryColor: "#222", logoPath: "" },
+        { id: "d", name: "D", primaryColor: "#333", logoPath: "" },
+        { id: "e", name: "E", primaryColor: "#444", logoPath: "" },
+      ],
+    }));
+    const removed = reduce(state, { type: "removeProduct", key: 3 });
+    expect(removed.products).toHaveLength(4);
+    expect(removed.products.map((p) => p.key)).not.toContain(3);
+    expect(removed.products.map((p) => p.key)).toEqual([1, 2, 4, 5]);
   });
 });

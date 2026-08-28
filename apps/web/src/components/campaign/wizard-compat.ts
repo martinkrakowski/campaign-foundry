@@ -4,6 +4,7 @@ import {
   slugify,
   approvedHeadlines as baseApprovedHeadlines,
   PLAN_DEBOUNCE_MS as BASE_PLAN_DEBOUNCE_MS,
+  emptyProduct,
 } from "./editor-state";
 
 export const WIZARD_STEPS = ["type", "products", "copy", "policy", "output", "review"] as const;
@@ -35,6 +36,7 @@ export interface WizardState {
   campaignMessage: string;
   localizedMessage: string;
   products: ProductDraft[];
+  nextProductKey: number;
   variation: {
     count: string;
     seed: string;
@@ -73,22 +75,6 @@ export function stepsFor(mode: CampaignMode): readonly WizardStepId[] {
   return mode === "variation" ? VARIATION_STEPS : CLASSIC_STEPS;
 }
 
-let nextProductKey = 1;
-
-export function emptyProduct(): ProductDraft {
-  const key = nextProductKey;
-  nextProductKey += 1;
-  return {
-    key,
-    id: "",
-    name: "",
-    primaryColor: "#1473E6",
-    logoPath: "",
-    inputAsset: "",
-    idTouched: false,
-  };
-}
-
 export const initialWizardState: WizardState = {
   stepIndex: 0,
   mode: "brief",
@@ -97,7 +83,8 @@ export const initialWizardState: WizardState = {
   targetAudience: "",
   campaignMessage: "",
   localizedMessage: "",
-  products: [emptyProduct(), emptyProduct()],
+  products: [emptyProduct(1), emptyProduct(2)],
+  nextProductKey: 3,
   variation: {
     count: "12",
     seed: "",
@@ -159,7 +146,11 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
       };
     }
     case "addProduct":
-      return { ...state, products: [...state.products, emptyProduct()] };
+      return {
+        ...state,
+        products: [...state.products, emptyProduct(state.nextProductKey)],
+        nextProductKey: state.nextProductKey + 1,
+      };
     case "removeProduct":
       return { ...state, products: state.products.filter((product) => product.key !== action.key) };
     case "setVariation":

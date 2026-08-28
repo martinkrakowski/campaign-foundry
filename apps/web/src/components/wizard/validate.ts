@@ -17,7 +17,7 @@ export type FieldErrors = Record<string, string>;
 function toEditorState(state: WizardState): EditorState {
   // This is a simplified conversion - in reality, we'd need a proper conversion
   // For now, return a minimal EditorState
-  return {
+    return {
     source: { kind: "new", tempId: "temp" },
     mode: state.mode,
     briefId: state.briefId,
@@ -25,7 +25,8 @@ function toEditorState(state: WizardState): EditorState {
     targetAudience: state.targetAudience,
     campaignMessage: state.campaignMessage,
     localizedMessage: "",
-    products: [],
+    products: state.products,
+    nextProductKey: Math.max(...state.products.map((p) => p.key), 0) + 1,
     treatments: [],
     variation: {
       count: state.variation.count,

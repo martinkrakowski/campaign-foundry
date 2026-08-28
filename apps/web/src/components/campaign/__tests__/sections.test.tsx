@@ -312,7 +312,7 @@ describe("TreatmentsSection", () => {
 describe("ProductsSection", () => {
   const uploadFile = async (container: HTMLElement, key: number) => {
     const user = userEvent.setup();
-    const input = container.querySelector(`#logo-upload-${key}`) as HTMLInputElement;
+    const input = container.querySelector(`[data-testid="logo-upload-${key}"]`) as HTMLInputElement;
     await user.upload(input, new File(["x"], "logo.png", { type: "image/png" }));
   };
 
@@ -388,7 +388,7 @@ describe("ProductsSection", () => {
     const user = userEvent.setup();
     const s = state();
     const { container } = render(<ProductsSection state={s} dispatch={vi.fn()} errors={{}} />);
-    const input = container.querySelector(`#logo-upload-${s.products[0].key}`) as HTMLInputElement;
+    const input = container.querySelector(`[data-testid="logo-upload-${s.products[0].key}"]`) as HTMLInputElement;
     const click = vi.spyOn(input, "click");
     await user.click(screen.getAllByText("Upload")[0]);
     expect(click).toHaveBeenCalled();
@@ -397,7 +397,7 @@ describe("ProductsSection", () => {
   test("a change event with no file selected does nothing", () => {
     const s = state();
     const { container } = render(<ProductsSection state={s} dispatch={vi.fn()} errors={{}} />);
-    const input = container.querySelector(`#logo-upload-${s.products[0].key}`) as HTMLInputElement;
+    const input = container.querySelector(`[data-testid="logo-upload-${s.products[0].key}"]`) as HTMLInputElement;
     const before = vi.mocked(globalThis.fetch).mock.calls.length;
     input.dispatchEvent(new Event("change", { bubbles: true }));
     expect(vi.mocked(globalThis.fetch).mock.calls.length).toBe(before);
