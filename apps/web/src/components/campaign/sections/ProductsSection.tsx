@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useId } from "react";
 import type { ChangeEvent, Dispatch } from "react";
 import { Button, Input } from "@/components/ui";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
@@ -8,6 +8,84 @@ import type { FieldErrors } from "@/components/campaign/validate";
 import { SectionShell, Field } from "./IdentitySection";
 import { uploadAsset, isBriefsApiError, unknownErrorMessage } from "@/lib/briefs-api";
 import { assetFileName, fileToBase64 } from "@/components/campaign/editor-state";
+
+function ProductRow({ product, index, dispatch, uploadingKeys, onLogoFile, errors }: {
+  product: EditorState["products"][number];
+  index: number;
+  dispatch: Dispatch<EditorAction>;
+  uploadingKeys: ReadonlySet<number>;
+  onLogoFile: (key: number, productId: string, event: ChangeEvent<HTMLInputElement>) => void;
+  errors: FieldErrors;
+}) {
+  const uploadId = useId();
+  const inputId = `logo-upload-${uploadId}`;
+
+  return (
+    <div className="space-y-3 rounded-lg border border-border bg-surface p-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Field label="Name" error={errors[`product-${index}-name`]}>
+          <Input
+            value={product.name}
+            onChange={(e) =>
+              dispatch({ type: "setProduct", key: product.key, patch: { name: e.target.value } })
+            }
+            invalid={Boolean(errors[`product-${index}-name`])}
+          />
+        </Field>
+        <Field label="ID" error={errors[`product-${index}-id`]}>
+          <Input
+            value={product.id}
+            onChange={(e) =>
+              dispatch({ type: "setProduct", key: product.key, patch: { id: e.target.value } })
+            }
+            invalid={Boolean(errors[`product-${index}-id`])}
+          />
+        </Field>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Field label="Primary Colour" error={errors[`product-${index}-color`]}>
+          <Input
+            value={product.primaryColor}
+            onChange={(e) =>
+              dispatch({ type: "setProduct", key: product.key, patch: { primaryColor: e.target.value } })
+            }
+            invalid={Boolean(errors[`product-${index}-color`])}
+          />
+        </Field>
+        <Field label="Logo Path" error={errors[`product-${index}-logo`]}>
+          <div className="flex gap-2">
+            <Input
+              value={product.logoPath}
+              onChange={(e) =>
+                dispatch({ type: "setProduct", key: product.key, patch: { logoPath: e.target.value } })
+              }
+              invalid={Boolean(errors[`product-${index}-logo`])}
+            />
+             <input
+               type="file"
+               accept="image/png,image/jpeg"
+               className="hidden"
+               id={inputId}
+               aria-label="Upload product logo"
+               onChange={(e) => void onLogoFile(product.key, product.id, e)}
+             />
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => document.getElementById(inputId)?.click()}
+              disabled={uploadingKeys.has(product.key)}
+            >
+              {uploadingKeys.has(product.key) ? "Uploading..." : "Upload"}
+            </Button>
+          </div>
+        </Field>
+      </div>
+      <Button variant="ghost" size="sm" onClick={() => dispatch({ type: "removeProduct", key: product.key })}>
+        Remove
+      </Button>
+    </div>
+  );
+}
 
 export function ProductsSection({ state, dispatch, errors }: { state: EditorState; dispatch: Dispatch<EditorAction>; errors: FieldErrors }) {
   const [uploadError, setUploadError] = useState<string | undefined>();
@@ -60,68 +138,15 @@ export function ProductsSection({ state, dispatch, errors }: { state: EditorStat
         </Button>
       </div>
       {state.products.map((product, index) => (
-        <div key={product.key} className="space-y-3 rounded-lg border border-border bg-surface p-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Name" error={errors[`product-${index}-name`]}>
-              <Input
-                value={product.name}
-                onChange={(e) =>
-                  dispatch({ type: "setProduct", key: product.key, patch: { name: e.target.value } })
-                }
-                invalid={Boolean(errors[`product-${index}-name`])}
-              />
-            </Field>
-            <Field label="ID" error={errors[`product-${index}-id`]}>
-              <Input
-                value={product.id}
-                onChange={(e) =>
-                  dispatch({ type: "setProduct", key: product.key, patch: { id: e.target.value } })
-                }
-                invalid={Boolean(errors[`product-${index}-id`])}
-              />
-            </Field>
-          </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Primary Colour" error={errors[`product-${index}-color`]}>
-              <Input
-                value={product.primaryColor}
-                onChange={(e) =>
-                  dispatch({ type: "setProduct", key: product.key, patch: { primaryColor: e.target.value } })
-                }
-                invalid={Boolean(errors[`product-${index}-color`])}
-              />
-            </Field>
-            <Field label="Logo Path" error={errors[`product-${index}-logo`]}>
-              <div className="flex gap-2">
-                <Input
-                  value={product.logoPath}
-                  onChange={(e) =>
-                    dispatch({ type: "setProduct", key: product.key, patch: { logoPath: e.target.value } })
-                  }
-                  invalid={Boolean(errors[`product-${index}-logo`])}
-                />
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg"
-                  className="hidden"
-                  id={`logo-upload-${product.key}`}
-                  onChange={(e) => void onLogoFile(product.key, product.id, e)}
-                />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => document.getElementById(`logo-upload-${product.key}`)?.click()}
-                  disabled={uploadingKeys.has(product.key)}
-                >
-                  {uploadingKeys.has(product.key) ? "Uploading..." : "Upload"}
-                </Button>
-              </div>
-            </Field>
-          </div>
-          <Button variant="ghost" size="sm" onClick={() => dispatch({ type: "removeProduct", key: product.key })}>
-            Remove
-          </Button>
-        </div>
+        <ProductRow
+          key={product.key}
+          product={product}
+          index={index}
+          dispatch={dispatch}
+          uploadingKeys={uploadingKeys}
+          onLogoFile={onLogoFile}
+          errors={errors}
+        />
       ))}
     </SectionShell>
   );

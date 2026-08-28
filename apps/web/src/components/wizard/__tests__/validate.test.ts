@@ -61,7 +61,7 @@ describe("validateStep", () => {
     };
     expect(validateStep("products", one)).toEqual({});
     expect(
-      validateStep("products", { ...initialWizardState, mode: "variation", products: [emptyProduct()] })
+      validateStep("products", { ...initialWizardState, mode: "variation", products: [emptyProduct(1)] })
         .products,
     ).toMatch(/randomized/);
   });

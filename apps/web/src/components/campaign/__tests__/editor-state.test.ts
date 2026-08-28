@@ -24,9 +24,14 @@ import {
   loadDraftFromStorage,
   purgeDraftFromStorage,
   canPlan,
+  normalizeDraftState,
   type EditorState,
   type EditorAction,
 } from "../editor-state";
+import { dumpBrief } from "../../wizard/dump-brief";
+import { load } from "js-yaml";
+import fs from "node:fs";
+import path from "node:path";
 
 const reduce = (state: EditorState, ...actions: EditorAction[]): EditorState =>
   actions.reduce(editorReducer, state);
@@ -48,8 +53,8 @@ const savedBrief = (over: Partial<CampaignBrief> = {}): CampaignBrief =>
 
 describe("value helpers", () => {
   test("emptyProduct hands out a fresh key each call and sane defaults", () => {
-    const a = emptyProduct();
-    const b = emptyProduct();
+    const a = emptyProduct(1);
+    const b = emptyProduct(2);
     expect(b.key).toBe(a.key + 1);
     expect(a).toMatchObject({ id: "", name: "", primaryColor: "#1473E6", logoPath: "", inputAsset: "", idTouched: false });
   });
@@ -273,6 +278,7 @@ describe("editorReducer — variation axes", () => {
   test("togglePlatform removes and restores in canonical order", () => {
     const off = reduce(base(), { type: "togglePlatform", value: STATIC_PLATFORMS[1] });
     expect(off.platforms).toEqual([STATIC_PLATFORMS[0], STATIC_PLATFORMS[2]]);
+    expect(off.outputExplicit).toBe(true);
     expect(reduce(off, { type: "togglePlatform", value: STATIC_PLATFORMS[1] }).platforms).toEqual([...STATIC_PLATFORMS]);
   });
 
@@ -320,6 +326,7 @@ describe("editorReducer — motion, duration and formats", () => {
   test("toggleFormat adds then removes", () => {
     const on = reduce(base(), { type: "toggleFormat", value: "motion" });
     expect(on.formats).toEqual(["static", "motion"]);
+    expect(on.outputExplicit).toBe(true);
     expect(reduce(on, { type: "toggleFormat", value: "motion" }).formats).toEqual(["static"]);
   });
 });
@@ -458,6 +465,38 @@ describe("toBrief", () => {
     expect(toBrief(filled())).not.toHaveProperty("treatments");
     const withTreatments = reduce(filled(), { type: "addTreatment" });
     expect(toBrief(withTreatments).treatments).toHaveLength(1);
+  });
+
+  test("mode and output are omitted when they equal the absent-key defaults", () => {
+    // absent mode means classic and absent output means the static pipeline —
+    // writing them would grow every classic brief on save and read a freshly
+    // loaded file back as dirty (its snapshot carries no such keys)
+    const brief = toBrief(filled());
+    expect(brief).not.toHaveProperty("mode");
+    expect(brief).not.toHaveProperty("output");
+  });
+
+  test("a variation mode and a diverging output are written", () => {
+    expect(toBrief(filled({ mode: "variation" })).mode).toBe("variation");
+    const motion = toBrief(filled({ formats: ["static", "motion"] }));
+    expect(motion.output).toEqual({ formats: ["static", "motion"], platforms: [...STATIC_PLATFORMS] });
+  });
+
+  test("an output the loaded brief declared stays written even at default values", () => {
+    const declared = fromBrief(
+      savedBrief({ output: { formats: ["static"], platforms: [...STATIC_PLATFORMS] } }),
+      { file: "camp.yaml" },
+    );
+    expect(toBrief(declared).output).toEqual({ formats: ["static"], platforms: [...STATIC_PLATFORMS] });
+  });
+
+  test("an output the user has toggled stays written even back at default values", () => {
+    const toggled = reduce(
+      filled(),
+      { type: "toggleFormat", value: "motion" },
+      { type: "toggleFormat", value: "motion" },
+    );
+    expect(toBrief(toggled).output).toEqual({ formats: ["static"], platforms: [...STATIC_PLATFORMS] });
   });
 
   test("localizedMessage is emitted only when it is non-blank after trimming", () => {
@@ -686,6 +725,28 @@ describe("draft storage", () => {
     expect(loadDraftFromStorage(state)?.variation).toEqual(base().variation);
   });
 
+  test("an unusable product entry is replaced, not dereferenced, so the draft survives", () => {
+    // Reading `.key` off a null entry throws inside loadDraftFromStorage's try/catch,
+    // which returns null — the user loses every recovered edit because one entry was junk.
+    const state = { ...base(), briefId: "camp" };
+    const draft = {
+      ...state,
+      products: [null, "not-a-product", { ...state.products[0], key: 7 }],
+      nextProductKey: 8,
+    };
+    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: draft, timestamp: 1 }));
+
+    const restored = loadDraftFromStorage(state);
+    expect(restored).not.toBeNull();
+    const products = (restored as EditorState).products;
+    expect(products).toHaveLength(3);
+    expect(products.map((p) => p.key)).toEqual([1, 2, 7]);
+    expect(products[0].name).toBe("");
+    expect(products[2].key).toBe(7);
+    // and the counter still outlives every key
+    expect((restored as EditorState).nextProductKey).toBe(8);
+  });
+
   test("a present mode survives, and an invalid one falls back to brief instead of leaking", () => {
     const state = { ...base(), briefId: "camp" };
     const store = (mode: unknown) =>
@@ -903,5 +964,150 @@ describe("isPristine", () => {
     expect(isPristine(initialEditorState())).toBe(true);
     expect(isPristine(initialEditorState("variation"))).toBe(true);
     expect(isPristine(reduce(base(), { type: "patch", patch: { briefId: "x" } }))).toBe(false);
+  });
+});
+
+describe("deterministic product keys (D16)", () => {
+  test("fromBrief of a 3-product brief yields keys 1, 2, 3 and counter 4", () => {
+    const brief = savedBrief({
+      products: [
+        { id: "a", name: "A", primaryColor: "#000", logoPath: "" },
+        { id: "b", name: "B", primaryColor: "#111", logoPath: "" },
+        { id: "c", name: "C", primaryColor: "#222", logoPath: "" },
+      ],
+    });
+    const state = fromBrief(brief);
+    expect(state.products.map((p) => p.key)).toEqual([1, 2, 3]);
+    expect(state.nextProductKey).toBe(4);
+  });
+
+  test("fromBrief called twice yields identical keys (no Date.now)", () => {
+    const brief = savedBrief({
+      products: [{ id: "a", name: "A", primaryColor: "#000", logoPath: "" }],
+    });
+    const state1 = fromBrief(brief);
+    const state2 = fromBrief(brief);
+    expect(state1.products[0].key).toBe(state2.products[0].key);
+    expect(state1.nextProductKey).toBe(state2.nextProductKey);
+  });
+
+  test("a restored 5-product draft without counter gets nextProductKey = 6", () => {
+    const state = { ...base(), products: [emptyProduct(1), emptyProduct(2), emptyProduct(3), emptyProduct(4), emptyProduct(5)] };
+    const raw = { ...state, nextProductKey: undefined };
+    delete (raw as Record<string, unknown>).nextProductKey;
+    const normalized = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    expect(normalized.nextProductKey).toBe(6);
+  });
+
+  test("a restored draft with stored counter of 42 keeps 42", () => {
+    const state = { ...base(), products: [emptyProduct(1)], nextProductKey: 42 };
+    const normalized = normalizeDraftState(state as unknown as Record<string, unknown>);
+    expect(normalized.nextProductKey).toBe(42);
+  });
+
+  test("a restored draft with a stale counter below the highest key clamps to maxKey + 1", () => {
+    const state = {
+      ...base(),
+      products: [emptyProduct(1), emptyProduct(2), emptyProduct(3), emptyProduct(4), emptyProduct(5)],
+      nextProductKey: 3,
+    };
+    const normalized = normalizeDraftState(state as unknown as Record<string, unknown>);
+    expect(normalized.nextProductKey).toBe(6);
+  });
+
+  test("addProduct after a stale-counter restore cannot mint an existing key", () => {
+    const restored = normalizeDraftState({
+      ...base(),
+      products: [emptyProduct(1), emptyProduct(2), emptyProduct(3), emptyProduct(4), emptyProduct(5)],
+      nextProductKey: 3,
+    } as unknown as Record<string, unknown>);
+    const added = reduce(restored, { type: "addProduct" });
+    expect(added.products.map((p) => p.key)).toEqual([1, 2, 3, 4, 5, 6]);
+    const removed = reduce(added, { type: "removeProduct", key: 6 });
+    expect(removed.products).toHaveLength(5);
+  });
+
+  test("a restored draft with invalid product keys repairs them to their position", () => {
+    const raw = {
+      ...base(),
+      products: [
+        { ...emptyProduct(1), id: "a" },
+        { ...emptyProduct(0), id: "b" },
+        { ...emptyProduct(1), id: "c", key: "not-a-number" },
+      ],
+    };
+    const normalized = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    expect(normalized.products.map((p) => p.key)).toEqual([1, 2, 3]);
+  });
+
+  test("a restored draft with no products gets nextProductKey = 1", () => {
+    const raw = { products: [] as never[], nextProductKey: undefined };
+    const normalized = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    expect(normalized.nextProductKey).toBe(1);
+  });
+
+  test("a restored draft keeps its explicit-output flag, and a wrong-typed one is repaired", () => {
+    const kept = normalizeDraftState({ ...base(), outputExplicit: true } as unknown as Record<string, unknown>);
+    expect(kept.outputExplicit).toBe(true);
+    const repaired = normalizeDraftState({ ...base(), outputExplicit: "yes" } as unknown as Record<string, unknown>);
+    expect(repaired.outputExplicit).toBe(false);
+  });
+
+  test("addProduct after fromBrief uses deterministic counter", () => {
+    const brief = savedBrief({
+      products: [
+        { id: "a", name: "A", primaryColor: "#000", logoPath: "" },
+        { id: "b", name: "B", primaryColor: "#111", logoPath: "" },
+      ],
+    });
+    const state = fromBrief(brief);
+    const withAdded = reduce(state, { type: "addProduct" });
+    expect(withAdded.products).toHaveLength(3);
+    expect(withAdded.products[2].key).toBe(3);
+    expect(withAdded.nextProductKey).toBe(4);
+  });
+
+  test("toBrief output contains no key or nextProductKey", () => {
+    const brief = savedBrief({
+      products: [{ id: "a", name: "A", primaryColor: "#000", logoPath: "" }],
+    });
+    const stateWithProduct = fromBrief(brief);
+    const roundTripped = toBrief(stateWithProduct);
+    const serialised = JSON.stringify(roundTripped);
+    expect(serialised).not.toContain('"key"');
+    expect(serialised).not.toContain('"nextProductKey"');
+  });
+
+  test("removeProduct removes exactly one by key", () => {
+    const state = fromBrief(savedBrief({
+      products: [
+        { id: "a", name: "A", primaryColor: "#000", logoPath: "" },
+        { id: "b", name: "B", primaryColor: "#111", logoPath: "" },
+        { id: "c", name: "C", primaryColor: "#222", logoPath: "" },
+        { id: "d", name: "D", primaryColor: "#333", logoPath: "" },
+        { id: "e", name: "E", primaryColor: "#444", logoPath: "" },
+      ],
+    }));
+    const removed = reduce(state, { type: "removeProduct", key: 3 });
+    expect(removed.products).toHaveLength(4);
+    expect(removed.products.map((p) => p.key)).not.toContain(3);
+    expect(removed.products.map((p) => p.key)).toEqual([1, 2, 4, 5]);
+  });
+});
+
+describe("whole-corpus round-trip", () => {
+  const briefDir = path.join(process.cwd(), "briefs");
+  const files = fs.readdirSync(briefDir).filter((f) => f.endsWith(".yaml"));
+
+  test.each(files)("%s round-trips fromBrief → toBrief → serialise byte-for-byte", (file) => {
+    const filePath = path.join(briefDir, file);
+    const yamlText = fs.readFileSync(filePath, "utf-8");
+    const parsed = load(yamlText) as CampaignBrief;
+    const entry = { file, revision: undefined as unknown as undefined };
+    const state = fromBrief(parsed, entry);
+    const roundTrippedBrief = toBrief(state);
+    const originalSerialised = dumpBrief(parsed);
+    const roundTrippedSerialised = dumpBrief(roundTrippedBrief);
+    expect(roundTrippedSerialised).toBe(originalSerialised);
   });
 });

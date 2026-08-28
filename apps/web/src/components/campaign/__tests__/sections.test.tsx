@@ -1,7 +1,8 @@
 import { describe, test, expect, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { initialEditorState, type EditorState } from "../editor-state";
+import { renderToString } from "react-dom/server";
+import { initialEditorState, emptyProduct, type EditorState } from "../editor-state";
 import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, OutputSection } from "../sections";
 import { ErrorStrip } from "../ErrorStrip";
 
@@ -310,9 +311,11 @@ describe("TreatmentsSection", () => {
 });
 
 describe("ProductsSection", () => {
-  const uploadFile = async (container: HTMLElement, key: number) => {
+  const logoInput = (): HTMLInputElement =>
+    screen.getAllByLabelText("Upload product logo")[0] as HTMLInputElement;
+
+  const uploadFile = async (input: HTMLInputElement) => {
     const user = userEvent.setup();
-    const input = container.querySelector(`#logo-upload-${key}`) as HTMLInputElement;
     await user.upload(input, new File(["x"], "logo.png", { type: "image/png" }));
   };
 
@@ -344,9 +347,9 @@ describe("ProductsSection", () => {
     const dispatch = vi.fn();
     mockFetch(() => json({ path: "assets/inputs/camp/alpha-logo.png" }, 201));
     const s = state();
-    const { container } = render(<ProductsSection state={s} dispatch={dispatch} errors={{}} />);
+    render(<ProductsSection state={s} dispatch={dispatch} errors={{}} />);
 
-    await uploadFile(container, s.products[0].key);
+    await uploadFile(logoInput());
 
     await waitFor(() =>
       expect(dispatch).toHaveBeenCalledWith({
@@ -361,9 +364,9 @@ describe("ProductsSection", () => {
     const dispatch = vi.fn();
     mockFetch(() => json({ error: "exists" }, 409));
     const s = state();
-    const { container } = render(<ProductsSection state={s} dispatch={dispatch} errors={{}} />);
+    render(<ProductsSection state={s} dispatch={dispatch} errors={{}} />);
 
-    await uploadFile(container, s.products[0].key);
+    await uploadFile(logoInput());
 
     await waitFor(() =>
       expect(dispatch).toHaveBeenCalledWith({
@@ -377,9 +380,9 @@ describe("ProductsSection", () => {
   test("any other upload failure is surfaced in the section", async () => {
     mockFetch(() => json({ error: "disk full" }, 500));
     const s = state();
-    const { container } = render(<ProductsSection state={s} dispatch={vi.fn()} errors={{}} />);
+    render(<ProductsSection state={s} dispatch={vi.fn()} errors={{}} />);
 
-    await uploadFile(container, s.products[0].key);
+    await uploadFile(logoInput());
 
     expect(await screen.findByText(/disk full/)).toBeTruthy();
   });
@@ -387,8 +390,8 @@ describe("ProductsSection", () => {
   test("the Upload button opens the hidden file input", async () => {
     const user = userEvent.setup();
     const s = state();
-    const { container } = render(<ProductsSection state={s} dispatch={vi.fn()} errors={{}} />);
-    const input = container.querySelector(`#logo-upload-${s.products[0].key}`) as HTMLInputElement;
+    render(<ProductsSection state={s} dispatch={vi.fn()} errors={{}} />);
+    const input = logoInput();
     const click = vi.spyOn(input, "click");
     await user.click(screen.getAllByText("Upload")[0]);
     expect(click).toHaveBeenCalled();
@@ -396,11 +399,61 @@ describe("ProductsSection", () => {
 
   test("a change event with no file selected does nothing", () => {
     const s = state();
-    const { container } = render(<ProductsSection state={s} dispatch={vi.fn()} errors={{}} />);
-    const input = container.querySelector(`#logo-upload-${s.products[0].key}`) as HTMLInputElement;
+    render(<ProductsSection state={s} dispatch={vi.fn()} errors={{}} />);
+    const input = logoInput();
     const before = vi.mocked(globalThis.fetch).mock.calls.length;
     input.dispatchEvent(new Event("change", { bubbles: true }));
     expect(vi.mocked(globalThis.fetch).mock.calls.length).toBe(before);
+  });
+
+  test("renders identical file-input ids from two independent initial states, and no id or data-* attribute embeds a product key", () => {
+    // SSR/CSR determinism (D16): server-render twice from two independently
+    // constructed states — different temp id, different session — then hydrate.
+    // The ids derive from useId's position in the tree, never from the draft, so
+    // they must be identical all the way through. (Client-side useId is a global
+    // counter that never resets across mounts, so "identical" is only observable
+    // server-to-server and through hydration — exactly where the pre-D16
+    // `logo-upload-${product.key}` ids threw the hydration mismatch.)
+    const ssrFileIds = (html: string) =>
+      Array.from(html.matchAll(/id="(logo-upload-[^"]*)"/g)).map((m) => m[1]);
+    const attrValues = (html: string) =>
+      Array.from(html.matchAll(/\s(?:id|data-[\w-]+)="([^"]*)"/g)).map((m) => m[1]);
+    const first = initialEditorState();
+    const second = initialEditorState();
+    const html1 = renderToString(<ProductsSection state={first} dispatch={vi.fn()} errors={{}} />);
+    const html2 = renderToString(<ProductsSection state={second} dispatch={vi.fn()} errors={{}} />);
+    expect(ssrFileIds(html2)).toEqual(ssrFileIds(html1));
+    expect(ssrFileIds(html1)).toHaveLength(first.products.length);
+
+    // The same tree keyed differently (41, 42) must render the same ids — if an
+    // id embedded its product key, moving the keys would move the ids.
+    const keyed: EditorState = { ...initialEditorState(), products: [emptyProduct(41), emptyProduct(42)] };
+    const html3 = renderToString(<ProductsSection state={keyed} dispatch={vi.fn()} errors={{}} />);
+    expect(ssrFileIds(html3)).toEqual(ssrFileIds(html1));
+
+    const container = document.createElement("div");
+    container.innerHTML = html1;
+    const { unmount } = render(<ProductsSection state={first} dispatch={vi.fn()} errors={{}} />, {
+      hydrate: true,
+      container,
+    });
+    expect(
+      Array.from(container.querySelectorAll('input[type="file"]')).map((el) => el.getAttribute("id")),
+    ).toEqual(ssrFileIds(html1));
+
+    // The literal probe: keys (41, 42) cannot occur in this tree's positional ids,
+    // so a hit inside any id or data-* attribute value could only mean a
+    // key-derived identifier.
+    const domAttrValues = Array.from(container.querySelectorAll("*")).flatMap((el) =>
+      Array.from(el.attributes)
+        .filter((attr) => attr.name === "id" || attr.name.startsWith("data-"))
+        .map((attr) => attr.value),
+    );
+    for (const value of [...attrValues(html1), ...attrValues(html3), ...domAttrValues]) {
+      expect(value).not.toContain("41");
+      expect(value).not.toContain("42");
+    }
+    unmount();
   });
 });
 

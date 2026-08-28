@@ -26,11 +26,7 @@ export interface ProductDraft {
   idTouched: boolean;
 }
 
-let nextProductKey = 1;
-
-export function emptyProduct(): ProductDraft {
-  const key = nextProductKey;
-  nextProductKey += 1;
+export function emptyProduct(key: number): ProductDraft {
   return {
     key,
     id: "",
@@ -39,6 +35,27 @@ export function emptyProduct(): ProductDraft {
     logoPath: "",
     inputAsset: "",
     idTouched: false,
+  };
+}
+
+export function nextKeyAfter(products: ProductDraft[]): number {
+  const numericKeys = products.map((p) => p.key).filter((k): k is number => typeof k === "number" && k > 0);
+  return numericKeys.length > 0 ? Math.max(...numericKeys) + 1 : 1;
+}
+
+/**
+ * The one allocation path for a new product: append a draft keyed `nextKey` and
+ * burn the counter. `editorReducer.addProduct` and `wizardReducer.addProduct`
+ * both call this — they were verbatim copies, and a third copy is how the
+ * module-level counter regressed in the first place.
+ */
+export function allocateProduct(
+  products: ProductDraft[],
+  nextKey: number,
+): { products: ProductDraft[]; nextProductKey: number } {
+  return {
+    products: [...products, emptyProduct(nextKey)],
+    nextProductKey: nextKey + 1,
   };
 }
 
@@ -93,6 +110,7 @@ export interface EditorState {
   campaignMessage: string;
   localizedMessage: string;
   products: ProductDraft[];
+  nextProductKey: number;
   treatments: TreatmentDraft[];
   variation: {
     count: string;
@@ -111,6 +129,14 @@ export interface EditorState {
   duration: number[];
   formats: string[];
   platforms: string[];
+  /**
+   * Whether the output block must be written even when it equals the absent-key
+   * default (static × the static platforms): true when the loaded brief declared
+   * `output`, or the user has toggled a format or platform. A default-valued
+   * output that was never declared serialises as the absent key instead — the
+   * static platforms carry zero insets (D11), so both forms render identically.
+   */
+  outputExplicit: boolean;
   pool: CopyPool | null;
   headlineAxisDropped: boolean;
   appliedSnapshot: CampaignBrief | null;
@@ -163,7 +189,8 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
     targetAudience: "",
     campaignMessage: "",
     localizedMessage: "",
-    products: [emptyProduct(), emptyProduct()],
+    products: [emptyProduct(1), emptyProduct(2)],
+    nextProductKey: 3,
     treatments: [],
     variation: {
       count: "12",
@@ -182,6 +209,7 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
     duration: [],
     formats: ["static"],
     platforms: [...STATIC_PLATFORMS],
+    outputExplicit: false,
     pool: null,
     headlineAxisDropped: false,
     appliedSnapshot: null,
@@ -222,7 +250,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       };
     }
     case "addProduct":
-      return { ...state, products: [...state.products, emptyProduct()] };
+      return { ...state, ...allocateProduct(state.products, state.nextProductKey) };
     case "removeProduct":
       return { ...state, products: state.products.filter((product) => product.key !== action.key) };
     case "setTreatment": {
@@ -303,10 +331,16 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       const next = state.formats.includes(action.value)
         ? state.formats.filter((f) => f !== action.value)
         : [...state.formats, action.value];
-      return { ...state, formats: next };
+      // The user has spoken about output: it must persist even if the toggles
+      // happen to land back on the absent-key default.
+      return { ...state, formats: next, outputExplicit: true };
     }
     case "togglePlatform":
-      return { ...state, platforms: toggleOrdered(state.platforms, action.value, PLATFORM_ORDER) };
+      return {
+        ...state,
+        platforms: toggleOrdered(state.platforms, action.value, PLATFORM_ORDER),
+        outputExplicit: true,
+      };
     case "setPool": {
       if (action.briefId !== state.briefId) return state;
       const none = approvedHeadlines(action.pool) === 0;
@@ -384,17 +418,29 @@ function toTreatment(draft: TreatmentDraft): Treatment {
 }
 
 export function toBrief(state: EditorState): CampaignBrief {
+  // `mode` and `output` are optional in CampaignBrief — absent means the classic
+  // static pipeline, which is exactly what a fresh draft holds. Writing them
+  // unconditionally grew every classic brief on save (and made a freshly loaded
+  // file read as dirty: its snapshot carried no such keys), so they are emitted
+  // only when they say something the absent key would not: a variation mode, or
+  // an output the loaded brief declared, the user has toggled, or that diverges
+  // from the default. Rendering is unaffected either way — the static platforms
+  // keep zero insets (D11) — same discipline the ratio axis already follows.
+  const isDefaultOutput =
+    state.formats.length === 1 &&
+    state.formats[0] === "static" &&
+    state.platforms.length === STATIC_PLATFORMS.length &&
+    STATIC_PLATFORMS.every((platform) => state.platforms.includes(platform));
   const brief: CampaignBrief = {
     id: state.briefId,
     targetRegion: state.targetRegion,
     targetAudience: state.targetAudience,
     campaignMessage: state.campaignMessage,
     products: state.products.map(toProduct),
-    mode: state.mode,
-    output: {
-      formats: [...state.formats],
-      platforms: [...state.platforms],
-    },
+    ...(state.mode === "variation" ? { mode: state.mode } : {}),
+    ...(state.outputExplicit || !isDefaultOutput
+      ? { output: { formats: [...state.formats], platforms: [...state.platforms] } }
+      : {}),
   };
   const localized = state.localizedMessage.trim();
   const withCopy = localized ? { ...brief, localizedMessage: localized } : brief;
@@ -454,7 +500,10 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
   const source: EditorSource = entry
     ? { kind: "file", file: entry.file, loadedId: brief.id, savedSnapshot: brief, revision: entry.revision }
     : { kind: "new", tempId };
-  const products = brief.products.length > 0 ? brief.products.map((p, i) => ({ ...emptyProduct(), key: Date.now() + i, ...p, idTouched: true })) : [emptyProduct(), emptyProduct()];
+  const products = brief.products.length > 0
+    ? brief.products.map((p, i) => ({ ...emptyProduct(i + 1), ...p, idTouched: true }))
+    : [emptyProduct(1), emptyProduct(2)];
+  const nextProductKey = brief.products.length > 0 ? brief.products.length + 1 : 3;
   const treatments = brief.treatments?.map((t) => ({ id: t.id, layout: t.layout, tone: t.tone })) ?? [];
   const formats = [...(brief.output?.formats ?? ["static"])];
   const platforms = [...(brief.output?.platforms ?? [...STATIC_PLATFORMS])];
@@ -474,6 +523,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
     campaignMessage: brief.campaignMessage,
     localizedMessage: brief.localizedMessage ?? "",
     products,
+    nextProductKey,
     treatments,
     variation: {
       count: variation ? String(variation.count) : "12",
@@ -492,6 +542,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
     duration: list(axes?.duration, []),
     formats,
     platforms,
+    outputExplicit: brief.output !== undefined,
     pool: null,
     headlineAxisDropped: false,
     appliedSnapshot: null,
@@ -570,7 +621,7 @@ export function loadDraftFromStorage(state: EditorState): EditorState | null {
  * the only correct fallback for a draft that lost its own, and a burnt counter
  * value costs nothing — product keys need only be unique.
  */
-function normalizeDraftState(raw: Record<string, unknown>): EditorState {
+export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   const mode: CampaignMode = raw.mode === "variation" ? "variation" : "brief";
   const initial = initialEditorState(mode);
   const str = (value: unknown, fallback: string): string => (typeof value === "string" ? value : fallback);
@@ -598,18 +649,36 @@ function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     paletteShift: list(v.paletteShift, initial.variation.paletteShift),
     headline: typeof v.headline === "boolean" ? v.headline : initial.variation.headline,
   };
+  // A persisted array can hold anything: `list` only proves it is an array, so an
+  // entry that is not a usable object (a `null` from a hand-edited draft, a bare
+  // string) is replaced rather than dereferenced — reading `.key` off it would
+  // throw inside the loader's try/catch and silently discard the whole draft,
+  // losing every recovered edit D11 exists to keep.
+  const products = (list(raw.products, initial.products) as unknown[]).map((entry, i) => {
+    if (typeof entry !== "object" || entry === null) return emptyProduct(i + 1);
+    const draft = entry as ProductDraft;
+    return typeof draft.key === "number" && draft.key > 0 ? draft : { ...draft, key: i + 1 };
+  });
+  const storedNextProductKey = typeof raw.nextProductKey === "number" && raw.nextProductKey > 0 ? raw.nextProductKey : undefined;
+  // A stored counter is trusted only above the keys it must outlive: a stale one
+  // (≤ an existing key) would make addProduct mint a duplicate and removeProduct
+  // delete two products — the very collision D16 exists to prevent. A counter
+  // burned past the keys still wins; product keys only need to be unique.
+  const nextProductKey = Math.max(storedNextProductKey ?? 0, nextKeyAfter(products));
   return {
     ...initial,
     ...raw,
     source,
     mode,
-    products: list(raw.products, initial.products),
+    products,
+    nextProductKey,
     treatments: list(raw.treatments, initial.treatments),
     variation,
     motion: list(raw.motion, initial.motion),
     duration: list(raw.duration, initial.duration),
     formats: list(raw.formats, initial.formats),
     platforms: list(raw.platforms, initial.platforms),
+    outputExplicit: raw.outputExplicit === true,
   } as EditorState;
 }
 
