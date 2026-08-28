@@ -1,5 +1,5 @@
 import type { EditorState } from "./editor-state";
-import { LAYOUT_OPTIONS, TONE_OPTIONS, RATIO_OPTIONS, approvedHeadlines } from "./editor-state";
+import { LAYOUT_OPTIONS, TONE_OPTIONS, approvedHeadlines } from "./editor-state";
 import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
 
 export const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -41,26 +41,6 @@ export function drawableRatios(state: EditorState): string[] {
   return requested.filter((ratio) => packaged.has(ratio));
 }
 
-/**
- * The projected per-ratio deal of `count`: dealt round-robin across the
- * drawable ratios in panel order — the same round-robin the planner's coverage
- * pass uses, so every drawable ratio's share stays ≥ the floor while the
- * numbers differ per panel. Ratios not drawn (unselected or excluded) get 0.
- */
-export function ratioAllocation(state: EditorState): Record<string, number> {
-  const drawable = drawableRatios(state);
-  const allocation: Record<string, number> = {};
-  for (const ratio of RATIO_OPTIONS) allocation[ratio] = 0;
-  const count = Math.max(0, Number.parseInt(state.variation.count, 10) || 0);
-  if (drawable.length === 0) return allocation;
-  const base = Math.floor(count / drawable.length);
-  let remainder = count % drawable.length;
-  for (const ratio of drawable) {
-    allocation[ratio] = base + (remainder > 0 ? 1 : 0);
-    if (remainder > 0) remainder -= 1;
-  }
-  return allocation;
-}
 
 /**
  * How many distinct variants this brief's axes can produce — the planner's hard
@@ -228,7 +208,19 @@ export function validatePolicy(state: EditorState): FieldErrors {
   // (perRatio × the ratios it will draw > count); the editor says so before
   // the run instead of surfacing the shortfall as a plan error.
   const floor = Number.parseInt(state.variation.perRatio, 10) || 0;
-  const drawableCount = drawableRatios(state).length;
+  const drawable = drawableRatios(state);
+  const drawableCount = drawable.length;
+  // A selection the motion narrowing empties parses cleanly and saves, then
+  // VariationPolicy.fromBrief refuses it at plan time. D7 keeps Save open for a
+  // structurally valid brief, but the editor must still say the brief cannot run
+  // — otherwise the only feedback is a failed run.
+  if (state.variation.ratio.length > 0 && drawableCount === 0) {
+    const packaged = [...motionPackagedRatios(state)];
+    errors.ratio =
+      packaged.length > 0
+        ? `None of the selected ratios can be drawn: motion-only output can draw [${packaged.join(", ")}] only — select one of those, or add the static format.`
+        : "None of the selected ratios can be drawn: no selected platform packages motion at any ratio — add the static format, or a platform that packages motion.";
+  }
   const count = Number.parseInt(state.variation.count, 10) || 0;
   if (floor > 0 && floor * drawableCount > count) {
     errors.perRatio = `coverage.perRatio ${floor} × ${drawableCount} selected ratios exceeds count ${count} — lower the floor, raise the count, or select fewer ratios.`;

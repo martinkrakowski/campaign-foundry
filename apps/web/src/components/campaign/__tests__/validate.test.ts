@@ -5,7 +5,6 @@ import {
   maxMinDistance,
   motionPackagedRatios,
   motionUnavailableReason,
-  ratioAllocation,
   validateIdentity,
   validateCopy,
   validateProducts,
@@ -140,7 +139,7 @@ describe("axisProductSize", () => {
   });
 });
 
-describe("drawableRatios / ratioAllocation", () => {
+describe("drawableRatios", () => {
   test("a static or mixed brief draws every selected ratio", () => {
     expect(drawableRatios(valid())).toEqual(["1:1", "9:16", "16:9"]);
     const narrowed = { ...valid(), variation: { ...valid().variation, ratio: ["16:9"] } };
@@ -155,25 +154,37 @@ describe("drawableRatios / ratioAllocation", () => {
     expect(motionPackagedRatios(valid({ platforms: ["instagram-feed", "linkedin"] })).size).toBe(0);
   });
 
-  test("the deal is round-robin across the drawable ratios, so the numbers differ per panel", () => {
-    // 12 dealt across three ratios → 4 each
-    expect(ratioAllocation(valid())).toEqual({ "1:1": 4, "9:16": 4, "16:9": 4 });
-    // 8 across three → the first ratio in panel order takes the extra slot
-    const eight = { ...valid(), variation: { ...valid().variation, count: "8" } };
-    expect(ratioAllocation(eight)).toEqual({ "1:1": 3, "9:16": 3, "16:9": 2 });
-    // a narrowed selection deals the whole count among the selected ratios
-    const two = { ...eight, variation: { ...eight.variation, ratio: ["1:1", "16:9"] } };
-    expect(ratioAllocation(two)).toEqual({ "1:1": 4, "9:16": 0, "16:9": 4 });
-  });
-
-  test("ratios the plan will not draw get zero, and an empty draw deals nothing", () => {
-    const reel = valid({
+  test("a selection the narrowing empties is flagged in the editor, not left to the run", () => {
+    // Structurally valid, so D7 keeps Save open — but VariationPolicy.fromBrief
+    // refuses it at plan time, so the editor has to say the brief cannot run.
+    const noneDrawable = valid({
+      mode: "variation",
       formats: ["motion"],
       platforms: ["instagram-reel"],
       motion: ["ken-burns-in"],
-      variation: { ...valid().variation, ratio: ["1:1", "9:16"] },
+      variation: { ...valid().variation, ratio: ["1:1", "16:9"] },
     });
-    expect(ratioAllocation(reel)).toEqual({ "1:1": 0, "9:16": 12, "16:9": 0 });
+    expect(validatePolicy(noneDrawable).ratio).toMatch(
+      /None of the selected ratios can be drawn: motion-only output can draw \[9:16\] only/,
+    );
+
+    // and when no platform packages motion at all, the fix named is different
+    const noMotionPlatform = valid({
+      mode: "variation",
+      formats: ["motion"],
+      platforms: ["instagram-feed", "linkedin"],
+      motion: ["ken-burns-in"],
+      variation: { ...valid().variation, ratio: ["1:1"] },
+    });
+    expect(validatePolicy(noMotionPlatform).ratio).toMatch(
+      /no selected platform packages motion at any ratio/,
+    );
+
+    // a selection that still has a drawable member is not flagged
+    expect(validatePolicy(valid({ mode: "variation" })).ratio).toBeUndefined();
+  });
+
+  test("a selection the motion narrowing empties draws nothing at all", () => {
     const allExcluded = valid({
       formats: ["motion"],
       platforms: ["instagram-reel"],
@@ -181,12 +192,6 @@ describe("drawableRatios / ratioAllocation", () => {
       variation: { ...valid().variation, ratio: ["1:1"] },
     });
     expect(drawableRatios(allExcluded)).toEqual([]);
-    expect(ratioAllocation(allExcluded)).toEqual({ "1:1": 0, "9:16": 0, "16:9": 0 });
-  });
-
-  test("an unparseable count deals zeros rather than NaN", () => {
-    const state = { ...valid(), variation: { ...valid().variation, count: "" } };
-    expect(ratioAllocation(state)).toEqual({ "1:1": 0, "9:16": 0, "16:9": 0 });
   });
 });
 

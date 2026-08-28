@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { cn } from "../../lib/cn";
 
 export interface AxisCardProps {
@@ -10,6 +10,12 @@ export interface AxisCardProps {
   readonly children: ReactNode;
   /** Optional caption under the value; aria-hidden so it cannot extend the name. */
   readonly meta?: string;
+  /**
+   * Why this option is unavailable, or anything else assistive technology must
+   * hear. Exposed via `aria-describedby`, which — unlike content — never joins
+   * the accessible name, so the name stays exactly `value`.
+   */
+  readonly description?: string;
   readonly disabled?: boolean;
 }
 
@@ -30,13 +36,16 @@ export function AxisCard({
   onToggle,
   children,
   meta,
+  description,
   disabled = false,
 }: AxisCardProps): ReactNode {
+  const descriptionId = `axis-card-description-${useId()}`;
   return (
     <button
       type="button"
       aria-label={value}
       aria-pressed={selected}
+      {...(description === undefined ? {} : { "aria-describedby": descriptionId })}
       disabled={disabled}
       onClick={() => onToggle(value)}
       className={cn(
@@ -69,6 +78,11 @@ export function AxisCard({
           {meta}
         </span>
       ) : null}
+      {description === undefined ? null : (
+        <span id={descriptionId} className="text-[11px] text-warning">
+          {description}
+        </span>
+      )}
     </button>
   );
 }

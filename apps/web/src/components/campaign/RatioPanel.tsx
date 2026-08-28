@@ -20,8 +20,6 @@ export interface RatioPanelProps {
   /** Why the ratio is excluded — the same string on every excluded panel. */
   readonly reason: string | undefined;
   /** How many of `count` this ratio is projected to receive (0 when it is not drawn). */
-  readonly allocation: number;
-  readonly count: number;
   /** The shared per-ratio floor — one setting, displayed identically on every panel. */
   readonly floor: number;
   readonly onToggle: (value: string) => void;
@@ -30,9 +28,15 @@ export interface RatioPanelProps {
 /**
  * One selectable aspect ratio, built on AxisCard (which carries the pressed
  * state, the selected treatment and the focus ring). The panel previews the
- * canvas at its true proportion, its share of the count, and the shared
- * coverage floor — the floor is a single brief setting, so every panel shows
- * the same `≥ N each`, never a per-ratio number.
+ * canvas at its true proportion and the shared coverage floor — the floor is a
+ * single brief setting, so every panel shows the same `≥ N each`, never a
+ * per-ratio number.
+ *
+ * It deliberately shows no per-ratio *allocation*. The planner round-robins the
+ * deficient coverage axes and then fills to `count` from a seeded random draw
+ * (PlanVariationsUseCase), so above the floor no ratio has a predictable share.
+ * The floor is the only per-ratio number the system actually guarantees; the
+ * budget line beneath the panels carries the exact count arithmetic.
  *
  * An excluded ratio is muted with its reason, not a bare disabled box: gating
  * blocks *entering* the state, so an excluded ratio the brief already selects
@@ -43,8 +47,6 @@ export function RatioPanel({
   selected,
   excluded,
   reason,
-  allocation,
-  count,
   floor,
   onToggle,
 }: RatioPanelProps) {
@@ -55,6 +57,7 @@ export function RatioPanel({
       onToggle={onToggle}
       disabled={excluded && !selected}
       meta={`${ratio.width} × ${ratio.height}`}
+      {...(excluded && reason !== undefined ? { description: reason } : {})}
     >
       <span className="flex flex-col items-center gap-1">
         <RatioFrame ratio={ratio.value} />
@@ -62,16 +65,8 @@ export function RatioPanel({
           className={cn("font-mono text-[11px]", excluded ? "text-text-muted" : "text-text-secondary")}
           aria-hidden="true"
         >
-          {allocation} of {count}
-        </span>
-        <span className="font-mono text-[11px] text-text-muted" aria-hidden="true">
           {floor > 0 ? `≥ ${floor} each` : "no floor"}
         </span>
-        {excluded && reason !== undefined ? (
-          <span className="text-[11px] text-warning" aria-hidden="true">
-            {reason}
-          </span>
-        ) : null}
       </span>
     </AxisCard>
   );

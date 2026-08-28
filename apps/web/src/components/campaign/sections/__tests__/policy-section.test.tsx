@@ -251,21 +251,22 @@ describe("PolicySection — aspect ratio panels", () => {
     await user.click(square);
     expect(dispatch).toHaveBeenCalledWith({ type: "toggleRatio", value: "1:1" });
 
-    // the frame, the allocation and the floor are decoration carried by the card —
-    // they must never extend the name (the invariant every getByRole query leans on)
+    // the frame and the floor are decoration carried by the card — they must never
+    // extend the name (the invariant every getByRole query leans on)
     expect(square.querySelector("svg[aria-hidden='true']")).toBeTruthy();
-    expect(within(square).getByText("4 of 12").getAttribute("aria-hidden")).toBe("true");
     expect(within(square).getByText("≥ 1 each").getAttribute("aria-hidden")).toBe("true");
   });
 
-  test("each panel shows its pixel spec and its own share of the count", () => {
+  test("each panel shows its pixel spec, and never invents a per-ratio allocation", () => {
     render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
     const fieldset = ratioFieldset();
     expect(within(fieldset).getByText("1080 × 1080")).toBeTruthy();
     expect(within(fieldset).getByText("1080 × 1920")).toBeTruthy();
     expect(within(fieldset).getByText("1920 × 1080")).toBeTruthy();
-    // 12 dealt round-robin across three ratios → 4 each
-    expect(within(fieldset).getAllByText("4 of 12")).toHaveLength(3);
+    // The planner round-robins only the deficient coverage axes and then fills to
+    // `count` from a seeded random draw, so above the floor no ratio has a
+    // predictable share. A panel must not claim one.
+    expect(within(fieldset).queryByText(/\d+ of \d+/)).toBeNull();
   });
 
   test("the floor is one setting: the same ≥ N each on every panel, and 'no floor' when unset", () => {
@@ -315,11 +316,18 @@ describe("PolicySection — aspect ratio panels", () => {
       />,
     );
     // instagram-reel packages motion at 9:16 only: the other two canvases are excluded
-    const reasons = screen.getAllByText(/Excluded — motion-only output draws \[9:16\] only/);
+    const reasons = screen.getAllByText(/Excluded — motion-only output can draw \[9:16\] only/);
     expect(reasons).toHaveLength(2);
-    // the excluded panels carry allocation 0; the drawable one takes the whole count
-    expect(screen.getByText("12 of 12")).toBeTruthy();
-    expect(screen.getAllByText("0 of 12")).toHaveLength(2);
+
+    // The reason must reach assistive technology. It is referenced by
+    // aria-describedby rather than nested as content, because content would join
+    // the accessible name and break every getByRole({ name }) query in the suite.
+    const square = within(ratioFieldset()).getByRole("button", { name: "1:1" });
+    const describedBy = square.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    const description = document.getElementById(describedBy as string);
+    expect(description?.textContent).toMatch(/Excluded — motion-only output can draw \[9:16\] only/);
+    expect(description?.getAttribute("aria-hidden")).toBeNull();
   });
 
   test("an excluded ratio the brief already selects stays clickable — deselecting is the way out", async () => {
@@ -361,7 +369,7 @@ describe("PolicySection — aspect ratio panels", () => {
     );
     const square = within(ratioFieldset()).getByRole("button", { name: "1:1" }) as HTMLButtonElement;
     expect(square.disabled).toBe(true);
-    expect(screen.getAllByText(/Excluded — motion-only output draws \[9:16\] only/)).toHaveLength(2);
+    expect(screen.getAllByText(/Excluded — motion-only output can draw \[9:16\] only/)).toHaveLength(2);
   });
 
   test("the exclusion reason says so plainly when no selected platform packages motion at any ratio", () => {
@@ -406,8 +414,6 @@ describe("PolicySection — aspect ratio panels", () => {
       />,
     );
     expect(screen.getByText("Select at least one aspect ratio.")).toBeTruthy();
-    // the empty deal still renders zeros rather than nothing
-    expect(screen.getAllByText("0 of 12")).toHaveLength(3);
   });
 });
 

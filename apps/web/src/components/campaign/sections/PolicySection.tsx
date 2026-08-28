@@ -12,7 +12,6 @@ import {
   drawableRatios,
   maxMinDistance,
   motionPackagedRatios,
-  ratioAllocation,
   type FieldErrors,
 } from "@/components/campaign/validate";
 import { SectionShell, Field } from "./IdentitySection";
@@ -132,7 +131,6 @@ function RatioAxis({
   const count = Math.max(0, Number.parseInt(state.variation.count, 10) || 0);
   const floor = Math.max(0, Number.parseInt(state.variation.perRatio, 10) || 0);
   const drawable = drawableRatios(state);
-  const allocations = ratioAllocation(state);
   // The same motion narrowing the policy applies: a motion-only plan draws only
   // the ratios its requested platforms package.
   const motionOnly = state.formats.includes("motion") && !state.formats.includes("static");
@@ -144,7 +142,7 @@ function RatioAxis({
   const over = floor > 0 && ratioFloorTotal > count;
   const reason =
     motionRatios.length > 0
-      ? `Excluded — motion-only output draws [${motionRatios.join(", ")}] only; add the static format to draw this ratio.`
+      ? `Excluded — motion-only output can draw [${motionRatios.join(", ")}] only; add the static format to draw this ratio.`
       : "Excluded — no selected platform packages motion at any ratio; add the static format to draw this ratio.";
 
   return (
@@ -179,8 +177,6 @@ function RatioAxis({
             selected={state.variation.ratio.includes(value)}
             excluded={motionOnly && !packaged.has(value)}
             reason={motionOnly ? reason : undefined}
-            allocation={allocations[value]}
-            count={count}
             floor={floor}
             onToggle={(value) => dispatch({ type: "toggleRatio", value })}
           />
