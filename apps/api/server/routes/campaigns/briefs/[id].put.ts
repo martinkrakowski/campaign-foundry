@@ -1,7 +1,7 @@
-import { basename } from "node:path";
 import { errorMessage } from "@campaignfoundry/shared";
-import { findBriefFileById, hashFile, isErrno, rewriteBriefFile, withBriefLock, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
+import { isErrno, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
 import { assertSafeId, parseBrief } from "../../../lib/load-brief.js";
+import { getBriefStore } from "../../../lib/ports/index.js";
 
 /**
  * PUT /campaigns/briefs/:id — replace the briefs/ file whose `brief.id` equals the
@@ -31,52 +31,30 @@ export default defineEventHandler(async (event) => {
     return { error: `Path id "${id}" does not match brief.id "${brief.id}".` };
   }
 
-  const filePath = await findBriefFileById(id);
-  if (!filePath) {
-    setResponseStatus(event, 404);
-    return { error: `Brief "${id}" not found.` };
-  }
-
   const rawRevision = getQuery(event).revision;
   const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
-  let result: { error?: string; revision?: string } | undefined;
-  try {
-    await withBriefLock(id, async () => {
-      if (expectedRevision) {
-        try {
-          const currentRevision = await hashFile(filePath);
-          if (currentRevision !== expectedRevision) {
-            result = { error: "Brief was modified by another user.", revision: currentRevision };
-            return;
-          }
-        } catch (error) {
-          if (isErrno(error, "ENOENT")) {
-            // File was deleted between the lookup and the hash — return 404
-            result = { error: `Brief "${id}" not found.` };
-            return;
-          }
-          throw error;
-        }
-      }
 
-      await rewriteBriefFile(filePath, brief);
+  try {
+    const stored = await getBriefStore().withBriefLock(id, async () => {
+      return await getBriefStore().rewriteBrief(brief, { expectedRevision });
     });
+    return { file: stored.file, brief: stored.brief };
   } catch (error) {
     if (errorMessage(error) === SYMLINK_WRITE_ERROR) {
       setResponseStatus(event, 400);
       return { error: errorMessage(error) };
     }
+    if (isErrno(error, "ENOENT")) {
+      setResponseStatus(event, 404);
+      return { error: `Brief "${id}" not found.` };
+    }
+    if (isErrno(error, "ECONFLICT")) {
+      setResponseStatus(event, 409);
+      return {
+        error: "Brief was modified by another user.",
+        revision: (error as { revision?: string }).revision,
+      };
+    }
     throw error;
   }
-
-  if (result?.error) {
-    if (result.revision) {
-      setResponseStatus(event, 409);
-    } else {
-      setResponseStatus(event, 404);
-    }
-    return result;
-  }
-
-  return { file: basename(filePath), brief };
 });

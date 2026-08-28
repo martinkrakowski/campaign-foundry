@@ -162,9 +162,9 @@ describe("POST /campaigns/assets", () => {
 
   test("surfaces an unexpected write error", async () => {
     const handler = await web(dir);
-    const assetFiles = await import("../../../lib/asset-files.js");
+    const { getAssetStore } = await import("../../../lib/ports/index.js");
     const spy = vi
-      .spyOn(assetFiles, "writeAssetFile")
+      .spyOn(getAssetStore(), "writeAsset")
       .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
     const res = await post(handler, upload());
     expect(res.status).toBe(500);

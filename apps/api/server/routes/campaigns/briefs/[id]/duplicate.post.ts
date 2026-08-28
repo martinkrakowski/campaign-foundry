@@ -1,17 +1,11 @@
-import { basename } from "node:path";
 import { errorMessage } from "@campaignfoundry/shared";
 import {
   extractSourceAssetBriefIds,
   rewriteAssetPaths,
 } from "../../../../lib/asset-files.js";
-import {
-  briefYamlPath,
-  createBriefFile,
-  findBriefById,
-  isExistsError,
-} from "../../../../lib/brief-files.js";
+import { isExistsError } from "../../../../lib/brief-files.js";
 import { assertSafeId } from "../../../../lib/load-brief.js";
-import { getAssetStore } from "../../../../lib/ports/index.js";
+import { getAssetStore, getBriefStore } from "../../../../lib/ports/index.js";
 
 /**
  * POST /campaigns/briefs/:id/duplicate — copy a yaml/yml/json brief to `briefs/<newId>.yaml`.
@@ -44,13 +38,13 @@ export default defineEventHandler(async (event) => {
     return { error: errorMessage(error) };
   }
 
-  const source = await findBriefById(id);
+  const source = await getBriefStore().findBriefById(id);
   if (!source) {
     setResponseStatus(event, 404);
     return { error: `Brief "${id}" not found.` };
   }
 
-  if (await findBriefById(newId)) {
+  if (await getBriefStore().findBriefById(newId)) {
     setResponseStatus(event, 409);
     return { error: `Brief "${newId}" already exists.` };
   }
@@ -64,9 +58,10 @@ export default defineEventHandler(async (event) => {
     brief = rewriteAssetPaths(brief, fromId, newId);
   }
 
-  const destPath = briefYamlPath(newId);
   try {
-    await createBriefFile(destPath, brief);
+    const created = await getBriefStore().createBrief(brief);
+    setResponseStatus(event, 201);
+    return { file: created.file, brief: created.brief };
   } catch (error) {
     if (isExistsError(error)) {
       setResponseStatus(event, 409);
@@ -74,7 +69,4 @@ export default defineEventHandler(async (event) => {
     }
     throw error;
   }
-
-  setResponseStatus(event, 201);
-  return { file: basename(destPath), brief };
 });

@@ -256,6 +256,10 @@ describe("hashFile", () => {
     const hashWithSpace = await hashFile(path);
     expect(hashWithoutSpace).not.toBe(hashWithSpace);
   });
+
+  test("throws ENOENT error for missing file", async () => {
+    await expect(hashFile(join(dir, "missing.txt"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
 });
 
 describe("hashBytes", () => {

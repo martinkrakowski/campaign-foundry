@@ -160,6 +160,25 @@ describe("FsBriefStore", () => {
     expect(await store.getRevision("non-existent")).toBeUndefined();
   });
 
+  test("exists returns true when file exists and false when missing", async () => {
+    expect(await store.exists("test-camp")).toBe(false);
+    await store.createBrief(minimalBrief);
+    expect(await store.exists("test-camp")).toBe(true);
+    expect(await store.exists(join(dir, "test-camp.yaml"))).toBe(true);
+    expect(await store.exists("missing-camp")).toBe(false);
+  });
+
+  test("createBrief refuses to write through a symlink", async () => {
+    const outside = join(dir, "outside-create.yaml");
+    writeFileSync(outside, "id: linked-create\n");
+    const link = join(dir, "linked-create.yaml");
+    symlinkSync(outside, link);
+
+    await expect(
+      store.createBrief({ ...minimalBrief, id: "linked-create" }),
+    ).rejects.toThrow(/Refusing to write through a symlink/);
+  });
+
   test("withBriefLock serialises critical sections per brief ID", async () => {
     const order: string[] = [];
     let unlock: () => void = () => {};

@@ -75,20 +75,33 @@ describe("Sidebar", () => {
     });
   });
 
-  test("ignores listAssets response on unmount (resolve and reject)", () => {
+  test("aborts in-flight listAssets request when unmounted (both resolve and reject)", async () => {
+    let capturedSignal1: AbortSignal | undefined;
     let resolveP: (v: { assets: briefsApi.AssetEntry[] }) => void = () => {};
     const pendingP = new Promise<{ assets: briefsApi.AssetEntry[] }>((r) => (resolveP = r));
-    vi.spyOn(briefsApi, "listAssets").mockReturnValueOnce(pendingP);
+    vi.spyOn(briefsApi, "listAssets").mockImplementationOnce((_id, signal) => {
+      capturedSignal1 = signal;
+      return pendingP;
+    });
     const { unmount } = renderWithRun(<Sidebar />);
+    expect(capturedSignal1?.aborted).toBe(false);
     unmount();
+    expect(capturedSignal1?.aborted).toBe(true);
     resolveP({ assets: [] });
 
+    let capturedSignal2: AbortSignal | undefined;
     let rejectP: (err: unknown) => void = () => {};
     const pendingR = new Promise<{ assets: briefsApi.AssetEntry[] }>((_, r) => (rejectP = r));
-    vi.spyOn(briefsApi, "listAssets").mockReturnValueOnce(pendingR);
+    vi.spyOn(briefsApi, "listAssets").mockImplementationOnce((_id, signal) => {
+      capturedSignal2 = signal;
+      return pendingR;
+    });
     const { unmount: unmount2 } = renderWithRun(<Sidebar />);
+    expect(capturedSignal2?.aborted).toBe(false);
     unmount2();
+    expect(capturedSignal2?.aborted).toBe(true);
     rejectP(new Error("aborted"));
+    await new Promise((r) => setTimeout(r, 20));
   });
 
   test("Browse briefs opens the picker", async () => {

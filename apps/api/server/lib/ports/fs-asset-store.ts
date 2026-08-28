@@ -1,8 +1,8 @@
-import { copyFile, mkdir, readdir, readFile, stat } from "node:fs/promises";
-import { extname, resolve } from "node:path";
+import { copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { dirname, extname, resolve } from "node:path";
 import { projectRoot } from "@campaignfoundry/shared";
 import { resolveConfined } from "../confined-path.js";
-import { ASSET_NAME_PATTERN, writeAssetFile } from "../asset-files.js";
+import { ASSET_NAME_PATTERN } from "../asset-files.js";
 import type { AssetEntry, AssetStorePort } from "./asset-store.port.js";
 
 /**
@@ -37,7 +37,8 @@ export class FsAssetStore implements AssetStorePort {
 
   async writeAsset(briefId: string, name: string, bytes: Buffer): Promise<{ path: string }> {
     const absPath = this.assetAbsPath(briefId, name);
-    await writeAssetFile(absPath, bytes);
+    await mkdir(dirname(absPath), { recursive: true });
+    await writeFile(absPath, bytes, { flag: "wx" });
     return { path: this.assetRelPath(briefId, name) };
   }
 

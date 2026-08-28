@@ -1,22 +1,15 @@
-import { basename } from "node:path";
 import { errorMessage } from "@campaignfoundry/shared";
 import {
   extractSourceAssetBriefIds,
   rewriteAssetPaths,
 } from "../../lib/asset-files.js";
 import {
-  briefYamlPath,
-  createBriefFile,
-  findBriefFileById,
-  hashFile,
   isExistsError,
   isErrno,
-  replaceBriefFile,
-  withBriefLock,
   SYMLINK_WRITE_ERROR,
 } from "../../lib/brief-files.js";
 import { parseBrief } from "../../lib/load-brief.js";
-import { getAssetStore } from "../../lib/ports/index.js";
+import { getAssetStore, getBriefStore } from "../../lib/ports/index.js";
 
 /**
  * POST /campaigns/briefs — persist a campaign brief.
@@ -44,7 +37,7 @@ export default defineEventHandler(async (event) => {
   const replace = (Array.isArray(rawReplace) ? rawReplace[0] : rawReplace) === "1";
   const rawRevision = getQuery(event).revision;
   const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
-  const existing = await findBriefFileById(brief.id);
+  const existing = await getBriefStore().findBriefFileById(brief.id);
   if (existing && !replace) {
     setResponseStatus(event, 409);
     return { error: `Brief "${brief.id}" already exists.` };
@@ -57,29 +50,15 @@ export default defineEventHandler(async (event) => {
     brief = rewriteAssetPaths(brief, fromId, brief.id);
   }
 
-  const filePath = existing ?? briefYamlPath(brief.id);
-  let result: { error?: string; revision?: string } | undefined;
   try {
-    await withBriefLock(brief.id, async () => {
-      if (replace && existing && expectedRevision) {
-        try {
-          const currentRevision = await hashFile(existing);
-          if (currentRevision !== expectedRevision) {
-            result = { error: "Brief was modified by another user.", revision: currentRevision };
-            return;
-          }
-        } catch (error) {
-          if (isErrno(error, "ENOENT")) {
-            // File was deleted between the lookup and the hash — fall through to create
-            return;
-          }
-          throw error;
-        }
+    const stored = await getBriefStore().withBriefLock(brief.id, async () => {
+      if (replace) {
+        return await getBriefStore().replaceBrief(brief, { expectedRevision });
       }
-
-      if (replace) await replaceBriefFile(filePath, brief);
-      else await createBriefFile(filePath, brief);
+      return await getBriefStore().createBrief(brief);
     });
+    setResponseStatus(event, 201);
+    return { file: stored.file, brief: stored.brief };
   } catch (error) {
     if (errorMessage(error) === SYMLINK_WRITE_ERROR) {
       setResponseStatus(event, 400);
@@ -89,14 +68,13 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, 409);
       return { error: `Brief "${brief.id}" already exists.` };
     }
+    if (isErrno(error, "ECONFLICT")) {
+      setResponseStatus(event, 409);
+      return {
+        error: "Brief was modified by another user.",
+        revision: (error as { revision?: string }).revision,
+      };
+    }
     throw error;
   }
-
-  if (result?.error) {
-    setResponseStatus(event, 409);
-    return result;
-  }
-
-  setResponseStatus(event, 201);
-  return { file: basename(filePath), brief };
 });

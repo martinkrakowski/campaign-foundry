@@ -70,6 +70,11 @@ export interface BriefStorePort {
   getRevision(fileOrId: string): Promise<string | undefined>;
 
   /**
+   * True if a brief or file exists at the given file name, key, or path.
+   */
+  exists(fileOrId: string): Promise<boolean>;
+
+  /**
    * Execute a critical section with per-brief concurrency locking.
    */
   withBriefLock<T>(briefId: string, fn: () => Promise<T>): Promise<T>;

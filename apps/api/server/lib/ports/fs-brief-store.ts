@@ -97,6 +97,14 @@ export class FsBriefStore implements BriefStorePort {
 
   async createBrief(brief: CampaignBrief): Promise<StoredBrief> {
     const filePath = resolveConfined(this.dir, `${brief.id}.yaml`);
+    try {
+      const st = await lstat(filePath);
+      if (st.isSymbolicLink()) {
+        throw new Error(SYMLINK_WRITE_ERROR);
+      }
+    } catch (err) {
+      if (errorMessage(err) === SYMLINK_WRITE_ERROR) throw err;
+    }
     await mkdir(dirname(filePath), { recursive: true });
     const content = serializeBrief(filePath, brief);
     await writeFile(filePath, content, { encoding: "utf8", flag: "wx" });
@@ -172,6 +180,18 @@ export class FsBriefStore implements BriefStorePort {
       return hashBytes(bytes);
     } catch {
       return undefined;
+    }
+  }
+
+  async exists(fileOrId: string): Promise<boolean> {
+    try {
+      const filePath = isAbsolute(fileOrId)
+        ? fileOrId
+        : (await this.findBriefFileById(fileOrId)) ?? resolveConfined(this.dir, fileOrId);
+      await lstat(filePath);
+      return true;
+    } catch {
+      return false;
     }
   }
 

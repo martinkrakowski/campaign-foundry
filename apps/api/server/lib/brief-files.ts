@@ -1,9 +1,8 @@
 import { createHash } from "node:crypto";
-import { lstat, readFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import * as yaml from "js-yaml";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { projectRoot, errorMessage } from "@campaignfoundry/shared";
+import { projectRoot } from "@campaignfoundry/shared";
 import { resolveConfined } from "./confined-path.js";
 import { getBriefStore } from "./ports/index.js";
 
@@ -70,20 +69,20 @@ export function hashBytes(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-/** Compute SHA-256 hex digest of a file's raw bytes. */
+/** Compute SHA-256 hex digest of a file's raw bytes via the brief store. */
 export async function hashFile(path: string): Promise<string> {
-  const bytes = await readFile(path);
-  return hashBytes(bytes);
+  const rev = await getBriefStore().getRevision(path);
+  if (rev === undefined) {
+    const err = new Error(`File not found: ${path}`);
+    (err as { code?: string }).code = "ENOENT";
+    throw err;
+  }
+  return rev;
 }
 
-/** True if anything (file, dir, symlink) exists at `path`. */
+/** True if anything (file, dir, symlink) exists at `path` in the store. */
 export async function pathExists(path: string): Promise<boolean> {
-  try {
-    await lstat(path);
-    return true;
-  } catch {
-    return false;
-  }
+  return getBriefStore().exists(path);
 }
 
 /**
@@ -121,10 +120,6 @@ export async function createBriefFile(path: string, brief: CampaignBrief): Promi
 
 /** Overwrite an existing regular file in its own format; refuse a symlink. */
 export async function rewriteBriefFile(path: string, brief: CampaignBrief): Promise<void> {
-  const st = await lstat(path);
-  if (st.isSymbolicLink()) {
-    throw new Error(SYMLINK_WRITE_ERROR);
-  }
   await getBriefStore().rewriteBrief(brief);
 }
 
@@ -133,14 +128,6 @@ export async function rewriteBriefFile(path: string, brief: CampaignBrief): Prom
  * Used by POST `?replace=1`. Symlinks are refused; a racing create is EEXIST.
  */
 export async function replaceBriefFile(path: string, brief: CampaignBrief): Promise<void> {
-  try {
-    const st = await lstat(path);
-    if (st.isSymbolicLink()) {
-      throw new Error(SYMLINK_WRITE_ERROR);
-    }
-  } catch (error) {
-    if (errorMessage(error) === SYMLINK_WRITE_ERROR) throw error;
-  }
   await getBriefStore().replaceBrief(brief);
 }
 

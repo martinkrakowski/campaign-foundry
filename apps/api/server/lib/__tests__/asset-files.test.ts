@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -86,23 +86,13 @@ describe("asset paths", () => {
     expect(assetRelPath("camp", "logo.png")).toBe("assets/inputs/camp/logo.png");
   });
 
-  test("assetAbsPath writes under assets/inputs/<briefId>/ and rejects escape", async () => {
-    const { assetAbsPath, writeAssetFile } = await filesFor(dir);
+  test("assetAbsPath formats path under assets/inputs/<briefId>/ and rejects escape", async () => {
+    const { assetAbsPath } = await filesFor(dir);
     const dest = assetAbsPath("camp", "logo.png");
     expect(dest).toBe(join(dir, "assets", "inputs", "camp", "logo.png"));
-    await writeAssetFile(dest, png);
-    expect(readFileSync(dest)).toEqual(png);
     expect(() => assetAbsPath("camp", "../hydra-logo.png")).toThrow(
       /Path escapes the allowed directory/,
     );
-  });
-
-  test("writeAssetFile is exclusive — a second write does not overwrite", async () => {
-    const { assetAbsPath, writeAssetFile } = await filesFor(dir);
-    const dest = assetAbsPath("camp", "logo.png");
-    await writeAssetFile(dest, png);
-    await expect(writeAssetFile(dest, Buffer.from("nope"))).rejects.toMatchObject({ code: "EEXIST" });
-    expect(readFileSync(dest)).toEqual(png);
   });
 });
 

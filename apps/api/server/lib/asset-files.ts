@@ -1,9 +1,6 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { projectRoot } from "@campaignfoundry/shared";
 import { resolveConfined } from "./confined-path.js";
-
 /**
  * Asset basename: a SAFE_ID_PATTERN stem plus a png/jpg/jpeg extension.
  * Dots, slashes, and `..` are rejected so the join `assets/inputs/<briefId>/<name>`
@@ -46,10 +43,6 @@ export function assetAbsPath(briefId: string, name: string): string {
   return resolveConfined(dir, name);
 }
 
-export async function writeAssetFile(path: string, bytes: Buffer): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, bytes, { flag: "wx" });
-}
 
 /**
  * Rewrite a single repo-relative asset path from `fromBriefId` to `toBriefId`.

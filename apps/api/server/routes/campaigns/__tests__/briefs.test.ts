@@ -320,9 +320,9 @@ describe("authoring briefs", () => {
 
   test("POST surfaces an unexpected write error", async () => {
     const { create } = await api();
-    const briefFiles = await import("../../../lib/brief-files.js");
+    const { getBriefStore } = await import("../../../lib/ports/index.js");
     const spy = vi
-      .spyOn(briefFiles, "createBriefFile")
+      .spyOn(getBriefStore(), "createBrief")
       .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
     const res = await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
     expect(res.status).toBe(500);
@@ -443,8 +443,8 @@ describe("authoring briefs", () => {
     const { create, update } = await api();
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
     const original = readFileSync(campYaml());
-    const briefFiles = await import("../../../lib/brief-files.js");
-    const spy = vi.spyOn(briefFiles, "rewriteBriefFile").mockRejectedValueOnce(
+    const { getBriefStore } = await import("../../../lib/ports/index.js");
+    const spy = vi.spyOn(getBriefStore(), "rewriteBrief").mockRejectedValueOnce(
       new Error("Refusing to write through a symlink."),
     );
     const res = await update()(jsonReq("http://x/campaigns/briefs/camp", "PUT", brief({ campaignMessage: "Nope" })));
@@ -458,9 +458,9 @@ describe("authoring briefs", () => {
     const { create, update } = await api();
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
     const original = readFileSync(campYaml());
-    const briefFiles = await import("../../../lib/brief-files.js");
+    const { getBriefStore } = await import("../../../lib/ports/index.js");
     const spy = vi
-      .spyOn(briefFiles, "rewriteBriefFile")
+      .spyOn(getBriefStore(), "rewriteBrief")
       .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
     const res = await update()(
       jsonReq("http://x/campaigns/briefs/camp", "PUT", brief({ campaignMessage: "Nope" })),
@@ -690,9 +690,9 @@ describe("authoring briefs", () => {
   test("duplicate surfaces an unexpected write error", async () => {
     const { create, duplicate } = await api();
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
-    const briefFiles = await import("../../../lib/brief-files.js");
+    const { getBriefStore } = await import("../../../lib/ports/index.js");
     const spy = vi
-      .spyOn(briefFiles, "createBriefFile")
+      .spyOn(getBriefStore(), "createBrief")
       .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
     const res = await duplicate()(
       jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "copy" }),
@@ -748,28 +748,22 @@ describe("authoring briefs", () => {
 
   test("POST with concurrent delete in replace mode falls through to create", async () => {
     const { create } = await api();
-    const briefFiles = await import("../../../lib/brief-files.js");
+    const { dumpBrief } = await import("../../../lib/brief-files.js");
     mkdirSync(join(dir, "briefs"), { recursive: true });
-    writeFileSync(campYaml(), briefFiles.dumpBrief(brief({ campaignMessage: "Original" })));
-    vi.spyOn(briefFiles, "hashFile").mockImplementation(async (_path: string) => {
-      // Throw ENOENT to simulate the file being deleted between lookup and hash
-      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-    });
+    writeFileSync(campYaml(), dumpBrief(brief({ campaignMessage: "Original" })));
     const res = await create()(
-      jsonReq("http://x/campaigns/briefs?replace=1&revision=stalehash", "POST", brief({ campaignMessage: "Fallback" })),
+      jsonReq("http://x/campaigns/briefs?replace=1", "POST", brief({ campaignMessage: "Fallback" })),
     );
-    // ENOENT during hash check in replace mode falls through to create attempt
-    expect([201, 409]).toContain(res.status);
-    vi.spyOn(briefFiles, "hashFile").mockRestore();
+    expect(res.status).toBe(201);
   });
 
   test("PUT with concurrent delete returns 404", async () => {
     const { create, update } = await api();
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
-    const briefFiles = await import("../../../lib/brief-files.js");
-    vi.spyOn(briefFiles, "hashFile").mockImplementation(async (_path: string) => {
-      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-    });
+    const { getBriefStore } = await import("../../../lib/ports/index.js");
+    vi.spyOn(getBriefStore(), "rewriteBrief").mockRejectedValueOnce(
+      Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
+    );
     const res = await update()(
       jsonReq(`http://x/campaigns/briefs/camp?revision=stalehash`, "PUT", brief({ campaignMessage: "Edited" })),
     );
@@ -777,13 +771,13 @@ describe("authoring briefs", () => {
     expect(await res.json()).toEqual({ error: 'Brief "camp" not found.' });
   });
 
-  test("POST with unexpected hash error surfaces the error", async () => {
+  test("POST with unexpected replace error surfaces the error", async () => {
     const { create } = await api();
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
-    const briefFiles = await import("../../../lib/brief-files.js");
-    vi.spyOn(briefFiles, "hashFile").mockImplementation(async (_path: string) => {
-      throw Object.assign(new Error("EIO"), { code: "EIO" });
-    });
+    const { getBriefStore } = await import("../../../lib/ports/index.js");
+    vi.spyOn(getBriefStore(), "replaceBrief").mockRejectedValueOnce(
+      Object.assign(new Error("EIO"), { code: "EIO" }),
+    );
     const res = await create()(
       jsonReq("http://x/campaigns/briefs?replace=1&revision=stalehash", "POST", brief({ campaignMessage: "Nope" })),
     );
@@ -793,10 +787,10 @@ describe("authoring briefs", () => {
   test("PUT with unexpected hash error surfaces the error", async () => {
     const { create, update } = await api();
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
-    const briefFiles = await import("../../../lib/brief-files.js");
-    vi.spyOn(briefFiles, "hashFile").mockImplementation(async (_path: string) => {
-      throw Object.assign(new Error("EIO"), { code: "EIO" });
-    });
+    const { getBriefStore } = await import("../../../lib/ports/index.js");
+    vi.spyOn(getBriefStore(), "rewriteBrief").mockRejectedValueOnce(
+      Object.assign(new Error("EIO"), { code: "EIO" }),
+    );
     const res = await update()(
       jsonReq(`http://x/campaigns/briefs/camp?revision=stalehash`, "PUT", brief({ campaignMessage: "Edited" })),
     );
@@ -1024,6 +1018,34 @@ describe("authoring briefs", () => {
       );
       expect(res.status).toBe(201);
       expect(readFileSync(join(assetsDir, "dest-camp", "extra.png"), "utf8")).toBe("THIRD-PARTY-ASSET");
+    });
+
+    test("POST /campaigns/briefs/:id/duplicate clones unreferenced bin assets from source brief", async () => {
+      const { create, duplicate } = await api();
+      const assetsDir = join(dir, "assets", "inputs");
+      mkdirSync(join(assetsDir, "unref-src"), { recursive: true });
+      writeFileSync(join(assetsDir, "unref-src", "unreferenced.png"), "UNREF-ASSET-BYTES");
+
+      // Brief has no references to unreferenced.png
+      const initialBrief = brief({
+        id: "unref-src",
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#1473E6",
+            logoPath: "assets/inputs/hydra-logo.png",
+          },
+        ],
+      });
+
+      await create()(jsonReq("http://x/campaigns/briefs", "POST", initialBrief));
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/unref-src/duplicate", "POST", { newId: "unref-dest" }),
+      );
+      expect(res.status).toBe(201);
+      // unreferenced asset in source bin is copied because duplicate operates on the source brief ID
+      expect(readFileSync(join(assetsDir, "unref-dest", "unreferenced.png"), "utf8")).toBe("UNREF-ASSET-BYTES");
     });
   });
 

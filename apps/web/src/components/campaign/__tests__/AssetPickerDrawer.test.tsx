@@ -179,30 +179,46 @@ describe("AssetPickerDrawer", () => {
     });
   });
 
-  test("ignores result when unmounted during fetch (both resolve and reject)", async () => {
+  test("aborts in-flight request and ignores late responses when unmounted during fetch", async () => {
+    let capturedSignal1: AbortSignal | undefined;
     let resolvePromise: (value: { assets: briefsApi.AssetEntry[] }) => void = () => {};
     const pendingPromise = new Promise<{ assets: briefsApi.AssetEntry[] }>((r) => {
       resolvePromise = r;
     });
-    vi.spyOn(briefsApi, "listAssets").mockReturnValueOnce(pendingPromise);
+    vi.spyOn(briefsApi, "listAssets").mockImplementationOnce((_id, signal) => {
+      capturedSignal1 = signal;
+      return pendingPromise;
+    });
 
     const { unmount } = render(
       <AssetPickerDrawer briefId="camp-1" open={true} onClose={() => {}} />,
     );
+    expect(capturedSignal1?.aborted).toBe(false);
     unmount();
+    expect(capturedSignal1?.aborted).toBe(true);
     resolvePromise({ assets: [{ name: "a.png", type: "image/png", size: 10, thumbnailUrl: "" }] });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByText("a.png")).toBeNull();
 
     // Also test rejection during cancellation
+    let capturedSignal2: AbortSignal | undefined;
     let rejectPromise: (err: unknown) => void = () => {};
     const pendingReject = new Promise<{ assets: briefsApi.AssetEntry[] }>((_, r) => {
       rejectPromise = r;
     });
-    vi.spyOn(briefsApi, "listAssets").mockReturnValueOnce(pendingReject);
+    vi.spyOn(briefsApi, "listAssets").mockImplementationOnce((_id, signal) => {
+      capturedSignal2 = signal;
+      return pendingReject;
+    });
     const { unmount: unmount2 } = render(
       <AssetPickerDrawer briefId="camp-1" open={true} onClose={() => {}} />,
     );
+    expect(capturedSignal2?.aborted).toBe(false);
     unmount2();
+    expect(capturedSignal2?.aborted).toBe(true);
     rejectPromise(new Error("abort"));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   test("clicking Close button or backdrop calls onClose", async () => {
