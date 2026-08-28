@@ -678,6 +678,11 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
  * anything?" has to ask before prompting or auto-saving.
  */
 export function isPristine(state: EditorState): boolean {
+  // `campaignName` is not part of the brief — only its slug is, as `id`. So a name made
+  // entirely of characters the slug strips ("!!!") leaves the brief identical to a blank
+  // one, and comparing briefs alone would call that pristine: the draft would never be
+  // autosaved and leaving would not prompt, so the typed name would vanish without a word.
+  if (state.campaignName !== initialEditorState(state.mode).campaignName) return false;
   return JSON.stringify(toBrief(state)) === JSON.stringify(toBrief(initialEditorState(state.mode)));
 }
 

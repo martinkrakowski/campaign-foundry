@@ -60,11 +60,16 @@ export function ChipGroup({
 
   return (
     <div role="group" aria-label={label ? `${label} options` : undefined} className="space-y-2">
+      {/* The chips are the visible control; this mirrors them for assistive tech. It has
+          to carry their gating too — disabling the buttons alone leaves a writable input
+          for exactly the users who cannot see that the group is unavailable. */}
       <input
         type="text"
         aria-label={label}
         className="sr-only"
         value={value}
+        disabled={disabled}
+        readOnly={readOnly}
         onChange={(e) => onChange(e.target.value)}
         tabIndex={-1}
       />

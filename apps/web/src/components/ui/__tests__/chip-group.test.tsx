@@ -188,3 +188,19 @@ describe("ChipGroup", () => {
     expect(euButton.disabled).toBe(true);
   });
 });
+
+describe("ChipGroup gating reaches the mirror input", () => {
+  test("disabled and readOnly close the assistive-tech input too, not just the chips", async () => {
+    const onChange = vi.fn();
+    const { unmount } = render(
+      <ChipGroup label="Target Region" options={["DE", "FR"]} value="DE" onChange={onChange} disabled />,
+    );
+    // the sr-only input is the control assistive tech actually operates; leaving it
+    // writable hands exactly those users a value the group says is unavailable
+    expect((screen.getByLabelText("Target Region") as HTMLInputElement).disabled).toBe(true);
+    unmount();
+
+    render(<ChipGroup label="Target Region" options={["DE", "FR"]} value="DE" onChange={onChange} readOnly />);
+    expect((screen.getByLabelText("Target Region") as HTMLInputElement).readOnly).toBe(true);
+  });
+});

@@ -1269,3 +1269,19 @@ describe("the axis min-one guard", () => {
     expect(narrowed.countNotice).toBeNull();
   });
 });
+
+describe("a campaign name the slug throws away is still work", () => {
+  test("a name of only stripped characters is not pristine", () => {
+    // "!!!" slugs to "", so the brief is byte-identical to a blank one. Comparing briefs
+    // alone would call this pristine — the draft would not be autosaved and leaving would
+    // not prompt, so the name the user typed would disappear without a word.
+    const typed = editorReducer(initialEditorState(), { type: "patch", patch: { campaignName: "!!!" } });
+    expect(typed.briefId).toBe("");
+    expect(JSON.stringify(toBrief(typed))).toBe(JSON.stringify(toBrief(initialEditorState())));
+    expect(isPristine(typed)).toBe(false);
+  });
+
+  test("an untouched editor is still pristine", () => {
+    expect(isPristine(initialEditorState())).toBe(true);
+  });
+});
