@@ -354,6 +354,44 @@ empty list.
 that was drafted adversarially rather than by hand. The reviewer ships, and §6's remedy is
 not invoked.
 
+#### Does it still FIND things? (2026-08-29) — yes, both classes
+
+P2.4 proved the reviewer stopped duplicating the linter. It could not prove it still worked,
+because silence is also what a broken reviewer produces. So a PR was opened carrying two
+genuine defects, one from each flagship class, both modelled on real incidents here.
+
+**The precondition that made it a fair test:** `yarn lint:arch` was **green** with both
+defects present, so the sweep marked both files CLEAR and left them open. Nothing in the
+instructions gave the reviewer cover for silence.
+
+| defect | shape | reviewer's verdict |
+|---|---|---|
+| `BriefStorePort.readBriefFromPath(absolutePath, mode): Promise<Buffer>` | class 1, leaky port (#93) | **found** |
+| `apps/web` importing `MOTION_KINDS` from the package root instead of the leaf | class 3, illegal runtime (#91) | **found** |
+
+Quoted from run `33274326381`:
+
+> The new `readBriefFromPath` method leaks a concrete filesystem path into the
+> `BriefStorePort` abstraction, breaking the hexagonal rule that ports must not expose I/O
+> details.
+
+> Importing `MOTION_KINDS` from the `CampaignOrchestration` barrel pulls in infrastructure
+> adapters (e.g., node:fs) that are illegal in browser bundles. Switch to a browser-safe
+> export that does not re-export node built-ins.
+
+The second names the mechanism — the barrel re-exporting infrastructure — rather than
+generic advice. The API reviewer flagged the same import for the wrong reason ("unnecessary
+bundle size and potential circular dependencies"), which is the difference between a reviewer
+that knows this codebase and one pattern-matching.
+
+**So the sweep bought deference, not silence.** Together with runs 3 and 4 this closes the
+question C1 raised: the reviewer is worth having.
+
+**A methodology note.** The first extraction of that run reported only one finding. That was
+an error in the extractor, not the reviewer: PR-Agent logs suggestions both JSON-escaped and
+as raw YAML block scalars, and the regex matched only the first. Verify the extractor before
+trusting a negative result about a model's output.
+
 **One open question this raised.** The UI reviewer spoke on both experiment PRs, about layer
 violations in `packages/**` — a domain value object and a governance barrel. It has no
 `paths` filter, so it reviews every file in the repository including packages far outside its
