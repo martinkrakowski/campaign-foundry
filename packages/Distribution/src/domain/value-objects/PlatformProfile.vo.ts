@@ -1,3 +1,7 @@
+// EXPERIMENT (P2.4 run 3) — deliberate layer violation. Never merged.
+// A DIFFERENT file and adapter from runs 1 and 2, so a pass cannot be memorisation.
+import { FileSystemExporter } from "../../infrastructure/adapters/FileSystemExporter.js";
+export const p24Exporter = FileSystemExporter;
 /**
  * PlatformProfile — lookup table mapping a distribution platform onto one of the
  * three existing canvases (D11). Packaging never re-renders; it only copies the
