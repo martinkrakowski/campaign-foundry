@@ -10,6 +10,7 @@ import {
   type PlanInput,
   type VariationPlanner,
 } from "@campaignfoundry/CampaignOrchestration";
+import { nodeCryptoPolicyHasher } from "@campaignfoundry/CampaignOrchestration/infrastructure";
 import { err, errorMessage, ok, type Result } from "@campaignfoundry/shared";
 import { briefsDir, isErrno } from "./brief-files.js";
 import { resolveConfined } from "./confined-path.js";
@@ -174,7 +175,7 @@ export async function planInputFor(brief: CampaignBrief): Promise<Result<PlanInp
 
 /** The variation planner with `input` (the resolved pool + platform ratios) bound for every `plan` call. */
 export function pooledPlanner(input: PlanInput): VariationPlanner {
-  const planner = new PlanVariationsUseCase();
+  const planner = new PlanVariationsUseCase(nodeCryptoPolicyHasher);
   return {
     plan: (brief) => planner.plan(brief, input),
     replan: (plan, index, attempt) => planner.replan(plan, index, attempt),

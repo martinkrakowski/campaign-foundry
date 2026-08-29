@@ -1,13 +1,11 @@
-import { createHash } from "node:crypto";
 import { err, ok, seedFrom, type Result } from "@campaignfoundry/shared";
 import type { CampaignBrief } from "../entities/CampaignBrief.js";
 import { AspectRatio } from "./AspectRatio.vo.js";
 import type { AspectRatioValue } from "./aspect-ratios.js";
 import { LAYOUT_VALUES, TONE_VALUES, type LayoutKind, type ToneKind } from "./Treatment.vo.js";
 import { MOTION_KINDS, type MotionKind } from "./MotionKind.vo.js";
-// The axis vocabulary and its defaults live in a leaf the browser can also import;
-// this module hashes with node:crypto and so cannot be bundled. Re-exported here so
-// the VO's public surface is unchanged.
+// The axis vocabulary and its defaults live in variation-defaults.ts;
+// re-exported here so the VO's public surface is unchanged.
 import {
   HEADLINE_POOL_REF,
   DEFAULT_BACKGROUND_SOURCES,
@@ -31,6 +29,9 @@ export {
   MIN_DURATION_SEC,
   type BackgroundAxisSource,
 } from "./variation-defaults.js";
+
+/** Digest function injected into policy hashing to keep domain free of platform crypto builtins. */
+export type PolicyHasher = (canonicalPayloadJson: string) => string;
 
 
 /** Hamming axes — a candidate must differ in at least `minDistance` of these. */
@@ -103,7 +104,19 @@ export class VariationPolicy {
     readonly motionRatios: readonly AspectRatioValue[],
   ) {}
 
-  static fromBrief(brief: CampaignBrief, input: PlanInput = {}): Result<VariationPolicy, Error> {
+  /**
+   * `hasher` is required, and deliberately a parameter rather than an optional field on
+   * `PlanInput`: wiring it is a composition concern, and a missing digest function is a
+   * mistake the compiler can catch. An optional one would push that to a runtime error on
+   * a path that only fires in a misconfigured deployment.
+   */
+  static fromBrief(
+    brief: CampaignBrief,
+    input: PlanInput,
+    hasher: PolicyHasher,
+  ): Result<VariationPolicy, Error> {
+    const hashFn = hasher;
+
     const variation = brief.variation;
     if (variation === undefined || variation.count === undefined) {
       return err(new Error('Variation policy requires "count".'));
@@ -229,24 +242,27 @@ export class VariationPolicy {
       Math.max(1, headline.length) *
       (motionEnabled ? motion.length * duration.length + (mixStatic ? 1 : 0) : 1);
 
-    const policyHash = hashPolicy({
-      axisProductSize,
-      backgroundSource,
-      count,
-      coverage,
-      layout,
-      minDistance,
-      paletteShift,
-      productIds,
-      ratios,
-      seed,
-      tone,
-      // Static briefs hash exactly as before the motion axes existed (golden-stable).
-      ...(motionEnabled ? { duration, mixStatic, motion, motionRatios } : {}),
-      // Only briefs with the headline axis carry it in the hash, so every
-      // pre-existing policyHash (and golden) is unchanged.
-      ...(headline.length > 0 ? { headline } : {}),
-    });
+    const policyHash = hashPolicy(
+      {
+        axisProductSize,
+        backgroundSource,
+        count,
+        coverage,
+        layout,
+        minDistance,
+        paletteShift,
+        productIds,
+        ratios,
+        seed,
+        tone,
+        // Static briefs hash exactly as before the motion axes existed (golden-stable).
+        ...(motionEnabled ? { duration, mixStatic, motion, motionRatios } : {}),
+        // Only briefs with the headline axis carry it in the hash, so every
+        // pre-existing policyHash (and golden) is unchanged.
+        ...(headline.length > 0 ? { headline } : {}),
+      },
+      hashFn,
+    );
 
     return ok(
       new VariationPolicy(
@@ -381,25 +397,28 @@ function resolveHeadline(
   return ok(texts);
 }
 
-function hashPolicy(payload: {
-  axisProductSize: number;
-  backgroundSource: readonly string[];
-  count: number;
-  coverage: VariationCoverage;
-  headline?: readonly string[];
-  layout: readonly string[];
-  minDistance: number;
-  paletteShift: readonly number[];
-  productIds: readonly string[];
-  ratios: readonly string[];
-  seed: number;
-  tone: readonly string[];
-  duration?: readonly number[];
-  mixStatic?: boolean;
-  motion?: readonly string[];
-  motionRatios?: readonly string[];
-}): string {
-  return createHash("sha256").update(canonicalJson(payload)).digest("hex");
+function hashPolicy(
+  payload: {
+    axisProductSize: number;
+    backgroundSource: readonly string[];
+    count: number;
+    coverage: VariationCoverage;
+    headline?: readonly string[];
+    layout: readonly string[];
+    minDistance: number;
+    paletteShift: readonly number[];
+    productIds: readonly string[];
+    ratios: readonly string[];
+    seed: number;
+    tone: readonly string[];
+    duration?: readonly number[];
+    mixStatic?: boolean;
+    motion?: readonly string[];
+    motionRatios?: readonly string[];
+  },
+  hasher: PolicyHasher,
+): string {
+  return hasher(canonicalJson(payload));
 }
 
 /** JSON with object keys sorted recursively; array order is preserved. */

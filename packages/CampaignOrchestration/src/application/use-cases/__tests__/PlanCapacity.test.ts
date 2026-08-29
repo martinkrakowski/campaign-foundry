@@ -1,6 +1,7 @@
 import { describe, test, expect } from "vitest";
 import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
 import { VariationPolicy, type PlanInput } from "../../../domain/value-objects/VariationPolicy.vo.js";
+import { nodeCryptoPolicyHasher } from "../../../infrastructure/index.js";
 import {
   EXACT_CAPACITY_MAX_SPACE,
   capacityAt,
@@ -29,7 +30,7 @@ const brief = (over: Record<string, unknown> = {}): CampaignBrief =>
   }) as unknown as CampaignBrief;
 
 const policyOf = (over: Record<string, unknown>, input: PlanInput = {}): VariationPolicy => {
-  const result = VariationPolicy.fromBrief(brief(over), input);
+  const result = VariationPolicy.fromBrief(brief(over), input, nodeCryptoPolicyHasher);
   if (!result.success) throw result.error;
   return result.value;
 };

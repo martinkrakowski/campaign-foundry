@@ -25,6 +25,10 @@
     "./variation-defaults": {
       "types": "./src/domain/value-objects/variation-defaults.ts",
       "default": "./src/domain/value-objects/variation-defaults.ts"
+    },
+    "./infrastructure": {
+      "types": "./src/infrastructure/index.ts",
+      "default": "./src/infrastructure/index.ts"
     }
   },
   "scripts": {

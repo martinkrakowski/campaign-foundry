@@ -6,6 +6,7 @@ import type { Variant } from "../../../domain/entities/Variant.js";
 import type { VariationPlan } from "../../../domain/value-objects/VariationPlan.vo.js";
 import { MOTION_KINDS } from "../../../domain/value-objects/MotionKind.vo.js";
 import { VariationPolicy } from "../../../domain/value-objects/VariationPolicy.vo.js";
+import { nodeCryptoPolicyHasher } from "../../../infrastructure/index.js";
 import { PlanVariationsUseCase } from "../PlanVariationsUseCase.use-case.js";
 
 const product = (id: string): Product => ({
@@ -25,7 +26,7 @@ const brief = (over: Partial<CampaignBrief> = {}): CampaignBrief => ({
   ...over,
 });
 
-const planner = (): PlanVariationsUseCase => new PlanVariationsUseCase();
+const planner = (): PlanVariationsUseCase => new PlanVariationsUseCase(nodeCryptoPolicyHasher);
 
 const hamming = (a: Variant, b: Variant): number => {
   const axes = ["productId", "aspectRatio", "layout", "tone", "backgroundSource", "paletteShift", "headline", "motion", "durationSec"] as const;
@@ -355,6 +356,8 @@ describe("PlanVariationsUseCase.replan", () => {
   test("exhausts after 64 distance-failing draws", () => {
     const policyResult = VariationPolicy.fromBrief(
       brief({ variation: { count: 2, seed: 7, minDistance: 6 } }),
+      {},
+      nodeCryptoPolicyHasher,
     );
     expect(policyResult.success).toBe(true);
     if (!policyResult.success) return;
@@ -395,6 +398,8 @@ describe("PlanVariationsUseCase.replan", () => {
   test("replan of a product at the perProduct floor never changes productId", () => {
     const policyResult = VariationPolicy.fromBrief(
       brief({ variation: { count: 2, seed: 7, minDistance: 1, coverage: { perProduct: 1 } } }),
+      {},
+      nodeCryptoPolicyHasher,
     );
     expect(policyResult.success).toBe(true);
     if (!policyResult.success) return;
@@ -446,6 +451,8 @@ describe("PlanVariationsUseCase.replan", () => {
   test("replan still post-checks coverage and exhausts when the occupant cannot satisfy it", () => {
     const policyResult = VariationPolicy.fromBrief(
       brief({ variation: { count: 2, seed: 7, minDistance: 0, coverage: { perProduct: 1 } } }),
+      {},
+      nodeCryptoPolicyHasher,
     );
     expect(policyResult.success).toBe(true);
     if (!policyResult.success) return;

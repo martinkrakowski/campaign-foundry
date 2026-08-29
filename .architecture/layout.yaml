@@ -1,0 +1,5 @@
+# Layer directories for HexaGen architecture analysis
+layers:
+  - domain
+  - application
+  - infrastructure

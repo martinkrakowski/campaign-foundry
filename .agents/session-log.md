@@ -1054,3 +1054,24 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - Laid-out screenshot verification for stills/motion stayed on the golden bytes (D10): `draw` and `drawLegacy` both re-pinned against all 12 committed still goldens at `restT(kind)`.
 - Fixed during the round: canvas quantizes `globalAlpha` to 8-bit (assertions use `toBeCloseTo`); per-beat rise must be probed via the pose clock against a beat's own window; accents painted per beat wrap into multi-line ops so memoization asserts the layout's lines; the timeline test needs a constructed compositor (registers bundled fonts) or hashes render in a fallback font.
 - Gate green: build 7/7, typecheck 7/7, lint 12/12 (0 errors; 2 pre-existing warnings), lint:arch compliant, test:cov 1890 passed / 2 skipped, 100% stmts/branches/funcs/lines. PR #99 vs main.
+
+## 2026-08-29 — Lane R1: Architecture Gate & Policy Hash Remediation (PR #115)
+
+- **Mode:** Implementer
+- **Changes:**
+  - R1.1 & R1.2: Relocated `node:crypto` policy hashing out of the domain layer to infrastructure adapter `packages/CampaignOrchestration/src/infrastructure/adapters/NodeCryptoPolicyHasher.ts` using Approach B (parameter injection). Exported subpath `./infrastructure`. Injected `PolicyHasher` into `PlanVariationsUseCase` and wired composition sites in `apps/api/server/lib/pools.ts` and `apps/api/server/routes/campaigns/plan.post.ts`. Re-verified golden policy hash `7181107a6ce42df96357800416bf26bf89007fd3dbd2b9792aab83323adefcf9`.
+  - R1.3: Bumped `@hexagen-monaco/arch-linter` to `^0.12.1` in `package.json` and resolved in `yarn.lock` (kept `@hexagen-monaco/sync` at `^0.8.0`).
+  - R1.4: Added `.architecture/layout.yaml` declaring layer directories (`domain`, `application`, `infrastructure`).
+  - R1.5: Deleted "class 0" and the relative-import exception from `.github/workflows/pr-agent-arch.yml`; updated "Who Enforces This" in `.agents/architecture.md`.
+  - R1.6: Proved the upgraded gate bites on a deliberate relative cross-layer import (`AspectRatio.vo.ts` -> `NodeCryptoPolicyHasher.ts`), confirmed failure, reverted, and confirmed pass.
+- **Decisions:**
+  - Selected Approach B because arch-linter 0.12.1 enforces node-builtin bans in both `domain` and `application`, which ruled out Approach A.
+- **Gate Results:**
+  - `yarn build`: 7/7 packages successful
+  - `yarn typecheck`: 7/7 packages successful
+  - `yarn lint`: 0 problems across 7 packages
+  - `yarn lint:arch`: Compliant
+  - `yarn sync:check`: 0 ops
+  - `yarn test:cov`: 125 test files passed (125), 2016 passed | 2 skipped (2018), 100% Statements/Branches/Functions/Lines.
+- **Left open:**
+  - None for Lane R1. PR #115 opened on branch `fix/r1-arch-linter-and-hash`.
