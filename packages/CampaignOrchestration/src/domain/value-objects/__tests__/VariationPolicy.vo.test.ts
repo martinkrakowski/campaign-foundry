@@ -296,6 +296,7 @@ describe("VariationPolicy.fromBrief", () => {
     [{ count: 1, seed: 2 ** 32 }, /seed/],
     [{ count: 1, seed: Number.NaN }, /seed/],
     [{ count: 1, axes: { paletteShift: [-0.1] } }, /paletteShift/],
+    [{ count: 1, axes: { paletteShift: [1] } }, /paletteShift/],
     [{ count: 1, axes: { paletteShift: [1.1] } }, /paletteShift/],
     [{ count: 1, axes: { paletteShift: [Number.NaN] } }, /paletteShift/],
     [{ count: 1, axes: { paletteShift: [Number.POSITIVE_INFINITY] } }, /paletteShift/],
@@ -327,13 +328,22 @@ describe("VariationPolicy.fromBrief", () => {
     if (!result.success) expect(result.error.message).toMatch(/paletteShift/);
   });
 
-  test("accepts paletteShift endpoints 0 and 1", () => {
-    const result = fromBrief(
-      brief({ variation: { count: 1, axes: { paletteShift: [0, 1] } } }),
+  test("accepts paletteShift endpoint 0 and refuses 1 (a whole turn is identical to 0)", () => {
+    const accepted = fromBrief(
+      brief({ variation: { count: 1, axes: { paletteShift: [0] } } }),
     );
-    expect(result.success).toBe(true);
-    if (!result.success) return;
-    expect(result.value.paletteShift).toEqual([0, 1]);
+    expect(accepted.success).toBe(true);
+    if (!accepted.success) return;
+    expect(accepted.value.paletteShift).toEqual([0]);
+
+    const refused = fromBrief(
+      brief({ variation: { count: 1, axes: { paletteShift: [1] } } }),
+    );
+    expect(refused.success).toBe(false);
+    if (!refused.success) {
+      expect(refused.error.message).toMatch(/paletteShift/);
+      expect(refused.error.message).toMatch(/\[0, 1\)/);
+    }
   });
 
   test("canonicalises duplicate layout values before hashing", () => {
