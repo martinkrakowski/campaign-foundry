@@ -4,6 +4,7 @@ import { AspectRatio } from "./AspectRatio.vo.js";
 import type { AspectRatioValue } from "./aspect-ratios.js";
 import { LAYOUT_VALUES, TONE_VALUES, type LayoutKind, type ToneKind } from "./Treatment.vo.js";
 import { MOTION_KINDS, type MotionKind } from "./MotionKind.vo.js";
+import { isPaletteShift } from "./palette-shift.js";
 // The axis vocabulary and its defaults live in variation-defaults.ts;
 // re-exported here so the VO's public surface is unchanged.
 import {
@@ -302,8 +303,12 @@ function requireInteger(value: number, field: string, min: number, max?: number)
 
 function requirePaletteShift(values: readonly number[]): Result<readonly number[], Error> {
   for (const shift of values) {
-    if (typeof shift !== "number" || !Number.isFinite(shift) || shift < 0 || shift > 1) {
-      return err(new Error("Invalid paletteShift."));
+    if (!isPaletteShift(shift)) {
+      return err(
+        new Error(
+          `Invalid paletteShift: must contain turns in [0, 1) — 1 is a whole circle and means the same as 0; got ${JSON.stringify(shift)}.`,
+        ),
+      );
     }
   }
   return ok(values);

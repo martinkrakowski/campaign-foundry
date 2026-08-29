@@ -1075,3 +1075,16 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - `yarn test:cov`: 125 test files passed (125), 2016 passed | 2 skipped (2018), 100% Statements/Branches/Functions/Lines.
 - **Left open:**
   - None for Lane R1. PR #115 opened on branch `fix/r1-arch-linter-and-hash`.
+
+## 2026-08-29 — close palette-shift range gap in domain (PR #120)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `packages/CampaignOrchestration/src/domain/value-objects/VariationPolicy.vo.ts`: imported `isPaletteShift` from `./palette-shift.js` and wired it into `requirePaletteShift`, closing the range gap between parser (`[0, 1)`) and domain (`[0, 1]`), with an informative error message explaining why 1 is refused.
+  - `packages/CampaignOrchestration/src/domain/value-objects/__tests__/VariationPolicy.vo.test.ts`: updated the boundary test to assert 0 is accepted and 1 is refused, and added 1 to the invalid paletteShift matrix.
+- **Decisions:**
+  - Kept error handling non-throwing returning `Result.err`.
+  - Reused `isPaletteShift` from `./palette-shift.js` as the single source of truth for turn validation across layers.
+- **Left open:**
+  - None.
+

@@ -1,3 +1,4 @@
+import { normalizeHueTurns } from "@campaignfoundry/CampaignOrchestration";
 import { createCanvas } from "@napi-rs/canvas";
 import type {
   AspectRatio,
@@ -47,7 +48,9 @@ function shiftRgb(rgb: [number, number, number], paletteShift?: number): [number
     return rgb;
   }
   const [h, s, l] = rgbToHsl(rgb[0], rgb[1], rgb[2]);
-  return hslToRgb(((h + paletteShift) % 1 + 1) % 1, s, l);
+  // Shared with the editor's swatch preview. The two used to wrap differently, so a
+  // negative shift previewed as one colour and rendered as another.
+  return hslToRgb(normalizeHueTurns(h + paletteShift), s, l);
 }
 
 function rgbToHsl(r: number, g: number, b: number): [number, number, number] {

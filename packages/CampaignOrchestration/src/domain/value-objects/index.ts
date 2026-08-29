@@ -8,6 +8,7 @@ export * from "./CopyPool.vo.js";
 export * from "./CopyTimeline.vo.js";
 export * from "./LogEntry.vo.js";
 export * from "./MotionKind.vo.js";
+export * from "./palette-shift.js";
 export * from "./PipelineExecutionLog.vo.js";
 export * from "./PipelineResult.vo.js";
 export * from "./Treatment.vo.js";
