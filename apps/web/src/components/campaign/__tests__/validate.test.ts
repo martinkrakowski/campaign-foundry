@@ -437,18 +437,18 @@ describe("validateMotion", () => {
   });
 
   test("a motion request needs at least one kind and one duration", () => {
-    const errors = validateMotion(valid({ formats: ["motion"] }));
+    const errors = validateMotion(valid({ mode: "variation" as const, formats: ["motion"] }));
     expect(errors.motion).toBe(messages.motion);
     expect(errors.duration).toBe(messages.duration);
-    expect(validateMotion(valid({ formats: ["motion"], motion: ["ken-burns-in"], duration: [5] }))).toEqual({});
+    expect(validateMotion(valid({ mode: "variation" as const, formats: ["motion"], motion: ["ken-burns-in"], duration: [5] }))).toEqual({});
   });
 
   test("durations are whole seconds bounded to the API's 2–30 range", () => {
-    expect(validateMotion(valid({ formats: ["motion"], motion: ["ken-burns-in"], duration: [2, 30] })).duration).toBeUndefined();
-    const bad = validateMotion(valid({ formats: ["motion"], motion: ["ken-burns-in"], duration: [1, 31] }));
+    expect(validateMotion(valid({ mode: "variation" as const, formats: ["motion"], motion: ["ken-burns-in"], duration: [2, 30] })).duration).toBeUndefined();
+    const bad = validateMotion(valid({ mode: "variation" as const, formats: ["motion"], motion: ["ken-burns-in"], duration: [1, 31] }));
     expect(bad.duration).toBe(messages.durationRange(2, 30));
     expect(
-      validateMotion(valid({ formats: ["motion"], motion: ["ken-burns-in"], duration: [Number.NaN] })).duration,
+      validateMotion(valid({ mode: "variation" as const, formats: ["motion"], motion: ["ken-burns-in"], duration: [Number.NaN] })).duration,
     ).toBe(messages.durationRange(2, 30));
   });
 });
@@ -456,14 +456,14 @@ describe("validateMotion", () => {
 describe("validateMotion — duplicate durations", () => {
   test("a repeated length is reported, because the planner draws each once", () => {
     const errors = validateMotion(
-      valid({ formats: ["static", "motion"], motion: ["ken-burns-in"], duration: [6, 6] }),
+      valid({ mode: "variation" as const, formats: ["static", "motion"], motion: ["ken-burns-in"], duration: [6, 6] }),
     );
     expect(errors.duration).toBe(messages.durationDuplicate);
   });
 
   test("distinct lengths pass", () => {
     expect(
-      validateMotion(valid({ formats: ["static", "motion"], motion: ["ken-burns-in"], duration: [6, 8] })).duration,
+      validateMotion(valid({ mode: "variation" as const, formats: ["static", "motion"], motion: ["ken-burns-in"], duration: [6, 8] })).duration,
     ).toBeUndefined();
   });
 });
@@ -489,9 +489,24 @@ describe("aggregation", () => {
     expect(getTotalErrorCount(clean)).toBe(0);
 
     // both of these now land in Identity, which is where their inputs are rendered
-    const broken = validateState(valid({ briefId: "Bad Id", targetRegion: "" }));
+    const broken = validateState(valid({ mode: "variation" as const, briefId: "Bad Id", targetRegion: "" }));
     expect(hasErrors(broken.identity)).toBe(true);
     expect(hasSectionErrors(broken, "copy")).toBe(false);
     expect(getTotalErrorCount(broken)).toBe(2);
   });
 });
+
+describe("a Classic brief cannot quietly ask for video", () => {
+  test("motion left over from Randomized is refused rather than rendered as stills", () => {
+    // pick Video in Randomized, then switch to Classic: `setMode` leaves formats alone,
+    // and the generate path branches on mode, so without this the brief saves clean and
+    // produces still images instead of the clips it names
+    const classicWithMotion = { ...initialEditorState(), mode: "brief" as const, formats: ["static", "motion"] };
+    expect(validateMotion(classicWithMotion).formats).toBe(messages.formatsMotionNeedsRandomizedMode);
+  });
+
+  test("the same brief in Randomized is not refused for its mode", () => {
+    const randomized = { ...initialEditorState(), mode: "variation" as const, formats: ["static", "motion"] };
+    expect(validateMotion(randomized).formats).toBeUndefined();
+  });
+})

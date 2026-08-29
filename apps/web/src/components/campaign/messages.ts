@@ -340,3 +340,7 @@ export const formatStillMeta = "still · one frame";
 export function formatMotionMeta(fps: number, min: number, max: number): string {
   return `clip · ${fps} fps · ${min}–${max} s`;
 }
+
+/** A Classic brief cannot produce video; the pipeline branches on mode alone. */
+export const formatsMotionNeedsRandomizedMode =
+  "Video needs a Randomized campaign — switch the mode, or turn Video off.";

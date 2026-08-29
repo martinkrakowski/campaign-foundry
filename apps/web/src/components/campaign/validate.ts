@@ -257,6 +257,15 @@ export function validateOutput(state: EditorState): FieldErrors {
 export function validateMotion(state: EditorState): FieldErrors {
   const errors: FieldErrors = {};
   if (!state.formats.includes("motion")) return errors;
+  // The FormatPanel gate stops Video being *selected* in Classic, but a brief can arrive
+  // here holding it anyway: pick Video in Randomized, switch to Classic, and the format
+  // stays. Nothing else catches that — the generate path branches on mode alone, so the
+  // brief saves and applies cleanly and then renders stills, silently producing something
+  // other than what it asks for. A refusal the user can read is the whole point (D3).
+  if (state.mode !== "variation") {
+    errors.formats = messages.formatsMotionNeedsRandomizedMode;
+    return errors;
+  }
   if (state.motion.length === 0) {
     errors.motion = messages.motion;
   }
