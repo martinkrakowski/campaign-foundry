@@ -984,6 +984,7 @@ describe("GenerateCampaignUseCase — motion variants", () => {
       }),
     );
     expect(result.success).toBe(true);
+  });
 
   test("E3.2 with no timeline the sampled times are exactly the fixed set (D10)", async () => {
     const d = deps({ planner: fakePlanner(fakePlan([motionVariant()])) });
@@ -1001,7 +1002,11 @@ describe("GenerateCampaignUseCase — motion variants", () => {
       { text: "Three", weight: 20 },
     ]);
     const d = deps({ planner: fakePlanner(fakePlan([motionVariant({ durationSec: 60 })])) });
-    await new GenerateCampaignUseCase(d).execute(variationBrief({ copy: { timeline } }));
+    // The duration axis has to match the clip: #107 refuses a timeline whose beats breach
+    // the dwell floor, and 1:1:20 over the default 6 s would. Over 60 s each beat clears it.
+    await new GenerateCampaignUseCase(d).execute(
+      variationBrief({ copy: { timeline }, variation: { count: 3, seed: 42, axes: { duration: [60] } } }),
+    );
     const request = vi.mocked(d.videoCompositor.compositeVideo).mock.calls[0]?.[0];
     const sampleAt = request?.sampleAt ?? [];
 

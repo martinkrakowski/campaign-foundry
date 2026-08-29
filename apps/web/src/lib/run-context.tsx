@@ -52,6 +52,13 @@ export interface Asset {
     paletteShift: number;
     motion?: string;
     durationSec?: number;
+    /**
+     * How many copy beats a sequenced clip carried. Absent means the legacy
+     * single-message path — a different statement from a sequence of length zero.
+     */
+    beats?: number;
+    /** The pooled headline this slot drew (`headline: pool://copy`); omitted otherwise. */
+    headline?: string;
   };
 }
 
