@@ -332,9 +332,26 @@ function FilterSelect({
   );
 }
 
-function DescriptorChip({ children }: { children: string }) {
+function DescriptorChip({
+  children,
+  title,
+  className,
+}: {
+  children: string;
+  /** Hover text when the chip's own content is clipped. */
+  title?: string;
+  className?: string;
+}) {
   return (
-    <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-text-muted">{children}</span>
+    <span
+      title={title}
+      className={cn(
+        "rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-text-muted",
+        className,
+      )}
+    >
+      {children}
+    </span>
   );
 }
 
@@ -492,7 +509,16 @@ function Artboard({
               <DescriptorChip>{descriptorBeats(asset.descriptor.beats)}</DescriptorChip>
             )}
             {typeof asset.descriptor.headline === "string" && (
-              <DescriptorChip>{descriptorHeadline(asset.descriptor.headline)}</DescriptorChip>
+              // Every other chip in this row is a short enum — a layout, a tone, a motion
+              // kind. A pooled headline is arbitrary author text with no length limit, and
+              // the row does not wrap, so an unbounded chip stretches the tile past its
+              // artboard and breaks the grid. Bound it and keep the full text on hover.
+              <DescriptorChip
+                title={asset.descriptor.headline}
+                className="max-w-[10rem] truncate"
+              >
+                {descriptorHeadline(asset.descriptor.headline)}
+              </DescriptorChip>
             )}
           </>
         )}

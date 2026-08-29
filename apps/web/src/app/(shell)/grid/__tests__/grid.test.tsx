@@ -117,6 +117,32 @@ describe("GridPage", () => {
     expect(screen.getByText('"Stay wild"')).toBeTruthy();
   });
 
+  test("a long pooled headline is bounded and keeps its full text on hover", async () => {
+    // Every other chip in this row is a short enum. A pooled headline is arbitrary author
+    // text, and the row does not wrap inside a 240px tile — unbounded, it pushes the chips
+    // after it out of view.
+    const long =
+      "Stay wild, stay hydrated, and never stop exploring the trail ahead of you today and tomorrow";
+    seedPersistedRun([
+      makeAsset({
+        variantIndex: 0,
+        descriptor: {
+          layout: "headline-top",
+          tone: "bold",
+          backgroundSource: "procedural",
+          paletteShift: 0,
+          headline: long,
+        },
+      }),
+    ]);
+    renderWithRun(<GridPage />);
+    const chip = await screen.findByText(`"${long}"`);
+    expect(chip.className).toContain("truncate");
+    expect(chip.className).toMatch(/max-w-/);
+    // Clipped on screen, but the whole line is still reachable.
+    expect(chip.getAttribute("title")).toBe(long);
+  });
+
   test("omits beat and headline chips when fields are absent", async () => {
     seedPersistedRun([
       makeMotionAsset({

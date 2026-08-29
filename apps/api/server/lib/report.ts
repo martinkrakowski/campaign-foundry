@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { assetIdentity, SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
-import type { GeneratedAsset, PipelineResult, VariantDescriptor } from "@campaignfoundry/CampaignOrchestration";
+import type { GeneratedAsset, PipelineResult } from "@campaignfoundry/CampaignOrchestration";
 import { outputRoot } from "./config.js";
 
 /** Persisted asset = the entity plus the derived `brandCompliant` view field. */
@@ -58,16 +58,23 @@ export type PersistedAsset = {
   videoPath?: string;
   durationSec?: number;
   /**
-   * Carried since descriptors existed — `writeReport` spreads the whole `GeneratedAsset`,
-   * so every row has held this. It is declared here because the type described a persisted
-   * row and omitted it, not because anything was missing at runtime.
+   * Planned-axis provenance, on variation rows only — `writeReport` spreads the whole
+   * `GeneratedAsset`, so whatever the entity carried is here. Declared because the type
+   * described a persisted row and said nothing about it.
    *
-   * Deliberately NOT validated by `isPersistedAsset`: this guard decides whether a row is
-   * usable, and a row whose descriptor is malformed is still a perfectly good asset. The
-   * UI reads each descriptor field conditionally. Rejecting the row would lose a creative
-   * to a cosmetic defect.
+   * `unknown`, not `VariantDescriptor`, and that is the whole point. `isPersistedAsset` is
+   * a type PREDICATE: whatever this type claims, callers believe after the guard returns
+   * true. The guard deliberately does not validate the descriptor — it decides whether a
+   * row is a usable ASSET, and a row whose provenance is malformed is still a perfectly
+   * good creative, so rejecting it would lose work to a cosmetic defect. Typing it
+   * `VariantDescriptor` while not checking it would make the predicate assert something it
+   * never verified.
+   *
+   * So the type says exactly what the guard guarantees: something may be here, of no
+   * promised shape. Nothing in the API reads it; a consumer that wants it must narrow it
+   * itself, which is what the web already does field by field.
    */
-  descriptor?: VariantDescriptor;
+  descriptor?: unknown;
 };
 
 const isNonNegInt = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n >= 0;
