@@ -258,6 +258,44 @@ found:
   "class 0" but left this sentence behind, so the reviewer was being told the linter is
   blind to exactly the case the experiment used.
 
+#### P2.4 re-run (2026-08-29) — option 1 did not work
+
+The instruction was fixed as decided above and the experiment re-run against it (#121, since
+closed, branch deleted). **The reviewer reported the layer violation again**, in nearly the
+same words:
+
+> The domain layer must not import directly from the infrastructure layer. Replace the direct
+> import with a port defined in the application layer and have an infrastructure adapter
+> implement it.
+
+It did so with the prohibition unconditional, with an explicit paragraph saying a failing
+gate is the strongest reason to stay silent, and with the stale "package specifier" qualifier
+removed so it could no longer believe the linter was blind to relative imports. It also
+posted a second, unrelated suggestion about wrapping the import — so it was not merely
+pattern-matching one rule.
+
+**Option 1 is exhausted.** Two runs, materially different instructions, same behaviour: this
+model does not honour a negative constraint of this shape. That is a fact about the reviewer,
+not about the wording, and no further rewording is worth the attempt.
+
+The instruction fix is kept regardless — both faults it corrected were real, and the stale
+qualifier was actively misleading.
+
+**What remains, narrowed to two:**
+
+- **Accept it (was option 2).** The behaviour only occurs when `lint:arch` is red, and such
+  a PR cannot merge — it is a duplicated message on a blocked PR, which costs a reader one
+  extra paragraph and never reaches `main`. On every green PR this session the reviewer
+  stayed inside its lane.
+- **Delete it (was option 3, and §6's literal remedy).** C1's argument stands: a reviewer
+  that repeats a solved problem teaches people to skim it, and skimming is how a real finding
+  gets missed later.
+
+A third possibility neither option named: **change the model for this reviewer only.** All
+three run `openrouter/inception/mercury-2`; the arch reviewer is the one asked to obey a
+prohibition rather than to find things, which is a different skill. Its `config.model` can be
+set per workflow without touching the other two.
+
 **A first attempt reached the opposite conclusion and was wrong.** It opened the experiment
 PR with `--draft`, and `pr-agent-arch.yml` guards its job with
 `github.event.pull_request.draft == false`, so the run completed in 1 s with conclusion
