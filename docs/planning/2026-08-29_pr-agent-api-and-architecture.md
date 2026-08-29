@@ -1,0 +1,224 @@
+# Architecture & Development Plan — two more PR-Agent reviewers: API and architecture
+
+**Status:** Proposed v1.0
+**Scope:** `.github/workflows/` and `.pr_agent.toml` — two additional PR-Agent workflows beside the
+existing UI-contract reviewer. No application code changes.
+**Depends on:** #96 (the UI-contract PR-Agent, merged as `caa329f`)
+
+---
+
+## 0. Verdict on the proposal
+
+**Both are worth adding, but for opposite reasons, and the architecture one is the riskier of the
+two by a wide margin.**
+
+The API reviewer is straightforward: nothing in this repository reviews Nitro route semantics
+today. CodeRabbit is generic, the PR-Agent from #96 is pointed at `DESIGN.md`, and neither knows
+what an H3 handler is supposed to do about a repeated query parameter or a conditional write. That
+is a genuine gap and the defects to prove it are already in the git history.
+
+The architecture reviewer is the dangerous one, and the user is right to flag it. `hexagen arch
+validate` already enforces the layer graph **deterministically**, from
+`.architecture/invariants/layer-rules.yaml`. An LLM asked to "review the architecture" will
+re-derive those same rules, report them as findings, and be wrong slower and less reliably than a
+linter that is already green. That is worse than adding nothing: it trains people to skim the bot.
+
+**So the architecture reviewer is only worth building if it is scoped to what the linter provably
+cannot see.** §2.2 draws that line precisely; §3.2 is the mandate that follows from it. If we
+cannot hold that line, we should ship the API reviewer alone — a second opinion nobody reads is a
+cost, not a safety net.
+
+---
+
+## 0.1 Proposed Decisions
+
+| # | Decision | Consequence |
+|---|---|---|
+| **D1** | **Three reviewers, one workflow file each**, not one workflow with three personas. Each has its own concurrency group, its own `extra_instructions`, and its own failure guard. | A rate-limited or failing API review cannot cancel or mask the UI one. The concurrency-key bug the #96 header documents at length was exactly this class; three keys keep it solved. |
+| **D2** | **The architecture reviewer never reports what `hexagen arch validate` reports.** Its mandate is the complement of the linter: semantics the import graph cannot express. It is told the linter's rules explicitly so it can recognise and *refuse* them. | Prevents the failure that makes a second reviewer worthless. See §2.2 for the boundary and §3.2 for the wording. |
+| **D3** | **Both new reviewers run `/improve`, not `/review`.** Same finding as #96: `/review` emits an effort estimate and a focus-areas section that is empty when it has nothing to say; only `/improve` produces line-anchored suggestions. | Consistent with the UI reviewer. `auto_review = false`, `auto_improve = true`. |
+| **D4** | **Path-scoped triggering.** The API reviewer runs only when `apps/api/**` changes; the architecture reviewer only when `packages/*/src/**`, `.architecture/**` or `.agents/architecture.md` changes. | A CSS-only PR should not pay for three LLM reviews. Uses `on.pull_request.paths`. |
+| **D5** | **Every finding must name a failure scenario**, as #96 requires. A finding without concrete inputs and a wrong output is not reported. | The three reviewers already produce ~20 threads on a large PR; the sweep cost is real and rises with noise. |
+| **D6** | **Each reviewer's instructions are grounded in defects this repository actually shipped**, cited by PR number, not in generic best practice. | #96's instructions were written this way and its first automatic run found a real `NaN`-silently-swallows-a-fade bug on #97. Generic prompts produce generic findings. |
+| **D7** | **`.pr_agent.toml` stays single.** PR-Agent reads one config from the default branch; per-workflow differences live in each workflow's `env:` block. | Splitting the toml is not supported. The existing file's `[pr_reviewer]`/`[pr_code_suggestions]` sections stay as the UI reviewer's defaults; the new workflows override in `env`. |
+| **D8** | **No new merge gates.** All three reviewers are advisory. The only job that may fail is the existing "did the review actually run" guard. | A green check must never claim a review that did not happen (#96); an LLM opinion must never block a merge. |
+
+---
+
+## 1. Context & Current State (verified 2026-08-29)
+
+**What reviews a PR here today**
+
+| Reviewer | Scope | Deterministic? |
+|---|---|---|
+| CI (`ci.yml`) | build, typecheck, lint, `lint:arch`, `sync:check`, `test:cov` at 100 % | yes |
+| `hexagen arch validate` | the layer import graph, from `.architecture/invariants/layer-rules.yaml` | **yes** |
+| CodeRabbit | generic correctness, repo-wide | no |
+| Qodo | best practices | no |
+| PR-Agent "UI Review" (#96) | `DESIGN.md` and the D-decisions | no |
+
+**What `hexagen arch validate` enforces, exactly.** From `.architecture/invariants/layer-rules.yaml`:
+
+- `domain` — `internal-only`; may import `@campaignfoundry/shared`
+- `application` — `ports-only`; may import `domain`, `shared`
+- `infrastructure` — `adapters`; may import `domain`, `application`, `shared`
+- a `global_whitelist` (`@campaignfoundry/shared/**`, and the `CampaignOrchestration` root
+  entrypoint so adapter packages can implement its ports)
+- `test_double_rules.allowed_cross_package_imports: true`
+
+It is a **static import-graph check**. It reads edges between files and packages.
+
+**The API surface nothing reviews.** `apps/api/server` is a Nitro app: `routes/campaigns/**`
+handlers, `lib/` helpers, `plugins/ffmpeg-check.ts`. Its conventions — `defineEventHandler`,
+`getQuery` returning `string | string[]`, `H3Error` shapes, status codes, the conditional-write
+`revision` guard — are enforced by nothing but review.
+
+---
+
+## 2. Analysis
+
+### 2.1 Findings
+
+| # | Sev | Finding |
+|---|---|---|
+| **C1** | Critical | **An architecture LLM that duplicates the linter is a net negative.** It will report layer violations the linter already proves absent, with lower precision, and the sweep cost falls on a human. Any version of this reviewer that cannot state what it is *not* allowed to report should not ship. → D2, §2.2 |
+| **H1** | High | **The linter cannot tell a port from a leak.** `BriefStorePort.readBrief` accepted an absolute filesystem path and read it (#93). Every import in that file was legal; the layer graph was green. The abstraction was the thing that was wrong, and only a reader catches that. |
+| **H2** | High | **The linter cannot see through a legal import to an illegal runtime.** `editor-state.ts` imported the `CampaignOrchestration` barrel — explicitly whitelisted — which re-exports infrastructure adapters and dragged `node:fs`/`node:path`/`node:crypto` into the browser bundle. `lint:arch` passed; `yarn build` failed (#91). A reviewer that knows which leaves are browser-safe catches it in review instead. |
+| **H3** | High | **Nothing reviews Nitro route semantics.** Two real defects shipped past CI: assets were copied *before* the lock and revision check, so a rejected write still mutated storage; and the duplicate route raced its own id check (#93). Both are ordering bugs inside a single handler — invisible to an import-graph linter and to a UI-contract reviewer. |
+| **M1** | Med | **Additive response fields get dropped by their own client.** `GET /campaigns/capabilities` returns an ffmpeg `version`; the web client rebuilt the response as `{ motion, reason }` and dropped it, so the component rendering it was unreachable at 100 % coverage (#95). A route-and-client reviewer sees both halves. |
+| **M2** | Med | **Query-parameter handling is repeatedly subtle.** `getQuery(event).replace` may be `string \| string[]`; `briefs.post.ts` handles the array case deliberately. Nothing checks that new handlers do. |
+| **M3** | Med | **Ports are not proven swappable.** The S3 adapter does not exist yet, so nothing tests that `BriefStorePort`/`AssetStorePort` *could* be implemented by one. A reviewer can ask the question a test cannot yet. |
+| **L1** | Low | **Three reviewers on one PR is a sweep cost.** #95 drew 26 threads. Path-scoping (D4) and a hard "failure scenario or silence" rule (D5) keep it proportionate. |
+
+### 2.2 The line the architecture reviewer must not cross
+
+This is the heart of the plan. The reviewer is given both columns and told the left one is the
+linter's job.
+
+| `hexagen arch validate` owns — **never report** | The reviewer owns — **the actual mandate** |
+|---|---|
+| Which layers may import which | Whether a *port* is an abstraction or a disguised implementation detail (a filesystem path, an errno, a `Buffer` where a stream belongs) |
+| Package-boundary violations | Whether an adapter's failure modes leak through the port (fs `ENOENT` reaching a use case as-is) |
+| Whitelist conformance | Whether a legal import pulls an **illegal runtime** into a bundle — `node:*` reaching `apps/web` through a whitelisted barrel (H2) |
+| Circular dependencies between modules | Whether a "port" has exactly one adapter and no prospect of a second — an interface that is really just indirection |
+| File placement under `domain/`, `application/`, `infrastructure/` | Whether the code in a correctly-placed file *belongs* to that layer: business rules in an adapter, I/O in a use case, a clock read in the domain |
+| | Whether a new port is wired to anything — a port and adapter nobody constructs is dead weight at 100 % coverage (#93's drawer, in a different guise) |
+| | Whether `.agents/architecture.md` still describes the code after the change |
+
+**The test for a valid finding:** could `hexagen arch validate` have caught this? If yes, it is out
+of scope and must not be reported — the linter is green, so by construction the answer is that it
+did not occur.
+
+---
+
+## 3. Target Design
+
+### 3.1 API reviewer — `.github/workflows/pr-agent-api.yml`
+
+Same skeleton as #96 (digest pin, allowlist guard, concurrency key split by sender type and by
+what the run produces, and the "did it actually run" step). Differences:
+
+- `on.pull_request.paths: ["apps/api/**"]` plus the `issue_comment` command path (D4).
+- `concurrency.group` prefix `pr-agent-api-` so it cannot cancel the UI reviewer's run.
+- `config.repo_context_files: [".agents/architecture.md", "AGENTS.md", ".agents/testing.md"]`.
+- Its own `pr_code_suggestions.extra_instructions` (§3.3).
+
+### 3.2 Architecture reviewer — `.github/workflows/pr-agent-arch.yml`
+
+Same skeleton. Differences:
+
+- `on.pull_request.paths: ["packages/*/src/**", ".architecture/**", ".agents/architecture.md"]`.
+- `concurrency.group` prefix `pr-agent-arch-`.
+- `config.repo_context_files: [".agents/architecture.md", ".architecture/invariants/layer-rules.yaml", ".architecture/invariants/linter-config.yaml"]` — **the linter's own rules are context**, so the reviewer can recognise and refuse them (D2).
+- Instructions open with the prohibition, not the mandate (§3.3).
+
+### 3.3 The instructions, in outline
+
+Both follow #96's shape: an adversarial stance, a hard requirement that every finding carries a
+concrete failure scenario, and a list of defect classes **drawn from this repository's own
+history** (D6).
+
+**API reviewer hunts:**
+
+1. **Mutation before validation.** Anything written, copied or deleted before the lock, the
+   revision check, or the id check. (#93: assets copied before the conditional write, so a
+   rejected 409 still moved files.)
+2. **Path handling.** Any path from a request reaching the filesystem without confinement.
+   (#93: `readBrief("/etc/hosts")` escaped the store; the file's own `resolveConfined` helper was
+   used on one path and not the others.)
+3. **Query and body shapes.** `getQuery` values that may be arrays; unvalidated JSON bodies;
+   a repeated parameter whose second value silently wins.
+4. **Status and error semantics.** A 500 where a 4xx belongs; an `H3Error` whose message leaks an
+   absolute path; a catch that turns "I could not tell" into "nothing was wrong".
+5. **Additive contract drift.** A field added to a response that its own client does not carry
+   (M1), or a field removed without a version bump.
+6. **Locking scope.** Whether the lock is process-local when the operation needs to be
+   cross-process, stated honestly rather than assumed (a known limitation of `FsBriefStore`).
+
+**Architecture reviewer hunts** — after being told plainly what it may not report (§2.2):
+
+1. **Leaky ports.** A port signature that names a filesystem, a Buffer, an errno, or anything else
+   only one adapter could satisfy (H1).
+2. **Illegal runtime through a legal import** (H2) — `node:*` reaching a browser bundle via a
+   whitelisted barrel. It is told which leaves are browser-safe.
+3. **Layer-correct but semantically misplaced code** — business rules inside an adapter, I/O
+   inside a use case.
+4. **Ports with no adapter, or adapters nobody wires.**
+5. **Drift between the change and `.agents/architecture.md`.**
+
+---
+
+## 4. Phases
+
+### P1 — API reviewer
+
+| # | Task | Owns |
+|---|------|------|
+| P1.1 | `pr-agent-api.yml` from #96's skeleton: digest pin, allowlist guard, split concurrency key, run-actually-happened guard | `.github/workflows/pr-agent-api.yml` |
+| P1.2 | `paths` filter for `apps/api/**` + the `issue_comment` command path (D4) | same |
+| P1.3 | `extra_instructions` for the six API classes in §3.3, each citing the PR it came from | same |
+| P1.4 | Verify: the workflow parses, and a PR touching only `apps/web/**` does **not** trigger it | — |
+
+### P2 — Architecture reviewer
+
+| # | Task | Owns |
+|---|------|------|
+| P2.1 | `pr-agent-arch.yml` from the same skeleton, with the `packages/*/src/**` paths filter | `.github/workflows/pr-agent-arch.yml` |
+| P2.2 | `repo_context_files` includes both invariant YAMLs so the linter's rules are in context (D2) | same |
+| P2.3 | `extra_instructions` **opening with the prohibition table** from §2.2, then the five classes in §3.3 | same |
+| P2.4 | Verify the boundary holds: run it against a PR with a known layer-rule violation and confirm it defers to the linter rather than reporting it | — |
+
+### P3 — Config and docs
+
+| # | Task | Owns |
+|---|------|------|
+| P3.1 | `.pr_agent.toml` comment noting three workflows share it and where per-reviewer overrides live (D7) | `.pr_agent.toml` |
+| P3.2 | `.agents/architecture.md`: a line recording that architecture has both a deterministic linter and an advisory reviewer, and which owns what | `.agents/architecture.md` |
+
+---
+
+## 5. Definition of Done
+
+- Both workflows parse (`yaml.safe_load`) and declare one job, the two triggers, and three steps.
+- Every file named in `repo_context_files` exists on the default branch. A missing entry is
+  *skipped, not fatal*, so a stale list silently ships a weaker reviewer — this is checked, not
+  assumed.
+- The paths filters are proven by observation: a PR touching only `apps/web/**` triggers the UI
+  reviewer and neither new one.
+- The architecture reviewer, run against a PR containing a deliberate layer-rule violation,
+  **does not report it** — it defers to `hexagen arch validate`. If it reports it, D2 has failed
+  and the reviewer does not ship (C1).
+- No new required check. `ci.yml` remains the only merge gate (D8).
+- Each reviewer's instructions cite at least three defects by PR number (D6).
+
+---
+
+## 6. Risks
+
+| Risk | Mitigation |
+|---|---|
+| The architecture reviewer re-derives the linter's rules anyway, despite the prohibition. | P2.4 tests exactly this before it ships. If it fails, ship P1 alone — an unreliable second opinion on a solved problem is worse than none (C1). |
+| Three reviewers make sweeps expensive; people start skimming. | D4 path-scoping, D5 failure-scenario-or-silence, and `publish_output_no_suggestions = false` so a clean PR gets silence rather than an empty table. |
+| The three workflows drift apart as #96's skeleton is fixed in one and not the others. | The concurrency and guard blocks are identical by construction; a change to one is a change to all three, stated in each header. #96's own header already carries the reasoning. |
+| `mercury-2` or its fallback becomes unavailable and all three reviewers fail at once. | They fail independently (D1) and none is a merge gate (D8). The run-actually-happened guard turns a silent failure into a red check on the affected reviewer only. |
+| Path filters mean a cross-cutting PR gets reviewed by only one agent. | `paths` is a union across the three workflows; a PR touching `apps/api` *and* `packages/*/src` triggers both. Verified in P1.4/P2.4. |
