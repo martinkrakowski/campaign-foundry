@@ -35,8 +35,8 @@ something is built on top of it.
 | **D3** | **The approach is chosen by evidence, not preference (R1.1).** Which layers 0.12.1's builtin check covers decides whether the hash may live in `application` or must reach `infrastructure`. Establish that first; §2.3 lists the options against each outcome. | Prevents a refactor built on a guess about a linter we have just learned to distrust. |
 | **D4** | **Upgrade the linter alone; leave `@hexagen-monaco/sync` at 0.8.0.** `hexagen sync` rewrites scaffold and rolls back destructively on a dirty tree. | Two independent risks stay independent. The version skew is recorded (L1), not resolved by momentum. |
 | **D5** | **A field the pipeline produces is either rendered or removed.** `descriptor.beats` and `descriptor.headline` get a place on screen, or they come out of the type. | No third option where data is carried, typed, tested and invisible — the state both fields are in today. |
-| **D6** | **Descriptor provenance survives a reload.** `PersistedAsset` gains the descriptor, additively, and a report written before this change still loads. | A reloaded campaign currently loses its layout/tone/motion chips; that is a silent difference between "just ran" and "came back to it". |
-| **D7** | **Two lanes, no shared files.** R1 is `packages/` + config; R2 is `apps/`. | They run in parallel without a rebase dance. The one file both could want — `messages.ts` — belongs to R2 alone. |
+| **D6** | ~~Descriptor provenance survives a reload.~~ **WITHDRAWN — it already does.** What remains is narrower and worth doing anyway: `PersistedAsset`'s *type* is silent about a field that is genuinely persisted, and nothing pins the round trip. | Declare the field as `unknown` and add a regression test. **Do not make `isPersistedAsset` stricter** — rejecting a row for a malformed descriptor would drop the whole asset to fix a defect that does not exist. And do not type it `VariantDescriptor` while leaving it unchecked: a type predicate asserts whatever its type claims, so an unvalidated shape would be a lie the compiler propagates. |
+| **D7** | **Two lanes, no shared files** — with one named exception. R1 is `packages/` + config; R2 is `apps/`. **If §2.3's approach B is selected, R1 also owns the two composition sites** `apps/api/server/lib/pools.ts` and `apps/api/server/routes/campaigns/plan.post.ts`, which construct `PlanVariationsUseCase`. | Those two files are disjoint from R2's list (`report.ts`, `grid/page.tsx`, `messages.ts`), so the guarantee holds either way — but it has to be stated, or R1 discovers mid-lane that its chosen approach needs a file it was told not to touch. |
 | **D8** | **`pr-agent-arch.yml`'s "class 0" is deleted by the same PR that lands the upgrade.** It exists only because the linter was blind. | The instruction file says so itself. Leaving it would tell the reviewer to report what the linter now catches — the exact duplication #102 was built to avoid. |
 
 ---
@@ -110,7 +110,7 @@ gets quieter.
 | **C1** | Critical | **A merge gate that does not check.** `lint:arch` gates every PR and has been passing without testing relative imports. Every "the linter proves it" claim made in this repository — including in `.agents/architecture.md` and in #102's reviewer instructions — has been true only for package specifiers. → D1 |
 | **H1** | High | **`node:crypto` in the domain layer.** Blocks D1, and has already cost a workaround: the browser-safe leaf exists solely to route around it. → D2, D3 |
 | **H2** | High | **`descriptor.beats` and `descriptor.headline` are unreachable data.** Produced, persisted, typed, covered — and invisible. This is the class the API reviewer is instructed to hunt, and #108 created half of it while fixing a related gap. → D5 |
-| **M1** | Med | **A reloaded campaign loses its descriptor chips.** `PersistedAsset` carries no descriptor, so layout, tone, palette shift and motion vanish on reload. A user cannot tell whether a variant had no provenance or whether the page simply forgot. → D6 |
+| **M1** | ~~Med~~ **WITHDRAWN** | ~~A reloaded campaign loses its descriptor chips.~~ **This finding was wrong.** It was inferred from `PersistedAsset`'s field list without reading the serialisation path. `ReportAsset` is `GeneratedAsset & { brandCompliant }` and `writeReport` spreads the whole asset, so the descriptor **is** persisted; `isPersistedAsset` is a boolean guard that ignores unknown fields, and the merge path stores whole rows. Descriptors already survive a reload. See §2.5. |
 | **M2** | Med | **`.architecture/layout.yaml` is absent.** 0.12.1 warns and falls back to defaults, so the layer directories it checks are assumed rather than declared. Worth closing while the linter is in hand. |
 | **L1** | Low | **Toolchain skew.** `@hexagen-monaco/sync` stays at ^0.8.0 while the linter moves to ^0.12.1. Deliberate (D4), and recorded so it is not rediscovered as a surprise. |
 
@@ -157,6 +157,35 @@ data. The existing `motion · 6s` chip is the natural neighbour.
 If a field turns out to have no place a person would look, **D5's other branch applies**:
 remove it from the type and stop writing it. A plan that only allows "add UI" is not a plan.
 
+### 2.5 A finding this plan got wrong
+
+M1 claimed a reloaded campaign loses its descriptor chips. It does not, and the mistake is
+worth recording because it is the same one this session has been catching in others: a
+conclusion drawn from a type's field list without following the data.
+
+`PersistedAsset` does omit `descriptor` — but it is a **validator and packaging type**, not
+the serialisation shape. What is actually written is:
+
+```ts
+type ReportAsset = GeneratedAsset & { brandCompliant: boolean };
+const fresh: ReportAsset[] = result.assets.map((a) => ({ ...a, brandCompliant: … }));
+```
+
+A whole-entity spread, and `GeneratedAsset` carries `descriptor`. The merge path keeps whole
+rows in a `Map` and writes them back unchanged, and `isPersistedAsset` is a filter, not a
+transform: it returns a boolean, so **no row loses a property by passing it**, and extra
+properties pass it. (It does narrow at the *type* level — `a is PersistedAsset` — which is
+why R2.3 declares the field `unknown`: whatever that type claims, the guard is taken to have
+verified.)
+
+So descriptors already survive a reload. Two things are still worth doing, and R2.3/R2.4 are
+rewritten to be only those: the type should stop lying about what a row holds, and the round
+trip should be pinned by a test so that a future narrowing of `writeReport` is caught rather
+than discovered.
+
+**Credit where it is due:** this was caught by the Qodo reviewer on the plan's own PR (#112),
+before the lane's work was merged.
+
 ---
 
 ## 3. Phases
@@ -178,8 +207,8 @@ remove it from the type and stop writing it. A plan that only allows "add UI" is
 |---|------|------|
 | R2.1 | Render `descriptor.beats` where a person would look for it, next to the existing `motion · Ns` chip — or, if there is genuinely no place for it, remove the field from `run-context.tsx` and from the use case and say why (D5) | `grid/page.tsx`, `messages.ts` |
 | R2.2 | Same decision for `descriptor.headline` | same |
-| R2.3 | `PersistedAsset` gains the descriptor, additively. `isPersistedAsset` must still accept a row written before this change — a report on disk today has no descriptor and must keep loading | `apps/api/server/lib/report.ts` |
-| R2.4 | A test that a **reloaded** campaign shows the same descriptor chips as a freshly-run one. This is the row's point: without it, R2.3 is untested plumbing | `__tests__` |
+| R2.3 | **Complete the `PersistedAsset` type** — it describes a persisted row and says nothing about `descriptor`, which **variation** rows carry (`GeneratedAsset.descriptor` is optional and documented variation-only; classic rows omit it). Declare it as **`unknown`**: `isPersistedAsset` is a type predicate, so whatever the type claims is what callers believe after it returns true, and this guard deliberately does not validate the descriptor. **Do not add validation that can reject a row** — a malformed descriptor must not cost the whole creative | `apps/api/server/lib/report.ts` |
+| R2.4 | A test that a **reloaded** campaign shows the same descriptor chips as a freshly-run one. It passes today — that is the point. It pins behaviour that currently works by virtue of `writeReport` spreading the whole asset, so a future narrowing is caught | `__tests__` |
 | R2.5 | All new copy in `messages.ts` (D2 of DESIGN.md), read through `display-names.ts` where a raw domain value would otherwise reach the screen (D18) | `messages.ts` |
 
 ---
