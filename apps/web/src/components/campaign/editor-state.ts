@@ -167,6 +167,16 @@ export interface EditorState {
    * round-trip (and a toggle-on→off cycle) is byte-identical (merge gate).
    */
   outputExplicit: boolean;
+  /**
+   * True only when the loaded brief wrote the default `mode: brief` explicitly.
+   * `variation` needs no flag — `toBrief` always writes it, because it says
+   * something the absent key does not. This flag covers the redundant-but-present
+   * case, so a file that spells out its classic mode still round-trips
+   * byte-for-byte. Switching *to* `brief` does not set it: returning to the
+   * default must serialise like the default (the toggle-on→off rule `output`
+   * already follows).
+   */
+  modeExplicit: boolean;
   /** True when formats were explicitly authored or loaded diverging from platform defaults (D7). */
   formatsOverridden: boolean;
   /** True when ratio was explicitly authored or loaded diverging from platform defaults (D7). */
@@ -256,6 +266,7 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
     formats: ["static"],
     platforms: [...STATIC_PLATFORMS],
     outputExplicit: false,
+    modeExplicit: false,
     formatsOverridden: false,
     ratioOverridden: false,
     motionTouched: false,
@@ -671,7 +682,7 @@ export function toBrief(state: EditorState): CampaignBrief {
     targetAudience: state.targetAudience,
     campaignMessage: state.campaignMessage,
     products: state.products.map(toProduct),
-    ...(state.mode === "variation" ? { mode: state.mode } : {}),
+    ...(state.mode === "variation" || state.modeExplicit ? { mode: state.mode } : {}),
     ...(state.outputExplicit || !isDefaultOutput
       ? { output: { formats: [...state.formats], platforms: [...state.platforms] } }
       : {}),
@@ -794,6 +805,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
     formats,
     platforms,
     outputExplicit: brief.output !== undefined,
+    modeExplicit: brief.mode === "brief",
     formatsOverridden,
     ratioOverridden,
     motionTouched,
@@ -973,6 +985,10 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     formats,
     platforms,
     outputExplicit: raw.outputExplicit === true,
+    // Unlike the flags below, `=== true` is right for a legacy draft: the mode itself
+    // survives in `mode`, and losing the marker only omits a key whose absence means
+    // exactly what its value said. No authored work is lost.
+    modeExplicit: raw.modeExplicit === true,
     // A draft written before these flags existed has none of them, and `=== true` would
     // read that absence as "never overridden". It is not the same statement: the draft
     // may well hold formats, ratios or motion the user authored by hand. Restoring those
