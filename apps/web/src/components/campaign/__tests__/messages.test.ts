@@ -1,6 +1,6 @@
 import { describe, test, expect } from "vitest";
-import * as messages from "./messages";
-import { formatDisplayName } from "./display-names";
+import * as messages from "../messages";
+import { formatDisplayName } from "../display-names";
 
 // Collect all string values from messages (including function return values)
 function collectStrings(obj: Record<string, unknown>): string[] {
