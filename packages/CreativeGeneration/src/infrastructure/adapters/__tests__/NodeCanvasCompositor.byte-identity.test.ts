@@ -1,4 +1,4 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, vi, afterEach } from "vitest";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -55,6 +55,8 @@ const render = (prepared: Awaited<ReturnType<typeof NodeCanvasCompositor.prepare
   NodeCanvasCompositor.draw(ctx, prepared, t, motion);
   return canvas.toBuffer("image/png");
 };
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("NodeCanvasCompositor D10 — the legacy path is byte-identical after the timeline change", () => {
   // Registering the bundled fonts (as the goldens test does via its compositor
@@ -141,15 +143,20 @@ describe("NodeCanvasCompositor D10 — the legacy path is byte-identical after t
       const prepared = await NodeCanvasCompositor.prepare(request);
       for (const kind of [undefined, ...MOTION_KINDS] as const) {
         for (const t of [0, 0.5, 1] as const) {
+          // Comparing `draw` against `drawLegacy` pixel-for-pixel would be tautological:
+          // with no timeline prepared, `draw` *calls* `drawLegacy`, so the assertion can
+          // only fail if canvas rendering is non-deterministic — never if this code
+          // regresses. The golden-hash comparison above is what actually pins the bytes.
+          //
+          // The invariant worth asserting is the one that would break: that a request
+          // with no timeline still travels the single legacy path, rather than a second
+          // copy of it growing beside the first and drifting.
+          const spy = vi.spyOn(NodeCanvasCompositor, "drawLegacy");
           const canvas = createCanvas(prepared.width, prepared.height);
-          const ctx = canvas.getContext("2d");
-          NodeCanvasCompositor.draw(ctx, prepared, t, kind);
-          const viaDraw = canvas.toBuffer("image/png");
-
-          const legacy = createCanvas(prepared.width, prepared.height);
-          const legacyCtx = legacy.getContext("2d");
-          NodeCanvasCompositor.drawLegacy(legacyCtx, prepared, t, kind);
-          expect(viaDraw.equals(legacy.toBuffer("image/png"))).toBe(true);
+          NodeCanvasCompositor.draw(canvas.getContext("2d"), prepared, t, kind);
+          expect(spy).toHaveBeenCalledTimes(1);
+          expect(spy.mock.calls[0].slice(1)).toEqual([prepared, t, kind]);
+          spy.mockRestore();
         }
       }
     }
