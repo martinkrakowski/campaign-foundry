@@ -27,6 +27,7 @@ import {
   purgeDraftFromStorage,
   canPlan,
   normalizeDraftState,
+  motionPackagedRatios,
   type EditorState,
   type EditorAction,
 } from "../editor-state";
@@ -307,7 +308,9 @@ describe("editorReducer — variation axes", () => {
   test("togglePlatform removes and restores in canonical order", () => {
     const off = reduce(base(), { type: "togglePlatform", value: STATIC_PLATFORMS[1] });
     expect(off.platforms).toEqual([STATIC_PLATFORMS[0], STATIC_PLATFORMS[2]]);
-    expect(off.outputExplicit).toBe(true);
+    // outputExplicit is reserved for briefs that declared `output` on load; a bare
+    // toggle no longer sets it, so a toggle back to the default round-trips clean.
+    expect(off.outputExplicit).toBe(false);
     expect(reduce(off, { type: "togglePlatform", value: STATIC_PLATFORMS[1] }).platforms).toEqual([...STATIC_PLATFORMS]);
   });
 
@@ -355,7 +358,8 @@ describe("editorReducer — motion, duration and formats", () => {
   test("toggleFormat adds then removes", () => {
     const on = reduce(base(), { type: "toggleFormat", value: "motion" });
     expect(on.formats).toEqual(["static", "motion"]);
-    expect(on.outputExplicit).toBe(true);
+    // see togglePlatform: toggling never sets outputExplicit on its own
+    expect(on.outputExplicit).toBe(false);
     expect(reduce(on, { type: "toggleFormat", value: "motion" }).formats).toEqual(["static"]);
   });
 });
@@ -519,13 +523,16 @@ describe("toBrief", () => {
     expect(toBrief(declared).output).toEqual({ formats: ["static"], platforms: [...STATIC_PLATFORMS] });
   });
 
-  test("an output the user has toggled stays written even back at default values", () => {
+  test("an output the user has toggled on then off back to default is omitted", () => {
+    // A toggle that leaves the output back at the absent-key default must not force
+    // an `output` block, otherwise a save after the toggle would grow the brief and
+    // read the saved file back as dirty — the corpus round-trip is a merge gate.
     const toggled = reduce(
       filled(),
       { type: "toggleFormat", value: "motion" },
       { type: "toggleFormat", value: "motion" },
     );
-    expect(toBrief(toggled).output).toEqual({ formats: ["static"], platforms: [...STATIC_PLATFORMS] });
+    expect(toBrief(toggled).output).toBeUndefined();
   });
 
   test("localizedMessage is emitted only when it is non-blank after trimming", () => {
@@ -1285,3 +1292,164 @@ describe("a campaign name the slug throws away is still work", () => {
     expect(isPristine(initialEditorState())).toBe(true);
   });
 });
+
+describe("L4.1 Whole-corpus round-trip tests (D7)", () => {
+  const briefsDir = path.resolve(__dirname, "../../../../../../briefs");
+  const yamlFiles = fs.readdirSync(briefsDir).filter((f) => f.endsWith(".yaml"));
+
+  test("discovers all corpus YAML files on disk", () => {
+    expect(yamlFiles.length).toBeGreaterThanOrEqual(7);
+  });
+
+  test.each(yamlFiles)(
+    "round-trips %s byte-identically after a platform toggle on→off (policy, format, ratio and axisProductSize all unchanged)",
+    (filename) => {
+      const rawYaml = fs.readFileSync(path.join(briefsDir, filename), "utf8");
+      const loadedBrief = load(rawYaml) as CampaignBrief;
+      const state = fromBrief(loadedBrief, { file: filename });
+
+      const serialized = toBrief(state);
+      expect(serialized).toMatchObject({ id: loadedBrief.id });
+
+      // A platform toggle must not clobber a stored format/ratio divergence, and
+      // toggling on then off must leave the brief deep-equal to the original. The
+      // API `dumpBrief` is deterministic (fixed key order, no refs), so deep
+      // equality of `toBrief` objects means the saved bytes are identical too —
+      // which in turn keeps `policyHash` and `axisProductSize` stable (D7/D9).
+      const testPlatform = state.platforms.includes("tiktok") ? "x" : "tiktok";
+      const toggled = reduce(state, { type: "togglePlatform", value: testPlatform });
+      const untoggled = reduce(toggled, { type: "togglePlatform", value: testPlatform });
+
+      const roundTripped = toBrief(untoggled);
+      expect(roundTripped).toEqual(serialized);
+      expect(roundTripped.id).toBe(loadedBrief.id);
+      expect(axisProductSize(untoggled)).toBe(axisProductSize(state));
+    },
+  );
+
+  test("synthetic fixture 1: stored formats override", () => {
+    const briefWithCustomFormats: CampaignBrief = {
+      ...savedBrief(),
+      output: { formats: ["motion"], platforms: ["instagram-feed"] },
+    };
+    const state = fromBrief(briefWithCustomFormats);
+    expect(state.formatsOverridden).toBe(true);
+    expect(state.formats).toEqual(["motion"]);
+
+    // Toggling a platform does NOT overwrite formats
+    const toggled = reduce(state, { type: "togglePlatform", value: "linkedin" });
+    expect(toggled.formats).toEqual(["motion"]);
+    const untoggled = reduce(toggled, { type: "togglePlatform", value: "linkedin" });
+    expect(untoggled.formats).toEqual(["motion"]);
+  });
+
+  test("synthetic fixture 2: stored ratio override", () => {
+    const briefWithCustomRatio: CampaignBrief = {
+      ...savedBrief(),
+      mode: "variation",
+      variation: {
+        count: 4,
+        axes: {
+          layout: ["headline-top"],
+          tone: ["bold"],
+          ratio: ["1:1"],
+          background: { source: ["procedural"] },
+          paletteShift: [0],
+        },
+      } as any,
+      output: { formats: ["static"], platforms: ["instagram-feed", "x"] },
+    };
+    const state = fromBrief(briefWithCustomRatio);
+    expect(state.ratioOverridden).toBe(true);
+    expect(state.variation.ratio).toEqual(["1:1"]);
+
+    // Toggling a platform does NOT overwrite ratios
+    const toggled = reduce(state, { type: "togglePlatform", value: "linkedin" });
+    expect(toggled.variation.ratio).toEqual(["1:1"]);
+    const untoggled = reduce(toggled, { type: "togglePlatform", value: "linkedin" });
+    expect(untoggled.variation.ratio).toEqual(["1:1"]);
+  });
+
+  test("synthetic fixture 3: absent-key case (no output or ratio declared)", () => {
+    const briefAbsent: CampaignBrief = {
+      ...savedBrief(),
+      mode: "variation",
+      variation: {
+        count: 4,
+        axes: {
+          layout: ["headline-top"],
+          tone: ["bold"],
+          background: { source: ["procedural"] },
+          paletteShift: [0],
+        },
+      } as any,
+    };
+    const state = fromBrief(briefAbsent);
+    // absent axes.ratio means all 3 ratios in domain, which differs from static platforms (2 ratios)
+    expect(state.ratioOverridden).toBe(true);
+    expect(state.outputExplicit).toBe(false);
+
+    const serialized = toBrief(state);
+    expect(serialized.output).toBeUndefined();
+    expect(serialized.variation?.axes?.ratio).toBeUndefined();
+  });
+});
+
+describe("L4.5 Fresh-draft Video on→off identity test (D9)", () => {
+  test("turning Video on and then off on fresh draft is an identity operation", () => {
+    const fresh = initialEditorState("variation");
+    const initialBrief = toBrief(fresh);
+    const initialSize = axisProductSize(fresh);
+
+    // Turn Video on -> seeds defaults (all motion kinds, duration [6])
+    const videoOn = reduce(fresh, { type: "toggleFormat", value: "motion" });
+    expect(videoOn.formats).toContain("motion");
+    expect(videoOn.motion.length).toBe(4);
+    expect(videoOn.duration).toEqual([6]);
+    expect(videoOn.motionSeeded).toBe(true);
+
+    // Turn Video off without touching motion/duration -> retracts seeded motion/duration
+    const videoOff = reduce(videoOn, { type: "toggleFormat", value: "motion" });
+    expect(videoOff.formats).toEqual(["static"]);
+    expect(videoOff.motion).toEqual([]);
+    expect(videoOff.duration).toEqual([]);
+    expect(axisProductSize(videoOff)).toBe(initialSize);
+
+    // A fresh on→off round-trip is byte-identical: no output block is invented and
+    // the motion/duration axes are absent, so the stored bytes, policyHash and
+    // axisProductSize are all identical to the untouched fresh draft.
+    const finalBrief = toBrief(videoOff);
+    expect(finalBrief).toEqual(initialBrief);
+    expect(finalBrief.variation?.axes?.motion).toBeUndefined();
+    expect(finalBrief.variation?.axes?.duration).toBeUndefined();
+  });
+
+  test("touching motion kinds prevents retraction when Video is toggled off", () => {
+    const fresh = initialEditorState("variation");
+    const videoOn = reduce(fresh, { type: "toggleFormat", value: "motion" });
+    const customized = reduce(videoOn, { type: "toggleMotion", value: "ken-burns-out" });
+    expect(customized.motionTouched).toBe(true);
+
+    const videoOff = reduce(customized, { type: "toggleFormat", value: "motion" });
+    // Retraction does not happen because user explicitly touched motion
+    expect(videoOff.motion).toContain("ken-burns-in");
+  });
+});
+
+describe("motionPackagedRatios", () => {
+  test("accepts an EditorState and lists ratios whose platforms package motion", () => {
+    const state = {
+      ...initialEditorState("variation"),
+      platforms: ["instagram-reel", "x", "instagram-feed"],
+    };
+    const ratios = motionPackagedRatios(state);
+    // Only instagram-reel packages motion (9:16); x and the static feed do not.
+    expect(Array.from(ratios)).toEqual(["9:16"]);
+  });
+
+  test("accepts a raw platform-id array (the array overload)", () => {
+    const ratios = motionPackagedRatios(["instagram-reel", "instagram-feed"]);
+    expect(Array.from(ratios)).toEqual(["9:16"]);
+  });
+});
+

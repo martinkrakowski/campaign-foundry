@@ -16,6 +16,7 @@ export interface AxisCardProps {
    * the accessible name, so the name stays exactly `value`.
    */
   readonly description?: string;
+  readonly descriptionIcon?: ReactNode;
   readonly disabled?: boolean;
 }
 
@@ -37,6 +38,7 @@ export function AxisCard({
   children,
   meta,
   description,
+  descriptionIcon,
   disabled = false,
 }: AxisCardProps): ReactNode {
   const descriptionId = `axis-card-description-${useId()}`;
@@ -79,8 +81,9 @@ export function AxisCard({
         </span>
       ) : null}
       {description === undefined ? null : (
-        <span id={descriptionId} className="text-[11px] text-warning">
-          {description}
+        <span id={descriptionId} className="flex items-center gap-1 text-[11px] text-warning">
+          {descriptionIcon ? <span aria-hidden="true">{descriptionIcon}</span> : null}
+          <span>{description}</span>
         </span>
       )}
     </button>

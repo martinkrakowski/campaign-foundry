@@ -5,6 +5,7 @@ import { renderToString } from "react-dom/server";
 import { initialEditorState, emptyProduct, type EditorState } from "../editor-state";
 import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, OutputSection } from "../sections";
 import { ErrorStrip } from "../ErrorStrip";
+import * as messages from "../messages";
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -175,7 +176,9 @@ describe("OutputSection", () => {
   test("motion is selectable once the capability is known to be on (or unknown)", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
-    render(<OutputSection state={state()} dispatch={dispatch} errors={{}} />);
+    // Classic mode gates Video at the FormatPanel (needs Randomized), so exercise the
+    // capability path on a Randomized draft where the format card is ungated.
+    render(<OutputSection state={state({ mode: "variation" })} dispatch={dispatch} errors={{}} />);
 
     const motion = screen.getByRole("button", { name: "motion" }) as HTMLButtonElement;
     expect(motion.disabled).toBe(false);
@@ -183,7 +186,7 @@ describe("OutputSection", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "toggleFormat", value: "motion" });
   });
 
-  test("motion stays unavailable with the probe's reason while the capability is off", async () => {
+  test("motion stays unavailable with the standard notice while the capability is off", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
     render(
@@ -196,14 +199,17 @@ describe("OutputSection", () => {
 
     const motion = screen.getByRole("button", { name: "motion" }) as HTMLButtonElement;
     expect(motion.disabled).toBe(true);
-    expect(screen.getByText(/Motion is not available on this host: no ffmpeg/)).toBeTruthy();
+    // D7: the notice is a fixed sentence (never a concatenation of the probe reason),
+    // shown on the gated format card rather than as a red field error.
+    expect(screen.getAllByText(messages.formatsMotionUnavailable)).toBeTruthy();
     await user.click(motion);
     expect(dispatch).not.toHaveBeenCalledWith({ type: "toggleFormat", value: "motion" });
   });
 
-  test("a capability-off probe without a reason falls back to a generic one", () => {
+  test("a capability-off probe without a reason shows the same fixed sentence", () => {
     render(<OutputSection state={state({ capabilities: { motion: false } })} dispatch={vi.fn()} errors={{}} />);
-    expect(screen.getByText(/Motion is not available on this host: capability off/)).toBeTruthy();
+    // no "capability off" fallback string: the one fixed sentence covers every reason
+    expect(screen.getAllByText(messages.formatsMotionUnavailable).length).toBeGreaterThan(0);
   });
 
   test("a brief that already declares motion still shows it as selected", () => {
@@ -231,20 +237,20 @@ describe("OutputSection", () => {
   test("motion kinds and durations appear only when motion is a requested format", () => {
     const { unmount } = render(<OutputSection state={state()} dispatch={vi.fn()} errors={{}} />);
     expect(screen.queryByRole("button", { name: "ken-burns-in" })).toBeNull();
-    expect(screen.queryByText("Durations (seconds)")).toBeNull();
+    expect(screen.queryByText("Clip lengths")).toBeNull();
     unmount();
 
     render(<OutputSection state={state({ formats: ["static", "motion"] })} dispatch={vi.fn()} errors={{}} />);
     expect(screen.getByRole("button", { name: "ken-burns-in" })).toBeTruthy();
-    expect(screen.getByText("Durations (seconds)")).toBeTruthy();
+    expect(screen.getByText("Clip lengths")).toBeTruthy();
   });
 
   test("motion kinds toggle, durations edit, add and remove", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
-    render(
+    const { container } = render(
       <OutputSection
-        state={state({ formats: ["motion"], motion: ["ken-burns-in"], duration: [5] })}
+        state={state({ mode: "variation", formats: ["motion"], motion: ["ken-burns-in"], duration: [5] })}
         dispatch={dispatch}
         errors={{}}
       />,
@@ -253,40 +259,46 @@ describe("OutputSection", () => {
     await user.click(screen.getByRole("button", { name: "accent-wipe" }));
     expect(dispatch).toHaveBeenCalledWith({ type: "toggleMotion", value: "accent-wipe" });
 
-    fireEvent.change(screen.getByLabelText("Duration 1 (seconds)"), { target: { value: "8" } });
-    expect(dispatch).toHaveBeenCalledWith({ type: "setDuration", index: 0, value: 8 });
-
-    await user.click(screen.getByRole("button", { name: "Remove" }));
+    // durations are role="slider" beads on the 0..30 s film strip: nudge to the next
+    // free second, delete to remove, and click the empty track to add a new one
+    const bead = screen.getByRole("slider", { name: "Duration 1 (seconds)" });
+    fireEvent.keyDown(bead, { key: "ArrowRight" });
+    expect(dispatch).toHaveBeenCalledWith({ type: "setDuration", index: 0, value: 6 });
+    fireEvent.keyDown(bead, { key: "Delete" });
     expect(dispatch).toHaveBeenCalledWith({ type: "removeDuration", index: 0 });
 
-    await user.click(screen.getByRole("button", { name: "Add duration" }));
+    const strip = container.querySelector(".select-none") as HTMLElement;
+    vi.spyOn(strip, "getBoundingClientRect").mockReturnValue({
+      left: 0, top: 0, right: 300, bottom: 50, width: 300, height: 50, x: 0, y: 0, toJSON: () => {},
+    });
+    fireEvent.click(strip, { clientX: 150 });
     expect(dispatch).toHaveBeenCalledWith({ type: "addDuration" });
   });
 
-  test("motion controls are disabled with the reason while the capability is off (D12)", async () => {
+  test("a capability-off host gates the format card but keeps motion kinds operable (D12)", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
     render(
       <OutputSection
-        state={{
-          ...state({
-            formats: ["static", "motion"],
-            motion: ["ken-burns-in"],
-            duration: [6],
-            capabilities: { motion: false, reason: "no ffmpeg" },
-          }),
-        }}
+        state={state({
+          formats: ["static", "motion"],
+          motion: ["ken-burns-in"],
+          duration: [6],
+          capabilities: { motion: false, reason: "no ffmpeg" },
+        })}
         dispatch={dispatch}
         errors={{}}
       />,
     );
 
-    expect((screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByLabelText("Duration 1 (seconds)") as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Add duration" }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Remove" }) as HTMLButtonElement).disabled).toBe(true);
+    // Per-card gating (L4.4) guards the format *choice*; the loaded motion kinds and
+    // durations stay operable so the brief persists verbatim (D12). The unselected
+    // motion format card is the thing that is disabled on this host.
+    expect((screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByRole("slider", { name: "Duration 1 (seconds)" }).getAttribute("tabindex")).toBe("0");
+    expect((screen.getByRole("button", { name: "Remove duration 6 s" }) as HTMLButtonElement).disabled).toBe(false);
     await user.click(screen.getByRole("button", { name: "ken-burns-in" }));
-    expect(dispatch).not.toHaveBeenCalledWith({ type: "toggleMotion", value: "ken-burns-in" });
+    expect(dispatch).toHaveBeenCalledWith({ type: "toggleMotion", value: "ken-burns-in" });
   });
 
   test("renders motion kind and duration errors", () => {
@@ -351,6 +363,35 @@ describe("OutputSection", () => {
     expect(feed.disabled).toBe(false);
     await user.click(feed);
     expect(dispatch).toHaveBeenCalledWith({ type: "togglePlatform", value: "instagram-feed" });
+  });
+
+  test("the exclusion remedy button dispatches the photo-platform toggle (L4.7)", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    render(
+      <OutputSection
+        state={state({ formats: ["motion"], platforms: ["instagram-reel", "x"] })}
+        dispatch={dispatch}
+        errors={{}}
+      />,
+    );
+    // reel (9:16) and x (16:9) package motion, so the holding shape is named
+    expect(screen.getByText((text) => text.includes("Not used for video"))).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: messages.addPhotoPlatform }));
+    expect(dispatch).toHaveBeenCalledWith({ type: "togglePlatform", value: "instagram-feed" });
+  });
+
+  test("the exclusion line names no shapes when no offered platform packages motion", () => {
+    render(
+      <OutputSection state={state({ formats: ["motion"], platforms: [] })} dispatch={vi.fn()} errors={{}} />,
+    );
+    expect(screen.getByText(messages.ratioExcludedNone())).toBeTruthy();
+    expect(screen.queryByRole("button", { name: messages.addPhotoPlatform })).toBeTruthy();
+  });
+
+  test("a selected platform id with no profile is skipped defensively", () => {
+    render(<OutputSection state={state({ platforms: ["nonexistent"] })} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.queryByRole("button", { name: "nonexistent" })).toBeNull();
   });
 });
 

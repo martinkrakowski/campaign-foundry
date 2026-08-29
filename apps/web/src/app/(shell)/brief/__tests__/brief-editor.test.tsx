@@ -880,10 +880,11 @@ describe("BriefPage — capabilities and motion", () => {
 
     await waitFor(() => expect(calls).toBe(2));
     await waitFor(() => expect(motionToggle().disabled).toBe(true));
-    expect(screen.getByText(/Motion is not available on this host: no ffmpeg/)).toBeTruthy();
+    expect(screen.getByText(messages.formatsMotionUnavailable)).toBeTruthy();
   });
 
   test("a probe that never settles leaves motion ungated rather than falsely unavailable", async () => {
+    const user = userEvent.setup();
     let calls = 0;
     routes({
       capabilities: () => {
@@ -899,8 +900,12 @@ describe("BriefPage — capabilities and motion", () => {
     expect(calls).toBe(4);
 
     // "not probed" is not a verdict: committing it would report a false negative with
-    // a meaningless reason, so the editor stays ungated and the API refuses at run time
-    expect(motionToggle().disabled).toBe(false);
+    // a meaningless reason, so the editor stays ungated and the API refuses at run time.
+    // Classic mode gates Video by the mode rule, so exercise the capability path on a
+    // Randomized draft where the probe verdict is the only thing that could gate it.
+    await waitForEditorReady();
+    await user.click(screen.getByText("Randomized"));
+    await waitFor(() => expect(motionToggle().disabled).toBe(false));
     expect(screen.queryByText(/not probed/)).toBeNull();
   });
 
@@ -936,10 +941,10 @@ describe("BriefPage — capabilities and motion", () => {
 
     await user.click(screen.getAllByText("New brief...")[0]);
     await user.click(await screen.findByText("clip"));
-    // the verdict lands: the motion *kinds* go read-only, but the format toggle stays
-    // operable because this draft already requests motion and needs a way out
+    // Under per-card gating (L4.4), motion kinds remain operable; the video format card
+    // carries the capability gate description
     await waitFor(() =>
-      expect((screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled).toBe(true),
+      expect((screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled).toBe(false),
     );
     expect(motionToggle().disabled).toBe(false);
 
@@ -956,6 +961,7 @@ describe("BriefPage — capabilities and motion", () => {
   });
 
   test("the capabilities are refetched when the window regains focus", async () => {
+    const user = userEvent.setup();
     let calls = 0;
     routes({
       capabilities: () => {
@@ -966,7 +972,11 @@ describe("BriefPage — capabilities and motion", () => {
     renderWithRun(<Editor />);
 
     await waitFor(() => expect(calls).toBe(1));
-    expect(motionToggle().disabled).toBe(false);
+    // Classic mode gates Video at the format card, so move to Randomized where the
+    // probe verdict is the only gate before testing the focus-triggered refetch.
+    await waitForEditorReady();
+    await user.click(screen.getByText("Randomized"));
+    await waitFor(() => expect(motionToggle().disabled).toBe(false));
 
     window.dispatchEvent(new Event("focus"));
     await waitFor(() => expect(motionToggle().disabled).toBe(true));
@@ -998,10 +1008,13 @@ describe("BriefPage — capabilities and motion", () => {
     await fillValidDraft(user);
     await user.click(screen.getByText("Randomized"));
 
-    // request motion, then give it a kind, a duration and a packaging platform
+    // request motion, then customize kind, duration and a packaging platform
     await user.click(screen.getByRole("button", { name: "motion" }));
-    await user.click(screen.getByRole("button", { name: "ken-burns-in" }));
-    await user.click(screen.getByRole("button", { name: "Add duration" }));
+    // motion is seeded with all kinds and 6s duration (D9)
+    // deselect non-ken-burns kinds
+    await user.click(screen.getByRole("button", { name: "ken-burns-out" }));
+    await user.click(screen.getByRole("button", { name: "headline-rise" }));
+    await user.click(screen.getByRole("button", { name: "accent-wipe" }));
     await user.click(screen.getByRole("button", { name: "instagram-reel" }));
 
     await saveVia(user, "Save & apply");
@@ -1012,7 +1025,7 @@ describe("BriefPage — capabilities and motion", () => {
     });
     expect(post.body).toMatchObject({
       mode: "variation",
-      variation: { axes: { motion: ["ken-burns-in"], duration: [5] } },
+      variation: { axes: { motion: ["ken-burns-in"], duration: [6] } },
       output: {
         formats: ["static", "motion"],
         platforms: ["instagram-feed", "linkedin", "x", "instagram-reel"],
@@ -1028,6 +1041,13 @@ describe("BriefPage — capabilities and motion", () => {
     await fillValidDraft(user);
     await user.click(screen.getByText("Randomized"));
     await user.click(screen.getByRole("button", { name: "motion" }));
+
+    // Deselect all seeded motion kinds and remove seeded duration
+    await user.click(screen.getByRole("button", { name: "ken-burns-in" }));
+    await user.click(screen.getByRole("button", { name: "ken-burns-out" }));
+    await user.click(screen.getByRole("button", { name: "headline-rise" }));
+    await user.click(screen.getByRole("button", { name: "accent-wipe" }));
+    await user.click(screen.getByRole("button", { name: "Remove duration 6 s" }));
 
     expect(screen.getByText(messages.motion)).toBeTruthy();
     expect(screen.getByText(messages.duration)).toBeTruthy();
@@ -1070,18 +1090,17 @@ describe("BriefPage — capabilities and motion", () => {
     await user.click(await screen.findByText("clip"));
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("clip"));
 
-    // the probe's verdict lands and the controls go read-only with its reason. The
-    // format toggle itself stays operable — the draft already requests motion, so
-    // gating it would trap the user with a compatibility error and no control to fix it.
+    // the probe's verdict lands and Video card shows capability description. Under per-card
+    // gating (L4.4), motion kinds remain operable and the format toggle stays operable.
     await waitFor(() =>
-      expect((screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled).toBe(true),
+      expect((screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled).toBe(false),
     );
     expect(motionToggle().disabled).toBe(false);
-    expect(screen.getByText(/Motion is not available on this host: no ffmpeg/)).toBeTruthy();
-    expect((screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled).toBe(true);
-    const duration = screen.getByLabelText("Duration 1 (seconds)") as HTMLInputElement;
-    expect(duration.disabled).toBe(true);
-    expect(duration.value).toBe("6");
+    expect(screen.getByText(messages.formatsMotionUnavailable)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "ken-burns-in" }) as HTMLButtonElement).disabled).toBe(false);
+    const slider = screen.getByRole("slider", { name: "Duration 1 (seconds)" });
+    expect(slider).toBeTruthy();
+    expect(slider.getAttribute("aria-valuenow")).toBe("6");
     expect((screen.getByRole("button", { name: "instagram-reel" }) as HTMLButtonElement).disabled).toBe(true);
 
     // structurally valid ⇒ persistable: Save stays offered and keeps the fields verbatim

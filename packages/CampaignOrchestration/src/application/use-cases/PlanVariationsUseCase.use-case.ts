@@ -2,7 +2,7 @@ import { err, ok, SeededRandom, seedFrom, type Result } from "@campaignfoundry/s
 import type { CampaignBrief } from "../../domain/entities/CampaignBrief.js";
 import type { Variant } from "../../domain/entities/Variant.js";
 import type { AspectRatioValue } from "../../domain/value-objects/aspect-ratios.js";
-import type { MotionKind } from "../../domain/value-objects/MotionKind.vo.js";
+import { MOTION_FPS, type MotionKind } from "../../domain/value-objects/MotionKind.vo.js";
 import type { VariationPlan } from "../../domain/value-objects/VariationPlan.vo.js";
 import { DISTANCE_AXES, VariationPolicy, type PlanInput } from "../../domain/value-objects/VariationPolicy.vo.js";
 
@@ -10,9 +10,6 @@ import { DISTANCE_AXES, VariationPolicy, type PlanInput } from "../../domain/val
 import { EXHAUSTIVE_MAX_SPACE, enumerateAxes, exhaustiveAccept, shortfallMessage } from "./PlanCapacity.js";
 
 const REPLAN_MAX_DRAWS = 64;
-
-/** Encode frame rate; the estimate's `frames` and the generator's `fps` agree on it. */
-export const MOTION_FPS = 30;
 
 interface AxisDraw {
   readonly productId?: string;

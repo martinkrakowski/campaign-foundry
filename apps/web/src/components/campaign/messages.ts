@@ -180,6 +180,10 @@ export const formatsMotionUnavailable =
 /** `formats.motionNeedsRandomized` */
 export const formatsMotionNeedsRandomized =
   "Video only works in a Randomized campaign — switch the mode toggle to Randomized, or turn Video off.";
+export const addPhotoPlatform = "Add a photo platform";
+export const turnOnStillImages = "Turn on Still images";
+export const shapesFromPlatforms = "from your platforms";
+
 
 // --- Motion ---
 

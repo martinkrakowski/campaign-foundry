@@ -2,7 +2,9 @@ import { describe, test, expect, expectTypeOf } from "vitest";
 import type { SafeInsets as PortSafeInsets } from "@campaignfoundry/CampaignOrchestration";
 import {
   PLATFORM_PROFILES,
+  formatsFor,
   isPlatformVisible,
+  motionPackagedRatios,
   platformProfile,
   visiblePlatformIds,
   type SafeInsets,
@@ -79,4 +81,21 @@ describe("PlatformProfile", () => {
     expect(platformProfile("instagram-feed")?.maxBytes).toBe(8 * 1024 * 1024);
     expect(platformProfile("tiktok")?.maxBytes).toBe(100 * 1024 * 1024);
   });
+
+  test("formatsFor extracts unique formats in canonical static-first order", () => {
+    expect(formatsFor([])).toEqual([]);
+    expect(formatsFor(["unknown-platform"])).toEqual([]);
+    expect(formatsFor(["instagram-feed", "linkedin"])).toEqual(["static"]);
+    expect(formatsFor(["instagram-story"])).toEqual(["motion"]);
+    expect(formatsFor(["instagram-story", "x", "tiktok"])).toEqual(["static", "motion"]);
+  });
+
+  test("motionPackagedRatios extracts canvas ratios for motion platforms only", () => {
+    expect(motionPackagedRatios([])).toEqual(new Set());
+    expect(motionPackagedRatios(["instagram-feed", "linkedin", "x"])).toEqual(new Set());
+    expect(motionPackagedRatios(["unknown-platform"])).toEqual(new Set());
+    expect(motionPackagedRatios(["instagram-story"])).toEqual(new Set(["9:16"]));
+    expect(motionPackagedRatios(["instagram-feed", "tiktok", "youtube-short"])).toEqual(new Set(["9:16"]));
+  });
 });
+

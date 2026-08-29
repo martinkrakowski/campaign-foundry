@@ -92,6 +92,12 @@ export async function probeFfmpeg(opts?: {
       finish({ motion: false, reason: `ffmpeg -version timed out after ${timeoutMs}ms` });
     }, timeoutMs);
 
+    let stdout = "";
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+
     let stderr = "";
     child.stderr?.setEncoding("utf8");
     child.stderr?.on("data", (chunk: string) => {
@@ -107,7 +113,9 @@ export async function probeFfmpeg(opts?: {
 
     child.once("close", (code) => {
       if (code === 0) {
-        finish({ motion: true });
+        const match = stdout.match(/ffmpeg version\s+([^\s]+)/i);
+        const version = match?.[1];
+        finish({ motion: true, ...(version ? { version } : {}) });
         return;
       }
       const detail = stderr.trim() || `ffmpeg -version exited ${code}`;

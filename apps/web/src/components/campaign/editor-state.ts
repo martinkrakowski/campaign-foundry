@@ -7,12 +7,14 @@ import {
   MAX_DURATION_SEC,
   MIN_DURATION_SEC,
 } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
+import { MOTION_KINDS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 
 // Re-exported, not restated: every one of these is the domain's own value, and the
 // editor's copies of them were exactly the drift the leaf exists to prevent (D18).
-export { HEADLINE_POOL_REF, MAX_DURATION_SEC, MIN_DURATION_SEC };
+export { HEADLINE_POOL_REF, MAX_DURATION_SEC, MIN_DURATION_SEC, MOTION_KINDS };
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
+import { platformsToFormats, platformsToRatios } from "./derive";
 
 
 export const LAYOUT_OPTIONS = ["headline-top", "headline-bottom"] as const;
@@ -157,11 +159,22 @@ export interface EditorState {
   /**
    * Whether the output block must be written even when it equals the absent-key
    * default (static × the static platforms): true when the loaded brief declared
-   * `output`, or the user has toggled a format or platform. A default-valued
-   * output that was never declared serialises as the absent key instead — the
-   * static platforms carry zero insets (D11), so both forms render identically.
+   * `output`. A default-valued output that was never declared serialises as the
+   * absent key instead — the static platforms carry zero insets (D11), so both
+   * forms render identically. Toggling a format or platform does not set this:
+   * `toBrief` writes output whenever a toggle leaves it diverging from the
+   * default, and omits it when a toggle returns to the default, so a load→save
+   * round-trip (and a toggle-on→off cycle) is byte-identical (merge gate).
    */
   outputExplicit: boolean;
+  /** True when formats were explicitly authored or loaded diverging from platform defaults (D7). */
+  formatsOverridden: boolean;
+  /** True when ratio was explicitly authored or loaded diverging from platform defaults (D7). */
+  ratioOverridden: boolean;
+  /** True when motion kinds or durations were touched by user (D9). */
+  motionTouched: boolean;
+  /** True when motion was seeded upon turning Video on (D9). */
+  motionSeeded: boolean;
   pool: CopyPool | null;
   headlineAxisDropped: boolean;
   /**
@@ -242,6 +255,10 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
     formats: ["static"],
     platforms: [...STATIC_PLATFORMS],
     outputExplicit: false,
+    formatsOverridden: false,
+    ratioOverridden: false,
+    motionTouched: false,
+    motionSeeded: false,
     pool: null,
     headlineAxisDropped: false,
     countNotice: null,
@@ -264,10 +281,11 @@ function toggleOrdered<T>(list: readonly T[], value: T, order: readonly T[]): T[
  */
 
 /** Ratios the requested platforms package motion at — the motion filter's allowlist. */
-export function motionPackagedRatios(state: EditorState): Set<string> {
+export function motionPackagedRatios(state: EditorState | readonly string[]): Set<string> {
+  const platforms: readonly string[] = Array.isArray(state) ? (state as readonly string[]) : (state as EditorState).platforms;
   return new Set(
-    state.platforms
-      .map((id) => PLATFORM_PROFILES[id])
+    platforms
+      .map((id: string) => PLATFORM_PROFILES[id])
       .filter((profile): profile is PlatformProfile => profile !== undefined)
       .filter((profile) => (profile.formats as readonly string[]).includes("motion"))
       .map((profile) => profile.ratio),
@@ -412,6 +430,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       return {
         ...state,
         variation: { ...state.variation, ratio: toggleOrdered(state.variation.ratio, action.value, RATIO_OPTIONS) },
+        ratioOverridden: true,
       };
     case "toggleBackground": {
       // Same guard as layout and tone. The domain multiplies these axes by their raw
@@ -431,36 +450,100 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       const next = state.motion.includes(action.value)
         ? state.motion.filter((m) => m !== action.value)
         : [...state.motion, action.value];
-      return { ...state, motion: next };
+      return { ...state, motion: next, motionTouched: true };
     }
     case "setDuration": {
       const next = [...state.duration];
       next[action.index] = action.value;
-      return { ...state, duration: next };
+      return { ...state, duration: next, motionTouched: true };
     }
     case "addDuration": {
       // The planner de-duplicates this axis (`unique(axes.duration)` in
       // VariationPolicy.vo), so appending a fixed value lets the user add entries that
       // silently do nothing. Offer the next unused length instead.
       const next = nextFreeDuration(state.duration);
-      return next === undefined ? state : { ...state, duration: [...state.duration, next] };
+      return next === undefined ? state : { ...state, duration: [...state.duration, next], motionTouched: true };
     }
     case "removeDuration":
-      return { ...state, duration: state.duration.filter((_, index) => index !== action.index) };
+      return { ...state, duration: state.duration.filter((_, index) => index !== action.index), motionTouched: true };
     case "toggleFormat": {
-      const next = state.formats.includes(action.value)
+      const nextFormats = state.formats.includes(action.value)
         ? state.formats.filter((f) => f !== action.value)
         : [...state.formats, action.value];
-      // The user has spoken about output: it must persist even if the toggles
-      // happen to land back on the absent-key default.
-      return { ...state, formats: next, outputExplicit: true };
-    }
-    case "togglePlatform":
+
+      const videoTurningOn = action.value === "motion" && nextFormats.includes("motion");
+      const videoTurningOff = action.value === "motion" && !nextFormats.includes("motion");
+
+      let motion = state.motion;
+      let duration = state.duration;
+      let motionSeeded = state.motionSeeded;
+
+      // Seeding domain defaults on Video-on (D9):
+      // When Video is turned on on a fresh draft with no motion/duration set,
+      // seed all motion kinds and 6s duration.
+      if (videoTurningOn && motion.length === 0 && duration.length === 0 && !state.motionTouched) {
+        motion = [...MOTION_KINDS];
+        duration = [6];
+        motionSeeded = true;
+      } else if (videoTurningOff && !state.motionTouched) {
+        // Retraction on Video-off while untouched (D9):
+        // Retract seeded motion and duration back to empty.
+        motion = [];
+        duration = [];
+        motionSeeded = false;
+      }
+
+      // D7/C6: a format toggle never forces an `output` block of its own. `toBrief`
+      // writes output when the result actually diverges from the absent-key default
+      // (so an on-toggle that adds motion persists it), and omits it when the toggle
+      // returns to the default (so toggle-on→off serialises byte-identically — the
+      // corpus round-trip is a merge gate). `outputExplicit` is reserved for one
+      // thing only: a loaded brief that declared `output`, which must be preserved.
       return {
         ...state,
-        platforms: toggleOrdered(state.platforms, action.value, PLATFORM_ORDER),
-        outputExplicit: true,
+        formats: nextFormats,
+        motion,
+        duration,
+        motionSeeded,
+        formatsOverridden: true,
       };
+    }
+    case "togglePlatform": {
+      const nextPlatforms = toggleOrdered(state.platforms, action.value, PLATFORM_ORDER);
+      const nextFormats = state.formatsOverridden ? state.formats : platformsToFormats(nextPlatforms);
+      const nextRatio = state.ratioOverridden ? state.variation.ratio : platformsToRatios(nextPlatforms);
+
+      let motion = state.motion;
+      let duration = state.duration;
+      let motionSeeded = state.motionSeeded;
+
+      if (!state.formatsOverridden) {
+        const videoTurningOn = nextFormats.includes("motion") && !state.formats.includes("motion");
+        const videoTurningOff = !nextFormats.includes("motion") && state.formats.includes("motion");
+        if (videoTurningOn && motion.length === 0 && duration.length === 0 && !state.motionTouched) {
+          motion = [...MOTION_KINDS];
+          duration = [6];
+          motionSeeded = true;
+        } else if (videoTurningOff && !state.motionTouched) {
+          motion = [];
+          duration = [];
+          motionSeeded = false;
+        }
+      }
+
+      return {
+        ...state,
+        platforms: nextPlatforms,
+        formats: nextFormats,
+        motion,
+        duration,
+        motionSeeded,
+        variation: {
+          ...state.variation,
+          ratio: nextRatio,
+        },
+      };
+    }
     case "setPool": {
       if (action.briefId !== state.briefId) return state;
       const none = approvedHeadlines(action.pool) === 0;
@@ -634,6 +717,21 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
   const axes = variation?.axes as Record<string, unknown> | undefined;
   const num = (value: unknown): string => (typeof value === "number" ? String(value) : "");
   const coverage = variation?.coverage as { perProduct?: number; perRatio?: number } | undefined;
+  const derivedFormats = platformsToFormats(platforms);
+  const storedFormats = brief.output?.formats;
+  const formatsOverridden =
+    storedFormats !== undefined &&
+    (storedFormats.length !== derivedFormats.length || !storedFormats.every((f) => derivedFormats.includes(f)));
+
+  const derivedRatios = platformsToRatios(platforms);
+  const storedRatios = axes?.ratio !== undefined ? list(axes.ratio, [...RATIO_OPTIONS]) : [...RATIO_OPTIONS];
+  const ratioOverridden =
+    storedRatios.length !== derivedRatios.length || !storedRatios.every((r) => derivedRatios.includes(r));
+
+  const motionList = list(axes?.motion, []);
+  const durationList = list(axes?.duration, []);
+  const motionTouched = motionList.length > 0 || durationList.length > 0;
+
   return {
     source,
     mode: brief.mode ?? "brief",
@@ -654,16 +752,20 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
       perRatio: coverage ? num(coverage.perRatio) : variation ? "" : "1",
       layout: list(axes?.layout, [...LAYOUT_OPTIONS]),
       tone: list(axes?.tone, [...TONE_OPTIONS]),
-      ratio: list(axes?.ratio, [...RATIO_OPTIONS]),
+      ratio: storedRatios,
       background: list((axes?.background as { source?: unknown } | undefined)?.source, [...DEFAULT_BACKGROUND_SOURCES]),
       paletteShift: list(axes?.paletteShift, [...PALETTE_SHIFT_OPTIONS]),
       headline: axes?.headline === HEADLINE_POOL_REF,
     },
-    motion: list(axes?.motion, []),
-    duration: list(axes?.duration, []),
+    motion: motionList,
+    duration: durationList,
     formats,
     platforms,
     outputExplicit: brief.output !== undefined,
+    formatsOverridden,
+    ratioOverridden,
+    motionTouched,
+    motionSeeded: false,
     pool: null,
     headlineAxisDropped: false,
     countNotice: null,
@@ -821,6 +923,10 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     formats: list(raw.formats, initial.formats),
     platforms: list(raw.platforms, initial.platforms),
     outputExplicit: raw.outputExplicit === true,
+    formatsOverridden: raw.formatsOverridden === true,
+    ratioOverridden: raw.ratioOverridden === true,
+    motionTouched: raw.motionTouched === true,
+    motionSeeded: raw.motionSeeded === true,
     // The count notice is one-time UI, not part of the draft it describes.
     countNotice: null,
   } as EditorState;

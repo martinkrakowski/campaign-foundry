@@ -130,3 +130,36 @@ export function visiblePlatformIds(capabilities: PlatformCapabilities): readonly
 export function platformProfile(id: string): PlatformProfile | undefined {
   return PLATFORM_PROFILES[id];
 }
+
+/**
+ * Formats packaged by the given platforms, in canonical order ("static" first).
+ * Empty when platforms is empty or no valid platforms match.
+ */
+export function formatsFor(platformIds: readonly string[]): PlatformFormat[] {
+  const formats = new Set<PlatformFormat>();
+  for (const id of platformIds) {
+    const profile = PLATFORM_PROFILES[id];
+    if (profile) {
+      for (const format of profile.formats) {
+        formats.add(format);
+      }
+    }
+  }
+  const order: readonly PlatformFormat[] = ["static", "motion"];
+  return order.filter((f) => formats.has(f));
+}
+
+/**
+ * Canvas ratios supported for motion across the given platforms.
+ */
+export function motionPackagedRatios(platformIds: readonly string[]): Set<CanvasRatio> {
+  const ratios = new Set<CanvasRatio>();
+  for (const id of platformIds) {
+    const profile = PLATFORM_PROFILES[id];
+    if (profile && profile.formats.includes("motion")) {
+      ratios.add(profile.ratio);
+    }
+  }
+  return ratios;
+}
+

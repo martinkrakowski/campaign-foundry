@@ -93,4 +93,16 @@ describe("AxisCard", () => {
     expect(onToggle).not.toHaveBeenCalled();
     expect(container.querySelector("svg")).toBeNull();
   });
+
+  test("a description renders with an optional leading icon, aria-hidden from the name", () => {
+    render(
+      <AxisCard value="headline-top" selected={false} onToggle={vi.fn()} description="gated" descriptionIcon="⚠">
+        <CreativeGlyph layout="headline-top" />
+      </AxisCard>,
+    );
+    // the description must not extend the accessible name
+    const button = screen.getByRole("button", { name: "headline-top" }) as HTMLButtonElement;
+    expect(button.textContent).toContain("gated");
+    expect(button.textContent).toContain("⚠");
+  });
 });

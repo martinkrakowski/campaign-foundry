@@ -364,11 +364,22 @@ describe("validateOutput", () => {
     expect(validateOutput(valid({ platforms: [] })).platforms).toBe(messages.platforms);
   });
 
-  test("motion is refused while the capability is off, with the probe's reason", () => {
-    const off = valid({ mode: "variation", formats: ["static", "motion"], capabilities: { motion: false, reason: "no ffmpeg" } });
-    expect(validateOutput(off).formats).toBe(messages.formatsMotionUnavailable);
-    const noReason = valid({ mode: "variation", formats: ["motion"], capabilities: { motion: false } });
-    expect(validateOutput(noReason).formats).toBe(messages.formatsMotionUnavailable);
+  test("motion is not a red error while the capability is off — the card gate owns it", () => {
+    // D7: gates are never red. A capability being off makes a motion brief unrunnable
+    // on this host but still fully persistable, so `validateOutput` stays clean (the
+    // only structural complaint would be a missing motion platform); the notice lives
+    // on the FormatPanel gate and `motionUnavailableReason` drives the Save/apply
+    // refusal, rather than a duplicate red field error.
+    const off = valid({ mode: "variation", formats: ["static", "motion"],
+      platforms: ["instagram-feed", "instagram-reel"],
+      capabilities: { motion: false, reason: "no ffmpeg" },
+    });
+    expect(validateOutput(off).formats).toBeUndefined();
+    const noReason = valid({ mode: "variation", formats: ["motion"],
+      platforms: ["instagram-reel"],
+      capabilities: { motion: false },
+    });
+    expect(validateOutput(noReason).formats).toBeUndefined();
     const on = valid({ mode: "variation", formats: ["static", "motion"],
       platforms: ["instagram-feed", "instagram-reel"],
       capabilities: { motion: true },
@@ -393,8 +404,8 @@ describe("validateOutput", () => {
   });
 
   test("a capability-off motion brief with its motion platform selected is structurally compatible", () => {
-    // D12: the compatibility mirror must not add an error a save would be blocked by —
-    // the only complaint is the capability, which does not gate persistence.
+    // D12: the compatibility mirror must not add an error a save would be blocked by,
+    // and the capability does not gate persistence — the gate owns the notice.
     const errors = validateOutput(
       valid({ mode: "variation", formats: ["static", "motion"],
         platforms: ["instagram-feed", "instagram-reel"],
@@ -402,21 +413,17 @@ describe("validateOutput", () => {
       }),
     );
     expect(errors.platforms).toBeUndefined();
-    expect(errors.formats).toBe(messages.formatsMotionUnavailable);
+    expect(errors.formats).toBeUndefined();
   });
 });
 
 describe("validateOutput — motion needs a randomized campaign", () => {
-  test("a classic brief requesting motion is told to switch mode", () => {
+  test("a classic brief requesting motion is not red-flagged — the mode gate owns it", () => {
+    // The classic matrix renders stills, so motion is drawn only by the variation
+    // planner; the remedy is a mode switch, surfaced on the motion FormatPanel gate
+    // rather than a red field error (D7: gates are never red).
     const errors = validateOutput(valid({ mode: "brief", formats: ["motion"], platforms: ["instagram-reel"] }));
-    expect(errors.formats).toBe(messages.formatsMotionNeedsRandomized);
-  });
-
-  test("the mode rule outranks the capability message — it is the root cause", () => {
-    const errors = validateOutput(
-      valid({ mode: "brief", formats: ["motion"], platforms: ["instagram-reel"], capabilities: { motion: false, reason: "no ffmpeg" } }),
-    );
-    expect(errors.formats).toBe(messages.formatsMotionNeedsRandomized);
+    expect(errors.formats).toBeUndefined();
   });
 
   test("a randomized brief requesting motion on a motion platform is clean", () => {

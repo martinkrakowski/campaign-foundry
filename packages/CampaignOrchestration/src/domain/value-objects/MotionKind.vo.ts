@@ -4,6 +4,7 @@
  */
 export const MOTION_KINDS = ["ken-burns-in", "ken-burns-out", "headline-rise", "accent-wipe"] as const;
 export type MotionKind = (typeof MOTION_KINDS)[number];
+export const MOTION_FPS = 30;
 
 const REST_T: Record<MotionKind, number> = {
   "ken-burns-in": 1,

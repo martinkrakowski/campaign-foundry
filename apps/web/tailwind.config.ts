@@ -19,6 +19,8 @@ const config: Config = {
           primary: "var(--color-brand-primary)",
           "primary-hover": "var(--color-brand-primary-hover)",
           secondary: "var(--color-brand-secondary)",
+          tint: "var(--color-brand-tint)",
+          rail: "var(--color-brand-rail)",
         },
         background: "var(--color-background)",
         surface: "var(--color-surface)",
@@ -51,6 +53,7 @@ const config: Config = {
       transitionDuration: {
         fast: "var(--duration-fast)",
         normal: "var(--duration-normal)",
+        preview: "var(--duration-preview)",
       },
     },
   },
