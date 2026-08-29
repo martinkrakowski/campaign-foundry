@@ -62,13 +62,14 @@ permissions:
 concurrency:
   group: >-
     pr-agent-${{ github.event.pull_request.number || github.event.issue.number
-    }}-${{ (github.event_name == 'pull_request'
+    }}-${{ ((github.event_name == 'pull_request'
     || github.event.comment.body == '/improve'
     || startsWith(github.event.comment.body, '/improve '))
-    && 'improve'
-    || (github.event.comment.body == '/review'
+    && 'improve')
+    || ((github.event.comment.body == '/review'
     || startsWith(github.event.comment.body, '/review '))
-    && 'review' || 'other' }}-${{ github.event.sender.type }}
+    && 'review')
+    || 'other' }}-${{ github.event.sender.type }}
   cancel-in-progress: true
 
 jobs:
@@ -297,10 +298,27 @@ jobs:
           #
           # Errors are NOT converted to zero. If the API call fails, this step fails,
           # because "I could not check" must never read as "nothing was wrong".
-          gh api --paginate --method GET "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" > "$RUNNER_TEMP/comments.json"
-          FILTER='[.[] | select(.user.login == "github-actions[bot]") | select(.created_at >= $since) | select(.body | test("Failed to generate"))] | length'
-          jq --arg since "$STARTED_AT" "$FILTER" "$RUNNER_TEMP/comments.json" > "$RUNNER_TEMP/failures"
+          # `--paginate` concatenates one JSON document PER PAGE, so a plain `jq` filter
+          # emits one count per page. On a PR with more than a page of comments `failed`
+          # becomes "0\n1", `[ "$failed" -gt 0 ]` is an integer-expression error, and a
+          # failing test inside `if` is simply false under `set -e` — so the guard falls
+          # through to its success message while a failure notice sits on the PR.
+          #
+          # That is this guard failing open: the exact defect it exists to catch, rebuilt
+          # inside itself, and invisible until a PR gets busy enough to paginate. `--slurp`
+          # makes the pages one array, so the count is one number.
+          gh api --paginate --slurp --method GET "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" > "$RUNNER_TEMP/pages.json"
+          FILTER='[.[][] | select(.user.login == "github-actions[bot]") | select(.created_at >= $since) | select(.body | test("Failed to generate"))] | length'
+          jq --arg since "$STARTED_AT" "$FILTER" "$RUNNER_TEMP/pages.json" > "$RUNNER_TEMP/failures"
           failed=$(cat "$RUNNER_TEMP/failures")
+          # A count that is not a single integer means the shape assumption above is wrong.
+          # Fail rather than compare, because "I could not tell" must not read as "clean".
+          case "$failed" in
+            ''|*[!0-9]*)
+              echo "Expected a single integer from the comment scan, got: $failed"
+              exit 1
+              ;;
+          esac
           if [ "$failed" -gt 0 ]; then
             echo "PR-Agent reported it could not generate a review."
             echo "A green check here would claim a review that never happened."
