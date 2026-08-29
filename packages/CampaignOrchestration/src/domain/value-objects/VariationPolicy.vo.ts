@@ -65,7 +65,6 @@ export interface PlanInput {
   readonly headlines?: readonly string[];
   readonly motionRatios?: readonly AspectRatioValue[];
   readonly ratios?: readonly AspectRatioValue[];
-  readonly hasher?: PolicyHasher;
 }
 
 export interface VariationCoverage {
@@ -105,15 +104,18 @@ export class VariationPolicy {
     readonly motionRatios: readonly AspectRatioValue[],
   ) {}
 
+  /**
+   * `hasher` is required, and deliberately a parameter rather than an optional field on
+   * `PlanInput`: wiring it is a composition concern, and a missing digest function is a
+   * mistake the compiler can catch. An optional one would push that to a runtime error on
+   * a path that only fires in a misconfigured deployment.
+   */
   static fromBrief(
     brief: CampaignBrief,
-    input: PlanInput = {},
-    hasher?: PolicyHasher,
+    input: PlanInput,
+    hasher: PolicyHasher,
   ): Result<VariationPolicy, Error> {
-    const hashFn = hasher ?? input.hasher;
-    if (!hashFn) {
-      return err(new Error('Variation policy requires a hasher.'));
-    }
+    const hashFn = hasher;
 
     const variation = brief.variation;
     if (variation === undefined || variation.count === undefined) {

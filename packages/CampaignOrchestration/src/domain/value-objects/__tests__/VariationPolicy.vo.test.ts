@@ -152,12 +152,6 @@ describe("VariationPolicy.fromBrief", () => {
     if (a.success && b.success) expect(a.value.policyHash).toBe(b.value.policyHash);
   });
 
-  test("rejects fromBrief when no hasher is supplied in input or argument", () => {
-    const input = brief({ variation: { count: 12, seed: 7 } });
-    const result = VariationPolicy.fromBrief(input);
-    expect(result.success).toBe(false);
-    if (!result.success) expect(result.error.message).toBe("Variation policy requires a hasher.");
-  });
 
   test("delegates hashing to the supplied PolicyHasher", () => {
     const customHasher = vi.fn((_payloadJson: string) => "custom-digest-12345");

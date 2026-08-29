@@ -31,7 +31,7 @@ export class PlanVariationsUseCase {
   constructor(private readonly hasher: PolicyHasher) {}
 
   plan(brief: CampaignBrief, input: PlanInput = {}): Result<VariationPlan, Error> {
-    const policyResult = VariationPolicy.fromBrief(brief, input, input.hasher ?? this.hasher);
+    const policyResult = VariationPolicy.fromBrief(brief, input, this.hasher);
     if (!policyResult.success) return policyResult;
     const policy = policyResult.value;
 
