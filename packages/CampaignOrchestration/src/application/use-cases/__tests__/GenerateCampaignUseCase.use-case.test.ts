@@ -6,6 +6,7 @@ import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
 import type { Product } from "../../../domain/entities/Product.js";
 import type { Variant } from "../../../domain/entities/Variant.js";
 import type { Treatment } from "../../../domain/value-objects/Treatment.vo.js";
+import { resolveTimeline } from "../../../domain/value-objects/CopyTimeline.vo.js";
 import type { CopyTimeline } from "../../../domain/value-objects/CopyTimeline.vo.js";
 import { DEFAULT_DURATION_SEC } from "../../../domain/value-objects/variation-defaults.js";
 import {
@@ -983,6 +984,62 @@ describe("GenerateCampaignUseCase — motion variants", () => {
       }),
     );
     expect(result.success).toBe(true);
+
+  test("E3.2 with no timeline the sampled times are exactly the fixed set (D10)", async () => {
+    const d = deps({ planner: fakePlanner(fakePlan([motionVariant()])) });
+    await new GenerateCampaignUseCase(d).execute(variationBrief());
+    const request = vi.mocked(d.videoCompositor.compositeVideo).mock.calls[0]?.[0];
+    expect(request?.sampleAt).toEqual([0, 0.25, 0.5, 0.75, 1]);
+  });
+
+  test("E3.2 every beat contributes at least one sampled frame, and the fixed set survives", async () => {
+    // 1:1:20 over 6 s puts beats 1 and 2 inside [0, 0.09] — entirely between the fixed
+    // samples 0 and 0.25, so without the union neither is ever brand-density checked.
+    const timeline = threeBeatTimeline([
+      { text: "One", weight: 1 },
+      { text: "Two", weight: 1 },
+      { text: "Three", weight: 20 },
+    ]);
+    const d = deps({ planner: fakePlanner(fakePlan([motionVariant({ durationSec: 60 })])) });
+    await new GenerateCampaignUseCase(d).execute(variationBrief({ copy: { timeline } }));
+    const request = vi.mocked(d.videoCompositor.compositeVideo).mock.calls[0]?.[0];
+    const sampleAt = request?.sampleAt ?? [];
+
+    // The fixed set is still there — the union adds, it does not replace.
+    for (const fixed of [0, 0.25, 0.5, 0.75, 1]) expect(sampleAt).toContain(fixed);
+    // Sorted and free of duplicates, so the adapter walks the clip once.
+    expect([...sampleAt].sort((a, b) => a - b)).toEqual([...sampleAt]);
+    expect(new Set(sampleAt).size).toBe(sampleAt.length);
+    // And every beat's own window holds one.
+    for (const beat of resolveTimeline(timeline, 60)) {
+      expect(sampleAt.some((t) => t >= beat.startT && t <= beat.endT)).toBe(true);
+    }
+  });
+
+  test("E3.3 the descriptor and the log line name the beat count; without a timeline neither does", async () => {
+    const timeline = threeBeatTimeline([
+      { text: "One", weight: 1 },
+      { text: "Two", weight: 1 },
+      { text: "Three", weight: 1 },
+    ]);
+    const withTimeline = deps({ planner: fakePlanner(fakePlan([motionVariant()])) });
+    const sequenced = await new GenerateCampaignUseCase(withTimeline).execute(
+      variationBrief({ copy: { timeline } }),
+    );
+    expect(sequenced.success).toBe(true);
+    if (!sequenced.success) return;
+    expect(sequenced.value.assets[0]?.descriptor?.beats).toBe(3);
+    const line = sequenced.value.log.entries.filter((e) => e.stage === "CompositeVariations").at(-1);
+    expect(line?.message).toMatch(/3 beats/);
+
+    // Absent, not zero: no timeline is a different statement from a sequence of length 0.
+    const legacyDeps = deps({ planner: fakePlanner(fakePlan([motionVariant()])) });
+    const legacy = await new GenerateCampaignUseCase(legacyDeps).execute(variationBrief());
+    expect(legacy.success).toBe(true);
+    if (!legacy.success) return;
+    expect(legacy.value.assets[0]?.descriptor).not.toHaveProperty("beats");
+    const legacyLine = legacy.value.log.entries.filter((e) => e.stage === "CompositeVariations").at(-1);
+    expect(legacyLine?.message).not.toMatch(/beats/);
   });
 });
 

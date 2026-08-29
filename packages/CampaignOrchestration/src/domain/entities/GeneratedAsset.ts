@@ -35,6 +35,12 @@ export interface VariantDescriptor {
   readonly motion?: MotionKind;
   /** Clip length in seconds — motion variants only. */
   readonly durationSec?: number;
+  /**
+   * How many copy beats the clip sequenced (`copy.timeline`) — motion variants that
+   * carried a timeline only. Absent means the legacy single-message path, which is a
+   * different statement from `1`: one beat is an authored sequence of length one.
+   */
+  readonly beats?: number;
 }
 
 /**

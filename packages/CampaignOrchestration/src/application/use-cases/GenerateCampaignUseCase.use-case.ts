@@ -30,7 +30,7 @@ import type { BackgroundContext, ImageGeneratorPort } from "../ports/out/ImageGe
 import type { PlatformSafeZoneResolver } from "../ports/out/PlatformProfilePort.js";
 import type { VideoCompositorPort } from "../ports/out/VideoCompositorPort.js";
 import { MOTION_FPS } from "../../domain/value-objects/MotionKind.vo.js";
-import { timelineProblem, type CopyTimeline } from "../../domain/value-objects/CopyTimeline.vo.js";
+import { resolveTimeline, timelineProblem, type CopyTimeline } from "../../domain/value-objects/CopyTimeline.vo.js";
 import { DEFAULT_DURATION, DEFAULT_DURATION_SEC } from "../../domain/value-objects/variation-defaults.js";
 
 /** Classic briefs keep the two-product floor; variation relaxes to 1 (D10). */
@@ -48,6 +48,25 @@ const MAX_CONCURRENT_BACKGROUNDS = 8;
 
 /** Normalised times whose frames are brand-density checked on a motion variant. */
 const MOTION_SAMPLE_AT: readonly number[] = [0, 0.25, 0.5, 0.75, 1];
+
+/**
+ * The times to brand-density check on a sequenced clip (D8).
+ *
+ * The fixed set alone is not evidence about a timeline: a short beat can fall entirely
+ * between two of those samples, so its frames are never checked and the recorded
+ * `complianceScore` — the minimum across the set — describes a clip that does not include
+ * it. Union in each beat's midpoint so every beat contributes at least one frame.
+ *
+ * Midpoints, not boundaries: a boundary sits inside a crossfade, where two beats are
+ * painted at partial alpha and neither is what the frame is meant to evidence.
+ *
+ * With no timeline this returns MOTION_SAMPLE_AT itself, so the legacy path is unchanged.
+ */
+function motionSampleAt(timeline: CopyTimeline | undefined, durationSec: number): readonly number[] {
+  if (timeline === undefined) return MOTION_SAMPLE_AT;
+  const midpoints = resolveTimeline(timeline, durationSec).map((beat) => (beat.startT + beat.endT) / 2);
+  return [...new Set([...MOTION_SAMPLE_AT, ...midpoints])].sort((a, b) => a - b);
+}
 
 /** Row identity + paths: the leading keys of every persisted asset row. */
 type VariationAssetIdentity = Pick<GeneratedAsset, "productId" | "aspectRatio" | "outputPath" | "proofPath">;
@@ -569,7 +588,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       durationSec,
       fps: MOTION_FPS,
       motion,
-      sampleAt: MOTION_SAMPLE_AT,
+      sampleAt: motionSampleAt(timeline, durationSec),
       // Absent → omitted, keeping the legacy single-message path byte-identical (D10).
       ...(timeline !== undefined ? { timeline } : {}),
     });
@@ -593,13 +612,18 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       logoApplied: video.logoApplied,
       ...lineage,
       format: "motion",
-      descriptor: { ...descriptor, motion, durationSec },
+      descriptor: {
+        ...descriptor,
+        motion,
+        durationSec,
+        ...(timeline !== undefined ? { beats: timeline.beats.length } : {}),
+      },
       videoPath,
       durationSec,
     };
     log.record(
       "CompositeVariations",
-      `${product.id} @ ${ratio.value} [v${variant.index} ${lineage.treatment} ${motion} ${durationSec}s] — min brand density over ${video.sampledFrames.length} frames ${minScore.toFixed(3)}${passed ? "" : " (below threshold)"}, logo ${video.logoApplied ? "present" : "missing"}`,
+      `${product.id} @ ${ratio.value} [v${variant.index} ${lineage.treatment} ${motion} ${durationSec}s${timeline !== undefined ? ` ${timeline.beats.length} beats` : ""}] — min brand density over ${video.sampledFrames.length} frames ${minScore.toFixed(3)}${passed ? "" : " (below threshold)"}, logo ${video.logoApplied ? "present" : "missing"}`,
       passed && video.logoApplied ? "info" : "warn",
     );
     // The proof pin is by plan order and ratio; a pinned motion 1:1 hero proofs from its poster.
