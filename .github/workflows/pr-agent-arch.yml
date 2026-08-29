@@ -134,6 +134,11 @@ jobs:
             choice of framing is the thing this step exists to constrain.
 
             THE SWEEP. List every import specifier this diff adds or changes, file by file. For each:
+            - Test files are exempt before anything else. linter-config.yaml sets
+              test_double_rules.allowed_cross_package_imports: true, and the linter skips any path
+              containing __tests__ entirely — it files nothing against them, so nothing about them
+              can be its finding. Record OUTSIDE for such a file and move on. A test may import
+              across layers freely, and a real defect in a test is yours to report.
             - Source layer: the path segment domain, application or infrastructure in the changed file's path.
               If the path contains none of those three, record OUTSIDE for that file and move on.
             - Target: a relative specifier resolves by its path segments — ../infrastructure/safe-path.js

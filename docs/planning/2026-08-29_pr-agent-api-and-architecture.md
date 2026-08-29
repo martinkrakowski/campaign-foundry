@@ -198,7 +198,7 @@ relative cross-layer import, `../infrastructure/safe-path.js`, on a throwaway br
 **non-draft** PR was opened (#118) so the reviewer would actually run. `lint:arch` rejected
 it first, as the experiment requires:
 
-```
+```text
 Domain Violation in [CreativeGeneration]:
   Relative import '../infrastructure/safe-path.js' crosses out of the 'domain' layer
   into 'infrastructure'.
@@ -281,7 +281,7 @@ not about the wording, and no further rewording is worth the attempt.
 The instruction fix is kept regardless — both faults it corrected were real, and the stale
 qualifier was actively misleading.
 
-**What remains, narrowed to two:**
+**What remains:**
 
 - **Accept it (was option 2).** The behaviour only occurs when `lint:arch` is red, and such
   a PR cannot merge — it is a duplicated message on a blocked PR, which costs a reader one
