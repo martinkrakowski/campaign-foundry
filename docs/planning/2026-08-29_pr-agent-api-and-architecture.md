@@ -188,11 +188,66 @@ history** (D6).
 | P2.3 | `extra_instructions` **opening with the prohibition table** from §2.2, then the five classes in §3.3 | same |
 | P2.4 | Verify the boundary holds: run it against a PR with a known layer-rule violation and confirm it defers to the linter rather than reporting it | — |
 
-#### P2.4 Experiment result (2026‑08‑29)
-- Trivial cross‑layer import added under `packages/CampaignOrchestration/src/domain`.
-- `yarn lint:arch` failed as expected.
-- Architecture reviewer run was silent; no AI response reported the violation.
-- **Verdict:** passes P2.4 – the reviewer correctly defers to the linter.
+#### P2.4 result (2026-08-29) — the reviewer did NOT defer
+
+**Verdict: P2.4 fails as written.** The architecture reviewer reported a violation that
+`hexagen arch validate` already catches.
+
+**Method.** `packages/CreativeGeneration/src/domain/index.ts` was given one deliberate
+relative cross-layer import, `../infrastructure/safe-path.js`, on a throwaway branch, and a
+**non-draft** PR was opened (#118) so the reviewer would actually run. `lint:arch` rejected
+it first, as the experiment requires:
+
+```
+Domain Violation in [CreativeGeneration]:
+  Relative import '../infrastructure/safe-path.js' crosses out of the 'domain' layer
+  into 'infrastructure'.
+```
+
+**What the reviewer said**, quoted from its own run log rather than paraphrased:
+
+> The domain layer must not import directly from the infrastructure layer. Replace the
+> direct import with a port abstraction defined in the application layer, and have the
+> infrastructure adapter implement that port. This removes the layer violation and keeps
+> the domain pure.
+
+Attributed to the architecture reviewer specifically (run 33266345460), not to the UI
+reviewer, which posted separately on the same PR.
+
+Its instructions say: *"THE TEST FOR EVERY FINDING: could `hexagen arch validate`, as
+pinned, have caught this? If yes, say nothing."* It could, and it did.
+
+**The nuance that stops this being a straight deletion.** The prohibition is written
+conditionally — *"the linter is green on this pull request, so … none of them occurred"* —
+and on this PR the linter was **red**. The reviewer saw a real violation and described it
+correctly. So the experiment cannot distinguish
+
+- *the reviewer ignores its prohibition*, from
+- *the prohibition's stated premise was false here, and it reported a genuine defect*.
+
+It also cannot occur on a mergeable PR: `lint:arch` is a merge gate, so any PR where this
+duplication is possible is already blocked. The cost to a reader is zero on a PR that cannot
+land.
+
+**What §6 prescribes** on a P2.4 failure is to ship the API reviewer alone and drop this one.
+That reads too strong against the evidence. The narrower conclusion is that the *instruction*
+is at fault rather than the reviewer: the prohibition should be unconditional, and should say
+what to do when the linter is red — stay silent, because the gate has already spoken.
+
+**Open decision, in the order this document would rank it:**
+
+1. Make the prohibition unconditional, add a "when `lint:arch` is failing, say nothing about
+   layer rules" clause, and re-run P2.4. Cheapest, and keeps the reviewer.
+2. Accept the behaviour as harmless — such a PR cannot merge — and record P2.4 as passed
+   *with the caveat that it holds only on green PRs*.
+3. Follow §6 literally and delete the architecture reviewer.
+
+**A first attempt reached the opposite conclusion and was wrong.** It opened the experiment
+PR with `--draft`, and `pr-agent-arch.yml` guards its job with
+`github.event.pull_request.draft == false`, so the run completed in 1 s with conclusion
+`skipped`. "No output" was recorded as silence. A check that did not run is not a check that
+passed — the same failure the did-it-actually-run guard in #96 exists to catch, reproduced
+inside the experiment built to test the reviewer.
 
 ### P3 — Config and docs
 
