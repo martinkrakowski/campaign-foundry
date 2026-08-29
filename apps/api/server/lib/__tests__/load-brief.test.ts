@@ -629,7 +629,7 @@ describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
       expect(defaulted.copy?.timeline?.keyBeat).toBe(1);
       // The round trip: feeding the parsed timeline straight back to the domain check it
       // just passed must still pass. An absent keyBeat fails this.
-      expect(timelineProblem(defaulted.copy!.timeline!, [6])).toBeNull();
+      expect(timelineProblem(defaulted.copy!.timeline!, [6])).toBeUndefined();
     });
 
     test("D11: authoring mode allows timeline when motion capability is off; running mode refuses", () => {
