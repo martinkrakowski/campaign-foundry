@@ -57,26 +57,21 @@ export type PersistedAsset = {
   format?: "static" | "motion";
   videoPath?: string;
   durationSec?: number;
+  /**
+   * Carried since descriptors existed — `writeReport` spreads the whole `GeneratedAsset`,
+   * so every row has held this. It is declared here because the type described a persisted
+   * row and omitted it, not because anything was missing at runtime.
+   *
+   * Deliberately NOT validated by `isPersistedAsset`: this guard decides whether a row is
+   * usable, and a row whose descriptor is malformed is still a perfectly good asset. The
+   * UI reads each descriptor field conditionally. Rejecting the row would lose a creative
+   * to a cosmetic defect.
+   */
   descriptor?: VariantDescriptor;
 };
 
 const isNonNegInt = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n >= 0;
 
-function isDescriptor(d: unknown): d is VariantDescriptor {
-  if (typeof d !== "object" || d === null) return false;
-  const rec = d as Record<string, unknown>;
-  if (typeof rec.layout !== "string") return false;
-  if (typeof rec.tone !== "string") return false;
-  if (typeof rec.backgroundSource !== "string") return false;
-  if (typeof rec.paletteShift !== "number" || !Number.isFinite(rec.paletteShift)) return false;
-  if (rec.headline !== undefined && typeof rec.headline !== "string") return false;
-  if (rec.motion !== undefined && typeof rec.motion !== "string") return false;
-  if (rec.durationSec !== undefined && (typeof rec.durationSec !== "number" || !Number.isFinite(rec.durationSec))) {
-    return false;
-  }
-  if (rec.beats !== undefined && !isNonNegInt(rec.beats)) return false;
-  return true;
-}
 
 /**
  * Guard for a persisted report row — used by both the merge path and packaging.
@@ -97,7 +92,6 @@ export function isPersistedAsset(a: unknown): a is PersistedAsset {
     if (typeof rec.videoPath !== "string") return false;
     if (typeof rec.durationSec !== "number" || !Number.isFinite(rec.durationSec)) return false;
   }
-  if (rec.descriptor !== undefined && !isDescriptor(rec.descriptor)) return false;
   if (rec.variantIndex === undefined) return true;
   return isNonNegInt(rec.variantIndex) && isNonNegInt(rec.attempt);
 }

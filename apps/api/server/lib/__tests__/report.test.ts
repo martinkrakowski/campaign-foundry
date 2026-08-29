@@ -194,7 +194,10 @@ describe("report persistence", () => {
     expect(isPersistedAsset(legacyVariation)).toBe(true);
   });
 
-  test("isPersistedAsset validates descriptor fields when present", () => {
+  test("a row is usable whatever shape its descriptor is in", () => {
+    // The guard decides whether a row is a usable ASSET. A descriptor is provenance the UI
+    // reads field by field; a malformed one is a cosmetic defect, not a reason to drop a
+    // creative. This asserts the guard stays out of it.
     const base = {
       productId: "alpha",
       aspectRatio: "9:16",
@@ -202,11 +205,8 @@ describe("report persistence", () => {
       outputPath: "alpha/9x16/v0.png",
       variantIndex: 0,
       attempt: 0,
-      format: "motion",
-      videoPath: "alpha/9x16/v0.mp4",
-      durationSec: 6,
     };
-    const validDescriptor = {
+    const wellFormed = {
       layout: "headline-top",
       tone: "bold",
       backgroundSource: "procedural",
@@ -216,35 +216,11 @@ describe("report persistence", () => {
       durationSec: 6,
       beats: 3,
     };
-    expect(isPersistedAsset({ ...base, descriptor: validDescriptor })).toBe(true);
-    // Minimal valid descriptor
-    expect(
-      isPersistedAsset({
-        ...base,
-        descriptor: {
-          layout: "headline-top",
-          tone: "bold",
-          backgroundSource: "procedural",
-          paletteShift: 0,
-        },
-      }),
-    ).toBe(true);
-
-    // Invalid descriptor shapes
-    expect(isPersistedAsset({ ...base, descriptor: null })).toBe(false);
-    expect(isPersistedAsset({ ...base, descriptor: "invalid" })).toBe(false);
-    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, layout: 123 } })).toBe(false);
-    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, tone: undefined } })).toBe(false);
-    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, backgroundSource: null } })).toBe(false);
-    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, paletteShift: "none" } })).toBe(false);
-    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, paletteShift: Number.NaN } })).toBe(false);
-    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, headline: 42 } })).toBe(false);
-    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, motion: false } })).toBe(false);
-    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, durationSec: "6" } })).toBe(false);
-    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, durationSec: Number.POSITIVE_INFINITY } })).toBe(false);
-    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, beats: -1 } })).toBe(false);
-    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, beats: 1.5 } })).toBe(false);
-    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, beats: "3" } })).toBe(false);
+    expect(isPersistedAsset({ ...base, descriptor: wellFormed })).toBe(true);
+    expect(isPersistedAsset({ ...base, descriptor: { layout: 42 } })).toBe(true);
+    expect(isPersistedAsset({ ...base, descriptor: null })).toBe(true);
+    // And a row written before descriptors existed still loads.
+    expect(isPersistedAsset(base)).toBe(true);
   });
 
   test("merge of a re-rolled variation slot replaces exactly one row; siblings unchanged", async () => {
