@@ -40,6 +40,17 @@ describe("normalizeDescriptor — keep what is usable, drop the rest", () => {
     expect(normalizeDescriptor({ paletteShift: "0.1", beats: 3 })).toEqual({ beats: 3 });
   });
 
+  test("an empty or whitespace-only string is not a usable field", () => {
+    // It would otherwise pass the chip's presence check and render the empty pill this
+    // function exists to prevent — and the filter options, which test truthiness, already
+    // treated it as absent, so the two disagreed about the same descriptor.
+    expect(normalizeDescriptor({ layout: "", tone: "bold" })).toEqual({ tone: "bold" });
+    expect(normalizeDescriptor({ layout: "   ", tone: "bold" })).toEqual({ tone: "bold" });
+    expect(normalizeDescriptor({ layout: "", tone: "" })).toBeUndefined();
+    // A real value keeps its surrounding text intact, trimmed.
+    expect(normalizeDescriptor({ headline: "  Stay wild  " })).toEqual({ headline: "Stay wild" });
+  });
+
   test("a non-finite number is not a number", () => {
     expect(normalizeDescriptor({ paletteShift: Number.NaN, tone: "bold" })).toEqual({ tone: "bold" });
     expect(normalizeDescriptor({ durationSec: Number.POSITIVE_INFINITY, tone: "bold" })).toEqual({

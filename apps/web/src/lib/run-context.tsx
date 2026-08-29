@@ -160,7 +160,15 @@ function pipelineUnreachable(status: number, error?: string): Error {
 export function normalizeDescriptor(value: unknown): Asset["descriptor"] | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const raw = value as Record<string, unknown>;
-  const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+  // An empty or whitespace-only string is not a usable field: it would satisfy the chip's
+  // presence check and render the empty pill this whole function exists to prevent. The
+  // filter options already treated it as absent (they test truthiness), so keeping it here
+  // made the two disagree about the same descriptor.
+  const str = (v: unknown): string | undefined => {
+    if (typeof v !== "string") return undefined;
+    const trimmed = v.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  };
   const num = (v: unknown): number | undefined =>
     typeof v === "number" && Number.isFinite(v) ? v : undefined;
   const descriptor: NonNullable<Asset["descriptor"]> = {
