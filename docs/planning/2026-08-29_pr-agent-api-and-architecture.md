@@ -188,6 +188,185 @@ history** (D6).
 | P2.3 | `extra_instructions` **opening with the prohibition table** from §2.2, then the five classes in §3.3 | same |
 | P2.4 | Verify the boundary holds: run it against a PR with a known layer-rule violation and confirm it defers to the linter rather than reporting it | — |
 
+#### P2.4 result (2026-08-29) — the reviewer did NOT defer
+
+**Verdict: P2.4 fails as written.** The architecture reviewer reported a violation that
+`hexagen arch validate` already catches.
+
+**Method.** `packages/CreativeGeneration/src/domain/index.ts` was given one deliberate
+relative cross-layer import, `../infrastructure/safe-path.js`, on a throwaway branch, and a
+**non-draft** PR was opened (#118) so the reviewer would actually run. `lint:arch` rejected
+it first, as the experiment requires:
+
+```text
+Domain Violation in [CreativeGeneration]:
+  Relative import '../infrastructure/safe-path.js' crosses out of the 'domain' layer
+  into 'infrastructure'.
+```
+
+**What the reviewer said**, quoted from its own run log rather than paraphrased:
+
+> The domain layer must not import directly from the infrastructure layer. Replace the
+> direct import with a port abstraction defined in the application layer, and have the
+> infrastructure adapter implement that port. This removes the layer violation and keeps
+> the domain pure.
+
+Attributed to the architecture reviewer specifically (run 33266345460), not to the UI
+reviewer, which posted separately on the same PR.
+
+Its instructions say: *"THE TEST FOR EVERY FINDING: could `hexagen arch validate`, as
+pinned, have caught this? If yes, say nothing."* It could, and it did.
+
+**The nuance that stops this being a straight deletion.** The prohibition is written
+conditionally — *"the linter is green on this pull request, so … none of them occurred"* —
+and on this PR the linter was **red**. The reviewer saw a real violation and described it
+correctly. So the experiment cannot distinguish
+
+- *the reviewer ignores its prohibition*, from
+- *the prohibition's stated premise was false here, and it reported a genuine defect*.
+
+It also cannot occur on a mergeable PR: `lint:arch` is a merge gate, so any PR where this
+duplication is possible is already blocked. The cost to a reader is zero on a PR that cannot
+land.
+
+**What §6 prescribes** on a P2.4 failure is to ship the API reviewer alone and drop this one.
+That reads too strong against the evidence. The narrower conclusion is that the *instruction*
+is at fault rather than the reviewer: the prohibition should be unconditional, and should say
+what to do when the linter is red — stay silent, because the gate has already spoken.
+
+**Decision: option 1** — fix the instruction, keep the reviewer, re-run the test.
+
+The three options were:
+
+1. **Taken.** Make the prohibition unconditional, add a "when `lint:arch` is failing, say
+   nothing about layer rules" clause, and re-run P2.4.
+2. Accept the behaviour as harmless — such a PR cannot merge — and record P2.4 as passed
+   *with the caveat that it holds only on green PRs*.
+3. Follow §6 literally and delete the architecture reviewer.
+
+Two things were wrong with the instruction, and the second was invisible until the first was
+found:
+
+- It was **conditional**: *"the linter is green on this pull request, so … none of them
+  occurred."* On a PR where the linter is red that premise is false, and a reviewer
+  reasoning from it correctly concludes it may speak. The rule now holds unconditionally,
+  and says explicitly that a red gate is the strongest reason to stay silent — the gate has
+  already caught it, said so precisely, and blocked the merge.
+- It still said the linter proves the layer graph **"for imports written as a package
+  specifier"**. That qualifier was true of the pinned 0.8.0 and became stale the moment
+  #115 upgraded to 0.12.1, which catches relative imports too. R1.5 removed the reviewer's
+  "class 0" but left this sentence behind, so the reviewer was being told the linter is
+  blind to exactly the case the experiment used.
+
+#### P2.4 re-run (2026-08-29) — option 1 did not work
+
+The instruction was fixed as decided above and the experiment re-run against it (#121, since
+closed, branch deleted). **The reviewer reported the layer violation again**, in nearly the
+same words:
+
+> The domain layer must not import directly from the infrastructure layer. Replace the direct
+> import with a port defined in the application layer and have an infrastructure adapter
+> implement it.
+
+It did so with the prohibition unconditional, with an explicit paragraph saying a failing
+gate is the strongest reason to stay silent, and with the stale "package specifier" qualifier
+removed so it could no longer believe the linter was blind to relative imports. It also
+posted a second, unrelated suggestion about wrapping the import — so it was not merely
+pattern-matching one rule.
+
+**Option 1 is exhausted.** Two runs, materially different instructions, same behaviour: this
+model does not honour a negative constraint of this shape. That is a fact about the reviewer,
+not about the wording, and no further rewording is worth the attempt.
+
+The instruction fix is kept regardless — both faults it corrected were real, and the stale
+qualifier was actively misleading.
+
+**What remains:**
+
+- **Accept it (was option 2).** The behaviour only occurs when `lint:arch` is red, and such
+  a PR cannot merge — it is a duplicated message on a blocked PR, which costs a reader one
+  extra paragraph and never reaches `main`. On every green PR this session the reviewer
+  stayed inside its lane.
+- **Delete it (was option 3, and §6's literal remedy).** C1's argument stands: a reviewer
+  that repeats a solved problem teaches people to skim it, and skimming is how a real finding
+  gets missed later.
+
+A third possibility neither option named: **change the model for this reviewer only.** All
+three run `openrouter/inception/mercury-2`; the arch reviewer is the one asked to obey a
+prohibition rather than to find things, which is a different skill. Its `config.model` can be
+set per workflow without touching the other two.
+
+#### P2.4 run 3 (2026-08-29) — PASSES, with the instruction rewritten as a procedure
+
+**The reviewer stayed silent.** Its AI response was `code_suggestions: []`.
+
+**What changed.** Runs 1 and 2 were prohibitions and broke identically: the reviewer framed a
+candidate finding, then judged whether the rule covered *that framing* — and always found one
+it did not obviously cover, usually "the real problem is the missing port abstraction". The
+instruction is now a **procedure over an object the model does not choose**: before any
+finding exists, sweep the import specifiers the diff adds, resolve each against
+`layer-rules.yaml`, mark OWNED or CLEAR. One OWNED import **closes the file**, and the only
+publishable finding about a closed file is one that would still be true if the offending
+import lines were deleted outright.
+
+That deletion test is what closes the reframing route: the missing port, the re-export and
+the dragged runtime all disappear when the line is deleted, which is the proof none of them
+belonged to the reviewer. Three further leaks were closed explicitly — the sweep is working
+state and must never be printed; a shape rule forbids any suggestion whose fix adds, moves or
+reroutes an import in a closed file, whatever class it is filed under; and prose in
+`.agents/architecture.md` that merely restates the layer graph is named as the linter's
+finding in words.
+
+The wording was drafted and attacked rather than written by hand: four independent strategies,
+each stress-tested twice by a model role-playing the reviewer hunting for a loophole. Every
+earlier shape, including both hand-written ones, fell to the same reframing route.
+
+**Tested on unseen ground.** Runs 1 and 2 used
+`packages/CreativeGeneration/src/domain/index.ts` importing `../infrastructure/safe-path.js`.
+Run 3 used `packages/Distribution/src/domain/value-objects/PlatformProfile.vo.ts` importing
+`../../infrastructure/adapters/FileSystemExporter.js`, so a pass could not be memorisation of
+the example in the prompt.
+
+**Honest limits.**
+
+- One run. Silence is also what a reviewer that simply found nothing produces, and on the
+  OWNED branch a correct execution and a skipped one are indistinguishable — PR-Agent has no
+  channel for the sweep. The next green PR carrying a genuine class-1 or class-3 defect is
+  the test that the procedure did not simply buy silence everywhere.
+- **The UI reviewer spoke on the same PR**, about the Node adapter reaching a domain module.
+  That reviewer has no `paths` filter, so it reviews every file in the repository including
+  packages it has no mandate over. Not a P2.4 failure — different reviewer, different
+  instructions — but a live question of its own: should the UI reviewer be commenting on a
+  domain value object at all?
+
+**Run 4 (2026-08-29) — confirms it.** After the sweep gained its test-file exemption, the
+check was re-run on a third distinct site: `packages/GovernanceAndCompliance/src/domain/index.ts`
+importing Distribution's `FileSystemExporter`. The architecture reviewer's only AI response
+was again `code_suggestions: []`.
+
+Attribution matters here and was checked rather than assumed: the phrase "port abstraction
+defined in the application layer" appears in *both* reviewers' run logs, because the
+architecture reviewer receives the diff and the concurrently-posted comment as context. Only
+the UI reviewer produced suggestions; the architecture reviewer's sole AI response was the
+empty list.
+
+**Status: P2.4 satisfied.** Two distinct violation sites, both silent, after an instruction
+that was drafted adversarially rather than by hand. The reviewer ships, and §6's remedy is
+not invoked.
+
+**One open question this raised.** The UI reviewer spoke on both experiment PRs, about layer
+violations in `packages/**` — a domain value object and a governance barrel. It has no
+`paths` filter, so it reviews every file in the repository including packages far outside its
+DESIGN.md mandate, and it is now the reviewer duplicating the linter. Worth deciding
+separately: give it a `paths` filter, or extend the sweep to its instructions too.
+
+**A first attempt reached the opposite conclusion and was wrong.** It opened the experiment
+PR with `--draft`, and `pr-agent-arch.yml` guards its job with
+`github.event.pull_request.draft == false`, so the run completed in 1 s with conclusion
+`skipped`. "No output" was recorded as silence. A check that did not run is not a check that
+passed — the same failure the did-it-actually-run guard in #96 exists to catch, reproduced
+inside the experiment built to test the reviewer.
+
 ### P3 — Config and docs
 
 | # | Task | Owns |
