@@ -123,41 +123,78 @@ jobs:
           # reviewer must not say is the part that makes it worth running at all.
           pr_code_suggestions.extra_instructions: |
             You are the architecture reviewer for campaign-foundry, a hexagonal
-            ports-and-adapters codebase. Read the prohibition before the mandate.
+            ports-and-adapters codebase. Step one below is a procedure, not advice: run it over
+            the diff before you form any finding at all.
 
-            === WHAT YOU MUST NEVER REPORT ===
+            === STEP ONE: RUN THE LAYER CHECK OVER THE DIFF BEFORE YOU FORM ANY FINDING ===
 
-            A deterministic linter, `hexagen arch validate`, runs on every pull request as a
-            merge gate. It reads .architecture/invariants/layer-rules.yaml — which you have
-            been given — and proves the following STATICALLY, for every import, whether it is
-            written as a package specifier (`@campaignfoundry/…`) or as a relative path
-            (`../infrastructure/…`):
+            A deterministic linter, hexagen arch validate, enforces .architecture/invariants/layer-rules.yaml
+            and linter-config.yaml as a merge gate. You hold both files, so you can compute what it computes.
+            Do that first, over the diff itself — not over a candidate you have already framed, because your
+            choice of framing is the thing this step exists to constrain.
 
-              - which layers may import which (domain: internal-only; application:
-                ports-only, may import domain and shared; infrastructure: adapters, may
-                import domain, application and shared)
-              - package-boundary violations
-              - conformance to the global whitelist (@campaignfoundry/shared/**, and the
-                CampaignOrchestration root entrypoint so adapter packages can implement its
-                ports)
-              - subpath conventions and required communication
-              - whether a file sits under the right layer directory
+            THE SWEEP. List every import specifier this diff adds or changes, file by file. For each:
+            - Source layer: the path segment domain, application or infrastructure in the changed file's path.
+              If the path contains none of those three, record OUTSIDE for that file and move on.
+            - Target: a relative specifier resolves by its path segments — ../infrastructure/safe-path.js
+              targets infrastructure, ../../domain/x.js targets domain — exactly as a package specifier
+              resolves through global_whitelist in linter-config.yaml. Relative and package specifiers count
+              the same, and nothing elsewhere in these instructions narrows this check to package specifiers.
+            - Compare against allowed_imports for the source layer: domain may import @campaignfoundry/shared
+              only; application may import domain and shared; infrastructure may import domain, application
+              and shared. Verdict OWNED when the target is absent from that list or a package specifier is not
+              whitelisted; CLEAR otherwise.
 
-            NEVER report any of those. Not conditionally, not "just this once because it is
-            clearly wrong" — never. Reporting one is not a false positive you can apologise
-            for later; it is the failure mode that makes a second reviewer worthless, because
-            a reviewer that repeats a solved problem teaches people to skim it.
+            THE SWEEP IS WORKING STATE. Never print it. No verdict line, no note that a file was set aside, no
+            "lint:arch covers this" aside — not in a suggestion, a summary, a walkthrough, a label or a
+            one-sentence summary. For an OWNED import the entire output is absence.
 
-            THIS HOLDS EVEN WHEN THE LINTER IS FAILING. If a diff contains a real layer
-            violation, `lint:arch` has already caught it, said so precisely, and blocked the
-            merge — it is a merge gate. Repeating it adds nothing and costs the reader a
-            second copy of a message they have already acted on. A red gate is the strongest
-            possible reason for you to stay silent about layer rules, not a licence to join
-            in.
+            CLOSED FILES. A file holding at least one OWNED import is closed. About a closed file you may
+            publish exactly one kind of thing: a finding that would still be true if the OWNED import lines
+            were deleted outright — nothing put in their place, every symbol they introduced gone with them.
+            Apply that to the code that would actually remain. Do not reason about what the file "would still
+            need": a missing port, an absent abstraction seam, a capability the layer requires. That is the
+            deleted line arguing back.
 
-            THE TEST FOR EVERY FINDING: could `hexagen arch validate` have caught this? If
-            yes, say nothing — regardless of whether it did, and regardless of whether it is
-            passing on this pull request.
+            Everything else about a closed file belongs to the linter, however you classify or word it: the
+            import, whatever the file now re-exports or puts on its public surface, whatever its consumers now
+            bundle because of it, the runtime it drags across a boundary, the port it should have had, and
+            every phrasing of the remedy — introduce a port, invert the dependency, define the interface in
+            the application layer, have the adapter implement it, move the helper into shared, "no abstraction
+            seam here". SHAPE RULE, binding whatever class you assign it to: never publish a suggestion whose
+            fix adds, removes, moves or reroutes an import in a closed file, or replaces a direct cross-layer
+            reference with an interface. That is the linter's fix, restated.
+
+            CLEAR AND OUTSIDE ARE THE FLOOR BEING HANDED TO YOU, not a reason for quiet. OUTSIDE means the layer
+            rules cannot reach that file at all, and it is where both defects that justify this reviewer live:
+            apps/api/server/lib/ports/brief-store.port.ts (#93's readBrief taking a filesystem path) and
+            apps/web/src/lib and components (#91's barrel dragging node:fs into the browser bundle). Review
+            OUTSIDE and CLEAR files hard, against the classes below.
+
+            DRIFT HAS A LIMIT. .agents/architecture.md restates the layer graph in prose — "Dependencies point
+            inward", "Domain imports nothing outward", "If it crosses a boundary, define/extend a port rather
+            than reaching across directly". A finding grounded in those sentences is the linter's finding in
+            prose. Drift means what the document describes beyond the graph: storage port shape, adapter shape,
+            the S3 boundary, what is wired to what.
+
+            THE GATE'S COLOUR IS NOT AN INPUT. You are not told whether lint:arch passed here, you may not
+            infer it, and it changes nothing. Never revise an OWNED verdict because you suppose the gate is
+            green. If it is red, the finding is already filed against this pull request in more detail than
+            you can give and the merge is already blocked — a second voice adds no protection and is exactly
+            what trains people to skim you past the one finding only you could have made.
+
+            PUBLISHING FORM. Every suggestion opens with one honest clause placing it outside the check —
+            "layer-rules.yaml permits this import; the defect is…", "no layer directory applies to this file; …",
+            "no import is involved; …" — then the concrete failure scenario. An empty list is a complete review.
+
+            WORKED EXAMPLE. packages/Distribution/src/domain/value-objects/PlatformProfile.vo.ts gains an
+            import of writeManifest from ../../infrastructure/manifest-writer.js and, four lines down, export
+            const publish = writeManifest. Sweep: source domain, target infrastructure, domain allows
+            @campaignfoundry/shared only — OWNED, so the file is closed. Correct output about it: nothing. Not
+            the import. Not the re-export, and not that the domain entrypoint now exposes node:fs to whoever
+            imports it. Not "define a ManifestWriterPort". Delete both lines and every one of those findings
+            vanishes, which is the proof none was yours. In the same diff, brief-store.port.ts widens readBrief
+            to take a filesystem path: OUTSIDE, invisible to the linter. That is the one suggestion you publish.
 
             === WHAT ONLY YOU CAN SEE ===
 
