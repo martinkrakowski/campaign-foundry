@@ -1638,6 +1638,9 @@ describe("the load path and the draft path agree about what counts as overridden
   });
 })
 
+const authored = (state: EditorState) =>
+  state.timeline.beats.map((beat) => ({ text: beat.text, weight: beat.weight }));
+
 describe("copy timeline (E5.1)", () => {
   // A variation draft that can carry a serialised timeline: variation mode and the
   // motion format, with no `axes.headline` — the D5 gate `canSerializeTimeline`.
@@ -1700,10 +1703,10 @@ describe("copy timeline (E5.1)", () => {
   describe("the reducer actions", () => {
     test("addBeat appends a blank first-weighted beat to the end", () => {
       const first = reduce(motionState(), { type: "addBeat" });
-      expect(first.timeline.beats).toEqual([{ text: "", weight: 1 }]);
+      expect(authored(first)).toEqual([{ text: "", weight: 1 }]);
       expect(first.timeline.keyBeat).toBe(1);
       const second = reduce(first, { type: "addBeat" });
-      expect(second.timeline.beats).toEqual([
+      expect(authored(second)).toEqual([
         { text: "", weight: 1 },
         { text: "", weight: 1 },
       ]);
@@ -1716,7 +1719,7 @@ describe("copy timeline (E5.1)", () => {
         reduce(named(["One", "Two", "Three"]), { type: "setBeatText", index: 1, text: "Updated" }),
         { type: "setBeatWeight", index: 1, weight: 4 },
       );
-      expect(edited.timeline.beats).toEqual([
+      expect(authored(edited)).toEqual([
         { text: "One", weight: 1 },
         { text: "Updated", weight: 4 },
         { text: "Three", weight: 1 },
@@ -1916,15 +1919,15 @@ describe("copy timeline (E5.1)", () => {
     test("fromBrief loads a declared timeline and toBrief writes it back", () => {
       const loaded = fromBrief(timelineBrief());
       expect(loaded.copyExplicit).toBe(true);
-      expect(loaded.timeline).toEqual({
-        beats: [
-          { text: "Stay wild.", weight: 3 },
-          { text: "Stay hydrated.", weight: 2 },
-          { text: "Find your trail.", weight: 1 },
-        ],
-        transition: "fade",
-        keyBeat: 2,
-      });
+      expect(authored(loaded)).toEqual([
+        { text: "Stay wild.", weight: 3 },
+        { text: "Stay hydrated.", weight: 2 },
+        { text: "Find your trail.", weight: 1 },
+      ]);
+      expect(loaded.timeline.transition).toBe("fade");
+      expect(loaded.timeline.keyBeat).toBe(2);
+      // Every row carries a distinct React identity, minted on load.
+      expect(new Set(loaded.timeline.beats.map((b) => b.key)).size).toBe(3);
       expect(toBrief(loaded).copy).toEqual(timelineBrief().copy);
     });
 
@@ -2029,16 +2032,14 @@ describe("copy timeline (E5.1)", () => {
           keyBeat: 20,
         },
       });
-      expect(restored.timeline).toEqual({
-        beats: [
-          { text: "", weight: 1 },
-          { text: "kept", weight: 7 },
-          { text: "", weight: 1 },
-          { text: "ok", weight: 1 },
-        ],
-        transition: "fade",
-        keyBeat: 4,
-      });
+      expect(authored(restored)).toEqual([
+        { text: "", weight: 1 },
+        { text: "kept", weight: 7 },
+        { text: "", weight: 1 },
+        { text: "ok", weight: 1 },
+      ]);
+      expect(restored.timeline.transition).toBe("fade");
+      expect(restored.timeline.keyBeat).toBe(4);
       expect(restored.copyExplicit).toBe(true);
     });
 
@@ -2055,7 +2056,9 @@ describe("copy timeline (E5.1)", () => {
         briefId: "camp",
         timeline: { beats: [{ text: "takable" }], keyBeat: -5 },
       });
-      expect(missingWeight.timeline).toEqual({ beats: [{ text: "takable", weight: 1 }], transition: "fade", keyBeat: 1 });
+      expect(authored(missingWeight)).toEqual([{ text: "takable", weight: 1 }]);
+      expect(missingWeight.timeline.transition).toBe("fade");
+      expect(missingWeight.timeline.keyBeat).toBe(1);
     });
   });
 })

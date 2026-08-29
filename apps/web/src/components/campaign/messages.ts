@@ -344,3 +344,64 @@ export function formatMotionMeta(fps: number, min: number, max: number): string 
 /** A Classic brief cannot produce video; the pipeline branches on mode alone. */
 export const formatsMotionNeedsRandomizedMode =
   "Video needs a Randomized campaign — switch the mode, or turn Video off.";
+
+/* ── The copy timeline (L6-E5) ───────────────────────────────────────────────── */
+
+/** The sub-panel's own legend, inside the Copy section. */
+export const timelineLegend = "Copy sequence";
+/**
+ * Said once, above the rows. The clip length is the *shortest* selected, because that is
+ * the one the readability floor is measured against.
+ */
+export const timelineHelp = "Each beat holds the screen for its share of the clip.";
+export const timelineEmpty = "No sequence — the headline holds the whole clip.";
+
+export const timelineAddBeat = "Add beat";
+/** Why *Add beat* is unavailable: adding one would leave a beat too brief to read. */
+export function timelineAddBlockedFloor(shortestSec: number, floorSec: number): string {
+  return `Another beat would leave one under ${floorSec}s on the ${shortestSec}s clip — too brief to read.`;
+}
+/** Why *Add beat* is unavailable: the sequence is already as long as a clip can carry. */
+export function timelineAddBlockedMax(max: number): string {
+  return `A sequence holds at most ${max} beats.`;
+}
+
+export function timelineBeatTextLabel(position: number): string {
+  return `Beat ${position} text`;
+}
+export function timelineBeatWeightLabel(position: number): string {
+  return `Beat ${position} share`;
+}
+export function timelineRemoveBeat(position: number): string {
+  return `Remove beat ${position}`;
+}
+export function timelineMoveBeatUp(position: number): string {
+  return `Move beat ${position} earlier`;
+}
+export function timelineMoveBeatDown(position: number): string {
+  return `Move beat ${position} later`;
+}
+export const timelineBeatPlaceholder = "What this beat says";
+
+/** The poster beat — the frame the still preview and the export thumbnail show. */
+export const timelineKeyBeatLegend = "Poster frame";
+export function timelineKeyBeatLabel(position: number): string {
+  return `Show beat ${position} on the poster`;
+}
+
+export const timelineTransitionLegend = "Between beats";
+export const timelineTransitionCut = "Cut";
+export const timelineTransitionFade = "Fade";
+
+/** The proportion bar's caption: which clip length its seconds are measured against. */
+export function timelineProportionCaption(durationSec: number): string {
+  return `${durationSec}s clip`;
+}
+/** One beat's dwell on one clip length, e.g. "1.8s". */
+export function timelineDwell(seconds: number): string {
+  return `${seconds.toFixed(1)}s`;
+}
+/** A beat whose dwell is under the floor on this clip length. */
+export function timelineDwellUnderFloor(seconds: number, floorSec: number): string {
+  return `${seconds.toFixed(1)}s — under the ${floorSec}s floor`;
+}

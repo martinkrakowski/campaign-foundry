@@ -7,6 +7,7 @@ import * as messages from "@/components/campaign/messages";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import { MAX_HEADLINE_LENGTH, type FieldErrors } from "@/components/campaign/validate";
 import { SectionShell, Field } from "./IdentitySection";
+import { TimelineSection } from "@/components/campaign/TimelineSection";
 
 export function CopySection({
   state,
@@ -65,8 +66,13 @@ export function CopySection({
         </div>
       ) : null}
 
-      {/* Slot for L6 copy timeline sub-panel (2026-08-27_motion-copy-timeline.md E5.2 / D11) */}
-      <div data-slot="copy-timeline" />
+      {/* L6 copy timeline sub-panel (2026-08-27_motion-copy-timeline.md E5.2 / D11). Only a
+          Randomized brief can render motion, so a classic draft never offers a sequence. */}
+      {state.mode === "variation" ? (
+        <div data-slot="copy-timeline">
+          <TimelineSection state={state} dispatch={dispatch} />
+        </div>
+      ) : null}
     </SectionShell>
   );
 }
