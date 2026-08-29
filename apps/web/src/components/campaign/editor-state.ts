@@ -9,17 +9,33 @@ import type {
 // pull node:fs/path/crypto into the browser bundle.
 import {
   DEFAULT_BACKGROUND_SOURCES,
+  DEFAULT_DURATION,
   DEFAULT_DURATION_SEC,
   HEADLINE_POOL_REF,
   MAX_DURATION_SEC,
   MIN_DURATION_SEC,
 } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import { MOTION_KINDS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
-import { MAX_BEATS, MAX_WEIGHT } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
+import {
+  MAX_BEATS,
+  MAX_WEIGHT,
+  MIN_DWELL_SEC,
+  timelineProblem,
+  type CopyTimeline,
+} from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 
 // Re-exported, not restated: every one of these is the domain's own value, and the
 // editor's copies of them were exactly the drift the leaf exists to prevent (D18).
-export { DEFAULT_DURATION_SEC, HEADLINE_POOL_REF, MAX_DURATION_SEC, MIN_DURATION_SEC, MOTION_KINDS, MAX_BEATS, MAX_WEIGHT };
+export {
+  DEFAULT_DURATION_SEC,
+  HEADLINE_POOL_REF,
+  MAX_DURATION_SEC,
+  MIN_DURATION_SEC,
+  MOTION_KINDS,
+  MAX_BEATS,
+  MAX_WEIGHT,
+  MIN_DWELL_SEC,
+};
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
 import { platformsToFormats, platformsToRatios } from "./derive";
@@ -450,6 +466,50 @@ function moveTimelineBeat(timeline: TimelineDraft, from: number, to: number): Ti
   else if (keyIndex > from) nextKeyIndex = to <= keyIndex - 1 ? keyIndex : keyIndex - 1;
   else nextKeyIndex = to <= keyIndex ? keyIndex + 1 : keyIndex;
   return { beats: next, transition: timeline.transition, keyBeat: nextKeyIndex + 1 };
+}
+
+/**
+ * The clip lengths a timeline is measured against.
+ *
+ * An empty duration axis is not "no clips": the planner falls back to the single default,
+ * and `timelineProblem` measures the readability floor against the SHORTEST length. The
+ * editor has to read the axis exactly as the planner does, or it will flag a different set
+ * of drafts than the run refuses.
+ */
+export function timelineDurations(state: EditorState): readonly number[] {
+  return state.duration.length > 0 ? state.duration : DEFAULT_DURATION;
+}
+
+/** The draft's timeline as the domain sees it. */
+export function asCopyTimeline(timeline: TimelineDraft): CopyTimeline {
+  return { beats: timeline.beats, transition: timeline.transition, keyBeat: timeline.keyBeat };
+}
+
+/**
+ * Why *Add beat* is unavailable, or undefined when it is available.
+ *
+ * Data, not copy — the same discipline `countNotice` follows: this returns what is true and
+ * the section turns it into a sentence, so no user-facing string lives in state.
+ *
+ * Answered by SIMULATION rather than arithmetic: build the timeline the click would
+ * produce and ask the domain. That is the only way the editor and the parser cannot drift,
+ * and because it re-derives on every render, narrowing the duration axis re-answers it with
+ * no extra wiring — the case the plan names as the one a click-time check misses.
+ */
+export type AddBeatBlock =
+  | { readonly kind: "max"; readonly max: number }
+  | { readonly kind: "floor"; readonly shortestSec: number; readonly floorSec: number };
+
+export function addBeatBlockedBy(state: EditorState): AddBeatBlock | undefined {
+  if (state.timeline.beats.length >= MAX_BEATS) return { kind: "max", max: MAX_BEATS };
+  const durations = timelineDurations(state);
+  const withOneMore: CopyTimeline = {
+    beats: [...state.timeline.beats, { text: "", weight: 1 }],
+    transition: state.timeline.transition,
+    keyBeat: state.timeline.keyBeat,
+  };
+  if (timelineProblem(withOneMore, durations) === undefined) return undefined;
+  return { kind: "floor", shortestSec: Math.min(...durations), floorSec: MIN_DWELL_SEC };
 }
 
 /** A usable 0-based beat index: an integer inside the current list. */
