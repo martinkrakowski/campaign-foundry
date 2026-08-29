@@ -1046,3 +1046,11 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - `normalizeDraftState`'s positional key repair can still collide with a
     later valid key (CodeRabbit's dedupe note) — needs the repair pass to
     track taken keys; deferred with the review note.
+
+## 2026-08-29 — L6-E2 sequenced copy.timeline through the compositor (#99)
+
+- Implemented `copy.timeline` through `NodeCanvasCompositor` (prepare resolves/lays out one box per distinct beat at a common type size, memoized by text; draw dispatches to a timeline path vs a frozen `drawLegacy`), CanvasFfmpegVideoCompositor poster copy clock at the key beat's mid-window, and `VideoCompositeRequest.timeline`.
+- Scope kept: did NOT touch `CopyTimeline.vo`, `GenerateCampaignUseCase` (E3), `apps/api` (E4), `apps/web` (E5).
+- Laid-out screenshot verification for stills/motion stayed on the golden bytes (D10): `draw` and `drawLegacy` both re-pinned against all 12 committed still goldens at `restT(kind)`.
+- Fixed during the round: canvas quantizes `globalAlpha` to 8-bit (assertions use `toBeCloseTo`); per-beat rise must be probed via the pose clock against a beat's own window; accents painted per beat wrap into multi-line ops so memoization asserts the layout's lines; the timeline test needs a constructed compositor (registers bundled fonts) or hashes render in a fallback font.
+- Gate green: build 7/7, typecheck 7/7, lint 12/12 (0 errors; 2 pre-existing warnings), lint:arch compliant, test:cov 1890 passed / 2 skipped, 100% stmts/branches/funcs/lines. PR #99 vs main.

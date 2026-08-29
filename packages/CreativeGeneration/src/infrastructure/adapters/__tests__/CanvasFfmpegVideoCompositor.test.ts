@@ -1,4 +1,4 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, vi, afterEach } from "vitest";
 import { spawn as realSpawn, spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
@@ -6,8 +6,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
-import { AspectRatio, type VideoCompositeRequest } from "@campaignfoundry/CampaignOrchestration";
+import {
+  AspectRatio,
+  MOTION_KINDS,
+  resolveTimeline,
+  restT,
+  type CopyTimeline,
+  type MotionKind,
+  type VideoCompositeRequest,
+} from "@campaignfoundry/CampaignOrchestration";
 import { createRequire } from "node:module";
+import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
 const require = createRequire(import.meta.url);
 const ffmpegStatic = require("ffmpeg-static") as string | null;
@@ -197,6 +206,8 @@ const skipReason = ffmpegOk
   : `ffmpeg-static binary cannot execute${ffmpegProbe?.error ? ` (${ffmpegProbe.error.message})` : ffmpegProbe ? ` (exited ${ffmpegProbe.status})` : " (path is null)"}`;
 
 describe("CanvasFfmpegVideoCompositor", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   // Local machines without a working binary may skip the real-binary tests;
   // CI must never skip them silently, or a broken binary would ship green.
   test.runIf(process.env.CI)("the ffmpeg-static binary executes on CI", () => {
@@ -581,5 +592,58 @@ describe("CanvasFfmpegVideoCompositor", () => {
     expect(MAX_CONCURRENT_ENCODES).toBe(2);
     expect(maxActive).toBeLessThanOrEqual(2);
     expect(maxActive).toBe(2);
+  });
+
+  test("passes the key beat's mid-window as the poster copy clock, for every motion kind (D7)", async () => {
+    const timeline: CopyTimeline = {
+      beats: [
+        { text: "Alpha", weight: 2 },
+        { text: "Beta", weight: 3 },
+      ],
+      transition: "fade",
+      keyBeat: 2,
+    };
+    const durationSec = 3;
+    const fps = 4;
+
+    for (const kind of MOTION_KINDS) {
+      const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
+      const spy = vi.spyOn(NodeCanvasCompositor, "draw").mockClear();
+      const req = videoRequest({ motion: kind, durationSec, fps, timeline });
+      const result = await compositor.compositeVideo(req);
+
+      const calls = spy.mock.calls as Array<[unknown, unknown, number, MotionKind?, number?]>;
+      // frames, poster, and sampled frames — nothing else draws (D7).
+      expect(calls).toHaveLength(durationSec * fps + 1 + req.sampleAt.length);
+      const posterCall = calls[durationSec * fps];
+      if (!posterCall) throw new Error("missing poster draw call");
+
+      // The poster: pose clock at restT(kind), copy clock on the key beat's mid-window.
+      const key = resolveTimeline(timeline, durationSec)[1];
+      expect(posterCall[2]).toBe(restT(kind));
+      expect(posterCall[4]).toBe((key.startT + key.endT) / 2);
+
+      // Frames and samples drive copy by the pose clock alone — no copyT is passed.
+      for (const call of calls.slice(0, durationSec * fps)) {
+        expect(call[4]).toBeUndefined();
+      }
+      for (const call of calls.slice(durationSec * fps + 1)) {
+        expect(call[4]).toBeUndefined();
+      }
+      expect(result.poster.byteLength).toBeGreaterThan(0);
+    }
+  });
+
+  test("keeps the poster on the legacy path when the request has no timeline (D10)", async () => {
+    const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
+    const spy = vi.spyOn(NodeCanvasCompositor, "draw");
+    const durationSec = 2;
+    const fps = 12;
+    await compositor.compositeVideo(videoRequest({ durationSec, fps }));
+
+    const calls = spy.mock.calls as Array<[unknown, unknown, number, MotionKind?, number?]>;
+    const posterCall = calls[durationSec * fps];
+    if (!posterCall) throw new Error("missing poster draw call");
+    expect(posterCall[4]).toBeUndefined();
   });
 });

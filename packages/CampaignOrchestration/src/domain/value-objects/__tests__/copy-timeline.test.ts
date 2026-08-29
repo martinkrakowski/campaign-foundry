@@ -73,7 +73,6 @@ describe("beatAt", () => {
     timeline([{ text: A, weight: 2 }, { text: B, weight: 3 }, { text: C, weight: 2 }]),
     5,
   );
-  const boundaries = [0, 2 / 7, 5 / 7, 1];
 
   test("is total: selects a beat at every boundary and returns the last at t = 1 with mix 0", () => {
     // At the start of the first beat.

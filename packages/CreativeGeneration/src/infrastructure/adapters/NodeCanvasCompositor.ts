@@ -1,11 +1,15 @@
 import { readFile } from "node:fs/promises";
 import { createCanvas, loadImage, type Image, type SKRSContext2D } from "@napi-rs/canvas";
-import type {
-  CompositeRequest,
-  CompositeResult,
-  CompositorPort,
-  MotionKind,
-  SafeInsets,
+import {
+  beatAt,
+  resolveTimeline,
+  type CompositeRequest,
+  type CompositeResult,
+  type CompositorPort,
+  type CopyTimeline,
+  type MotionKind,
+  type ResolvedBeat,
+  type SafeInsets,
 } from "@campaignfoundry/CampaignOrchestration";
 import { hexToRgb, wrapText } from "./canvas-util.js";
 import { registerBundledFonts } from "../fonts.js";
@@ -45,6 +49,19 @@ interface PreparedCreative {
   readonly logoApplied: boolean;
   /** Normalized safe-zone insets; zeros when the request omitted them. */
   readonly insets: SafeInsets;
+  /**
+   * Resolved beat windows when the request carried `copy.timeline` + `durationSec`;
+   * undefined = the legacy single-message path (D10). All three scene fields are
+   * set together in `prepare`, never per frame.
+   */
+  readonly timeline?: readonly ResolvedBeat[];
+  /**
+   * Per-text layout at the D6 common type size, keyed by beat text and memoized
+   * once in `prepare`, so `draw` never re-wraps (M4).
+   */
+  readonly beatLayouts?: ReadonlyMap<string, HeadlineLayout>;
+  /** The key beat's layout: what the poster shows (D7) and the logo rests against. */
+  readonly anchorLayout?: HeadlineLayout;
 }
 
 /**
@@ -78,8 +95,45 @@ export class NodeCanvasCompositor implements CompositorPort {
    * kind; the solid accent and logo stay put. Logo placement (including the
    * headline-overlap snap) is resolved from the rest-pose headline box, so a
    * rising headline can never make the logo jump between edges mid-clip.
+   *
+   * A prepared timeline (D1/D2) selects the beat by `copyT ?? t`: the video
+   * poster passes a key-beat clock so it shows exactly the key beat at rest (D7),
+   * while `headline-rise` still advances on `t` per beat's local progress. Laying
+   * out and resolving happened once in `prepare` (D6/D9) — this method only
+   * paints (M4). Without a timeline, `draw` delegates to the frozen legacy path
+   * ([`drawLegacy`]) so stills and legacy motion bytes stay identical (D10).
    */
-  static draw(ctx: SKRSContext2D, prepared: PreparedCreative, t: number, motion?: MotionKind): void {
+  static draw(
+    ctx: SKRSContext2D,
+    prepared: PreparedCreative,
+    t: number,
+    motion?: MotionKind,
+    copyT?: number,
+  ): void {
+    if (
+      prepared.timeline !== undefined &&
+      prepared.beatLayouts !== undefined &&
+      prepared.anchorLayout !== undefined
+    ) {
+      const scenes: BeatScenes = {
+        resolved: prepared.timeline,
+        beats: prepared.beatLayouts,
+        anchor: prepared.anchorLayout,
+      };
+      drawTimeline(ctx, prepared, scenes, t, motion, copyT ?? t);
+      return;
+    }
+    NodeCanvasCompositor.drawLegacy(ctx, prepared, t, motion);
+  }
+
+  /**
+   * The frozen legacy path (D10): the single-message render exactly as it existed
+   * before copy timelines. Its output is byte-pinned by the platform goldens
+   * (darwin-arm64 and linux-x64 fixture keys) and by a diff against `draw` for
+   * timeline-free requests. Do not modify this body — new behaviour belongs in
+   * the timeline branch of {@link NodeCanvasCompositor.draw}.
+   */
+  static drawLegacy(ctx: SKRSContext2D, prepared: PreparedCreative, t: number, motion?: MotionKind): void {
     const { width, height, top, shadeAlpha } = prepared;
     const eased = motion === undefined ? 1 : easeOutCubic(t);
 
@@ -171,9 +225,14 @@ export class NodeCanvasCompositor implements CompositorPort {
     }
   }
 
-  /** Load background + logo and capture everything {@link NodeCanvasCompositor.draw} needs. */
+  /**
+   * Load background + logo and capture everything {@link NodeCanvasCompositor.draw}
+   * needs. When the request carries `copy.timeline` *and* `durationSec`, the whole
+   * beat sequence is resolved and fitted once here (D6/D9) — a still (no
+   * durationSec) or a timeline-free request never resolves a timeline (D10).
+   */
   static async prepare(
-    request: CompositeRequest,
+    request: CompositeRequest & { readonly durationSec?: number; readonly timeline?: CopyTimeline },
     fontFamily: string = "Inter",
   ): Promise<PreparedCreative> {
     const { width, height } = request.ratio;
@@ -219,7 +278,7 @@ export class NodeCanvasCompositor implements CompositorPort {
       }
     }
 
-    return {
+    const base: Omit<PreparedCreative, "timeline" | "beatLayouts" | "anchorLayout"> = {
       width,
       height,
       top,
@@ -233,6 +292,14 @@ export class NodeCanvasCompositor implements CompositorPort {
       logoApplied,
       insets,
     };
+
+    // Sequenced copy: resolve windows and fit every beat at one common type size
+    // (D6) right here, so `draw` (every frame, the poster, and every sample) pays
+    // nothing but the blit. Still requests have no durationSec and no windows.
+    if (request.timeline !== undefined && request.durationSec !== undefined) {
+      return { ...base, ...resolveBeatLayouts(base, request.timeline, request.durationSec) };
+    }
+    return base;
   }
 
   async compositeAsset(request: CompositeRequest): Promise<CompositeResult> {
@@ -315,53 +382,88 @@ interface HeadlineLayout {
   readonly box: Box;
 }
 
-function layoutHeadline(ctx: SKRSContext2D, prepared: PreparedCreative): HeadlineLayout {
-  const { width, height, top, fontWeight, fontFamily, message, insets } = prepared;
-  const innerWidth = width - insets.left - insets.right;
-  const wrapWidth = innerWidth * 0.85;
-  const centerX = insets.left + innerWidth / 2;
-  const originalFontSize = Math.round(width * 0.06);
+/**
+ * The prepared-fields the layout math reads, so fitting works on the real blit
+ * context and on the throwaway measure context alike.
+ */
+type LayoutSource = Pick<
+  PreparedCreative,
+  "width" | "height" | "top" | "fontWeight" | "fontFamily" | "insets"
+>;
+
+/**
+ * Lay a text out at its natural (autofit) type size — the legacy path's only
+ * layout, and the per-beat first pass behind the D6 common size.
+ */
+function fitText(ctx: SKRSContext2D, p: LayoutSource, text: string): HeadlineLayout {
+  const originalFontSize = Math.round(p.width * 0.06);
   const floor = Math.round(originalFontSize * 0.4);
 
-  const trySize = (fontSize: number) => {
-    ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}, sans-serif`;
-    const lines = wrapText(ctx, message, wrapWidth);
-    const lineHeight = fontSize * 1.25;
-    const minFirst = insets.top + fontSize;
-    const maxLast = height - insets.bottom;
-    const span = (lines.length - 1) * lineHeight;
-    const fits = minFirst + span <= maxLast;
-    let firstY = top
-      ? height * 0.1 + fontSize + insets.top
-      : height - height * 0.08 - span - insets.bottom;
-    if (fits) {
-      firstY = Math.min(Math.max(firstY, minFirst), maxLast - span);
-    }
-    return { lines, fontSize, lineHeight, firstY, fits, minFirst, maxLast, span };
-  };
-
   let fontSize = originalFontSize;
-  let attempt = trySize(fontSize);
+  let attempt = layoutAt(ctx, p, text, fontSize);
   while (!attempt.fits && fontSize > floor) {
     fontSize = Math.max(floor, fontSize - 4);
-    attempt = trySize(fontSize);
+    attempt = layoutAt(ctx, p, text, fontSize);
   }
+  return settleLayout(ctx, p, attempt);
+}
 
+/**
+ * Lay a text out at a caller-chosen type size — the D6 common size decided once
+ * in `prepare`, never the autofit loop (M4). `draw` no longer re-wraps.
+ */
+function layoutFixed(ctx: SKRSContext2D, p: LayoutSource, text: string, fontSize: number): HeadlineLayout {
+  return settleLayout(ctx, p, layoutAt(ctx, p, text, fontSize));
+}
+
+/** The exact legacy fitting arithmetic at a single type size. */
+function layoutAt(ctx: SKRSContext2D, p: LayoutSource, text: string, fontSize: number): LayoutAttempt {
+  const innerWidth = p.width - p.insets.left - p.insets.right;
+  const wrapWidth = innerWidth * 0.85;
+  ctx.font = `${p.fontWeight} ${fontSize}px ${p.fontFamily}, sans-serif`;
+  const lines = wrapText(ctx, text, wrapWidth);
+  const lineHeight = fontSize * 1.25;
+  const minFirst = p.insets.top + fontSize;
+  const maxLast = p.height - p.insets.bottom;
+  const span = (lines.length - 1) * lineHeight;
+  const fits = minFirst + span <= maxLast;
+  let firstY = p.top
+    ? p.height * 0.1 + fontSize + p.insets.top
+    : p.height - p.height * 0.08 - span - p.insets.bottom;
+  if (fits) {
+    firstY = Math.min(Math.max(firstY, minFirst), maxLast - span);
+  }
+  return { lines, fontSize, lineHeight, firstY, fits, minFirst, maxLast, span, wrapWidth };
+}
+
+interface LayoutAttempt {
+  readonly lines: readonly string[];
+  readonly fontSize: number;
+  readonly lineHeight: number;
+  readonly firstY: number;
+  readonly fits: boolean;
+  readonly minFirst: number;
+  readonly maxLast: number;
+  readonly span: number;
+  readonly wrapWidth: number;
+}
+
+function settleLayout(ctx: SKRSContext2D, p: LayoutSource, attempt: LayoutAttempt): HeadlineLayout {
   if (!attempt.fits) {
     const maxLines = Math.max(1, Math.floor((attempt.maxLast - attempt.minFirst) / attempt.lineHeight) + 1);
-    let lines = attempt.lines;
+    let lines = [...attempt.lines];
     if (lines.length > maxLines) {
       lines = lines.slice(0, maxLines);
-      lines[lines.length - 1] = ellipsize(ctx, lines[lines.length - 1], wrapWidth);
+      lines[lines.length - 1] = ellipsize(ctx, lines[lines.length - 1], attempt.wrapWidth);
     }
     const span = (lines.length - 1) * attempt.lineHeight;
-    let firstY = top
-      ? height * 0.1 + attempt.fontSize + insets.top
-      : height - height * 0.08 - span - insets.bottom;
+    let firstY = p.top
+      ? p.height * 0.1 + attempt.fontSize + p.insets.top
+      : p.height - p.height * 0.08 - span - p.insets.bottom;
     firstY = Math.min(Math.max(firstY, attempt.minFirst), attempt.maxLast - span);
     attempt = { ...attempt, lines, firstY, span, fits: true };
   }
-
+  const centerX = p.insets.left + (p.width - p.insets.left - p.insets.right) / 2;
   return {
     lines: attempt.lines,
     fontSize: attempt.fontSize,
@@ -369,12 +471,16 @@ function layoutHeadline(ctx: SKRSContext2D, prepared: PreparedCreative): Headlin
     firstY: attempt.firstY,
     centerX,
     box: {
-      x: centerX - wrapWidth / 2,
+      x: centerX - attempt.wrapWidth / 2,
       y: attempt.firstY - attempt.fontSize,
-      width: wrapWidth,
+      width: attempt.wrapWidth,
       height: attempt.span + attempt.fontSize,
     },
   };
+}
+
+function layoutHeadline(ctx: SKRSContext2D, prepared: PreparedCreative): HeadlineLayout {
+  return fitText(ctx, prepared, prepared.message);
 }
 
 function flushLogoY(edge: "top" | "bottom", height: number, logoH: number, insets: SafeInsets): number {
@@ -399,4 +505,220 @@ function resolveOverlappingLogoY(
     return otherY;
   }
   return preferredY;
+}
+
+/** Everything `draw` needs once the request resolved a timeline (D6/D9). */
+interface BeatScenes {
+  readonly resolved: readonly ResolvedBeat[];
+  readonly beats: ReadonlyMap<string, HeadlineLayout>;
+  readonly anchor: HeadlineLayout;
+}
+
+/**
+ * Resolve a timeline's beat windows and fit every distinct beat text at one
+ * common type size (D6): each text's natural fit is measured once, the sequence
+ * takes the smallest size, and every text is re-laid at it. Layouts are keyed by
+ * text, so a repeated beat shares its layout.
+ */
+function resolveBeatLayouts(
+  prepared: PreparedCreative,
+  timeline: CopyTimeline,
+  durationSec: number,
+): {
+  readonly timeline: readonly ResolvedBeat[];
+  readonly beatLayouts: ReadonlyMap<string, HeadlineLayout>;
+  readonly anchorLayout: HeadlineLayout;
+} {
+  const resolved = resolveTimeline(timeline, durationSec);
+  if (resolved.length === 0) {
+    throw new Error(
+      "NodeCanvasCompositor: cannot fit an empty copy.timeline; reject it with timelineProblem before rendering.",
+    );
+  }
+  // A throwaway measure context — wrapText needs a context for measureText, and
+  // SKIA metrics are independent of the canvas backing size.
+  const ctx = createCanvas(1, 1).getContext("2d");
+  const texts = [...new Set(resolved.map((beat) => beat.text))];
+  const naturalSizes = texts.map((text) => fitText(ctx, prepared, text).fontSize);
+  const commonSize = Math.min(...naturalSizes);
+  // `keyBeat` is a 1-based index the domain bounds and the parser rejects out of range, so
+  // a malformed one cannot reach here through the pipeline. A direct adapter call can still
+  // carry one, and indexing past the end would throw a bare TypeError from deep inside the
+  // canvas work — a failure wearing the wrong name, several frames from its cause. Say what
+  // is actually wrong instead, as `beatAt` does for an empty timeline.
+  const anchorBeat = timeline.beats[timeline.keyBeat - 1];
+  if (anchorBeat === undefined) {
+    throw new Error(
+      `copy.timeline.keyBeat is ${timeline.keyBeat}, outside [1, ${timeline.beats.length}]; ` +
+        "validate with timelineProblem before compositing.",
+    );
+  }
+  const anchorText = anchorBeat.text;
+  const beatLayouts = new Map<string, HeadlineLayout>();
+  let anchorLayout!: HeadlineLayout;
+  for (const text of texts) {
+    const layout = layoutFixed(ctx, prepared, text, commonSize);
+    beatLayouts.set(text, layout);
+    if (text === anchorText) {
+      anchorLayout = layout;
+    }
+  }
+  return { timeline: resolved, beatLayouts, anchorLayout };
+}
+
+/**
+ * The sequenced-copy draw path. Layers 1–3, the text layer, and the logo layer
+ * each match the legacy blit for the same `motion` / `t`; the only differences
+ * are that copy is chosen by `copyT` (passed by the caller — the poster passes
+ * the key beat's mid-time, D7) and that `headline-rise` advances per beat on the
+ * pose clock `t` (each beat rises on its own local progress).
+ */
+function drawTimeline(
+  ctx: SKRSContext2D,
+  prepared: PreparedCreative,
+  scenes: BeatScenes,
+  t: number,
+  motion: MotionKind | undefined,
+  copyT: number,
+): void {
+  const eased = motion === undefined ? 1 : easeOutCubic(t);
+
+  // Layers 1–3 — identical to the legacy blit for this motion / pose clock.
+  paintBackground(ctx, prepared, eased, motion);
+  paintShade(ctx, prepared);
+  paintAccent(ctx, prepared, eased, motion);
+
+  // Layer 4 — sequenced copy: the beat is selected by copyT, crossfaded with any
+  // incoming beat, and (for headline-rise) eased on its own local progress.
+  const pair = beatAt(scenes.resolved, copyT);
+  const rise = motion === "headline-rise";
+  if (pair.mix > 0 && pair.incoming !== undefined) {
+    drawBeat(ctx, prepared, scenes, pair.current, 1 - pair.mix, t, rise);
+    drawBeat(ctx, prepared, scenes, pair.incoming, pair.mix, t, rise);
+  } else {
+    drawBeat(ctx, prepared, scenes, pair.current, 1, t, rise);
+  }
+
+  // Layer 5 — brand logo, anchored to the key beat's rest-pose box, so it neither
+  // jumps between beats nor drifts from the poster (D7).
+  if (prepared.logo) {
+    const { image, x, width: lw, height: lh } = prepared.logo;
+    let ly = prepared.logo.y;
+    const logoBox = { x, y: ly, width: lw, height: lh };
+    if (boxesOverlap(scenes.anchor.box, logoBox)) {
+      ly = resolveOverlappingLogoY(prepared, scenes.anchor.box, lw, lh, x);
+    }
+    ctx.drawImage(image, x, ly, lw, lh);
+  }
+}
+
+/** Paint one beat's copy at the given layer opacity (`1 - mix` / `mix` during a crossfade). */
+function drawBeat(
+  ctx: SKRSContext2D,
+  prepared: PreparedCreative,
+  scenes: BeatScenes,
+  beat: ResolvedBeat,
+  layerAlpha: number,
+  t: number,
+  rise: boolean,
+): void {
+  const layout = scenes.beats.get(beat.text);
+  if (layout === undefined) {
+    throw new Error(`NodeCanvasCompositor: no fitted layout for beat "${beat.text}".`);
+  }
+  // Local progress inside the beat's own window, so headline-rise resets with
+  // each beat (Q1) while the global pose clock keeps the ground layers continuous.
+  const local = clamp01((t - beat.startT) / (beat.endT - beat.startT));
+  const eased = rise ? easeOutCubic(local) : 1;
+  const dy = rise ? (1 - eased) * 0.12 * prepared.height : 0;
+  const alpha = rise ? eased : 1;
+  const opacity = alpha * layerAlpha;
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.font = `${prepared.fontWeight} ${layout.fontSize}px ${prepared.fontFamily}, sans-serif`;
+  if (dy !== 0 || opacity !== 1) {
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    ctx.translate(0, dy);
+  }
+  let y = layout.firstY;
+  for (const line of layout.lines) {
+    ctx.fillText(line, layout.centerX, y);
+    y += layout.lineHeight;
+  }
+  if (dy !== 0 || opacity !== 1) {
+    ctx.restore();
+  }
+}
+
+function clamp01(x: number): number {
+  return x < 0 ? 0 : x > 1 ? 1 : x;
+}
+
+/** Timeline-path layer 1 — background (identical to the legacy blit for the same `motion`/`eased`). */
+function paintBackground(
+  ctx: SKRSContext2D,
+  prepared: PreparedCreative,
+  eased: number,
+  motion: MotionKind | undefined,
+): void {
+  const { width, height } = prepared;
+  const zoom = kenBurnsScale(motion, eased);
+  if (zoom === 1) {
+    ctx.drawImage(prepared.background, 0, 0, width, height);
+  } else {
+    ctx.save();
+    ctx.translate(width / 2, height / 2);
+    ctx.scale(zoom, zoom);
+    ctx.translate(-width / 2, -height / 2);
+    ctx.drawImage(prepared.background, 0, 0, width, height);
+    ctx.restore();
+  }
+}
+
+/** Timeline-path layer 2 — contrast shade, darkest at the headline edge. */
+function paintShade(ctx: SKRSContext2D, prepared: PreparedCreative): void {
+  const { width, height, top, shadeAlpha } = prepared;
+  const shade = top
+    ? ctx.createLinearGradient(0, height * 0.55, 0, 0)
+    : ctx.createLinearGradient(0, height * 0.45, 0, height);
+  shade.addColorStop(0, "rgba(0, 0, 0, 0)");
+  shade.addColorStop(1, `rgba(0, 0, 0, ${shadeAlpha})`);
+  ctx.fillStyle = shade;
+  ctx.fillRect(0, 0, width, height);
+}
+
+/** Timeline-path layer 3 — brand-colour accent band (solid base + wipe fade). */
+function paintAccent(
+  ctx: SKRSContext2D,
+  prepared: PreparedCreative,
+  eased: number,
+  motion: MotionKind | undefined,
+): void {
+  const { width, height, top } = prepared;
+  const [ar, ag, ab] = hexToRgb(prepared.brandColor);
+  const solidH = height * 0.05;
+  const fadeH = height * 0.06;
+  const wipe = motion === "accent-wipe" ? eased : 1;
+  ctx.fillStyle = `rgb(${ar}, ${ag}, ${ab})`;
+  if (top) {
+    ctx.fillRect(0, 0, width, solidH);
+    if (wipe > 0) {
+      const fade = ctx.createLinearGradient(0, solidH, 0, solidH + fadeH);
+      fade.addColorStop(0, `rgb(${ar}, ${ag}, ${ab})`);
+      fade.addColorStop(1, `rgba(${ar}, ${ag}, ${ab}, 0)`);
+      ctx.fillStyle = fade;
+      ctx.fillRect(0, solidH, width, fadeH * wipe);
+    }
+  } else {
+    ctx.fillRect(0, height - solidH, width, solidH);
+    if (wipe > 0) {
+      const fade = ctx.createLinearGradient(0, height - solidH - fadeH, 0, height - solidH);
+      fade.addColorStop(0, `rgba(${ar}, ${ag}, ${ab}, 0)`);
+      fade.addColorStop(1, `rgb(${ar}, ${ag}, ${ab})`);
+      ctx.fillStyle = fade;
+      ctx.fillRect(0, height - solidH - fadeH * wipe, width, fadeH * wipe);
+    }
+  }
 }
