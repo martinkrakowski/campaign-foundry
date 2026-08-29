@@ -24,15 +24,28 @@ name: "PR-Agent Architecture Review"
 
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review, synchronize]
     # D4. `packages/*/src/**` is one level deep on purpose: it is where the layers live.
     paths:
       - "packages/*/src/**"
       - ".architecture/**"
       - ".agents/architecture.md"
+      # Finding class 3 — a legal import that pulls an illegal runtime — is a WEB-side
+      # defect: #91 was `editor-state.ts` importing the CampaignOrchestration barrel, which
+      # dragged node:fs into the browser bundle. Excluding apps/web would have excluded the
+      # only place that class occurs, leaving the reviewer unable to catch one of the two
+      # real defects that justify it. The cost is one call per web PR; it answers
+      # `code_suggestions: []` when it has nothing and posts nothing on empty.
+      #
+      # Scoped to TS/TSX rather than all of apps/web/src: a stylesheet cannot import a
+      # barrel, so including it would only cost a call. This keeps the plan's DoD intent —
+      # a CSS-only PR pays for one reviewer — while covering the import sites that class
+      # actually occurs in.
+      - "apps/web/src/**/*.ts"
+      - "apps/web/src/**/*.tsx"
   # Deliberately no `issue_comment` — see the note in pr-agent-api.yml. GitHub has no
   # `paths` filter for comments, so the command path would fire all three reviewers on any
-  # PR. "Re-run jobs" replays this workflow's own pull_request payload.
+  # PR. `synchronize` above, not "Re-run jobs", is what covers later commits.
 
 permissions:
   contents: read
@@ -87,7 +100,7 @@ jobs:
           github_action_config.auto_review: "false"
           github_action_config.auto_describe: "false"
           github_action_config.auto_improve: "true"
-          github_action_config.pr_actions: '["opened", "reopened", "ready_for_review"]'
+          github_action_config.pr_actions: '["opened", "reopened", "ready_for_review", "synchronize"]'
           # The instructions OPEN WITH THE PROHIBITION, not the mandate (P2.3). What this
           # reviewer must not say is the part that makes it worth running at all.
           pr_code_suggestions.extra_instructions: |
@@ -177,6 +190,19 @@ jobs:
           pr_code_suggestions.parallel_calls: "true"
           pr_code_suggestions.suggestions_score_threshold: "0"
 
+      # KNOWN LIMIT, stated rather than hidden: PR-Agent's failure notice is posted by
+      # github-actions[bot] with the same text from all three reviewers, and the issue
+      # comment carries nothing identifying which workflow produced it. On a PR that
+      # triggers two reviewers at once, one failing makes both guards red.
+      #
+      # That weakens D1's isolation, and the trade is deliberate: this guard exists because
+      # PR-Agent exits 0 when it could not produce a review, so a green check would claim
+      # work that never happened. Cross-contamination fails in the SAFE direction — a
+      # spurious red on an advisory check that gates nothing (D8) — and the alternative,
+      # dropping the guard, restores exactly the false-green it was built to catch.
+      #
+      # `since` is the step stamp rather than the job start, which narrows the overlap
+      # window to this reviewer's own LLM call. It does not eliminate it.
       - name: "Fail if the review did not actually run"
         if: always() && github.event_name == 'pull_request'
         env:
