@@ -4,6 +4,26 @@ Style: **hexagonal**
 
 > An HITL orchestrator for deterministic creative generation and automated brand compliance.
 
+## Who Enforces This
+
+Two things review the architecture, and they do not overlap.
+
+`hexagen arch validate` (`yarn lint:arch`) proves the layer graph **deterministically** from
+`.architecture/invariants/layer-rules.yaml`, on every PR, as a merge gate: which layers may
+import which, package boundaries, whitelist conformance, cycles, and file placement by
+layer. If it is green, none of those occurred.
+
+`.github/workflows/pr-agent-arch.yml` is an **advisory** LLM reviewer scoped to the
+complement — what the import graph cannot express: whether a port is an abstraction or a
+disguised implementation detail, whether adapter failure modes leak through it, whether a
+*legal* import pulls an illegal runtime into a bundle, whether layer-correct code belongs to
+the layer it sits in, and whether a port is wired to anything. It is given the linter's own
+rules so it can recognise and refuse them, and it is not a merge gate.
+
+The split matters: a reviewer that repeats what the linter already proves is worse than no
+reviewer, because it teaches people to skim it. See
+`docs/planning/2026-08-29_pr-agent-api-and-architecture.md` §2.2.
+
 ## Universal Boundary Rules
 
 These hold regardless of style and are enforced in review:

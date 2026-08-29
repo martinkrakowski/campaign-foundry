@@ -1,0 +1,184 @@
+name: "PR-Agent API Review"
+
+# An LLM reviewer specialised in this repo's Nitro/H3 API — route semantics, ordering
+# around writes, path confinement, status and error shape. It is the second of three
+# PR-Agent reviewers; see docs/planning/2026-08-29_pr-agent-api-and-architecture.md.
+#
+# Why it exists: nothing reviews Nitro route semantics today. CodeRabbit is generic and the
+# UI reviewer (pr-agent.yml) is pointed at DESIGN.md, so neither knows what an H3 handler
+# should do about a repeated query parameter or a conditional write. The defects in the
+# instructions below are real, all from this repository, cited by PR.
+#
+# OPERATIONAL SCAFFOLDING IS IDENTICAL TO pr-agent.yml BY CONSTRUCTION — the digest pin,
+# the concurrency key, the command allowlist, the did-it-actually-run guard. Every one of
+# those blocks records a failure that was actually hit; a change to one is a change to all
+# three files. Read pr-agent.yml's comments for the reasoning, which is not repeated here.
+#
+# Config in .pr_agent.toml is read from the DEFAULT BRANCH and is SHARED by all three
+# workflows. Per-reviewer differences live in this file's env block. Keep env and toml in
+# agreement.
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+    # D4: a CSS-only PR must not pay for three LLM reviews.
+    paths:
+      - "apps/api/**"
+  # NOTE the deliberate absence of `issue_comment`, which pr-agent.yml does have.
+  #
+  # GitHub has no `paths` filter for issue_comment. Wiring the command path here would mean
+  # a single `/improve` on ANY pull request — including one that changes no API file at all
+  # — fires all three reviewers, which is precisely the cost D4 exists to avoid. The plan's
+  # P1.2 named the command path before that interaction was worked through.
+  #
+  # The manual override is not lost: "Re-run jobs" on a previous run of this workflow
+  # replays the same pull_request payload, so a maintainer can re-request an API review
+  # without paying for a UI and an architecture one alongside it.
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+# Prefixed `pr-agent-api-` so this reviewer has its OWN group. D1: a rate-limited or failing
+# API review must not cancel the UI one. The keying by what the run produces and by sender
+# type is carried from pr-agent.yml; with no issue_comment trigger only the 'improve' arm is
+# reachable here, and it is kept in full so the three files stay diffable against each other.
+concurrency:
+  group: >-
+    pr-agent-api-${{ github.event.pull_request.number || github.event.issue.number
+    }}-${{ ((github.event_name == 'pull_request'
+    || github.event.comment.body == '/improve'
+    || startsWith(github.event.comment.body, '/improve '))
+    && 'improve')
+    || ((github.event.comment.body == '/review'
+    || startsWith(github.event.comment.body, '/review '))
+    && 'review')
+    || 'other' }}-${{ github.event.sender.type }}
+  cancel-in-progress: true
+
+jobs:
+  pr_agent_api:
+    name: "PR-Agent API review"
+    if: >-
+      github.event.sender.type != 'Bot'
+      && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: "Stamp run start"
+        id: started
+        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: "PR Agent"
+        uses: docker://pragent/pr-agent@sha256:b81235c3bddc551939a1feca8926f4b6e8abcec2ae5bf4620424f8f56dd9cb93 # 0.42.0-github_action
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENROUTER__KEY: ${{ secrets.OPENROUTER_KEY }}
+          config.restricted_mode: "true"
+          config.model: "openrouter/inception/mercury-2"
+          config.fallback_models: '["openrouter/anthropic/claude-haiku-4.5"]'
+          config.custom_model_max_tokens: "128000"
+          config.max_model_tokens: "70000"
+          # Every entry verified to exist. A missing file is SKIPPED, not fatal, so a stale
+          # list is a silent way to ship a reviewer with less context than intended.
+          # DESIGN.md is deliberately absent: it is the UI reviewer's context, and handing
+          # it to this one invites UI findings on an API diff.
+          config.repo_context_files: '[".agents/architecture.md", "AGENTS.md", ".agents/testing.md"]'
+          config.repo_context_max_lines: "3000"
+          config.ai_timeout: "600"
+          pr_reviewer.require_ticket_analysis_review: "false"
+          github_action_config.auto_review: "false"
+          github_action_config.auto_describe: "false"
+          github_action_config.auto_improve: "true"
+          github_action_config.pr_actions: '["opened", "reopened", "ready_for_review"]'
+          pr_code_suggestions.extra_instructions: |
+            You are the adversarial API reviewer for campaign-foundry. The API is Nitro/H3:
+            file-routed handlers under apps/api/server/routes, helpers under
+            apps/api/server/lib. Find defects; do not summarise the PR.
+
+            Every finding MUST carry a concrete failure scenario: a specific request — method,
+            path, query, body — and the wrong status, wrong body, corrupted state or silent
+            no-op that results. "This could be fragile" is not a finding. "POST
+            /campaigns/briefs?replace=1 copies the asset files before the revision check, so
+            a request that is then rejected 409 has already moved them" is a finding.
+
+            Hunt these classes first. Every one has actually shipped in this repository,
+            passed a 100%-coverage gate, and been caught only in review:
+
+            1. MUTATION BEFORE VALIDATION. Anything written, copied, moved or deleted before
+               the lock, the revision check, or the id-uniqueness check. On #93 assets were
+               copied ahead of the conditional write, so a rejected 409 had already mutated
+               storage; the duplicate route raced its own id check. For every write ask: if
+               the very next check fails, what has already changed on disk?
+            2. PATH HANDLING. Any path segment derived from a request — a route param, a
+               query value, a body field, a filename — that reaches the filesystem without
+               going through resolveConfined (apps/api/server/lib/confined-path.ts). On #93
+               readBrief("/etc/hosts") escaped the store in a file that had already written
+               its own confinement helper and applied it on one path but not the others.
+               A helper existing is not evidence it is used everywhere.
+            3. QUERY AND BODY SHAPES. getQuery(event) values may be `string | string[]` —
+               briefs.post.ts handles the array case for `replace` deliberately, and nothing
+               checks that new handlers do. A repeated parameter whose second value silently
+               wins, a body read with readBody and used unvalidated, a numeric parameter
+               parsed with parseInt and never checked for NaN.
+            4. STATUS AND ERROR SEMANTICS. A 500 where a 4xx belongs (a malformed brief is
+               the caller's fault). An H3Error whose message or `cause` leaks an absolute
+               filesystem path to the client. A catch that turns "I could not tell" into
+               "nothing was wrong" — returning null, [], or a default where the caller cannot
+               distinguish absence from failure.
+            5. ADDITIVE CONTRACT DRIFT. A field added to a response that its own client does
+               not carry through. On #95 GET /campaigns/capabilities gained an ffmpeg
+               `version` and the web client rebuilt the response as { motion, reason },
+               dropping it — so the component rendering it was unreachable while sitting at
+               100% coverage. When a response shape changes, follow it into the client.
+            6. LOCKING SCOPE, STATED HONESTLY. The brief store serialises revision-check→write
+               sections per id WITHIN THIS PROCESS. If a change assumes that guarantee holds
+               across processes, say so explicitly rather than letting the assumption stand.
+
+            For every fix you propose, state what it does to requests the current code already
+            handles, and whether it converts a loud failure into a quiet one. A fix that
+            trades a 500 for a wrong 200 is worse than the bug.
+
+            Stay in your lane. Do not review React components, DESIGN.md rules, copy, or
+            accessibility — pr-agent.yml owns those. Do not review layer boundaries or import
+            rules — `hexagen arch validate` proves those deterministically on every PR and
+            pr-agent-arch.yml owns what it cannot see. Do not re-raise what CodeRabbit owns.
+            Do not comment to acknowledge, praise or summarise. Prefer silence to a
+            speculative finding: a wrong finding costs a human more time than it saves.
+          pr_code_suggestions.commitable_code_suggestions: "true"
+          pr_code_suggestions.publish_output_no_suggestions: "false"
+          pr_code_suggestions.focus_only_on_problems: "true"
+          pr_code_suggestions.num_code_suggestions_per_chunk: "6"
+          pr_code_suggestions.max_number_of_calls: "6"
+          pr_code_suggestions.parallel_calls: "true"
+          pr_code_suggestions.suggestions_score_threshold: "0"
+
+      # Identical in intent and text to pr-agent.yml's guard: PR-Agent exits 0 even when it
+      # could not produce a review, so a green check would claim work that did not happen.
+      # --paginate --slurp because --paginate alone concatenates one JSON document per page
+      # and the count would stop being a single integer. Errors are NOT converted to zero.
+      - name: "Fail if the review did not actually run"
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          STARTED_AT: ${{ steps.started.outputs.at }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp --method GET "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" > "$RUNNER_TEMP/pages.json"
+          FILTER='[.[][] | select(.user.login == "github-actions[bot]") | select(.created_at >= $since) | select(.body | test("Failed to generate"))] | length'
+          jq --arg since "$STARTED_AT" "$FILTER" "$RUNNER_TEMP/pages.json" > "$RUNNER_TEMP/failures"
+          failed=$(cat "$RUNNER_TEMP/failures")
+          case "$failed" in
+            ''|*[!0-9]*)
+              echo "Expected a single integer from the comment scan, got: $failed"
+              exit 1
+              ;;
+          esac
+          if [ "$failed" -gt 0 ]; then
+            echo "PR-Agent reported it could not generate a review."
+            echo "A green check here would claim a review that never happened."
+            exit 1
+          fi
+          echo "No PR-Agent failure notice from this run."
