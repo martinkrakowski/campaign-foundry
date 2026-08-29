@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import type { Dispatch, ReactNode } from "react";
 import { RATIO_DIMENSIONS, RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import {
@@ -115,10 +116,15 @@ function RatioAxis({
   // the coupling surfaces before the run instead of as a shortfall error after.
   const over = floor > 0 && ratioFloorTotal > count;
 
+  const shapesHintId = useId();
+  const derivedShapes = !state.ratioOverridden;
   return (
-    <fieldset className="space-y-2">
+    // The hint explains where these shapes came from, so it belongs to the group rather
+    // than sitting beside it: a screen-reader user meeting the fieldset should hear it too.
+    <fieldset className="space-y-2" {...(derivedShapes ? { "aria-describedby": shapesHintId } : {})}>
       <legend className="text-[11px] text-text-muted">
-        Aspect ratios {!state.ratioOverridden ? `· ${messages.shapesFromPlatforms}` : ""}
+        Aspect ratios{" "}
+        {derivedShapes ? <span id={shapesHintId}>{`· ${messages.shapesFromPlatforms}`}</span> : null}
       </legend>
       <Field label="Coverage per ratio" error={errors.perRatio} hint="Fewest creatives each aspect ratio must get">
         <Stepper

@@ -231,6 +231,10 @@ export function DurationStrip({
               <div
                 key={`bead-${index}`}
                 role="slider"
+                // The error is rendered once, below the reel, and a bead is what a screen
+                // reader is actually on — so it has to carry the invalid state and point at
+                // the sentence, or the message is visible to sighted users only.
+                {...(error ? { "aria-invalid": true, "aria-describedby": describedById } : {})}
                 tabIndex={readOnly || disabled ? -1 : 0}
                 aria-label={`Duration ${index + 1} (seconds)`}
                 aria-valuenow={seconds}

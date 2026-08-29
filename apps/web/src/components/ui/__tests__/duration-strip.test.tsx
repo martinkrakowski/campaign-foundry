@@ -260,3 +260,20 @@ describe("DurationStrip component", () => {
     expect(screen.getByRole("slider", { name: "Duration 2 (seconds)" })).toBeTruthy();
   });
 });
+
+describe("the reel's error reaches the control, not only the page", () => {
+  test("a bead is marked invalid and points at the message", () => {
+    render(<DurationStrip values={[6]} onChange={vi.fn()} onAdd={vi.fn()} onRemove={vi.fn()} error="too many" />);
+    const bead = screen.getByRole("slider", { name: "Duration 1 (seconds)" });
+    expect(bead.getAttribute("aria-invalid")).toBe("true");
+    const describedBy = bead.getAttribute("aria-describedby") as string;
+    expect(document.getElementById(describedBy)?.textContent).toBe("too many");
+  });
+
+  test("with no error the bead claims neither", () => {
+    render(<DurationStrip values={[6]} onChange={vi.fn()} onAdd={vi.fn()} onRemove={vi.fn()} />);
+    const bead = screen.getByRole("slider", { name: "Duration 1 (seconds)" });
+    expect(bead.getAttribute("aria-invalid")).toBeNull();
+    expect(bead.getAttribute("aria-describedby")).toBeNull();
+  });
+});
