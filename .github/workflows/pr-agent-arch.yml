@@ -1,0 +1,268 @@
+name: "PR-Agent Architecture Review"
+
+# An LLM reviewer for the hexagonal ports-and-adapters design — the third of three
+# PR-Agent reviewers. See docs/planning/2026-08-29_pr-agent-api-and-architecture.md.
+#
+# THIS REVIEWER'S ONLY JUSTIFICATION IS THE BOUNDARY IN ITS INSTRUCTIONS.
+#
+# `hexagen arch validate` already enforces the layer graph DETERMINISTICALLY, from
+# .architecture/invariants/layer-rules.yaml, on every PR, as a merge gate. An LLM asked to
+# "review the architecture" will re-derive those same rules and report them more slowly and
+# less reliably than a linter that is already green. That is worse than adding nothing: it
+# trains people to skim the bot, and a bot people skim is how a real finding gets missed.
+#
+# So this reviewer is scoped to the COMPLEMENT of the linter, and is handed the linter's own
+# YAML as context specifically so it can recognise those rules and REFUSE to report them.
+# The test for a valid finding: could `lint:arch` have caught this? If yes it is out of
+# scope — the linter is green, so by construction it did not occur.
+#
+# If this reviewer starts reporting layer-rule violations the linter DOES catch, D2 has
+# failed and it should be deleted rather than tuned. The API reviewer stands on its own.
+#
+# THE BOUNDARY IS NARROWER THAN THE PLAN ASSUMED, and the instructions say so. The pinned
+# linter (@hexagen-monaco/arch-linter 0.8.0) skips the layer check for relative specifiers:
+# in its shipped build the domain branch reads
+#
+#     if (!spec.startsWith("@") && (spec.startsWith(".") || spec.startsWith("/"))) ; else { … }
+#
+# — an empty statement. Verified end to end: a domain file importing
+# `../infrastructure/safe-path.js` is reported "Architecture is compliant", while the same
+# file importing `@campaignfoundry/Distribution` is correctly rejected. Nearly every
+# intra-package import is relative, so within a package the layer rules are unenforced.
+#
+# The reviewer therefore owns relative cross-layer imports (class 0) until the linter is
+# upgraded. 0.12.1 adds `checkCrossLayerRelativeImport` and catches the case exactly; the
+# upgrade also surfaces one real pre-existing violation (node:crypto in a domain VO), which
+# is why it is a separate change rather than folded in here.
+#
+# OPERATIONAL SCAFFOLDING IS IDENTICAL TO pr-agent.yml BY CONSTRUCTION — see its comments
+# for the reasoning behind the digest pin, the concurrency key and the guard.
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+    # D4. `packages/*/src/**` is one level deep on purpose: it is where the layers live.
+    paths:
+      - "packages/*/src/**"
+      - ".architecture/**"
+      - ".agents/architecture.md"
+      # Finding class 3 — a legal import that pulls an illegal runtime — is a WEB-side
+      # defect: #91 was `editor-state.ts` importing the CampaignOrchestration barrel, which
+      # dragged node:fs into the browser bundle. Excluding apps/web would have excluded the
+      # only place that class occurs, leaving the reviewer unable to catch one of the two
+      # real defects that justify it. The cost is one call per web PR; it answers
+      # `code_suggestions: []` when it has nothing and posts nothing on empty.
+      #
+      # Scoped to TS/TSX rather than all of apps/web/src: a stylesheet cannot import a
+      # barrel, so including it would only cost a call. This keeps the plan's DoD intent —
+      # a CSS-only PR pays for one reviewer — while covering the import sites that class
+      # actually occurs in.
+      - "apps/web/src/**/*.ts"
+      - "apps/web/src/**/*.tsx"
+      # The ports live here too, not only in packages/. `apps/api/server/lib/ports/`
+      # declares BriefStorePort and AssetStorePort, holds their filesystem adapters, and
+      # composes them; `pipeline.ts` wires the ImageGeneratorPort implementations. Finding
+      # class 1's worked example — #93's `readBrief` taking an absolute filesystem path —
+      # is in that directory. Excluding apps/api excluded the file that motivates the
+      # class. The API reviewer does not cover it: its instructions send architecture
+      # questions here.
+      - "apps/api/server/**"
+  # Deliberately no `issue_comment` — see the note in pr-agent-api.yml. GitHub has no
+  # `paths` filter for comments, so the command path would fire all three reviewers on any
+  # PR. `synchronize` above, not "Re-run jobs", is what covers later commits.
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+# Prefixed `pr-agent-arch-` so this reviewer has its OWN group (D1).
+concurrency:
+  group: >-
+    pr-agent-arch-${{ github.event.pull_request.number || github.event.issue.number
+    }}-${{ ((github.event_name == 'pull_request'
+    || github.event.comment.body == '/improve'
+    || startsWith(github.event.comment.body, '/improve '))
+    && 'improve')
+    || ((github.event.comment.body == '/review'
+    || startsWith(github.event.comment.body, '/review '))
+    && 'review')
+    || 'other' }}-${{ github.event.sender.type }}
+  cancel-in-progress: true
+
+jobs:
+  pr_agent_arch:
+    name: "PR-Agent architecture review"
+    if: >-
+      github.event.sender.type != 'Bot'
+      && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: "Stamp run start"
+        id: started
+        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: "PR Agent"
+        uses: docker://pragent/pr-agent@sha256:b81235c3bddc551939a1feca8926f4b6e8abcec2ae5bf4620424f8f56dd9cb93 # 0.42.0-github_action
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENROUTER__KEY: ${{ secrets.OPENROUTER_KEY }}
+          config.restricted_mode: "true"
+          config.model: "openrouter/inception/mercury-2"
+          config.fallback_models: '["openrouter/anthropic/claude-haiku-4.5"]'
+          config.custom_model_max_tokens: "128000"
+          config.max_model_tokens: "70000"
+          # THE LINTER'S OWN RULES ARE CONTEXT (D2, P2.2). The reviewer cannot defer to a
+          # rule it has not read. Both invariant files are verified to exist; a missing
+          # entry is skipped, not fatal, so a stale list would silently remove the very
+          # context that makes the prohibition below enforceable.
+          config.repo_context_files: '[".agents/architecture.md", ".architecture/invariants/layer-rules.yaml", ".architecture/invariants/linter-config.yaml"]'
+          config.repo_context_max_lines: "3000"
+          config.ai_timeout: "600"
+          pr_reviewer.require_ticket_analysis_review: "false"
+          github_action_config.auto_review: "false"
+          github_action_config.auto_describe: "false"
+          github_action_config.auto_improve: "true"
+          github_action_config.pr_actions: '["opened", "reopened", "ready_for_review", "synchronize"]'
+          # The instructions OPEN WITH THE PROHIBITION, not the mandate (P2.3). What this
+          # reviewer must not say is the part that makes it worth running at all.
+          pr_code_suggestions.extra_instructions: |
+            You are the architecture reviewer for campaign-foundry, a hexagonal
+            ports-and-adapters codebase. Read the prohibition before the mandate.
+
+            === WHAT YOU MUST NEVER REPORT ===
+
+            A deterministic linter, `hexagen arch validate`, runs on every pull request as a
+            merge gate. It reads .architecture/invariants/layer-rules.yaml — which you have
+            been given — and proves the following STATICALLY, for imports written as a
+            PACKAGE SPECIFIER (`@campaignfoundry/…`):
+
+              - which layers may import which (domain: internal-only; application:
+                ports-only, may import domain and shared; infrastructure: adapters, may
+                import domain, application and shared)
+              - package-boundary violations
+              - conformance to the global whitelist (@campaignfoundry/shared/**, and the
+                CampaignOrchestration root entrypoint so adapter packages can implement its
+                ports)
+              - subpath conventions and required communication
+              - whether a file sits under the right layer directory
+
+            NEVER report any of those. The linter is green on this pull request, so for
+            package specifiers none of them occurred. Reporting one is not a false positive
+            you can apologise for later — it is the failure mode that makes a second
+            reviewer worthless, because a reviewer that repeats a solved problem teaches
+            people to skim it.
+
+            ONE EXCEPTION, AND IT IS LOAD-BEARING. The pinned linter (0.8.0) skips the layer
+            check entirely for RELATIVE specifiers — anything beginning `./` or `../`. This
+            was verified directly: a domain file importing `../infrastructure/safe-path.js`
+            passes as "Architecture is compliant". Since almost every intra-package import
+            is relative, the layer rules are effectively unenforced INSIDE a package. So a
+            relative import that crosses a layer boundary IS yours to report — see class 0
+            below. (Linter 0.12.1 closes this with `checkCrossLayerRelativeImport`; when
+            this repository upgrades, delete class 0 and this paragraph.)
+
+            THE TEST FOR EVERY FINDING: could `hexagen arch validate`, as pinned, have
+            caught this? If yes, say nothing.
+
+            === WHAT ONLY YOU CAN SEE ===
+
+            Everything below is invisible to an import-graph check. The two examples marked
+            REAL got past `lint:arch` in this repository.
+
+            0. A RELATIVE IMPORT THAT CROSSES A LAYER. A file under `src/domain/` importing
+               `../infrastructure/…` or `../application/…`, or a file under
+               `src/application/` importing `../infrastructure/…`. The layer rules forbid
+               these and the pinned linter does not see them, so nothing else in the
+               pipeline will. Report the file, the specifier, and the layer it reaches into.
+            1. LEAKY PORTS. A port signature that names something only one adapter could
+               satisfy: a filesystem path, an errno, a Buffer where a stream belongs, an
+               ffmpeg flag, an HTTP status. REAL (#93): BriefStorePort.readBrief accepted an
+               absolute filesystem path and read it. Every import in that file was legal and
+               the layer graph was green; the ABSTRACTION was what was wrong. Ask of every
+               port method: could a second, unrelated adapter implement this signature
+               without lying about what it is?
+            2. ADAPTER FAILURE MODES LEAKING THROUGH THE PORT. An fs ENOENT, a network
+               timeout, a driver-specific error object reaching a use case as-is, so the
+               application layer now knows which adapter it is talking to.
+            3. A LEGAL IMPORT THAT PULLS AN ILLEGAL RUNTIME. REAL (#91): editor-state.ts
+               imported the CampaignOrchestration barrel — explicitly whitelisted, so
+               `lint:arch` passed — and that barrel re-exports infrastructure adapters, which
+               dragged node:fs, node:path and node:crypto into the browser bundle. `yarn
+               build` failed; the linter never could have seen it. Browser-safe leaves exist
+               for exactly this reason (variation-defaults.ts is one, split out because
+               VariationPolicy.vo.ts imports node:crypto). When web code imports from a
+               package barrel, ask what that barrel re-exports.
+            4. LAYER-CORRECT BUT SEMANTICALLY MISPLACED CODE. Business rules inside an
+               adapter; I/O inside a use case; a clock, a random source or an environment
+               read inside the domain. The file is in the right directory and every import
+               is legal — the code still belongs to a different layer.
+            5. PORTS WITH NO ADAPTER, OR ADAPTERS NOBODY CONSTRUCTS. An interface with one
+               implementation and no prospect of a second is indirection, not a port. A port
+               and adapter that no production code wires is dead weight sitting at 100%
+               coverage — the same defect as #93's drawer, one layer down.
+            6. DRIFT BETWEEN THE CHANGE AND .agents/architecture.md. If this PR changes what
+               that document describes, the document is part of the change.
+
+            Every finding MUST carry a concrete failure scenario: what breaks, for whom, with
+            what inputs — a bundle that fails to build, a second adapter that cannot be
+            written, a use case that has to catch an fs error. "Violates hexagonal
+            principles" is not a finding. Name the port, the adapter, or the import.
+
+            Stay in your lane. Do not review React components, copy or accessibility
+            (pr-agent.yml owns those). Do not review Nitro route semantics, status codes or
+            path confinement (pr-agent-api.yml owns those). Do not re-raise what CodeRabbit
+            owns. Do not comment to acknowledge, praise or summarise.
+
+            Silence is the correct output for most pull requests. This codebase's layering is
+            already enforced; you exist for the handful of changes where the import graph is
+            clean and the design is not.
+          pr_code_suggestions.commitable_code_suggestions: "true"
+          pr_code_suggestions.publish_output_no_suggestions: "false"
+          pr_code_suggestions.focus_only_on_problems: "true"
+          # Lower than the other two reviewers, deliberately. The finding classes above are
+          # rare by design; a high cap invites this reviewer to fill it, and what it would
+          # fill it with is the linter's territory.
+          pr_code_suggestions.num_code_suggestions_per_chunk: "3"
+          pr_code_suggestions.max_number_of_calls: "4"
+          pr_code_suggestions.parallel_calls: "true"
+          pr_code_suggestions.suggestions_score_threshold: "0"
+
+      # KNOWN LIMIT, stated rather than hidden: PR-Agent's failure notice is posted by
+      # github-actions[bot] with the same text from all three reviewers, and the issue
+      # comment carries nothing identifying which workflow produced it. On a PR that
+      # triggers two reviewers at once, one failing makes both guards red.
+      #
+      # That weakens D1's isolation, and the trade is deliberate: this guard exists because
+      # PR-Agent exits 0 when it could not produce a review, so a green check would claim
+      # work that never happened. Cross-contamination fails in the SAFE direction — a
+      # spurious red on an advisory check that gates nothing (D8) — and the alternative,
+      # dropping the guard, restores exactly the false-green it was built to catch.
+      #
+      # `since` is the step stamp rather than the job start, which narrows the overlap
+      # window to this reviewer's own LLM call. It does not eliminate it.
+      - name: "Fail if the review did not actually run"
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          STARTED_AT: ${{ steps.started.outputs.at }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp --method GET "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" > "$RUNNER_TEMP/pages.json"
+          FILTER='[.[][] | select(.user.login == "github-actions[bot]") | select(.created_at >= $since) | select(.body | test("Failed to generate"))] | length'
+          jq --arg since "$STARTED_AT" "$FILTER" "$RUNNER_TEMP/pages.json" > "$RUNNER_TEMP/failures"
+          failed=$(cat "$RUNNER_TEMP/failures")
+          case "$failed" in
+            ''|*[!0-9]*)
+              echo "Expected a single integer from the comment scan, got: $failed"
+              exit 1
+              ;;
+          esac
+          if [ "$failed" -gt 0 ]; then
+            echo "PR-Agent reported it could not generate a review."
+            echo "A green check here would claim a review that never happened."
+            exit 1
+          fi
+          echo "No PR-Agent failure notice from this run."

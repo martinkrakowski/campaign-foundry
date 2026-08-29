@@ -8,6 +8,13 @@
 # The workflow's env block sets the same keys. Both are kept because the env block is what
 # applies before this file is on main, and because a key present in only one of them is a
 # silent divergence. Keep them in agreement; when they disagree, the env block wins.
+#
+# SHARED BY THREE WORKFLOWS. PR-Agent reads exactly one config file per repository, so
+# pr-agent.yml (UI contracts), pr-agent-api.yml (Nitro routes) and pr-agent-arch.yml
+# (ports and adapters) all inherit what is below. Splitting the toml per reviewer is not
+# supported. Everything that must DIFFER between them — the extra_instructions, the
+# repo_context_files, the suggestion caps — lives in each workflow's own env block, and
+# nothing reviewer-specific belongs in this file. A value set here reaches all three.
 
 [config]
 restricted_mode = true
