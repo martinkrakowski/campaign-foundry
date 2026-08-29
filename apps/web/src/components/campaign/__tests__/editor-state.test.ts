@@ -1356,7 +1356,7 @@ describe("L4.1 Whole-corpus round-trip tests (D7)", () => {
           background: { source: ["procedural"] },
           paletteShift: [0],
         },
-      } as any,
+      } as unknown as CampaignBrief["variation"],
       output: { formats: ["static"], platforms: ["instagram-feed", "x"] },
     };
     const state = fromBrief(briefWithCustomRatio);
@@ -1382,7 +1382,7 @@ describe("L4.1 Whole-corpus round-trip tests (D7)", () => {
           background: { source: ["procedural"] },
           paletteShift: [0],
         },
-      } as any,
+      } as unknown as CampaignBrief["variation"],
     };
     const state = fromBrief(briefAbsent);
     // absent axes.ratio means all 3 ratios in domain, which differs from static platforms (2 ratios)

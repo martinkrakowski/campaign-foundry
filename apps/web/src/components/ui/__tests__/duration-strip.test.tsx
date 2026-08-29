@@ -182,12 +182,11 @@ describe("DurationStrip component", () => {
     fireEvent.pointerDown(bead, { pointerId: 1, clientX: 60 });
     expect(bead.setPointerCapture).toHaveBeenCalledWith(1);
 
-    const moveEv = new Event("pointermove") as any;
-    moveEv.clientX = 100;
+    const moveEv = Object.assign(new Event("pointermove"), { clientX: 100 });
     bead.dispatchEvent(moveEv);
     expect(onChange).toHaveBeenCalledWith(0, 10);
 
-    const upEv = new Event("pointerup") as any;
+    const upEv = new Event("pointerup");
     bead.dispatchEvent(upEv);
   });
 
@@ -250,8 +249,7 @@ describe("DurationStrip component", () => {
     bead.setPointerCapture = vi.fn();
     fireEvent.pointerDown(bead, { pointerId: 1, clientX: 60 });
     unmount(); // stripRef.current becomes null → the move handler bails
-    const moveEv = new Event("pointermove") as any;
-    moveEv.clientX = 100;
+    const moveEv = Object.assign(new Event("pointermove"), { clientX: 100 });
     bead.dispatchEvent(moveEv);
     expect(onChange).not.toHaveBeenCalled();
   });
