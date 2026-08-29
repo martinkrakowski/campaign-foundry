@@ -1,4 +1,5 @@
 import type { Treatment } from "../value-objects/Treatment.vo.js";
+import type { CopyTimeline } from "../value-objects/CopyTimeline.vo.js";
 import type { Product } from "./Product.js";
 
 /**
@@ -15,6 +16,15 @@ export interface CampaignBrief {
   readonly campaignMessage: string;
   /** Optional localized copy; the use case falls back to campaignMessage when this is absent. */
   readonly localizedMessage?: string;
+  /**
+   * Optional sequenced copy for motion clips (additive).
+   *
+   * When absent the renderer keeps today's single-`campaignMessage` path byte-for-byte
+   * (D10). `campaignMessage` stays required and unchanged — it is the still-format copy
+   * and the fallback for any renderer without a timeline. A brief with no `copy` block
+   * parses and serialises exactly as it always has.
+   */
+  readonly copy?: { readonly timeline?: CopyTimeline };
   readonly products: readonly Product[];
   /**
    * Optional creative treatments to produce per product × aspect ratio. When
