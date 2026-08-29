@@ -85,6 +85,58 @@ describe("GridPage", () => {
     expect(screen.queryByText(/headline-bottom ·/)).toBeNull();
   });
 
+  test("shows beat and pooled headline descriptor chips when present", async () => {
+    seedPersistedRun([
+      makeMotionAsset({
+        variantIndex: 0,
+        descriptor: {
+          layout: "headline-top",
+          tone: "bold",
+          backgroundSource: "procedural",
+          paletteShift: 0,
+          motion: "ken-burns-in",
+          durationSec: 6,
+          beats: 3,
+          headline: "Stay wild",
+        },
+      }),
+      makeAsset({
+        variantIndex: 1,
+        descriptor: {
+          layout: "headline-bottom",
+          tone: "subtle",
+          backgroundSource: "procedural",
+          paletteShift: 0,
+          beats: 1,
+        },
+      }),
+    ]);
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText("3 beats")).toBeTruthy();
+    expect(screen.getByText("1 beat")).toBeTruthy();
+    expect(screen.getByText('"Stay wild"')).toBeTruthy();
+  });
+
+  test("omits beat and headline chips when fields are absent", async () => {
+    seedPersistedRun([
+      makeMotionAsset({
+        variantIndex: 0,
+        descriptor: {
+          layout: "headline-top",
+          tone: "bold",
+          backgroundSource: "procedural",
+          paletteShift: 0,
+          motion: "ken-burns-in",
+          durationSec: 6,
+        },
+      }),
+    ]);
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText("ken-burns-in · 6s")).toBeTruthy();
+    expect(screen.queryByText(/beat/)).toBeNull();
+    expect(screen.queryByText(/".*"/)).toBeNull();
+  });
+
   test("a variation re-roll updates the tile in place and clears its decision", async () => {
     const user = userEvent.setup();
     const original = makeAsset({

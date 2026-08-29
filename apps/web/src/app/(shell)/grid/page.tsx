@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { API, assetKey, assetLabel, useRun, type Asset } from "@/lib/run-context";
 import { ASPECT_RATIOS } from "@/lib/aspect-ratios";
 import { cn } from "@/lib/cn";
+import { descriptorBeats, descriptorHeadline } from "@/components/campaign/messages";
 
 /** Rank an aspect ratio by the shared display order. */
 const ratioRank = (r: string): number => {
@@ -486,6 +487,12 @@ function Artboard({
             )}
             {asset.descriptor.motion !== undefined && (
               <DescriptorChip>{`${asset.descriptor.motion} · ${asset.descriptor.durationSec ?? asset.durationSec ?? "?"}s`}</DescriptorChip>
+            )}
+            {typeof asset.descriptor.beats === "number" && (
+              <DescriptorChip>{descriptorBeats(asset.descriptor.beats)}</DescriptorChip>
+            )}
+            {typeof asset.descriptor.headline === "string" && (
+              <DescriptorChip>{descriptorHeadline(asset.descriptor.headline)}</DescriptorChip>
             )}
           </>
         )}

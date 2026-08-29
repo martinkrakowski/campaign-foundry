@@ -435,3 +435,15 @@ export const timelineInsertLegend = "Approved copy";
 export function timelineInsertBeat(text: string): string {
   return `Add "${text}" as a beat`;
 }
+
+// --- Descriptors ---
+
+/** `descriptor.beats` */
+export function descriptorBeats(count: number): string {
+  return `${count} ${count === 1 ? "beat" : "beats"}`;
+}
+
+/** `descriptor.headline` */
+export function descriptorHeadline(text: string): string {
+  return `"${text}"`;
+}

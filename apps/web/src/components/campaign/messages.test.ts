@@ -48,6 +48,9 @@ describe("messages jargon test", () => {
     strings.push(messages.durationRange(2, 30));
     strings.push(messages.headlineCounter(10, 60));
     strings.push(messages.productsHeading(2));
+    strings.push(messages.descriptorBeats(1));
+    strings.push(messages.descriptorBeats(3));
+    strings.push(messages.descriptorHeadline("Stay wild"));
 
     for (const str of strings) {
       for (const term of forbidden) {
@@ -60,6 +63,18 @@ describe("messages jargon test", () => {
     expect(formatDisplayName("Still images")).toBe("Still images");
     expect(formatDisplayName("Video")).toBe("Video");
     expect(formatDisplayName("invalid")).toBe("invalid");
+  });
+});
+
+describe("descriptor messages", () => {
+  test("formats beat counts with singular and plural nouns", () => {
+    expect(messages.descriptorBeats(1)).toBe("1 beat");
+    expect(messages.descriptorBeats(0)).toBe("0 beats");
+    expect(messages.descriptorBeats(3)).toBe("3 beats");
+  });
+
+  test("quotes pooled headline text", () => {
+    expect(messages.descriptorHeadline("Stay wild")).toBe('"Stay wild"');
   });
 });
 
