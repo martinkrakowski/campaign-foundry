@@ -328,3 +328,15 @@ export function countReadout(count: number, ceiling: number): string {
 export function countLowered(ceiling: number): string {
   return `Lowered to ${ceiling} — that is every different ad these choices can make.`;
 }
+
+/** The four legends of the Output section, in the order a user meets them. */
+export const outputPlatformsLegend = "Where will the ads run?";
+export const outputFormatsLegend = "Formats";
+export const outputMotionLegend = "Video styles";
+export const outputDurationLegend = "Clip lengths";
+
+/** What each format card says under its picture. */
+export const formatStillMeta = "still · one frame";
+export function formatMotionMeta(fps: number, min: number, max: number): string {
+  return `clip · ${fps} fps · ${min}–${max} s`;
+}

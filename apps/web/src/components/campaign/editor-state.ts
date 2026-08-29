@@ -205,7 +205,8 @@ export type EditorAction =
   | { type: "toggleHeadline" }
   | { type: "toggleMotion"; value: string }
   | { type: "setDuration"; index: number; value: number }
-  | { type: "addDuration" }
+  | { type: "addDuration"; value?: number }
+  | { type: "addPhotoOutput" }
   | { type: "removeDuration"; index: number }
   | { type: "toggleFormat"; value: string }
   | { type: "togglePlatform"; value: string }
@@ -426,12 +427,18 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       if (tone.length === 0) return state;
       return { ...state, variation: { ...state.variation, tone } };
     }
-    case "toggleRatio":
+    case "toggleRatio": {
+      const nextRatioSelection = toggleOrdered(state.variation.ratio, action.value, RATIO_OPTIONS);
       return {
         ...state,
-        variation: { ...state.variation, ratio: toggleOrdered(state.variation.ratio, action.value, RATIO_OPTIONS) },
-        ratioOverridden: true,
+        variation: { ...state.variation, ratio: nextRatioSelection },
+        // Recomputed, not latched. Toggling a ratio off and back on returns the selection
+        // to what the platforms derive, and a flag stuck at true would freeze it there —
+        // the next platform change would leave the ratios behind, still showing the old
+        // platform's shapes.
+        ratioOverridden: differsFrom(nextRatioSelection, platformsToRatios(state.platforms)),
       };
+    }
     case "toggleBackground": {
       // Same guard as layout and tone. The domain multiplies these axes by their raw
       // length, so an empty one makes a policy that can produce nothing at all.
@@ -457,11 +464,32 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       next[action.index] = action.value;
       return { ...state, duration: next, motionTouched: true };
     }
+    case "addPhotoOutput": {
+      // The remedy offered beside the exclusion warning has to actually remove it, and
+      // the warning is raised by `formats` holding motion without static — not by the
+      // platform list alone. Toggling a platform did neither reliably: it left the
+      // warning standing, and on a brief that already had the photo platform selected it
+      // took it away, which is the opposite of what the button says.
+      //
+      // Idempotent by construction: pressing it twice is pressing it once.
+      const formats = state.formats.includes("static") ? state.formats : [...state.formats, "static"];
+      const platforms = state.platforms.some((id) => platformsToFormats([id]).includes("static"))
+        ? state.platforms
+        : [...state.platforms, PHOTO_PLATFORM];
+      return withCountClamp({ ...state, formats, platforms, formatsOverridden: true, outputExplicit: true });
+    }
     case "addDuration": {
+      // A click lands on a particular second of the reel, and that is the length the user
+      // asked for — discarding it and appending "the next free one" quietly adds a
+      // different number from the one they pointed at.
+      //
       // The planner de-duplicates this axis (`unique(axes.duration)` in
-      // VariationPolicy.vo), so appending a fixed value lets the user add entries that
-      // silently do nothing. Offer the next unused length instead.
-      const next = nextFreeDuration(state.duration);
+      // VariationPolicy.vo), so a value already present would be an entry that silently
+      // does nothing; in that case, and when the caller names no second at all, fall back
+      // to the next unused length.
+      const asked = action.value;
+      const next =
+        asked !== undefined && !state.duration.includes(asked) ? asked : nextFreeDuration(state.duration);
       return next === undefined ? state : { ...state, duration: [...state.duration, next], motionTouched: true };
     }
     case "removeDuration":
@@ -505,7 +533,10 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         motion,
         duration,
         motionSeeded,
-        formatsOverridden: true,
+        // Recomputed for the same reason as the ratio axis: turning Video on and off again
+        // leaves the formats equal to what the platforms derive, and latching the flag
+        // would stop a later platform change updating them.
+        formatsOverridden: differsFrom(nextFormats, platformsToFormats(state.platforms)),
       };
     }
     case "togglePlatform": {
@@ -973,6 +1004,9 @@ export const DEFAULT_DURATION_SEC = 5;
  * The next whole second in range that this list does not already hold, or undefined
  * when every one is taken. Duplicates are meaningless — the planner collapses them.
  */
+/** The platform the exclusion remedy adds when the brief has no still-image outlet. */
+export const PHOTO_PLATFORM = "instagram-feed";
+
 export function nextFreeDuration(duration: readonly number[]): number | undefined {
   const taken = new Set(duration);
   if (!taken.has(DEFAULT_DURATION_SEC)) return DEFAULT_DURATION_SEC;

@@ -84,7 +84,7 @@ export function OutputSection({
 
         {/* Where will the ads run? */}
         <fieldset className="space-y-2">
-          <legend className="text-[11px] text-text-muted">Where will the ads run?</legend>
+          <legend className="text-[11px] text-text-muted">{messages.outputPlatformsLegend}</legend>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
             {allVisiblePlatforms.map((id) => {
               const profile = PLATFORM_PROFILES[id];
@@ -111,7 +111,7 @@ export function OutputSection({
               </span>
               <button
                 type="button"
-                onClick={() => dispatch({ type: "togglePlatform", value: "instagram-feed" })}
+                onClick={() => dispatch({ type: "addPhotoOutput" })}
                 className="underline hover:text-text-primary"
               >
                 {messages.addPhotoPlatform}
@@ -124,7 +124,7 @@ export function OutputSection({
 
         {/* Formats */}
         <fieldset className="space-y-2">
-          <legend className="text-[11px] text-text-muted">Formats</legend>
+          <legend className="text-[11px] text-text-muted">{messages.outputFormatsLegend}</legend>
           <div className="grid grid-cols-2 gap-2">
             <FormatPanel
               format="static"
@@ -146,7 +146,7 @@ export function OutputSection({
         {motionRequested ? (
           <div id="motion" className="space-y-6 rounded-md border-l-2 border-brand-rail pl-4 scroll-mt-24">
             <fieldset className="space-y-2">
-              <legend className="text-[11px] text-text-muted">Video styles</legend>
+              <legend className="text-[11px] text-text-muted">{messages.outputMotionLegend}</legend>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {MOTION_KINDS.map((kind) => (
                   <MotionKindPanel
@@ -161,11 +161,11 @@ export function OutputSection({
             </fieldset>
 
             <fieldset className="space-y-2">
-              <legend className="text-[11px] text-text-muted">Clip lengths</legend>
+              <legend className="text-[11px] text-text-muted">{messages.outputDurationLegend}</legend>
               <DurationStrip
                 values={state.duration}
                 onChange={(index, value) => dispatch({ type: "setDuration", index, value })}
-                onAdd={(_value) => dispatch({ type: "addDuration" })}
+                onAdd={(value) => dispatch({ type: "addDuration", value })}
                 onRemove={(index) => dispatch({ type: "removeDuration", index })}
                 error={errors.duration}
               />

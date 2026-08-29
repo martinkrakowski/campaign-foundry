@@ -272,7 +272,7 @@ describe("OutputSection", () => {
       left: 0, top: 0, right: 300, bottom: 50, width: 300, height: 50, x: 0, y: 0, toJSON: () => {},
     });
     fireEvent.click(strip, { clientX: 150 });
-    expect(dispatch).toHaveBeenCalledWith({ type: "addDuration" });
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "addDuration" }));
   });
 
   test("a capability-off host gates the format card but keeps motion kinds operable (D12)", async () => {
@@ -365,7 +365,7 @@ describe("OutputSection", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "togglePlatform", value: "instagram-feed" });
   });
 
-  test("the exclusion remedy button dispatches the photo-platform toggle (L4.7)", async () => {
+  test("the exclusion remedy asks for a photo output, not a platform toggle (L4.7)", async () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
     render(
@@ -378,7 +378,7 @@ describe("OutputSection", () => {
     // reel (9:16) and x (16:9) package motion, so the holding shape is named
     expect(screen.getByText((text) => text.includes("Not used for video"))).toBeTruthy();
     await user.click(screen.getByRole("button", { name: messages.addPhotoPlatform }));
-    expect(dispatch).toHaveBeenCalledWith({ type: "togglePlatform", value: "instagram-feed" });
+    expect(dispatch).toHaveBeenCalledWith({ type: "addPhotoOutput" });
   });
 
   test("the exclusion line names no shapes when no offered platform packages motion", () => {

@@ -66,8 +66,8 @@ export function FormatPanel({
 }: FormatPanelProps): ReactNode {
   const isMotion = format === "motion";
   const meta = isMotion
-    ? `clip · ${MOTION_FPS} fps · ${MIN_DURATION_SEC}–${MAX_DURATION_SEC} s`
-    : "still · one frame";
+    ? messages.formatMotionMeta(MOTION_FPS, MIN_DURATION_SEC, MAX_DURATION_SEC)
+    : messages.formatStillMeta;
 
   return (
     <AxisCard

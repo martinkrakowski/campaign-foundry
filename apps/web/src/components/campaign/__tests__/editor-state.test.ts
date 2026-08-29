@@ -1489,3 +1489,43 @@ describe("a draft written before the override flags existed", () => {
     expect(legacy({ formats: ["static", "motion"], formatsOverridden: false }).formatsOverridden).toBe(false);
   });
 });
+
+describe("the output remedies do what their labels say", () => {
+  const motionOnly = () =>
+    editorReducer(
+      { ...initialEditorState(), mode: "variation", briefId: "camp", platforms: ["instagram-reel"], formats: ["motion"] },
+      { type: "patch", patch: {} },
+    );
+
+  test("Add a photo platform clears the exclusion instead of toggling a platform off", () => {
+    const fixed = editorReducer(motionOnly(), { type: "addPhotoOutput" });
+    // the warning is raised by formats holding motion without static, so the remedy has
+    // to add the format, not merely a platform
+    expect(fixed.formats).toContain("static");
+    expect(fixed.platforms.length).toBeGreaterThan(0);
+
+    // …and pressing it twice is pressing it once, rather than undoing itself
+    const again = editorReducer(fixed, { type: "addPhotoOutput" });
+    expect(again.formats).toEqual(fixed.formats);
+    expect(again.platforms).toEqual(fixed.platforms);
+  });
+
+  test("adding a clip length uses the second the user clicked", () => {
+    const base = { ...initialEditorState(), mode: "variation" as const, duration: [6] };
+    expect(editorReducer(base, { type: "addDuration", value: 12 }).duration).toEqual([6, 12]);
+    // a second already on the reel would be a no-op for the planner, so fall back
+    expect(editorReducer(base, { type: "addDuration", value: 6 }).duration).not.toEqual([6, 6]);
+    // and with no second named at all, the old behaviour stands
+    expect(editorReducer(base, { type: "addDuration" }).duration.length).toBe(2);
+  });
+
+  test("an override flag lifts when the selection returns to what the platforms derive", () => {
+    const start = { ...initialEditorState(), mode: "variation" as const, platforms: ["instagram-feed"] };
+    const on = editorReducer(start, { type: "toggleFormat", value: "motion" });
+    expect(on.formatsOverridden).toBe(true);
+    // back to the derived set: a latched flag would freeze formats against the next
+    // platform change, leaving the previous platform's formats on screen
+    const off = editorReducer(on, { type: "toggleFormat", value: "motion" });
+    expect(off.formatsOverridden).toBe(false);
+  });
+});
