@@ -29,7 +29,17 @@ export const DEFAULT_PALETTE_SHIFT: readonly number[] = [0];
  * a static brief (no motion format) draws no motion kinds at all.
  */
 export const DEFAULT_MOTION: readonly MotionKind[] = MOTION_KINDS;
+/**
+ * The default clip length in whole seconds, when no duration is elsewhere supplied.
+ *
+ * This is the one constant the whole stack reads for "how long is a clip by default",
+ * exported from this browser-safe leaf so the orchestrator, the editor and the API
+ * cannot drift from each other (L1): the use case and the editor previously each kept
+ * a private copy that disagreed (6 vs 5). The duration *axis* default below is derived
+ * from it, so a brief with no `axes.duration` runs exactly this long.
+ */
+export const DEFAULT_DURATION_SEC = 6;
 /** Clip length in whole seconds; the parser bounds it to [2, 30]. */
-export const DEFAULT_DURATION: readonly number[] = [6];
+export const DEFAULT_DURATION: readonly number[] = [DEFAULT_DURATION_SEC];
 export const MIN_DURATION_SEC = 2;
 export const MAX_DURATION_SEC = 30;
