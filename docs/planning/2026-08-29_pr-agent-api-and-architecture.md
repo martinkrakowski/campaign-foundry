@@ -360,9 +360,17 @@ P2.4 proved the reviewer stopped duplicating the linter. It could not prove it s
 because silence is also what a broken reviewer produces. So a PR was opened carrying two
 genuine defects, one from each flagship class, both modelled on real incidents here.
 
-**The precondition that made it a fair test:** `yarn lint:arch` was **green** with both
-defects present, so the sweep marked both files CLEAR and left them open. Nothing in the
-instructions gave the reviewer cover for silence.
+**The precondition that made it a fair test:** both files stay open under the sweep, so
+nothing in the instructions gave the reviewer cover for silence. Precisely — and this matters,
+because the sweep does not work the way a first reading suggests — both defects sit under
+`apps/`, whose paths carry no `domain`/`application`/`infrastructure` segment, so the sweep
+records them **OUTSIDE**: the layer rules cannot reach them at all. Not CLEAR, which would
+mean a layered file whose imports are permitted.
+
+The gate's colour played no part in that. The sweep is told explicitly that it is not an
+input, and it never consults one. `lint:arch` being green on this PR is a fact about the
+defects — they are genuinely invisible to the linter, which is the whole point of the two
+classes being tested — and not a step in the procedure.
 
 | defect | shape | reviewer's verdict |
 |---|---|---|
