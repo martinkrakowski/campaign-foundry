@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { AxisCard, CreativeGlyph } from "@/components/ui";
+import { formatDisplayName } from "@/components/campaign/display-names";
 import { MOTION_FPS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import { MIN_DURATION_SEC, MAX_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import * as messages from "@/components/campaign/messages";
@@ -71,11 +72,24 @@ export function FormatPanel({
   return (
     <AxisCard
       value={format}
+      label={formatDisplayName(format)}
       selected={selected}
       onToggle={onToggle}
       disabled={gate?.disabled ?? false}
       meta={meta}
-      {...(gate?.description ? { description: gate.description } : {})}
+      {...(gate?.description
+        ? {
+            description: gate.description,
+            // The gate's reason is a warning, not a caption — the icon is what makes that
+            // read at a glance, and this is the one place a description is set.
+            descriptionIcon: (
+              <svg viewBox="0 0 12 12" className="size-3 text-warning" aria-hidden="true" focusable="false">
+                <path d="M6 1.5 11 10.5H1z" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+                <path d="M6 5v2.2M6 8.8v.2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+              </svg>
+            ),
+          }
+        : {})}
     >
       <CreativeGlyph motion={isMotion ? "ken-burns-in" : undefined} />
     </AxisCard>

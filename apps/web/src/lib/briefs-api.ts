@@ -24,6 +24,8 @@ export interface AssetUploadResult {
 export interface HostCapabilities {
   motion: boolean;
   reason?: string;
+  /** The probe's ffmpeg version, when it could read one. Additive: absent on older hosts. */
+  version?: string;
 }
 
 /** Delay between retries while the probe's answer is still "not probed". */
@@ -66,7 +68,15 @@ export async function getCapabilities(): Promise<HostCapabilities | null> {
   const motion = (data as { motion?: unknown }).motion;
   if (typeof motion !== "boolean") return null;
   const reason = (data as { reason?: unknown }).reason;
-  return typeof reason === "string" ? { motion, reason } : { motion };
+  const version = (data as { version?: unknown }).version;
+  // Rebuilding the object rather than passing `data` through is deliberate — it is
+  // untrusted JSON — but every field the UI shows has to be carried across, or the
+  // component that renders it is dead code that still reaches 100% coverage.
+  return {
+    motion,
+    ...(typeof reason === "string" ? { reason } : {}),
+    ...(typeof version === "string" ? { version } : {}),
+  };
 }
 
 export interface PlanEstimate {

@@ -85,3 +85,14 @@ describe("FormatPanel", () => {
     expect(screen.getByText("Gated reason")).toBeTruthy();
   });
 });
+
+describe("FormatPanel says what it is, and shows what it means", () => {
+  test("the screen reads the display name while the accessible name stays the raw value", () => {
+    render(<FormatPanel format="motion" selected={false} onToggle={vi.fn()} />);
+    // D18: "motion" is what the brief stores and what assistive tech and the YAML agree on;
+    // "Video" is what a person reads. Both, not one standing in for the other.
+    const card = screen.getByRole("button", { name: "motion" });
+    expect(card.textContent).toContain("Video");
+    expect(card.textContent).not.toContain("motion");
+  });
+});
