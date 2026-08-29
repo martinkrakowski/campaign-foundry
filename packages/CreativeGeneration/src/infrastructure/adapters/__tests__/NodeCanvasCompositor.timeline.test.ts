@@ -379,10 +379,11 @@ describe("a key beat outside the timeline fails by name", () => {
     // The parser rejects an out-of-range keyBeat, so this cannot arrive through the
     // pipeline — but a direct adapter call can carry one, and indexing past the end used
     // to throw from deep inside the canvas work, several frames from the actual cause.
-    const bad = request({
+    const bad: TimelineRequest = {
+      ...request(),
       timeline: copyTimeline([{ text: "one" }, { text: "two" }], { keyBeat: 5 }),
       durationSec: 6,
-    });
+    };
     await expect(NodeCanvasCompositor.prepare(bad)).rejects.toThrow(/keyBeat is 5, outside \[1, 2\]/);
   });
 });
