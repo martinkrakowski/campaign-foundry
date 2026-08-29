@@ -339,7 +339,26 @@ the example in the prompt.
   instructions — but a live question of its own: should the UI reviewer be commenting on a
   domain value object at all?
 
-**Status: P2.4 satisfied.** The reviewer ships, and §6's remedy is not invoked.
+**Run 4 (2026-08-29) — confirms it.** After the sweep gained its test-file exemption, the
+check was re-run on a third distinct site: `packages/GovernanceAndCompliance/src/domain/index.ts`
+importing Distribution's `FileSystemExporter`. The architecture reviewer's only AI response
+was again `code_suggestions: []`.
+
+Attribution matters here and was checked rather than assumed: the phrase "port abstraction
+defined in the application layer" appears in *both* reviewers' run logs, because the
+architecture reviewer receives the diff and the concurrently-posted comment as context. Only
+the UI reviewer produced suggestions; the architecture reviewer's sole AI response was the
+empty list.
+
+**Status: P2.4 satisfied.** Two distinct violation sites, both silent, after an instruction
+that was drafted adversarially rather than by hand. The reviewer ships, and §6's remedy is
+not invoked.
+
+**One open question this raised.** The UI reviewer spoke on both experiment PRs, about layer
+violations in `packages/**` — a domain value object and a governance barrel. It has no
+`paths` filter, so it reviews every file in the repository including packages far outside its
+DESIGN.md mandate, and it is now the reviewer duplicating the linter. Worth deciding
+separately: give it a `paths` filter, or extend the sweep to its instructions too.
 
 **A first attempt reached the opposite conclusion and was wrong.** It opened the experiment
 PR with `--draft`, and `pr-agent-arch.yml` guards its job with
