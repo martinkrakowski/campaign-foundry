@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, vi, afterEach } from "vitest";
 import type { CampaignBrief, CopyPool } from "@campaignfoundry/CampaignOrchestration";
 import { axisProductSize } from "../validate";
+import { platformsToFormats } from "../derive";
 import {
   BACKGROUND_OPTIONS,
   LAYOUT_OPTIONS,
@@ -1543,5 +1544,25 @@ describe("override detection is about bytes, not sets", () => {
       formats: ["motion", "static"],
     } as Record<string, unknown>);
     expect(reversed.formatsOverridden).toBe(true);
+  });
+})
+
+describe("the load path and the draft path agree about what counts as overridden", () => {
+  test("a brief loaded from disk with reordered formats is overridden, exactly as a draft is", () => {
+    // `fromBrief` used its own inline set comparison while `normalizeDraftState` used
+    // `differsFrom`, so the same brief got a different verdict depending on where it came
+    // from — and the load path, the one that reads other people's briefs, was the lenient
+    // of the two. A later platform toggle would then rewrite an order nobody edited.
+    const loaded = fromBrief(
+      savedBrief({ output: { formats: ["motion", "static"], platforms: ["instagram-feed", "instagram-reel"] } }),
+    );
+    expect(loaded.formatsOverridden).toBe(true);
+  });
+
+  test("a brief whose formats match the derived order is still not overridden", () => {
+    const loaded = fromBrief(
+      savedBrief({ output: { formats: platformsToFormats(["instagram-feed"]), platforms: ["instagram-feed"] } }),
+    );
+    expect(loaded.formatsOverridden).toBe(false);
   });
 })

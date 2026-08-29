@@ -749,15 +749,16 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
   const num = (value: unknown): string => (typeof value === "number" ? String(value) : "");
   const coverage = variation?.coverage as { perProduct?: number; perRatio?: number } | undefined;
   const derivedFormats = platformsToFormats(platforms);
+  // One comparison for both paths. This used to be an inline set test while the draft
+  // path used `differsFrom`, so the same brief got a different verdict depending on
+  // whether it arrived from disk or from a restored draft — and the load path, the one
+  // that reads other people's briefs, was the lenient of the two.
   const storedFormats = brief.output?.formats;
-  const formatsOverridden =
-    storedFormats !== undefined &&
-    (storedFormats.length !== derivedFormats.length || !storedFormats.every((f) => derivedFormats.includes(f)));
+  const formatsOverridden = storedFormats !== undefined && differsFrom(storedFormats, derivedFormats);
 
   const derivedRatios = platformsToRatios(platforms);
   const storedRatios = axes?.ratio !== undefined ? list(axes.ratio, [...RATIO_OPTIONS]) : [...RATIO_OPTIONS];
-  const ratioOverridden =
-    storedRatios.length !== derivedRatios.length || !storedRatios.every((r) => derivedRatios.includes(r));
+  const ratioOverridden = differsFrom(storedRatios, derivedRatios);
 
   const motionList = list(axes?.motion, []);
   const durationList = list(axes?.duration, []);
