@@ -296,6 +296,51 @@ three run `openrouter/inception/mercury-2`; the arch reviewer is the one asked t
 prohibition rather than to find things, which is a different skill. Its `config.model` can be
 set per workflow without touching the other two.
 
+#### P2.4 run 3 (2026-08-29) — PASSES, with the instruction rewritten as a procedure
+
+**The reviewer stayed silent.** Its AI response was `code_suggestions: []`.
+
+**What changed.** Runs 1 and 2 were prohibitions and broke identically: the reviewer framed a
+candidate finding, then judged whether the rule covered *that framing* — and always found one
+it did not obviously cover, usually "the real problem is the missing port abstraction". The
+instruction is now a **procedure over an object the model does not choose**: before any
+finding exists, sweep the import specifiers the diff adds, resolve each against
+`layer-rules.yaml`, mark OWNED or CLEAR. One OWNED import **closes the file**, and the only
+publishable finding about a closed file is one that would still be true if the offending
+import lines were deleted outright.
+
+That deletion test is what closes the reframing route: the missing port, the re-export and
+the dragged runtime all disappear when the line is deleted, which is the proof none of them
+belonged to the reviewer. Three further leaks were closed explicitly — the sweep is working
+state and must never be printed; a shape rule forbids any suggestion whose fix adds, moves or
+reroutes an import in a closed file, whatever class it is filed under; and prose in
+`.agents/architecture.md` that merely restates the layer graph is named as the linter's
+finding in words.
+
+The wording was drafted and attacked rather than written by hand: four independent strategies,
+each stress-tested twice by a model role-playing the reviewer hunting for a loophole. Every
+earlier shape, including both hand-written ones, fell to the same reframing route.
+
+**Tested on unseen ground.** Runs 1 and 2 used
+`packages/CreativeGeneration/src/domain/index.ts` importing `../infrastructure/safe-path.js`.
+Run 3 used `packages/Distribution/src/domain/value-objects/PlatformProfile.vo.ts` importing
+`../../infrastructure/adapters/FileSystemExporter.js`, so a pass could not be memorisation of
+the example in the prompt.
+
+**Honest limits.**
+
+- One run. Silence is also what a reviewer that simply found nothing produces, and on the
+  OWNED branch a correct execution and a skipped one are indistinguishable — PR-Agent has no
+  channel for the sweep. The next green PR carrying a genuine class-1 or class-3 defect is
+  the test that the procedure did not simply buy silence everywhere.
+- **The UI reviewer spoke on the same PR**, about the Node adapter reaching a domain module.
+  That reviewer has no `paths` filter, so it reviews every file in the repository including
+  packages it has no mandate over. Not a P2.4 failure — different reviewer, different
+  instructions — but a live question of its own: should the UI reviewer be commenting on a
+  domain value object at all?
+
+**Status: P2.4 satisfied.** The reviewer ships, and §6's remedy is not invoked.
+
 **A first attempt reached the opposite conclusion and was wrong.** It opened the experiment
 PR with `--draft`, and `pr-agent-arch.yml` guards its job with
 `github.event.pull_request.draft == false`, so the run completed in 1 s with conclusion
