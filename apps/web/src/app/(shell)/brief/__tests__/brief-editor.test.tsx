@@ -87,6 +87,23 @@ const routes = (handlers: {
   return calls;
 };
 
+/**
+ * The calls that actually WROTE something.
+ *
+ * `EstimatePanel` fires `planCampaign` — a POST to /campaigns/plan — on a
+ * PLAN_DEBOUNCE_MS (250 ms) timer whenever the draft changes. It is a dry run: it
+ * persists nothing. A refusal test that asserts "no non-GET call happened" therefore
+ * races that timer, and a test doing a dozen awaited clicks loses the race on a loaded
+ * runner while passing locally. That is a real flake, seen once on #99's CI and green on
+ * rerun.
+ *
+ * So these tests assert what they mean — nothing was written — rather than the stricter
+ * statement that no request of any kind was issued. Any other non-GET, including a stray
+ * /campaigns/generate, still fails.
+ */
+const writes = (calls: readonly { url: string; method: string }[]) =>
+  calls.filter((c) => c.method !== "GET" && !c.url.includes("/campaigns/plan"));
+
 /** The editor adopts the shell's active brief only after the listing arrives. */
 const waitForEditorReady = async () =>
   waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).not.toBe(""));
@@ -638,7 +655,7 @@ describe("BriefPage — data flow", () => {
     );
 
     // all three refused: no write left the page, and the refusal is on screen
-    expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
+    expect(writes(calls)).toEqual([]);
     expect(screen.getByText(messages.targetRegion)).toBeTruthy();
   });
 
@@ -1051,12 +1068,13 @@ describe("BriefPage — capabilities and motion", () => {
 
     expect(screen.getByText(messages.motion)).toBeTruthy();
     expect(screen.getByText(messages.duration)).toBeTruthy();
-    await waitFor(() =>
-      expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false),
-    );
-    // D3: Save is live, and pressing it refuses rather than writing.
-    await userEvent.setup().click(screen.getByRole("button", { name: /^Save$/ }));
-    expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
+    // D3: the verb is never disabled — it stays live and refuses when pressed.
+    expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false);
+    // The control named "Save" opens the menu; the verb a user actually presses is inside
+    // it. Clicking only the menu button proved nothing here — this assertion passed with
+    // the refusal removed entirely, because opening a menu never writes.
+    await saveVia(user, "Save & apply");
+    expect(writes(calls)).toEqual([]);
   });
 
   test("a motion brief on a host without motion stays read-only, saves verbatim, and applies with the refusal (D12)", async () => {
