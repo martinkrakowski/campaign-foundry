@@ -541,7 +541,19 @@ function resolveBeatLayouts(
   const texts = [...new Set(resolved.map((beat) => beat.text))];
   const naturalSizes = texts.map((text) => fitText(ctx, prepared, text).fontSize);
   const commonSize = Math.min(...naturalSizes);
-  const anchorText = timeline.beats[timeline.keyBeat - 1].text;
+  // `keyBeat` is a 1-based index the domain bounds and the parser rejects out of range, so
+  // a malformed one cannot reach here through the pipeline. A direct adapter call can still
+  // carry one, and indexing past the end would throw a bare TypeError from deep inside the
+  // canvas work — a failure wearing the wrong name, several frames from its cause. Say what
+  // is actually wrong instead, as `beatAt` does for an empty timeline.
+  const anchorBeat = timeline.beats[timeline.keyBeat - 1];
+  if (anchorBeat === undefined) {
+    throw new Error(
+      `copy.timeline.keyBeat is ${timeline.keyBeat}, outside [1, ${timeline.beats.length}]; ` +
+        "validate with timelineProblem before compositing.",
+    );
+  }
+  const anchorText = anchorBeat.text;
   const beatLayouts = new Map<string, HeadlineLayout>();
   let anchorLayout!: HeadlineLayout;
   for (const text of texts) {
