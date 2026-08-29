@@ -30,8 +30,8 @@ import type { BackgroundContext, ImageGeneratorPort } from "../ports/out/ImageGe
 import type { PlatformSafeZoneResolver } from "../ports/out/PlatformProfilePort.js";
 import type { VideoCompositorPort } from "../ports/out/VideoCompositorPort.js";
 import { MOTION_FPS } from "../../domain/value-objects/MotionKind.vo.js";
-import type { CopyTimeline } from "../../domain/value-objects/CopyTimeline.vo.js";
-import { DEFAULT_DURATION_SEC } from "../../domain/value-objects/variation-defaults.js";
+import { timelineProblem, type CopyTimeline } from "../../domain/value-objects/CopyTimeline.vo.js";
+import { DEFAULT_DURATION, DEFAULT_DURATION_SEC } from "../../domain/value-objects/variation-defaults.js";
 
 /** Classic briefs keep the two-product floor; variation relaxes to 1 (D10). */
 const MINIMUM_PRODUCTS_CLASSIC = 2;
@@ -641,6 +641,27 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
           `A campaign brief requires at least ${minProducts} unique products (received ${unique.size}).`,
         ),
       );
+    }
+    // A timeline is only ever rendered by a motion variant, and `runLegalGate` sweeps its
+    // beat text immediately after this. Both need it refused here rather than later:
+    // a classic brief would otherwise halt on copy no output could show, and an unrunnable
+    // timeline would throw inside the compositor after the backgrounds had been generated.
+    //
+    // Every entry point already validates — all three call `parseBrief`/`loadBrief` with
+    // `enforceCapabilities: true` — but a use case that depends on its callers having done
+    // so is a port that does not hold its own contract.
+    const timeline = brief.copy?.timeline;
+    if (timeline !== undefined) {
+      if (brief.mode !== "variation") {
+        return err(
+          new Error('A campaign brief with "copy.timeline" must be in variation mode — a classic run renders no motion.'),
+        );
+      }
+      // The duration axis decides every beat's dwell; absent means the single default,
+      // exactly as the planner reads it.
+      const durations = brief.variation?.axes?.duration ?? DEFAULT_DURATION;
+      const problem = timelineProblem(timeline, durations);
+      if (problem !== undefined) return err(new Error(problem));
     }
     if (brief.treatments) {
       const ids = brief.treatments.map((t) => t.id);

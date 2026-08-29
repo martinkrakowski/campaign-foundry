@@ -932,6 +932,58 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     const halt = result.value.log.entries.filter((e) => e.stage === "ExecuteLegalGateCheck").at(-1);
     expect(halt?.message).toMatch(/Prohibited terminology: miracle/);
   });
+
+  test("a timeline on a classic brief is refused before the legal gate sweeps its beats", async () => {
+    // Without this, a classic brief carrying a prohibited term only in copy.timeline
+    // returns halted:true on copy no output could ever render.
+    const compliance = {
+      validateLegalCopy: vi.fn(async (text: string) =>
+        text.includes("miracle") ? { passed: false, reason: "Prohibited terminology: miracle" } : { passed: true },
+      ),
+      validateBrandColorDensity: vi.fn(async () => ({ passed: true, score: 0.5 })),
+    };
+    const d = deps({ compliance });
+    const result = await new GenerateCampaignUseCase(d).execute(
+      baseBrief({ copy: { timeline: threeBeatTimeline([{ text: "A miracle cure", weight: 1 }]) } }),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.message).toMatch(/must be in variation mode/);
+    // Refused during ValidateBriefIntegrity, so no port was touched at all.
+    expect(compliance.validateLegalCopy).not.toHaveBeenCalled();
+  });
+
+  test("an unrunnable timeline is refused at the boundary, not thrown from the compositor", async () => {
+    // Three beats over the default 6 s clip give each 2 s; weights 1:1:20 put the first
+    // two under MIN_DWELL_SEC. timelineProblem is the same check the parser runs.
+    const d = deps({ planner: fakePlanner(fakePlan([motionVariant()])) });
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({
+        copy: {
+          timeline: threeBeatTimeline([
+            { text: "One", weight: 1 },
+            { text: "Two", weight: 1 },
+            { text: "Three", weight: 20 },
+          ]),
+        },
+      }),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.message).toMatch(/dwell|1\.2/);
+    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+    expect(d.videoCompositor.compositeVideo).not.toHaveBeenCalled();
+  });
+
+  test("a runnable timeline on a variation brief still passes validation", async () => {
+    const d = deps({ planner: fakePlanner(fakePlan([motionVariant()])) });
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({
+        copy: { timeline: threeBeatTimeline([{ text: "One", weight: 1 }, { text: "Two", weight: 1 }]) },
+      }),
+    );
+    expect(result.success).toBe(true);
+  });
 });
 
 const ZONES: Record<string, PlatformSafeZone> = {
