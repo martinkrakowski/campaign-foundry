@@ -1371,15 +1371,13 @@ export function purgeDraftFromStorage(state: EditorState): void {
   localStorage.removeItem(getDraftKey(state));
 }
 
-/** Clip lengths the API accepts, mirroring load-brief's MIN/MAX_DURATION_SEC. */
+/** The platform the exclusion remedy adds when the brief has no still-image outlet. */
+export const PHOTO_PLATFORM = "instagram-feed";
 
 /**
  * The next whole second in range that this list does not already hold, or undefined
  * when every one is taken. Duplicates are meaningless — the planner collapses them.
  */
-/** The platform the exclusion remedy adds when the brief has no still-image outlet. */
-export const PHOTO_PLATFORM = "instagram-feed";
-
 export function nextFreeDuration(duration: readonly number[]): number | undefined {
   const taken = new Set(duration);
   if (!taken.has(DEFAULT_DURATION_SEC)) return DEFAULT_DURATION_SEC;
