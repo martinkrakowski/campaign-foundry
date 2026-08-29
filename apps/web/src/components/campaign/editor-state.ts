@@ -273,7 +273,7 @@ export type EditorAction =
   | { type: "setTreatment"; index: number; patch: Partial<TreatmentDraft> }
   | { type: "addTreatment" }
   | { type: "removeTreatment"; index: number }
-  | { type: "addBeat" }
+  | { type: "addBeat"; text?: string }
   | { type: "removeBeat"; index: number }
   | { type: "moveBeat"; from: number; to: number }
   | { type: "setBeatText"; index: number; text: string }
@@ -594,7 +594,11 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         nextBeatKey: state.nextBeatKey + 1,
         timeline: {
           ...state.timeline,
-          beats: [...state.timeline.beats, { key: state.nextBeatKey, text: "", weight: 1 }],
+          // `text` carries an insert from the approved pool (E5.4); a plain Add starts blank.
+          beats: [
+            ...state.timeline.beats,
+            { key: state.nextBeatKey, text: action.text ?? "", weight: 1 },
+          ],
         },
       };
     case "removeBeat": {
@@ -881,7 +885,24 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
 }
 
 export function approvedHeadlines(pool: CopyPool | null): number {
-  return pool === null ? 0 : pool.entries.filter((entry) => entry.status === "approved").length;
+  return approvedHeadlineTexts(pool).length;
+}
+
+/**
+ * The approved copy in the pool, as text (E5.4).
+ *
+ * The shared source the plan asks for. `HeadlinePoolPanel` is wizard-internal and typed to
+ * `WizardState`, so there was nothing to reuse — this extracts the one rule that matters
+ * ("approved" is the only status a person may insert) so the drawer's count and the
+ * timeline's insert list cannot disagree about what is approved.
+ *
+ * Order is the pool's own, and duplicates are dropped: the same line approved twice is one
+ * choice to a person, and offering it twice reads as a bug.
+ */
+export function approvedHeadlineTexts(pool: CopyPool | null): readonly string[] {
+  if (pool === null) return [];
+  const texts = pool.entries.filter((entry) => entry.status === "approved").map((entry) => entry.text);
+  return [...new Set(texts)];
 }
 
 function toProduct(draft: ProductDraft): Product {

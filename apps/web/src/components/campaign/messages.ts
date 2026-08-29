@@ -405,3 +405,33 @@ export function timelineDwell(seconds: number): string {
 export function timelineDwellUnderFloor(seconds: number, floorSec: number): string {
   return `${seconds.toFixed(1)}s — under the ${floorSec}s floor`;
 }
+
+/* ── Timeline problems, in the editor's voice (E5.5) ─────────────────────────── */
+
+/**
+ * These mirror `timelineProblem`'s conditions, not its wording. The domain's messages name
+ * fields as a brief file spells them — `copy.timeline.beats[0].weight` — which is the right
+ * thing to tell someone editing YAML and the wrong thing to put on screen (D2, D18).
+ */
+export function timelineTooManyBeats(max: number): string {
+  return `A sequence holds at most ${max} beats — remove the extras to save.`;
+}
+export function timelineBeatWeightOutOfRange(position: number, max: number): string {
+  return `Beat ${position}'s share must be a whole number between 1 and ${max}.`;
+}
+export const timelineKeyBeatMissing = "The poster points at a beat that is no longer there.";
+/** A beat too brief to read on the shortest clip — the one the floor is measured against. */
+export function timelineBeatUnderFloor(
+  position: number,
+  dwellSec: number,
+  floorSec: number,
+  shortestSec: number,
+): string {
+  return `Beat ${position} holds for ${dwellSec.toFixed(1)}s on the ${shortestSec}s clip — under the ${floorSec}s floor. Give it more share, or drop a beat.`;
+}
+
+/** Inserting approved copy into the sequence (E5.4). */
+export const timelineInsertLegend = "Approved copy";
+export function timelineInsertBeat(text: string): string {
+  return `Add "${text}" as a beat`;
+}

@@ -1,6 +1,21 @@
 import { MAX_DURATION_SEC, MIN_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import type { EditorState } from "./editor-state";
-import { LAYOUT_OPTIONS, TONE_OPTIONS, drawableRatios, motionPackagedRatios } from "./editor-state";
+import {
+  LAYOUT_OPTIONS,
+  TONE_OPTIONS,
+  MAX_BEATS,
+  MAX_WEIGHT,
+  MIN_DWELL_SEC,
+  drawableRatios,
+  motionPackagedRatios,
+  timelineDurations,
+} from "./editor-state";
+
+// The float slack on the dwell floor is IMPORTED, not restated: 3 × 1.2 is
+// 3.5999999999999996, and an editor with its own copy of the tolerance would eventually
+// disagree with `timelineProblem` about the boundary case. Same reasoning as the one
+// DEFAULT_DURATION_SEC constant (L1).
+import { DWELL_TOLERANCE } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 
 // The draw-size helpers moved to `editor-state.ts` (the reducer's clamp needs them, and
 // the two modules were importing each other); re-exported here for their old callers.
@@ -98,6 +113,59 @@ export function validateCopy(state: EditorState): FieldErrors {
   } else if (state.campaignMessage.length > MAX_HEADLINE_LENGTH) {
     errors.campaignMessage = messages.campaignMessageTooLong;
   }
+  return { ...errors, ...validateTimeline(state) };
+}
+
+/**
+ * Mirror `timelineProblem` (E5.5) — its conditions, in the editor's voice.
+ *
+ * Deliberately not a call to `timelineProblem` returning its string: the domain names
+ * fields the way a brief file spells them (`copy.timeline.beats[0].weight`), which is right
+ * for a YAML author and wrong on screen (D2, D18). The conditions are mirrored one for one
+ * and a test asserts the two agree about WHICH drafts are invalid, so the wording can differ
+ * without the judgement drifting.
+ *
+ * The reducer now refuses to create most of these; a draft restored from storage can still
+ * hold them, which is why they are checked rather than assumed away — a draft is
+ * persistable and flagged, not repaired behind the author's back (D7/D11).
+ */
+export function validateTimeline(state: EditorState): FieldErrors {
+  const errors: FieldErrors = {};
+  const beats = state.timeline.beats;
+  if (beats.length === 0) return errors;
+
+  if (beats.length > MAX_BEATS) {
+    errors["copy-timeline"] = messages.timelineTooManyBeats(MAX_BEATS);
+    return errors;
+  }
+  beats.forEach((beat, index) => {
+    if (!Number.isInteger(beat.weight) || beat.weight < 1 || beat.weight > MAX_WEIGHT) {
+      errors[`copy-timeline-beat-${index}`] = messages.timelineBeatWeightOutOfRange(index + 1, MAX_WEIGHT);
+    }
+  });
+  if (Object.keys(errors).length > 0) return errors;
+
+  const keyBeat = state.timeline.keyBeat;
+  if (!Number.isInteger(keyBeat) || keyBeat < 1 || keyBeat > beats.length) {
+    errors["copy-timeline"] = messages.timelineKeyBeatMissing;
+    return errors;
+  }
+
+  // The floor is measured against the SHORTEST clip, exactly as the domain measures it.
+  const durations = timelineDurations(state);
+  const shortest = Math.min(...durations);
+  const total = beats.reduce((sum, beat) => sum + beat.weight, 0);
+  beats.forEach((beat, index) => {
+    const dwellSec = (shortest * beat.weight) / total;
+    if (dwellSec < MIN_DWELL_SEC - DWELL_TOLERANCE) {
+      errors[`copy-timeline-beat-${index}`] = messages.timelineBeatUnderFloor(
+        index + 1,
+        dwellSec,
+        MIN_DWELL_SEC,
+        shortest,
+      );
+    }
+  });
   return errors;
 }
 

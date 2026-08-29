@@ -286,6 +286,26 @@ Skeletal by design — patterns to extend, not a library.
   *Almost there — fill Products to make it runnable* → *Ready — Apply to run, or Save & apply
   to keep it* → *Applied — press Generate in the top bar to make ${briefId}*. Refusal
   sentence on Apply/Save with errors.
+- **TimelineSection** (L6-E5) — the copy-sequence sub-panel inside Copy, shown only on a
+  Randomized draft (only a Randomized brief renders motion). One row per beat: text `Input`,
+  a share `Stepper` bounded `[1, MAX_WEIGHT]`, a *Poster frame* toggle (`aria-pressed`, and
+  exactly one beat carries it), reorder arrows disabled at the ends, and remove.
+  - **Add beat** is disabled *with the reason beside it*, never silently. Two reasons, and
+    they are different sentences: the sequence is at its beat ceiling, or another beat would
+    drop one under the readability floor on the shortest clip. The reason is re-derived on
+    every render by simulating the click and asking the domain — so **narrowing the duration
+    axis re-answers it** with no control to disable, which is the case a click-time check
+    misses.
+  - This is an exception to §5's *never disable a verb*, and only because *Add beat* is not
+    a verb in that sense: it does not commit the draft. Save and Apply stay live and refuse
+    out loud, as ever. What the editor guarantees is **detection plus refusal to run**, not
+    prevention — narrowing the axis after the fact breaches the floor with every control
+    enabled, and the flag, not the control, is what catches it.
+- **ProportionBar** (L6-E5) — one 24px bar per clip length in the duration axis, each
+  segment's width and label taken from the compositor's own `resolveTimeline`. Segments
+  under the floor take the error tint and say so in words as well as colour. It computes
+  nothing itself: a bar that divided the weights would agree with the domain until the
+  domain changed, then be quietly wrong.
 - **ErrorPill** (L1.3) — 16px count, red background, white text, rounded full. Used in
   `SectionShell` and sidebar accordion aside.
 - **FloatingBar** (L1.4) — `sticky bottom-6 z-20 mx-auto w-full max-w-[800px] rounded-xl

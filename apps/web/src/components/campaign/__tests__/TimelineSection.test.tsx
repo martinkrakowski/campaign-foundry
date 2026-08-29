@@ -180,6 +180,65 @@ describe("TimelineSection — the dwell floor (E5.2/D3)", () => {
   });
 });
 
+describe("TimelineSection — insert from the approved pool (E5.4)", () => {
+  const pool = (entries: { text: string; status: string }[]) =>
+    ({ entries: entries.map((e, i) => ({ id: `e${i}`, text: e.text, status: e.status })) }) as unknown as EditorState["pool"];
+
+  test("only approved copy is offered, and inserting it becomes a beat", async () => {
+    const user = userEvent.setup();
+    const live = renderLive(
+      withBeats([], {
+        duration: [30],
+        pool: pool([
+          { text: "Approved line", status: "approved" },
+          { text: "Rejected line", status: "rejected" },
+          { text: "Pending line", status: "pending" },
+        ]),
+      }),
+    );
+    expect(screen.queryByLabelText(messages.timelineInsertBeat("Rejected line"))).toBeNull();
+    expect(screen.queryByLabelText(messages.timelineInsertBeat("Pending line"))).toBeNull();
+
+    await user.click(screen.getByLabelText(messages.timelineInsertBeat("Approved line")));
+    // The key is an internal React identity; the assertion is about authored content.
+    expect(live.state.timeline.beats.map((b) => ({ text: b.text, weight: b.weight }))).toEqual([
+      { text: "Approved line", weight: 1 },
+    ]);
+  });
+
+  test("the same approved line twice is offered once", () => {
+    render(
+      <TimelineSection
+        state={withBeats([], {
+          duration: [30],
+          pool: pool([
+            { text: "Same", status: "approved" },
+            { text: "Same", status: "approved" },
+          ]),
+        })}
+        dispatch={vi.fn()}
+      />,
+    );
+    expect(screen.getAllByLabelText(messages.timelineInsertBeat("Same"))).toHaveLength(1);
+  });
+
+  test("nothing is offered when adding is blocked — a control that cannot act is not shown", () => {
+    const beats = Array.from({ length: MAX_BEATS }, (_, i) => ({ text: `B${i}`, weight: 1 }));
+    render(
+      <TimelineSection
+        state={withBeats(beats, { duration: [30], pool: pool([{ text: "Approved line", status: "approved" }]) })}
+        dispatch={vi.fn()}
+      />,
+    );
+    expect(screen.queryByLabelText(messages.timelineInsertBeat("Approved line"))).toBeNull();
+  });
+
+  test("no pool means no insert row at all", () => {
+    render(<TimelineSection state={withBeats([], { duration: [30] })} dispatch={vi.fn()} />);
+    expect(screen.queryByText(messages.timelineInsertLegend)).toBeNull();
+  });
+});
+
 describe("TimelineSection — the proportion bar (E5.3)", () => {
   test("every second it shows is resolveTimeline's, for every clip length in the axis", () => {
     // The point of this test: the bar must not compute its own shares. If it ever divides
