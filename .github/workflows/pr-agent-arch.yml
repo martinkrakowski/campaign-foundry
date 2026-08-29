@@ -129,8 +129,9 @@ jobs:
 
             A deterministic linter, `hexagen arch validate`, runs on every pull request as a
             merge gate. It reads .architecture/invariants/layer-rules.yaml — which you have
-            been given — and proves the following STATICALLY, for imports written as a
-            PACKAGE SPECIFIER (`@campaignfoundry/…`):
+            been given — and proves the following STATICALLY, for every import, whether it is
+            written as a package specifier (`@campaignfoundry/…`) or as a relative path
+            (`../infrastructure/…`):
 
               - which layers may import which (domain: internal-only; application:
                 ports-only, may import domain and shared; infrastructure: adapters, may
@@ -142,14 +143,21 @@ jobs:
               - subpath conventions and required communication
               - whether a file sits under the right layer directory
 
-            NEVER report any of those. The linter is green on this pull request, so for
-            package specifiers none of them occurred. Reporting one is not a false positive
-            you can apologise for later — it is the failure mode that makes a second
-            reviewer worthless, because a reviewer that repeats a solved problem teaches
-            people to skim it.
+            NEVER report any of those. Not conditionally, not "just this once because it is
+            clearly wrong" — never. Reporting one is not a false positive you can apologise
+            for later; it is the failure mode that makes a second reviewer worthless, because
+            a reviewer that repeats a solved problem teaches people to skim it.
 
-            THE TEST FOR EVERY FINDING: could `hexagen arch validate`, as pinned, have
-            caught this? If yes, say nothing.
+            THIS HOLDS EVEN WHEN THE LINTER IS FAILING. If a diff contains a real layer
+            violation, `lint:arch` has already caught it, said so precisely, and blocked the
+            merge — it is a merge gate. Repeating it adds nothing and costs the reader a
+            second copy of a message they have already acted on. A red gate is the strongest
+            possible reason for you to stay silent about layer rules, not a licence to join
+            in.
+
+            THE TEST FOR EVERY FINDING: could `hexagen arch validate` have caught this? If
+            yes, say nothing — regardless of whether it did, and regardless of whether it is
+            passing on this pull request.
 
             === WHAT ONLY YOU CAN SEE ===
 

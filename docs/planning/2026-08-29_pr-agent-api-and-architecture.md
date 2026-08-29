@@ -234,13 +234,29 @@ That reads too strong against the evidence. The narrower conclusion is that the 
 is at fault rather than the reviewer: the prohibition should be unconditional, and should say
 what to do when the linter is red — stay silent, because the gate has already spoken.
 
-**Open decision, in the order this document would rank it:**
+**Decision: option 1** — fix the instruction, keep the reviewer, re-run the test.
 
-1. Make the prohibition unconditional, add a "when `lint:arch` is failing, say nothing about
-   layer rules" clause, and re-run P2.4. Cheapest, and keeps the reviewer.
+The three options were:
+
+1. **Taken.** Make the prohibition unconditional, add a "when `lint:arch` is failing, say
+   nothing about layer rules" clause, and re-run P2.4.
 2. Accept the behaviour as harmless — such a PR cannot merge — and record P2.4 as passed
    *with the caveat that it holds only on green PRs*.
 3. Follow §6 literally and delete the architecture reviewer.
+
+Two things were wrong with the instruction, and the second was invisible until the first was
+found:
+
+- It was **conditional**: *"the linter is green on this pull request, so … none of them
+  occurred."* On a PR where the linter is red that premise is false, and a reviewer
+  reasoning from it correctly concludes it may speak. The rule now holds unconditionally,
+  and says explicitly that a red gate is the strongest reason to stay silent — the gate has
+  already caught it, said so precisely, and blocked the merge.
+- It still said the linter proves the layer graph **"for imports written as a package
+  specifier"**. That qualifier was true of the pinned 0.8.0 and became stale the moment
+  #115 upgraded to 0.12.1, which catches relative imports too. R1.5 removed the reviewer's
+  "class 0" but left this sentence behind, so the reviewer was being told the linter is
+  blind to exactly the case the experiment used.
 
 **A first attempt reached the opposite conclusion and was wrong.** It opened the experiment
 PR with `--draft`, and `pr-agent-arch.yml` guards its job with
