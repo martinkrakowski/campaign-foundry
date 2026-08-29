@@ -3,6 +3,7 @@ import type { CampaignBrief, CopyPool, Product, Treatment, VariationPolicy } fro
 // pull node:fs/path/crypto into the browser bundle.
 import {
   DEFAULT_BACKGROUND_SOURCES,
+  DEFAULT_DURATION_SEC,
   HEADLINE_POOL_REF,
   MAX_DURATION_SEC,
   MIN_DURATION_SEC,
@@ -11,7 +12,7 @@ import { MOTION_KINDS } from "@campaignfoundry/CampaignOrchestration/motion-kind
 
 // Re-exported, not restated: every one of these is the domain's own value, and the
 // editor's copies of them were exactly the drift the leaf exists to prevent (D18).
-export { HEADLINE_POOL_REF, MAX_DURATION_SEC, MIN_DURATION_SEC, MOTION_KINDS };
+export { DEFAULT_DURATION_SEC, HEADLINE_POOL_REF, MAX_DURATION_SEC, MIN_DURATION_SEC, MOTION_KINDS };
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
 import { platformsToFormats, platformsToRatios } from "./derive";
@@ -522,7 +523,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // seed all motion kinds and 6s duration.
       if (videoTurningOn && motion.length === 0 && duration.length === 0 && !state.motionTouched) {
         motion = [...MOTION_KINDS];
-        duration = [6];
+        duration = [DEFAULT_DURATION_SEC];
         motionSeeded = true;
       } else if (videoTurningOff && !state.motionTouched) {
         // Retraction on Video-off while untouched (D9):
@@ -564,7 +565,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         const videoTurningOff = !nextFormats.includes("motion") && state.formats.includes("motion");
         if (videoTurningOn && motion.length === 0 && duration.length === 0 && !state.motionTouched) {
           motion = [...MOTION_KINDS];
-          duration = [6];
+          duration = [DEFAULT_DURATION_SEC];
           motionSeeded = true;
         } else if (videoTurningOff && !state.motionTouched) {
           motion = [];
@@ -1022,8 +1023,6 @@ export function purgeDraftFromStorage(state: EditorState): void {
 }
 
 /** Clip lengths the API accepts, mirroring load-brief's MIN/MAX_DURATION_SEC. */
-/** The default length a first duration is offered at. */
-export const DEFAULT_DURATION_SEC = 5;
 
 /**
  * The next whole second in range that this list does not already hold, or undefined

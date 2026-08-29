@@ -29,6 +29,7 @@ import {
   canPlan,
   normalizeDraftState,
   motionPackagedRatios,
+  DEFAULT_DURATION_SEC,
   type EditorState,
   type EditorAction,
 } from "../editor-state";
@@ -335,11 +336,12 @@ describe("editorReducer — motion, duration and formats", () => {
 
   test("duration is appended, written by index and removed by index", () => {
     // each Add offers a length the list does not already hold — the planner
-    // de-duplicates this axis, so a repeat would draw nothing
+    // de-duplicates this axis, so a repeat would draw nothing. The first offer is
+    // the domain's DEFAULT_DURATION_SEC; the next free second is the smallest in range.
     const added = reduce(base(), { type: "addDuration" }, { type: "addDuration" });
-    expect(added.duration).toEqual([5, 2]);
+    expect(added.duration).toEqual([DEFAULT_DURATION_SEC, 2]);
     const set = reduce(added, { type: "setDuration", index: 1, value: 8 });
-    expect(set.duration).toEqual([5, 8]);
+    expect(set.duration).toEqual([DEFAULT_DURATION_SEC, 8]);
     expect(reduce(set, { type: "removeDuration", index: 0 }).duration).toEqual([8]);
   });
 
@@ -1451,11 +1453,11 @@ describe("L4.5 Fresh-draft Video on→off identity test (D9)", () => {
     const initialBrief = toBrief(fresh);
     const initialSize = axisProductSize(fresh);
 
-    // Turn Video on -> seeds defaults (all motion kinds, duration [6])
+    // Turn Video on -> seeds defaults (all motion kinds, duration [DEFAULT_DURATION_SEC])
     const videoOn = reduce(fresh, { type: "toggleFormat", value: "motion" });
     expect(videoOn.formats).toContain("motion");
     expect(videoOn.motion.length).toBe(4);
-    expect(videoOn.duration).toEqual([6]);
+    expect(videoOn.duration).toEqual([DEFAULT_DURATION_SEC]);
     expect(videoOn.motionSeeded).toBe(true);
 
     // Turn Video off without touching motion/duration -> retracts seeded motion/duration
@@ -1483,6 +1485,23 @@ describe("L4.5 Fresh-draft Video on→off identity test (D9)", () => {
     const videoOff = reduce(customized, { type: "toggleFormat", value: "motion" });
     // Retraction does not happen because user explicitly touched motion
     expect(videoOff.motion).toContain("ken-burns-in");
+  });
+});
+
+describe("DEFAULT_DURATION_SEC (L1)", () => {
+  test("the editor re-exports the domain leaf constant rather than keeping a private copy", async () => {
+    const { DEFAULT_DURATION_SEC: domainDefault } = await import(
+      "@campaignfoundry/CampaignOrchestration/variation-defaults"
+    );
+    // The editor's default is the domain's, so changing the one constant moves the
+    // editor's seed and `nextFreeDuration` along with it — no private 5-vs-6 drift.
+    expect(DEFAULT_DURATION_SEC).toBe(domainDefault);
+  });
+
+  test("the seeded duration follows the editor's exported constant", () => {
+    const fresh = initialEditorState("variation");
+    const videoOn = reduce(fresh, { type: "toggleFormat", value: "motion" });
+    expect(videoOn.duration).toEqual([DEFAULT_DURATION_SEC]);
   });
 });
 
