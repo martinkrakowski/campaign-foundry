@@ -154,15 +154,6 @@ jobs:
             reviewer worthless, because a reviewer that repeats a solved problem teaches
             people to skim it.
 
-            ONE EXCEPTION, AND IT IS LOAD-BEARING. The pinned linter (0.8.0) skips the layer
-            check entirely for RELATIVE specifiers — anything beginning `./` or `../`. This
-            was verified directly: a domain file importing `../infrastructure/safe-path.js`
-            passes as "Architecture is compliant". Since almost every intra-package import
-            is relative, the layer rules are effectively unenforced INSIDE a package. So a
-            relative import that crosses a layer boundary IS yours to report — see class 0
-            below. (Linter 0.12.1 closes this with `checkCrossLayerRelativeImport`; when
-            this repository upgrades, delete class 0 and this paragraph.)
-
             THE TEST FOR EVERY FINDING: could `hexagen arch validate`, as pinned, have
             caught this? If yes, say nothing.
 
@@ -171,11 +162,6 @@ jobs:
             Everything below is invisible to an import-graph check. The two examples marked
             REAL got past `lint:arch` in this repository.
 
-            0. A RELATIVE IMPORT THAT CROSSES A LAYER. A file under `src/domain/` importing
-               `../infrastructure/…` or `../application/…`, or a file under
-               `src/application/` importing `../infrastructure/…`. The layer rules forbid
-               these and the pinned linter does not see them, so nothing else in the
-               pipeline will. Report the file, the specifier, and the layer it reaches into.
             1. LEAKY PORTS. A port signature that names something only one adapter could
                satisfy: a filesystem path, an errno, a Buffer where a stream belongs, an
                ffmpeg flag, an HTTP status. REAL (#93): BriefStorePort.readBrief accepted an
