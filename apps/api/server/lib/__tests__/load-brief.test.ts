@@ -235,6 +235,14 @@ describe("parseBrief v2 fields", () => {
     ],
     ["a non-array paletteShift", { ...valid, variation: { axes: { paletteShift: 0 } } }, /paletteShift/],
     ["a non-finite paletteShift", { ...valid, variation: { axes: { paletteShift: [Infinity] } } }, /paletteShift/],
+    // A shift is a hue rotation in TURNS. 1 is a whole circle and means what 0 means, so
+    // accepting it would let a brief ask for a full rotation and silently receive none.
+    ["a whole-turn paletteShift", { ...valid, variation: { axes: { paletteShift: [1] } } }, /turns in \[0, 1\)/],
+    ["a paletteShift past a whole turn", { ...valid, variation: { axes: { paletteShift: [1.25] } } }, /turns in \[0, 1\)/],
+    // A negative shift is what made the editor's preview disagree with the render.
+    ["a negative paletteShift", { ...valid, variation: { axes: { paletteShift: [-0.1] } } }, /turns in \[0, 1\)/],
+    ["a wildly out-of-range paletteShift", { ...valid, variation: { axes: { paletteShift: [1e308] } } }, /turns in \[0, 1\)/],
+    ["a non-number paletteShift entry", { ...valid, variation: { axes: { paletteShift: ["0.1"] } } }, /turns in \[0, 1\)/],
     ["a non-number paletteShift", { ...valid, variation: { axes: { paletteShift: ["0"] } } }, /paletteShift/],
     ["a non-object output", { ...valid, output: "x" }, /"output" must be an object/],
     ["an array output", { ...valid, output: [] }, /"output" must be an object/],

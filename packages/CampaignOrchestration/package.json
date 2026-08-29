@@ -29,6 +29,10 @@
     "./infrastructure": {
       "types": "./src/infrastructure/index.ts",
       "default": "./src/infrastructure/index.ts"
+    },
+    "./palette-shift": {
+      "types": "./src/domain/value-objects/palette-shift.ts",
+      "default": "./src/domain/value-objects/palette-shift.ts"
     }
   },
   "scripts": {

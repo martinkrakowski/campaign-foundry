@@ -1,3 +1,4 @@
+import { normalizeHueTurns } from "@campaignfoundry/CampaignOrchestration/palette-shift";
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
 
@@ -28,7 +29,10 @@ export function hueShiftHex(hex: string, shift: number): string {
     else hue = (r - g) / delta + 4;
     hue /= 6;
   }
-  hue = (hue + shift) % 1;
+  // The compositor's own wrap, imported rather than restated. This line used to read
+  // `(hue + shift) % 1`, which leaves a negative shift negative — so the chip previewed a
+  // colour the pipeline would never render.
+  hue = normalizeHueTurns(hue + shift);
   // HSL → RGB (the standard piecewise conversion).
   const channel = (n: number): number => {
     const k = (n + hue * 12) % 12;

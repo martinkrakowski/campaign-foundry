@@ -11,6 +11,7 @@ import {
   RATIO_VALUES,
   SAFE_ID_PATTERN,
   TONE_VALUES,
+  isPaletteShift,
   timelineProblem,
   type CampaignBrief,
   type CopyTimeline,
@@ -116,8 +117,16 @@ function validatePaletteShift(value: unknown): void {
     throw new Error('Campaign brief field "variation.axes.paletteShift" must be an array.');
   }
   for (const entry of value) {
-    if (!isFiniteNumber(entry)) {
-      throw new Error('Campaign brief field "variation.axes.paletteShift" must contain finite numbers.');
+    // A shift is a hue rotation in TURNS, so 1 is a whole circle and means exactly what 0
+    // means. Accepting anything outside [0, 1) would let a brief ask for a full rotation, or
+    // for -0.1, and quietly receive something else — 1 renders as no shift at all, and a
+    // negative used to render differently from the colour the editor previewed. Refuse it
+    // and say what the range is, rather than wrapping it behind the author's back.
+    if (!isPaletteShift(entry)) {
+      throw new Error(
+        `Campaign brief field "variation.axes.paletteShift" must contain turns in [0, 1) — ` +
+          `1 is a whole circle and means the same as 0; got ${JSON.stringify(entry)}.`,
+      );
     }
   }
 }
