@@ -137,6 +137,90 @@ describe("GridPage", () => {
     expect(screen.queryByText(/".*"/)).toBeNull();
   });
 
+  test("a reloaded campaign shows the same descriptor chips as a freshly-run one", async () => {
+    const user = userEvent.setup();
+    const assets = [
+      makeMotionAsset({
+        variantIndex: 0,
+        treatment: "headline-top-bold",
+        descriptor: {
+          layout: "headline-top",
+          tone: "bold",
+          backgroundSource: "procedural",
+          paletteShift: 0.2,
+          motion: "ken-burns-in",
+          durationSec: 6,
+          beats: 3,
+          headline: "Stay wild",
+        },
+      }),
+      makeAsset({
+        variantIndex: 1,
+        treatment: "headline-bottom-subtle",
+        descriptor: {
+          layout: "headline-bottom",
+          tone: "subtle",
+          backgroundSource: "procedural",
+          paletteShift: 0,
+        },
+      }),
+    ];
+
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem(
+      "cf:brief",
+      JSON.stringify({
+        id: "camp",
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "Stay wild",
+        products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
+        mode: "variation",
+        variation: { count: 2 },
+      }),
+    );
+
+    const report = {
+      halted: false,
+      assets,
+      log: { entries: [], campaignId: "camp" },
+    };
+
+    mockPipelineApi({
+      post: () => json({ jobId: "job-reload-test" }, 202),
+      job: () => jobOk(report),
+      result: () => json(report),
+    });
+
+    // 1. Freshly run the campaign
+    const { unmount } = renderWithRun(<Harness />);
+    await user.click(screen.getByText("exec"));
+
+    // Verify chips on fresh run
+    expect(await screen.findByText("3 beats")).toBeTruthy();
+    expect(screen.getByText('"Stay wild"')).toBeTruthy();
+    expect(screen.getByText("ken-burns-in · 6s")).toBeTruthy();
+    expect(screen.getByText("shift 0.2")).toBeTruthy();
+    expect(screen.getAllByText("headline-top").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("bold").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("headline-bottom").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("subtle").length).toBeGreaterThan(0);
+
+    // 2. Reload: unmount and mount fresh GridPage (fetches from persisted GET /campaigns/result)
+    unmount();
+    renderWithRun(<GridPage />);
+
+    // Verify chips on reloaded run match freshly-run chips
+    expect(await screen.findByText("3 beats")).toBeTruthy();
+    expect(screen.getByText('"Stay wild"')).toBeTruthy();
+    expect(screen.getByText("ken-burns-in · 6s")).toBeTruthy();
+    expect(screen.getByText("shift 0.2")).toBeTruthy();
+    expect(screen.getAllByText("headline-top").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("bold").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("headline-bottom").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("subtle").length).toBeGreaterThan(0);
+  });
+
   test("a variation re-roll updates the tile in place and clears its decision", async () => {
     const user = userEvent.setup();
     const original = makeAsset({

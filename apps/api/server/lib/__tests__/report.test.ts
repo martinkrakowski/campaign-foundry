@@ -174,6 +174,79 @@ describe("report persistence", () => {
     expect(isPersistedAsset({ ...variation, treatment: undefined })).toBe(false);
   });
 
+  test("isPersistedAsset accepts rows without descriptor (backward compatibility)", () => {
+    const legacyClassic = {
+      productId: "alpha",
+      aspectRatio: "1:1",
+      treatment: "default",
+      outputPath: "alpha/1x1.png",
+    };
+    const legacyVariation = {
+      productId: "alpha",
+      aspectRatio: "1:1",
+      treatment: "headline-top-bold",
+      outputPath: "alpha/1x1/v0.png",
+      variantIndex: 0,
+      attempt: 0,
+      format: "static",
+    };
+    expect(isPersistedAsset(legacyClassic)).toBe(true);
+    expect(isPersistedAsset(legacyVariation)).toBe(true);
+  });
+
+  test("isPersistedAsset validates descriptor fields when present", () => {
+    const base = {
+      productId: "alpha",
+      aspectRatio: "9:16",
+      treatment: "headline-top-bold",
+      outputPath: "alpha/9x16/v0.png",
+      variantIndex: 0,
+      attempt: 0,
+      format: "motion",
+      videoPath: "alpha/9x16/v0.mp4",
+      durationSec: 6,
+    };
+    const validDescriptor = {
+      layout: "headline-top",
+      tone: "bold",
+      backgroundSource: "procedural",
+      paletteShift: 0.1,
+      headline: "Stay wild",
+      motion: "ken-burns-in",
+      durationSec: 6,
+      beats: 3,
+    };
+    expect(isPersistedAsset({ ...base, descriptor: validDescriptor })).toBe(true);
+    // Minimal valid descriptor
+    expect(
+      isPersistedAsset({
+        ...base,
+        descriptor: {
+          layout: "headline-top",
+          tone: "bold",
+          backgroundSource: "procedural",
+          paletteShift: 0,
+        },
+      }),
+    ).toBe(true);
+
+    // Invalid descriptor shapes
+    expect(isPersistedAsset({ ...base, descriptor: null })).toBe(false);
+    expect(isPersistedAsset({ ...base, descriptor: "invalid" })).toBe(false);
+    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, layout: 123 } })).toBe(false);
+    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, tone: undefined } })).toBe(false);
+    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, backgroundSource: null } })).toBe(false);
+    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, paletteShift: "none" } })).toBe(false);
+    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, paletteShift: Number.NaN } })).toBe(false);
+    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, headline: 42 } })).toBe(false);
+    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, motion: false } })).toBe(false);
+    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, durationSec: "6" } })).toBe(false);
+    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, durationSec: Number.POSITIVE_INFINITY } })).toBe(false);
+    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, beats: -1 } })).toBe(false);
+    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, beats: 1.5 } })).toBe(false);
+    expect(isPersistedAsset({ ...base, descriptor: { ...validDescriptor, beats: "3" } })).toBe(false);
+  });
+
   test("merge of a re-rolled variation slot replaces exactly one row; siblings unchanged", async () => {
     const v0 = asset({
       variantIndex: 0,

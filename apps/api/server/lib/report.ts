@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { assetIdentity, SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
-import type { GeneratedAsset, PipelineResult } from "@campaignfoundry/CampaignOrchestration";
+import type { GeneratedAsset, PipelineResult, VariantDescriptor } from "@campaignfoundry/CampaignOrchestration";
 import { outputRoot } from "./config.js";
 
 /** Persisted asset = the entity plus the derived `brandCompliant` view field. */
@@ -45,6 +45,7 @@ export const latestReportPath = (root: string): string => resolve(root, "report.
  * A persisted report row that can be keyed. Every row — classic or variation —
  * has the four strings. Variation rows additionally carry integer variantIndex
  * and attempt (>= 0); motion rows carry the mp4 path and clip length.
+ * Planned-axis descriptor is carried additively on variation rows.
  */
 export type PersistedAsset = {
   productId: string;
@@ -56,9 +57,26 @@ export type PersistedAsset = {
   format?: "static" | "motion";
   videoPath?: string;
   durationSec?: number;
+  descriptor?: VariantDescriptor;
 };
 
 const isNonNegInt = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n >= 0;
+
+function isDescriptor(d: unknown): d is VariantDescriptor {
+  if (typeof d !== "object" || d === null) return false;
+  const rec = d as Record<string, unknown>;
+  if (typeof rec.layout !== "string") return false;
+  if (typeof rec.tone !== "string") return false;
+  if (typeof rec.backgroundSource !== "string") return false;
+  if (typeof rec.paletteShift !== "number" || !Number.isFinite(rec.paletteShift)) return false;
+  if (rec.headline !== undefined && typeof rec.headline !== "string") return false;
+  if (rec.motion !== undefined && typeof rec.motion !== "string") return false;
+  if (rec.durationSec !== undefined && (typeof rec.durationSec !== "number" || !Number.isFinite(rec.durationSec))) {
+    return false;
+  }
+  if (rec.beats !== undefined && !isNonNegInt(rec.beats)) return false;
+  return true;
+}
 
 /**
  * Guard for a persisted report row — used by both the merge path and packaging.
@@ -79,6 +97,7 @@ export function isPersistedAsset(a: unknown): a is PersistedAsset {
     if (typeof rec.videoPath !== "string") return false;
     if (typeof rec.durationSec !== "number" || !Number.isFinite(rec.durationSec)) return false;
   }
+  if (rec.descriptor !== undefined && !isDescriptor(rec.descriptor)) return false;
   if (rec.variantIndex === undefined) return true;
   return isNonNegInt(rec.variantIndex) && isNonNegInt(rec.attempt);
 }
