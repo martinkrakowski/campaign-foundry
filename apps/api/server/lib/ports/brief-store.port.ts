@@ -26,6 +26,12 @@ export interface BriefStorePort {
   listBriefs(): Promise<readonly StoredBrief[]>;
 
   /**
+   * Read a brief straight off disk, for the importer that accepts a file the operator
+   * picked outside the store. Returns the raw bytes so the caller can decide the encoding.
+   */
+  readBriefFromPath(absolutePath: string, mode?: number): Promise<Buffer>;
+
+  /**
    * Find a brief by its domain identifier (`brief.id`).
    * Returns undefined if no brief with that id exists.
    */

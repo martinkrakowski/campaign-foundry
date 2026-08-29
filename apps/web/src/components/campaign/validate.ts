@@ -20,6 +20,8 @@ import { DWELL_TOLERANCE } from "@campaignfoundry/CampaignOrchestration/copy-tim
 // The draw-size helpers moved to `editor-state.ts` (the reducer's clamp needs them, and
 // the two modules were importing each other); re-exported here for their old callers.
 export { axisProductSize, drawableRatios, motionPackagedRatios } from "./editor-state";
+// Pulled from the package root so the ratio helpers and the profiles come from one import.
+import { MOTION_KINDS } from "@campaignfoundry/CampaignOrchestration";
 import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
 import * as messages from "./messages";
 import { formatDisplayName, platformDisplayName, ratioDisplayName } from "./display-names";
@@ -30,6 +32,9 @@ export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 export { MIN_DURATION_SEC, MAX_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 
 export type FieldErrors = Record<string, string>;
+
+/** Motion kinds the editor may offer. */
+export const EDITOR_MOTION_KINDS: readonly string[] = MOTION_KINDS;
 
 const UINT32_MAX = 0xffffffff;
 const BASE_DISTANCE_AXES = 6;
