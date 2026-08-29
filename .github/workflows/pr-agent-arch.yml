@@ -16,8 +16,24 @@ name: "PR-Agent Architecture Review"
 # The test for a valid finding: could `lint:arch` have caught this? If yes it is out of
 # scope — the linter is green, so by construction it did not occur.
 #
-# If this reviewer starts reporting layer-rule violations, D2 has failed and it should be
-# deleted rather than tuned. The API reviewer stands on its own.
+# If this reviewer starts reporting layer-rule violations the linter DOES catch, D2 has
+# failed and it should be deleted rather than tuned. The API reviewer stands on its own.
+#
+# THE BOUNDARY IS NARROWER THAN THE PLAN ASSUMED, and the instructions say so. The pinned
+# linter (@hexagen-monaco/arch-linter 0.8.0) skips the layer check for relative specifiers:
+# in its shipped build the domain branch reads
+#
+#     if (!spec.startsWith("@") && (spec.startsWith(".") || spec.startsWith("/"))) ; else { … }
+#
+# — an empty statement. Verified end to end: a domain file importing
+# `../infrastructure/safe-path.js` is reported "Architecture is compliant", while the same
+# file importing `@campaignfoundry/Distribution` is correctly rejected. Nearly every
+# intra-package import is relative, so within a package the layer rules are unenforced.
+#
+# The reviewer therefore owns relative cross-layer imports (class 0) until the linter is
+# upgraded. 0.12.1 adds `checkCrossLayerRelativeImport` and catches the case exactly; the
+# upgrade also surfaces one real pre-existing violation (node:crypto in a domain VO), which
+# is why it is a separate change rather than folded in here.
 #
 # OPERATIONAL SCAFFOLDING IS IDENTICAL TO pr-agent.yml BY CONSTRUCTION — see its comments
 # for the reasoning behind the digest pin, the concurrency key and the guard.
@@ -111,7 +127,8 @@ jobs:
 
             A deterministic linter, `hexagen arch validate`, runs on every pull request as a
             merge gate. It reads .architecture/invariants/layer-rules.yaml — which you have
-            been given — and proves the following STATICALLY, from the import graph:
+            been given — and proves the following STATICALLY, for imports written as a
+            PACKAGE SPECIFIER (`@campaignfoundry/…`):
 
               - which layers may import which (domain: internal-only; application:
                 ports-only, may import domain and shared; infrastructure: adapters, may
@@ -120,23 +137,37 @@ jobs:
               - conformance to the global whitelist (@campaignfoundry/shared/**, and the
                 CampaignOrchestration root entrypoint so adapter packages can implement its
                 ports)
-              - circular dependencies between modules
+              - subpath conventions and required communication
               - whether a file sits under the right layer directory
 
-            NEVER report any of these. The linter is green on this pull request, so by
-            construction none of them occurred. Reporting one is not a false positive you
-            can apologise for later — it is the failure mode that makes a second reviewer
-            worthless, because a reviewer that repeats a solved problem teaches people to
-            skim it.
+            NEVER report any of those. The linter is green on this pull request, so for
+            package specifiers none of them occurred. Reporting one is not a false positive
+            you can apologise for later — it is the failure mode that makes a second
+            reviewer worthless, because a reviewer that repeats a solved problem teaches
+            people to skim it.
 
-            THE TEST FOR EVERY FINDING: could `hexagen arch validate` have caught this from
-            the import graph alone? If yes, say nothing.
+            ONE EXCEPTION, AND IT IS LOAD-BEARING. The pinned linter (0.8.0) skips the layer
+            check entirely for RELATIVE specifiers — anything beginning `./` or `../`. This
+            was verified directly: a domain file importing `../infrastructure/safe-path.js`
+            passes as "Architecture is compliant". Since almost every intra-package import
+            is relative, the layer rules are effectively unenforced INSIDE a package. So a
+            relative import that crosses a layer boundary IS yours to report — see class 0
+            below. (Linter 0.12.1 closes this with `checkCrossLayerRelativeImport`; when
+            this repository upgrades, delete class 0 and this paragraph.)
+
+            THE TEST FOR EVERY FINDING: could `hexagen arch validate`, as pinned, have
+            caught this? If yes, say nothing.
 
             === WHAT ONLY YOU CAN SEE ===
 
             Everything below is invisible to an import-graph check. The two examples marked
             REAL got past `lint:arch` in this repository.
 
+            0. A RELATIVE IMPORT THAT CROSSES A LAYER. A file under `src/domain/` importing
+               `../infrastructure/…` or `../application/…`, or a file under
+               `src/application/` importing `../infrastructure/…`. The layer rules forbid
+               these and the pinned linter does not see them, so nothing else in the
+               pipeline will. Report the file, the specifier, and the layer it reaches into.
             1. LEAKY PORTS. A port signature that names something only one adapter could
                satisfy: a filesystem path, an errno, a Buffer where a stream belongs, an
                ffmpeg flag, an HTTP status. REAL (#93): BriefStorePort.readBrief accepted an
