@@ -11,7 +11,9 @@ import {
   MOTION_FORMAT,
   SUPPORTED_AXES,
   SUPPORTED_FORMATS,
+  TIMELINE_TRANSITIONS,
 } from "../load-brief.js";
+import { MAX_BEATS, MAX_WEIGHT, timelineProblem } from "@campaignfoundry/CampaignOrchestration";
 import type { Capabilities } from "../../lib/capabilities.js";
 
 const valid = {
@@ -475,4 +477,285 @@ describe("motion requires a randomized campaign", () => {
   });
 });
 
+});
+
+const validTimeline = {
+  transition: "fade" as const,
+  keyBeat: 1,
+  beats: [
+    { text: "New season, new kit", weight: 2 },
+    { text: "Built for the cold", weight: 3 },
+    { text: "Shop now", weight: 2 },
+  ],
+};
+
+const validMotionTimelineBrief = (over: Record<string, unknown> = {}) => ({
+  ...motionBrief(),
+  copy: {
+    timeline: validTimeline,
+  },
+  ...over,
+});
+
+describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
+  test("TIMELINE_TRANSITIONS locks the supported transition allowlist", () => {
+    expect(TIMELINE_TRANSITIONS).toEqual(["cut", "fade"]);
+  });
+
+  describe("E4.1: accepts valid copy.timeline", () => {
+    test("accepts a structurally valid timeline and preserves fields", () => {
+      const brief = parseBrief(validMotionTimelineBrief());
+      expect(brief.copy?.timeline).toEqual(validTimeline);
+    });
+
+    test("accepts transition: cut and optional keyBeat/transition defaults", () => {
+      const cutBrief = parseBrief(
+        validMotionTimelineBrief({
+          copy: {
+            timeline: {
+              transition: "cut",
+              keyBeat: 2,
+              beats: [
+                { text: "A", weight: 1 },
+                { text: "B", weight: 2 },
+              ],
+            },
+          },
+        }),
+      );
+      expect(cutBrief.copy?.timeline?.transition).toBe("cut");
+      expect(cutBrief.copy?.timeline?.keyBeat).toBe(2);
+
+      // Omitted transition and keyBeat are structurally accepted
+      const minimal = parseBrief(
+        validMotionTimelineBrief({
+          copy: {
+            timeline: {
+              beats: [
+                { text: "A", weight: 1 },
+                { text: "B", weight: 2 },
+              ],
+            },
+          },
+        }),
+      );
+      expect(minimal.copy?.timeline?.beats).toHaveLength(2);
+      // The returned brief IS the CampaignBrief every caller goes on to use, and
+      // CopyTimeline declares both fields required — defaulting them only inside the
+      // validator would hand callers a value the domain says cannot exist.
+      expect(minimal.copy?.timeline?.transition).toBe("fade");
+      expect(minimal.copy?.timeline?.keyBeat).toBe(1);
+    });
+
+    test("accepts empty copy object (no timeline)", () => {
+      const brief = parseBrief({ ...v2Brief, copy: {} });
+      expect(brief.copy).toEqual({});
+    });
+
+    test("D11: authoring mode allows structurally sound timeline with dwell floor violation", () => {
+      // weights [5, 1, 1] at 5s has thinnest beat at 5 * 1 / 7 = 0.71s < 1.2s floor
+      const shortBeatsBrief = validMotionTimelineBrief({
+        variation: {
+          ...v2Brief.variation,
+          axes: { ...staticAxes, motion: ["ken-burns-in"], duration: [5] },
+        },
+        copy: {
+          timeline: {
+            transition: "fade",
+            keyBeat: 1,
+            beats: [
+              { text: "A", weight: 5 },
+              { text: "B", weight: 1 },
+              { text: "C", weight: 1 },
+            ],
+          },
+        },
+      });
+
+      // Authoring mode (default / enforceCapabilities: false) allows it to save
+      const parsed = parseBrief(shortBeatsBrief, { enforceCapabilities: false });
+      expect(parsed.copy?.timeline?.beats).toHaveLength(3);
+
+      // Running mode (enforceCapabilities: true) refuses it with dwell floor message from timelineProblem
+      expect(() =>
+        parseBrief(shortBeatsBrief, { capabilities: MOTION_ON, enforceCapabilities: true }),
+      ).toThrow(/readability floor/);
+    });
+
+    test("running mode accepts valid timelines with explicit and defaulted fields", () => {
+      // Explicit transition, keyBeat, and duration
+      const explicit = parseBrief(
+        validMotionTimelineBrief({
+          variation: {
+            ...v2Brief.variation,
+            axes: { ...staticAxes, motion: ["ken-burns-in"], duration: [6] },
+          },
+          copy: {
+            timeline: {
+              transition: "cut",
+              keyBeat: 2,
+              beats: [
+                { text: "A", weight: 1 },
+                { text: "B", weight: 1 },
+              ],
+            },
+          },
+        }),
+        { capabilities: MOTION_ON, enforceCapabilities: true },
+      );
+      expect(explicit.copy?.timeline?.transition).toBe("cut");
+      expect(explicit.copy?.timeline?.keyBeat).toBe(2);
+
+      // Defaulted transition, keyBeat, and omitted duration axis (falls back to DEFAULT_DURATION_SEC)
+      const defaulted = parseBrief(
+        validMotionTimelineBrief({
+          variation: {
+            ...v2Brief.variation,
+            axes: { ...staticAxes, motion: ["ken-burns-in"] },
+          },
+          copy: {
+            timeline: {
+              beats: [
+                { text: "A", weight: 1 },
+                { text: "B", weight: 1 },
+              ],
+            },
+          },
+        }),
+        { capabilities: MOTION_ON, enforceCapabilities: true },
+      );
+      expect(defaulted.copy?.timeline?.beats).toHaveLength(2);
+      expect(defaulted.copy?.timeline?.transition).toBe("fade");
+      expect(defaulted.copy?.timeline?.keyBeat).toBe(1);
+      // The round trip: feeding the parsed timeline straight back to the domain check it
+      // just passed must still pass. An absent keyBeat fails this.
+      expect(timelineProblem(defaulted.copy!.timeline!, [6])).toBeUndefined();
+    });
+
+    test("D11: authoring mode allows timeline when motion capability is off; running mode refuses", () => {
+      const brief = validMotionTimelineBrief();
+      // Authoring mode: passes
+      expect(parseBrief(brief, { capabilities: MOTION_OFF, enforceCapabilities: false }).copy?.timeline).toBeDefined();
+
+      // Running mode: fails
+      expect(() =>
+        parseBrief(brief, { capabilities: MOTION_OFF, enforceCapabilities: true }),
+      ).toThrow(/motion output is unavailable/);
+    });
+  });
+
+  describe("E4.2: rejects structural violations naming offending path", () => {
+    test.each([
+      ["a non-object copy", { ...validMotionTimelineBrief(), copy: "invalid" }, /Campaign brief field "copy" must be an object/],
+      ["a non-object copy.timeline", { ...validMotionTimelineBrief(), copy: { timeline: "invalid" } }, /Campaign brief field "copy.timeline" must be an object/],
+      ["an unknown transition", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, transition: "slide" } } }), /Campaign brief field "copy.timeline.transition" must be "cut" or "fade"/],
+      ["a non-string transition", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, transition: 123 } } }), /Campaign brief field "copy.timeline.transition" must be "cut" or "fade"/],
+      ["non-array beats", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, beats: "invalid" } } }), /Campaign brief field "copy.timeline.beats" must be an array/],
+      ["empty beats", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, beats: [] } } }), /copy\.timeline\.beats must not be empty/],
+      [
+        `more than MAX_BEATS (${MAX_BEATS}) beats`,
+        validMotionTimelineBrief({
+          copy: {
+            timeline: {
+              ...validTimeline,
+              beats: Array.from({ length: MAX_BEATS + 1 }, (_, i) => ({ text: `Beat ${i + 1}`, weight: 1 })),
+            },
+          },
+        }),
+        /copy\.timeline\.beats holds more than 8 beats/,
+      ],
+      ["a non-object beat entry", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, beats: [null] } } }), /Campaign brief field "copy\.timeline\.beats\[0\]" must be an object/],
+      ["a non-string beat text", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, beats: [{ text: 123, weight: 1 }] } } }), /Campaign brief field "copy\.timeline\.beats\[0\]\.text" must be a string/],
+      ["a non-integer weight", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, beats: [{ text: "A", weight: 1.5 }] } } }), /copy\.timeline\.beats\[0\]\.weight must be an integer in \[1, 20\]/],
+      ["a non-number weight", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, beats: [{ text: "A", weight: "2" }] } } }), /copy\.timeline\.beats\[0\]\.weight must be an integer in \[1, 20\]/],
+      ["a weight below 1", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, beats: [{ text: "A", weight: 0 }] } } }), /copy\.timeline\.beats\[0\]\.weight must be an integer in \[1, 20\]/],
+      ["a negative weight", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, beats: [{ text: "A", weight: -1 }] } } }), /copy\.timeline\.beats\[0\]\.weight must be an integer in \[1, 20\]/],
+      ["a weight above MAX_WEIGHT", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, beats: [{ text: "A", weight: MAX_WEIGHT + 1 }] } } }), /copy\.timeline\.beats\[0\]\.weight must be an integer in \[1, 20\]/],
+      ["an astronomical weight (1e308 overflow boundary)", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, beats: [{ text: "A", weight: 1e308 }] } } }), /copy\.timeline\.beats\[0\]\.weight must be an integer in \[1, 20\]/],
+      ["a keyBeat below 1", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, keyBeat: 0 } } }), /copy\.timeline\.keyBeat must be an integer in \[1, 3\]/],
+      ["a keyBeat above beats.length", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, keyBeat: 4 } } }), /copy\.timeline\.keyBeat must be an integer in \[1, 3\]/],
+      ["a non-integer keyBeat", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, keyBeat: 1.5 } } }), /copy\.timeline\.keyBeat must be an integer in \[1, 3\]/],
+      ["a non-number keyBeat", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, keyBeat: "1" } } }), /copy\.timeline\.keyBeat must be an integer in \[1, 3\]/],
+    ])("rejects %s in authoring mode", (_label, input, message) => {
+      expect(() => parseBrief(input, { enforceCapabilities: false })).toThrow(message);
+    });
+  });
+
+  describe("E4.3: rejects invalid D5 combinations in authoring mode", () => {
+    test("rejects copy.timeline together with axes.headline: pool://copy", () => {
+      const conflictBrief = validMotionTimelineBrief({
+        variation: {
+          ...validMotionTimelineBrief().variation,
+          axes: {
+            ...validMotionTimelineBrief().variation.axes,
+            headline: "pool://copy",
+          },
+        },
+      });
+      expect(() => parseBrief(conflictBrief, { enforceCapabilities: false })).toThrow(
+        /Campaign brief cannot combine "copy\.timeline" with "variation\.axes\.headline"/,
+      );
+    });
+
+    test("rejects copy.timeline on a classic brief (mode not variation)", () => {
+      const classicWithTimeline = {
+        ...valid,
+        copy: { timeline: validTimeline },
+        output: { formats: ["motion"], platforms: ["instagram-reel"] },
+      };
+      expect(() => parseBrief(classicWithTimeline, { enforceCapabilities: false })).toThrow(
+        /Campaign brief field "copy\.timeline" requires motion output/,
+      );
+    });
+
+    test("rejects copy.timeline on a variation brief without formats: motion", () => {
+      const staticVariationWithTimeline = {
+        ...v2Brief,
+        copy: { timeline: validTimeline },
+        output: { formats: ["static"], platforms: ["instagram-feed"] },
+      };
+      expect(() => parseBrief(staticVariationWithTimeline, { enforceCapabilities: false })).toThrow(
+        /Campaign brief field "copy\.timeline" requires motion output/,
+      );
+    });
+
+    test("rejects copy.timeline on a variation brief with omitted output.formats (defaults to static)", () => {
+      const noFormatsVariationWithTimeline = {
+        ...v2Brief,
+        copy: { timeline: validTimeline },
+        output: { platforms: ["instagram-feed"] },
+      };
+      expect(() => parseBrief(noFormatsVariationWithTimeline, { enforceCapabilities: false })).toThrow(
+        /Campaign brief field "copy\.timeline" requires motion output/,
+      );
+    });
+  });
+
+  describe("Non-negotiable: all briefs/*.yaml load and non-timeline briefs parse identically", () => {
+    test("loads every existing brief in briefs/*.yaml", async () => {
+      const briefFiles = [
+        "briefs/sample-campaign.yaml",
+        "briefs/sample-campaign-orange.yaml",
+        "briefs/sample-campaign-reuse.yaml",
+        "briefs/sample-campaign-variants.yaml",
+        "briefs/sample-motion.yaml",
+        "briefs/sample-pooled.yaml",
+        "briefs/sample-randomized.yaml",
+      ];
+      for (const file of briefFiles) {
+        const loaded = await loadBrief(file);
+        expect(loaded.id).toBeDefined();
+        expect(loaded.copy?.timeline).toBeUndefined();
+      }
+    });
+
+    test("a brief with no copy.timeline parses and serializes byte-for-byte as before", () => {
+      const parsedClassic = parseBrief(valid);
+      expect(parsedClassic.copy).toBeUndefined();
+
+      const parsedV2 = parseBrief(v2Brief);
+      expect(parsedV2.copy).toBeUndefined();
+      expect(JSON.stringify(parsedV2)).toBe(JSON.stringify(v2Brief));
+    });
+  });
 });

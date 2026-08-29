@@ -5,11 +5,15 @@ import * as yaml from "js-yaml";
 import {
   HEADLINE_POOL_REF,
   LAYOUT_VALUES,
+  MAX_BEATS,
+  MAX_WEIGHT,
   MOTION_KINDS,
   RATIO_VALUES,
   SAFE_ID_PATTERN,
   TONE_VALUES,
+  timelineProblem,
   type CampaignBrief,
+  type CopyTimeline,
   type RegenerationTarget,
 } from "@campaignfoundry/CampaignOrchestration";
 import { isPlatformVisible, platformProfile, type PlatformProfile } from "@campaignfoundry/Distribution";
@@ -37,6 +41,9 @@ export const SUPPORTED_FORMATS = ["static"] as const;
 
 /** Output format accepted only while the ffmpeg capability is on (D8). */
 export const MOTION_FORMAT = "motion";
+
+/** Transitions supported between motion copy beats (D9). */
+export const TIMELINE_TRANSITIONS = ["cut", "fade"] as const;
 
 /** Clip length bounds in whole seconds. */
 const MIN_DURATION_SEC = 2;
@@ -370,9 +377,110 @@ function validateTreatments(value: unknown): void {
 }
 
 /**
+ * Structurally validate `copy.timeline` (D1).
+ *
+ * In authoring mode (`enforceCapabilities: false`), only structural rules and D5's mutual
+ * exclusions are enforced — dwell floor (D3) and motion capability checks are deferred to
+ * the running paths so invalid/unrunnable timelines remain persistable and fixable in the
+ * editor (D11/D15).
+ */
+function validateCopy(record: Record<string, unknown>, enforceCapabilities: boolean): void {
+  if (record.copy === undefined) return;
+  if (!isPlainObject(record.copy)) {
+    throw new Error('Campaign brief field "copy" must be an object.');
+  }
+  const timeline = record.copy.timeline;
+  if (timeline === undefined) return;
+  if (!isPlainObject(timeline)) {
+    throw new Error('Campaign brief field "copy.timeline" must be an object.');
+  }
+
+  if (
+    timeline.transition !== undefined &&
+    (typeof timeline.transition !== "string" ||
+      !(TIMELINE_TRANSITIONS as readonly string[]).includes(timeline.transition))
+  ) {
+    throw new Error(
+      `Campaign brief field "copy.timeline.transition" must be "cut" or "fade"; got ${JSON.stringify(timeline.transition)}.`,
+    );
+  }
+
+  if (!Array.isArray(timeline.beats)) {
+    throw new Error('Campaign brief field "copy.timeline.beats" must be an array.');
+  }
+  if (timeline.beats.length === 0) {
+    throw new Error("copy.timeline.beats must not be empty.");
+  }
+  if (timeline.beats.length > MAX_BEATS) {
+    throw new Error(`copy.timeline.beats holds more than ${MAX_BEATS} beats (max ${MAX_BEATS}).`);
+  }
+
+  for (let i = 0; i < timeline.beats.length; i += 1) {
+    const beat = timeline.beats[i];
+    if (!isPlainObject(beat)) {
+      throw new Error(`Campaign brief field "copy.timeline.beats[${i}]" must be an object.`);
+    }
+    if (typeof beat.text !== "string") {
+      throw new Error(`Campaign brief field "copy.timeline.beats[${i}].text" must be a string.`);
+    }
+    const weight = beat.weight;
+    if (!isFiniteInteger(weight) || weight < 1 || weight > MAX_WEIGHT) {
+      throw new Error(`copy.timeline.beats[${i}].weight must be an integer in [1, ${MAX_WEIGHT}].`);
+    }
+  }
+
+  if (timeline.keyBeat !== undefined) {
+    if (
+      !isFiniteInteger(timeline.keyBeat) ||
+      timeline.keyBeat < 1 ||
+      timeline.keyBeat > timeline.beats.length
+    ) {
+      throw new Error(
+        `copy.timeline.keyBeat must be an integer in [1, ${timeline.beats.length}].`,
+      );
+    }
+  }
+
+  // D5: copy.timeline together with axes.headline: pool://copy is invalid.
+  const axes = (record.variation as Record<string, unknown> | undefined)?.axes as
+    | Record<string, unknown>
+    | undefined;
+  if (axes?.headline !== undefined) {
+    throw new Error(
+      'Campaign brief cannot combine "copy.timeline" with "variation.axes.headline" — motion copy sequences are fixed across variants.',
+    );
+  }
+
+  // D5: copy.timeline on any brief that cannot render motion (classic mode or formats without motion).
+  const formats = (record.output as Record<string, unknown> | undefined)?.formats;
+  const canRenderMotion =
+    record.mode === "variation" && Array.isArray(formats) && formats.includes(MOTION_FORMAT);
+  if (!canRenderMotion) {
+    throw new Error(
+      `Campaign brief field "copy.timeline" requires motion output (mode "variation" and output.formats including "${MOTION_FORMAT}").`,
+    );
+  }
+
+  // Write the defaults onto the record, not onto a temporary. `parseBrief` returns this
+  // same record as a CampaignBrief, and CopyTimeline declares `transition` and `keyBeat`
+  // required — defaulting them only for the check below hands every caller a value the
+  // domain says cannot exist, and `timelineProblem` rejects it on the round trip.
+  timeline.transition = (timeline.transition as "cut" | "fade" | undefined) ?? "fade";
+  timeline.keyBeat = (timeline.keyBeat as number | undefined) ?? 1;
+
+  if (enforceCapabilities) {
+    const durations = (axes?.duration as readonly number[] | undefined) ?? [];
+    const problem = timelineProblem(timeline as unknown as CopyTimeline, durations);
+    if (problem) {
+      throw new Error(problem);
+    }
+  }
+}
+
+/**
  * Structurally validate an untrusted value into a CampaignBrief. Business rules
  * live in the use case. `capabilities` gates the motion allowlist (D8); it defaults
-  * to the boot probe's snapshot and is injectable so tests can flip it.
+ * to the boot probe's snapshot and is injectable so tests can flip it.
  */
 /** How a brief is validated: authoring accepts what this host cannot run (D7/D12/D15). */
 export interface ParseBriefOptions {
@@ -421,6 +529,7 @@ export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): Campaig
   validateVariation(record.variation, effectiveCapabilities);
   validateOutput(record.output, effectiveCapabilities);
   validateMotionAxisRequested(record);
+  validateCopy(record, enforceCapabilities);
   // Motion is a variation axis: only the planner draws clips, and the classic
   // product × ratio × treatment matrix has no motion path, so a classic brief that
   // requests `formats: motion` would silently render stills. Refuse it on the run
