@@ -30,6 +30,7 @@ import type { BackgroundContext, ImageGeneratorPort } from "../ports/out/ImageGe
 import type { PlatformSafeZoneResolver } from "../ports/out/PlatformProfilePort.js";
 import type { VideoCompositorPort } from "../ports/out/VideoCompositorPort.js";
 import { MOTION_FPS } from "../../domain/value-objects/MotionKind.vo.js";
+import type { CopyTimeline } from "../../domain/value-objects/CopyTimeline.vo.js";
 import { DEFAULT_DURATION_SEC } from "../../domain/value-objects/variation-defaults.js";
 
 /** Classic briefs keep the two-product floor; variation relaxes to 1 (D10). */
@@ -307,6 +308,9 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       targetAudience: brief.targetAudience,
       targetRegion: brief.targetRegion,
     };
+    // Sequenced copy for motion clips (D2/D5): fixed across variants, threaded straight
+    // to the compositor for every motion slot. Absent → the legacy single-message path.
+    const timeline = brief.copy?.timeline;
 
     const targets = options?.regenerateOnly;
     let variants: readonly Variant[];
@@ -402,6 +406,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         cell.attempt,
         pinnedProofIndex.get(cell.product.id) === cell.variant.index,
         insetsByRatio.get(cell.ratio.value),
+        timeline,
       ),
     );
 
@@ -439,6 +444,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     attempt: number,
     writeProof: boolean,
     safeInsets: SafeInsets | undefined,
+    timeline: CopyTimeline | undefined,
   ): Promise<{ asset: GeneratedAsset; heroImage?: Uint8Array }> {
     const cellContext: BackgroundContext = {
       ...context,
@@ -503,6 +509,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         { identity, lineage, descriptor, videoPath },
         log,
         writeProof,
+        timeline,
       );
     }
 
@@ -554,6 +561,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     { identity, lineage, descriptor, videoPath }: VariationAssetBase,
     log: PipelineExecutionLog,
     writeProof: boolean,
+    timeline: CopyTimeline | undefined,
   ): Promise<{ asset: GeneratedAsset; heroImage?: Uint8Array }> {
     const durationSec = variant.durationSec ?? DEFAULT_DURATION_SEC;
     const video = await this.deps.videoCompositor.compositeVideo({
@@ -562,6 +570,8 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       fps: MOTION_FPS,
       motion,
       sampleAt: MOTION_SAMPLE_AT,
+      // Absent → omitted, keeping the legacy single-message path byte-identical (D10).
+      ...(timeline !== undefined ? { timeline } : {}),
     });
 
     // No sampled frame is no evidence: an adapter that returns none fails the check.
@@ -648,9 +658,18 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
 
   /** Runs the legal gate over the campaign copy (and localized copy). Returns true if the run must halt. */
   private async runLegalGate(brief: CampaignBrief, log: PipelineExecutionLog): Promise<boolean> {
-    const checks = [brief.campaignMessage, brief.localizedMessage].filter(
-      (t): t is string => typeof t === "string" && t.length > 0,
-    );
+    // Beats are free-text copy (D4): each distinct beat text joins the same deduped
+    // sweep as the campaign and localized messages, so a prohibited term in any beat
+    // halts the run before a frame is drawn. Naming the offending beat is out of scope —
+    // this is an unordered deduped set, exactly like the pooled-headline sweep.
+    const beatTexts = brief.copy?.timeline?.beats.map((beat) => beat.text) ?? [];
+    const checks = [
+      ...new Set(
+        [brief.campaignMessage, brief.localizedMessage, ...beatTexts].filter(
+          (t): t is string => typeof t === "string" && t.length > 0,
+        ),
+      ),
+    ];
     if (await this.haltsOnProhibitedCopy(checks, log)) return true;
     log.record("ExecuteLegalGateCheck", "Legal gate passed");
     return false;
