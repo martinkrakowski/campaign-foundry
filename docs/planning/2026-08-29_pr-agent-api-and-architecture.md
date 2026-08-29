@@ -188,6 +188,12 @@ history** (D6).
 | P2.3 | `extra_instructions` **opening with the prohibition table** from §2.2, then the five classes in §3.3 | same |
 | P2.4 | Verify the boundary holds: run it against a PR with a known layer-rule violation and confirm it defers to the linter rather than reporting it | — |
 
+#### P2.4 Experiment result (2026‑08‑29)
+- Trivial cross‑layer import added under `packages/CampaignOrchestration/src/domain`.
+- `yarn lint:arch` failed as expected.
+- Architecture reviewer run was silent; no AI response reported the violation.
+- **Verdict:** passes P2.4 – the reviewer correctly defers to the linter.
+
 ### P3 — Config and docs
 
 | # | Task | Owns |
