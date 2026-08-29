@@ -147,6 +147,13 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
         <span className={`truncate text-right text-[12px] ${statusColor}`}>{status}</span>
       </div>
       {isVariation && <EstimateSummary plan={plan} />}
+      {/* Why the re-roll is refused — its own row, so a long sentence stays readable
+          on a phone instead of being squeezed between two buttons. */}
+      {rejectedCount > 0 && rerollBlockedReason !== null && (
+        <p role="status" className="px-2 pt-2 text-[11px] leading-tight text-warning">
+          {rerollBlockedReason}
+        </p>
+      )}
       <div className="flex items-center justify-between gap-2 px-2 pt-2">
         <button
           type="button"
@@ -162,18 +169,22 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
 
         <div className="flex items-center gap-2">
           {/* Re-roll just the rejected creatives — only meaningful once some exist. */}
-          {rejectedCount > 0 && rerollBlockedReason !== null && (
-            <p role="status" className="max-w-xs text-right text-[11px] leading-tight text-warning">
-              {rerollBlockedReason}
-            </p>
-          )}
           {rejectedCount > 0 && (
             <button
               type="button"
-              onClick={() => setConfirm("regenerate")}
-              disabled={loading || rerollBlockedReason !== null}
+              onClick={() => {
+                // A mode change blocks the re-roll. Disabling the verb made the tap do
+                // nothing at all — and `title` is unreachable on a touch device — so
+                // route the blocked click through the guard, which reports the reason.
+                if (rerollBlockedReason !== null) {
+                  void regenerateRejected();
+                  return;
+                }
+                setConfirm("regenerate");
+              }}
+              disabled={loading}
               title={rerollBlockedReason ?? undefined}
-              aria-haspopup="dialog"
+              aria-haspopup={rerollBlockedReason === null ? "dialog" : undefined}
               className="flex shrink-0 items-center space-x-2 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-[13px] text-text-primary transition-colors hover:bg-border-hover disabled:cursor-not-allowed disabled:text-text-muted sm:px-4"
             >
               <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
