@@ -893,9 +893,17 @@ export function loadDraftFromStorage(state: EditorState): EditorState | null {
  * the only correct fallback for a draft that lost its own, and a burnt counter
  * value costs nothing — product keys need only be unique.
  */
-/** Whether a stored list says something other than what the platforms would derive. */
+/**
+ * Whether a stored list says something other than what the platforms would derive.
+ *
+ * Order-sensitive, deliberately. A set comparison would call `["motion", "static"]` equal
+ * to the derived `["static", "motion"]` and so not overridden — and the next platform
+ * toggle would then replace it with the canonical order, changing the serialised
+ * `output.formats` of a brief nobody edited. The corpus round-trip is a merge gate, and
+ * "same values, different order" is not the same bytes.
+ */
 function differsFrom(stored: readonly string[], derived: readonly string[]): boolean {
-  return stored.length !== derived.length || !stored.every((value) => derived.includes(value));
+  return stored.length !== derived.length || stored.some((value, index) => value !== derived[index]);
 }
 
 export function normalizeDraftState(raw: Record<string, unknown>): EditorState {

@@ -1529,3 +1529,19 @@ describe("the output remedies do what their labels say", () => {
     expect(off.formatsOverridden).toBe(false);
   });
 });
+
+describe("override detection is about bytes, not sets", () => {
+  test("a brief whose formats are in a different order is overridden, not derived", () => {
+    // `instagram-feed` and a video platform derive ["static", "motion"]; this brief says
+    // the same two the other way round. Reading that as "derived" lets the next platform
+    // toggle rewrite it into canonical order — changing the serialised output of a brief
+    // nobody edited, which the corpus round-trip gate exists to prevent.
+    const reversed = normalizeDraftState({
+      mode: "variation",
+      briefId: "camp",
+      platforms: ["instagram-feed", "instagram-reel"],
+      formats: ["motion", "static"],
+    } as Record<string, unknown>);
+    expect(reversed.formatsOverridden).toBe(true);
+  });
+})
