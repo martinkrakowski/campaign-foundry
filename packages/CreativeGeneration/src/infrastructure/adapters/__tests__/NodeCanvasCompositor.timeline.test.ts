@@ -65,17 +65,32 @@ async function timelineSpy(req: TimelineRequest, t: number, motion?: MotionKind,
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
   const texts: TextOp[] = [];
+  // Mirror the canvas transform stack instead of recording the last translate. The copy
+  // path translates only when it has an offset or an alpha to apply, so a spy that stored
+  // the last y would attribute the background's ken-burns recentre (-height / 2, inside a
+  // save/restore) to any beat painted opaque and un-risen.
   let dy = 0;
+  const dyStack: number[] = [];
   const origFill = ctx.fillText.bind(ctx);
   const origTranslate = ctx.translate.bind(ctx);
+  const origSave = ctx.save.bind(ctx);
+  const origRestore = ctx.restore.bind(ctx);
   ctx.fillText = ((text: string, x: number, y: number, maxWidth?: number) => {
     texts.push({ text, alpha: ctx.globalAlpha, dy, font: ctx.font });
     return origFill(text, x, y, maxWidth);
   }) as typeof ctx.fillText;
   ctx.translate = ((x: number, y: number) => {
-    dy = y;
+    dy += y;
     return origTranslate(x, y);
   }) as typeof ctx.translate;
+  ctx.save = (() => {
+    dyStack.push(dy);
+    return origSave();
+  }) as typeof ctx.save;
+  ctx.restore = (() => {
+    dy = dyStack.pop() ?? 0;
+    return origRestore();
+  }) as typeof ctx.restore;
   NodeCanvasCompositor.draw(ctx, prepared, t, motion, copyT);
   return { prepared, texts };
 }
@@ -246,6 +261,23 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
     expect(painted.texts[1]?.alpha).toBeCloseTo(0.25, 2);
     expect(painted.texts[0]?.dy).toBe(0);
     expect(painted.texts[1]?.dy).toBe(0);
+  });
+
+  test("an opaque un-risen beat is painted at zero offset under a zooming background", async () => {
+    // ken-burns zooms the background inside a save/restore, and a cut transition paints the
+    // beat at layerAlpha 1 with no rise — so the copy path skips its own translate entirely.
+    // Whatever this reports is the transform the text was actually painted under.
+    const timeline: CopyTimeline = copyTimeline(
+      [{ text: "Alpha", weight: 2 }, { text: "Beta", weight: 3 }],
+      { transition: "cut", keyBeat: 1 },
+    );
+    const durationSec = 5;
+    const req = { ...request(), durationSec, timeline };
+
+    const painted = await timelineSpy(req, 0.6, "ken-burns-in", 0.6);
+    expect(painted.texts).toHaveLength(1);
+    expect(painted.texts[0]?.alpha).toBe(1);
+    expect(painted.texts[0]?.dy).toBe(0);
   });
 
   test("a cut transition never crossfades, even mid-window", async () => {
