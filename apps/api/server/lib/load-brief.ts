@@ -13,7 +13,6 @@ import {
   TONE_VALUES,
   timelineProblem,
   type CampaignBrief,
-  type CopyBeat,
   type CopyTimeline,
   type RegenerationTarget,
 } from "@campaignfoundry/CampaignOrchestration";
@@ -462,14 +461,16 @@ function validateCopy(record: Record<string, unknown>, enforceCapabilities: bool
     );
   }
 
+  // Write the defaults onto the record, not onto a temporary. `parseBrief` returns this
+  // same record as a CampaignBrief, and CopyTimeline declares `transition` and `keyBeat`
+  // required — defaulting them only for the check below hands every caller a value the
+  // domain says cannot exist, and `timelineProblem` rejects it on the round trip.
+  timeline.transition = (timeline.transition as "cut" | "fade" | undefined) ?? "fade";
+  timeline.keyBeat = (timeline.keyBeat as number | undefined) ?? 1;
+
   if (enforceCapabilities) {
-    const copyTimeline: CopyTimeline = {
-      beats: timeline.beats as unknown as readonly CopyBeat[],
-      transition: (timeline.transition as "cut" | "fade" | undefined) ?? "fade",
-      keyBeat: (timeline.keyBeat as number | undefined) ?? 1,
-    };
     const durations = (axes?.duration as readonly number[] | undefined) ?? [];
-    const problem = timelineProblem(copyTimeline, durations);
+    const problem = timelineProblem(timeline as unknown as CopyTimeline, durations);
     if (problem) {
       throw new Error(problem);
     }

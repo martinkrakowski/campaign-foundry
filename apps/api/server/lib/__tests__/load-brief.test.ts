@@ -13,7 +13,7 @@ import {
   SUPPORTED_FORMATS,
   TIMELINE_TRANSITIONS,
 } from "../load-brief.js";
-import { MAX_BEATS, MAX_WEIGHT } from "@campaignfoundry/CampaignOrchestration";
+import { MAX_BEATS, MAX_WEIGHT, timelineProblem } from "@campaignfoundry/CampaignOrchestration";
 import type { Capabilities } from "../../lib/capabilities.js";
 
 const valid = {
@@ -540,6 +540,11 @@ describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
         }),
       );
       expect(minimal.copy?.timeline?.beats).toHaveLength(2);
+      // The returned brief IS the CampaignBrief every caller goes on to use, and
+      // CopyTimeline declares both fields required — defaulting them only inside the
+      // validator would hand callers a value the domain says cannot exist.
+      expect(minimal.copy?.timeline?.transition).toBe("fade");
+      expect(minimal.copy?.timeline?.keyBeat).toBe(1);
     });
 
     test("accepts empty copy object (no timeline)", () => {
@@ -620,6 +625,11 @@ describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
         { capabilities: MOTION_ON, enforceCapabilities: true },
       );
       expect(defaulted.copy?.timeline?.beats).toHaveLength(2);
+      expect(defaulted.copy?.timeline?.transition).toBe("fade");
+      expect(defaulted.copy?.timeline?.keyBeat).toBe(1);
+      // The round trip: feeding the parsed timeline straight back to the domain check it
+      // just passed must still pass. An absent keyBeat fails this.
+      expect(timelineProblem(defaulted.copy!.timeline!, [6])).toBeNull();
     });
 
     test("D11: authoring mode allows timeline when motion capability is off; running mode refuses", () => {
