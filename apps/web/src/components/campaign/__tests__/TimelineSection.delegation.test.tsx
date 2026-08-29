@@ -39,8 +39,8 @@ describe("the proportion bar delegates to resolveTimeline", () => {
       // Equal weights: a bar doing its own arithmetic would show 5.0s and 5.0s.
       timeline: {
         beats: [
-          { text: "One", weight: 1 },
-          { text: "Two", weight: 1 },
+          { key: 1, text: "One", weight: 1 },
+          { key: 2, text: "Two", weight: 1 },
         ],
         transition: "fade" as const,
         keyBeat: 1,

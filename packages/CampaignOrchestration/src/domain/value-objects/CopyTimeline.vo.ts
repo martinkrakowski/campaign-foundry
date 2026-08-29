@@ -79,7 +79,7 @@ const FADE_WIDTH_SHARE = 0.25;
  * `3.5999999999999996`, so a beat whose dwell is exactly on the floor can read a hair
  * under it; compare with a tolerance so a boundary case is not wrongly rejected.
  */
-const DWELL_TOLERANCE = 1e-9;
+export const DWELL_TOLERANCE = 1e-9;
 
 /**
  * Beats → `t`-windows. Duration is needed only to bound the fade width (D9).

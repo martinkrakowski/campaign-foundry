@@ -13,7 +13,7 @@ import {
   type EditorAction,
   type EditorState,
 } from "@/components/campaign/editor-state";
-import { resolveTimeline } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
+import { DWELL_TOLERANCE, resolveTimeline } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 
 /**
  * The copy-timeline sub-panel (E5.2 / E5.3).
@@ -51,7 +51,7 @@ export function TimelineSection({
       {beats.length > 0 ? (
         <ol className="space-y-2">
           {beats.map((beat, index) => (
-            <li key={index} className="flex items-start gap-2">
+            <li key={beat.key} className="flex items-start gap-2">
               <Input
                 aria-label={messages.timelineBeatTextLabel(index + 1)}
                 value={beat.text}
@@ -176,7 +176,10 @@ function ProportionBar({ state, durationSec }: { state: EditorState; durationSec
       <div className="flex h-6 w-full overflow-hidden rounded border border-border">
         {resolved.map((beat, index) => {
           const dwellSec = (beat.endT - beat.startT) * durationSec;
-          const underFloor = dwellSec < MIN_DWELL_SEC;
+          // The domain's own slack, imported not restated: 3 × 1.2 is 3.5999999999999996,
+          // so a strict comparison paints a beat red that `timelineProblem` accepts — the
+          // bar and the validator disagreeing about the same draft.
+          const underFloor = dwellSec < MIN_DWELL_SEC - DWELL_TOLERANCE;
           return (
             <span
               key={index}

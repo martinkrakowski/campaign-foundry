@@ -1,7 +1,7 @@
 import { describe, test, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { resolveTimeline } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
+import { resolveTimeline, timelineProblem } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import { TimelineSection } from "../TimelineSection";
 import * as messages from "../messages";
 import {
@@ -20,7 +20,7 @@ const withBeats = (
   ...initialEditorState(),
   mode: "variation",
   briefId: "camp",
-  timeline: { beats, transition: "fade", keyBeat: 1 },
+  timeline: { beats: beats.map((b, i) => ({ key: i + 1, ...b })), transition: "fade", keyBeat: 1 },
   ...over,
 });
 
@@ -63,6 +63,24 @@ describe("TimelineSection — beat rows (E5.2)", () => {
     await user.click(screen.getByLabelText(messages.timelineMoveBeatDown(1)));
     expect(live.state.timeline.beats.map((b) => b.text)).toEqual(["Two", "One", "Three"]);
     expect(live.state.timeline.keyBeat).toBe(2);
+  });
+
+  test("a beat's row keeps its identity across a move, so a second press moves the same beat", async () => {
+    // Keyed by array position, React hands the moved beat's DOM node to its neighbour:
+    // focus stays on the position and the second press moves a DIFFERENT beat. Keyed by a
+    // stable beat identity, the node moves with the beat and focus follows it.
+    const user = userEvent.setup();
+    const live = renderLive(
+      withBeats([{ text: "One", weight: 1 }, { text: "Two", weight: 1 }, { text: "Three", weight: 1 }], {
+        duration: [30],
+      }),
+    );
+    await user.click(screen.getByLabelText(messages.timelineMoveBeatDown(1)));
+    expect(live.state.timeline.beats.map((b) => b.text)).toEqual(["Two", "One", "Three"]);
+
+    // The focused control is still the one belonging to the beat that just moved.
+    await user.click(document.activeElement as HTMLElement);
+    expect(live.state.timeline.beats.map((b) => b.text)).toEqual(["Two", "Three", "One"]);
   });
 
   test("the ends cannot be moved past the ends", () => {
@@ -196,6 +214,29 @@ describe("TimelineSection — the proportion bar (E5.3)", () => {
     const blink = (resolved[1].endT - resolved[1].startT) * 6;
     expect(blink).toBeLessThan(MIN_DWELL_SEC);
     expect(screen.getAllByText(messages.timelineDwellUnderFloor(blink, MIN_DWELL_SEC)).length).toBeGreaterThan(0);
+  });
+
+  test("a beat exactly on the floor is not painted as under it", () => {
+    // Five equal beats on a 6 s clip. The domain computes (6 × 1) / 5 = 1.2 and accepts it;
+    // the bar computes (endT - startT) × 6 = 1.1999999999999997 from cumulative windows.
+    // Without the domain's own tolerance the bar paints a valid draft red — the validator
+    // and the picture disagreeing about the same timeline.
+    const beats = Array.from({ length: 5 }, (_, i) => ({ text: `B${i}`, weight: 1 }));
+    const state = withBeats(beats, { duration: [6] });
+    // Which beat trips it depends on where the cumulative rounding lands — find it rather
+    // than hard-coding an index that a change to resolveTimeline could move.
+    const resolved = resolveTimeline(asCopyTimeline(state.timeline), 6);
+    const dwells = resolved.map((beat) => (beat.endT - beat.startT) * 6);
+    const dwellSec = dwells.find((d) => d < MIN_DWELL_SEC);
+    expect(dwellSec).toBeDefined();
+    if (dwellSec === undefined) return;
+    expect(dwellSec).toBeGreaterThan(MIN_DWELL_SEC - 1e-6);
+    // The domain accepts it: (6 × 1) / 5 is exactly 1.2.
+    expect(timelineProblem(asCopyTimeline(state.timeline), [6])).toBeUndefined();
+
+    render(<TimelineSection state={state} dispatch={vi.fn()} />);
+    expect(screen.queryByText(messages.timelineDwellUnderFloor(dwellSec, MIN_DWELL_SEC))).toBeNull();
+    expect(screen.getAllByText(messages.timelineDwell(dwellSec)).length).toBeGreaterThan(0);
   });
 
   test("with no beats there is no bar to read", () => {

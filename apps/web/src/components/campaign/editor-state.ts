@@ -148,6 +148,13 @@ export interface TreatmentDraft {
 }
 
 export interface TimelineBeatDraft {
+  /**
+   * Stable identity for React keys — the same device `ProductDraft.key` uses, and for the
+   * same reason with an extra edge: these rows REORDER. Keyed by array position, moving a
+   * beat hands its DOM node to a different beat, so focus stays on the position and a
+   * second press of the same move button moves the wrong beat. Never serialised.
+   */
+  key: number;
   text: string;
   /** An integer in [1, MAX_WEIGHT] — the Stepper bounds it, timelineProblem holds it. */
   weight: number;
@@ -180,6 +187,8 @@ export interface EditorState {
   localizedMessage: string;
   products: ProductDraft[];
   nextProductKey: number;
+  /** The next free `TimelineBeatDraft.key`. Monotonic; never reused within a session. */
+  nextBeatKey: number;
   treatments: TreatmentDraft[];
   /**
    * Sequenced copy for motion clips (E5): ordered beats, never seconds (D1). Empty
@@ -312,6 +321,7 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
     localizedMessage: "",
     products: [emptyProduct(1)],
     nextProductKey: 2,
+    nextBeatKey: 1,
     treatments: [],
     timeline: { beats: [], transition: "fade", keyBeat: 1 },
     copyExplicit: false,
@@ -581,7 +591,11 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       if (state.timeline.beats.length >= MAX_BEATS) return state;
       return {
         ...state,
-        timeline: { ...state.timeline, beats: [...state.timeline.beats, { text: "", weight: 1 }] },
+        nextBeatKey: state.nextBeatKey + 1,
+        timeline: {
+          ...state.timeline,
+          beats: [...state.timeline.beats, { key: state.nextBeatKey, text: "", weight: 1 }],
+        },
       };
     case "removeBeat": {
       const timeline = removeTimelineBeat(state.timeline, action.index);
@@ -1041,7 +1055,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
   const copyTimeline = brief.copy?.timeline;
   const timeline: TimelineDraft = copyTimeline
     ? {
-        beats: copyTimeline.beats.map((beat) => ({ text: beat.text, weight: beat.weight })),
+        beats: copyTimeline.beats.map((beat, index) => ({ key: index + 1, text: beat.text, weight: beat.weight })),
         transition: copyTimeline.transition,
         keyBeat: copyTimeline.keyBeat,
       }
@@ -1049,6 +1063,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
 
   return {
     source,
+    nextBeatKey: timeline.beats.length + 1,
     mode: brief.mode ?? "brief",
     campaignName: brief.id,
     briefId: brief.id,
@@ -1203,15 +1218,19 @@ function differsFrom(stored: readonly string[], derived: readonly string[]): boo
  */
 function normalizeTimelineDraft(value: unknown): TimelineDraft {
   const rawTimeline = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
-  const beats: TimelineBeatDraft[] = (Array.isArray(rawTimeline?.beats) ? rawTimeline.beats : []).map((entry) => {
-    if (typeof entry !== "object" || entry === null) return { text: "", weight: 1 };
-    const beat = entry as Partial<TimelineBeatDraft>;
-    const weight =
-      typeof beat.weight === "number" && Number.isInteger(beat.weight) && beat.weight >= 1 && beat.weight <= MAX_WEIGHT
-        ? beat.weight
-        : 1;
-    return { text: typeof beat.text === "string" ? beat.text : "", weight };
-  });
+  // The key is never serialised, so a restored draft has none: mint by position. That is
+  // safe precisely because the list has just been read whole — no reorder has happened yet.
+  const beats: TimelineBeatDraft[] = (Array.isArray(rawTimeline?.beats) ? rawTimeline.beats : []).map(
+    (entry, index) => {
+      if (typeof entry !== "object" || entry === null) return { key: index + 1, text: "", weight: 1 };
+      const beat = entry as Partial<TimelineBeatDraft>;
+      const weight =
+        typeof beat.weight === "number" && Number.isInteger(beat.weight) && beat.weight >= 1 && beat.weight <= MAX_WEIGHT
+          ? beat.weight
+          : 1;
+      return { key: index + 1, text: typeof beat.text === "string" ? beat.text : "", weight };
+    },
+  );
   const transition =
     rawTimeline !== null && (rawTimeline.transition === "cut" || rawTimeline.transition === "fade")
       ? rawTimeline.transition
@@ -1273,6 +1292,7 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   const duration = list(raw.duration, initial.duration);
   const formats = list(raw.formats, initial.formats);
   const platforms = list(raw.platforms, initial.platforms);
+  const normalizedTimeline = normalizeTimelineDraft(raw.timeline);
 
   return {
     ...initial,
@@ -1284,7 +1304,9 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     products,
     nextProductKey,
     treatments: list(raw.treatments, initial.treatments),
-    timeline: normalizeTimelineDraft(raw.timeline),
+    timeline: normalizedTimeline,
+    // Keys are minted by position in normalizeTimelineDraft, so the counter starts past them.
+    nextBeatKey: normalizedTimeline.beats.length + 1,
     copyExplicit: raw.copyExplicit === true,
     variation,
     motion,
