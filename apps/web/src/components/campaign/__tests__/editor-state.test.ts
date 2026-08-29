@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, vi, afterEach } from "vitest";
 import type { CampaignBrief, CopyPool } from "@campaignfoundry/CampaignOrchestration";
+import { timelineProblem } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import { axisProductSize } from "../validate";
 import { platformsToFormats } from "../derive";
 import {
@@ -30,6 +31,8 @@ import {
   normalizeDraftState,
   motionPackagedRatios,
   DEFAULT_DURATION_SEC,
+  MAX_BEATS,
+  MAX_WEIGHT,
   type EditorState,
   type EditorAction,
 } from "../editor-state";
@@ -1632,5 +1635,427 @@ describe("the load path and the draft path agree about what counts as overridden
       savedBrief({ output: { formats: platformsToFormats(["instagram-feed"]), platforms: ["instagram-feed"] } }),
     );
     expect(loaded.formatsOverridden).toBe(false);
+  });
+})
+
+describe("copy timeline (E5.1)", () => {
+  // A variation draft that can carry a serialised timeline: variation mode and the
+  // motion format, with no `axes.headline` — the D5 gate `canSerializeTimeline`.
+  const motionState = (): EditorState =>
+    ({ ...initialEditorState("variation"), briefId: "camp", formats: ["static", "motion"] }) as EditorState;
+
+  const named = (texts: string[]): EditorState => {
+    let state = motionState();
+    texts.forEach((text, index) => {
+      state = reduce(state, { type: "addBeat" });
+      state = reduce(state, { type: "setBeatText", index, text });
+    });
+    return state;
+  };
+
+  const texts = (state: EditorState): string[] => state.timeline.beats.map((beat) => beat.text);
+
+  // A corpus-style motion brief that round-trips byte-for-byte once a timeline is
+  // added — mirrors briefs/sample-motion.yaml's full axis set plus `copy.timeline`.
+  const timelineBrief = (over: Partial<CampaignBrief> = {}): CampaignBrief =>
+    ({
+      id: "sample-timeline",
+      targetRegion: "DE",
+      targetAudience: "Urban outdoor enthusiasts",
+      campaignMessage: "Stay wild.",
+      localizedMessage: "Bleib wild.",
+      products: [
+        { id: "hydra-bottle", name: "Hydra Bottle", primaryColor: "#1473E6", logoPath: "assets/inputs/hydra-logo.png" },
+      ],
+      mode: "variation",
+      variation: {
+        count: 8,
+        seed: 3,
+        minDistance: 2,
+        coverage: { perProduct: 1, perRatio: 1 },
+        axes: {
+          layout: ["headline-top", "headline-bottom"],
+          tone: ["bold", "subtle"],
+          background: { source: ["procedural"] },
+          paletteShift: [0, 0.1],
+          motion: ["ken-burns-in", "headline-rise"],
+          duration: [6],
+        },
+      } as unknown as CampaignBrief["variation"],
+      output: { formats: ["static", "motion"], platforms: ["instagram-feed", "instagram-reel"] },
+      copy: {
+        timeline: {
+          beats: [
+            { text: "Stay wild.", weight: 3 },
+            { text: "Stay hydrated.", weight: 2 },
+            { text: "Find your trail.", weight: 1 },
+          ],
+          transition: "fade",
+          keyBeat: 2,
+        },
+      },
+      ...over,
+    }) as CampaignBrief;
+
+  describe("the reducer actions", () => {
+    test("addBeat appends a blank first-weighted beat to the end", () => {
+      const first = reduce(motionState(), { type: "addBeat" });
+      expect(first.timeline.beats).toEqual([{ text: "", weight: 1 }]);
+      expect(first.timeline.keyBeat).toBe(1);
+      const second = reduce(first, { type: "addBeat" });
+      expect(second.timeline.beats).toEqual([
+        { text: "", weight: 1 },
+        { text: "", weight: 1 },
+      ]);
+      // the poster stays; tweaking a row never re-points it
+      expect(second.timeline.keyBeat).toBe(1);
+    });
+
+    test("setBeatText and setBeatWeight patch the named beat only", () => {
+      const edited = reduce(
+        reduce(named(["One", "Two", "Three"]), { type: "setBeatText", index: 1, text: "Updated" }),
+        { type: "setBeatWeight", index: 1, weight: 4 },
+      );
+      expect(edited.timeline.beats).toEqual([
+        { text: "One", weight: 1 },
+        { text: "Updated", weight: 4 },
+        { text: "Three", weight: 1 },
+      ]);
+    });
+
+    test("setKeyBeat makes the 1-based poster and setTransition swaps the cut", () => {
+      const edited = reduce(
+        reduce(named(["One", "Two", "Three"]), { type: "setKeyBeat", index: 2 }),
+        { type: "setTransition", transition: "cut" },
+      );
+      expect(edited.timeline.keyBeat).toBe(3);
+      expect(edited.timeline.transition).toBe("cut");
+    });
+
+    test("removeBeat removes exactly one beat per key", () => {
+      expect(texts(reduce(named(["One", "Two", "Three"]), { type: "removeBeat", index: 1 }))).toEqual([
+        "One",
+        "Three",
+      ]);
+    });
+
+    test("moveBeat reorders without duplicating or dropping", () => {
+      const moved = reduce(named(["One", "Two", "Three"]), { type: "moveBeat", from: 0, to: 2 });
+      expect(texts(moved)).toEqual(["Two", "Three", "One"]);
+    });
+
+    test("a no-op move and an off-range remove return the same state object", () => {
+      const state = reduce(named(["One", "Two", "Three"]), { type: "setKeyBeat", index: 1 });
+      expect(editorReducer(state, { type: "moveBeat", from: 2, to: 2 })).toBe(state);
+      expect(editorReducer(state, { type: "removeBeat", index: 4 })).toBe(state);
+    });
+
+    test("an out-of-range move source is a no-op, never an injected undefined beat", () => {
+      const state = reduce(named(["One", "Two", "Three"]), { type: "addBeat" });
+      const moved = editorReducer(state, { type: "moveBeat", from: 4, to: 0 });
+      expect(moved).toBe(state);
+      expect(moved.timeline.beats.every((beat) => beat.text !== undefined && beat.weight !== undefined)).toBe(true);
+    });
+
+    test("an out-of-range move DESTINATION is a no-op and leaves the poster pointing at a beat", () => {
+      // `to` was unchecked: moving the selected first beat to index 9 of a three-beat list
+      // appended it and recorded keyBeat 10 — a timeline the API refuses on Save.
+      const state = reduce(named(["One", "Two", "Three"]), { type: "setKeyBeat", index: 0 });
+      for (const to of [3, 9, -1, 1.5]) {
+        const moved = editorReducer(state, { type: "moveBeat", from: 0, to });
+        expect(moved).toBe(state);
+      }
+      expect(state.timeline.keyBeat).toBeLessThanOrEqual(state.timeline.beats.length);
+    });
+
+    test("addBeat refuses past the domain's beat ceiling", () => {
+      let state = motionState();
+      for (let i = 0; i < MAX_BEATS; i += 1) state = reduce(state, { type: "addBeat" });
+      expect(state.timeline.beats).toHaveLength(MAX_BEATS);
+      // The parser rejects more, so the editor must not build a draft Save cannot take.
+      expect(editorReducer(state, { type: "addBeat" })).toBe(state);
+    });
+
+    test("setBeatWeight refuses a weight the parser would reject", () => {
+      const state = named(["One", "Two", "Three"]);
+      for (const weight of [0, -1, 1.5, MAX_WEIGHT + 1, Number.NaN]) {
+        expect(editorReducer(state, { type: "setBeatWeight", index: 1, weight })).toBe(state);
+      }
+      // The bounds themselves are accepted.
+      expect(reduce(state, { type: "setBeatWeight", index: 1, weight: 1 }).timeline.beats[1]?.weight).toBe(1);
+      expect(
+        reduce(state, { type: "setBeatWeight", index: 1, weight: MAX_WEIGHT }).timeline.beats[1]?.weight,
+      ).toBe(MAX_WEIGHT);
+      // An index outside the list is a no-op too, like the move and remove cases.
+      expect(editorReducer(state, { type: "setBeatWeight", index: 7, weight: 2 })).toBe(state);
+    });
+
+    test("setKeyBeat refuses an index no beat occupies", () => {
+      const state = named(["One", "Two", "Three"]);
+      for (const index of [3, 9, -1, 0.5]) {
+        expect(editorReducer(state, { type: "setKeyBeat", index })).toBe(state);
+      }
+      expect(reduce(state, { type: "setKeyBeat", index: 2 }).timeline.keyBeat).toBe(3);
+    });
+  });
+
+  describe("keyBeat follows the beat, not the row (D7/E5.1)", () => {
+    test("moving the poster itself carries the poster to its new row", () => {
+      const poster = 0;
+      const moved = reduce(
+        reduce(named(["One", "Two", "Three"]), { type: "setKeyBeat", index: poster }),
+        { type: "moveBeat", from: poster, to: 2 },
+      );
+      expect(texts(moved)).toEqual(["Two", "Three", "One"]);
+      expect(moved.timeline.keyBeat).toBe(3);
+    });
+
+    test("a beat carried forward across the poster shifts the poster's row left", () => {
+      const state = reduce(named(["One", "Two", "Three", "Four"]), { type: "setKeyBeat", index: 2 });
+      const moved = reduce(state, { type: "moveBeat", from: 0, to: 3 });
+      expect(texts(moved)).toEqual(["Two", "Three", "Four", "One"]);
+      // the poster (Three) is now second — keyBeat tracks the row, and the selected
+      // text is unchanged because rows moved
+      expect(moved.timeline.keyBeat).toBe(2);
+    });
+
+    test("a beat carried back across the poster shifts the poster's row right", () => {
+      const state = reduce(named(["One", "Two", "Three", "Four"]), { type: "setKeyBeat", index: 0 });
+      const moved = reduce(state, { type: "moveBeat", from: 3, to: 0 });
+      expect(texts(moved)).toEqual(["Four", "One", "Two", "Three"]);
+      expect(moved.timeline.keyBeat).toBe(2);
+    });
+
+    test("a beat that moves above the poster without crossing it leaves the poster's row alone", () => {
+      const state = reduce(named(["One", "Two", "Three", "Four"]), { type: "setKeyBeat", index: 2 });
+      const moved = reduce(state, { type: "moveBeat", from: 0, to: 1 });
+      expect(texts(moved)).toEqual(["Two", "One", "Three", "Four"]);
+      expect(moved.timeline.keyBeat).toBe(3);
+    });
+
+    test("a beat that moves below the poster without crossing it leaves the poster's row alone", () => {
+      const state = reduce(named(["One", "Two", "Three", "Four"]), { type: "setKeyBeat", index: 0 });
+      const moved = reduce(state, { type: "moveBeat", from: 2, to: 3 });
+      expect(texts(moved)).toEqual(["One", "Two", "Four", "Three"]);
+      expect(moved.timeline.keyBeat).toBe(1);
+    });
+
+    test("removing a beat before the poster decrements it", () => {
+      const state = reduce(named(["One", "Two", "Three", "Four"]), { type: "setKeyBeat", index: 2 });
+      const removed = reduce(state, { type: "removeBeat", index: 0 });
+      expect(texts(removed)).toEqual(["Two", "Three", "Four"]);
+      expect(removed.timeline.keyBeat).toBe(2);
+    });
+
+    test("removing the poster itself keeps the row — the shifted beat inherits it", () => {
+      const state = reduce(named(["One", "Two", "Three", "Four"]), { type: "setKeyBeat", index: 2 });
+      const removed = reduce(state, { type: "removeBeat", index: 2 });
+      expect(texts(removed)).toEqual(["One", "Two", "Four"]);
+      expect(removed.timeline.keyBeat).toBe(3);
+    });
+
+    test("removing the poster when it is last picks the new last beat", () => {
+      const state = reduce(named(["One", "Two", "Three"]), { type: "setKeyBeat", index: 2 });
+      const removed = reduce(state, { type: "removeBeat", index: 2 });
+      expect(texts(removed)).toEqual(["One", "Two"]);
+      expect(removed.timeline.keyBeat).toBe(2);
+    });
+
+    test("removing a beat after the poster leaves it alone", () => {
+      const state = reduce(named(["One", "Two", "Three"]), { type: "setKeyBeat", index: 0 });
+      const removed = reduce(state, { type: "removeBeat", index: 2 });
+      expect(texts(removed)).toEqual(["One", "Two"]);
+      expect(removed.timeline.keyBeat).toBe(1);
+    });
+
+    test("removing the last beat empties the draft and resets the poster to its sentinel", () => {
+      const state = reduce(named(["One"]), { type: "setKeyBeat", index: 0 });
+      const removed = reduce(state, { type: "removeBeat", index: 0 });
+      expect(removed.timeline).toEqual({ beats: [], transition: "fade", keyBeat: 1 });
+      // an empty timeline has no `copy` block to write, and a later add can rebuild it
+      expect(toBrief(removed).copy).toBeUndefined();
+      expect(reduce(removed, { type: "addBeat" }).timeline.keyBeat).toBe(1);
+    });
+  });
+
+  describe("the keyBeat invariant holds through a scripted session", () => {
+    test("no sequence of edits can leave keyBeat outside [1, beats.length]", () => {
+      let state = named(["One", "Two", "Three"]);
+      const script: EditorAction[] = [
+        { type: "moveBeat", from: 0, to: 2 },
+        { type: "setKeyBeat", index: 1 },
+        { type: "moveBeat", from: 2, to: 0 },
+        { type: "setBeatWeight", index: 0, weight: 4 },
+        { type: "addBeat" },
+        { type: "moveBeat", from: 1, to: 3 },
+        { type: "removeBeat", index: 2 },
+        { type: "removeBeat", index: 0 },
+        { type: "addBeat" },
+        { type: "moveBeat", from: 0, to: 2 },
+        { type: "removeBeat", index: 1 },
+      ];
+      for (const action of script) {
+        state = editorReducer(state, action);
+        if (state.timeline.beats.length === 0) {
+          expect(state.timeline.keyBeat).toBe(1);
+        } else {
+          expect(state.timeline.keyBeat).toBeGreaterThanOrEqual(1);
+          expect(state.timeline.keyBeat).toBeLessThanOrEqual(state.timeline.beats.length);
+        }
+      }
+      // And the draft that comes out of this is structurally sound for the running
+      // paths: poster in range, integer weights in [1, MAX_WEIGHT], ≤ MAX_BEATS beats
+      // — at 6 s every beat clears the 1.2 s readability floor (D3).
+      const timeline = toBrief(state).copy?.timeline;
+      expect(timeline).toBeDefined();
+      expect(timelineProblem(timeline!, [6])).toBeUndefined();
+    });
+  });
+
+  describe("toBrief/fromBrief round-trip (D11)", () => {
+    test("fromBrief loads a declared timeline and toBrief writes it back", () => {
+      const loaded = fromBrief(timelineBrief());
+      expect(loaded.copyExplicit).toBe(true);
+      expect(loaded.timeline).toEqual({
+        beats: [
+          { text: "Stay wild.", weight: 3 },
+          { text: "Stay hydrated.", weight: 2 },
+          { text: "Find your trail.", weight: 1 },
+        ],
+        transition: "fade",
+        keyBeat: 2,
+      });
+      expect(toBrief(loaded).copy).toEqual(timelineBrief().copy);
+    });
+
+    test("a timeline brief survives a load → save byte-for-byte", () => {
+      const brief = timelineBrief();
+      const roundTripped = toBrief(fromBrief(brief, { file: "camp.yaml", revision: undefined as unknown as undefined }));
+      expect(dumpBrief(roundTripped)).toBe(dumpBrief(brief));
+    });
+
+    test("the serialised copy block sits after variation, as the canonical key order is", () => {
+      // `dumpBrief` puts any key outside the known order last, so `copy` lands at the
+      // tail of its YAML. The object we hand it should match that: copy after variation.
+      const written = toBrief(fromBrief(timelineBrief()));
+      const keys = Object.keys(written);
+      expect(keys.indexOf("variation")).toBeLessThan(keys.indexOf("copy"));
+    });
+
+    test("a brief with no copy block does not grow one", () => {
+      const written = toBrief(fromBrief(savedBrief({ mode: "variation" })));
+      expect("copy" in written).toBe(false);
+    });
+
+    test("a declared-but-empty copy block round-trips (copyExplicit)", () => {
+      const brief = savedBrief({ copy: {} });
+      const roundTripped = toBrief(fromBrief(brief, { file: "camp.yaml", revision: undefined as unknown as undefined }));
+      expect(roundTripped.copy).toEqual({});
+      expect(dumpBrief(roundTripped)).toBe(dumpBrief(brief));
+    });
+
+    test("a host without the ffmpeg capability still round-trips a loaded timeline verbatim", () => {
+      const loaded = { ...fromBrief(timelineBrief()), capabilities: { motion: false, reason: "no ffmpeg on host" } };
+      const written = toBrief(loaded);
+      // the brief arrives with motion formats (the parser required them), so the
+      // timeline persists even though this host has no controls for it (D11/D12)
+      expect(written.copy).toEqual(timelineBrief().copy);
+      expect(written.output?.formats).toContain("motion");
+    });
+  });
+
+  describe("the D5 gate: a timeline serialises only where the parser allows it", () => {
+    test("authoring is gated on canSerializeTimeline, never on the beats in the draft", () => {
+      const authored = reduce(reduce(motionState(), { type: "addBeat" }), {
+        type: "setBeatText",
+        index: 0,
+        text: "Hook",
+      });
+      expect(toBrief(authored).copy?.timeline?.beats).toEqual([{ text: "Hook", weight: 1 }]);
+    });
+
+    test("Video off drops the timeline from the brief but keeps the beats in the draft", () => {
+      const authored = reduce(reduce(motionState(), { type: "addBeat" }), {
+        type: "setBeatText",
+        index: 0,
+        text: "Hook",
+      });
+      const videoOff = reduce(authored, { type: "toggleFormat", value: "motion" });
+      expect(videoOff.timeline.beats).toHaveLength(1);
+      expect(toBrief(videoOff).copy).toBeUndefined();
+    });
+
+    test("a switch to classic mode does the same, and the draft survives the round trip", () => {
+      const authored = reduce(reduce(motionState(), { type: "addBeat" }), {
+        type: "setBeatText",
+        index: 0,
+        text: "Hook",
+      });
+      const classic = reduce(authored, { type: "setMode", mode: "brief" });
+      expect(toBrief(classic).copy).toBeUndefined();
+      const back = reduce(classic, { type: "setMode", mode: "variation" });
+      expect(toBrief(back).copy?.timeline?.beats).toEqual([{ text: "Hook", weight: 1 }]);
+    });
+
+    test("a timeline cannot combine with axes.headline: pool://copy", () => {
+      const authored = reduce(reduce(motionState(), { type: "addBeat" }), {
+        type: "setBeatText",
+        index: 0,
+        text: "Hook",
+      });
+      const heightened = reduce(authored, { type: "toggleHeadline" });
+      expect(heightened.variation.headline).toBe(true);
+      // the beats are still in the draft; only the serialisation is gated
+      expect(heightened.timeline.beats).toHaveLength(1);
+      expect(toBrief(heightened).copy).toBeUndefined();
+    });
+  });
+
+  describe("drafts written before timelines existed", () => {
+    test("a legacy draft restores an empty timeline and no copy flag", () => {
+      const restored = normalizeDraftState({ mode: "brief", briefId: "camp" });
+      expect(restored.timeline).toEqual({ beats: [], transition: "fade", keyBeat: 1 });
+      expect(restored.copyExplicit).toBe(false);
+    });
+
+    test("a draft with a timeline keeps it, repairing broken beats and clamping keyBeat", () => {
+      const restored = normalizeDraftState({
+        mode: "brief",
+        briefId: "camp",
+        copyExplicit: true,
+        timeline: {
+          beats: [null, { text: "kept", weight: 7 }, { text: 42, weight: 99 }, { text: "ok", weight: -3 }],
+          transition: "slide",
+          keyBeat: 20,
+        },
+      });
+      expect(restored.timeline).toEqual({
+        beats: [
+          { text: "", weight: 1 },
+          { text: "kept", weight: 7 },
+          { text: "", weight: 1 },
+          { text: "ok", weight: 1 },
+        ],
+        transition: "fade",
+        keyBeat: 4,
+      });
+      expect(restored.copyExplicit).toBe(true);
+    });
+
+    test("a malformed timeline object repairs its shape and its poster", () => {
+      const nonArray = normalizeDraftState({
+        mode: "brief",
+        briefId: "camp",
+        timeline: { beats: "nope", transition: "cut", keyBeat: 0 },
+      });
+      expect(nonArray.timeline).toEqual({ beats: [], transition: "cut", keyBeat: 1 });
+
+      const missingWeight = normalizeDraftState({
+        mode: "brief",
+        briefId: "camp",
+        timeline: { beats: [{ text: "takable" }], keyBeat: -5 },
+      });
+      expect(missingWeight.timeline).toEqual({ beats: [{ text: "takable", weight: 1 }], transition: "fade", keyBeat: 1 });
+    });
   });
 })
