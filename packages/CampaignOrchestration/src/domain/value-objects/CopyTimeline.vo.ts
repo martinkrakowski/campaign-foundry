@@ -117,7 +117,10 @@ function fadeInWidth(
   total: number,
   durationSec: number,
 ): number {
-  if (t.transition === "cut" || i === 0) return 0;
+  // A clip of no length has no room to fade. Without this the arithmetic below is
+  // `0 / 0`, and a NaN `fadeInT` propagates into `beatAt`'s comparisons, where every
+  // test against it is false — so the fade silently disappears instead of failing.
+  if (t.transition === "cut" || i === 0 || durationSec <= 0) return 0;
   const prevSec = (durationSec * weights[i - 1]) / total;
   const thisSec = (durationSec * weights[i]) / total;
   const fadeSec = Math.min(FADE_WIDTH_MAX_SEC, FADE_WIDTH_SHARE * Math.min(prevSec, thisSec));
@@ -142,6 +145,15 @@ export function beatAt(
   // the last, which is closed at 1 — so "the first window whose end exceeds t, or the
   // last once reached" is total on [0,1]: the last iteration always breaks, so there is
   // no fallback branch to leave uncovered.
+  // An empty list has no beat to be "at". The return type promises a `current`, so
+  // returning `resolved[0]` here would hand the compositor `undefined` behind a
+  // non-optional type and fail somewhere further away, wearing someone else's name.
+  // Callers reach this through `resolveTimeline`, which only yields an empty list for a
+  // timeline `timelineProblem` rejects — so this is unreachable in the pipeline and
+  // loud if that ever stops being true.
+  if (resolved.length === 0) {
+    throw new Error("beatAt: the resolved timeline is empty; validate with timelineProblem first.");
+  }
   let selected = 0;
   for (let i = 0; i < resolved.length; i += 1) {
     if (t < resolved[i].endT || i === resolved.length - 1) {

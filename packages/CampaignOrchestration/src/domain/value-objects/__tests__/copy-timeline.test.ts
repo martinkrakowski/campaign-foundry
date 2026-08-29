@@ -198,3 +198,25 @@ describe("timelineProblem", () => {
     expect(timelineProblem(t, [3.5])).toBeDefined();
   });
 });
+
+describe("degenerate inputs fail loudly or not at all", () => {
+  test("a zero-length clip has no room to fade, rather than a NaN width", () => {
+    // `0 / 0` is NaN, and every comparison against NaN is false — so a NaN fadeInT does
+    // not throw, it makes the crossfade silently vanish.
+    const resolved = resolveTimeline(
+      { beats: [{ text: "a", weight: 1 }, { text: "b", weight: 1 }], transition: "fade", keyBeat: 1 },
+      0,
+    );
+    expect(resolved.every((beat) => Number.isFinite(beat.fadeInT))).toBe(true);
+    expect(resolved[1].fadeInT).toBe(0);
+  });
+
+  test("resolveTimeline returns an empty list for empty beats, without dividing by zero", () => {
+    // the loop never runs, so the zero total is never a divisor
+    expect(resolveTimeline({ beats: [], transition: "cut", keyBeat: 1 }, 6)).toEqual([]);
+  });
+
+  test("beatAt refuses an empty timeline by name instead of returning undefined", () => {
+    expect(() => beatAt([], 0)).toThrow(/empty/);
+  });
+});
