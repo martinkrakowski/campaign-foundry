@@ -4,7 +4,7 @@ import type { Variant } from "../../domain/entities/Variant.js";
 import type { AspectRatioValue } from "../../domain/value-objects/aspect-ratios.js";
 import { MOTION_FPS, type MotionKind } from "../../domain/value-objects/MotionKind.vo.js";
 import type { VariationPlan } from "../../domain/value-objects/VariationPlan.vo.js";
-import { DISTANCE_AXES, VariationPolicy, type PlanInput } from "../../domain/value-objects/VariationPolicy.vo.js";
+import { DISTANCE_AXES, VariationPolicy, type PlanInput, type PolicyHasher } from "../../domain/value-objects/VariationPolicy.vo.js";
 
 /** Re-roll bound: 64 draws from `seedFrom(briefId, index, attempt)`. */
 import { EXHAUSTIVE_MAX_SPACE, enumerateAxes, exhaustiveAccept, shortfallMessage } from "./PlanCapacity.js";
@@ -28,8 +28,10 @@ interface AxisDraw {
  * policy carries them for `replan`.
  */
 export class PlanVariationsUseCase {
+  constructor(private readonly hasher: PolicyHasher) {}
+
   plan(brief: CampaignBrief, input: PlanInput = {}): Result<VariationPlan, Error> {
-    const policyResult = VariationPolicy.fromBrief(brief, input);
+    const policyResult = VariationPolicy.fromBrief(brief, input, input.hasher ?? this.hasher);
     if (!policyResult.success) return policyResult;
     const policy = policyResult.value;
 

@@ -1,4 +1,5 @@
 import { PlanVariationsUseCase } from "@campaignfoundry/CampaignOrchestration";
+import { nodeCryptoPolicyHasher } from "@campaignfoundry/CampaignOrchestration/infrastructure";
 import { parseBrief } from "../../lib/load-brief.js";
 import { planInputFor } from "../../lib/pools.js";
 
@@ -28,7 +29,7 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 422);
     return { error: input.error.message };
   }
-  const planned = new PlanVariationsUseCase().plan(brief, input.value);
+  const planned = new PlanVariationsUseCase(nodeCryptoPolicyHasher).plan(brief, input.value);
   if (!planned.success) {
     setResponseStatus(event, 422);
     return { error: planned.error.message };

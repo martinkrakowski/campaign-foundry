@@ -4,11 +4,9 @@ import { MOTION_KINDS, type MotionKind } from "./MotionKind.vo.js";
  * The variation axes' vocabulary and defaults, in the one place both the planner and
  * the editor can read them.
  *
- * `VariationPolicy.vo.ts` is the natural home, but it hashes its policy with
- * `node:crypto` and so can never be bundled for a browser. Keeping these here — a leaf
- * with no runtime dependency beyond the motion kinds — lets the web app read the domain
- * rather than keep a copy of it that silently drifts (D18). The VO re-exports every name
- * below, so its own public surface is unchanged.
+ * Keeping these here — a leaf with no runtime dependency beyond the motion kinds —
+ * lets the web app read the domain without dragging in orchestration use cases (D18).
+ * The VO re-exports every name below, so its own public surface is unchanged.
  */
 
 /**
