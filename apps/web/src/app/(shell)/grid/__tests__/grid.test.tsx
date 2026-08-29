@@ -143,6 +143,35 @@ describe("GridPage", () => {
     expect(chip.getAttribute("title")).toBe(long);
   });
 
+  test("a partial descriptor from a persisted report loses only the bad field, never a chip's worth of nothing", async () => {
+    // This goes through the real boundary: seedPersistedRun mocks fetch, so the report is
+    // narrowed by fetchPersistedRun exactly as it would be in the app. Without that wiring
+    // `layout` renders as `undefined` — a visible empty pill.
+    seedPersistedRun([
+      makeAsset({
+        variantIndex: 0,
+        descriptor: {
+          layout: 42,
+          tone: "bold",
+          backgroundSource: "procedural",
+          paletteShift: "nope",
+          beats: 3,
+        } as unknown as never,
+      }),
+    ]);
+    renderWithRun(<GridPage />);
+    // The usable fields survive…
+    expect((await screen.findAllByText("bold")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("procedural").length).toBeGreaterThan(0);
+    expect(screen.getByText("3 beats")).toBeTruthy();
+    // …and the unusable ones leave nothing behind, rather than an empty chip.
+    expect(screen.queryByText("42")).toBeNull();
+    expect(screen.queryByText("shift nope")).toBeNull();
+    expect(screen.queryByText("shift undefined")).toBeNull();
+    // The creative itself is untouched by any of this.
+    expect(screen.getByText(/alpha @ 1:1/)).toBeTruthy();
+  });
+
   test("omits beat and headline chips when fields are absent", async () => {
     seedPersistedRun([
       makeMotionAsset({
