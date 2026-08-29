@@ -45,6 +45,7 @@ export const latestReportPath = (root: string): string => resolve(root, "report.
  * A persisted report row that can be keyed. Every row — classic or variation —
  * has the four strings. Variation rows additionally carry integer variantIndex
  * and attempt (>= 0); motion rows carry the mp4 path and clip length.
+ * Planned-axis descriptor is carried additively on variation rows.
  */
 export type PersistedAsset = {
   productId: string;
@@ -56,9 +57,28 @@ export type PersistedAsset = {
   format?: "static" | "motion";
   videoPath?: string;
   durationSec?: number;
+  /**
+   * Planned-axis provenance, on variation rows only — `writeReport` spreads the whole
+   * `GeneratedAsset`, so whatever the entity carried is here. Declared because the type
+   * described a persisted row and said nothing about it.
+   *
+   * `unknown`, not `VariantDescriptor`, and that is the whole point. `isPersistedAsset` is
+   * a type PREDICATE: whatever this type claims, callers believe after the guard returns
+   * true. The guard deliberately does not validate the descriptor — it decides whether a
+   * row is a usable ASSET, and a row whose provenance is malformed is still a perfectly
+   * good creative, so rejecting it would lose work to a cosmetic defect. Typing it
+   * `VariantDescriptor` while not checking it would make the predicate assert something it
+   * never verified.
+   *
+   * So the type says exactly what the guard guarantees: something may be here, of no
+   * promised shape. Nothing in the API reads it; a consumer that wants it must narrow it
+   * itself, which is what the web already does field by field.
+   */
+  descriptor?: unknown;
 };
 
 const isNonNegInt = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n >= 0;
+
 
 /**
  * Guard for a persisted report row — used by both the merge path and packaging.

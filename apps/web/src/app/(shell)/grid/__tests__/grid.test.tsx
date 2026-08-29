@@ -85,6 +85,168 @@ describe("GridPage", () => {
     expect(screen.queryByText(/headline-bottom ·/)).toBeNull();
   });
 
+  test("shows beat and pooled headline descriptor chips when present", async () => {
+    seedPersistedRun([
+      makeMotionAsset({
+        variantIndex: 0,
+        descriptor: {
+          layout: "headline-top",
+          tone: "bold",
+          backgroundSource: "procedural",
+          paletteShift: 0,
+          motion: "ken-burns-in",
+          durationSec: 6,
+          beats: 3,
+          headline: "Stay wild",
+        },
+      }),
+      makeAsset({
+        variantIndex: 1,
+        descriptor: {
+          layout: "headline-bottom",
+          tone: "subtle",
+          backgroundSource: "procedural",
+          paletteShift: 0,
+          beats: 1,
+        },
+      }),
+    ]);
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText("3 beats")).toBeTruthy();
+    expect(screen.getByText("1 beat")).toBeTruthy();
+    expect(screen.getByText('"Stay wild"')).toBeTruthy();
+  });
+
+  test("a long pooled headline is bounded and keeps its full text on hover", async () => {
+    // Every other chip in this row is a short enum. A pooled headline is arbitrary author
+    // text, and the row does not wrap inside a 240px tile — unbounded, it pushes the chips
+    // after it out of view.
+    const long =
+      "Stay wild, stay hydrated, and never stop exploring the trail ahead of you today and tomorrow";
+    seedPersistedRun([
+      makeAsset({
+        variantIndex: 0,
+        descriptor: {
+          layout: "headline-top",
+          tone: "bold",
+          backgroundSource: "procedural",
+          paletteShift: 0,
+          headline: long,
+        },
+      }),
+    ]);
+    renderWithRun(<GridPage />);
+    const chip = await screen.findByText(`"${long}"`);
+    expect(chip.className).toContain("truncate");
+    expect(chip.className).toMatch(/max-w-/);
+    // Clipped on screen, but the whole line is still reachable.
+    expect(chip.getAttribute("title")).toBe(long);
+  });
+
+  test("omits beat and headline chips when fields are absent", async () => {
+    seedPersistedRun([
+      makeMotionAsset({
+        variantIndex: 0,
+        descriptor: {
+          layout: "headline-top",
+          tone: "bold",
+          backgroundSource: "procedural",
+          paletteShift: 0,
+          motion: "ken-burns-in",
+          durationSec: 6,
+        },
+      }),
+    ]);
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText("ken-burns-in · 6s")).toBeTruthy();
+    expect(screen.queryByText(/beat/)).toBeNull();
+    expect(screen.queryByText(/".*"/)).toBeNull();
+  });
+
+  test("a reloaded campaign shows the same descriptor chips as a freshly-run one", async () => {
+    const user = userEvent.setup();
+    const assets = [
+      makeMotionAsset({
+        variantIndex: 0,
+        treatment: "headline-top-bold",
+        descriptor: {
+          layout: "headline-top",
+          tone: "bold",
+          backgroundSource: "procedural",
+          paletteShift: 0.2,
+          motion: "ken-burns-in",
+          durationSec: 6,
+          beats: 3,
+          headline: "Stay wild",
+        },
+      }),
+      makeAsset({
+        variantIndex: 1,
+        treatment: "headline-bottom-subtle",
+        descriptor: {
+          layout: "headline-bottom",
+          tone: "subtle",
+          backgroundSource: "procedural",
+          paletteShift: 0,
+        },
+      }),
+    ];
+
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem(
+      "cf:brief",
+      JSON.stringify({
+        id: "camp",
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "Stay wild",
+        products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
+        mode: "variation",
+        variation: { count: 2 },
+      }),
+    );
+
+    const report = {
+      halted: false,
+      assets,
+      log: { entries: [], campaignId: "camp" },
+    };
+
+    mockPipelineApi({
+      post: () => json({ jobId: "job-reload-test" }, 202),
+      job: () => jobOk(report),
+      result: () => json(report),
+    });
+
+    // 1. Freshly run the campaign
+    const { unmount } = renderWithRun(<Harness />);
+    await user.click(screen.getByText("exec"));
+
+    // Verify chips on fresh run
+    expect(await screen.findByText("3 beats")).toBeTruthy();
+    expect(screen.getByText('"Stay wild"')).toBeTruthy();
+    expect(screen.getByText("ken-burns-in · 6s")).toBeTruthy();
+    expect(screen.getByText("shift 0.2")).toBeTruthy();
+    expect(screen.getAllByText("headline-top").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("bold").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("headline-bottom").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("subtle").length).toBeGreaterThan(0);
+
+    // 2. Reload: unmount and mount fresh GridPage (fetches from persisted GET /campaigns/result)
+    unmount();
+    renderWithRun(<GridPage />);
+
+    // Verify chips on reloaded run match freshly-run chips
+    expect(await screen.findByText("3 beats")).toBeTruthy();
+    expect(screen.getByText('"Stay wild"')).toBeTruthy();
+    expect(screen.getByText("ken-burns-in · 6s")).toBeTruthy();
+    expect(screen.getByText("shift 0.2")).toBeTruthy();
+    expect(screen.getAllByText("headline-top").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("bold").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("headline-bottom").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("subtle").length).toBeGreaterThan(0);
+  });
+
   test("a variation re-roll updates the tile in place and clears its decision", async () => {
     const user = userEvent.setup();
     const original = makeAsset({

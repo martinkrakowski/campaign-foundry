@@ -174,6 +174,55 @@ describe("report persistence", () => {
     expect(isPersistedAsset({ ...variation, treatment: undefined })).toBe(false);
   });
 
+  test("isPersistedAsset accepts rows without descriptor (backward compatibility)", () => {
+    const legacyClassic = {
+      productId: "alpha",
+      aspectRatio: "1:1",
+      treatment: "default",
+      outputPath: "alpha/1x1.png",
+    };
+    const legacyVariation = {
+      productId: "alpha",
+      aspectRatio: "1:1",
+      treatment: "headline-top-bold",
+      outputPath: "alpha/1x1/v0.png",
+      variantIndex: 0,
+      attempt: 0,
+      format: "static",
+    };
+    expect(isPersistedAsset(legacyClassic)).toBe(true);
+    expect(isPersistedAsset(legacyVariation)).toBe(true);
+  });
+
+  test("a row is usable whatever shape its descriptor is in", () => {
+    // The guard decides whether a row is a usable ASSET. A descriptor is provenance the UI
+    // reads field by field; a malformed one is a cosmetic defect, not a reason to drop a
+    // creative. This asserts the guard stays out of it.
+    const base = {
+      productId: "alpha",
+      aspectRatio: "9:16",
+      treatment: "headline-top-bold",
+      outputPath: "alpha/9x16/v0.png",
+      variantIndex: 0,
+      attempt: 0,
+    };
+    const wellFormed = {
+      layout: "headline-top",
+      tone: "bold",
+      backgroundSource: "procedural",
+      paletteShift: 0.1,
+      headline: "Stay wild",
+      motion: "ken-burns-in",
+      durationSec: 6,
+      beats: 3,
+    };
+    expect(isPersistedAsset({ ...base, descriptor: wellFormed })).toBe(true);
+    expect(isPersistedAsset({ ...base, descriptor: { layout: 42 } })).toBe(true);
+    expect(isPersistedAsset({ ...base, descriptor: null })).toBe(true);
+    // And a row written before descriptors existed still loads.
+    expect(isPersistedAsset(base)).toBe(true);
+  });
+
   test("merge of a re-rolled variation slot replaces exactly one row; siblings unchanged", async () => {
     const v0 = asset({
       variantIndex: 0,
