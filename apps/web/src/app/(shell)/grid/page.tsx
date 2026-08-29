@@ -113,10 +113,12 @@ export default function GridPage() {
       products: uniqueSorted(assets.map((a) => a.productId)),
       ratios: uniqueSorted(assets.map((a) => a.aspectRatio)),
       formats: uniqueSorted(assets.map((a) => formatOf(a))),
-      layouts: uniqueSorted(assets.flatMap((a) => (a.descriptor ? [a.descriptor.layout] : []))),
-      tones: uniqueSorted(assets.flatMap((a) => (a.descriptor ? [a.descriptor.tone] : []))),
+      // A descriptor that lost a field to normalisation contributes no option for it —
+      // `flatMap` over `?? []` drops it rather than offering an "undefined" filter.
+      layouts: uniqueSorted(assets.flatMap((a) => (a.descriptor?.layout ? [a.descriptor.layout] : []))),
+      tones: uniqueSorted(assets.flatMap((a) => (a.descriptor?.tone ? [a.descriptor.tone] : []))),
       backgrounds: uniqueSorted(
-        assets.flatMap((a) => (a.descriptor ? [a.descriptor.backgroundSource] : [])),
+        assets.flatMap((a) => (a.descriptor?.backgroundSource ? [a.descriptor.backgroundSource] : [])),
       ),
     }),
     [assets],
@@ -496,9 +498,17 @@ function Artboard({
         </span>
         {asset.descriptor && (
           <>
-            <DescriptorChip>{asset.descriptor.layout}</DescriptorChip>
-            <DescriptorChip>{asset.descriptor.tone}</DescriptorChip>
-            <DescriptorChip>{asset.descriptor.backgroundSource}</DescriptorChip>
+            {/* Each chip renders only what survived normalisation. An absent field is a
+                chip that is not there, never an empty pill. */}
+            {asset.descriptor.layout !== undefined && (
+              <DescriptorChip>{asset.descriptor.layout}</DescriptorChip>
+            )}
+            {asset.descriptor.tone !== undefined && (
+              <DescriptorChip>{asset.descriptor.tone}</DescriptorChip>
+            )}
+            {asset.descriptor.backgroundSource !== undefined && (
+              <DescriptorChip>{asset.descriptor.backgroundSource}</DescriptorChip>
+            )}
             {typeof asset.descriptor.paletteShift === "number" && (
               <DescriptorChip>{`shift ${asset.descriptor.paletteShift}`}</DescriptorChip>
             )}

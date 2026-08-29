@@ -45,11 +45,20 @@ export interface Asset {
   attempt?: number;
   seed?: number;
   format?: "static" | "motion";
+  /**
+   * Planned axes for this slot — variation assets only.
+   *
+   * Every field is optional because this object arrives as untrusted JSON from a persisted
+   * report, and declaring four of them required was a claim nothing verified. `normalizeDescriptor`
+   * is what makes the shape true: it runs once at the boundary, keeps the fields that are
+   * usable, and drops the rest. The optionality here is what forces a renderer to say what
+   * it does when a field is absent, instead of rendering `undefined` into an empty chip.
+   */
   descriptor?: {
-    layout: string;
-    tone: string;
-    backgroundSource: string;
-    paletteShift: number;
+    layout?: string;
+    tone?: string;
+    backgroundSource?: string;
+    paletteShift?: number;
     motion?: string;
     durationSec?: number;
     /**
@@ -137,11 +146,55 @@ function pipelineUnreachable(status: number, error?: string): Error {
  * log-only run counts); the API's "no run yet" default has assets:[] and log:null.
  * The report must belong to this campaign — never adopt another brief's creatives.
  */
+/**
+ * Keep the descriptor fields that are usable and drop the rest (never the asset).
+ *
+ * A persisted report is untrusted JSON: `PersistedAsset.descriptor` is deliberately typed
+ * `unknown` on the API side because `isPersistedAsset` decides whether a row is a usable
+ * ASSET and says nothing about its provenance. A row whose descriptor is partial or junk is
+ * still a perfectly good creative, so this narrows the provenance and never rejects the row.
+ *
+ * Returning `undefined` when nothing survives is deliberate: a descriptor with no readable
+ * field is indistinguishable from no descriptor, and a classic asset legitimately has none.
+ */
+export function normalizeDescriptor(value: unknown): Asset["descriptor"] | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+  const num = (v: unknown): number | undefined =>
+    typeof v === "number" && Number.isFinite(v) ? v : undefined;
+  const descriptor: NonNullable<Asset["descriptor"]> = {
+    ...(str(raw.layout) !== undefined ? { layout: str(raw.layout) } : {}),
+    ...(str(raw.tone) !== undefined ? { tone: str(raw.tone) } : {}),
+    ...(str(raw.backgroundSource) !== undefined ? { backgroundSource: str(raw.backgroundSource) } : {}),
+    ...(num(raw.paletteShift) !== undefined ? { paletteShift: num(raw.paletteShift) } : {}),
+    ...(str(raw.motion) !== undefined ? { motion: str(raw.motion) } : {}),
+    ...(num(raw.durationSec) !== undefined ? { durationSec: num(raw.durationSec) } : {}),
+    ...(num(raw.beats) !== undefined ? { beats: num(raw.beats) } : {}),
+    ...(str(raw.headline) !== undefined ? { headline: str(raw.headline) } : {}),
+  };
+  return Object.keys(descriptor).length > 0 ? descriptor : undefined;
+}
+
+/** Narrow every asset's provenance once, where report JSON becomes a RunResult. */
+export function normalizeRunResult(result: RunResult): RunResult {
+  if (!Array.isArray(result.assets)) return result;
+  return {
+    ...result,
+    assets: result.assets.map((asset) =>
+      asset.descriptor === undefined
+        ? asset
+        : { ...asset, descriptor: normalizeDescriptor(asset.descriptor) },
+    ),
+  };
+}
+
 async function fetchPersistedRun(campaignId: string): Promise<RunResult | null> {
   try {
     const res = await fetch(`${API}/campaigns/result?campaignId=${encodeURIComponent(campaignId)}`);
     const d = (await res.json()) as RunResult;
-    if (d?.log?.campaignId === campaignId && (d.assets?.length || d.log)) return d;
+    // The one place persisted JSON becomes a RunResult, so the one place to narrow it.
+    if (d?.log?.campaignId === campaignId && (d.assets?.length || d.log)) return normalizeRunResult(d);
   } catch {
     /* non-JSON / network — treat as "no persisted run" */
   }
