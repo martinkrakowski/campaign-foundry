@@ -5,12 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Writable } from "node:stream";
 import { createCanvas, type Canvas, type SKRSContext2D } from "@napi-rs/canvas";
-import type {
-  VideoCompositeRequest,
-  VideoCompositeResult,
-  VideoCompositorPort,
-} from "@campaignfoundry/CampaignOrchestration";
+import type { VideoCompositeRequest, VideoCompositeResult, VideoCompositorPort } from "@campaignfoundry/CampaignOrchestration";
 import { restT } from "@campaignfoundry/CampaignOrchestration";
+import type { CopyTimeline, ResolvedBeat } from "@campaignfoundry/CampaignOrchestration";
 // Static import (not createRequire) so bundlers such as Nitro trace the package
 // and its binary into the production output.
 import ffmpegStatic from "ffmpeg-static";
@@ -107,10 +104,21 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
 
     const video = await this.encodeFrames(canvas, ctx, prepared, request, frames, this.ffmpegPath);
 
-    NodeCanvasCompositor.draw(ctx, prepared, restT(request.motion), request.motion);
+    // Poster = the key beat at rest (D7): the pose clock settles at restT(kind)
+    // while the copy clock sits on the key beat's own mid-window, so the poster
+    // shows exactly what buyers see when the campaign middle beat is prominent.
+    NodeCanvasCompositor.draw(
+      ctx,
+      prepared,
+      restT(request.motion),
+      request.motion,
+      posterCopyTAt(request.timeline, prepared.timeline),
+    );
     const poster = new Uint8Array(canvas.toBuffer("image/png"));
 
     const sampledFrames = sampleAt.map((t) => {
+      // Frames clip the live sequence: only `t` moves, so copy follows pose in
+      // lockstep and the poster/timeline clocks stay independent (D2/D7).
       NodeCanvasCompositor.draw(ctx, prepared, t, request.motion);
       return new Uint8Array(canvas.toBuffer("image/png"));
     });
@@ -201,6 +209,21 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
       await rm(workDir, { recursive: true, force: true });
     }
   }
+}
+
+/**
+ * The poster's copy clock (D7): the midpoint of the key beat's window, in copy
+ * seconds. Undefined without `copy.timeline`, which keeps the poster on the
+ * legacy path. The pose clock is unaffected — only this value is passed as the
+ * compositor's `copyT`.
+ */
+function posterCopyTAt(
+  timeline: CopyTimeline | undefined,
+  resolved: readonly ResolvedBeat[] | undefined,
+): number | undefined {
+  if (timeline === undefined || resolved === undefined) return undefined;
+  const keyBeat = resolved[timeline.keyBeat - 1];
+  return (keyBeat.startT + keyBeat.endT) / 2;
 }
 
 function ffmpegArgs(width: number, height: number, fps: number, outPath: string): string[] {
