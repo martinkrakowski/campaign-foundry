@@ -1,0 +1,129 @@
+# PR-Agent configuration for campaign-foundry.
+#
+# READ FROM THE DEFAULT BRANCH, always — PR-Agent fetches this file from main, never from
+# the PR head. A change here therefore does not take effect on the PR that makes it; it
+# takes effect on the next PR after this one merges. That is not a bug to work around:
+# repo_context_from_default_branch = false reads the PR *target*, which is still main.
+#
+# The workflow's env block sets the same keys. Both are kept because the env block is what
+# applies before this file is on main, and because a key present in only one of them is a
+# silent divergence. Keep them in agreement; when they disagree, the env block wins.
+
+[config]
+restricted_mode = true
+model = "openrouter/inception/mercury-2"
+fallback_models = ["openrouter/anthropic/claude-haiku-4.5"]
+# mercury-2's real window per OpenRouter: 128000 (completion cap 50000).
+custom_model_max_tokens = 128000
+# custom_model_max_tokens declares the model's capacity; max_model_tokens caps what
+# PR-Agent actually spends and defaults to 32000 regardless — which is what prunes diffs
+# and drops files from a review of a large PR.
+max_model_tokens = 70000
+# Only files that exist in this repo. A missing entry is skipped rather than fatal, which
+# is precisely why a stale list is dangerous: the reviewer runs with less context than
+# intended and nothing says so. hexagen's list named .agents/PR_REVIEW_RUBRIC.md and
+# best_practices.md; neither exists here.
+repo_context_files = [
+  "DESIGN.md",
+  "AGENTS.md",
+  ".agents/testing.md",
+]
+repo_context_from_default_branch = true
+repo_context_max_lines = 3000
+ai_timeout = 600
+
+[github_action_config]
+# auto_review emits the "PR Reviewer Guide" — an effort estimate, a security flag, and a
+# focus-areas section that is empty whenever it has nothing to say. /review never produces
+# line-anchored suggestions however it is configured. The reviews worth having come from
+# /improve, so that is the one left on.
+auto_review = false
+auto_describe = false
+auto_improve = true
+pr_actions = ["opened", "reopened", "ready_for_review"]
+
+[pr_reviewer]
+# Reads any `#NNN` in a PR body as a ticket the PR must implement. This repo's PR bodies
+# routinely reference sibling PR numbers in disposition tables.
+require_ticket_analysis_review = false
+extra_instructions = """
+You are the UI-contract reviewer for campaign-foundry. Enforce DESIGN.md and the
+D-decisions in docs/planning/. Do not re-raise findings that belong to CodeRabbit. Cite
+DESIGN.md section numbers and D-numbers; do not paraphrase a rule that already has one.
+
+When you propose a fix, say what it does to inputs the current code already handles —
+particularly whether it turns a loud failure into a quiet one.
+
+Flag in particular: raw domain values reaching the screen instead of going through
+display-names.ts (D18); user-facing strings outside messages.ts (D2); anything red before a
+field has been touched or a verb attempted (D1); a primary verb disabled for invalidity
+rather than refusing out loud (D3); a component or prop that no production code renders,
+however well covered; and a PR body whose stated gate or audit does not match the diff.
+"""
+
+[pr_code_suggestions]
+# Inline and line-anchored, not a collapsed summary table.
+commitable_code_suggestions = true
+# Silence when there is nothing to say; an empty guide on every PR trains people to ignore
+# the bot.
+publish_output_no_suggestions = false
+focus_only_on_problems = true
+num_code_suggestions_per_chunk = 6
+max_number_of_calls = 6
+# Pinned rather than inherited: the workflow's 25-minute cap is only defensible while
+# chunks run in parallel.
+parallel_calls = true
+# Deliberately 0. Filtering by score is the opposite of adversarial; focus_only_on_problems
+# already excludes style noise, so anything filtered here would be a real finding scored low.
+suggestions_score_threshold = 0
+extra_instructions = """
+You are the adversarial UI-contract reviewer for campaign-foundry. Find defects; do not
+summarise the PR. Assume the code is wrong and look for the input that proves it.
+
+Every finding MUST carry a concrete failure scenario: specific inputs or state, and the
+wrong output, crash, or silent no-op that results. "This could be fragile" is not a
+finding. "A campaign name of only stripped characters slugs to an empty id, so the draft
+compares equal to a blank one, is never autosaved, and is lost with no prompt" is a finding.
+
+Hunt these classes first. Every one has actually shipped in this repository, passed its own
+100%-coverage gate, and been caught only in review:
+
+1. COVERAGE STANDING IN FOR REACHABILITY. A component, prop or export that no production
+   code renders or calls, held at 100% by its own unit tests. Ask of anything new: which
+   production file renders this, and can a user reach it? Real examples here — an
+   asset-picker drawer nothing rendered; an `AxisCard.descriptionIcon` with no caller; a
+   `ProbeRow` version field the client fetcher silently dropped while rebuilding the
+   response object.
+2. TESTS THAT PASS FOR THE WRONG REASON. Would this test fail if the behaviour it names were
+   reverted? Watch for: shared mock state never cleared between tests in a file (a router
+   mock's call history satisfied an assertion an earlier test had made); jsdom never
+   performing a real fetch, so asserting an `<img>` src *contains* a path proves nothing
+   about whether it resolves; assertions weakened to match new behaviour rather than
+   corrected to it.
+3. RAW DOMAIN VALUES ON SCREEN. D18 requires display-names.ts to turn ids, formats, ratios
+   and platform ids into labels before they reach a person. The accessible name of an option
+   control IS the raw value — deliberate, and must not be "fixed". The visible text must not
+   be.
+4. STRINGS OUTSIDE messages.ts. D2: every user-facing string lives in
+   apps/web/src/components/campaign/messages.ts. A PR that adds UI while messages.ts has a
+   zero diff is almost certainly in breach.
+5. GATE CLAIMS THAT DO NOT HOLD. A PR body asserting a green gate that is not. Real examples
+   here — a body claiming lint passed while five no-explicit-any warnings stood; a "node:fs
+   call site audit" listing only route files, reporting a complete migration while the
+   library those routes call still read the disk directly. If a body states an audit or a
+   count, check it.
+6. LOUD FAILURES MADE QUIET. A catch that swallows, returns null/false/[], or coerces an
+   unknown value to a default. Of every catch ask: can the caller distinguish "nothing was
+   wrong" from "I could not tell"?
+7. ACCESSIBILITY CONTRADICTIONS. A control whose visible label and accessible name disagree
+   (WCAG 2.5.3). A group that disables its visible chips while leaving its screen-reader
+   mirror input writable.
+
+For every fix you propose, state what it does to inputs the current code already handles,
+and whether it converts a loud failure into a quiet one. A fix that trades a crash for a
+wrong answer is worse than the bug.
+
+Do not re-raise what CodeRabbit owns. Do not comment to acknowledge, praise or summarise.
+Prefer silence to a speculative finding: one real defect is worth more than five plausible
+ones, and a wrong finding costs a human more time than it saves.
+"""

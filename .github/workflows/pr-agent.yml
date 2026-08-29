@@ -1,0 +1,327 @@
+name: "PR-Agent UI Review"
+
+# An LLM reviewer specialised in this repo's UI contracts — DESIGN.md and the D-decisions
+# in docs/planning/. It complements CodeRabbit rather than duplicating it. Not a merge
+# gate: a green check here is not a review.
+#
+# Adapted from hexagen-monaco's pr-agent.yml. The operational scaffolding (concurrency
+# keying, the command allowlist, the digest pin, the did-it-actually-run guard) is carried
+# over intact — every one of those comments records a failure that repo actually hit. The
+# instructions are NOT carried over: they cite hexagen's DESIGN.md section numbers and its
+# defect classes. This repo's sections and its own recurring defects are different, and
+# quoting a rule that does not exist here would produce confident nonsense.
+#
+# Config in .pr_agent.toml is read from the DEFAULT BRANCH. Until this file and the toml
+# are on main, only the keys in the env block below apply — so keep env and toml in
+# agreement. Do not set repo_context_from_default_branch=false to "read the PR head":
+# false reads the PR *target* (still main), never head.
+#
+# The pin is the multi-arch index digest of pragent/pr-agent:0.42.0-github_action, not
+# uses: the-pr-agent/pr-agent@<sha> — that repo's action.yaml FROMs the rolling
+# :github_action tag. Version tags are immutable; rolling tags are not.
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+# restricted_mode skips contents:write operations. contents:read is enough for the API to
+# fetch the PR and the repo context files.
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+# Keyed by PR, by what the run PRODUCES, and by sender type — not by PR alone.
+#
+# Workflow-level concurrency is evaluated when a run is QUEUED, before the job-level `if`
+# below ever runs. With a PR-only key, any bot comment queues a run in this PR's group,
+# cancel-in-progress kills the review already running, and only then does the guard skip
+# the new run. The review dies and nothing replaces it. CodeRabbit comments within seconds
+# of a PR opening — which is exactly while this job is still pulling its image.
+#
+# Splitting on sender type stops *bots* cancelling the review. A HUMAN comment lands in the
+# same group and kills it the same way, and posting a summary right after opening a PR is
+# routine, so the review was being killed on essentially every PR that followed one.
+#
+# The key is therefore "does this run produce a review". Keying on the event alone is wrong
+# in the other direction: it puts an explicit /review in a different group from the auto
+# run, so both proceed and post duplicate reviews. Trading a cancelled review for a doubled
+# one is not a fix.
+#
+# Review-producing runs share a group and supersede each other, as intended: every
+# pull_request run, and an issue_comment whose body is exactly the /review command.
+# Everything else — /describe, /improve, /ask, /help, ordinary comments — gets the isolated
+# group; those do different work, so running one alongside a review is correct.
+#
+# The /review test is the exact-match form the job guard uses, deliberately not
+# startsWith(body, '/review'): a loose test would let `/reviewXYZ` join the review group and
+# cancel a real review, and the guard would then skip it — rebuilding this very bug one
+# level down.
+concurrency:
+  group: >-
+    pr-agent-${{ github.event.pull_request.number || github.event.issue.number
+    }}-${{ ((github.event_name == 'pull_request'
+    || github.event.comment.body == '/improve'
+    || startsWith(github.event.comment.body, '/improve '))
+    && 'improve')
+    || ((github.event.comment.body == '/review'
+    || startsWith(github.event.comment.body, '/review '))
+    && 'review')
+    || 'other' }}-${{ github.event.sender.type }}
+  cancel-in-progress: true
+
+jobs:
+  pr_agent:
+    name: "PR-Agent UI contract review"
+    # pull_request: skip drafts (ready_for_review re-fires when undrafted).
+    # issue_comment: slash commands from trusted authors only — the intentional override so
+    # a maintainer can /review a draft. Do not fetch the PR to skip drafts here; that would
+    # remove the override. The author_association gate matters because issue_comment runs on
+    # the base repo with secrets, while a pull_request from a fork does not get the key.
+    #
+    # The command list is an ALLOWLIST, not startsWith(body, '/'), because an unrecognised
+    # command is not an error to PR-Agent: it logs `WARNING Unknown command: <x>` and exits
+    # 0, so the check goes GREEN having done nothing — indistinguishable from a completed
+    # review unless somebody opens the log. Skipping is the honest outcome for a command
+    # this image cannot serve.
+    #
+    # Each command is matched as the whole body or the body up to a space, so
+    # `/reviewers please look` and `/reviewXYZ` no longer match `/review`. GHA expressions
+    # have no split(); exact-equality plus a trailing-space prefix covers both real forms.
+    # `/ask` is space-only: it is meaningless without a question after it.
+    if: >-
+      github.event.sender.type != 'Bot'
+      && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+      && (github.event_name != 'issue_comment' || (
+        github.event.issue.pull_request
+        && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+        && (
+          github.event.comment.body == '/review'
+          || startsWith(github.event.comment.body, '/review ')
+          || github.event.comment.body == '/describe'
+          || startsWith(github.event.comment.body, '/describe ')
+          || github.event.comment.body == '/improve'
+          || startsWith(github.event.comment.body, '/improve ')
+          || startsWith(github.event.comment.body, '/ask ')
+          || github.event.comment.body == '/help'
+          || startsWith(github.event.comment.body, '/help ')
+        )
+      ))
+    runs-on: ubuntu-latest
+    # The action has no internal deadline and an LLM call can hang. Without this the job
+    # inherits GitHub's 360-minute default and holds a runner for six hours to produce
+    # nothing. Sized for a degraded call, not for serial chunks: parallel_calls is true, so
+    # wall-clock is roughly the slowest single call rather than the sum, and
+    # max_number_of_calls does not multiply this number.
+    timeout-minutes: 25
+    steps:
+      - name: "Stamp run start"
+        id: started
+        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: "PR Agent"
+        uses: docker://pragent/pr-agent@sha256:b81235c3bddc551939a1feca8926f4b6e8abcec2ae5bf4620424f8f56dd9cb93 # 0.42.0-github_action
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Dynaconf/PR-Agent OpenRouter secret: openrouter__key. Dotted OPENROUTER.KEY is
+          # accepted in some GHA examples; __ is the documented form and a legal POSIX name.
+          OPENROUTER__KEY: ${{ secrets.OPENROUTER_KEY }}
+          config.restricted_mode: "true"
+          config.model: "openrouter/inception/mercury-2"
+          config.fallback_models: '["openrouter/anthropic/claude-haiku-4.5"]'
+          # mercury-2's real window per OpenRouter: 128000 (completion cap 50000).
+          config.custom_model_max_tokens: "128000"
+          # custom_model_max_tokens declares the model's capacity; max_model_tokens caps
+          # what PR-Agent actually spends and defaults to 32000 regardless — which is what
+          # prunes diffs and drops files from reviews.
+          config.max_model_tokens: "70000"
+          # Only files that exist in THIS repo. hexagen's list named
+          # .agents/PR_REVIEW_RUBRIC.md and best_practices.md; neither exists here. A
+          # missing entry is skipped rather than fatal, but listing one is a silent way to
+          # ship a reviewer with less context than intended.
+          config.repo_context_files: '["DESIGN.md", "AGENTS.md", ".agents/testing.md"]'
+          config.repo_context_max_lines: "3000"
+          # Bound the LLM call INSIDE the container so a slow model aborts and
+          # fallback_models can engage. Without it the only deadline is timeout-minutes,
+          # which kills the whole job and attempts no fallback at all. Honest caveat:
+          # PR-Agent documents a 120s default for this and long calls have completed
+          # anyway, so this path may not be honoured; timeout-minutes remains the deadline
+          # that definitely works.
+          config.ai_timeout: "600"
+          # Reads any `#NNN` in a PR body as a ticket the PR must implement. This repo's PR
+          # bodies routinely reference sibling PR numbers in disposition tables.
+          pr_reviewer.require_ticket_analysis_review: "false"
+          # SWAPPED, deliberately. auto_review emits the "PR Reviewer Guide" — an effort
+          # estimate, a security flag, and a focus-areas section that is empty whenever it
+          # has nothing to say. That is its output format, not a degraded version of one:
+          # /review never produces line-anchored suggestions however it is configured. The
+          # reviews worth having come from /improve.
+          github_action_config.auto_review: "false"
+          github_action_config.auto_describe: "false"
+          github_action_config.auto_improve: "true"
+          github_action_config.pr_actions: '["opened", "reopened", "ready_for_review"]'
+          # /improve NEVER reads pr_reviewer.extra_instructions, so the mandate is carried
+          # here or the bot becomes a generic suggester — which is the overlap with
+          # CodeRabbit that a second reviewer exists to avoid.
+          pr_code_suggestions.extra_instructions: |
+            You are the adversarial UI-contract reviewer for campaign-foundry. Find defects;
+            do not summarise the PR. Assume the code is wrong and look for the input that
+            proves it.
+
+            Every finding MUST carry a concrete failure scenario: specific inputs or state,
+            and the wrong output, crash, or silent no-op that results. "This could be
+            fragile" is not a finding. "A campaign name of only stripped characters slugs to
+            an empty id, so the draft compares equal to a blank one, is never autosaved, and
+            is lost with no prompt" is a finding.
+
+            Hunt these classes first. Every one of them has actually shipped in this
+            repository, passed its own 100%-coverage gate, and been caught only in review:
+
+            1. COVERAGE STANDING IN FOR REACHABILITY. A component, prop or export that no
+               production code renders or calls, held at 100% by its own unit tests. Ask of
+               anything new: which production file renders this, and can a user reach it?
+               Real examples here — an asset-picker drawer nothing rendered; an
+               `AxisCard.descriptionIcon` with no caller; a `ProbeRow` version field the
+               client fetcher silently dropped while rebuilding the response object.
+            2. TESTS THAT PASS FOR THE WRONG REASON. Would this test fail if the behaviour
+               it names were reverted? Watch for: shared mock state that is never cleared
+               between tests in a file (a router mock's call history satisfied an assertion
+               an earlier test had made); jsdom never performing a real fetch, so asserting
+               an `<img>` src *contains* a path proves nothing about whether it resolves;
+               assertions weakened to match new behaviour rather than corrected to it.
+            3. RAW DOMAIN VALUES ON SCREEN. DESIGN.md and the plan's D18 require
+               `display-names.ts` to turn ids, formats, ratios and platform ids into labels
+               before they reach a person. The accessible name of an option control is the
+               raw value — that is deliberate and must NOT be "fixed". The visible text must
+               not be. A jargon test enforces this; a violation that slips past it is the
+               interesting one.
+            4. STRINGS OUTSIDE messages.ts. D2: every user-facing string lives in
+               `apps/web/src/components/campaign/messages.ts`. A component that hardcodes
+               copy has drifted out of the one voice, and a PR that adds UI while
+               messages.ts has a zero diff is almost certainly in breach.
+            5. GATE CLAIMS THAT DO NOT HOLD. A PR body asserting a green gate that is not.
+               Real examples here — a body claiming lint passed while five `no-explicit-any`
+               warnings stood; a "node:fs call site audit" that listed only route files and
+               so reported a complete migration while the library those routes call still
+               read the disk directly. If a body states an audit or a count, check it.
+            6. LOUD FAILURES MADE QUIET. A catch that swallows, returns null/false/[], or
+               coerces an unknown value to a default. Of every catch ask: can the caller
+               distinguish "nothing was wrong" from "I could not tell"?
+            7. ACCESSIBILITY CONTRADICTIONS. A control whose visible label and accessible
+               name disagree (WCAG 2.5.3). A group that disables its visible chips while
+               leaving its screen-reader mirror input writable — the users least able to see
+               that a control is unavailable being the ones who can still change it.
+
+            For every fix you propose, state what it does to inputs the current code already
+            handles, and whether it converts a loud failure into a quiet one. A fix that
+            trades a crash for a wrong answer is worse than the bug.
+
+            Cite DESIGN.md section numbers, and D-numbers from docs/planning/ where a rule
+            has one. Never paraphrase a rule that has a section; name it.
+
+            Do not re-raise what CodeRabbit owns. Do not comment to acknowledge, praise or
+            summarise. Prefer silence to a speculative finding: one real defect is worth
+            more than five plausible ones, and a wrong finding costs a human more time than
+            it saves.
+          # Inline and line-anchored, not a summary table. The default posts one collapsed
+          # comment — the format that reads as "nothing happened" even when it found
+          # something.
+          pr_code_suggestions.commitable_code_suggestions: "true"
+          # Do not post when there is nothing to say. The default is what produces an empty
+          # guide on every PR; silence is a better signal than three vague rows.
+          pr_code_suggestions.publish_output_no_suggestions: "false"
+          # Pinned explicitly so a future image change cannot quietly turn the bot into a
+          # style-nitpicker.
+          pr_code_suggestions.focus_only_on_problems: "true"
+          # Depth. Defaults are 3 and 3, which on a PR of this repo's usual size processes
+          # only part of the diff and stops at three findings per section.
+          pr_code_suggestions.num_code_suggestions_per_chunk: "6"
+          pr_code_suggestions.max_number_of_calls: "6"
+          # PINNED, not inherited. timeout-minutes above is justified by wall-clock being
+          # roughly the slowest single call rather than the sum of six — true only while
+          # chunks run in parallel. That is the 0.42.0 default, but a default is not a
+          # guarantee: an image bump that flipped it would turn six slow chunks into far
+          # more than the cap, and the first symptom would be a killed job with no review.
+          pr_code_suggestions.parallel_calls: "true"
+          # Deliberately NOT raised above 0: filtering by score is the opposite of
+          # adversarial. focus_only_on_problems already excludes style noise, so anything
+          # filtered here would be a real finding scored low.
+          pr_code_suggestions.suggestions_score_threshold: "0"
+          pr_reviewer.extra_instructions: |
+            You are the UI-contract reviewer for campaign-foundry. Enforce DESIGN.md and the
+            D-decisions in docs/planning/. Do not re-raise findings that belong to
+            CodeRabbit. Cite DESIGN.md section numbers and D-numbers; do not paraphrase a
+            rule that already has one.
+
+            When you propose a fix, say what it does to inputs the current code already
+            handles — particularly whether it turns a loud failure into a quiet one.
+
+            Flag in particular: raw domain values reaching the screen instead of going
+            through display-names.ts (D18); user-facing strings outside messages.ts (D2);
+            anything red before a field has been touched or a verb attempted (D1); a
+            primary verb disabled for invalidity rather than refusing out loud (D3); a
+            component or prop that no production code renders, however well covered; and a
+            PR body whose stated gate or audit does not match the diff.
+
+      # PR-Agent exits 0 even when it could not produce a review — it posts "Failed to
+      # generate code suggestions for PR" and the check goes GREEN. A passing gate for work
+      # that did not happen is the one failure worth engineering against here.
+      #
+      # Deliberately matched on PR-Agent's own failure string rather than on the absence of
+      # suggestions: silence is legitimate (a clean PR posts nothing, by
+      # publish_output_no_suggestions=false), so "no comment" must NOT fail. Only an
+      # explicit failure does.
+      #
+      # Fragile in one known way, stated rather than hidden: the string is PR-Agent's, and
+      # an upstream reword would silently stop matching. The image is pinned by digest, so
+      # that cannot change without a deliberate bump — and the bump is the moment to
+      # re-check this.
+      - name: "Fail if the review did not actually run"
+        # Runs for BOTH triggers. A /review command fails the same way a pull_request run
+        # does; gating this on pull_request alone leaves the command path able to exit 0
+        # having produced nothing.
+        if: always() && (github.event_name == 'pull_request' || github.event_name == 'issue_comment')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number || github.event.issue.number }}
+          # ISO-8601, lexicographically comparable to GitHub's created_at.
+          STARTED_AT: ${{ steps.started.outputs.at }}
+        run: |
+          set -euo pipefail
+          # --paginate, and NO request parameters. A request parameter switches `gh api` to
+          # POST, so it tries to CREATE a comment and gets 422; it also does not define a jq
+          # variable, so a `since` filter would be undefined. Both failures plus an
+          # error-to-zero fallback would make this guard always pass — the exact defect it
+          # exists to catch, inside itself.
+          #
+          # Errors are NOT converted to zero. If the API call fails, this step fails,
+          # because "I could not check" must never read as "nothing was wrong".
+          # `--paginate` concatenates one JSON document PER PAGE, so a plain `jq` filter
+          # emits one count per page. On a PR with more than a page of comments `failed`
+          # becomes "0\n1", `[ "$failed" -gt 0 ]` is an integer-expression error, and a
+          # failing test inside `if` is simply false under `set -e` — so the guard falls
+          # through to its success message while a failure notice sits on the PR.
+          #
+          # That is this guard failing open: the exact defect it exists to catch, rebuilt
+          # inside itself, and invisible until a PR gets busy enough to paginate. `--slurp`
+          # makes the pages one array, so the count is one number.
+          gh api --paginate --slurp --method GET "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" > "$RUNNER_TEMP/pages.json"
+          FILTER='[.[][] | select(.user.login == "github-actions[bot]") | select(.created_at >= $since) | select(.body | test("Failed to generate"))] | length'
+          jq --arg since "$STARTED_AT" "$FILTER" "$RUNNER_TEMP/pages.json" > "$RUNNER_TEMP/failures"
+          failed=$(cat "$RUNNER_TEMP/failures")
+          # A count that is not a single integer means the shape assumption above is wrong.
+          # Fail rather than compare, because "I could not tell" must not read as "clean".
+          case "$failed" in
+            ''|*[!0-9]*)
+              echo "Expected a single integer from the comment scan, got: $failed"
+              exit 1
+              ;;
+          esac
+          if [ "$failed" -gt 0 ]; then
+            echo "PR-Agent reported it could not generate a review."
+            echo "A green check here would claim a review that never happened."
+            exit 1
+          fi
+          echo "No PR-Agent failure notice from this run."
