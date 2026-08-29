@@ -59,6 +59,14 @@ on:
       # actually occurs in.
       - "apps/web/src/**/*.ts"
       - "apps/web/src/**/*.tsx"
+      # The ports live here too, not only in packages/. `apps/api/server/lib/ports/`
+      # declares BriefStorePort and AssetStorePort, holds their filesystem adapters, and
+      # composes them; `pipeline.ts` wires the ImageGeneratorPort implementations. Finding
+      # class 1's worked example — #93's `readBrief` taking an absolute filesystem path —
+      # is in that directory. Excluding apps/api excluded the file that motivates the
+      # class. The API reviewer does not cover it: its instructions send architecture
+      # questions here.
+      - "apps/api/server/**"
   # Deliberately no `issue_comment` — see the note in pr-agent-api.yml. GitHub has no
   # `paths` filter for comments, so the command path would fire all three reviewers on any
   # PR. `synchronize` above, not "Re-run jobs", is what covers later commits.
