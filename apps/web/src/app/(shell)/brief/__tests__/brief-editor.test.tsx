@@ -638,7 +638,7 @@ describe("BriefPage — data flow", () => {
     );
 
     // all three refused: no write left the page, and the refusal is on screen
-    expect(calls.some((c) => c.method !== "GET")).toBe(false);
+    expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
     expect(screen.getByText(messages.targetRegion)).toBeTruthy();
   });
 
@@ -1056,7 +1056,7 @@ describe("BriefPage — capabilities and motion", () => {
     );
     // D3: Save is live, and pressing it refuses rather than writing.
     await userEvent.setup().click(screen.getByRole("button", { name: /^Save$/ }));
-    expect(calls.some((c) => c.method !== "GET")).toBe(false);
+    expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
   });
 
   test("a motion brief on a host without motion stays read-only, saves verbatim, and applies with the refusal (D12)", async () => {
