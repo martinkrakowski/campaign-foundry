@@ -6,6 +6,7 @@ import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
 import type { Product } from "../../../domain/entities/Product.js";
 import type { Variant } from "../../../domain/entities/Variant.js";
 import type { Treatment } from "../../../domain/value-objects/Treatment.vo.js";
+import type { CopyTimeline } from "../../../domain/value-objects/CopyTimeline.vo.js";
 import { DEFAULT_DURATION_SEC } from "../../../domain/value-objects/variation-defaults.js";
 import {
   fakeCompliance,
@@ -883,6 +884,53 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     if (!result.success) return;
     expect(result.value.assets).toHaveLength(1);
     expect(result.value.assets[0]).toMatchObject({ variantIndex: 1, attempt: 2, videoPath: "alpha/1x1/v1.mp4" });
+  });
+
+  const threeBeatTimeline = (beats: { text: string; weight: number }[]): CopyTimeline => ({
+    transition: "fade",
+    keyBeat: 1,
+    beats,
+  });
+
+  test("E3.5 threads authored beats through to the request the compositor receives", async () => {
+    const timeline = threeBeatTimeline([
+      { text: "New season, new kit", weight: 2 },
+      { text: "Built for the cold", weight: 3 },
+      { text: "Shop now", weight: 2 },
+    ]);
+    const d = deps({ planner: fakePlanner(fakePlan([motionVariant()])) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief({ copy: { timeline } }));
+    expect(result.success).toBe(true);
+    // Assert on the request the port received, not a mock call count.
+    const request = vi.mocked(d.videoCompositor.compositeVideo).mock.calls[0]?.[0];
+    expect(request).toBeDefined();
+    expect(request.timeline).toEqual(timeline);
+    expect(request.timeline?.beats).toHaveLength(3);
+  });
+
+  test("E3.1 a prohibited term in any beat halts the run before a frame is drawn", async () => {
+    const compliance = {
+      validateLegalCopy: vi.fn(async (text: string) =>
+        text.includes("miracle") ? { passed: false, reason: "Prohibited terminology: miracle" } : { passed: true },
+      ),
+      validateBrandColorDensity: vi.fn(async () => ({ passed: true, score: 0.5 })),
+    };
+    const timeline = threeBeatTimeline([
+      { text: "New season", weight: 2 },
+      { text: "A miracle cure", weight: 3 },
+      { text: "Shop now", weight: 2 },
+    ]);
+    const d = deps({ compliance, planner: fakePlanner(fakePlan([motionVariant()])) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief({ copy: { timeline } }));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value).toMatchObject({ halted: true, assets: [] });
+    // The gate fires before enquiry, background or composite: nothing is generated.
+    expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
+    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+    expect(d.videoCompositor.compositeVideo).not.toHaveBeenCalled();
+    const halt = result.value.log.entries.filter((e) => e.stage === "ExecuteLegalGateCheck").at(-1);
+    expect(halt?.message).toMatch(/Prohibited terminology: miracle/);
   });
 });
 
