@@ -172,8 +172,11 @@ const fresh: ReportAsset[] = result.assets.map((a) => ({ ...a, brandCompliant: �
 ```
 
 A whole-entity spread, and `GeneratedAsset` carries `descriptor`. The merge path keeps whole
-rows in a `Map` and writes them back unchanged, and `isPersistedAsset` returns a boolean —
-it never narrows a row, and extra properties pass it.
+rows in a `Map` and writes them back unchanged, and `isPersistedAsset` is a filter, not a
+transform: it returns a boolean, so **no row loses a property by passing it**, and extra
+properties pass it. (It does narrow at the *type* level — `a is PersistedAsset` — which is
+why R2.3 declares the field `unknown`: whatever that type claims, the guard is taken to have
+verified.)
 
 So descriptors already survive a reload. Two things are still worth doing, and R2.3/R2.4 are
 rewritten to be only those: the type should stop lying about what a row holds, and the round
