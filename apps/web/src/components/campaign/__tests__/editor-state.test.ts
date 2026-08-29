@@ -31,6 +31,8 @@ import {
   normalizeDraftState,
   motionPackagedRatios,
   DEFAULT_DURATION_SEC,
+  MAX_BEATS,
+  MAX_WEIGHT,
   type EditorState,
   type EditorAction,
 } from "../editor-state";
@@ -1753,6 +1755,47 @@ describe("copy timeline (E5.1)", () => {
       const moved = editorReducer(state, { type: "moveBeat", from: 4, to: 0 });
       expect(moved).toBe(state);
       expect(moved.timeline.beats.every((beat) => beat.text !== undefined && beat.weight !== undefined)).toBe(true);
+    });
+
+    test("an out-of-range move DESTINATION is a no-op and leaves the poster pointing at a beat", () => {
+      // `to` was unchecked: moving the selected first beat to index 9 of a three-beat list
+      // appended it and recorded keyBeat 10 — a timeline the API refuses on Save.
+      const state = reduce(named(["One", "Two", "Three"]), { type: "setKeyBeat", index: 0 });
+      for (const to of [3, 9, -1, 1.5]) {
+        const moved = editorReducer(state, { type: "moveBeat", from: 0, to });
+        expect(moved).toBe(state);
+      }
+      expect(state.timeline.keyBeat).toBeLessThanOrEqual(state.timeline.beats.length);
+    });
+
+    test("addBeat refuses past the domain's beat ceiling", () => {
+      let state = motionState();
+      for (let i = 0; i < MAX_BEATS; i += 1) state = reduce(state, { type: "addBeat" });
+      expect(state.timeline.beats).toHaveLength(MAX_BEATS);
+      // The parser rejects more, so the editor must not build a draft Save cannot take.
+      expect(editorReducer(state, { type: "addBeat" })).toBe(state);
+    });
+
+    test("setBeatWeight refuses a weight the parser would reject", () => {
+      const state = named(["One", "Two", "Three"]);
+      for (const weight of [0, -1, 1.5, MAX_WEIGHT + 1, Number.NaN]) {
+        expect(editorReducer(state, { type: "setBeatWeight", index: 1, weight })).toBe(state);
+      }
+      // The bounds themselves are accepted.
+      expect(reduce(state, { type: "setBeatWeight", index: 1, weight: 1 }).timeline.beats[1]?.weight).toBe(1);
+      expect(
+        reduce(state, { type: "setBeatWeight", index: 1, weight: MAX_WEIGHT }).timeline.beats[1]?.weight,
+      ).toBe(MAX_WEIGHT);
+      // An index outside the list is a no-op too, like the move and remove cases.
+      expect(editorReducer(state, { type: "setBeatWeight", index: 7, weight: 2 })).toBe(state);
+    });
+
+    test("setKeyBeat refuses an index no beat occupies", () => {
+      const state = named(["One", "Two", "Three"]);
+      for (const index of [3, 9, -1, 0.5]) {
+        expect(editorReducer(state, { type: "setKeyBeat", index })).toBe(state);
+      }
+      expect(reduce(state, { type: "setKeyBeat", index: 2 }).timeline.keyBeat).toBe(3);
     });
   });
 

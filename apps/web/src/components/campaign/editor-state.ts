@@ -15,11 +15,11 @@ import {
   MIN_DURATION_SEC,
 } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import { MOTION_KINDS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
-import { MAX_WEIGHT } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
+import { MAX_BEATS, MAX_WEIGHT } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 
 // Re-exported, not restated: every one of these is the domain's own value, and the
 // editor's copies of them were exactly the drift the leaf exists to prevent (D18).
-export { DEFAULT_DURATION_SEC, HEADLINE_POOL_REF, MAX_DURATION_SEC, MIN_DURATION_SEC, MOTION_KINDS, MAX_WEIGHT };
+export { DEFAULT_DURATION_SEC, HEADLINE_POOL_REF, MAX_DURATION_SEC, MIN_DURATION_SEC, MOTION_KINDS, MAX_BEATS, MAX_WEIGHT };
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
 import { platformsToFormats, platformsToRatios } from "./derive";
@@ -452,6 +452,11 @@ function moveTimelineBeat(timeline: TimelineDraft, from: number, to: number): Ti
   return { beats: next, transition: timeline.transition, keyBeat: nextKeyIndex + 1 };
 }
 
+/** A usable 0-based beat index: an integer inside the current list. */
+function isBeatIndex(index: number, beatCount: number): boolean {
+  return Number.isInteger(index) && index >= 0 && index < beatCount;
+}
+
 function reduceEditor(state: EditorState, action: EditorAction): EditorState {
   switch (action.type) {
     case "setMode": {
@@ -510,6 +515,10 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         treatments: state.treatments.filter((_, index) => index !== action.index),
       };
     case "addBeat":
+      // The domain caps a sequence at MAX_BEATS and the parser refuses more, so the editor
+      // must not build a draft it knows Save will reject. A restored draft that already
+      // holds more is left intact deliberately — see normalizeDraftState.
+      if (state.timeline.beats.length >= MAX_BEATS) return state;
       return {
         ...state,
         timeline: { ...state.timeline, beats: [...state.timeline.beats, { text: "", weight: 1 }] },
@@ -520,7 +529,17 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       return { ...state, timeline };
     }
     case "moveBeat": {
-      if (action.from === action.to || action.from >= state.timeline.beats.length) return state;
+      // Both ends, both bounds, and integrality. `to` was unchecked: moving beat 0 to index
+      // 9 of a three-beat list spliced it onto the end and left keyBeat pointing at 10, a
+      // timeline the API rejects on Save.
+      const beatCount = state.timeline.beats.length;
+      if (
+        action.from === action.to ||
+        !isBeatIndex(action.from, beatCount) ||
+        !isBeatIndex(action.to, beatCount)
+      ) {
+        return state;
+      }
       return {
         ...state,
         timeline: moveTimelineBeat(state.timeline, action.from, action.to),
@@ -537,6 +556,17 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         },
       };
     case "setBeatWeight":
+      // The Stepper bounds this, but the reducer is the contract: a weight outside
+      // [1, MAX_WEIGHT], or a fraction, serialises straight into a brief the parser
+      // refuses. An out-of-range dispatch is a no-op, as the move and remove cases are.
+      if (
+        !isBeatIndex(action.index, state.timeline.beats.length) ||
+        !Number.isInteger(action.weight) ||
+        action.weight < 1 ||
+        action.weight > MAX_WEIGHT
+      ) {
+        return state;
+      }
       return {
         ...state,
         timeline: {
@@ -547,6 +577,8 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         },
       };
     case "setKeyBeat":
+      // keyBeat is 1-based and must point at a beat that exists; the action is 0-based.
+      if (!isBeatIndex(action.index, state.timeline.beats.length)) return state;
       return { ...state, timeline: { ...state.timeline, keyBeat: action.index + 1 } };
     case "setTransition":
       return { ...state, timeline: { ...state.timeline, transition: action.transition } };
