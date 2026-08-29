@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import * as messages from "@/components/campaign/messages";
 import {
   addBeatBlockedBy,
+  approvedHeadlineTexts,
   asCopyTimeline,
   timelineDurations,
   MAX_WEIGHT,
@@ -40,6 +41,7 @@ export function TimelineSection({
   const beats = state.timeline.beats;
   const blocked = addBeatBlockedBy(state);
   const durations = [...timelineDurations(state)].sort((a, b) => a - b);
+  const approved = approvedHeadlineTexts(state.pool);
 
   return (
     <fieldset className="mt-4 space-y-2 border-t border-border pt-3">
@@ -128,6 +130,25 @@ export function TimelineSection({
           </span>
         ) : null}
       </div>
+
+      {/* E5.4 — insert approved copy. Offered only when the pool holds some and a beat can
+          still be added, so the control is never present-but-inert. */}
+      {approved.length > 0 && blocked === undefined ? (
+        <fieldset className="flex flex-wrap items-center gap-2">
+          <legend className="text-[11px] text-text-muted">{messages.timelineInsertLegend}</legend>
+          {approved.map((text) => (
+            <button
+              key={text}
+              type="button"
+              aria-label={messages.timelineInsertBeat(text)}
+              onClick={() => dispatch({ type: "addBeat", text })}
+              className="max-w-[16rem] truncate rounded border border-border px-2 py-1 text-[11px] text-text-muted"
+            >
+              {text}
+            </button>
+          ))}
+        </fieldset>
+      ) : null}
 
       {beats.length > 0 ? (
         <>
