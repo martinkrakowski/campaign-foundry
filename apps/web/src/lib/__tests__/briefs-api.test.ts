@@ -526,3 +526,20 @@ describe("listAssets", () => {
   });
 });
 
+
+describe("getCapabilities carries every field the UI renders", () => {
+  test("the probe's ffmpeg version survives the trip to the client", async () => {
+    // ProbeRow renders `capabilities.version`. The fetcher rebuilds the object rather than
+    // passing untrusted JSON through, which is right — but a field it forgets to carry makes
+    // the component that shows it dead code at 100% coverage.
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      json({ motion: true, version: "7.1.1" }) as unknown as Response,
+    );
+    await expect(getCapabilities()).resolves.toEqual({ motion: true, version: "7.1.1" });
+  });
+
+  test("a host that reports no version simply has none", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(json({ motion: true }) as unknown as Response);
+    await expect(getCapabilities()).resolves.toEqual({ motion: true });
+  });
+})

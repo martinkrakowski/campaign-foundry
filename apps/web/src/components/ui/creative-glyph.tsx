@@ -1,5 +1,6 @@
 import { useId, type ReactNode } from "react";
 import type { LayoutKind, ToneKind } from "@campaignfoundry/CampaignOrchestration";
+import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 
 export type LayoutOption = LayoutKind;
 export type ToneOption = ToneKind;
@@ -7,6 +8,7 @@ export type ToneOption = ToneKind;
 export interface CreativeGlyphProps {
   readonly layout?: LayoutOption;
   readonly tone?: ToneOption;
+  readonly motion?: MotionKind;
   readonly size?: number;
 }
 
@@ -30,12 +32,12 @@ const BAR_GAP = 3;
  * A miniature of the creative the compositor will draw, in its layer order
  * (NodeCanvasCompositor.draw): photo ground → contrast shade on the headline
  * edge → brand accent band flush to that edge → text. `layout` picks the edge;
- * `tone` scales the shade and the text weight. The arrangement mirrors the
- * compositor, not the pixels — colours are theme tokens so the glyph reads in
- * both themes, and the whole drawing is `aria-hidden`: the label carries the
- * meaning, never the picture.
+ * `tone` scales the shade and the text weight. `motion` animates the corresponding
+ * group via CSS keyframes with an always-present cue glyph fallback for reduced
+ * motion and disabled states. The entire SVG is `aria-hidden`: the label carries
+ * the meaning, never the picture.
  */
-export function CreativeGlyph({ layout, tone, size = 46 }: CreativeGlyphProps): ReactNode {
+export function CreativeGlyph({ layout, tone, motion, size = 46 }: CreativeGlyphProps): ReactNode {
   // An axis card previews one axis at a time; the omitted prop falls back to a
   // fixed representative value so every glyph still has an edge and a weight.
   const top = TOP_EDGE[layout ?? "headline-top"];
@@ -47,6 +49,7 @@ export function CreativeGlyph({ layout, tone, size = 46 }: CreativeGlyphProps): 
   // The shade gradient starts where the compositor's does: 0.55h / 0.45h,
   // darkest at the headline edge (NodeCanvasCompositor.draw, layer 2).
   const gradientId = `creative-glyph-shade-${useId()}`;
+  const fadeGradientId = `creative-glyph-fade-${useId()}`;
   const longBarY = top ? TEXT_EDGE : VIEWBOX - TEXT_EDGE - barHeight;
   const shortBarY = top ? longBarY + barHeight + BAR_GAP : longBarY - BAR_GAP - barHeight;
 
@@ -58,6 +61,7 @@ export function CreativeGlyph({ layout, tone, size = 46 }: CreativeGlyphProps): 
       aria-hidden="true"
       focusable="false"
       className="shrink-0"
+      {...(motion !== undefined ? { "data-motion": motion } : {})}
     >
       <defs>
         {/*
@@ -71,16 +75,67 @@ export function CreativeGlyph({ layout, tone, size = 46 }: CreativeGlyphProps): 
           <stop offset="0" stopColor="#000000" stopOpacity={0} />
           <stop offset="1" stopColor="#000000" stopOpacity={shadeAlpha} />
         </linearGradient>
+        <linearGradient id={fadeGradientId} x1="0" y1={top ? "0" : "1"} x2="0" y2={top ? "1" : "0"}>
+          <stop offset="0" stopColor="var(--color-brand-primary)" stopOpacity={0.6} />
+          <stop offset="1" stopColor="var(--color-brand-primary)" stopOpacity={0} />
+        </linearGradient>
       </defs>
-      {/* Layer 1 — photo ground (text-muted: the neutral placeholder). */}
-      <rect x="0" y="0" width={VIEWBOX} height={VIEWBOX} className="fill-text-muted" />
-      {/* Layer 2 — contrast shade on the headline edge, fading into the image. */}
-      <rect x="0" y="0" width={VIEWBOX} height={VIEWBOX} fill={`url(#${gradientId})`} />
-      {/* Layer 3 — brand accent band flush to the headline edge. */}
-      <rect x="0" y={top ? 0 : VIEWBOX - BAND} width={VIEWBOX} height={BAND} className="fill-brand-primary" />
-      {/* Layer 4 — the message as two bars; tone sets their weight. */}
-      <rect x="10" y={longBarY} width="26" height={barHeight} rx={barHeight / 2} className="fill-text-primary" />
-      <rect x="15" y={shortBarY} width="16" height={barHeight} rx={barHeight / 2} className="fill-text-primary" />
+
+      {/* Group 1 — Ground layer (photo ground + shade gradient). */}
+      <g className="glyph-anim glyph-ground">
+        {/* Layer 1 — photo ground (text-muted: the neutral placeholder). */}
+        <rect x="0" y="0" width={VIEWBOX} height={VIEWBOX} className="fill-text-muted" />
+        {/* Layer 2 — contrast shade on the headline edge, fading into the image. */}
+        <rect x="0" y="0" width={VIEWBOX} height={VIEWBOX} fill={`url(#${gradientId})`} />
+      </g>
+
+      {/* Group 2 — Accent band & soft fade layer for accent-wipe. */}
+      <g className="glyph-band-group">
+        <rect
+          x="0"
+          y={top ? BAND : VIEWBOX - BAND - 14}
+          width={VIEWBOX}
+          height="14"
+          fill={`url(#${fadeGradientId})`}
+          className="glyph-anim glyph-fade"
+        />
+        {/* Layer 3 — brand accent band flush to the headline edge. */}
+        <rect x="0" y={top ? 0 : VIEWBOX - BAND} width={VIEWBOX} height={BAND} className="fill-brand-primary" />
+      </g>
+
+      {/* Group 3 — Text bars (headline message). */}
+      <g className="glyph-anim glyph-text">
+        {/* Layer 4 — the message as two bars; tone sets their weight. */}
+        <rect x="10" y={longBarY} width="26" height={barHeight} rx={barHeight / 2} className="fill-text-primary" />
+        <rect x="15" y={shortBarY} width="16" height={barHeight} rx={barHeight / 2} className="fill-text-primary" />
+      </g>
+
+      {/* Group 4 — Directional cue group (always rendered; revealed when reduced-motion/disabled). */}
+      <g className="glyph-cue" aria-hidden="true">
+        {motion === "ken-burns-in" ? (
+          <g stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-white">
+            <path d="M 6 6 L 14 14 M 14 6 L 14 14 L 6 14" />
+            <path d="M 40 40 L 32 32 M 32 40 L 32 32 L 40 32" />
+          </g>
+        ) : null}
+        {motion === "ken-burns-out" ? (
+          <g stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-white">
+            <path d="M 14 14 L 6 6 M 14 6 L 6 6 L 6 14" />
+            <path d="M 32 32 L 40 40 M 32 40 L 40 40 L 40 32" />
+          </g>
+        ) : null}
+        {motion === "headline-rise" ? (
+          <g stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-white">
+            <path d="M 23 34 L 23 18 M 17 24 L 23 18 L 29 24" />
+          </g>
+        ) : null}
+        {motion === "accent-wipe" ? (
+          <g stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-white">
+            <path d={top ? "M 23 8 L 23 24 M 17 18 L 23 24 L 29 18" : "M 23 38 L 23 22 M 17 28 L 23 22 L 29 28"} />
+          </g>
+        ) : null}
+      </g>
     </svg>
   );
 }
+

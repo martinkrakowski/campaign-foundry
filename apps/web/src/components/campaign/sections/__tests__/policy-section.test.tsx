@@ -284,7 +284,10 @@ describe("PolicySection — axes", () => {
 });
 
 describe("PolicySection — aspect ratio panels", () => {
-  const ratioFieldset = () => axis("Aspect ratios");
+  // The legend carries a "· from your platforms" hint until the ratio is diverged
+  // from the platform default, so match the fieldset by its stable prefix.
+  const ratioFieldset = () =>
+    screen.getByText(/^Aspect ratios/).closest("fieldset") as HTMLElement;
 
   test("each panel answers to its raw ratio as the whole accessible name", async () => {
     const user = userEvent.setup();
@@ -347,7 +350,8 @@ describe("PolicySection — aspect ratio panels", () => {
     expect(over.textContent).toMatch(/lower the floor, raise the count, or select fewer ratios/);
   });
 
-  test("an excluded panel is muted with its reason, and the reason names the motion-capable ratios", () => {
+  test("a motion-only brief names the motion-capable ratios in one amber line, and the way out", () => {
+    const dispatch = vi.fn();
     render(
       <PolicySection
         state={state({
@@ -356,23 +360,21 @@ describe("PolicySection — aspect ratio panels", () => {
           motion: ["ken-burns-in"],
           duration: [4],
         })}
-        dispatch={vi.fn()}
+        dispatch={dispatch}
         errors={{}}
       />,
     );
-    // instagram-reel packages motion at 9:16 only: the other two canvases are excluded
-    const reasons = screen.getAllByText(/Excluded — motion-only output can draw \[9:16\] only/);
-    expect(reasons).toHaveLength(2);
-
-    // The reason must reach assistive technology. It is referenced by
-    // aria-describedby rather than nested as content, because content would join
-    // the accessible name and break every getByRole({ name }) query in the suite.
-    const square = within(ratioFieldset()).getByRole("button", { name: "1:1" });
-    const describedBy = square.getAttribute("aria-describedby");
-    expect(describedBy).toBeTruthy();
-    const description = document.getElementById(describedBy as string);
-    expect(description?.textContent).toMatch(/Excluded — motion-only output can draw \[9:16\] only/);
-    expect(description?.getAttribute("aria-hidden")).toBeNull();
+    // L4.7: instagram-reel plays video at Tall (9:16) only, so the exclusion reason
+    // appears once as a single amber line naming the ratios motion can draw — not
+    // once per excluded panel.
+    expect(screen.getByText(messages.ratioExcludedPackaged(["Tall"]))).toBeTruthy();
+    // excluded-but-selected canvases stay clickable — deselecting is the way out
+    const square = within(ratioFieldset()).getByRole("button", { name: "1:1" }) as HTMLButtonElement;
+    expect(square.disabled).toBe(false);
+    // the inline remedy turns Still images back on
+    const remedy = within(ratioFieldset()).getByRole("button", { name: messages.turnOnStillImages });
+    fireEvent.click(remedy);
+    expect(dispatch).toHaveBeenCalledWith({ type: "toggleFormat", value: "static" });
   });
 
   test("an excluded ratio the brief already selects stays clickable — deselecting is the way out", async () => {
@@ -399,6 +401,8 @@ describe("PolicySection — aspect ratio panels", () => {
   });
 
   test("an excluded ratio that is not selected cannot be switched on", () => {
+    // 1:1 is excluded on a motion-only reel brief and is not the brief's selection,
+    // so it is gated off (disabled); the single amber line carries the reason.
     render(
       <PolicySection
         state={state({
@@ -414,7 +418,7 @@ describe("PolicySection — aspect ratio panels", () => {
     );
     const square = within(ratioFieldset()).getByRole("button", { name: "1:1" }) as HTMLButtonElement;
     expect(square.disabled).toBe(true);
-    expect(screen.getAllByText(/Excluded — motion-only output can draw \[9:16\] only/)).toHaveLength(2);
+    expect(screen.getByText(messages.ratioExcludedPackaged(["Tall"]))).toBeTruthy();
   });
 
   test("the exclusion reason says so plainly when no selected platform packages motion at any ratio", () => {
@@ -425,7 +429,10 @@ describe("PolicySection — aspect ratio panels", () => {
         errors={{}}
       />,
     );
-    expect(screen.getAllByText(/Excluded — no selected platform packages motion at any ratio/)).toHaveLength(3);
+    // instagram-feed takes stills only, so no ratio can be drawn; the amber line says
+    // so once, naming the remedy, rather than shouting on every panel.
+    expect(screen.getByText(messages.ratioExcludedNone())).toBeTruthy();
+    expect(screen.getByRole("button", { name: messages.turnOnStillImages })).toBeTruthy();
   });
 
   test("the coverage-per-ratio stepper sits inside the ratio fieldset, beside its effect", async () => {

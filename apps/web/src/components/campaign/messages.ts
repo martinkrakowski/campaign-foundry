@@ -180,6 +180,10 @@ export const formatsMotionUnavailable =
 /** `formats.motionNeedsRandomized` */
 export const formatsMotionNeedsRandomized =
   "Video only works in a Randomized campaign — switch the mode toggle to Randomized, or turn Video off.";
+export const addPhotoPlatform = "Add a photo platform";
+export const turnOnStillImages = "Turn on Still images";
+export const shapesFromPlatforms = "from your platforms";
+
 
 // --- Motion ---
 
@@ -324,3 +328,19 @@ export function countReadout(count: number, ceiling: number): string {
 export function countLowered(ceiling: number): string {
   return `Lowered to ${ceiling} — that is every different ad these choices can make.`;
 }
+
+/** The four legends of the Output section, in the order a user meets them. */
+export const outputPlatformsLegend = "Where will the ads run?";
+export const outputFormatsLegend = "Formats";
+export const outputMotionLegend = "Video styles";
+export const outputDurationLegend = "Clip lengths";
+
+/** What each format card says under its picture. */
+export const formatStillMeta = "still · one frame";
+export function formatMotionMeta(fps: number, min: number, max: number): string {
+  return `clip · ${fps} fps · ${min}–${max} s`;
+}
+
+/** A Classic brief cannot produce video; the pipeline branches on mode alone. */
+export const formatsMotionNeedsRandomizedMode =
+  "Video needs a Randomized campaign — switch the mode, or turn Video off.";

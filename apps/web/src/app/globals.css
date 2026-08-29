@@ -37,3 +37,91 @@
     background: transparent;
   }
 }
+
+/* Creative glyph motion preview keyframes */
+@keyframes kf-ken-burns-in {
+  0% {
+    transform: scale(1);
+  }
+  80%,
+  100% {
+    transform: scale(1.15);
+  }
+}
+
+@keyframes kf-ken-burns-out {
+  0% {
+    transform: scale(1.15);
+  }
+  80%,
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes kf-headline-rise {
+  0% {
+    transform: translateY(3px);
+    opacity: 0.4;
+  }
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes kf-accent-wipe {
+  0% {
+    transform: scaleY(0);
+    opacity: 0;
+  }
+  80%,
+  100% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+[data-motion="ken-burns-in"] .glyph-ground {
+  transform-origin: center;
+  animation: kf-ken-burns-in var(--duration-preview) var(--easing-preview) infinite;
+}
+
+[data-motion="ken-burns-out"] .glyph-ground {
+  transform-origin: center;
+  animation: kf-ken-burns-out var(--duration-preview) var(--easing-preview) infinite;
+}
+
+[data-motion="headline-rise"] .glyph-text {
+  animation: kf-headline-rise var(--duration-preview) var(--easing-preview) infinite;
+}
+
+[data-motion="accent-wipe"] .glyph-fade {
+  transform-origin: top;
+  animation: kf-accent-wipe var(--duration-preview) var(--easing-preview) infinite;
+}
+
+.glyph-cue {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glyph-anim {
+    animation: none !important;
+  }
+  .glyph-cue {
+    display: block !important;
+  }
+}
+
+button:disabled .glyph-anim,
+button[disabled] .glyph-anim {
+  animation: none !important;
+}
+
+button:disabled .glyph-cue,
+button[disabled] .glyph-cue {
+  display: block !important;
+}
+

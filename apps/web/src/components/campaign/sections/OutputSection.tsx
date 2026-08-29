@@ -1,146 +1,177 @@
 "use client";
 
 import type { Dispatch } from "react";
-import { Button, Input } from "@/components/ui";
+import { PlatformCard, DurationStrip } from "@/components/ui";
 import { MOTION_KINDS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import { PLATFORM_PROFILES, isPlatformVisible } from "@campaignfoundry/Distribution/platform-profiles";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
-import { MIN_DURATION_SEC, MAX_DURATION_SEC, type FieldErrors } from "@/components/campaign/validate";
+import { PLATFORM_ORDER } from "@/components/campaign/editor-state";
+import type { FieldErrors } from "@/components/campaign/validate";
+import { motionPackagedRatios } from "@/components/campaign/validate";
+import { RATIO_OPTIONS } from "@/components/campaign/editor-state";
+import { ratioDisplayName } from "@/components/campaign/display-names";
+import * as messages from "@/components/campaign/messages";
 import { SectionShell } from "./IdentitySection";
+import { ProbeRow } from "../ProbeRow";
+import { FormatPanel, formatGate } from "../FormatPanel";
+import { MotionKindPanel } from "../MotionKindPanel";
 
-export function OutputSection({ state, dispatch, errors, compact = false }: { state: EditorState; dispatch: Dispatch<EditorAction>; errors: FieldErrors; compact?: boolean }) {
+export interface OutputSectionProps {
+  readonly state: EditorState;
+  readonly dispatch: Dispatch<EditorAction>;
+  readonly errors: FieldErrors;
+  readonly compact?: boolean;
+}
+
+/**
+ * 05 Output section (D7–D10):
+ * - ProbeRow showing host ffmpeg capability status.
+ * - PlatformCard grid for "Where will the ads run?".
+ * - Single amber exclusion line with inline [Add a photo platform] when motion excludes shapes.
+ * - FormatPanel × 2 for Still images vs Video with per-card capability & mode gating.
+ * - Nested Video section:
+ *   - MotionKindPanel × 4 with animated CreativeGlyphs and reduced-motion fallback cues.
+ *   - DurationStrip film strip on 0..30s grid with draggable slider beads and lanes slot.
+ */
+export function OutputSection({
+  state,
+  dispatch,
+  errors,
+  compact = false,
+}: OutputSectionProps) {
   const motionRequested = state.formats.includes("motion");
-  // Unknown capabilities (probe unreachable) must not read as "no motion" — only a
-  // definite false from the probe gates anything.
   const motionOff = state.capabilities?.motion === false;
-  const motionReason = motionOff ? (state.capabilities?.reason ?? "capability off") : undefined;
 
-  // Platforms this host can produce that package at least one requested format.
+  // Platforms offered on this host that package at least one requested format.
   const capabilities = { motion: !motionOff };
   const offered = Object.values(PLATFORM_PROFILES).filter(
-    (profile) => isPlatformVisible(profile, capabilities) && profile.formats.some((format) => state.formats.includes(format)),
+    (profile) =>
+      isPlatformVisible(profile, capabilities) &&
+      profile.formats.some((format) => state.formats.includes(format)),
   );
   const offeredIds = new Set(offered.map((profile) => profile.id));
-  // A loaded brief may select platforms the current filters hide (D12: a host with no
-  // motion must not strip the motion platforms the file already declares). They stay
-  // visible; capability-hidden ones are read-only, format-mismatched ones can still be
-  // deselected so a compatibility error always has a way out.
+
+  // A loaded brief may select platforms hidden on this host (D12: never strip data).
+  // They stay visible and read-only.
   const hiddenSelected = state.platforms.filter((id) => !offeredIds.has(id));
-  // Only a capability-hidden platform is locked: the file declared it and this host
-  // cannot produce it, so it stays read-only (D12 — gating never strips data). A
-  // format-mismatched selection stays deselectable so a compatibility error always
-  // has a way out.
+
+  const allVisiblePlatforms = Array.from(
+    new Set([...PLATFORM_ORDER.filter((id) => offeredIds.has(id)), ...hiddenSelected]),
+  );
+
   const platformDisabled = (id: string): boolean => {
     const profile = PLATFORM_PROFILES[id];
     return profile !== undefined && !isPlatformVisible(profile, capabilities);
   };
 
+  // Motion narrowing / exclusion calculation (D7 / L4.7)
+  const motionOnly = state.formats.includes("motion") && !state.formats.includes("static");
+  const packaged = motionPackagedRatios(state);
+  const motionRatios = RATIO_OPTIONS.filter((ratio) => packaged.has(ratio));
+  const hasExcludedRatio = motionOnly && packaged.size < RATIO_OPTIONS.length;
+
+  const outputErrorCount = Object.keys(errors).filter((k) =>
+    ["formats", "platforms", "motion", "duration"].includes(k),
+  ).length;
+
+  const staticGate = formatGate("static", state, state.capabilities);
+  const motionGate = formatGate("motion", state, state.capabilities);
+
   return (
-    <SectionShell id="output" title="5 · Output" errorCount={Object.keys(errors).filter((k) => k === "formats" || k === "platforms").length} compact={compact}>
-      <div className="space-y-4">
-        <div>
-          <h3 className="mb-2 font-mono text-[11px] uppercase tracking-widest text-text-muted">Formats</h3>
-          <div className="flex gap-2">
-            {["static", "motion"].map((format) => {
-              // Gating prevents *selecting* motion, never deselecting it. A draft that
-              // already requests motion when a capability-off verdict lands must keep a
-              // way out, or compatibility validation blocks Save with no control to fix it.
-              const selected = state.formats.includes(format);
-              const gated = format === "motion" && motionOff && !selected;
+    <SectionShell id="output" title="5 · Output" errorCount={outputErrorCount} compact={compact}>
+      <div className="space-y-6">
+        <ProbeRow capabilities={state.capabilities} />
+
+        {/* Where will the ads run? */}
+        <fieldset className="space-y-2">
+          <legend className="text-[11px] text-text-muted">{messages.outputPlatformsLegend}</legend>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+            {allVisiblePlatforms.map((id) => {
+              const profile = PLATFORM_PROFILES[id];
+              if (!profile) return null;
               return (
-                <Button
-                  key={format}
-                  variant={selected ? "primary" : "secondary"}
-                  size="sm"
-                  disabled={gated}
-                  title={gated ? `Motion is not available on this host: ${motionReason}` : undefined}
-                  onClick={() => dispatch({ type: "toggleFormat", value: format })}
-                >
-                  {format}
-                </Button>
+                <PlatformCard
+                  key={id}
+                  profile={profile}
+                  selected={state.platforms.includes(id)}
+                  disabled={platformDisabled(id)}
+                  onToggle={(platformId) => dispatch({ type: "togglePlatform", value: platformId })}
+                />
               );
             })}
           </div>
-          {motionOff ? (
-            <p className="mt-1 text-[11px] text-text-muted">
-              Motion is not available on this host: {motionReason}.
-            </p>
+
+          {/* Single amber exclusion line with inline [Add a photo platform] (D7 / L4.7) */}
+          {hasExcludedRatio ? (
+            <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px] text-warning">
+              <span>
+                {motionRatios.length > 0
+                  ? messages.ratioExcludedPackaged(motionRatios.map(ratioDisplayName))
+                  : messages.ratioExcludedNone()}
+              </span>
+              <button
+                type="button"
+                onClick={() => dispatch({ type: "addPhotoOutput" })}
+                className="underline hover:text-text-primary"
+              >
+                {messages.addPhotoPlatform}
+              </button>
+            </div>
           ) : null}
-          {errors.formats ? <p className="mt-1 text-[11px] text-error">{errors.formats}</p> : null}
-        </div>
+
+          {errors.platforms ? <p className="text-[11px] text-error">{errors.platforms}</p> : null}
+        </fieldset>
+
+        {/* Formats */}
+        <fieldset className="space-y-2">
+          <legend className="text-[11px] text-text-muted">{messages.outputFormatsLegend}</legend>
+          <div className="grid grid-cols-2 gap-2">
+            <FormatPanel
+              format="static"
+              selected={state.formats.includes("static")}
+              onToggle={(value) => dispatch({ type: "toggleFormat", value })}
+              gate={staticGate}
+            />
+            <FormatPanel
+              format="motion"
+              selected={state.formats.includes("motion")}
+              onToggle={(value) => dispatch({ type: "toggleFormat", value })}
+              gate={motionGate}
+            />
+          </div>
+          {errors.formats ? <p className="text-[11px] text-error">{errors.formats}</p> : null}
+        </fieldset>
+
+        {/* Video options (Motion kinds & Duration) */}
         {motionRequested ? (
-          <div id="motion" className="space-y-4 scroll-mt-24">
-            <div>
-              <h3 className="mb-2 font-mono text-[11px] uppercase tracking-widest text-text-muted">Motion kinds</h3>
-              <div className="flex flex-wrap gap-2">
+          <div id="motion" className="space-y-6 rounded-md border-l-2 border-brand-rail pl-4 scroll-mt-24">
+            <fieldset className="space-y-2">
+              <legend className="text-[11px] text-text-muted">{messages.outputMotionLegend}</legend>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {MOTION_KINDS.map((kind) => (
-                  <Button
+                  <MotionKindPanel
                     key={kind}
-                    variant={state.motion.includes(kind) ? "primary" : "secondary"}
-                    size="sm"
-                    disabled={motionOff}
-                    onClick={() => dispatch({ type: "toggleMotion", value: kind })}
-                  >
-                    {kind}
-                  </Button>
+                    kind={kind}
+                    selected={state.motion.includes(kind)}
+                    onToggle={(value) => dispatch({ type: "toggleMotion", value })}
+                  />
                 ))}
               </div>
-              {errors.motion ? <p className="mt-1 text-[11px] text-error">{errors.motion}</p> : null}
-            </div>
-            <div>
-              <h3 className="mb-2 font-mono text-[11px] uppercase tracking-widest text-text-muted">Durations (seconds)</h3>
-              <div className="space-y-2">
-                {state.duration.map((seconds, index) => (
-                  <div key={index} className="flex items-center gap-2">
-                    <Input
-                      type="number"
-                      min={MIN_DURATION_SEC}
-                      max={MAX_DURATION_SEC}
-                      step={1}
-                      value={seconds}
-                      aria-label={`Duration ${index + 1} (seconds)`}
-                      disabled={motionOff}
-                      invalid={Boolean(errors.duration)}
-                      onChange={(e) =>
-                        dispatch({ type: "setDuration", index, value: Number(e.target.value) })
-                      }
-                      className="w-28"
-                    />
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={motionOff}
-                      onClick={() => dispatch({ type: "removeDuration", index })}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                ))}
-                <Button variant="secondary" size="sm" disabled={motionOff} onClick={() => dispatch({ type: "addDuration" })}>
-                  Add duration
-                </Button>
-              </div>
-              {errors.duration ? <p className="mt-1 text-[11px] text-error">{errors.duration}</p> : null}
-            </div>
+              {errors.motion ? <p className="text-[11px] text-error">{errors.motion}</p> : null}
+            </fieldset>
+
+            <fieldset className="space-y-2">
+              <legend className="text-[11px] text-text-muted">{messages.outputDurationLegend}</legend>
+              <DurationStrip
+                values={state.duration}
+                onChange={(index, value) => dispatch({ type: "setDuration", index, value })}
+                onAdd={(value) => dispatch({ type: "addDuration", value })}
+                onRemove={(index) => dispatch({ type: "removeDuration", index })}
+                error={errors.duration}
+              />
+            </fieldset>
           </div>
         ) : null}
-        <div>
-          <h3 className="mb-2 font-mono text-[11px] uppercase tracking-widest text-text-muted">Platforms</h3>
-          <div className="flex flex-wrap gap-2">
-            {[...offered.map((profile) => profile.id), ...hiddenSelected].map((platform) => (
-              <Button
-                key={platform}
-                variant={state.platforms.includes(platform) ? "primary" : "secondary"}
-                size="sm"
-                disabled={platformDisabled(platform)}
-                onClick={() => dispatch({ type: "togglePlatform", value: platform })}
-              >
-                {platform}
-              </Button>
-            ))}
-          </div>
-          {errors.platforms ? <p className="mt-1 text-[11px] text-error">{errors.platforms}</p> : null}
-        </div>
       </div>
     </SectionShell>
   );

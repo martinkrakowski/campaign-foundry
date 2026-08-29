@@ -29,7 +29,7 @@ import type { ExportPort } from "../ports/out/ExportPort.js";
 import type { BackgroundContext, ImageGeneratorPort } from "../ports/out/ImageGeneratorPort.js";
 import type { PlatformSafeZoneResolver } from "../ports/out/PlatformProfilePort.js";
 import type { VideoCompositorPort } from "../ports/out/VideoCompositorPort.js";
-import { MOTION_FPS } from "./PlanVariationsUseCase.use-case.js";
+import { MOTION_FPS } from "../../domain/value-objects/MotionKind.vo.js";
 
 /** Classic briefs keep the two-product floor; variation relaxes to 1 (D10). */
 const MINIMUM_PRODUCTS_CLASSIC = 2;

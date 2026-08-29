@@ -93,4 +93,66 @@ describe("AxisCard", () => {
     expect(onToggle).not.toHaveBeenCalled();
     expect(container.querySelector("svg")).toBeNull();
   });
+
+  test("a description renders with an optional leading icon, aria-hidden from the name", () => {
+    render(
+      <AxisCard value="headline-top" selected={false} onToggle={vi.fn()} description="gated" descriptionIcon="⚠">
+        <CreativeGlyph layout="headline-top" />
+      </AxisCard>,
+    );
+    // the description must not extend the accessible name
+    const button = screen.getByRole("button", { name: "headline-top" }) as HTMLButtonElement;
+    expect(button.textContent).toContain("gated");
+    expect(button.textContent).toContain("⚠");
+  });
+});
+
+describe("AxisCard's visible label is separable from its name", () => {
+  test("a label shows on screen while the accessible name stays the raw value", () => {
+    const { unmount } = render(
+      <AxisCard value="motion" label="Video" selected={false} onToggle={vi.fn()}>
+        <span />
+      </AxisCard>,
+    );
+    const card = screen.getByRole("button", { name: "motion" });
+    expect(card.textContent).toContain("Video");
+    expect(card.textContent).not.toContain("motion");
+    unmount();
+
+    // and with no label the card reads as the value, which is every other axis in the app
+    render(
+      <AxisCard value="headline-top" selected={false} onToggle={vi.fn()}>
+        <span />
+      </AxisCard>,
+    );
+    expect(screen.getByRole("button", { name: "headline-top" }).textContent).toContain("headline-top");
+  });
+});
+
+describe("a gate's reason can carry an icon, or not", () => {
+  test("the icon is decoration beside the reason, and is optional", () => {
+    const { unmount } = render(
+      <AxisCard
+        value="motion"
+        selected={false}
+        onToggle={vi.fn()}
+        description="needs ffmpeg"
+        descriptionIcon={<svg data-testid="warn" />}
+      >
+        <span />
+      </AxisCard>,
+    );
+    expect(screen.getByTestId("warn").closest("span")?.getAttribute("aria-hidden")).toBe("true");
+    expect(screen.getByText("needs ffmpeg")).toBeTruthy();
+    unmount();
+
+    // a reason with no icon still reads — the icon must not be load-bearing
+    render(
+      <AxisCard value="motion" selected={false} onToggle={vi.fn()} description="needs ffmpeg">
+        <span />
+      </AxisCard>,
+    );
+    expect(screen.getByText("needs ffmpeg")).toBeTruthy();
+    expect(screen.queryByTestId("warn")).toBeNull();
+  });
 });

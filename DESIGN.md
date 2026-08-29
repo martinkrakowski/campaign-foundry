@@ -98,6 +98,16 @@ The scale as actually used — these are deliberate, keep to them:
 - Motion: `--duration-fast` 150ms for hover/colour, `--duration-normal` 250ms for
   open/close. `transition-colors` is the default; respect `prefers-reduced-motion` for
   anything larger.
+- **Looping previews** (L4.3): the four motion kinds each have a keyframe animation in
+  `globals.css` — `kf-ken-burns-in`, `kf-ken-burns-out`, `kf-headline-rise`,
+  `kf-accent-wipe` — played on the glyph inside a `MotionKindPanel` so a user sees the
+  transition rather than reading its name. These are the one place a loop is allowed; every
+  other animation in the system is a one-shot on interaction.
+- **A loop is never the only carrier of meaning.** Each motion glyph renders a static cue
+  group *as well as* the animated one, always, so the kind is legible with animation off.
+  Under `prefers-reduced-motion` and on a disabled card the animation does not run and the
+  cue is what remains — the reveal is CSS-only, never a `paused` animation, because a paused
+  animation still says "this is moving" to anything reading the DOM.
 
 ---
 
@@ -220,6 +230,26 @@ Skeletal by design — patterns to extend, not a library.
   carry `aria-label` with their hex value; the active swatch reflects both click selection and
   typed hex matches. It offers the brand palette at a single click while preserving arbitrary
   hex inputs for custom themes.
+
+- **PlatformCard** (L4.2) — one card per delivery platform, showing `PlatformProfile.label`
+  and its shape through a `PreviewFrame`. The accessible name stays the raw platform id, as
+  every card in this kit does; the label is what the screen reads.
+- **PreviewFrame** (L4.2) — the aspect-correct frame a card's preview sits in, so a 9:16 and
+  a 1:1 card are visibly the shapes they name rather than two equal rectangles.
+- **FormatPanel** (L4.4) — Still images and Video as two cards, gated per card by
+  `formatGate()` rather than by one blanket switch: a host without ffmpeg disables the Video
+  card *and says why on that card*, instead of hiding the choice. The visible label is the
+  display name (D18) while the accessible name stays `static` / `motion`.
+- **MotionKindPanel** (L4.5) — one card per motion kind, each playing its own transition.
+  Turning Video on seeds the domain's default kinds into a fresh draft and turning it off
+  again retracts them while untouched (D9), so an accidental toggle leaves no trace.
+- **ProbeRow** (L4.2) — what this host can actually do, from the boot probe: ffmpeg found or
+  not, its version when the probe could read one, and the reason when it could not.
+- **DurationStrip** (L4.6) — clip lengths as a film strip on a 0-based 31-column axis. Beads
+  are dragged along the reel; a click on empty reel adds one; the last remaining length can
+  still be removed. Values loaded from a brief are clamped into place rather than producing
+  an out-of-range column. It carries a `lanes` slot, which the copy timeline (L6) mounts into
+  so beats line up against the same seconds axis.
 
 ### Shell (`src/components/shell`)
 

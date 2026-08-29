@@ -364,11 +364,22 @@ describe("validateOutput", () => {
     expect(validateOutput(valid({ platforms: [] })).platforms).toBe(messages.platforms);
   });
 
-  test("motion is refused while the capability is off, with the probe's reason", () => {
-    const off = valid({ mode: "variation", formats: ["static", "motion"], capabilities: { motion: false, reason: "no ffmpeg" } });
-    expect(validateOutput(off).formats).toBe(messages.formatsMotionUnavailable);
-    const noReason = valid({ mode: "variation", formats: ["motion"], capabilities: { motion: false } });
-    expect(validateOutput(noReason).formats).toBe(messages.formatsMotionUnavailable);
+  test("motion is not a red error while the capability is off — the card gate owns it", () => {
+    // D7: gates are never red. A capability being off makes a motion brief unrunnable
+    // on this host but still fully persistable, so `validateOutput` stays clean (the
+    // only structural complaint would be a missing motion platform); the notice lives
+    // on the FormatPanel gate and `motionUnavailableReason` drives the Save/apply
+    // refusal, rather than a duplicate red field error.
+    const off = valid({ mode: "variation", formats: ["static", "motion"],
+      platforms: ["instagram-feed", "instagram-reel"],
+      capabilities: { motion: false, reason: "no ffmpeg" },
+    });
+    expect(validateOutput(off).formats).toBeUndefined();
+    const noReason = valid({ mode: "variation", formats: ["motion"],
+      platforms: ["instagram-reel"],
+      capabilities: { motion: false },
+    });
+    expect(validateOutput(noReason).formats).toBeUndefined();
     const on = valid({ mode: "variation", formats: ["static", "motion"],
       platforms: ["instagram-feed", "instagram-reel"],
       capabilities: { motion: true },
@@ -393,8 +404,8 @@ describe("validateOutput", () => {
   });
 
   test("a capability-off motion brief with its motion platform selected is structurally compatible", () => {
-    // D12: the compatibility mirror must not add an error a save would be blocked by —
-    // the only complaint is the capability, which does not gate persistence.
+    // D12: the compatibility mirror must not add an error a save would be blocked by,
+    // and the capability does not gate persistence — the gate owns the notice.
     const errors = validateOutput(
       valid({ mode: "variation", formats: ["static", "motion"],
         platforms: ["instagram-feed", "instagram-reel"],
@@ -402,21 +413,17 @@ describe("validateOutput", () => {
       }),
     );
     expect(errors.platforms).toBeUndefined();
-    expect(errors.formats).toBe(messages.formatsMotionUnavailable);
+    expect(errors.formats).toBeUndefined();
   });
 });
 
 describe("validateOutput — motion needs a randomized campaign", () => {
-  test("a classic brief requesting motion is told to switch mode", () => {
+  test("a classic brief requesting motion is not red-flagged — the mode gate owns it", () => {
+    // The classic matrix renders stills, so motion is drawn only by the variation
+    // planner; the remedy is a mode switch, surfaced on the motion FormatPanel gate
+    // rather than a red field error (D7: gates are never red).
     const errors = validateOutput(valid({ mode: "brief", formats: ["motion"], platforms: ["instagram-reel"] }));
-    expect(errors.formats).toBe(messages.formatsMotionNeedsRandomized);
-  });
-
-  test("the mode rule outranks the capability message — it is the root cause", () => {
-    const errors = validateOutput(
-      valid({ mode: "brief", formats: ["motion"], platforms: ["instagram-reel"], capabilities: { motion: false, reason: "no ffmpeg" } }),
-    );
-    expect(errors.formats).toBe(messages.formatsMotionNeedsRandomized);
+    expect(errors.formats).toBeUndefined();
   });
 
   test("a randomized brief requesting motion on a motion platform is clean", () => {
@@ -430,18 +437,18 @@ describe("validateMotion", () => {
   });
 
   test("a motion request needs at least one kind and one duration", () => {
-    const errors = validateMotion(valid({ formats: ["motion"] }));
+    const errors = validateMotion(valid({ mode: "variation" as const, formats: ["motion"] }));
     expect(errors.motion).toBe(messages.motion);
     expect(errors.duration).toBe(messages.duration);
-    expect(validateMotion(valid({ formats: ["motion"], motion: ["ken-burns-in"], duration: [5] }))).toEqual({});
+    expect(validateMotion(valid({ mode: "variation" as const, formats: ["motion"], motion: ["ken-burns-in"], duration: [5] }))).toEqual({});
   });
 
   test("durations are whole seconds bounded to the API's 2–30 range", () => {
-    expect(validateMotion(valid({ formats: ["motion"], motion: ["ken-burns-in"], duration: [2, 30] })).duration).toBeUndefined();
-    const bad = validateMotion(valid({ formats: ["motion"], motion: ["ken-burns-in"], duration: [1, 31] }));
+    expect(validateMotion(valid({ mode: "variation" as const, formats: ["motion"], motion: ["ken-burns-in"], duration: [2, 30] })).duration).toBeUndefined();
+    const bad = validateMotion(valid({ mode: "variation" as const, formats: ["motion"], motion: ["ken-burns-in"], duration: [1, 31] }));
     expect(bad.duration).toBe(messages.durationRange(2, 30));
     expect(
-      validateMotion(valid({ formats: ["motion"], motion: ["ken-burns-in"], duration: [Number.NaN] })).duration,
+      validateMotion(valid({ mode: "variation" as const, formats: ["motion"], motion: ["ken-burns-in"], duration: [Number.NaN] })).duration,
     ).toBe(messages.durationRange(2, 30));
   });
 });
@@ -449,14 +456,14 @@ describe("validateMotion", () => {
 describe("validateMotion — duplicate durations", () => {
   test("a repeated length is reported, because the planner draws each once", () => {
     const errors = validateMotion(
-      valid({ formats: ["static", "motion"], motion: ["ken-burns-in"], duration: [6, 6] }),
+      valid({ mode: "variation" as const, formats: ["static", "motion"], motion: ["ken-burns-in"], duration: [6, 6] }),
     );
     expect(errors.duration).toBe(messages.durationDuplicate);
   });
 
   test("distinct lengths pass", () => {
     expect(
-      validateMotion(valid({ formats: ["static", "motion"], motion: ["ken-burns-in"], duration: [6, 8] })).duration,
+      validateMotion(valid({ mode: "variation" as const, formats: ["static", "motion"], motion: ["ken-burns-in"], duration: [6, 8] })).duration,
     ).toBeUndefined();
   });
 });
@@ -482,9 +489,24 @@ describe("aggregation", () => {
     expect(getTotalErrorCount(clean)).toBe(0);
 
     // both of these now land in Identity, which is where their inputs are rendered
-    const broken = validateState(valid({ briefId: "Bad Id", targetRegion: "" }));
+    const broken = validateState(valid({ mode: "variation" as const, briefId: "Bad Id", targetRegion: "" }));
     expect(hasErrors(broken.identity)).toBe(true);
     expect(hasSectionErrors(broken, "copy")).toBe(false);
     expect(getTotalErrorCount(broken)).toBe(2);
   });
 });
+
+describe("a Classic brief cannot quietly ask for video", () => {
+  test("motion left over from Randomized is refused rather than rendered as stills", () => {
+    // pick Video in Randomized, then switch to Classic: `setMode` leaves formats alone,
+    // and the generate path branches on mode, so without this the brief saves clean and
+    // produces still images instead of the clips it names
+    const classicWithMotion = { ...initialEditorState(), mode: "brief" as const, formats: ["static", "motion"] };
+    expect(validateMotion(classicWithMotion).formats).toBe(messages.formatsMotionNeedsRandomizedMode);
+  });
+
+  test("the same brief in Randomized is not refused for its mode", () => {
+    const randomized = { ...initialEditorState(), mode: "variation" as const, formats: ["static", "motion"] };
+    expect(validateMotion(randomized).formats).toBeUndefined();
+  });
+})

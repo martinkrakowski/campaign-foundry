@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import type { Dispatch, ReactNode } from "react";
 import { RATIO_DIMENSIONS, RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import {
@@ -19,6 +20,7 @@ import * as messages from "@/components/campaign/messages";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import { RATIO_OPTIONS } from "@/components/campaign/editor-state";
 import { RatioPanel } from "@/components/campaign/RatioPanel";
+import { ratioDisplayName } from "@/components/campaign/display-names";
 import {
   axisProductSize,
   drawableRatios,
@@ -113,14 +115,17 @@ function RatioAxis({
   // Mirrors the planner's refusal (perRatio × ratios it will draw > count), so
   // the coupling surfaces before the run instead of as a shortfall error after.
   const over = floor > 0 && ratioFloorTotal > count;
-  const reason =
-    motionRatios.length > 0
-      ? `Excluded — motion-only output can draw [${motionRatios.join(", ")}] only; add the static format to draw this ratio.`
-      : "Excluded — no selected platform packages motion at any ratio; add the static format to draw this ratio.";
 
+  const shapesHintId = useId();
+  const derivedShapes = !state.ratioOverridden;
   return (
-    <fieldset className="space-y-2">
-      <legend className="text-[11px] text-text-muted">Aspect ratios</legend>
+    // The hint explains where these shapes came from, so it belongs to the group rather
+    // than sitting beside it: a screen-reader user meeting the fieldset should hear it too.
+    <fieldset className="space-y-2" {...(derivedShapes ? { "aria-describedby": shapesHintId } : {})}>
+      <legend className="text-[11px] text-text-muted">
+        Aspect ratios{" "}
+        {derivedShapes ? <span id={shapesHintId}>{`· ${messages.shapesFromPlatforms}`}</span> : null}
+      </legend>
       <Field label="Coverage per ratio" error={errors.perRatio} hint="Fewest creatives each aspect ratio must get">
         <Stepper
           aria-label="Coverage per ratio"
@@ -149,12 +154,27 @@ function RatioAxis({
             ratio={{ value, ...RATIO_DIMENSIONS[value] }}
             selected={state.variation.ratio.includes(value)}
             excluded={motionOnly && !packaged.has(value)}
-            reason={motionOnly ? reason : undefined}
             floor={floor}
             onToggle={(value) => dispatch({ type: "toggleRatio", value })}
           />
         ))}
       </div>
+      {motionOnly && packaged.size < RATIO_VALUES.length ? (
+        <div className="flex flex-wrap items-center gap-2 text-[11px] text-warning">
+          <span>
+            {motionRatios.length > 0
+              ? messages.ratioExcludedPackaged(motionRatios.map(ratioDisplayName))
+              : messages.ratioExcludedNone()}
+          </span>
+          <button
+            type="button"
+            onClick={() => dispatch({ type: "toggleFormat", value: "static" })}
+            className="underline hover:text-text-primary"
+          >
+            {messages.turnOnStillImages}
+          </button>
+        </div>
+      ) : null}
       {errors.ratio ? <span className="block text-[11px] text-error">{errors.ratio}</span> : null}
     </fieldset>
   );

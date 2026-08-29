@@ -246,20 +246,26 @@ export function validateOutput(state: EditorState): FieldErrors {
       break;
     }
   }
-  const unavailable = motionUnavailableReason(state);
-  if (unavailable) errors.formats = messages.formatsMotionUnavailable;
-  // Motion is drawn by the variation planner only; the classic matrix renders stills.
-  // This is structural, not a capability, so it blocks Save — the remedy is a mode
-  // switch, and it outranks the capability message because it is the root cause.
-  if (state.mode !== "variation" && state.formats.includes("motion")) {
-    errors.formats = messages.formatsMotionNeedsRandomized;
-  }
+  // Per-card gating is the single, non-red home for the "motion not available / needs
+  // randomized mode" notices (D7: gates are never red). They are surfaced on the
+  // FormatPanel gate, and the Save/apply refusal path uses `motionUnavailableReason`
+  // directly as a status line — so emitting them here too would double-report them.
+  // `motionUnavailableReason` remains a public helper for that refusal path.
   return errors;
 }
 
 export function validateMotion(state: EditorState): FieldErrors {
   const errors: FieldErrors = {};
   if (!state.formats.includes("motion")) return errors;
+  // The FormatPanel gate stops Video being *selected* in Classic, but a brief can arrive
+  // here holding it anyway: pick Video in Randomized, switch to Classic, and the format
+  // stays. Nothing else catches that — the generate path branches on mode alone, so the
+  // brief saves and applies cleanly and then renders stills, silently producing something
+  // other than what it asks for. A refusal the user can read is the whole point (D3).
+  if (state.mode !== "variation") {
+    errors.formats = messages.formatsMotionNeedsRandomizedMode;
+    return errors;
+  }
   if (state.motion.length === 0) {
     errors.motion = messages.motion;
   }

@@ -11,11 +11,18 @@ export interface AxisCardProps {
   /** Optional caption under the value; aria-hidden so it cannot extend the name. */
   readonly meta?: string;
   /**
+   * What the card *shows*, when that differs from what it *is*. The accessible name stays
+   * `value` either way: assistive tech and the YAML agree on the raw term, while the screen
+   * can read "Video" instead of "motion" (D18). Defaults to `value`.
+   */
+  readonly label?: string;
+  /**
    * Why this option is unavailable, or anything else assistive technology must
    * hear. Exposed via `aria-describedby`, which — unlike content — never joins
    * the accessible name, so the name stays exactly `value`.
    */
   readonly description?: string;
+  readonly descriptionIcon?: ReactNode;
   readonly disabled?: boolean;
 }
 
@@ -36,7 +43,9 @@ export function AxisCard({
   onToggle,
   children,
   meta,
+  label,
   description,
+  descriptionIcon,
   disabled = false,
 }: AxisCardProps): ReactNode {
   const descriptionId = `axis-card-description-${useId()}`;
@@ -72,15 +81,16 @@ export function AxisCard({
       <span aria-hidden="true" className="flex items-center justify-center">
         {children}
       </span>
-      <span className={cn("font-mono text-[12px]", selected ? "text-white" : "text-text-muted")}>{value}</span>
+      <span className={cn("font-mono text-[12px]", selected ? "text-white" : "text-text-muted")}>{label ?? value}</span>
       {meta ? (
         <span aria-hidden="true" className="text-[11px] text-text-muted">
           {meta}
         </span>
       ) : null}
       {description === undefined ? null : (
-        <span id={descriptionId} className="text-[11px] text-warning">
-          {description}
+        <span id={descriptionId} className="flex items-center gap-1 text-[11px] text-warning">
+          {descriptionIcon ? <span aria-hidden="true">{descriptionIcon}</span> : null}
+          <span>{description}</span>
         </span>
       )}
     </button>

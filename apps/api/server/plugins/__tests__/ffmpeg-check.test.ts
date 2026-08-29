@@ -13,6 +13,7 @@ import plugin from "../ffmpeg-check.js";
 
 function fakeProcess(opts: {
   code?: number | null;
+  stdout?: string;
   stderr?: string;
   error?: Error;
   hang?: boolean;
@@ -22,9 +23,10 @@ function fakeProcess(opts: {
   return () => {
     if (opts.throwOnSpawn !== undefined) throw opts.throwOnSpawn;
     const stderr = opts.noStderr ? null : new PassThrough();
+    const stdout = new PassThrough();
     const proc = Object.assign(new EventEmitter(), {
       stderr,
-      stdout: new PassThrough(),
+      stdout,
       stdin: null,
       killed: false,
       kill() {
@@ -40,6 +42,8 @@ function fakeProcess(opts: {
         proc.emit("error", opts.error);
         return;
       }
+      if (opts.stdout) stdout.end(opts.stdout);
+      else stdout.end();
       if (opts.stderr && stderr) stderr.end(opts.stderr);
       else stderr?.end();
       proc.emit("close", opts.code ?? 0);
@@ -52,6 +56,14 @@ describe("probeFfmpeg", () => {
   test("returns motion true when ffmpeg -version exits 0", async () => {
     const cap = await probeFfmpeg({ spawn: fakeProcess({ code: 0 }), ffmpegPath: "/opt/ffmpeg" });
     expect(cap).toEqual({ motion: true });
+  });
+
+  test("extracts version string from stdout when present", async () => {
+    const cap = await probeFfmpeg({
+      spawn: fakeProcess({ code: 0, stdout: "ffmpeg version 6.1.1-static https://johnvansickle.com/ffmpeg/ Copyright (c) 2000-2023 the FFmpeg developers\n" }),
+      ffmpegPath: "/opt/ffmpeg",
+    });
+    expect(cap).toEqual({ motion: true, version: "6.1.1-static" });
   });
 
   test("returns a redacted reason on a non-zero exit with stderr", async () => {

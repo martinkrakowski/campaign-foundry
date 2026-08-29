@@ -15,3 +15,12 @@ export { SwatchChip, hueShiftHex, type SwatchChipProps } from "./swatch-chip";
 export { SwitchRow, type SwitchRowProps } from "./switch-row";
 export { ChipGroup, type ChipGroupProps } from "./chip-group";
 export { SwatchPicker, SWATCH_PALETTE, type SwatchPickerProps } from "./swatch-picker";
+export { PlatformCard, type PlatformCardProps } from "./platform-card";
+export {
+  DurationStrip,
+  slideToFree,
+  secondsAtClientX,
+  keyToTarget,
+  type DurationStripProps,
+} from "./duration-strip";
+

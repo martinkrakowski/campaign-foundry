@@ -15,6 +15,8 @@
   --color-brand-primary: #1473e6;
   --color-brand-primary-hover: color-mix(in srgb, var(--color-brand-primary) 85%, black);
   --color-brand-secondary: #8b5cf6;
+  --color-brand-tint: rgba(20, 115, 230, 0.15);
+  --color-brand-rail: rgba(20, 115, 230, 0.4);
 
   /* Neutral surfaces & text */
   --color-background: #ffffff;
@@ -61,7 +63,9 @@
   /* Motion */
   --duration-fast: 150ms;
   --duration-normal: 250ms;
+  --duration-preview: 2400ms;
   --easing-default: cubic-bezier(0.4, 0, 0.2, 1);
+  --easing-preview: cubic-bezier(0.33, 1, 0.68, 1);
 }
 
 /*

@@ -17,12 +17,10 @@ export interface RatioPanelProps {
   readonly selected: boolean;
   /** True when the motion narrowing excludes this ratio from a motion-only plan. */
   readonly excluded: boolean;
-  /** Why the ratio is excluded — the same string on every excluded panel. */
-  readonly reason: string | undefined;
-  /** How many of `count` this ratio is projected to receive (0 when it is not drawn). */
   /** The shared per-ratio floor — one setting, displayed identically on every panel. */
   readonly floor: number;
   readonly onToggle: (value: string) => void;
+  readonly reason?: string;
 }
 
 /**
@@ -46,7 +44,6 @@ export function RatioPanel({
   ratio,
   selected,
   excluded,
-  reason,
   floor,
   onToggle,
 }: RatioPanelProps) {
@@ -57,7 +54,6 @@ export function RatioPanel({
       onToggle={onToggle}
       disabled={excluded && !selected}
       meta={`${ratio.width} × ${ratio.height}`}
-      {...(excluded && reason !== undefined ? { description: reason } : {})}
     >
       <span className="flex flex-col items-center gap-1">
         <RatioFrame ratio={ratio.value} />
