@@ -1453,3 +1453,39 @@ describe("motionPackagedRatios", () => {
   });
 });
 
+
+describe("a draft written before the override flags existed", () => {
+  const legacy = (over: Record<string, unknown>) =>
+    normalizeDraftState({
+      mode: "variation",
+      briefId: "camp",
+      platforms: ["instagram-feed"],
+      ...over,
+    } as Record<string, unknown>);
+
+  test("authored formats survive, because an absent flag is not a claim they were derived", () => {
+    // `instagram-feed` derives static only; this draft holds motion as well, which can
+    // only have been authored. Restoring it as "not overridden" hands the next platform
+    // toggle permission to overwrite it.
+    const restored = legacy({ formats: ["static", "motion"] });
+    expect(restored.formatsOverridden).toBe(true);
+    const toggled = editorReducer(restored, { type: "togglePlatform", value: "linkedin" });
+    expect(toggled.formats).toEqual(["static", "motion"]);
+  });
+
+  test("authored motion kinds survive turning Video off", () => {
+    const restored = legacy({ motion: ["ken-burns-in"], duration: [4] });
+    expect(restored.motionTouched).toBe(true);
+  });
+
+  test("a draft that matches what the platforms derive is not marked overridden", () => {
+    expect(legacy({ formats: ["static"] }).formatsOverridden).toBe(false);
+    expect(legacy({ motion: [], duration: [] }).motionTouched).toBe(false);
+  });
+
+  test("a flag that is present is believed, not re-inferred", () => {
+    // the user turned an override off deliberately; the data still differs, and that is
+    // not the restore's business to second-guess
+    expect(legacy({ formats: ["static", "motion"], formatsOverridden: false }).formatsOverridden).toBe(false);
+  });
+});

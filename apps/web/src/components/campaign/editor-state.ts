@@ -862,6 +862,11 @@ export function loadDraftFromStorage(state: EditorState): EditorState | null {
  * the only correct fallback for a draft that lost its own, and a burnt counter
  * value costs nothing — product keys need only be unique.
  */
+/** Whether a stored list says something other than what the platforms would derive. */
+function differsFrom(stored: readonly string[], derived: readonly string[]): boolean {
+  return stored.length !== derived.length || !stored.every((value) => derived.includes(value));
+}
+
 export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   const mode: CampaignMode = raw.mode === "variation" ? "variation" : "brief";
   const initial = initialEditorState(mode);
@@ -907,6 +912,11 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   // burned past the keys still wins; product keys only need to be unique.
   const nextProductKey = Math.max(storedNextProductKey ?? 0, nextKeyAfter(products));
   const campaignName = str(raw.campaignName, typeof raw.briefId === "string" ? raw.briefId : "");
+  const motion = list(raw.motion, initial.motion);
+  const duration = list(raw.duration, initial.duration);
+  const formats = list(raw.formats, initial.formats);
+  const platforms = list(raw.platforms, initial.platforms);
+
   return {
     ...initial,
     ...raw,
@@ -918,14 +928,32 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     nextProductKey,
     treatments: list(raw.treatments, initial.treatments),
     variation,
-    motion: list(raw.motion, initial.motion),
-    duration: list(raw.duration, initial.duration),
-    formats: list(raw.formats, initial.formats),
-    platforms: list(raw.platforms, initial.platforms),
+    motion,
+    duration,
+    formats,
+    platforms,
     outputExplicit: raw.outputExplicit === true,
-    formatsOverridden: raw.formatsOverridden === true,
-    ratioOverridden: raw.ratioOverridden === true,
-    motionTouched: raw.motionTouched === true,
+    // A draft written before these flags existed has none of them, and `=== true` would
+    // read that absence as "never overridden". It is not the same statement: the draft
+    // may well hold formats, ratios or motion the user authored by hand. Restoring those
+    // as platform-derived means the next platform toggle overwrites them, and turning
+    // Video off retracts motion kinds the user chose — silent loss of authored work, in a
+    // draft whose whole purpose is to not lose it.
+    //
+    // So an absent flag is inferred from the data, exactly as `fromBrief` infers it when
+    // loading a brief from disk; a flag that is present is believed.
+    formatsOverridden:
+      raw.formatsOverridden === undefined
+        ? differsFrom(formats, platformsToFormats(platforms))
+        : raw.formatsOverridden === true,
+    ratioOverridden:
+      raw.ratioOverridden === undefined
+        ? differsFrom(variation.ratio, platformsToRatios(platforms))
+        : raw.ratioOverridden === true,
+    motionTouched:
+      raw.motionTouched === undefined
+        ? motion.length > 0 || duration.length > 0
+        : raw.motionTouched === true,
     motionSeeded: raw.motionSeeded === true,
     // The count notice is one-time UI, not part of the draft it describes.
     countNotice: null,
