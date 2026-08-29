@@ -14,6 +14,10 @@
       "types": "./src/domain/value-objects/aspect-ratios.ts",
       "default": "./src/domain/value-objects/aspect-ratios.ts"
     },
+    "./copy-timeline": {
+      "types": "./src/domain/value-objects/CopyTimeline.vo.ts",
+      "default": "./src/domain/value-objects/CopyTimeline.vo.ts"
+    },
     "./motion-kinds": {
       "types": "./src/domain/value-objects/MotionKind.vo.ts",
       "default": "./src/domain/value-objects/MotionKind.vo.ts"

@@ -1,4 +1,10 @@
-import type { CampaignBrief, CopyPool, Product, Treatment, VariationPolicy } from "@campaignfoundry/CampaignOrchestration";
+import type {
+  CampaignBrief,
+  CopyPool,
+  Product,
+  Treatment,
+  VariationPolicy,
+} from "@campaignfoundry/CampaignOrchestration";
 // The leaf, never the barrel: the barrel re-exports the infrastructure adapters, which
 // pull node:fs/path/crypto into the browser bundle.
 import {
@@ -9,10 +15,11 @@ import {
   MIN_DURATION_SEC,
 } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import { MOTION_KINDS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
+import { MAX_WEIGHT } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 
 // Re-exported, not restated: every one of these is the domain's own value, and the
 // editor's copies of them were exactly the drift the leaf exists to prevent (D18).
-export { DEFAULT_DURATION_SEC, HEADLINE_POOL_REF, MAX_DURATION_SEC, MIN_DURATION_SEC, MOTION_KINDS };
+export { DEFAULT_DURATION_SEC, HEADLINE_POOL_REF, MAX_DURATION_SEC, MIN_DURATION_SEC, MOTION_KINDS, MAX_WEIGHT };
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
 import { platformsToFormats, platformsToRatios } from "./derive";
@@ -124,6 +131,24 @@ export interface TreatmentDraft {
   tone: string;
 }
 
+export interface TimelineBeatDraft {
+  text: string;
+  /** An integer in [1, MAX_WEIGHT] — the Stepper bounds it, timelineProblem holds it. */
+  weight: number;
+}
+
+export interface TimelineDraft {
+  beats: TimelineBeatDraft[];
+  transition: "cut" | "fade";
+  /**
+   * 1-based index of the beat the poster shows (D7). Persisted, and deliberately an
+   * index — the reducer re-points it across reorder/remove so the selected text stays
+   * stable. Invariant: in [1, beats.length] whenever the timeline is not empty; the
+   * reducer clamps and no serialisation path can emit an out-of-range value.
+   */
+  keyBeat: number;
+}
+
 export type EditorSource =
   | { kind: "new"; tempId: string }
   | { kind: "file"; file: string; loadedId: string; savedSnapshot: CampaignBrief | null; revision: string | undefined };
@@ -140,6 +165,22 @@ export interface EditorState {
   products: ProductDraft[];
   nextProductKey: number;
   treatments: TreatmentDraft[];
+  /**
+   * Sequenced copy for motion clips (E5): ordered beats, never seconds (D1). Empty
+   * until a beat is added — an empty timeline is "no timeline" and is never
+   * serialised, so a loaded brief without a `copy` block does not grow one. The
+   * beats survive a retraction (Video off or a switch to classic) inside this draft;
+   * only the serialisation is gated, so toggling back restores the work.
+   */
+  timeline: TimelineDraft;
+  /**
+   * True only when the loaded brief declared a `copy` block (D11). A declared-but-empty
+   * block (`copy: {}`) is legal — the parser accepts it — and must survive a load→save
+   * the same way `outputExplicit` preserves a declared `output`: saving must not strip
+   * what a file already wrote. The editor never authors an empty block on its own;
+   * `toBrief` writes one only to keep such a file byte-identical.
+   */
+  copyExplicit: boolean;
   variation: {
     count: string;
     seed: string;
@@ -207,6 +248,13 @@ export type EditorAction =
   | { type: "setTreatment"; index: number; patch: Partial<TreatmentDraft> }
   | { type: "addTreatment" }
   | { type: "removeTreatment"; index: number }
+  | { type: "addBeat" }
+  | { type: "removeBeat"; index: number }
+  | { type: "moveBeat"; from: number; to: number }
+  | { type: "setBeatText"; index: number; text: string }
+  | { type: "setBeatWeight"; index: number; weight: number }
+  | { type: "setKeyBeat"; index: number }
+  | { type: "setTransition"; transition: "cut" | "fade" }
   | { type: "setVariation"; field: "count" | "seed" | "minDistance" | "perProduct" | "perRatio"; value: string }
   | { type: "toggleLayout"; value: string }
   | { type: "toggleTone"; value: string }
@@ -249,6 +297,8 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
     products: [emptyProduct(1)],
     nextProductKey: 2,
     treatments: [],
+    timeline: { beats: [], transition: "fade", keyBeat: 1 },
+    copyExplicit: false,
     variation: {
       count: "12",
       seed: "",
@@ -363,6 +413,45 @@ function withCountClamp(state: EditorState): EditorState {
   return state.countNotice === null ? state : { ...state, countNotice: null };
 }
 
+/**
+ * Remove a beat (0-based `index`), re-pointing `keyBeat` so the poster's text does not
+ * change because rows moved (D7/E5.1). A beat before the poster decrements it; removing
+ * the poster itself keeps the index — the beat that shifted into the slot inherits the
+ * poster, or, when it was last, the new last beat does — and a beat after it leaves it
+ * alone. Emptying the list resets `keyBeat` to 1, which no path serialises because an
+ * empty timeline has no `keyBeat` to write.
+ */
+function removeTimelineBeat(timeline: TimelineDraft, index: number): TimelineDraft {
+  const beats = timeline.beats.filter((_, i) => i !== index);
+  let nextKeyIndex = timeline.keyBeat - 1;
+  if (index < timeline.keyBeat - 1) nextKeyIndex = timeline.keyBeat - 2;
+  else if (index === timeline.keyBeat - 1) nextKeyIndex = Math.min(timeline.keyBeat - 1, beats.length - 1);
+  return {
+    beats,
+    transition: timeline.transition,
+    keyBeat: beats.length === 0 ? 1 : nextKeyIndex + 1,
+  };
+}
+
+/**
+ * Move a beat (0-based `from` → `to`), re-pointing `keyBeat` so the poster's text does
+ * not change because rows moved. The poster is tracked by position, not content: when
+ * the moved row IS the poster it follows to `to`; otherwise it shifts exactly as a row
+ * would — left when a beat ahead of it is carried forward past it, right when a beat
+ * behind it is carried back across it. The result is always in [1, beats.length].
+ */
+function moveTimelineBeat(timeline: TimelineDraft, from: number, to: number): TimelineDraft {
+  const next = [...timeline.beats];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  const keyIndex = timeline.keyBeat - 1;
+  let nextKeyIndex = keyIndex;
+  if (keyIndex === from) nextKeyIndex = to;
+  else if (keyIndex > from) nextKeyIndex = to <= keyIndex - 1 ? keyIndex : keyIndex - 1;
+  else nextKeyIndex = to <= keyIndex ? keyIndex + 1 : keyIndex;
+  return { beats: next, transition: timeline.transition, keyBeat: nextKeyIndex + 1 };
+}
+
 function reduceEditor(state: EditorState, action: EditorAction): EditorState {
   switch (action.type) {
     case "setMode": {
@@ -420,6 +509,47 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         ...state,
         treatments: state.treatments.filter((_, index) => index !== action.index),
       };
+    case "addBeat":
+      return {
+        ...state,
+        timeline: { ...state.timeline, beats: [...state.timeline.beats, { text: "", weight: 1 }] },
+      };
+    case "removeBeat": {
+      const timeline = removeTimelineBeat(state.timeline, action.index);
+      if (timeline.beats.length === state.timeline.beats.length) return state;
+      return { ...state, timeline };
+    }
+    case "moveBeat": {
+      if (action.from === action.to || action.from >= state.timeline.beats.length) return state;
+      return {
+        ...state,
+        timeline: moveTimelineBeat(state.timeline, action.from, action.to),
+      };
+    }
+    case "setBeatText":
+      return {
+        ...state,
+        timeline: {
+          ...state.timeline,
+          beats: state.timeline.beats.map((beat, index) =>
+            index === action.index ? { ...beat, text: action.text } : beat,
+          ),
+        },
+      };
+    case "setBeatWeight":
+      return {
+        ...state,
+        timeline: {
+          ...state.timeline,
+          beats: state.timeline.beats.map((beat, index) =>
+            index === action.index ? { ...beat, weight: action.weight } : beat,
+          ),
+        },
+      };
+    case "setKeyBeat":
+      return { ...state, timeline: { ...state.timeline, keyBeat: action.index + 1 } };
+    case "setTransition":
+      return { ...state, timeline: { ...state.timeline, transition: action.transition } };
     case "setVariation": {
       // Setting the count by hand answers the notice — it has said its one thing.
       if (action.field === "count") {
@@ -663,6 +793,19 @@ function toTreatment(draft: TreatmentDraft): Treatment {
   return { id: draft.id, layout: draft.layout as Treatment["layout"], tone: draft.tone as Treatment["tone"] };
 }
 
+/**
+ * Whether this editor state may carry a serialised `copy.timeline` — the same D5 rule
+ * the running parser enforces: a timeline requires motion output (`mode: "variation"`
+ * and `output.formats` including motion) and cannot combine with `axes.headline:
+ * pool://copy` (motion copy sequences are fixed across variants). The beats themselves
+ * are kept in the draft no matter what — toggling Video off or switching to classic
+ * merely stops the serialisation, so Save never sends a brief the API would reject and
+ * the authored work returns the moment Video does.
+ */
+export function canSerializeTimeline(state: EditorState): boolean {
+  return state.mode === "variation" && state.formats.includes("motion") && !state.variation.headline;
+}
+
 export function toBrief(state: EditorState): CampaignBrief {
   // `mode` and `output` are optional in CampaignBrief — absent means the classic
   // static pipeline, which is exactly what a fresh draft holds. Writing them
@@ -689,7 +832,28 @@ export function toBrief(state: EditorState): CampaignBrief {
       : {}),
   };
   const localized = state.localizedMessage.trim();
-  const withCopy = localized ? { ...brief, localizedMessage: localized } : brief;
+  const withLocalized = localized ? { ...brief, localizedMessage: localized } : brief;
+  // Sequenced copy for motion clips (E5). The block is written only when the state may
+  // carry one — the D5 gate `canSerializeTimeline` mirrors the parser's — and only when
+  // beats exist: an empty list is "no timeline", and a loaded brief with no `copy` block
+  // must not grow one. `copyExplicit` is the lone exemption, preserving a declared-but-
+  // empty `copy: {}` a loaded file wrote (D11), exactly as `outputExplicit` preserves
+  // `output`. When the beats are present the whole timeline is written, including its
+  // defaults — `transition` and `keyBeat` are required by the domain, so a loaded brief
+  // keeps them and an authored one always states them.
+  const timeline =
+    canSerializeTimeline(state) && state.timeline.beats.length > 0
+      ? {
+          beats: state.timeline.beats.map((beat) => ({ text: beat.text, weight: beat.weight })),
+          transition: state.timeline.transition,
+          keyBeat: state.timeline.keyBeat,
+        }
+      : undefined;
+  const copy =
+    timeline !== undefined || state.copyExplicit
+      ? { ...(timeline !== undefined ? { timeline } : {}) }
+      : undefined;
+  const withCopy = copy !== undefined ? { ...withLocalized, copy } : withLocalized;
   if (state.mode === "brief") {
     return state.treatments.length > 0 ? { ...withCopy, treatments: state.treatments.map(toTreatment) } : withCopy;
   }
@@ -722,7 +886,7 @@ export function toBrief(state: EditorState): CampaignBrief {
     ...(state.duration.length > 0 ? { duration: [...state.duration] } : {}),
   };
   return {
-    ...withCopy,
+    ...withLocalized,
     variation: {
       count,
       ...(isFinite(seed) ? { seed } : {}),
@@ -730,6 +894,7 @@ export function toBrief(state: EditorState): CampaignBrief {
       ...(coverage !== undefined ? { coverage } : {}),
       axes,
     },
+    ...(copy !== undefined ? { copy } : {}),
   };
 }
 
@@ -776,6 +941,20 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
   const durationList = list(axes?.duration, []);
   const motionTouched = motionList.length > 0 || durationList.length > 0;
 
+  // E5: a load keeps a declared timeline — and a declared-but-empty `copy` block — so
+  // saving cannot silently strip what a file already wrote (D11), the same reason the
+  // output block is preserved above. The parser defaults `transition`/`keyBeat` onto
+  // every accepted timeline, and requires non-empty beats, so the draft below is always
+  // structurally sound; the text/weight values are copied verbatim, never trimmed.
+  const copyTimeline = brief.copy?.timeline;
+  const timeline: TimelineDraft = copyTimeline
+    ? {
+        beats: copyTimeline.beats.map((beat) => ({ text: beat.text, weight: beat.weight })),
+        transition: copyTimeline.transition,
+        keyBeat: copyTimeline.keyBeat,
+      }
+    : { beats: [], transition: "fade", keyBeat: 1 };
+
   return {
     source,
     mode: brief.mode ?? "brief",
@@ -788,6 +967,8 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
     products,
     nextProductKey,
     treatments,
+    timeline,
+    copyExplicit: brief.copy !== undefined,
     variation: {
       count: variation ? String(variation.count) : "12",
       seed: num(variation?.seed),
@@ -920,6 +1101,37 @@ function differsFrom(stored: readonly string[], derived: readonly string[]): boo
   return stored.length !== derived.length || stored.some((value, index) => value !== derived[index]);
 }
 
+/**
+ * Rebuilds a persisted `timeline` over the shape this build expects, with the same
+ * repair-first, discard-only-when-unusable rigor as the rest of `normalizeDraftState`:
+ * a beat that is not an object, a weight outside [1, MAX_WEIGHT], a non-"cut"/"fade"
+ * transition and an out-of-range `keyBeat` are repaired rather than trusted — but a
+ * `keyBeat` cannot be repaired past `beats.length`, and with the list empty the field
+ * has no valid value at all and is reset to its never-serialised sentinel 1.
+ */
+function normalizeTimelineDraft(value: unknown): TimelineDraft {
+  const rawTimeline = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+  const beats: TimelineBeatDraft[] = (Array.isArray(rawTimeline?.beats) ? rawTimeline.beats : []).map((entry) => {
+    if (typeof entry !== "object" || entry === null) return { text: "", weight: 1 };
+    const beat = entry as Partial<TimelineBeatDraft>;
+    const weight =
+      typeof beat.weight === "number" && Number.isInteger(beat.weight) && beat.weight >= 1 && beat.weight <= MAX_WEIGHT
+        ? beat.weight
+        : 1;
+    return { text: typeof beat.text === "string" ? beat.text : "", weight };
+  });
+  const transition =
+    rawTimeline !== null && (rawTimeline.transition === "cut" || rawTimeline.transition === "fade")
+      ? rawTimeline.transition
+      : "fade";
+  const storedKeyBeat =
+    rawTimeline !== null && typeof rawTimeline.keyBeat === "number" && Number.isInteger(rawTimeline.keyBeat)
+      ? rawTimeline.keyBeat
+      : 1;
+  const keyBeat = beats.length === 0 ? 1 : Math.min(Math.max(1, storedKeyBeat), beats.length);
+  return { beats, transition, keyBeat };
+}
+
 export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   const mode: CampaignMode = raw.mode === "variation" ? "variation" : "brief";
   const initial = initialEditorState(mode);
@@ -980,6 +1192,8 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     products,
     nextProductKey,
     treatments: list(raw.treatments, initial.treatments),
+    timeline: normalizeTimelineDraft(raw.timeline),
+    copyExplicit: raw.copyExplicit === true,
     variation,
     motion,
     duration,
