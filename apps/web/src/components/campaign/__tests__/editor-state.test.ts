@@ -1083,6 +1083,13 @@ describe("deterministic product keys (D16)", () => {
     expect(normalized.nextProductKey).toBe(1);
   });
 
+  test("a restored draft keeps its explicit-mode flag, and a wrong-typed one is repaired", () => {
+    const kept = normalizeDraftState({ ...base(), modeExplicit: true } as unknown as Record<string, unknown>);
+    expect(kept.modeExplicit).toBe(true);
+    const repaired = normalizeDraftState({ ...base(), modeExplicit: "yes" } as unknown as Record<string, unknown>);
+    expect(repaired.modeExplicit).toBe(false);
+  });
+
   test("a restored draft keeps its explicit-output flag, and a wrong-typed one is repaired", () => {
     const kept = normalizeDraftState({ ...base(), outputExplicit: true } as unknown as Record<string, unknown>);
     expect(kept.outputExplicit).toBe(true);
@@ -1160,6 +1167,48 @@ describe("whole-corpus round-trip", () => {
     const originalSerialised = dumpBrief(parsed);
     const roundTrippedSerialised = dumpBrief(roundTrippedBrief);
     expect(roundTrippedSerialised).toBe(originalSerialised);
+  });
+});
+
+describe("mode fidelity across a load → save round trip", () => {
+  const classic = (over: Partial<CampaignBrief> = {}): CampaignBrief =>
+    ({
+      id: "camp",
+      targetRegion: "DE",
+      targetAudience: "a",
+      campaignMessage: "Hi",
+      products: [{ id: "p", name: "P", primaryColor: "#FF7A00", logoPath: "assets/p.png" }],
+      ...over,
+    }) as CampaignBrief;
+  const entry = { file: "camp.yaml", revision: undefined as unknown as undefined };
+  const trip = (brief: CampaignBrief) => toBrief(fromBrief(brief, entry));
+
+  test("a brief that spells out the default mode keeps it", () => {
+    // `mode: brief` is redundant — its absence means the same thing — but a file that
+    // wrote it must come back holding it, or saving silently rewrites the author's file.
+    expect(trip(classic({ mode: "brief" })).mode).toBe("brief");
+  });
+
+  test("a brief that omits mode still omits it", () => {
+    expect("mode" in trip(classic())).toBe(false);
+  });
+
+  test("a variation brief keeps its mode without needing the flag", () => {
+    expect(trip(classic({ mode: "variation" })).mode).toBe("variation");
+  });
+
+  test("switching a loaded variation brief back to classic omits mode, as the default does", () => {
+    // The toggle-on→off rule `output` follows: returning to the default must serialise
+    // like the default, so a variation → brief → variation cycle is byte-identical.
+    const loaded = fromBrief(classic({ mode: "variation" }), entry);
+    const switched = reduce(loaded, { type: "setMode", mode: "brief" });
+    expect("mode" in toBrief(switched)).toBe(false);
+  });
+
+  test("switching a file that spelled out the default to variation writes variation", () => {
+    const loaded = fromBrief(classic({ mode: "brief" }), entry);
+    const switched = reduce(loaded, { type: "setMode", mode: "variation" });
+    expect(toBrief(switched).mode).toBe("variation");
   });
 });
 
