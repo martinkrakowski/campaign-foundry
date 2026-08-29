@@ -30,6 +30,7 @@ import type { BackgroundContext, ImageGeneratorPort } from "../ports/out/ImageGe
 import type { PlatformSafeZoneResolver } from "../ports/out/PlatformProfilePort.js";
 import type { VideoCompositorPort } from "../ports/out/VideoCompositorPort.js";
 import { MOTION_FPS } from "../../domain/value-objects/MotionKind.vo.js";
+import { DEFAULT_DURATION_SEC } from "../../domain/value-objects/variation-defaults.js";
 
 /** Classic briefs keep the two-product floor; variation relaxes to 1 (D10). */
 const MINIMUM_PRODUCTS_CLASSIC = 2;
@@ -46,8 +47,6 @@ const MAX_CONCURRENT_BACKGROUNDS = 8;
 
 /** Normalised times whose frames are brand-density checked on a motion variant. */
 const MOTION_SAMPLE_AT: readonly number[] = [0, 0.25, 0.5, 0.75, 1];
-/** Planner default; a motion variant without `durationSec` (hand-built plan) encodes this. */
-const DEFAULT_DURATION_SEC = 6;
 
 /** Row identity + paths: the leading keys of every persisted asset row. */
 type VariationAssetIdentity = Pick<GeneratedAsset, "productId" | "aspectRatio" | "outputPath" | "proofPath">;

@@ -6,6 +6,7 @@ import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
 import type { Product } from "../../../domain/entities/Product.js";
 import type { Variant } from "../../../domain/entities/Variant.js";
 import type { Treatment } from "../../../domain/value-objects/Treatment.vo.js";
+import { DEFAULT_DURATION_SEC } from "../../../domain/value-objects/variation-defaults.js";
 import {
   fakeCompliance,
   fakeCompositor,
@@ -854,12 +855,14 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     expect(d.compliance.validateBrandColorDensity).not.toHaveBeenCalled();
   });
 
-  test("a motion variant without durationSec encodes the 6 s default", async () => {
+  test("a motion variant without durationSec encodes the domain default duration", async () => {
     const d = deps({ planner: fakePlanner(fakePlan([motionVariant({ durationSec: undefined })])) });
     const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
     expect(result.success).toBe(true);
-    expect(d.videoCompositor.compositeVideo).toHaveBeenCalledWith(expect.objectContaining({ durationSec: 6 }));
-    if (result.success) expect(result.value.assets[0].durationSec).toBe(6);
+    expect(d.videoCompositor.compositeVideo).toHaveBeenCalledWith(
+      expect.objectContaining({ durationSec: DEFAULT_DURATION_SEC }),
+    );
+    if (result.success) expect(result.value.assets[0].durationSec).toBe(DEFAULT_DURATION_SEC);
   });
 
   test("a pinned 1:1 motion variant proofs from its poster; a non-pinned one does not", async () => {
