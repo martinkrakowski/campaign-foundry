@@ -1,7 +1,7 @@
 "use client";
 
-import { useReducer, useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from "react";
-import { Button, Input } from "@/components/ui";
+import { useReducer, useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect, type ReactNode } from "react";
+import { Button, Input, SegBar } from "@/components/ui";
 import { useRun } from "@/lib/run-context";
 import { useRouter } from "next/navigation";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
@@ -48,7 +48,13 @@ import { SectionModeContext } from "@/components/campaign/SectionModeContext";
 import { useEditorPanels } from "@/lib/editor-panels-context";
 import { Accordion } from "@/components/shell/Accordion";
 import { revealSection } from "@/lib/scroll-to-section";
-import { useStepNavigation } from "@/lib/use-step-navigation";
+import {
+  useStepNavigation,
+  useStepKeys,
+  useStepSwipe,
+  useBecameTrue,
+  STEP_TRANSITION_MS,
+} from "@/lib/use-step-navigation";
 import { cn } from "@/lib/cn";
 import { BriefSelector } from "@/components/campaign/BriefSelector";
 import { HeadlinePoolDrawer } from "@/components/campaign/HeadlinePoolDrawer";
@@ -165,7 +171,9 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   // The step list is derived from the mode, never stored (D19): both modes produce
   // five sections plus the review step. The cursor re-clamps when the mode flips.
   const steps = useMemo<StepId[]>(() => [...sectionOrder(state.mode), "review"], [state.mode]);
-  const { index: stepIndex, go } = useStepNavigation(steps);
+  // W7.1: `direction` and `maxVisited` come off the same cursor — the segbar paints
+  // the walk (how far it got) and the step card slides the way the user came.
+  const { index: stepIndex, direction, maxVisited, go } = useStepNavigation(steps);
 
   // W6.2: a reveal that points at another step cannot scroll there synchronously —
   // in Guided the target section is unmounted until the step change commits. The
@@ -464,6 +472,29 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     (stepHeadingRef.current as HTMLHeadingElement).focus();
   }, [stepIndex]);
 
+  // W7.2 — the card on its way out. Only the step it is and the way the user went;
+  // the card itself is rendered from that, fresh, so nothing stale is held in state.
+  const [exiting, setExiting] = useState<{ index: number; direction: 1 | -1 } | null>(null);
+  const shownStep = useRef(stepIndex);
+
+  useEffect(() => {
+    const from = shownStep.current;
+    // A re-run that is not a step change has nothing to animate out: the direction
+    // can flip without the cursor moving, when the walk is asked for the step it is
+    // already on.
+    if (from === stepIndex) return;
+    shownStep.current = stepIndex;
+    setExiting({ index: from, direction });
+  }, [stepIndex, direction]);
+
+  // …and spent one transition later. Keyed on the card rather than the step, so
+  // typing on the step that just arrived cannot clear the one that is leaving.
+  useEffect(() => {
+    if (!exiting) return;
+    const timer = setTimeout(() => setExiting(null), STEP_TRANSITION_MS);
+    return () => clearTimeout(timer);
+  }, [exiting]);
+
   // D4/U1: the mode chooser is the first decision a brief makes, so it is the first
   // thing the bar shows. Published like every other editor panel — the page keeps the
   // dispatch, the bar only places it — which also gives the mobile menu the chooser.
@@ -683,18 +714,39 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     go(stepIndex + 1);
   }, [steps, stepIndex, stepSectionErrors, reveal, go]);
 
-  // W6.5 — the step's status sentence: the review step speaks for the whole brief,
-  // and every other step says the first thing wrong or "Looking good."
-  const stepFooterStatus = useMemo(() => {
-    const step = steps[stepIndex];
-    // The bucket read first: `stepSectionErrors` answers for "review" too (all of
-    // nothing), and the step sentence that follows uses the same voice for both.
-    const sectionErrors = stepSectionErrors(step);
-    if (step === "review") return messages.statusStepReview;
-    return Object.keys(sectionErrors).length > 0
-      ? Object.values(sectionErrors)[0]
-      : messages.statusStepReady;
-  }, [steps, stepIndex, stepSectionErrors]);
+  // W6.5 / W7.4 — the step's own errors, read once and answered twice: the footer's
+  // sentence speaks the first of them, and the Next button's ready ring fires the
+  // moment there are none.
+  const stepErrors = stepSectionErrors(steps[stepIndex]);
+  const stepValid = Object.keys(stepErrors).length === 0;
+  // W7.4 — the ready ring counts the transitions of *this* step into complete, so
+  // walking onto a step that was already finished is not an event, and neither is
+  // any render of one that stays finished.
+  const readyKey = useBecameTrue(stepValid, stepIndex);
+  const stepFooterStatus =
+    steps[stepIndex] === "review"
+      ? messages.statusStepReview
+      : stepValid
+        ? messages.statusStepReady
+        : Object.values(stepErrors)[0];
+
+  // W7.1 — one segment per step, mapped off the same list the cursor walks. The
+  // segbar takes the steps and their issue counts and knows nothing else, so the
+  // six cannot disagree with the walk the footer moves.
+  const segments = useMemo(
+    () =>
+      steps.map((step) => ({
+        id: step,
+        label: stepTitle(step),
+        issues: Object.keys(stepSectionErrors(step)).length,
+      })),
+    [steps, stepSectionErrors],
+  );
+
+  // W7.3 — the two gestures, live only while there is a walk to move. Both end in
+  // `go`, which clamps, so a swipe or an arrow past either end does nothing.
+  useStepKeys({ enabled: presentation === "guided", onStep: (move) => go(stepIndex + move) });
+  const swipe = useStepSwipe((move) => go(stepIndex + move));
 
   const handleDiscard = () => {
     dispatch({ type: "discard" });
@@ -740,6 +792,14 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
         return <PolicySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("policy")} />;
     }
   };
+
+  /** The review step is the one card that is not a section (W6.1). */
+  const renderStepCard = (step: StepId): ReactNode =>
+    step === "review" ? (
+      <p className="text-[13px] text-text-primary">{messages.stepReviewIntro}</p>
+    ) : (
+      renderStepSection(step)
+    );
 
   return (
     // No h-full / inner overflow: like every other view, this one flows and the
@@ -806,32 +866,58 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
 
           {/* Sections: the whole stack (Everything) or one step (Guided) */}
           {presentation === "guided" ? (
-            <div className="space-y-8">
-              <StepHeader
-                step={stepIndex + 1}
-                total={steps.length}
-                title={stepTitle(steps[stepIndex])}
-                subtitle={STEP_SUBTITLES[steps[stepIndex]]}
-                state={state}
-                headingRef={stepHeadingRef}
-              />
-              <div>
-                {steps[stepIndex] === "review" ? (
-                  <p className="text-[13px] text-text-primary">{messages.stepReviewIntro}</p>
-                ) : (
-                  renderStepSection(steps[stepIndex])
-                )}
+            <div className="space-y-4">
+              {/* W7.1 — the walk, above the sticky step head: the segbar scrolls away
+                  with the page while the head stays, and the two never fight for the
+                  same pixel. */}
+              <SegBar segments={segments} index={stepIndex} maxVisited={maxVisited} onSelect={go} />
+              <div className="space-y-8">
+                <StepHeader
+                  step={stepIndex + 1}
+                  total={steps.length}
+                  title={stepTitle(steps[stepIndex])}
+                  subtitle={STEP_SUBTITLES[steps[stepIndex]]}
+                  state={state}
+                  headingRef={stepHeadingRef}
+                />
+                {/* W7.2 — the two cards of a step change. The arriving one is keyed on
+                    the step, because a CSS animation only replays on a fresh node;
+                    the leaving one is out of flow for the same breath, so the pair
+                    slide past each other instead of reflowing down the column. */}
+                <div className="relative" data-testid="step-card" {...swipe}>
+                  {exiting ? (
+                    <div
+                      key={`exit-${exiting.index}`}
+                      // Inert as well as hidden: an `aria-hidden` box full of live
+                      // controls is a trap, and this one has a whole section's worth
+                      // of them for as long as it is on screen. `pointer-events-none`
+                      // is the same promise to an engine that has no `inert`.
+                      aria-hidden="true"
+                      inert
+                      className={cn(
+                        "pointer-events-none absolute inset-x-0 top-0",
+                        exiting.direction === 1 ? "step-exit-l" : "step-exit-r",
+                      )}
+                    >
+                      {renderStepCard(steps[exiting.index])}
+                    </div>
+                  ) : null}
+                  <div key={stepIndex} className={direction === 1 ? "step-enter-r" : "step-enter-l"}>
+                    {renderStepCard(steps[stepIndex])}
+                  </div>
+                </div>
+                <StepFooter
+                  statusText={stepFooterStatus}
+                  onBack={stepIndex > 0 ? () => go(stepIndex - 1) : undefined}
+                  onNext={steps[stepIndex] === "review" ? undefined : () => handleNext()}
+                  // The last section step, not a named one: `output` is last in classic
+                  // but randomized puts `policy` after it, so keying on the id promised
+                  // a launch and delivered the Variation Policy step.
+                  nextLabel={stepIndex === steps.length - 2 ? messages.stepNextReviewLaunch : undefined}
+                  nudgeKey={nudgeKey}
+                  readyKey={readyKey}
+                />
               </div>
-              <StepFooter
-                statusText={stepFooterStatus}
-                onBack={stepIndex > 0 ? () => go(stepIndex - 1) : undefined}
-                onNext={steps[stepIndex] === "review" ? undefined : () => handleNext()}
-                // The last section step, not a named one: `output` is last in classic
-                // but randomized puts `policy` after it, so keying on the id promised
-                // a launch and delivered the Variation Policy step.
-                nextLabel={stepIndex === steps.length - 2 ? messages.stepNextReviewLaunch : undefined}
-                nudgeKey={nudgeKey}
-              />
             </div>
           ) : (
             <div className="space-y-8">

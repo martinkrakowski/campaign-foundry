@@ -1603,3 +1603,54 @@ To keep this file out of version control, add `.agents/session-log.md` to
   reverting the three source changes fails them.
 - **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
   **2244 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
+
+### 2026-08-30 — W7 segbar & transitions (lane shipped: `ae02e0c` → PR #143)
+
+- **Mode:** Implementer (then Reviewer on my own diff), building on W6 (`useStepNavigation`,
+  `revealSection`, `StepHeader`/`StepFooter`, the presentation toggle) and importing its step
+  list rather than re-deriving it. All gates green, commit verbatim, PR #143 against `main`.
+  Rebased onto `origin/main`: PRs #141 and #142 landed underneath, and #141 narrowed the
+  coverage exclusion from `**/index.ts` to `packages/*/src/**/index.ts` — so the ui barrel
+  this lane adds a line to is now inside the 100% gate, and stays at 100%.
+- **W7.1 — `SegBar` (`components/ui/seg-bar.tsx`).** One segment per step, mapped from the same
+  `steps` array the cursor walks; the six live in exactly one place (W6.1). Four states,
+  `aria-current="step"`, a per-segment `aria-label` (the bar carries no visible text), and no
+  lock: `maxVisited` only decides *done* vs *not started*. Hover growth is `motion-safe:`.
+- **W7.2 — the step-card slide.** The arriving card is `key={stepIndex}` (a CSS animation only
+  replays on a fresh node); the leaving card is held `STEP_TRANSITION_MS`, absolutely positioned
+  and `inert` + `aria-hidden` + `pointer-events-none`, then dropped. Two effects rather than one:
+  the hold is keyed on the *card*, not the step, so typing on the step that just arrived cannot
+  clear the one that is leaving (a single effect with a `renderStepCard` dependency re-ran on
+  every keystroke and cleared its own timer).
+- **W7.3 — swipe + arrows.** 60px / 1.4 ratio; the gesture belongs to whatever it *started* on,
+  so a drag across a slider is the slider's. Both gestures suppressed inside a field and while a
+  `[role="dialog"][aria-modal="true"]` is mounted (every overlay in the app unmounts when it
+  closes, so the DOM is the open/closed bookkeeping). Swipe hint painted by media query, not by
+  JS pointer sniffing.
+- **W7.4 — one-shots.** W6's scoped `kf-step-nudge` retires into the shared `animate-nudge`;
+  `animate-ready-ring` fires on the *transition* into complete, counted **per step** by
+  `useBecameTrue(valid, stepIndex)`. Per-step scoping is what stops the two false positives I
+  hit while testing: arriving at a step that was already complete, and (once the count rebased)
+  leaving a step that had rung — both hand the caller a zero, so the ring comes off the button.
+- **Deviations (in the PR body):** W6's `kf-step-nudge` renamed to `animate-nudge` (one assertion
+  in `brief-editor.test.tsx` updated with it); `stepFooterStatus` demoted from `useMemo` to a
+  plain derivation because the ring needs the same bucket read; a `data-testid="step-card"` for
+  the swipe target; the outgoing card re-mounts its section for one transition (the only way
+  React can render a second copy), which costs `CopySection` one aborted `getPool` fetch.
+- **Finding, out of lane (recorded in the PR body):** `motion-safe:animate-check-pop` in
+  `axis-card.tsx`, `preview-card.tsx` and `platform-card.tsx` **emits no CSS** — Tailwind 3.4
+  does not generate variants for a hand-written class in `@layer utilities`, so the check badge
+  overshoot never runs. Verified by compiling the real config, not by reading it.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2345 passed | 2 skipped — 100 % on all four counters**, `sync:check` **Total ops 0**, and the
+  new utilities confirmed present in the *built* stylesheet (`.step-enter-r`, `.animate-nudge`,
+  `.animate-ready-ring`, `motion-safe:group-hover:scale-y-[1.4]`, `@media(pointer:coarse)`, and
+  the reduced-motion block naming all six new classes).
+
+### 2026-08-30 — W7 segbar & transitions: Gesture yielding and transient count drops
+
+- **Mode:** Implementer. Second lane on the `feat/w7-segbar-transitions` branch.
+- **Changes:**
+  - **Gesture guard expanded:** `useStepSwipe` and `useStepKeys` now yield to elements that own their own drag or arrow keys (sliders, range inputs, draggables). The new `ownsItsOwnGesture` predicate guards the gestures alongside `isTypingTarget`. This fixes a bug where dragging a slider horizontally past 60px or using arrow keys on it would trigger a step change instead of adjusting the slider.
+  - **Transient count drop:** `useBecameTrue` was returning a count belonging to the previous subject on the render immediately after the subject changed (due to the state updating in a `useEffect`). This caused the ready-ring to fire on steps that were never valid. It now drops the stale count by returning 0 if `state.subject` does not match the current `subject`.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov` **2351 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
