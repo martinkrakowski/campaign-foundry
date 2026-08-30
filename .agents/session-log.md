@@ -1326,3 +1326,29 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Stale pre-W6 tests updated to the new contract: `sections.test.tsx` asserted the old raw-key chip fallback — `ErrorStrip` now drops buckets no section declares (covered by a motion-label test); `brief.test.tsx`'s beforeEach seeds `cf:presentation=everything` so the legacy stacked-editor suite keeps its assumption.
 - **Verification:** build, typecheck, lint (0 problems), lint:arch, `vitest` web **2265 passed | 2 skipped — 100 % on all four counters**, `sync:check` **Total ops 0**, commit `9514f08` (15 files, +990/−82), PR https://github.com/martinkrakowski/campaign-foundry/pull/140 with a Deviations section (nudge keyframe scoped to StepFooter, FloatingBar placement kept for W8.2, no SectionOutline steering, policy sidebar gating, everything-seeding of legacy suites).
 - **Left open:** nothing blocking. W7.4 owns the shared `nudge` keyframe in `globals.css`; W8.2 moves FloatingBar into the flow; StepHeader/StepFooter still lack dedicated unit tests (both arms proven through the editor suites instead).
+
+### 2026-08-30 — W6 orchestrator round: the motion mapping was declared but not read
+
+- **Mode:** Orchestrator, verifying `feat/w6-guided-engine` before review.
+- **Verified first, before changing anything.** The lane's central risk was W6.2's deferred
+  scroll, and the brief demanded its test **fail against a synchronous implementation**. It
+  does: replacing the `pendingReveal` deferral with an immediate `revealSection` makes
+  `brief-editor.test.tsx:1405` fail — a synchronous scroll runs while the section is still
+  unmounted, so `revealSection` finds no candidate and `scrollIntoView` is never reached. The
+  lane did what it was asked. Gate re-run independently: **2265 passed, 100 % on all four**.
+- **Found and fixed:** `MOTION_HOST_SECTION` was exported, documented and asserted in the
+  totality test — but **nothing read it**. `BriefEditor.reveal` spelled the pair again as
+  `section === "motion" ? "output" : section`, so the constant and the code could diverge in
+  silence and the test would still pass. That is the same drift the vocabulary collapse exists
+  to stop, reintroduced one file over. `reveal` now reads `MOTION_ERROR_KEY` and
+  `MOTION_HOST_SECTION`, and `ErrorStrip`'s chip label reads `MOTION_LABEL` rather than an
+  inline `"Motion"`.
+- **Test strengthened:** the totality suite asserted only `MOTION_HOST_SECTION === "output"`,
+  a tautology. It now also asserts the host appears in `sectionOrder(mode)` for **both** modes —
+  the property that actually matters, because a host absent from a mode's order would leave the
+  motion chip pointing at a step that does not exist in that mode, and clicking it would do
+  nothing there.
+- **Also:** `ErrorStrip.tsx` had lost its trailing newline; restored. The PR title said
+  "Closes #136", which is lane W2a's already-merged PR; retitled.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2266 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.

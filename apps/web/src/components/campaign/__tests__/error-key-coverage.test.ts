@@ -3,7 +3,7 @@ import { validateState } from "@/components/campaign/validate";
 import { initialEditorState } from "@/components/campaign/editor-state";
 import { isKnownKey } from "@/components/campaign/error-sections";
 import { SECTION_BY_ERROR_KEY, MOTION_HOST_SECTION } from "@/components/campaign/ErrorStrip";
-import { SECTION_TITLES, type SectionId } from "@/components/campaign/sections";
+import { SECTION_TITLES, sectionOrder, type SectionId } from "@/components/campaign/sections";
 import type { EditorState, ProductDraft } from "@/components/campaign/editor-state";
 
 function makeFixture(overrides: Partial<EditorState>): EditorState {
@@ -131,5 +131,15 @@ describe("W6.7 error bucket ↔ section totality", () => {
   test("motion is the one non-section bucket, and lives inside its Output host", () => {
     expect(MOTION_HOST_SECTION).toBe("output");
     expect(SECTION_BY_ERROR_KEY).not.toHaveProperty("motion");
+  });
+
+  test("motion's host is a section that exists in every mode, so the chip is always reachable", () => {
+    // The property that actually matters. A motion chip reveals its *host*, and in
+    // Guided that means switching to the host's step — so a host absent from a mode's
+    // section order would leave the chip pointing at a step that does not exist, and
+    // clicking it would do nothing at all in that mode.
+    for (const mode of ["brief", "variation"] as const) {
+      expect(sectionOrder(mode)).toContain(MOTION_HOST_SECTION);
+    }
   });
 });

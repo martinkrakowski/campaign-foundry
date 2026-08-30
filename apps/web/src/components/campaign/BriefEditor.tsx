@@ -40,7 +40,7 @@ import {
 import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, OutputSection, PolicySection } from "@/components/campaign/sections";
 import { StatusChip } from "@/components/campaign/StatusChip";
 import { StatusLine } from "@/components/campaign/StatusLine";
-import { ErrorStrip } from "@/components/campaign/ErrorStrip";
+import { ErrorStrip, MOTION_ERROR_KEY, MOTION_HOST_SECTION } from "@/components/campaign/ErrorStrip";
 import { ErrorPill } from "@/components/ui/error-pill";
 import { SaveMenu } from "@/components/campaign/SaveMenu";
 import { FloatingBar } from "@/components/shell/FloatingBar";
@@ -406,9 +406,12 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
 
   const reveal = useCallback(
     (section: string, focus = false) => {
-      // Motion has no section and no step; it validates inside its Output host, so a
-      // motion chip points at whatever step hosts Output and scrolls the motion panel.
-      const step = section === "motion" ? "output" : section;
+      // Motion has no section and no step; it validates inside its host, so a motion
+      // chip points at whatever step hosts it and scrolls the motion panel. Read the
+      // declared constants rather than spelling the pair again: the totality test
+      // asserts them, and a third copy here would let the code and the test disagree
+      // silently — the exact drift the vocabulary collapse exists to stop.
+      const step = section === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : section;
       const targetStepIndex = steps.findIndex((candidate) => candidate === step);
       if (presentation === "guided" && targetStepIndex !== -1 && targetStepIndex !== stepIndex) {
         pendingReveal.current = { section, focus };

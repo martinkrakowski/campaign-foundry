@@ -25,7 +25,10 @@ export const SECTION_BY_ERROR_KEY: Record<SectionId, SectionId> = {
 };
 
 /** The one non-section bucket: motion's errors render inside its Output host. */
+export const MOTION_ERROR_KEY = "motion";
 export const MOTION_HOST_SECTION: SectionId = "output";
+/** Motion is not a `SectionId`, so its chip label cannot come from `SECTION_TITLES`. */
+export const MOTION_LABEL = "Motion";
 
 export function ErrorStrip({ errors, onErrorClick }: ErrorStripProps) {
   const sectionsWithErrors = Object.entries(errors)
@@ -33,7 +36,10 @@ export function ErrorStrip({ errors, onErrorClick }: ErrorStripProps) {
     // Only declared buckets — the six sections plus motion — reach the label lookup.
     // An undeclared bucket cannot occur from validate (W6.7 pins it), so it is
     // dropped rather than spelled as a raw-key chip.
-    .filter(([section]) => section === "motion" || SECTION_TITLES[SECTION_BY_ERROR_KEY[section as SectionId]]);
+    .filter(
+      ([section]) =>
+        section === MOTION_ERROR_KEY || SECTION_TITLES[SECTION_BY_ERROR_KEY[section as SectionId]],
+    );
 
   if (sectionsWithErrors.length === 0) return null;
 
@@ -42,8 +48,8 @@ export function ErrorStrip({ errors, onErrorClick }: ErrorStripProps) {
       {sectionsWithErrors.map(([section, sectionErrors]) => {
         const errorCount = Object.keys(sectionErrors).length;
         const label =
-          section === "motion"
-            ? "Motion"
+          section === MOTION_ERROR_KEY
+            ? MOTION_LABEL
             : SECTION_TITLES[SECTION_BY_ERROR_KEY[section as SectionId]];
         return (
           <button
