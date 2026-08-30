@@ -1213,3 +1213,5 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Added `exerciseFocusTrap` coverage against all dialog and drawer overlays.
 - **Left open:**
   - None.
+
+- **W10 follow-up (orchestrator):** the lane's remediation fixed the four trap findings but three more stood. The dirty-guard test had replaced W1's four `toHaveBeenCalledTimes(1)` assertions with `getAllByRole("dialog")).toHaveLength(1)`, which cannot see a double interception at all because the dialog is a singleton — restored as an assertion of what a second interception would actually produce (a second push, or a prompt still standing after Leave). `DialogHead` had flattened every overlay to `<h2>`, changing `HeadlinePoolDrawer` and `AssetPickerDrawer` from `<h3>`; it now takes a `headingLevel` and both keep theirs. **Left open:** `BriefEditor` still calls `window.confirm` at three sites (`confirmReplace`, and two Save-as overwrite prompts) — the first is the same dirty-guard concept and should move to the in-app dialog; the two overwrite prompts are a different concept (destructive confirm, not navigation). Not folded in here to keep this lane from growing further.

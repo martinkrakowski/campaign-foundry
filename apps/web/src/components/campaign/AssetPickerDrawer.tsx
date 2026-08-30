@@ -53,7 +53,7 @@ export function AssetPickerDrawer({
 
   return (
     <DrawerShell open={open} onClose={onClose} ariaLabel="Asset Bin">
-      <DialogHead
+      <DialogHead headingLevel={3}
         title="Asset Bin"
         onClose={onClose}
         closeLabel="Close drawer"

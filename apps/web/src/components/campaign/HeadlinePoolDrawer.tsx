@@ -158,7 +158,7 @@ export function HeadlinePoolDrawer({
 
   return (
     <DrawerShell open={open} onClose={onClose} ariaLabel="Headline Pool">
-      <DialogHead
+      <DialogHead headingLevel={3}
         title="Headline Pool"
         onClose={onClose}
         closeText="Close"

@@ -112,6 +112,12 @@ export interface DialogHeadProps {
   readonly onClose?: () => void;
   readonly closeLabel?: string;
   readonly closeText?: string;
+  /**
+   * The heading level for `title`. Overlays sit at different depths in their pages, so
+   * the shared chrome must not flatten them all to one level — `HeadlinePoolDrawer` and
+   * `AssetPickerDrawer` were `h3` before this extraction and stay `h3`.
+   */
+  readonly headingLevel?: 2 | 3;
   readonly actions?: ReactNode;
   readonly className?: string;
 }
@@ -123,15 +129,17 @@ export function DialogHead({
   onClose,
   closeLabel,
   closeText,
+  headingLevel,
   actions,
   className,
 }: DialogHeadProps): ReactNode {
+  const Heading = headingLevel === 3 ? "h3" : "h2";
   const resolvedCloseLabel = closeLabel ?? (closeText ? undefined : "Close");
 
   return (
     <div className={cn("flex items-start justify-between gap-3 border-b border-border px-4 py-3", className)}>
       <div>
-        <h2 className="text-sm font-semibold text-text-emphasis">{title}</h2>
+        <Heading className="text-sm font-semibold text-text-emphasis">{title}</Heading>
         {description ? <p className="mt-0.5 text-[11px] text-text-muted">{description}</p> : null}
       </div>
       <div className="flex items-center gap-2 shrink-0">

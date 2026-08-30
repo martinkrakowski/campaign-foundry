@@ -465,7 +465,13 @@ describe("guarded navigation when the editor is dirty", () => {
     expect(screen.getAllByRole("dialog", { name: "Unsaved edits" })).toHaveLength(1);
 
     await user.click(within(dialog).getByRole("button", { name: "Leave" }));
+    // W1 fixed a *double* interception here, and the guard for it must survive the move
+    // from window.confirm to the in-app dialog. Counting rendered dialogs cannot see it
+    // — the dialog is a singleton — so assert what a second interception would actually
+    // produce: another prompt still standing, or a second push.
+    expect(nextMock().router.push).toHaveBeenCalledTimes(1);
     expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
+    expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
   });
 
   test("a dirty mobile tab click the user cancels does not navigate and leaves the menu open", async () => {
