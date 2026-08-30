@@ -1352,3 +1352,26 @@ To keep this file out of version control, add `.agents/session-log.md` to
   confirmed failing against it (`generatePosts()` was 0, expected 1).
 - **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
   **2259 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
+
+### 2026-08-30 — W5 review round (independent reviewer: `agy/gemini-3.1-pro-high`)
+
+- **Mode:** Orchestrator, applying verified review findings to `feat/w5-header`.
+- **The reviewer independently found the Generate bug** recorded in the entry above, by the same
+  route (tracing `guardedPush`'s `false` return). It reviewed the pre-fix commit, so its first
+  finding was already closed by that commit — two readings reaching the same defect is the
+  useful signal, not a second fix.
+- **Changes** (all test strength; no source change beyond the entry above):
+  - `header.test.tsx` — `aria-current` exclusivity now asserts **every** other tab, not only
+    Grid. A prefix bug marks one specific tab, so checking a single sibling catches it only if
+    that sibling is the one marked.
+  - `header.test.tsx` — a **brand-mark refusal** test ("Stay" must not navigate). The suite had
+    only the acceptance path, so a guard that navigated on refusal would have passed.
+    Mutation-checked: replacing `guardedPush` with a bare `router.push` makes it fail.
+  - `header.test.tsx`, `shell-modals.test.tsx` — `toHaveBeenCalledTimes(1)` beside three
+    `toHaveBeenCalledWith` assertions (Generate's navigation, twice, and `onModelChange`).
+    `toHaveBeenCalledWith` alone passes against a double-fire, which is this repo's known
+    shipped defect pattern.
+  - The new assertions use `getAttribute(...)`, not `toHaveAttribute` — `jest-dom` is not set
+    up here, and the first draft failed with "Invalid Chai property".
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2260 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.

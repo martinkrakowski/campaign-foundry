@@ -103,8 +103,12 @@ describe("Header — the Brief tab (D33)", () => {
 
     expect(screen.getByRole("link", { name: "Brief" }).getAttribute("aria-current")).toBe("page");
     // The two routes share a prefix, so the tab stays current on both — and no other
-    // tab's href is a prefix of another, which is what makes that test safe.
-    expect(screen.getByRole("link", { name: "Grid" }).getAttribute("aria-current")).toBeNull();
+    // tab's href is a prefix of another, which is what makes that test safe. Assert
+    // every other tab, not just one: a prefix bug would mark a specific tab, and
+    // checking a single sibling can only catch it if that is the one it marks.
+    for (const other of ["Grid", "Compliance", "Export", "Runs"]) {
+      expect(screen.getByRole("link", { name: other }).getAttribute("aria-current")).toBeNull();
+    }
   });
 });
 
@@ -152,6 +156,9 @@ describe("Header — Generate (D32)", () => {
     await user.click(screen.getByRole("button", { name: "Generate" }));
 
     expect(generatePosts()).toHaveLength(1);
+    // Times(1), not just "was called with": a double navigation is a real failure mode
+    // and `toHaveBeenCalledWith` alone cannot see it.
+    expect(nextMock().router.push).toHaveBeenCalledTimes(1);
     expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
     expect(screen.queryByRole("status")).toBeNull();
   });
@@ -174,6 +181,7 @@ describe("Header — Generate (D32)", () => {
     // defers whatever it was handed, so handing it only the push loses the run: the
     // user presses Generate, answers the question, lands on the grid and nothing ran.
     await waitFor(() => expect(generatePosts()).toHaveLength(1));
+    expect(nextMock().router.push).toHaveBeenCalledTimes(1);
     expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
   });
 
@@ -212,6 +220,20 @@ describe("Header — the brand mark and the telemetry control", () => {
     await user.click(within(dialog).getByRole("button", { name: "Leave" }));
     expect(nextMock().router.push).toHaveBeenCalledTimes(1);
     expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
+  });
+
+  test("a brand-mark prompt the user refuses does not navigate", async () => {
+    const user = userEvent.setup();
+    nextMock().router.push.mockClear();
+    renderDirty(<Header />);
+
+    await user.click(screen.getByRole("link", { name: /Campaign Pipeline/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    await user.click(within(dialog).getByRole("button", { name: "Stay" }));
+
+    // Staying is an answer, and it must hold the user where they are — the guard's
+    // whole contract is that a refused action never fires.
+    expect(nextMock().router.push).not.toHaveBeenCalled();
   });
 
   test("the telemetry button opens the drawer and asks the dirty guard nothing", async () => {

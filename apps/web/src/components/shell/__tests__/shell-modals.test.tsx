@@ -43,7 +43,9 @@ describe("ModelSelector", () => {
     await user.click(screen.getByTitle("Change image model"));
     const dialog = await screen.findByRole("dialog", { name: "Select image model" });
     await user.click(within(dialog).getByText("Nano Banana"));
-    // A label, never the raw id (`google/gemini-2.5-flash-image`).
+    // A label, never the raw id (`google/gemini-2.5-flash-image`) — and exactly once,
+    // because `toHaveBeenCalledWith` alone passes against a callback that double-fires.
+    expect(onModelChange).toHaveBeenCalledTimes(1);
     expect(onModelChange).toHaveBeenCalledWith("Nano Banana");
   });
 
