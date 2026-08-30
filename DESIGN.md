@@ -51,8 +51,10 @@ Source of truth: `apps/web/src/styles/tokens.css`. Change a value there; nothing
 | `--color-background` | `#ffffff` | `#0f0f0f` | `bg-background` | page ground, inputs |
 | `--color-surface` | `#f8fafc` | `#1c1c1c` | `bg-surface` | panels, cards, menus, drawers |
 | `--color-surface-2` | `#f1f5f9` | `#262626` | `bg-surface-2` | a raised surface on a surface (rows, inputs on a panel, hover) |
-| `--color-border` | `#e2e8f0` | `#333333` | `border-border` | every hairline |
-| `--color-border-hover` | `#cbd5e1` | `#444444` | `hover:bg-border-hover` | |
+| `--color-border` | `#e2e8f0` | `#333333` | `border-border` | every hairline: frames, rules, ticks, fills |
+| `--color-border-hover` | `#cbd5e1` | `#444444` | `hover:bg-border-hover` | hover fills (and decorative hover edges) |
+| `--color-border-control` | `#78889b` | `#757575` | `border-border-control` | a control's own edge, where its fill does not distinguish it from its ground (WCAG 1.4.11) |
+| `--color-border-control-hover` | `#64748b` | `#8f8f8f` | `hover:border-border-control-hover` | the hover of that edge |
 | `--color-text-primary` | `#0f172a` | `#e8e8e8` | `text-text-primary` | body |
 | `--color-text-secondary` | `#475569` | `#9e9e9e` | `text-text-secondary` | supporting copy |
 | `--color-text-muted` | `#5b6b80` | `#9e9e9e` | `text-text-muted` | labels, hints, captions |
@@ -79,6 +81,16 @@ reason: at `slate-400` `muted` measured 2.3 : 1 on `surface-2`, and `muted` now 
 ground — the darkest it is painted on. See the W3.2 audit below for the measurements.
 
 Every colour maps to a `color-mix(in srgb, var(--color-x) calc(<alpha-value> * 100%), transparent)` form in `tailwind.config.ts`. This permits native Tailwind opacity modifiers like `bg-error/20` and `hover:bg-border/40` on tokens without defining separate `-alpha` scales in CSS. Arbitrary alphas require bracket syntax, e.g. `bg-black/[0.08]`.
+
+**The boundary rule: `border-border` frames things, `border-border-control` bounds controls.**
+`--color-border` was deliberately left alone — it is double-booked. It is a *fill* (`bg-border`
+skeleton loaders, sidebar rules) and it paints ~119 decorative hairlines (card frames, dialog
+frames, `divide-border` row rules, table rules, image rims, tick marks), which 1.4.11 exempts;
+a 3 : 1 value would turn skeletons into mid-grey blocks and the whole app into a wireframe.
+But a control whose fill differs from its ground by almost nothing (`surface` on `background`
+is 1.05 : 1; `surface-2` on `surface` is 1.05 : 1 light, 1.13 : 1 dark) is identified *only*
+by its hairline, so that hairline — the control's own edge, and its hover — uses
+`border-border-control`, which clears 3 : 1 on the worst ground each theme draws on.
 
 ### Themes
 
@@ -121,13 +133,10 @@ small text (10–13 px) needs **4.5 : 1**, a control boundary **3 : 1**.
 | The grid's *can't play* pill | `grid/page.tsx` → `bg-surface` | `text-error` on a 70 % scrim measured 1.30 : 1 in the light theme (2.26 : 1 dark): a translucent ground over a clip hands its contrast to the video. Now 7.9 : 1 light / 4.5 : 1 dark |
 | The FIREFLY provenance badge | `grid/page.tsx:390` → an opaque `brand-tint` / `brand-on-tint` pair | 3.34 : 1 light / 3.06 : 1 dark on `bg-surface` — and **2.34 : 1** for the same badge over the lightbox's scrim. Now 6.50 : 1 / 7.45 : 1, ground-independent |
 | The lightbox chrome — close, caption, asset label | `grid/page.tsx:730,760,763` → fixed white | `bg-scrim/80` is black in both themes, so over the **light** page it composites to `#333333`: `text-text-muted` was 2.32 : 1 and `text-text-primary` **1.41 : 1**. Now 7.09 : 1 and 12.63 : 1 light, 9.84 : 1 and 20.6 : 1 dark |
+| Control boundaries below 3 : 1 (WCAG 1.4.11) | new `--color-border-control` / `--color-border-control-hover` pair, repointed at the controls' own edges (Input, Button secondary's border, Stepper, ChipGroup, SwatchChip's button, SwatchPicker, AxisCard, PreviewCard, PlatformCard, SwitchRow's off rail, ModelSelector's trigger) | `border-border` measured 1.13–1.23 : 1 light and 1.35–1.52 : 1 dark — no perceptible edge for a control whose fill is 1.05 : 1 from its ground. The new token clears 3 : 1 on the worst ground its theme draws on: 3.31 : 1 light (3.62 / 3.46 on `background` / `surface`), 3.28 : 1 dark (4.16 / 3.70); hover 4.34 : 1 light, 4.68 : 1 dark. `--color-border` itself is unchanged — see the boundary rule in §2 |
 
 **Found, not fixed** — each needs a decision this lane must not take alone:
 
-- **`--color-border` is below 3 : 1 on every ground, in both themes** (1.13–1.23 : 1 light,
-  1.35–1.52 : 1 dark). An input's background is the page ground, so the hairline is the only
-  thing that identifies it. Fixing it moves `--color-border` (and `--color-border-hover`) for
-  both themes, which is a palette change to the shipped product, not an audit fix.
 - **Dark's own tints sit below 4.5 : 1 — on every ground, not only `surface-2`.** An earlier
   pass measured this against `surface-2` alone and so understated it; the chip idiom
   (`bg-X/20 text-X border-X/50`) is painted over all three grounds. Measured per ground:

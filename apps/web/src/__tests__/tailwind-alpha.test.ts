@@ -69,6 +69,24 @@ describe('Tailwind Alpha Colors', () => {
     // Alpha variant must NOT emit — Tailwind 3.4 drops /NN on a bare var()
     expect(css).not.toContain('.bg-test-bare\\/50');
   });
+
+  // The control-boundary pair: a class that emits nothing looks identical to one that
+  // works, so the utilities are compiled here the same way the alpha tokens above are.
+  it('generates real declarations for the border-control pair, with and without alpha', async () => {
+    const css = await generateCss([
+      'border-border-control',
+      'border-border-control-hover',
+      'hover:border-border-control-hover',
+      'border-border-control/50',
+    ]);
+
+    expect(css).toContain('.border-border-control');
+    expect(css).toContain('--color-border-control');
+    expect(css).toContain('.border-border-control-hover');
+    expect(css).toContain('--color-border-control-hover');
+    expect(css).toContain('.hover\\:border-border-control-hover:hover');
+    expect(css).toContain('.border-border-control\\/50');
+  });
 });
 
 // The other class the kit now writes that a stock Tailwind scale would silently
