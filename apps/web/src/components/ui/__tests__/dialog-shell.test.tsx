@@ -114,6 +114,32 @@ describe("DialogShell and DrawerShell anatomy", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  test("the icon close control is a 32px IconButton named by closeLabel, Close by default", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const { unmount } = render(
+      <DialogShell open onClose={onClose} ariaLabel="Icon Close">
+        <DialogHead title="Icon Close" onClose={onClose} />
+      </DialogShell>,
+    );
+
+    const close = screen.getByRole("button", { name: "Close" });
+    expect(close.className).toContain("size-8");
+    await user.click(close);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    unmount();
+
+    // A caller may still name it more precisely — several overlays read
+    // "Close drawer", and the suite queries that name.
+    const onNamedClose = vi.fn();
+    render(
+      <DialogShell open onClose={onNamedClose} ariaLabel="Named Icon Close">
+        <DialogHead title="Named Icon Close" onClose={onNamedClose} closeLabel="Close drawer" />
+      </DialogShell>,
+    );
+    expect(screen.getByRole("button", { name: "Close drawer" }).className).toContain("size-8");
+  });
+
   test("DrawerShell backdrop click triggers onClose", () => {
     const onClose = vi.fn();
 

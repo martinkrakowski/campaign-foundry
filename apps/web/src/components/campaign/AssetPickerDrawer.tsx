@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Button, DrawerShell, DialogHead } from "@/components/ui";
+import { Button, DrawerShell, DialogHead, Eyebrow, Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { formatBytes, listAssets, unknownErrorMessage, type AssetEntry } from "@/lib/briefs-api";
 export { formatBytes };
@@ -63,16 +63,20 @@ export function AssetPickerDrawer({
 
       <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <h4 className="font-mono text-[11px] uppercase tracking-widest text-text-muted">
-              Assets ({assets.length})
-            </h4>
+            <Eyebrow as="h4">Assets ({assets.length})</Eyebrow>
           </div>
           <p className="text-[12px] text-text-muted">
             Uploaded campaign assets available for logos and product backgrounds.
           </p>
 
           {loading ? (
-            <p className="text-[13px] text-text-muted" role="status">Loading assets…</p>
+            <div className="space-y-2">
+              <p className="text-[13px] text-text-muted" role="status">
+                Loading assets…
+              </p>
+              <Skeleton className="h-12" />
+              <Skeleton className="h-12" />
+            </div>
           ) : error ? (
             <p className="text-[13px] text-error" role="alert">{error}</p>
           ) : assets.length === 0 ? (

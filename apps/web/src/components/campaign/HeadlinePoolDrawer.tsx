@@ -2,7 +2,7 @@
 
 import type { Dispatch } from "react";
 import { useState, useEffect, useRef } from "react";
-import { Button, Input, DrawerShell, DialogHead } from "@/components/ui";
+import { Button, Input, DrawerShell, DialogHead, Eyebrow, Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import { approvedHeadlines, toBrief } from "@/components/campaign/editor-state";
@@ -166,9 +166,7 @@ export function HeadlinePoolDrawer({
       />
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h4 className="font-mono text-[11px] uppercase tracking-widest text-text-muted">
-            Headlines ({approved} approved)
-          </h4>
+          <Eyebrow as="h4">Headlines ({approved} approved)</Eyebrow>
           <Button
             variant="secondary"
             size="sm"
@@ -189,7 +187,17 @@ export function HeadlinePoolDrawer({
           </p>
         ) : null}
         {error ? <p className="text-[13px] text-error">{error}</p> : null}
-        {entries.length === 0 ? (
+        {loading ? (
+          // Static blocks plus one spoken sentence: a pulsing skeleton would be a
+          // fifth looping animation, and D27 permits exactly four.
+          <div className="space-y-2">
+            <p role="status" className="text-[13px] text-text-muted">
+              Loading headlines…
+            </p>
+            <Skeleton className="h-12" />
+            <Skeleton className="h-12" />
+          </div>
+        ) : entries.length === 0 ? (
           <p className="text-[13px] text-text-muted">No headlines yet.</p>
         ) : (
           <ul className="space-y-2">
