@@ -1,6 +1,7 @@
 import { useId, type ReactNode } from "react";
 import type { LayoutKind, ToneKind } from "@campaignfoundry/CampaignOrchestration";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
+import { LAYERS, PREVIEW_BOX, fractionOfBox } from "./preview-layers";
 
 export type LayoutOption = LayoutKind;
 export type ToneOption = ToneKind;
@@ -21,12 +22,22 @@ export interface CreativeGlyphProps {
 const TOP_EDGE: Record<LayoutKind, boolean> = { "headline-top": true, "headline-bottom": false };
 const HEAVY: Record<ToneKind, boolean> = { bold: true, subtle: false };
 
-const VIEWBOX = 46;
-/** The compositor's solid accent band: height * 0.05 (NodeCanvasCompositor.draw, layer 3). */
-const BAND = 2.3;
-/** Edge offset of the text block, ≈ the compositor's headline anchor (height * 0.1). */
-const TEXT_EDGE = 8;
-const BAR_GAP = 3;
+const VIEWBOX = PREVIEW_BOX;
+/**
+ * Every geometry constant resolves from `preview-layers` — the same fractions the
+ * compositor proportions derive from (band = height * 0.05, headline edge ≈ height * 0.1,
+ * accent shade alpha per tone) — so the miniature and `CreativePreview` share one source
+ * and cannot drift. Each number is *bit-identical* to the value it replaced, which
+ * `creative-glyph.byte-identity.test.tsx` proves byte-for-byte against the captured golden.
+ */
+const BAND = fractionOfBox(LAYERS.band);
+const fadeHeight = fractionOfBox(LAYERS.fadeHeight);
+const TEXT_EDGE = fractionOfBox(LAYERS.textEdge);
+const BAR_GAP = fractionOfBox(LAYERS.barGap);
+const longBarX = fractionOfBox(LAYERS.longBar.x);
+const longBarWidth = fractionOfBox(LAYERS.longBar.width);
+const shortBarX = fractionOfBox(LAYERS.shortBar.x);
+const shortBarWidth = fractionOfBox(LAYERS.shortBar.width);
 
 /**
  * A miniature of the creative the compositor will draw, in its layer order
@@ -44,8 +55,8 @@ export function CreativeGlyph({ layout, tone, motion, size = 46 }: CreativeGlyph
   const bold = HEAVY[tone ?? "bold"];
   // tone → shadeAlpha / text weight, mirroring NodeCanvasCompositor.prepare:
   // `const shadeAlpha = subtle ? 0.4 : 0.7` and `fontWeight = subtle ? "500" : "bold"`.
-  const shadeAlpha = bold ? 0.7 : 0.4;
-  const barHeight = bold ? 4 : 2.5;
+  const shadeAlpha = bold ? LAYERS.shade.alpha.bold : LAYERS.shade.alpha.subtle;
+  const barHeight = bold ? fractionOfBox(LAYERS.weight.bold) : fractionOfBox(LAYERS.weight.subtle);
   // The shade gradient starts where the compositor's does: 0.55h / 0.45h,
   // darkest at the headline edge (NodeCanvasCompositor.draw, layer 2).
   const gradientId = `creative-glyph-shade-${useId()}`;
@@ -71,7 +82,7 @@ export function CreativeGlyph({ layout, tone, motion, size = 46 }: CreativeGlyph
           from `--color-background` would invert it there (#ffffff), and the card would
           misrepresent the creative it is previewing.
         */}
-        <linearGradient id={gradientId} x1="0" y1={top ? "0.55" : "0.45"} x2="0" y2={top ? "0" : "1"}>
+        <linearGradient id={gradientId} x1="0" y1={top ? LAYERS.shade.start.top : LAYERS.shade.start.bottom} x2="0" y2={top ? "0" : "1"}>
           <stop offset="0" stopColor="#000000" stopOpacity={0} />
           <stop offset="1" stopColor="#000000" stopOpacity={shadeAlpha} />
         </linearGradient>
@@ -93,9 +104,9 @@ export function CreativeGlyph({ layout, tone, motion, size = 46 }: CreativeGlyph
       <g className="glyph-band-group">
         <rect
           x="0"
-          y={top ? BAND : VIEWBOX - BAND - 14}
+          y={top ? BAND : VIEWBOX - BAND - fadeHeight}
           width={VIEWBOX}
-          height="14"
+          height={fadeHeight}
           fill={`url(#${fadeGradientId})`}
           className="glyph-anim glyph-fade"
         />
@@ -106,8 +117,8 @@ export function CreativeGlyph({ layout, tone, motion, size = 46 }: CreativeGlyph
       {/* Group 3 — Text bars (headline message). */}
       <g className="glyph-anim glyph-text">
         {/* Layer 4 — the message as two bars; tone sets their weight. */}
-        <rect x="10" y={longBarY} width="26" height={barHeight} rx={barHeight / 2} className="fill-text-primary" />
-        <rect x="15" y={shortBarY} width="16" height={barHeight} rx={barHeight / 2} className="fill-text-primary" />
+        <rect x={longBarX} y={longBarY} width={longBarWidth} height={barHeight} rx={barHeight / 2} className="fill-text-primary" />
+        <rect x={shortBarX} y={shortBarY} width={shortBarWidth} height={barHeight} rx={barHeight / 2} className="fill-text-primary" />
       </g>
 
       {/* Group 4 — Directional cue group (always rendered; revealed when reduced-motion/disabled). */}
