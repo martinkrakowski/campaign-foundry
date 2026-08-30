@@ -1244,3 +1244,20 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Left open:** `TelemetryDrawer`'s header row grew 32px → 40px so a 32px control fits inside it.
 
 - **W2a follow-up (orchestrator, from the independent review):** `DialogHead` set `aria-label={closeLabel}` on the *text* close button, so a caller supplying both got a button whose visible word and announced name differed — live in `AssetPickerDrawer` ("Close" / "Close drawer"). WCAG 2.5.3 (Label in Name) is now enforced by construction: the label is honoured only when it contains the visible text, otherwise the text wins. The existing drawer test had pinned the non-conformant pairing ("Close Drawer" announcing "Custom Close") and is corrected, not deleted. `::selection` no longer forces `color`, which would have repainted selected text near-black on a brand-blue button in the light theme. Both `globals.test.ts` guards were weakened as written — the scrollbar check read only `background` (missing the thumb's `border` shorthand) and the literal check named four strings — and now reject shapes rather than names, over comment-stripped CSS so the guard cannot fail on its own rationale.
+
+---
+
+## 2026-08-30 — Hexagen sync toolchain skew evaluation (branch chore/hexagen-sync-upgrade)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Evaluated upgrading `@hexagen-monaco/sync` from `^0.8.0` to `^0.12.1`.
+  - Bumped `@hexagen-monaco/sync` to `0.12.1` in `package.json` and `yarn.lock`.
+  - Applied the five deletions by hand after verifying they are inert; the evidence lives in the PR rather than a committed report file.
+- **Decisions:**
+  - Closed the skew. Observed 5 deletion operations proposed by `@hexagen-monaco/sync@0.12.1` targeting empty barrel files (`shared/src/application/index.ts`, `CreativeGeneration/src/domain/index.ts`, `CreativeGeneration/src/application/index.ts`, `GovernanceAndCompliance/src/domain/index.ts`, `GovernanceAndCompliance/src/application/index.ts`).
+  - Followed lane contract rule: stopped without running bare `sync` or opening a PR since drift would delete files.
+  - Verified that `yarn lint:arch`, `yarn build`, `yarn typecheck`, `yarn lint` (0 warnings), and `yarn test:cov` (100% all counters) all pass.
+- **Left open:**
+  - Nothing. The decision this entry was written to raise is the one it records as taken: the five empty barrels are converged and `@hexagen-monaco/sync` is on `^0.12.1`, so the skew with `arch-linter` is closed. Kept as history rather than an open question — this log is read as next-session memory, and a stale "decide whether to" would invite a future session to revisit or revert a completed migration.
+
