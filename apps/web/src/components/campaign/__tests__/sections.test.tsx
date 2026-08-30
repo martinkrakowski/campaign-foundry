@@ -724,12 +724,16 @@ describe("ErrorStrip", () => {
     expect(onErrorClick).toHaveBeenCalledWith("identity");
   });
 
-  test("falls back to the raw key for an unknown section and tolerates no click handler", async () => {
+  test("drops buckets no section declares, still tolerates a missing click handler, and spells motion by its motion label", async () => {
     const user = userEvent.setup();
-    render(<ErrorStrip errors={{ mystery: { a: "1" } }} />);
-    const button = screen.getByRole("button", { name: /mystery/ });
-    await user.click(button);
-    expect(button).toBeTruthy();
+    // The W6 totality contract means an undeclared bucket can only reach the strip
+    // from hostile data; it is dropped, never spelled as a raw-key chip. motion is
+    // the one declared non-section, labelled "Motion".
+    render(<ErrorStrip errors={{ mystery: { a: "1" }, motion: { b: "2" } }} />);
+    expect(screen.queryByRole("button", { name: /mystery/i })).toBeNull();
+    const motion = screen.getByRole("button", { name: /Motion/ });
+    await user.click(motion); // no onErrorClick -> no crash
+    expect(motion.textContent).toContain("1");
   });
 });
 

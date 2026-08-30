@@ -1315,3 +1315,203 @@ To keep this file out of version control, add `.agents/session-log.md` to
   no overlap.
 - **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
   **2243 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
+
+
+---
+
+## 2026-08-30 — W5 lane: the header (branch feat/w5-header)
+
+- **Mode:** Implementer (`opencode/hy4-preview`), lane W5 of the guided-brief plan (§4 W5, decisions D32/D33), based on `origin/main` d013d98.
+- **Changes (W5.1–W5.4):**
+  - **W5.1** `Header.tsx` — `TABS` gains `/brief` (first), and the desktop tabs now carry `aria-current="page"` as `MobileMenu` already did. The brand mark becomes a `Link` home (`/grid`) through the same `handleTabClick` interception the tabs use, so a dirty draft prompts once, through `guardedPush`, and a plain click stays a plain link.
+  - **W5.2** `Header.tsx` — a **Generate** button: runs the applied brief with the context's own `execute()` and routes to `/grid` through `guardedPush` (a refused prompt leaves the run unstarted). Never disabled: with nothing applied it sets the header's status line to `messages.generateNoBrief` and routes to `/brief`. `run-context.tsx` gains one narrow read-only flag, `briefApplied`.
+  - **W5.3** `Header.tsx` — the telemetry control is a 32px `IconButton` opening the existing non-modal drawer; `ModelSelector.tsx` gains an optional `onModelChange(label)` so the header's status line can say which model the next run will use (`messages.modelChanged`). `run-context.tsx` gains `telemetryOpen` / `toggleTelemetry` / `closeTelemetry`, and `app/(shell)/layout.tsx` moves the drawer out of the grid-only `showOrchestrator` block into a small `TelemetrySlot` that reads that state inside `RunProvider`.
+  - **W5.4** `shell/__tests__/header.test.tsx` (+7), `shell-modals.test.tsx` (+1), `lib/__tests__/run-context.test.tsx` (+4), `app/(shell)/__tests__/layout.test.tsx` (+1).
+- **Decisions (the two the lane brief left open):**
+  - **What "nothing applied" means to the header.** `applied` is `EditorState.appliedSnapshot !== null && !isDirtySinceApply(state)` (`BriefEditor.tsx:300`) — state inside a component the shell does not contain, in a file this lane does not own. Lifting it was not available, so the flag is derived in the provider: **`briefApplied = brief !== DEFAULT_BRIEF && brief.id !== ""`**. The two uncommitted states are exactly the two `RunProvider` can hold before a commit — the `DEFAULT_BRIEF` it starts from (`run-context.tsx:305`, only ever replaced, never mutated) and the blank brief `/brief/new` releases (`BriefEditor.tsx:204`, `blankBrief()`, `id: ""` — "nothing can be saved, listed or run under it"). Every commit path in the editor already ends in `setBrief` (apply `:435`, save & apply `:456`, save-as `:502`, load `:396`), and the picker's select is the same act, so the brief the shell holds is the one signal the editor and the shell agree on.
+  - **The reveal, when the blocking section is not mounted.** `refuseInvalid` (`BriefEditor.tsx:424`) is attempted → reveal → scroll, and the header cannot scroll a section it does not render. From another route the reveal is therefore **the route**: the status line says what is missing and names Apply, and `guardedPush("/brief")` lands the user where that control is — in the action bar, which is `sticky bottom-6` and so already in view once the editor is mounted. On `/brief` itself nothing navigates. No editor internal is exported to borrow the scroll; the copy mirrors `refuseInvalid`'s vocabulary ("<what is missing> — <the one thing to do>") rather than inventing a second one.
+- **Deviations** (full list on the PR): `app/(shell)/layout.tsx` is edited — the drawer is mounted by that layout, behind a grid-only condition, and the `CommandBar` toggle is wired to the same state, so W5.3 is unreachable within the four owned files; the alternative (a second drawer instance in the header) would put two telemetry drawers on `/grid`. The drawer keeps its bottom-docked placement and stays where it is rendered — the mock's telemetry drawer is a *right* drawer, but restyling an existing non-modal panel is not this lane's. `run-context` gains three telemetry members alongside the one Generate needs, following the `briefPickerOpen` precedent (a shell overlay opened from the sidebar and rendered by the layout). The mounted-restore path (a brief restored from `cf:brief` on load) counts as applied. `DESIGN.md` §3 is untouched — `AGENTS.md` lists it as a file never edited without design review — so its header anatomy now under-describes the bar (Brief tab, Generate, telemetry, and a drawer that is no longer grid-only).
+- **Verification:** gate in order on the committed tree — build, typecheck, lint (**0 problems**), lint:arch, `test:cov` **2258 passed | 2 skipped — 100 % on all four counters (6481/6481 statements, 4737/4737 branches, 1374/1374 functions, 5812/5812 lines)**, then `sync:check`.
+- **Left open:** the `DESIGN.md` §3 anatomy note above; and `messages.ts` still carries pre-existing header literals from earlier lanes (`HITL Mode Active`, `Open menu`, the tab labels), left where W2a/W3 put them rather than moved in this lane.
+
+### 2026-08-30 — W5 orchestrator round: Generate dropped the run on a confirmed prompt
+
+- **Mode:** Orchestrator, verifying `feat/w5-header` before review.
+- **Bug found and fixed:** `Header.handleGenerate` called `guardedPush(HOME)` and returned early
+  on `false`. But `false` is the guard's *deferred* answer, not its refusal: `guardedAction`
+  stashes the action and returns `false` whenever the editor is dirty. The action it was handed
+  was only `router.push`, so pressing **Generate** with unsaved edits and answering **Leave**
+  navigated to `/grid` and **never started the run** — the verb the user pressed silently
+  dropped. The lane's four Generate tests covered nothing-applied (on and off `/brief`),
+  applied-and-clean, and dirty-then-**Stay**; the dirty-then-**Leave** path was the one case
+  none of them drove, which is why a green suite hid it.
+- **Fix:** hand the guard the whole gesture — `guardedAction(() => { router.push(HOME);
+  setNotice(null); void execute(); })`. Leave is consent to Generate, not merely to the route
+  change; Stay still cancels both, because a refused action never fires.
+- **Test:** "a prompt the user accepts navigates AND starts the run", written before the fix and
+  confirmed failing against it (`generatePosts()` was 0, expected 1).
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2259 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
+
+### 2026-08-30 — W5 review round (independent reviewer: `agy/gemini-3.1-pro-high`)
+
+- **Mode:** Orchestrator, applying verified review findings to `feat/w5-header`.
+- **The reviewer independently found the Generate bug** recorded in the entry above, by the same
+  route (tracing `guardedPush`'s `false` return). It reviewed the pre-fix commit, so its first
+  finding was already closed by that commit — two readings reaching the same defect is the
+  useful signal, not a second fix.
+- **Changes** (all test strength; no source change beyond the entry above):
+  - `header.test.tsx` — `aria-current` exclusivity now asserts **every** other tab, not only
+    Grid. A prefix bug marks one specific tab, so checking a single sibling catches it only if
+    that sibling is the one marked.
+  - `header.test.tsx` — a **brand-mark refusal** test ("Stay" must not navigate). The suite had
+    only the acceptance path, so a guard that navigated on refusal would have passed.
+    Mutation-checked: replacing `guardedPush` with a bare `router.push` makes it fail.
+  - `header.test.tsx`, `shell-modals.test.tsx` — `toHaveBeenCalledTimes(1)` beside three
+    `toHaveBeenCalledWith` assertions (Generate's navigation, twice, and `onModelChange`).
+    `toHaveBeenCalledWith` alone passes against a double-fire, which is this repo's known
+    shipped defect pattern.
+  - The new assertions use `getAttribute(...)`, not `toHaveAttribute` — `jest-dom` is not set
+    up here, and the first draft failed with "Invalid Chai property".
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2260 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
+
+### 2026-08-30 — W5 bot-thread sweep (12 threads on PR #139)
+
+- **Mode:** Orchestrator. Every claim checked against the code before acting; five valid, seven refuted.
+- **Fixed:**
+  - **Modified clicks on the brand mark.** `handleTabClick` called `preventDefault()` on every
+    dirty click without checking modifiers, so a Cmd/Ctrl/Shift/Alt or middle click opened the
+    unsaved-edits flow instead of a new tab. This is the **same defect lane W1 fixed in
+    `MobileMenu`**, never mirrored here. Guard added, with W1's own `test.each` over all five.
+  - **A standing refusal outlived its cause.** Pressing Generate with nothing applied set the
+    notice; applying a brief flipped `briefApplied` but left the notice on screen, so the header
+    kept telling the user to do the thing they had just done. Cleared by effect, **scoped to
+    that one string** so a model-change notice survives — with a test for each direction.
+  - `type="button"` on the header's Generate (`Button` sets no default, unlike `IconButton`).
+  - `aria-controls` on the telemetry control, with `TELEMETRY_DRAWER_ID` exported from
+    `TelemetryDrawer` so the id has one spelling rather than two.
+  - **Mobile overflow:** the right cluster gained two controls this lane, and at 320px the model
+    label pushed the row past the viewport. Cluster is `min-w-0`; the model label truncates at
+    `9rem` below `sm`. Not measured — jsdom has no layout — so this is containment, not proof.
+- **Refuted:**
+  - **`briefApplied` should compare `brief.id` rather than object identity** (four separate
+    threads). Reference equality is the *more* correct test, not a weaker one: it asks "is this
+    still the object the provider started from", which is exactly the uncommitted state. The
+    proposed `brief.id !== DEFAULT_BRIEF.id` would falsely refuse a brief a user legitimately
+    applied under that id, and content equality would refuse any brief identical to the default.
+  - **"`guardedPush` may be asynchronous; await it."** It returns `boolean`, not a Promise.
+  - **`aria-pressed` as a fallback because "IconButton does not forward unknown props".** It
+    does — `icon-button.tsx` spreads `...rest`, which is how the existing `aria-expanded`
+    assertion passes. A second state attribute would also report the same fact twice.
+  - **`aria-live="polite"` on the status paragraph.** `role="status"` already implies it.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2267 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
+
+### 2026-08-30 — W6 guided engine (lane shipped: `9514f08` → PR #140)
+
+- **Mode:** Implementer / Debugger / Reviewer, working from the earlier W6 summary. All gates green, commit verbatim, PR #140 opened against `main`.
+- **This session closed the guided test suite and coverage gaps:**
+  - Rewired the W6.8 guided tests off jest-dom (`toHaveTextContent`/`toHaveAttribute` are not registered — replaced with `.textContent` / `.getAttribute`) and off `Storage.prototype` spies (the suite's `localStorage` is the vitest.setup memory object — `vi.spyOn(globalThis.localStorage, …)` instead). The double-render in the storage-fallback test was collapsed to one render with a pre-set spy, and the unset-value fallback moved into the first guided test.
+  - Fixed the walk test's Output→Review leg: the last section step's button is named "Review & launch", so the `next()` helper (name "Next") no longer matches there.
+  - **Coverage-gap fixes (all 100 % now):** the everything-branch `renderStepSection` arms for Copy (`onOpenPool`) and Policy were only reachable in Guided — added a variation walk test that opens the headline pool on the Copy step and walks Output → Policy. `readPresentation(preferGuided)` was always called with `true`, leaving two unreachable ternary sides — dropped the parameter (fallback is Guided). `stepSectionErrors("review")` was dead code because `stepFooterStatus` short-circuited before the bucket read — reordered so the "review" bucket read happens first. `StepFooter`'s `nudgeKey = 0` default was never taken (the editor always passes it) — made the prop required.
+  - Stale pre-W6 tests updated to the new contract: `sections.test.tsx` asserted the old raw-key chip fallback — `ErrorStrip` now drops buckets no section declares (covered by a motion-label test); `brief.test.tsx`'s beforeEach seeds `cf:presentation=everything` so the legacy stacked-editor suite keeps its assumption.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `vitest` web **2265 passed | 2 skipped — 100 % on all four counters**, `sync:check` **Total ops 0**, commit `9514f08` (15 files, +990/−82), PR https://github.com/martinkrakowski/campaign-foundry/pull/140 with a Deviations section (nudge keyframe scoped to StepFooter, FloatingBar placement kept for W8.2, no SectionOutline steering, policy sidebar gating, everything-seeding of legacy suites).
+- **Left open:** nothing blocking. W7.4 owns the shared `nudge` keyframe in `globals.css`; W8.2 moves FloatingBar into the flow; StepHeader/StepFooter still lack dedicated unit tests (both arms proven through the editor suites instead).
+
+### 2026-08-30 — W6 orchestrator round: the motion mapping was declared but not read
+
+- **Mode:** Orchestrator, verifying `feat/w6-guided-engine` before review.
+- **Verified first, before changing anything.** The lane's central risk was W6.2's deferred
+  scroll, and the brief demanded its test **fail against a synchronous implementation**. It
+  does: replacing the `pendingReveal` deferral with an immediate `revealSection` makes
+  `brief-editor.test.tsx:1405` fail — a synchronous scroll runs while the section is still
+  unmounted, so `revealSection` finds no candidate and `scrollIntoView` is never reached. The
+  lane did what it was asked. Gate re-run independently: **2265 passed, 100 % on all four**.
+- **Found and fixed:** `MOTION_HOST_SECTION` was exported, documented and asserted in the
+  totality test — but **nothing read it**. `BriefEditor.reveal` spelled the pair again as
+  `section === "motion" ? "output" : section`, so the constant and the code could diverge in
+  silence and the test would still pass. That is the same drift the vocabulary collapse exists
+  to stop, reintroduced one file over. `reveal` now reads `MOTION_ERROR_KEY` and
+  `MOTION_HOST_SECTION`, and `ErrorStrip`'s chip label reads `MOTION_LABEL` rather than an
+  inline `"Motion"`.
+- **Test strengthened:** the totality suite asserted only `MOTION_HOST_SECTION === "output"`,
+  a tautology. It now also asserts the host appears in `sectionOrder(mode)` for **both** modes —
+  the property that actually matters, because a host absent from a mode's order would leave the
+  motion chip pointing at a step that does not exist in that mode, and clicking it would do
+  nothing there.
+- **Also:** `ErrorStrip.tsx` had lost its trailing newline; restored. The PR title said
+  "Closes #136", which is lane W2a's already-merged PR; retitled.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2266 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
+
+### 2026-08-30 — W6 review round (independent reviewer: `agy/gemini-3.1-pro-high`)
+
+- **Mode:** Orchestrator. Seven findings; six valid, one refuted on evidence.
+- **Fixed:**
+  - **A mode flip moved the user without asking.** The cursor was a bare integer, and the two
+    lists disagree at the same ordinal — classic `[… treatments, output]`, randomized
+    `[… output, policy]`. Standing on **Output** (index 4) and flipping mode landed you on
+    **Variation Policy**. The cursor now remembers the step *id* and follows it, falling back
+    to the remembered ordinal for `treatments`, the one step a flip really removes. Both arms
+    tested.
+  - **StrictMode stole focus on first paint.** `skippedStepHeading` was a "have I run before"
+    flag flipped by the effect's first pass, so React's double invocation let the second pass
+    through and focused the step heading on mount in development. Now keyed off the step
+    actually changing, which is idempotent under a repeated run.
+  - **W6.7's stated criterion was not the test that shipped.** The suite asserted a bijection
+    between error buckets and section titles, not the steps↔sections totality the task named.
+    Added, per mode and in both directions.
+  - **The nudge was a `<style>` element inside `StepFooter`**, with its own hand-rolled
+    reduced-motion query — a per-instance stylesheet outside the audited animation budget.
+    Moved to `globals.css` as a one-shot in `@layer utilities` and added to the **named**
+    `prefers-reduced-motion` list. Confirmed in the built CSS, not assumed: the utility, the
+    keyframes and the reduced-motion entry are all present.
+  - `toHaveBeenCalled()` → `toHaveBeenCalledTimes(1)` on the deferred scroll; it fires once.
+  - **A comment described behaviour the code did not have** — it claimed `ErrorStrip` folds
+    motion into Output "exactly as the FloatingBar's strip treats it". It does not, and should
+    not: a strip chip is a *scroll target* and motion has its own (`#motion`). `StatusLine`
+    folds because it lists **sections**; `ErrorStrip` does not because it lists **buckets**.
+    They answer different questions; the comment now says so.
+- **Refuted:** *"`bg-error/10`, `bg-error/30`, `border-error/50` evaluate to empty on the pinned
+  Tailwind."* Exactly backwards — that is the defect **lane W0 fixed**, by moving the scale to
+  `color-mix(… calc(<alpha-value> * 100%) …)`. `src/__tests__/tailwind-alpha.test.ts` compiles
+  the real config and asserts `bg-error/20` and `border-error/50` emit; all three are default
+  steps.
+- **One unreachable branch removed rather than excluded** (house rule): the cursor's
+  `id === undefined` guard could not be reached, and `indexOf` already answers `-1`.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2270 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
+
+### 2026-08-30 — W6 bot-thread sweep (10 threads on PR #140)
+
+- **Fixed — the serious one:** the presentation toggle carried `hidden` in Everything, and it
+  is the **only** control that returns to Guided. The choice persists, so choosing Everything
+  made Guided **permanently unreachable, across reloads**. Two reviewers caught it; the suite
+  could not, because jsdom applies no CSS, so a role query still found the button and every
+  test passed. Now always visible, with a test that asserts the *class* — the only thing
+  observable in that environment.
+- **Fixed — a test that specified the defect.** `nextLabel` was keyed on
+  `steps[stepIndex] === "output"`, but `output` is the last section step in **classic** only;
+  randomized puts `policy` after it. So the randomized Output step promised "Review & launch"
+  and delivered Variation Policy. The existing walk test asserted exactly that, pinning the bug.
+  Keyed on `stepIndex === steps.length - 2` instead, and the test is **corrected, not deleted**:
+  it now asserts Output does *not* offer the launch in randomized, and that Policy does.
+- **Fixed:** the Review step's status said *"press Review & launch"* while that step
+  deliberately supplies no `onNext`, sending the user after a button that is not there. It now
+  states readiness; W8 places the action bar and the instruction belongs with it.
+- **Fixed:** the two reveal paths disagreed — the immediate one focused the *mapped* step, the
+  deferred one the raw section. A motion reveal with focus would have focused different things
+  depending on whether a step switch was needed. `pendingReveal` now carries the step.
+- **Fixed earlier this round:** the `<style>` block in `StepFooter` (a bot raised it too).
+- **Refuted:**
+  - *"Keep `scrollToSection` as an alias; the rename broke importers."* Replacing it at every
+    call site **was** W6.2. A stale import would fail `typecheck` and `build`; both pass.
+  - *"Guard `stepHeadingRef.current` — the `<h1>` only renders in Guided."* The effect fires on
+    a step change, and `go` is reachable only from the guided branch, so the ref is non-null
+    wherever the effect can run. An optional chain here would add a branch nothing can cover.
+  - *"Tighten the `ErrorStrip` filter to use `SECTION_BY_ERROR_KEY`."* It already does.
+- **Deferred to W8 (its stated scope):** loading a different brief keeps the step cursor. W8.3
+  owns which step a load opens.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2295 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.

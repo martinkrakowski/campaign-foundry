@@ -2,6 +2,8 @@ import { describe, test, expect } from "vitest";
 import { validateState } from "@/components/campaign/validate";
 import { initialEditorState } from "@/components/campaign/editor-state";
 import { isKnownKey } from "@/components/campaign/error-sections";
+import { SECTION_BY_ERROR_KEY, MOTION_HOST_SECTION } from "@/components/campaign/ErrorStrip";
+import { SECTION_TITLES, sectionOrder, type SectionId } from "@/components/campaign/sections";
 import type { EditorState, ProductDraft } from "@/components/campaign/editor-state";
 
 function makeFixture(overrides: Partial<EditorState>): EditorState {
@@ -106,6 +108,56 @@ describe("L1.1 error key coverage", () => {
       for (const key of Object.keys(sectionErrors)) {
         expect(isKnownKey(key)).toBe(true);
       }
+    }
+  });
+});
+
+describe("W6.7 error bucket ↔ section totality", () => {
+  test("every section id resolves to itself, and no bucket hides beyond the six", () => {
+    const ids = Object.keys(SECTION_TITLES) as SectionId[];
+    for (const id of ids) {
+      expect(SECTION_BY_ERROR_KEY[id]).toBe(id);
+    }
+    expect(Object.keys(SECTION_BY_ERROR_KEY)).toHaveLength(ids.length);
+  });
+
+  test("SECTION_BY_ERROR_KEY is a bijection: every value is a declared section", () => {
+    const ids = Object.keys(SECTION_TITLES) as SectionId[];
+    const values = Object.values(SECTION_BY_ERROR_KEY);
+    expect(values).toHaveLength(new Set(values).size);
+    expect(values.sort()).toEqual(ids.sort());
+  });
+
+  test("motion is the one non-section bucket, and lives inside its Output host", () => {
+    expect(MOTION_HOST_SECTION).toBe("output");
+    expect(SECTION_BY_ERROR_KEY).not.toHaveProperty("motion");
+  });
+
+  // W6.7's stated criterion, in both directions: adding a section with no step, or a
+  // step that is neither a section nor the declared `review`, must fail here.
+  test.each(["brief", "variation"] as const)(
+    "%s: every section has a step, and every step but review is a section",
+    (mode) => {
+      const sections = sectionOrder(mode);
+      const steps = [...sections, "review"];
+
+      for (const section of sections) expect(steps).toContain(section);
+      for (const step of steps) {
+        if (step === "review") continue;
+        expect(sections).toContain(step as SectionId);
+        expect(SECTION_TITLES).toHaveProperty(step);
+      }
+      expect(steps).toHaveLength(sections.length + 1);
+    },
+  );
+
+  test("motion's host is a section that exists in every mode, so the chip is always reachable", () => {
+    // The property that actually matters. A motion chip reveals its *host*, and in
+    // Guided that means switching to the host's step — so a host absent from a mode's
+    // section order would leave the chip pointing at a step that does not exist, and
+    // clicking it would do nothing at all in that mode.
+    for (const mode of ["brief", "variation"] as const) {
+      expect(sectionOrder(mode)).toContain(MOTION_HOST_SECTION);
     }
   });
 });

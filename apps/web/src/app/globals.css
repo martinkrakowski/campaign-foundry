@@ -161,6 +161,12 @@
   display: none;
 }
 
+@keyframes kf-step-nudge {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
 @layer utilities {
   .animate-check-pop {
     animation: check-pop var(--duration-fast) cubic-bezier(0.2, 0.9, 0.3, 1.4) both;
@@ -170,6 +176,11 @@
   }
   .stagger > * {
     animation: rise-in 0.4s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+  }
+  /* One shot, never a loop (D27): the refusal nudge fires per press, keyed by the
+     editor so a second refusal replays it. W7.4 takes ownership of this rule. */
+  .kf-step-nudge {
+    animation: kf-step-nudge 350ms ease-in-out 1;
   }
 }
 
@@ -182,6 +193,7 @@
   }
   .animate-check-pop,
   .animate-rise-in,
+  .kf-step-nudge,
   .stagger > * {
     animation: none !important;
   }

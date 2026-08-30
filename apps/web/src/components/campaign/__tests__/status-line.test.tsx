@@ -14,13 +14,15 @@ describe("StatusLine", () => {
     expect(status.textContent).toContain(messages.statusNewBrief().lead);
   });
 
-  test("its section names are links that scroll", async () => {
+  test("its section names are links that hand the caller the section id", async () => {
     const user = userEvent.setup();
     const onScroll = vi.fn();
     render(<StatusLine state={blank()} attempted={false} onScrollToSection={onScroll} />);
     const link = screen.getAllByRole("button")[0];
     await user.click(link);
-    expect(onScroll).toHaveBeenCalledWith(link.textContent?.toLowerCase());
+    // The button says the label ("Identity") but scrolls by id — the one vocabulary
+    // a reveal understands, and it is independent of however the label is spelled.
+    expect(onScroll).toHaveBeenCalledWith("identity");
   });
 
   test("a failed write outranks everything else, and drops the links", () => {

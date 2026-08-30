@@ -488,3 +488,71 @@ export function previewStep(step: number, total: number): string {
 export const themeToLight = "Switch to the light theme";
 /** The theme toggle's name while the app is light. */
 export const themeToDark = "Switch to the dark theme";
+
+// --- Header (W5) ---
+
+/**
+ * The header's run verb (D32). It runs the applied brief and takes the user to the
+ * grid; it is never disabled, so everything it refuses to do it says here.
+ */
+export const generate = "Generate";
+/**
+ * `header.generate` with nothing applied. The remedy is the one control that stages a
+ * brief — Apply, in the editor's action bar — and the header routes to the view that
+ * carries it, because that bar does not exist anywhere else.
+ */
+export const generateNoBrief = "Nothing applied yet — press Apply to run on the brief first.";
+/**
+ * The header's telemetry control. It opens a panel rather than performing an action on
+ * a draft, so the name names the panel — it never trips the unsaved-changes guard.
+ */
+export const telemetryButton = "System telemetry";
+/**
+ * Said when the image model changes: the choice has no visible effect until the next
+ * run, so the header states what that run will use (D2's "<what is missing or wrong> —
+ * <the one thing to do>" shape, here a plain statement of what is now true).
+ */
+export function modelChanged(modelLabel: string): string {
+  return `${modelLabel} will make the next set of creatives.`;
+}
+
+/* ── Guided presentation (W6) ─────────────────────────────────────────────── */
+
+/** The presentation toggle's group label. */
+export const presentationLabel = "Presentation";
+/** The guided presentation's button: one section at a time, in steps. */
+export const presentationGuided = "Guided";
+/** The everything presentation's button: today's scroll, all sections at once. */
+export const presentationEverything = "Everything";
+
+/** The step eyebrow, e.g. "STEP 1 OF 6" — the one place the step count is read. */
+export function stepEyebrow(step: number, total: number): string {
+  return `STEP ${step} OF ${total}`;
+}
+
+/** A step's subtitle — the one line under each step heading. */
+export const stepSubtitleIdentity = "Name the campaign and say who it is for.";
+export const stepSubtitleCopy = "Write the one line you want people to remember.";
+export const stepSubtitleProducts = "Add what you are advertising, with its colour and logo.";
+export const stepSubtitleTreatments = "Choose the looks each product gets.";
+export const stepSubtitlePolicy = "Say how many ads you want, and how much they should differ.";
+export const stepSubtitleOutput = "Pick where the ads run, and whether they move.";
+export const stepSubtitleReview = "Last look, then send it to the pipeline.";
+
+/** The step footer's status sentence when the step has nothing to fix. */
+export const statusStepReady = "Looking good.";
+/**
+ * The review step's footer status sentence. It states readiness rather than naming a
+ * control: Review supplies no Next, so an instruction to "press Review & launch" sent
+ * the user looking for a button that is not on the step. W8 places the action bar
+ * here, and the instruction belongs with it.
+ */
+export const statusStepReview = "Everything checks out — this is the last look.";
+/** The review step's body: the brief has met every step, so this is the last look. */
+export const stepReviewIntro =
+  "The brief is in shape. This is the last look before any of it runs — launch when you are ready.";
+/** Step footer verbs. */
+export const stepBack = "Back";
+export const stepNext = "Next";
+/** The last section step's Next, before the review step. */
+export const stepNextReviewLaunch = "Review & launch";
