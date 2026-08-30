@@ -5,6 +5,8 @@ import {
   CreativePreview,
   PREVIEW_MAX_LINES,
   PREVIEW_FONT_RATIO,
+  PREVIEW_MIN_FONT_RATIO,
+  CHAR_WIDTH_RATIO,
   fitHeadline,
   wrapHeadline,
 } from "../CreativePreview";
@@ -21,8 +23,17 @@ describe("wrapHeadline", () => {
     expect(wrapHeadline("Stay wild and hydrated", 9)).toEqual(["Stay wild", "and", "hydrated"]);
   });
 
-  test("a word longer than the budget sits on its own line", () => {
+  test("a word longer than the budget sits on its own line when breakWords is false", () => {
     expect(wrapHeadline("supercalifragilistic spirit", 7)).toEqual(["supercalifragilistic", "spirit"]);
+  });
+
+  test("a word longer than the budget is split across lines when breakWords is true", () => {
+    expect(wrapHeadline("supercalifragilistic spirit", 7, true)).toEqual([
+      "superca",
+      "lifragi",
+      "listic",
+      "spirit",
+    ]);
   });
 
   test("collapses whitespace drift and returns nothing for blank text", () => {
@@ -39,7 +50,7 @@ describe("fitHeadline", () => {
   });
 
   test("long headline shrinks down to three lines", () => {
-    const fit = fitHeadline("Stay wild and stay hydrated under the open sky", 700, 600, 200);
+    const fit = fitHeadline("Stay wild and stay hydrated under the open sky", 700, 600, 200, 50);
     expect(fit.lines.length).toBeLessThanOrEqual(PREVIEW_MAX_LINES);
     expect(fit.fontSize).toBeLessThan(200);
     expect(fit.lines.flatMap((l) => l.split(" ")).join(" ")).toBe(
@@ -47,11 +58,17 @@ describe("fitHeadline", () => {
     );
   });
 
-  test("a single over-long word still ends up on a line, shrinking only for height", () => {
-    const fit = fitHeadline("supercalifragilistic", 100, 100, 200);
+  test("a single long word shrinks to fit width without breaking when possible", () => {
+    const fit = fitHeadline("supercalifragilistic", 300, 200, 200, 20);
     expect(fit.lines).toEqual(["supercalifragilistic"]);
     expect(fit.fontSize).toBeLessThan(200);
-    expect(fit.fontSize * 1.08).toBeLessThanOrEqual(100);
+    expect(fit.fontSize).toBeGreaterThanOrEqual(20);
+  });
+
+  test("a word that cannot fit at any size falls back to the exact floor and breaks", () => {
+    const fit = fitHeadline("supercalifragilistic", 100, 100, 200, 50);
+    expect(fit.fontSize).toBe(50);
+    expect(fit.lines.every((line) => line.length <= Math.floor(100 / (CHAR_WIDTH_RATIO * 50)))).toBe(true);
   });
 
   test("blank headline fits with no lines", () => {
@@ -60,11 +77,23 @@ describe("fitHeadline", () => {
     expect(fit.fontSize).toBe(170);
   });
 
-  test("a block too shallow for even a floor-sized headline falls off the floor", () => {
-    // maxHeight below one floor-sized line can never satisfy — the loop must give up.
-    const fit = fitHeadline("a b c d e", 500, 3, 100);
-    expect(fit.lines).toEqual(["a b c d e"]);
-    expect(fit.fontSize).toBeLessThan(100 * PREVIEW_FONT_RATIO);
+  test("a block too shallow for even a floor-sized headline falls back to the exact floor", () => {
+    // maxHeight below one floor-sized line can never satisfy — the loop falls back to minFontSize.
+    const fit = fitHeadline("a b c d e", 500, 3, 100, 50);
+    expect(fit.fontSize).toBe(50);
+  });
+
+  test("a deliberately long headline lands at the floor (PREVIEW_MIN_FONT_RATIO * H) and not beneath it", () => {
+    const longHeadline =
+      "This is a deliberately very long headline that exceeds three lines at any size and must land exactly at the floor";
+    const { height: H, width: W } = RATIO_DIMENSIONS["1:1"];
+    const textEdge = times(LAYERS.textEdge, W);
+    const textWidth = W - 2 * textEdge;
+    const anchor = times(LAYERS.headlineAnchor, H);
+    const maxHeight = H - 2 * anchor;
+    const fit = fitHeadline(longHeadline, textWidth, maxHeight, H * PREVIEW_FONT_RATIO, H * PREVIEW_MIN_FONT_RATIO);
+    expect(fit.fontSize).toBe(H * PREVIEW_MIN_FONT_RATIO);
+    expect(fit.fontSize / H).toBeCloseTo(PREVIEW_MIN_FONT_RATIO, 5);
   });
 });
 
@@ -152,4 +181,38 @@ describe("CreativePreview", () => {
     );
     expect(animated).toHaveLength(0);
   });
+
+  test.each(["1:1", "9:16", "16:9"] as const)(
+    "a 60-character unbroken string stays inside the text block at ratio %s",
+    (ratio) => {
+      const unbroken = "A".repeat(60);
+      const svg = svgOf(<CreativePreview primaryColor="#1473E6" headline={unbroken} ratio={ratio} />);
+      const { height: H, width: W } = RATIO_DIMENSIONS[ratio];
+      const textEdge = times(LAYERS.textEdge, W);
+      const textWidth = W - 2 * textEdge;
+      const anchor = times(LAYERS.headlineAnchor, H);
+      const maxHeight = H - 2 * anchor;
+
+      const fit = fitHeadline(unbroken, textWidth, maxHeight, H * PREVIEW_FONT_RATIO, H * PREVIEW_MIN_FONT_RATIO);
+      const floorChars = Math.max(1, Math.floor(textWidth / (CHAR_WIDTH_RATIO * (H * PREVIEW_MIN_FONT_RATIO))));
+
+      expect(fit.lines.length).toBeGreaterThan(0);
+      for (const line of fit.lines) {
+        expect(line.length).toBeLessThanOrEqual(floorChars);
+        const estimatedLineWidth = line.length * CHAR_WIDTH_RATIO * fit.fontSize;
+        expect(estimatedLineWidth).toBeLessThanOrEqual(textWidth);
+      }
+
+      const text = svg.querySelector("text")!;
+      expect(text).not.toBeNull();
+      const renderedLines = [
+        text.firstChild?.textContent ?? "",
+        ...Array.from(text.querySelectorAll("tspan")).map((t) => t.textContent ?? ""),
+      ].filter((l) => l.length > 0);
+      expect(renderedLines.length).toBeGreaterThan(0);
+      for (const line of renderedLines) {
+        expect(line.length).toBeLessThanOrEqual(floorChars);
+      }
+    },
+  );
 });

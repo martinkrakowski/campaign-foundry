@@ -27,7 +27,7 @@ export const PREVIEW_MIN_FONT_RATIO = 0.05;
 /** Line-to-line spacing as a multiple of the font size. */
 export const LINE_HEIGHT_RATIO = 1.08;
 /** Rough per-glyph advance, in ems, used to plan line breaks without measuring text. */
-const CHAR_WIDTH_RATIO = 0.5;
+export const CHAR_WIDTH_RATIO = 0.5;
 const SHRINK = 0.9;
 
 /**
@@ -48,10 +48,28 @@ export interface FittedHeadline {
   readonly lines: readonly string[];
 }
 
-/** Greedy word-wrap: each line takes words up to `maxChars`, breaking between words. */
-export function wrapHeadline(text: string, maxChars: number): string[] {
-  const words = text.split(/\s+/).filter((word) => word.length > 0);
-  if (words.length === 0) return [];
+/**
+ * Greedy word-wrap: each line takes words up to `maxChars`, breaking between words.
+ * When `breakWords` is true, any individual word longer than `maxChars` is split across lines.
+ */
+export function wrapHeadline(text: string, maxChars: number, breakWords = false): string[] {
+  const rawWords = text.split(/\s+/).filter((word) => word.length > 0);
+  if (rawWords.length === 0) return [];
+  const words: string[] = [];
+  if (breakWords) {
+    for (const w of rawWords) {
+      if (w.length <= maxChars) {
+        words.push(w);
+      } else {
+        for (let i = 0; i < w.length; i += maxChars) {
+          words.push(w.slice(i, i + maxChars));
+        }
+      }
+    }
+  } else {
+    words.push(...rawWords);
+  }
+
   const lines: string[] = [];
   let line = "";
   for (const word of words) {
@@ -69,29 +87,32 @@ export function wrapHeadline(text: string, maxChars: number): string[] {
 
 /**
  * Fit a headline into the text block: start at `startFontSize` and shrink until it
- * wraps into at most `PREVIEW_MAX_LINES` lines that fit `maxHeight`, hitting a floor
- * only when a long word or the floor itself gives out. Pure and deterministic, so
- * the preview's SVG text stays byte-stable for a given brief.
+ * wraps into at most `PREVIEW_MAX_LINES` lines that fit `maxHeight` and `textWidth`,
+ * hitting a floor at `minFontSize`. When nothing fits at or above the floor, falls back
+ * to `minFontSize` and breaks over-long words so copy never overflows the text block.
  */
 export function fitHeadline(
   text: string,
   textWidth: number,
   maxHeight: number,
   startFontSize: number,
+  minFontSize: number = (startFontSize * PREVIEW_MIN_FONT_RATIO) / PREVIEW_FONT_RATIO,
 ): FittedHeadline {
   const trim = text.trim().replace(/\s+/g, " ");
   if (trim.length === 0) return { fontSize: startFontSize, lines: [] };
-  const minFontSize = startFontSize * PREVIEW_MIN_FONT_RATIO;
   let fontSize = startFontSize;
   while (fontSize >= minFontSize) {
     const maxChars = Math.max(1, Math.floor(textWidth / (CHAR_WIDTH_RATIO * fontSize)));
     const lines = wrapHeadline(trim, maxChars);
     const height = lines.length * fontSize * LINE_HEIGHT_RATIO;
-    if (lines.length <= PREVIEW_MAX_LINES && height <= maxHeight) return { fontSize, lines };
+    const widestLine = Math.max(...lines.map((l) => l.length), 0);
+    if (lines.length <= PREVIEW_MAX_LINES && height <= maxHeight && widestLine <= maxChars) {
+      return { fontSize, lines };
+    }
     fontSize *= SHRINK;
   }
-  const floor = Math.max(1, Math.floor(textWidth / (CHAR_WIDTH_RATIO * fontSize)));
-  return { fontSize, lines: wrapHeadline(trim, floor) };
+  const floorChars = Math.max(1, Math.floor(textWidth / (CHAR_WIDTH_RATIO * minFontSize)));
+  return { fontSize: minFontSize, lines: wrapHeadline(trim, floorChars, true) };
 }
 
 /**
@@ -124,7 +145,13 @@ export function CreativePreview({
   const textEdge = times(LAYERS.textEdge, W);
   const textWidth = W - 2 * textEdge;
   const maxHeight = H - 2 * anchor;
-  const { fontSize, lines } = fitHeadline(headline ?? "", textWidth, maxHeight, H * PREVIEW_FONT_RATIO);
+  const { fontSize, lines } = fitHeadline(
+    headline ?? "",
+    textWidth,
+    maxHeight,
+    H * PREVIEW_FONT_RATIO,
+    H * PREVIEW_MIN_FONT_RATIO,
+  );
   const lineHeight = fontSize * LINE_HEIGHT_RATIO;
   const firstBaseline = top
     ? anchor + fontSize * 0.75
