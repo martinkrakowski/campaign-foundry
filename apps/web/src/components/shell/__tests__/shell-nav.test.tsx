@@ -252,6 +252,14 @@ describe("MobileMenu", () => {
     { href: "/export", label: "Export" },
   ] as const;
 
+  test("marks only the active tab with aria-current and leaves the others bare", () => {
+    nextMock().nav.pathname = "/export";
+    renderWithRun(<MobileMenu open onClose={() => {}} tabs={tabs} />);
+    const active = screen.getByRole("link", { name: "Export" });
+    expect(active.getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Grid" }).getAttribute("aria-current")).toBeNull();
+  });
+
   test("renders nothing when closed", () => {
     const { container } = renderWithRun(<MobileMenu open={false} onClose={() => {}} tabs={tabs} />);
     expect(container.querySelector('[role="dialog"]')).toBeNull();
