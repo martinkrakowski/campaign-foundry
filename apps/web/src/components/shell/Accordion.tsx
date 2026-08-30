@@ -20,7 +20,7 @@ export function Accordion({ title, aside, defaultOpen = true, children }: Accord
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex flex-1 items-center gap-2 text-left transition-colors hover:text-white"
+          className="flex flex-1 items-center gap-2 text-left transition-colors hover:text-text-emphasis"
         >
           <svg
             className={cn("h-3.5 w-3.5 transition-transform", open ? "rotate-0" : "-rotate-90")}

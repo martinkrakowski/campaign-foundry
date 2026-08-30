@@ -81,7 +81,7 @@ export function AxisCard({
       <span aria-hidden="true" className="flex items-center justify-center">
         {children}
       </span>
-      <span className={cn("font-mono text-[12px]", selected ? "text-white" : "text-text-muted")}>{label ?? value}</span>
+      <span className={cn("font-mono text-[12px]", selected ? "text-text-emphasis" : "text-text-muted")}>{label ?? value}</span>
       {meta ? (
         <span aria-hidden="true" className="text-[11px] text-text-muted">
           {meta}

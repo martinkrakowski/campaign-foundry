@@ -76,7 +76,7 @@ export function TelemetryDrawer({ open, onClose }: TelemetryDrawerProps) {
             type="button"
             onClick={copyLog}
             disabled={log.length === 0}
-            className="font-mono text-[10px] uppercase tracking-wider text-text-muted transition-colors hover:text-white disabled:opacity-40"
+            className="font-mono text-[10px] uppercase tracking-wider text-text-muted transition-colors hover:text-text-emphasis disabled:opacity-40"
             aria-label="Copy telemetry to clipboard"
           >
             {copied ? "Copied ✓" : "Copy"}
@@ -84,7 +84,7 @@ export function TelemetryDrawer({ open, onClose }: TelemetryDrawerProps) {
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
-            className="text-text-muted hover:text-white"
+            className="text-text-muted hover:text-text-emphasis"
             aria-label={expanded ? "Collapse telemetry" : "Expand telemetry"}
           >
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
@@ -95,7 +95,7 @@ export function TelemetryDrawer({ open, onClose }: TelemetryDrawerProps) {
               )}
             </svg>
           </button>
-          <button type="button" onClick={onClose} className="text-text-muted hover:text-white" aria-label="Close telemetry">
+          <button type="button" onClick={onClose} className="text-text-muted hover:text-text-emphasis" aria-label="Close telemetry">
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>

@@ -185,7 +185,7 @@ export default function GridPage() {
   if (assets.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center p-6 text-center">
-        <h2 className="mb-2 text-lg font-semibold text-white">Start orchestrating assets</h2>
+        <h2 className="mb-2 text-lg font-semibold text-text-emphasis">Start orchestrating assets</h2>
         <p className="max-w-md text-[13px] text-text-muted">
           {loading
             ? "Running the pipeline — resolving assets, compositing brand layers, and checking compliance…"
@@ -431,7 +431,7 @@ function Artboard({
       <div
         className={cn(
           "absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 opacity-0 transition-opacity group-hover:opacity-100",
-          isMotion(asset) ? "bg-black/40" : "bg-black/80 backdrop-blur-sm",
+          isMotion(asset) ? "bg-scrim/40" : "bg-scrim/80 backdrop-blur-sm",
         )}
       >
         <button
@@ -445,7 +445,7 @@ function Artboard({
           <a
             href={videoSrc(asset, version)}
             download
-            className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-white transition-colors hover:bg-border-hover"
+            className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-text-emphasis transition-colors hover:bg-border-hover"
           >
             Download .MP4
           </a>
@@ -453,7 +453,7 @@ function Artboard({
         <a
           href={assetSrc(asset, version)}
           download
-          className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-white transition-colors hover:bg-border-hover"
+          className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-text-emphasis transition-colors hover:bg-border-hover"
         >
           {isMotion(asset) ? "Download poster .PNG" : "Download .PNG"}
         </a>
@@ -461,7 +461,7 @@ function Artboard({
           <a
             href={`${API}/output/${asset.proofPath}`}
             download
-            className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-white transition-colors hover:bg-border-hover"
+            className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-text-emphasis transition-colors hover:bg-border-hover"
           >
             Print Proof (.PDF)
           </a>
@@ -470,7 +470,7 @@ function Artboard({
 
       {/* Regeneration indicator — shown over each creative while a run is in flight. */}
       {loading && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/60 backdrop-blur-sm">
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-scrim/60 backdrop-blur-sm">
           <span className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
           <span className="text-[11px] font-medium text-white">Regenerating…</span>
         </div>
@@ -561,7 +561,7 @@ function Artboard({
             "rounded-full border px-4 py-1 text-xs font-medium transition-colors",
             decision === "approved"
               ? "border-success bg-success/20 text-success"
-              : "border-border text-text-muted hover:text-white",
+              : "border-border text-text-muted hover:text-text-emphasis",
           )}
         >
           Approve
@@ -573,7 +573,7 @@ function Artboard({
             "rounded-full border px-4 py-1 text-xs font-medium transition-colors",
             decision === "rejected"
               ? "border-error bg-error/20 text-error"
-              : "border-border text-text-muted hover:text-white",
+              : "border-border text-text-muted hover:text-text-emphasis",
           )}
         >
           Reject
@@ -705,7 +705,7 @@ function PreviewModal({
   return (
     <div
       ref={dialogRef}
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-black/80 p-4 backdrop-blur-sm sm:p-8"
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-scrim/80 p-4 backdrop-blur-sm sm:p-8"
       onClick={onClose}
       role="dialog"
       aria-modal="true"

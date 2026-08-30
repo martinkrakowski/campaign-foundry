@@ -604,14 +604,14 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
 
        {/* Save as dialog */}
       {saveAsId !== null && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-scrim/80 p-4 backdrop-blur-sm">
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="save-as-title"
             className="w-full max-w-md rounded-xl border border-border bg-surface p-6"
           >
-            <h3 id="save-as-title" className="mb-4 text-sm font-semibold text-white">Save as...</h3>
+            <h3 id="save-as-title" className="mb-4 text-sm font-semibold text-text-emphasis">Save as...</h3>
             <p className="mb-4 text-[12px] text-text-muted">
               This creates a copy. The original file stays on disk until deleted.
             </p>
@@ -621,7 +621,7 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
               placeholder="New brief id"
               value={saveAsId}
               onChange={(e) => setSaveAsId(e.target.value)}
-              className="mb-4 w-full rounded border border-border bg-background px-3 py-2 text-[13px] text-white"
+              className="mb-4 w-full rounded border border-border bg-background px-3 py-2 text-[13px] text-text-emphasis"
               autoFocus
             />
             <div className="flex gap-2">

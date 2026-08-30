@@ -41,7 +41,7 @@ export function TreatmentsSection({ state, dispatch, errors }: { state: EditorSt
                 onChange={(e) =>
                   dispatch({ type: "setTreatment", index, patch: { layout: e.target.value } })
                 }
-                className="rounded border border-border bg-surface px-3 py-2 text-sm text-white"
+                className="rounded border border-border bg-surface px-3 py-2 text-sm text-text-emphasis"
               >
                 {LAYOUT_OPTIONS.map((opt) => (
                   <option key={opt} value={opt}>{opt}</option>
@@ -54,7 +54,7 @@ export function TreatmentsSection({ state, dispatch, errors }: { state: EditorSt
                 onChange={(e) =>
                   dispatch({ type: "setTreatment", index, patch: { tone: e.target.value } })
                 }
-                className="rounded border border-border bg-surface px-3 py-2 text-sm text-white"
+                className="rounded border border-border bg-surface px-3 py-2 text-sm text-text-emphasis"
               >
                 {TONE_OPTIONS.map((opt) => (
                   <option key={opt} value={opt}>{opt}</option>

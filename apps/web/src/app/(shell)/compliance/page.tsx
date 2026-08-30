@@ -10,7 +10,7 @@ export default function CompliancePage() {
   return (
     <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col p-4 pb-12 sm:p-8">
       <span className="font-mono text-[11px] uppercase tracking-widest text-text-muted">Compliance</span>
-      <h2 className="mb-6 text-lg font-semibold text-white">Automated Compliance Report</h2>
+      <h2 className="mb-6 text-lg font-semibold text-text-emphasis">Automated Compliance Report</h2>
 
       <div className="w-full overflow-x-auto rounded-xl border border-border bg-surface shadow-2xl">
         <table className="w-full min-w-[640px] text-left text-[13px]">
@@ -22,7 +22,7 @@ export default function CompliancePage() {
               <th className="p-4 font-medium">Gate Status</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-border text-white">
+          <tbody className="divide-y divide-border text-text-emphasis">
             {!hasRun || assets.length === 0 ? (
               <tr className="opacity-50">
                 <td className="p-4 font-mono">—</td>

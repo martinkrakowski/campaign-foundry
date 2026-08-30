@@ -233,7 +233,12 @@ describe("Header", () => {
     nextMock().nav.pathname = "/compliance";
     renderWithRun(<Header />);
     const active = screen.getByRole("link", { name: "Compliance" });
-    expect(active.className).toContain("text-white");
+    expect(active.className).toContain("text-text-emphasis");
+    // The underline must track the same token as the text. It was `border-white`, which
+    // in the light theme is a white rule on a white ground — the active tab would read
+    // as inactive while its label looked right.
+    expect(active.className).toContain("border-text-emphasis");
+    expect(active.className).not.toContain("border-white");
   });
 
   test("the hamburger opens and closes the mobile menu", async () => {

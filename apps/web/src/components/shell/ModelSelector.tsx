@@ -101,7 +101,7 @@ function ModelModal({
   return (
     <div
       ref={dialogRef}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-8 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/80 p-8 backdrop-blur-sm"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -112,12 +112,12 @@ function ModelModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <h2 className="text-sm font-semibold text-white">Image model</h2>
+          <h2 className="text-sm font-semibold text-text-emphasis">Image model</h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="text-text-muted transition-colors hover:text-white"
+            className="text-text-muted transition-colors hover:text-text-emphasis"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

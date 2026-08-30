@@ -35,10 +35,10 @@ export function ErrorStrip({ errors, onErrorClick }: ErrorStripProps) {
             key={section}
             type="button"
             onClick={() => onErrorClick?.(section)}
-            className="inline-flex items-center gap-1.5 rounded-full border border-red-500/50 bg-red-500/10 px-3 py-1 text-[11px] font-medium text-red-400 transition-colors hover:bg-red-500/20"
+            className="inline-flex items-center gap-1.5 rounded-full border border-error/50 bg-error/10 px-3 py-1 text-[11px] font-medium text-error transition-colors hover:bg-error/20"
           >
             <span>{label}</span>
-            <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500/30 px-1 text-[10px]">
+            <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-error/30 px-1 text-[10px]">
               {errorCount}
             </span>
           </button>

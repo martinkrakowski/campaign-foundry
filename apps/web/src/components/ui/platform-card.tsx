@@ -70,7 +70,7 @@ export function PlatformCard({
           <RatioFrame ratio={profile.ratio} size={40} />
         </PreviewFrame>
       </span>
-      <span className={cn("text-[13px] font-medium leading-tight", selected ? "text-white" : "text-text-primary")}>
+      <span className={cn("text-[13px] font-medium leading-tight", selected ? "text-text-emphasis" : "text-text-primary")}>
         {profile.label}
       </span>
       {meta ? (

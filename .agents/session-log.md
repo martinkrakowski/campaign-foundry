@@ -1145,3 +1145,18 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - `e.stopPropagation()` (the dialog root has no click handler; the only sibling handler is the close button).
 - **Plan defect corrected in this PR:** §4's Hot-files line named `Sidebar.tsx` as **(W4 only)** while **W1.2 owned it**. Harmless in practice — W1 merged long before W4 — but the line was wrong.
 - **Left open for W0b (the next wave):** the 55-utility bracket-alpha sweep, the stock-colour literals in `ErrorStrip` and six other components, and the `text-white` → `text-text-emphasis` migration (70 occurrences in 29 files). `DESIGN.md`'s typography table already prescribes the token, so the doc leads the code by exactly one lane — stated there deliberately, not by omission.
+
+---
+
+## 2026-08-30 — W0b lane: the sweep W0 enabled (branch feat/w0b-sweep)
+
+- **Mode:** Implementer (`opencode/big-pickle`), landed by the orchestrator after the CLI stopped before committing — the third time in this plan's execution that this happened, so the pattern is now expected rather than surprising.
+- **Changes:**
+  - Non-default alpha steps → bracket syntax. The grep for a token-alpha whose number is not a multiple of 5 now returns **nothing**: those classes emitted no CSS at all even after W0 fixed the scale.
+  - Stock-colour literals → tokens across 27 files (`ErrorStrip`'s `red-500/NN` among them).
+  - `text-white` → `text-text-emphasis` wherever the ground is a theme surface, including three `hover:text-white` states in the grid that would hover to white-on-white once light is reachable.
+- **Decisions:**
+  - **Twelve `text-white` kept deliberately**, each on a ground coloured regardless of theme: the primary and destructive `Button` variants, the duration-strip's selected bead, the sidebar's Create-new button, the header's brand mark, the swatch-picker's tick over an arbitrary product colour, the grid's black download pill and its "Regenerating…" overlay, and CreativeGlyph's four motion-cue groups. White there is a function of the ground, not the theme.
+  - **`StatusChip`'s `yellow-400` left in place.** UE-D11 requires the four chip states to stay colour-distinct and `warning` is already state two, so folding yellow onto it would make two states identical. No token fits; it needs one, and that is a token decision rather than a sweep.
+  - **Four `bg-white` / `text-black` / `hover:bg-gray-200` primary buttons left as literals.** An always-white button's hover is the same category as the `text-white` exceptions. They are, however, a genuine light-theme problem — a white button on a white ground — and belong to **W3.2's light-theme audit**.
+- **Left open:** the `StatusChip` fourth-state token; the white primary buttons under a light theme (W3.2). Observed once: `shell-nav.test.tsx` "marks the active tab from the pathname" failed on one full-suite run and passed on two further runs of the **same commit** — recorded for the reviewer, not diagnosed.

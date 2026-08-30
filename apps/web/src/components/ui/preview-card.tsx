@@ -68,8 +68,8 @@ export function PreviewCard({
         {children}
       </span>
       <span className="min-w-0 flex-1">
-        <span className={cn("block text-[13px]", selected ? "text-white" : "text-text-primary")}>{meta}</span>
-        <span className={cn("block font-mono text-[12px]", selected ? "text-white" : "text-text-muted")} aria-hidden="true">
+        <span className={cn("block text-[13px]", selected ? "text-text-emphasis" : "text-text-primary")}>{meta}</span>
+        <span className={cn("block font-mono text-[12px]", selected ? "text-text-emphasis" : "text-text-muted")} aria-hidden="true">
           {value}
         </span>
       </span>

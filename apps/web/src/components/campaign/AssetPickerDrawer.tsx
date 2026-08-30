@@ -53,10 +53,10 @@ export function AssetPickerDrawer({
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label="Asset Bin">
-      <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-scrim/80 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-96 overflow-y-auto border-l border-border bg-surface p-4">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-white">Asset Bin</h3>
+          <h3 className="text-sm font-semibold text-text-emphasis">Asset Bin</h3>
           <Button variant="ghost" size="sm" aria-label="Close drawer" onClick={onClose}>
             Close
           </Button>
@@ -131,7 +131,7 @@ export function AssetPickerDrawer({
                         {isSelected ? "Selected" : "Choose"}
                       </Button>
                     ) : (
-                      <span className="text-xs text-amber-400" title="Hero asset" aria-label="Hero asset">
+                      <span className="text-xs text-warning" title="Hero asset" aria-label="Hero asset">
                         ★
                       </span>
                     )}
