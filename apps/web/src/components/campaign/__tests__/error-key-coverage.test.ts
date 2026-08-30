@@ -2,6 +2,8 @@ import { describe, test, expect } from "vitest";
 import { validateState } from "@/components/campaign/validate";
 import { initialEditorState } from "@/components/campaign/editor-state";
 import { isKnownKey } from "@/components/campaign/error-sections";
+import { SECTION_BY_ERROR_KEY, MOTION_HOST_SECTION } from "@/components/campaign/ErrorStrip";
+import { SECTION_TITLES, type SectionId } from "@/components/campaign/sections";
 import type { EditorState, ProductDraft } from "@/components/campaign/editor-state";
 
 function makeFixture(overrides: Partial<EditorState>): EditorState {
@@ -107,5 +109,27 @@ describe("L1.1 error key coverage", () => {
         expect(isKnownKey(key)).toBe(true);
       }
     }
+  });
+});
+
+describe("W6.7 error bucket ↔ section totality", () => {
+  test("every section id resolves to itself, and no bucket hides beyond the six", () => {
+    const ids = Object.keys(SECTION_TITLES) as SectionId[];
+    for (const id of ids) {
+      expect(SECTION_BY_ERROR_KEY[id]).toBe(id);
+    }
+    expect(Object.keys(SECTION_BY_ERROR_KEY)).toHaveLength(ids.length);
+  });
+
+  test("SECTION_BY_ERROR_KEY is a bijection: every value is a declared section", () => {
+    const ids = Object.keys(SECTION_TITLES) as SectionId[];
+    const values = Object.values(SECTION_BY_ERROR_KEY);
+    expect(values).toHaveLength(new Set(values).size);
+    expect(values.sort()).toEqual(ids.sort());
+  });
+
+  test("motion is the one non-section bucket, and lives inside its Output host", () => {
+    expect(MOTION_HOST_SECTION).toBe("output");
+    expect(SECTION_BY_ERROR_KEY).not.toHaveProperty("motion");
   });
 });

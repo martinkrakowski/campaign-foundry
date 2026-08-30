@@ -1,6 +1,6 @@
 "use client";
 
-import { useReducer, useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useReducer, useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from "react";
 import { Button, Input } from "@/components/ui";
 import { useRun } from "@/lib/run-context";
 import { useRouter } from "next/navigation";
@@ -47,15 +47,69 @@ import { FloatingBar } from "@/components/shell/FloatingBar";
 import { SectionModeContext } from "@/components/campaign/SectionModeContext";
 import { useEditorPanels } from "@/lib/editor-panels-context";
 import { Accordion } from "@/components/shell/Accordion";
-import { scrollToSection } from "@/lib/scroll-to-section";
+import { revealSection } from "@/lib/scroll-to-section";
+import { useStepNavigation } from "@/lib/use-step-navigation";
+import { cn } from "@/lib/cn";
 import { BriefSelector } from "@/components/campaign/BriefSelector";
 import { HeadlinePoolDrawer } from "@/components/campaign/HeadlinePoolDrawer";
 import { ModePanel } from "@/components/ui/mode-panel";
 import { SectionOutline } from "@/components/ui/section-outline";
 import { EstimatePanel } from "@/components/campaign/EstimatePanel";
+import { StepHeader } from "@/components/campaign/StepHeader";
+import { StepFooter } from "@/components/campaign/StepFooter";
+import { SECTION_TITLES, sectionOrder, type SectionId } from "./sections";
+import * as messages from "./messages";
 import type { CampaignMode } from "@/components/campaign/editor-state";
 
 const LEAVE_PROMPT = "You have unsaved changes. Are you sure you want to leave?";
+
+/* ── Guided presentation (W6) ─────────────────────────────────────────────── */
+
+/** A step is one of the six sections, or the review step the pipeline sends to. */
+type StepId = SectionId | "review";
+
+/** The two presentations the toggle offers (W6). */
+type Presentation = "guided" | "everything";
+
+const PRESENTATION_KEY = "cf:presentation";
+
+/**
+ * The one presentation the editor reads or writes, closed over two values.
+ * `localStorage` can be gone (private mode) — the tried/fallback pair keeps a
+ * read and a write from either throwing or depending on which side broadcasts.
+ */
+function readPresentation(): Presentation {
+  try {
+    const stored = window.localStorage.getItem(PRESENTATION_KEY);
+    if (stored === "guided" || stored === "everything") return stored;
+    return "guided";
+  } catch {
+    return "guided";
+  }
+}
+
+function persistPresentation(next: Presentation): void {
+  try {
+    window.localStorage.setItem(PRESENTATION_KEY, next);
+  } catch {
+    // Storage unavailable in this context; the toggle still works for the tab.
+  }
+}
+
+/** The subtitle under each step heading, keyed by the same vocabulary as the headings. */
+const STEP_SUBTITLES: Record<StepId, string> = {
+  identity: messages.stepSubtitleIdentity,
+  copy: messages.stepSubtitleCopy,
+  products: messages.stepSubtitleProducts,
+  treatments: messages.stepSubtitleTreatments,
+  policy: messages.stepSubtitlePolicy,
+  output: messages.stepSubtitleOutput,
+  review: messages.stepSubtitleReview,
+};
+
+function stepTitle(step: StepId): string {
+  return step === "review" ? "Review" : SECTION_TITLES[step];
+}
 
 /**
  * The campaign editor. Two routes render it: `/brief` edits whatever brief the shell
@@ -99,6 +153,31 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     if (section) setTouchedSections((prev) => (prev.has(section) ? prev : new Set([...prev, section])));
   }, []);
   const [attempted, setAttempted] = useState(false);
+
+  // W6: the guided/everything presentation. Stored outside the editor so the toggle
+  // outlives a reload; the guarded read makes a blank choice before anything renders.
+  const [presentation, setPresentation] = useState<Presentation>(() => readPresentation());
+  const choosePresentation = useCallback((next: Presentation) => {
+    setPresentation(next);
+    persistPresentation(next);
+  }, []);
+
+  // The step list is derived from the mode, never stored (D19): both modes produce
+  // five sections plus the review step. The cursor re-clamps when the mode flips.
+  const steps = useMemo<StepId[]>(() => [...sectionOrder(state.mode), "review"], [state.mode]);
+  const { index: stepIndex, go } = useStepNavigation(steps);
+
+  // W6.2: a reveal that points at another step cannot scroll there synchronously —
+  // in Guided the target section is unmounted until the step change commits. The
+  // pending marker is spent in a layout effect on the committed step.
+  const pendingReveal = useRef<{ section: string; focus: boolean } | null>(null);
+  // The reveal that drove a step change already pointed at the step's own content, so
+  // the step-change focus lands nowhere else. Consumed by the step-focus effect.
+  const suppressStepHeading = useRef(false);
+  const skippedStepHeading = useRef(false);
+  const [nudgeKey, setNudgeKey] = useState(0);
+  // SHELL-55: the guided step heading, the focus handoff target on a step change.
+  const stepHeadingRef = useRef<HTMLHeadingElement | null>(null);
 
   // Load briefs on mount and set up focus listener
   useEffect(() => {
@@ -305,13 +384,13 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
 
   /** Section errors before the first validation pass lands. */
 
-  // W4.2: the outline's rows crawl their section into view and hand it focus. This is
-  // the outline's one navigation call site — W6 swaps `scrollToSection` for
-  // `revealSection` here, which also switches the guided step and focuses the step
-  // heading, so that lane changes one line instead of searching for every caller.
-  const outlineActivate = useCallback((section: string) => {
-    scrollToSection(section);
-    // Same candidate strategy as `scrollToSection`: a section placed in the left bar
+  // W6.2 — the reveal center. W4.2's outline handoff (scroll + focus) is one call
+  // site of a single verb, and the FloatingBar's verbs are the rest: every row, link
+  // or chip that wants to point at a section ends here. In Guided the section may
+  // live on another step — then the step switches first, and the scroll runs once the
+  // section is mounted, so a chip's click lands in the same place it does today.
+  const focusSection = useCallback((section: string) => {
+    // Same candidate strategy as `revealSection`: a section placed in the left bar
     // exists twice below `lg`, so prefer the copy that is actually laid out.
     const target = Array.from(
       document.querySelectorAll<HTMLElement>(`#${section}, [data-section="${section}"]`),
@@ -324,6 +403,56 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     target.tabIndex = -1;
     target.focus({ preventScroll: true });
   }, []);
+
+  const reveal = useCallback(
+    (section: string, focus = false) => {
+      // Motion has no section and no step; it validates inside its Output host, so a
+      // motion chip points at whatever step hosts Output and scrolls the motion panel.
+      const step = section === "motion" ? "output" : section;
+      const targetStepIndex = steps.findIndex((candidate) => candidate === step);
+      if (presentation === "guided" && targetStepIndex !== -1 && targetStepIndex !== stepIndex) {
+        pendingReveal.current = { section, focus };
+        go(targetStepIndex);
+        return;
+      }
+      revealSection(section);
+      if (focus) focusSection(step);
+    },
+    [presentation, steps, stepIndex, go],
+  );
+
+  /** The outline's rows crawl their section into view and hand it focus (W4.2). */
+  const outlineActivate = useCallback((section: string) => reveal(section, true), [reveal]);
+
+  // W6.2 — the deferred half of a reveal. The scroll (and focus, for the outline) set
+  // aside by a guided step switch runs here, once the section is mounted under the new
+  // step. Marker consumed so a later step of the same index cannot replay it.
+  useLayoutEffect(() => {
+    const pending = pendingReveal.current;
+    if (!pending) return;
+    pendingReveal.current = null;
+    revealSection(pending.section);
+    if (pending.focus) focusSection(pending.section);
+    // The reveal already pointed at the step's own content; the step-change focus
+    // handoff must not steal it. (A chip reveal is scroll-only and expects the same.)
+    suppressStepHeading.current = true;
+  }, [stepIndex, focusSection]);
+
+  // SHELL-55: the step heading is the focus handoff target on a step change — *never*
+  // on first render, and never after a reveal that already pointed somewhere. The
+  // heading is mounted for every guided step (including review), so the call needs no
+  // guard: a non-null ref here is guaranteed by construction.
+  useEffect(() => {
+    if (!skippedStepHeading.current) {
+      skippedStepHeading.current = true;
+      return;
+    }
+    if (suppressStepHeading.current) {
+      suppressStepHeading.current = false;
+      return;
+    }
+    (stepHeadingRef.current as HTMLHeadingElement).focus();
+  }, [stepIndex]);
 
   // D4/U1: the mode chooser is the first decision a brief makes, so it is the first
   // thing the bar shows. Published like every other editor panel — the page keeps the
@@ -349,7 +478,10 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   useEffect(() => {
     setPanels(
       <>
-        {state.mode === "variation" ? (
+        {state.mode === "variation" && presentation === "everything" ? (
+          // W6: the sidebar's policy panel lives on the policy step in Guided — the
+          // only section that does not render inside the step card — so it is
+          // published only for the everything presentation.
           // The panel renders in the sidebar, outside this page's DOM subtree, so it
           // needs its own capture: a click on an axis card there is still "the user
           // has been to the policy section" (D1).
@@ -373,7 +505,7 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     );
     return () => setPanels(null);
     // sectionErrors only reads what `errors` already covers.
-  }, [state, errors, policyErrors, setPanels, touchSectionFromEvent]);
+  }, [state, errors, policyErrors, setPanels, touchSectionFromEvent, presentation]);
 
   /** Every path that replaces the draft goes through the same D14 confirmation. */
   const confirmReplace = (): boolean =>
@@ -424,7 +556,7 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   const refuseInvalid = (): boolean => {
     setAttempted(true);
     if (blockedAt === null) return false;
-    scrollToFirstError(blockedAt);
+    reveal(blockedAt);
     return true;
   };
 
@@ -510,6 +642,46 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     }
   };
 
+  // The errors behind one step. `errors` is keyed by every bucket once validation has
+  // landed, but the first paint carries the empty put-state — so the bucket read still
+  // falls back, and the guided first paint is what exercises that side. Motion folds
+  // into its Output host, exactly as the FloatingBar's strip treats it.
+  const stepSectionErrors = useCallback(
+    (step: StepId): FieldErrors => {
+      if (step === "review") return {};
+      return step === "output" ? { ...errors.output, ...errors.motion } : (errors[step] ?? {});
+    },
+    [errors],
+  );
+
+  // D3, on the step's own terms: a refused Next sets the attempted flag, reveals that
+  // step's errors and replays the one-shot nudge — it never disables the button, so
+  // pressing Next again is how the user re-asks what stands in the way.
+  const handleNext = useCallback(() => {
+    const sectionErrors = stepSectionErrors(steps[stepIndex]);
+    if (Object.keys(sectionErrors).length > 0) {
+      setAttempted(true);
+      reveal(steps[stepIndex]);
+      setNudgeKey((key) => key + 1);
+      return;
+    }
+    setNudgeKey(0);
+    go(stepIndex + 1);
+  }, [steps, stepIndex, stepSectionErrors, reveal, go]);
+
+  // W6.5 — the step's status sentence: the review step speaks for the whole brief,
+  // and every other step says the first thing wrong or "Looking good."
+  const stepFooterStatus = useMemo(() => {
+    const step = steps[stepIndex];
+    // The bucket read first: `stepSectionErrors` answers for "review" too (all of
+    // nothing), and the step sentence that follows uses the same voice for both.
+    const sectionErrors = stepSectionErrors(step);
+    if (step === "review") return messages.statusStepReview;
+    return Object.keys(sectionErrors).length > 0
+      ? Object.values(sectionErrors)[0]
+      : messages.statusStepReady;
+  }, [steps, stepIndex, stepSectionErrors]);
+
   const handleDiscard = () => {
     dispatch({ type: "discard" });
     purgeDraftFromStorage(state);
@@ -519,7 +691,41 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     setTouchedSections(new Set());
   };
 
-  const scrollToFirstError = (section: string) => scrollToSection(section);
+  /**
+   * A guided step card wraps the same sections the everything stack renders — one at a
+   * time, so a step and "the section on that step" are the same thing. The switch is
+   * over the closed six (exhaustive): the review step is handled by the caller, and the
+   * mode-derived step list guarantees this only ever receives one of these six.
+   */
+  const renderStepSection = (section: SectionId) => {
+    switch (section) {
+      case "identity":
+        return <IdentitySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("identity")} />;
+      case "copy":
+        return (
+          <CopySection
+            state={state}
+            dispatch={dispatch}
+            errors={sectionErrorsVisible("copy")}
+            onOpenPool={() => setPoolDrawerOpen(true)}
+          />
+        );
+      case "products":
+        return <ProductsSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("products")} />;
+      case "treatments":
+        return <TreatmentsSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("treatments")} />;
+      case "output":
+        return (
+          <OutputSection
+            state={state}
+            dispatch={dispatch}
+            errors={{ ...sectionErrorsVisible("output"), ...sectionErrorsVisible("motion") }}
+          />
+        );
+      case "policy":
+        return <PolicySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("policy")} />;
+    }
+  };
 
   return (
     // No h-full / inner overflow: like every other view, this one flows and the
@@ -533,7 +739,9 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
               className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 sm:p-8 pb-24"
               onBlurCapture={handleMainBlur} onClickCapture={touchSectionFromEvent}
             >
-          {/* Header with selector, mode toggle, status chip */}
+          {/* Header with selector, status chip, and the presentation toggle.
+              In Guided the chip moves out of this row — the StepHeader announces the
+              step's own status — so this row only ever holds one of the two. */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <BriefSelector
@@ -542,32 +750,91 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
                 onSelect={loadBrief}
                 onCreateNew={createNew}
               />
-              <StatusChip state={state} />
+              {presentation === "everything" ? <StatusChip state={state} /> : null}
+            </div>
+            <div
+              role="group"
+              aria-label={messages.presentationLabel}
+              className={cn("shrink-0 items-center gap-1", presentation === "guided" ? "flex" : "hidden")}
+            >
+              <button
+                type="button"
+                aria-pressed={presentation === "guided"}
+                onClick={() => choosePresentation("guided")}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-[12px] font-semibold transition-colors",
+                  presentation === "guided"
+                    ? "bg-surface-2 text-text-emphasis"
+                    : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
+                )}
+              >
+                {messages.presentationGuided}
+              </button>
+              <button
+                type="button"
+                aria-pressed={presentation === "everything"}
+                onClick={() => choosePresentation("everything")}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-[12px] font-semibold transition-colors",
+                  presentation === "everything"
+                    ? "bg-surface-2 text-text-emphasis"
+                    : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
+                )}
+              >
+                {messages.presentationEverything}
+              </button>
             </div>
           </div>
 
-          {/* Sections */}
-          <div className="space-y-8">
-             <div>
-               <IdentitySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("identity")} />
-             </div>
-             <div>
-               <CopySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("copy")} onOpenPool={() => setPoolDrawerOpen(true)} />
-             </div>
-             <div>
-               <ProductsSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("products")} />
-             </div>
-             <div>
-               {state.mode === "brief" ? (
-                 <TreatmentsSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("treatments")} />
-               ) : null}
-             </div>
-             <OutputSection
-               state={state}
-               dispatch={dispatch}
-               errors={{ ...sectionErrorsVisible("output"), ...sectionErrorsVisible("motion") }}
-             />
-          </div>
+          {/* Sections: the whole stack (Everything) or one step (Guided) */}
+          {presentation === "guided" ? (
+            <div className="space-y-8">
+              <StepHeader
+                step={stepIndex + 1}
+                total={steps.length}
+                title={stepTitle(steps[stepIndex])}
+                subtitle={STEP_SUBTITLES[steps[stepIndex]]}
+                state={state}
+                headingRef={stepHeadingRef}
+              />
+              <div>
+                {steps[stepIndex] === "review" ? (
+                  <p className="text-[13px] text-text-primary">{messages.stepReviewIntro}</p>
+                ) : (
+                  renderStepSection(steps[stepIndex])
+                )}
+              </div>
+              <StepFooter
+                statusText={stepFooterStatus}
+                onBack={stepIndex > 0 ? () => go(stepIndex - 1) : undefined}
+                onNext={steps[stepIndex] === "review" ? undefined : () => handleNext()}
+                nextLabel={steps[stepIndex] === "output" ? messages.stepNextReviewLaunch : undefined}
+                nudgeKey={nudgeKey}
+              />
+            </div>
+          ) : (
+            <div className="space-y-8">
+               <div>
+                 <IdentitySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("identity")} />
+               </div>
+               <div>
+                 <CopySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("copy")} onOpenPool={() => setPoolDrawerOpen(true)} />
+               </div>
+               <div>
+                 <ProductsSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("products")} />
+               </div>
+               <div>
+                 {state.mode === "brief" ? (
+                   <TreatmentsSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("treatments")} />
+                 ) : null}
+               </div>
+               <OutputSection
+                 state={state}
+                 dispatch={dispatch}
+                 errors={{ ...sectionErrorsVisible("output"), ...sectionErrorsVisible("motion") }}
+               />
+            </div>
+          )}
 
         </div>
 
@@ -590,10 +857,10 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
              attempted={attempted}
              applyRefusal={applyRefusal}
              persistError={persistError}
-             onScrollToSection={scrollToFirstError}
+             onScrollToSection={reveal}
            />
            <div className="min-w-0 flex-1">
-             {getTotalErrorCount(visibleErrors) > 0 ? <ErrorStrip errors={visibleErrors} onErrorClick={scrollToFirstError} /> : null}
+             {getTotalErrorCount(visibleErrors) > 0 ? <ErrorStrip errors={visibleErrors} onErrorClick={reveal} /> : null}
            </div>
            <Button variant="ghost" onClick={handleDiscard}>
              Discard

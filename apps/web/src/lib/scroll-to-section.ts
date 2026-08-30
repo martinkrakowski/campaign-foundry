@@ -5,7 +5,7 @@
  * menu shows the same content — and ids must be unique. Of the copies, prefer the
  * one that is actually laid out; `getElementById` would hand back the hidden one.
  */
-export function scrollToSection(section: string): void {
+export function revealSection(section: string): void {
   const candidates = Array.from(
     document.querySelectorAll<HTMLElement>(`#${section}, [data-section="${section}"]`),
   );

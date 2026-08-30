@@ -1,26 +1,39 @@
 "use client";
 
 import type { FieldErrors } from "./validate";
+import { SECTION_TITLES, type SectionId } from "./sections";
 
 interface ErrorStripProps {
   errors: Record<string, FieldErrors>;
   onErrorClick?: (section: string) => void;
 }
 
-const SECTION_LABELS: Record<string, string> = {
-  identity: "Identity",
-  copy: "Copy",
-  products: "Products",
-  treatments: "Treatments",
-  policy: "Policy",
-  output: "Output",
-  motion: "Motion",
+/**
+ * An error bucket keys either a section — one of the six in `SECTION_TITLES` — or
+ * the one exception, `motion`, which validates under its host. The totality test
+ * (W6.7) pins this map both ways and declares `MOTION_HOST_SECTION`, so a bucket
+ * cannot reach the label lookup without a declared section — the chip label is
+ * spelled by the one `SECTION_TITLES` vocabulary, never by a `||` fallback.
+ */
+export const SECTION_BY_ERROR_KEY: Record<SectionId, SectionId> = {
+  identity: "identity",
+  copy: "copy",
+  products: "products",
+  treatments: "treatments",
+  output: "output",
+  policy: "policy",
 };
 
+/** The one non-section bucket: motion's errors render inside its Output host. */
+export const MOTION_HOST_SECTION: SectionId = "output";
+
 export function ErrorStrip({ errors, onErrorClick }: ErrorStripProps) {
-  const sectionsWithErrors = Object.entries(errors).filter(
-    ([, sectionErrors]) => sectionErrors && Object.keys(sectionErrors).length > 0
-  );
+  const sectionsWithErrors = Object.entries(errors)
+    .filter(([, sectionErrors]) => sectionErrors && Object.keys(sectionErrors).length > 0)
+    // Only declared buckets — the six sections plus motion — reach the label lookup.
+    // An undeclared bucket cannot occur from validate (W6.7 pins it), so it is
+    // dropped rather than spelled as a raw-key chip.
+    .filter(([section]) => section === "motion" || SECTION_TITLES[SECTION_BY_ERROR_KEY[section as SectionId]]);
 
   if (sectionsWithErrors.length === 0) return null;
 
@@ -28,8 +41,10 @@ export function ErrorStrip({ errors, onErrorClick }: ErrorStripProps) {
     <div className="flex flex-wrap gap-2">
       {sectionsWithErrors.map(([section, sectionErrors]) => {
         const errorCount = Object.keys(sectionErrors).length;
-        const label = SECTION_LABELS[section] || section;
-
+        const label =
+          section === "motion"
+            ? "Motion"
+            : SECTION_TITLES[SECTION_BY_ERROR_KEY[section as SectionId]];
         return (
           <button
             key={section}

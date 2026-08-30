@@ -131,6 +131,10 @@ describe("BriefPage — data flow", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
+    // W6: the editor's default presentation is Guided, but everything this suite
+    // describes (stacked sections, sidebar policy) is the Everything presentation —
+    // so seed it, and let the Guided tests below override per-test.
+    localStorage.setItem("cf:presentation", "everything");
     globalThis.confirm = vi.fn(() => true);
   });
 
@@ -898,6 +902,7 @@ describe("BriefPage — capabilities and motion", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:presentation", "everything");
     globalThis.confirm = vi.fn(() => true);
   });
 
@@ -1220,4 +1225,292 @@ describe("BriefPage — capabilities and motion", () => {
     expect(document.activeElement).toBe(row);
   });
 
+});
+
+describe("BriefPage — guided presentation (W6)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:presentation", "guided");
+    globalThis.confirm = vi.fn(() => true);
+  });
+
+  // A classic brief that meets every step, so Next can walk all the way to Review.
+  const complete = (id: string) => ({
+    ...brief(id),
+    output: { formats: ["static"], platforms: ["linkedin"] },
+  });
+
+  const adopt = async (user: ReturnType<typeof userEvent.setup>, id: string) => {
+    await user.click(screen.getAllByText("New brief...")[0]);
+    await user.click(await screen.findByText(id));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id));
+  };
+
+  const stepHeading = () => screen.getByRole("heading", { level: 1 });
+  const next = () => screen.getByRole("button", { name: messages.stepNext });
+  const back = () => screen.getByRole("button", { name: messages.stepBack });
+  const footerStatus = () =>
+    (document.querySelector('footer [role="status"]') as HTMLElement | null)?.textContent;
+
+  test("guided shows one section at a time, with the StepHeader in place of the row's chip", async () => {
+    // No stored choice: the default is Guided. (This describe's beforeEach seeds
+    // "guided", so drop the key to exercise the unset fallback.)
+    localStorage.removeItem("cf:presentation");
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "ok");
+
+    // Only the Identity step is mounted; the rest of the stack is not in the DOM.
+    expect(stepHeading().textContent).toBe("Identity");
+    expect(document.getElementById("identity")).toBeTruthy();
+    expect(document.getElementById("products")).toBeNull();
+
+    // First step: no Back, Next present, both verbs live.
+    expect(screen.queryByRole("button", { name: messages.stepBack })).toBeNull();
+    expect(next()).toBeTruthy();
+
+    // The status chip moved into the StepHeader, and the toggle mirrors the mode.
+    expect(screen.getByRole("group", { name: messages.presentationLabel })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: messages.presentationGuided }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(footerStatus()).toBe(messages.statusStepReady);
+  });
+
+  test("broken presentation storage falls back to Guided", async () => {
+    // Storage that throws is the same fallback as an absent key: a read that reaches
+    // storage but has nothing valid to give is indistinguishable from one that cannot
+    // reach it. The suite's localStorage is the in-memory stand-in from vitest.setup,
+    // so spy on that object, not on the Web platform's Storage.prototype. The picker
+    // (adopt) still needs real reads for its own keys, so only trip the probe key.
+    const realGet = globalThis.localStorage.getItem.bind(globalThis.localStorage);
+    const spy = vi.spyOn(globalThis.localStorage, "getItem").mockImplementation((key: string) => {
+      if (key === "cf:presentation") throw new Error("storage gone");
+      return realGet(key);
+    });
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "ok");
+    expect(stepHeading().textContent).toBe("Identity");
+    spy.mockRestore();
+  });
+
+  test("a refused Next keeps the step, reveals its errors and replays the nudge", async () => {
+    const user = userEvent.setup();
+    // "BROKEN" is not a valid brief id — so Identity is the step that stands in the way.
+    routes({ list: () => json({ briefs: [entry("BROKEN", "r1")] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "BROKEN");
+
+    expect(stepHeading().textContent).toBe("Identity");
+    await user.click(next());
+
+    // Still on Identity, now speaking what it needs: the footer says the first error.
+    expect(stepHeading().textContent).toBe("Identity");
+    expect(footerStatus()).toBe(messages.briefId);
+    // The refused Next replayed the one-shot nudge on the Next label.
+    const label = next().querySelector("span");
+    expect(label?.className).toContain("kf-step-nudge");
+  });
+
+  test("walk to Review: each Next lands on the next step and hands the step heading focus", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "ok");
+
+    // Identity (step 1 of 6) -> Copy; the heading is the focus handoff target.
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
+    expect(document.activeElement).toBe(stepHeading());
+    expect(back()).toBeTruthy();
+
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Treatments"));
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
+
+    // The last section step's Next says what it leads to.
+    const launch = screen.getByRole("button", { name: messages.stepNextReviewLaunch });
+    expect(launch.textContent).toBe(messages.stepNextReviewLaunch);
+    await user.click(launch);
+    await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
+
+    // Review: no Next — the launch is the last look, already on screen.
+    expect(screen.queryByRole("button", { name: messages.stepNext })).toBeNull();
+    expect(back()).toBeTruthy();
+    expect(screen.getByText(messages.stepReviewIntro)).toBeTruthy();
+    expect(footerStatus()).toBe(messages.statusStepReview);
+  });
+
+  test("variation walks to the Policy step, and the Copy step can open the headline pool", async () => {
+    const user = userEvent.setup();
+    const randomizedBrief = {
+      ...complete("rand"),
+      mode: "variation" as const,
+      variation: {
+        count: 8,
+        seed: 3,
+        minDistance: 2,
+        coverage: { perProduct: 1, perRatio: 1 },
+        axes: {
+          layout: ["headline-top", "headline-bottom"],
+          tone: ["bold", "subtle"],
+          background: { source: ["procedural"] },
+          paletteShift: [0, 0.1],
+        },
+      },
+    };
+    routes({ list: () => json({ briefs: [{ file: "rand.yaml", revision: "r1", brief: randomizedBrief }] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "rand");
+
+    // Identity -> Copy.
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
+
+    // On the Copy step (variation) the headline pool is one click away.
+    await user.click(screen.getByRole("button", { name: new RegExp(messages.moreIdeas) }));
+    expect(screen.getByRole("heading", { level: 3, name: "Headline Pool" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /Close/ }));
+
+    // Copy -> Products -> Output -> Policy: the variation order skips treatments.
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
+    await user.click(screen.getByRole("button", { name: messages.stepNextReviewLaunch }));
+    await waitFor(() => expect(stepHeading().textContent).toBe("Variation Policy"));
+    expect(footerStatus()).toBe(messages.statusStepReady);
+  });
+
+  test("Back returns to the previous step, and disappears again on the first", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "ok");
+
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
+    await user.click(back());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Identity"));
+    expect(screen.queryByRole("button", { name: messages.stepBack })).toBeNull();
+  });
+
+  test("an unmounted ErrorStrip chip switches the step first, then scrolls — and leaves focus alone", async () => {
+    const user = userEvent.setup();
+    const scroller = vi.fn();
+    Element.prototype.scrollIntoView = scroller;
+    // Products is invalid, so its chip is visible from the identity step.
+    const brokenProducts = {
+      file: "prod.yaml",
+      revision: "r1",
+      brief: {
+        ...brief("prod"),
+        products: [{ id: "bad id", name: "A", primaryColor: "#1473E6", logoPath: "a.png", key: 0 }],
+      },
+    };
+    routes({ list: () => json({ briefs: [brokenProducts] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "prod");
+
+    const chip = Array.from(document.querySelectorAll<HTMLElement>("button.rounded-full")).find((b) =>
+      /Products/.test(b.textContent ?? ""),
+    ) as HTMLElement;
+    expect(chip).toBeTruthy();
+    await user.click(chip);
+
+    // The step switched to Products (the section was unmounted at click time)…
+    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
+    expect(document.getElementById("products")).toBeTruthy();
+    // …and the deferred scroll found it once it existed.
+    expect(scroller).toHaveBeenCalled();
+    // Scroll-only: the pressed chip keeps focus, the heading is not grabbed.
+    expect(document.activeElement).toBe(chip);
+  });
+
+  test("an outline row on another step switches the step and hands the section focus", async () => {
+    const user = userEvent.setup();
+    const scroller = vi.fn();
+    Element.prototype.scrollIntoView = scroller;
+    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "ok");
+
+    // The complete brief leaves the StatusLine link-free, so the outline's row is the
+    // only button named exactly "Products".
+    const row = await screen.findByRole("button", { name: "Products" });
+    await user.click(row);
+
+    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
+    const section = document.getElementById("products") as HTMLElement;
+    expect(section).toBeTruthy();
+    expect(scroller).toHaveBeenCalled();
+    // The outline's activation asked for focus — the section takes it, not the heading.
+    expect(document.activeElement).toBe(section);
+  });
+
+  test("the toggle switches and persists the presentation, and restores the row's chip", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "ok");
+    expect(screen.queryByRole("button", { name: messages.presentationGuided })?.getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+
+    await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
+    await waitFor(() => expect(document.getElementById("products")).toBeTruthy());
+    // Everything stacks the sections and moves the status chip back into the header row.
+    expect(document.getElementById("identity")).toBeTruthy();
+    expect(screen.getByRole("group", { name: messages.presentationLabel })).toBeTruthy();
+    expect(localStorage.getItem("cf:presentation")).toBe("everything");
+
+    await user.click(screen.getByRole("button", { name: messages.presentationGuided }));
+    await waitFor(() => expect(document.getElementById("products")).toBeNull());
+    expect(stepHeading().textContent).toBe("Identity");
+  });
+
+  test("a presentation write that cannot reach storage does not break the toggle", async () => {
+    const realSet = globalThis.localStorage.setItem.bind(globalThis.localStorage);
+    const spy = vi.spyOn(globalThis.localStorage, "setItem").mockImplementation((key: string, value: string) => {
+      if (key === "cf:presentation") throw new Error("storage gone");
+      return realSet(key, value);
+    });
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "ok");
+
+    await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
+    await waitFor(() => expect(document.getElementById("products")).toBeTruthy());
+    spy.mockRestore();
+  });
+
+  test("the policy sidebar renders only for Everything; Guided keeps it on its step", async () => {
+    const user = userEvent.setup();
+    const randomizedBrief = {
+      ...complete("rand"),
+      mode: "variation",
+      variation: {
+        count: 0,
+        axes: { layout: ["headline-top"], tone: ["bold"], background: { source: ["procedural"] }, paletteShift: [0] },
+      },
+    };
+    routes({ list: () => json({ briefs: [{ file: "rand.yaml", revision: "r1", brief: randomizedBrief }] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "rand");
+
+    // Guided: no policy panel in the sidebar — policy is a step (reached after Output).
+    // The sidebar panel is the element carrying data-section="policy" (its own capture
+    // for touched-section tracking); the outline row names the section elsewhere.
+    expect(document.querySelector('[data-section="policy"]')).toBeNull();
+    await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
+    await waitFor(() => expect(document.querySelector('[data-section="policy"]')).toBeTruthy());
+  });
 });
