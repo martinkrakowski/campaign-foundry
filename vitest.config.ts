@@ -62,7 +62,7 @@ export default defineConfig({
       exclude: [
         "**/*.test.{ts,tsx}",
         "**/__tests__/**",
-        "**/index.ts", // generated barrels: pure re-exports, no logic
+        "packages/*/src/**/index.ts", // generated barrels: pure re-exports only; the three index.ts files in apps/web/src/components/campaign/sections, apps/api/server/lib/ports, and apps/api/server/routes contain logic and are intentionally covered
         "**/*.config.{ts,mts,js,mjs}",
         "**/*.d.ts",
         "apps/web/src/app/layout.tsx", // root html/body shell; uses next/font (build-time only)
