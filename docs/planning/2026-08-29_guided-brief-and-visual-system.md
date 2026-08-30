@@ -199,7 +199,7 @@ A shared `previewLayers.ts` holds the fractions both it and `CreativeGlyph` use,
 ## 4. Work Breakdown
 
 **Merge order:** **(W0 ‖ W1) → W0b → W2a → W2b → ((W3 → W5) ‖ W4) → W6 → W7 → W8 → W9 → W10.**
-W0 first because every later visual lane assumes `/NN` works, and W0b lands the sweep before anything is restyled on top of it. W1 is independent bug-fixing and ships alongside. W3/W4/W5 are disjoint (theme / sidebar / header). W6–W8 share `BriefEditor.tsx` and merge in order. **Hot files:** `tailwind.config.ts` (W0 only) · `DESIGN.md` (append-only, every lane) · `messages.ts` (append-only, W5/W6/W8/W9) · **`Header.tsx` (W3 then W5 — this is why they are not parallel)** · **`BriefEditor.tsx` (W4 publish-only, then W6, W7, W8, W9 — sequential)** · `Sidebar.tsx` (W4 only).
+W0 first because every later visual lane assumes `/NN` works, and W0b lands the sweep before anything is restyled on top of it. W1 is independent bug-fixing and ships alongside. W3/W4/W5 are disjoint (theme / sidebar / header). W6–W8 share `BriefEditor.tsx` and merge in order. **Hot files:** `tailwind.config.ts` (W0 only) · `DESIGN.md` (append-only, every lane) · `messages.ts` (append-only, W5/W6/W8/W9) · **`Header.tsx` (W3 then W5 — this is why they are not parallel)** · **`BriefEditor.tsx` (W4 publish-only, then W6, W7, W8, W9 — sequential)** · `Sidebar.tsx` (**W1** for the Aspects readout, then W4).
 **Cross-lane gate:** every new error or status key must be registered in `error-sections.ts` and covered by the visibility filter, or GB-D1 regresses; W6 extends the existing coverage test to the step→section map so a section with no step is a test failure.
 
 ### W0 — the alpha scale and the contract (P0, ships first)
