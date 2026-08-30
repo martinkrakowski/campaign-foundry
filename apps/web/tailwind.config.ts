@@ -17,7 +17,7 @@ const config: Config = {
         brand: {
           DEFAULT: "color-mix(in srgb, var(--color-brand-primary) calc(<alpha-value> * 100%), transparent)",
           primary: "color-mix(in srgb, var(--color-brand-primary) calc(<alpha-value> * 100%), transparent)",
-          "primary-hover": "var(--color-brand-primary-hover)",
+          "primary-hover": "color-mix(in srgb, var(--color-brand-primary-hover) calc(<alpha-value> * 100%), transparent)",
           secondary: "color-mix(in srgb, var(--color-brand-secondary) calc(<alpha-value> * 100%), transparent)",
         },
         background: "color-mix(in srgb, var(--color-background) calc(<alpha-value> * 100%), transparent)",
