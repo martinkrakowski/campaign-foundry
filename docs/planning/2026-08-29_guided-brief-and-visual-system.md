@@ -1,7 +1,7 @@
 # Guided Brief & Visual System — Architecture & Development Plan
 
 **Date:** 2026-08-29
-**Status:** Draft v1.1 — revised after an independent review by Gemini 3.7 Flash (High) run against the live tree. It re-verified every factual claim in §1 as correct (including reproducing the Tailwind probe independently) and returned **2 blocking · 3 major · 2 minor** findings, all fixed here: the `Header.tsx` collision between two lanes scheduled in parallel; a preview spec that `CreativeGlyph` could not satisfy; `revealSection`'s render-cycle race; five Appendix A rows that contradicted §2.3/§2.4; an undeclared hot file; and two stale task numbers. Draft v1.0: Synthesised from a static HTML inspiration mock supplied by the user: **246 discrete items** (tokens, colours, layout, components, interactions, copy, motion, a11y, data, features, gating) inventoried in four slices, each classified against the live codebase, **19 of them contested by a second adversarial pass** and resolved here. Three codebase maps were written first (editor 69 KB, shell 52 KB, constraints 65 KB). The design panel and plan-authoring agents were lost to a spend limit mid-run; the target design in §3 and the lanes in §4 are authored directly from the verified classification, and **every load-bearing defect claim and the one prescribed fix were re-verified by hand** (see §1).
+**Status:** Draft v1.2 (after a CodeRabbit sweep: the step count reconciled, four cross-references corrected, all 246 Appendix A descriptions restored). v1.1 — revised after an independent review by Gemini 3.7 Flash (High) run against the live tree. It re-verified every factual claim in §1 as correct (including reproducing the Tailwind probe independently) and returned **2 blocking · 3 major · 2 minor** findings, all fixed here: the `Header.tsx` collision between two lanes scheduled in parallel; a preview spec that `CreativeGlyph` could not satisfy; `revealSection`'s render-cycle race; five Appendix A rows that contradicted §2.3/§2.4; an undeclared hot file; and two stale task numbers. Draft v1.0: Synthesised from a static HTML inspiration mock supplied by the user: **246 discrete items** (tokens, colours, layout, components, interactions, copy, motion, a11y, data, features, gating) inventoried in four slices, each classified against the live codebase, **19 of them contested by a second adversarial pass** and resolved here. Three codebase maps were written first (editor 69 KB, shell 52 KB, constraints 65 KB). The design panel and plan-authoring agents were lost to a spend limit mid-run; the target design in §3 and the lanes in §4 are authored directly from the verified classification, and **every load-bearing defect claim and the one prescribed fix were re-verified by hand** (see §1).
 **Scope:** `apps/web` — the visual token layer, the UI kit, the shell (header/sidebar/overlays) and the `/brief` editor's presentation. `DESIGN.md` — the contract, which this plan finds has drifted from the code. **No brief-schema change, no new API route, no domain change.** Everything the mock implies beyond that boundary is enumerated and deferred in §2.4 and Appendix A.
 **Source material:** `inspiration/2026-08-29_brief-wizard.html` — the mock as supplied, committed so this plan's `mock:NNN` line citations stay resolvable.
 **Related:** `2026-08-26_unified-campaign-editor.md` (UE-D1–D15, locked), `2026-08-28_graphical-brief-editor.md` (GB-D1–D18, shipped across #93, #94, #95, #106, #109, #110), `2026-08-27_motion-copy-timeline.md` (shipped), `DESIGN.md`, PRs #82, #84, #85, #113, #119, #120, #126.
@@ -24,7 +24,7 @@ Continuing the D-numbering after GB-D18. Prior decisions are cited as **UE-Dn** 
 |----|----------|-------------|
 | **D19** | **Guided is a lens on the sections, not a second editor.** `/brief` gains a presentation choice — **Guided** (one section at a time with step chrome) and **Everything** (today's scroll) — and both render the *same* section components against the *same* reducer, validator and message file. The step index lives in a `useStepNavigation` hook beside `BriefEditor`; `editor-state.ts` never learns it. **Amends UE-D4** ("sections, not steps") to: *steps are a presentation of the same sections.* | No second state tree, no second validator, no second copy source. Every existing editor test keeps passing in Everything mode. The trap this closes: `scrollToSection` is called by `StatusLine` links, `ErrorStrip` chips and `refuseInvalid` (`BriefEditor.tsx:388-393`) against a section that may not be mounted in Guided — so it becomes `revealSection(section)`, which switches the step first and then scrolls. `sectionOrder(mode)` (`sections/index.ts:10-15`) is the one list of steps; Randomized's fifth step is **Variety**, the sidebar panel. |
 | **D20** | **Next is never disabled, and a refused Next speaks.** The mock renders Next `disabled` while the step has issues (`mock:972`). Forbidden by **GB-D3** / `DESIGN.md:344-347`. Next stays live; pressing it on an invalid step marks that section attempted, reveals its errors, plays a one-shot `nudge`, and the step footer states the first problem — the exact shape `refuseInvalid` already gives Apply and Save. | The mock's own `go()` refusal path (`mock:1001-1008`) is the behaviour we ship; only its `disabled` attribute and the `readyPulse` **infinite** loop are dropped. Keeps the lesson of #126: a dead verb cannot answer the question pressing it asks. |
-| **D21** | **No locked steps. Every navigation surface navigates freely.** The mock locks segments above `maxVisited` (`mock:836`) while its own sidebar rows and Review links bypass that lock. A locked segment is a disabled control whose reason is off-screen. | `maxVisited` survives only as *styling* (which segments read as visited), never as a gate. The segbar, the Sections outline, Review's Edit links, `StatusLine` links and `ErrorStrip` chips all reach any section in any order. |
+| **D21** | **No locked steps. Every navigation surface navigates freely.** The mock locks segments above `maxVisited` (`mock:837`) while its own sidebar rows and Review links bypass that lock. A locked segment is a disabled control whose reason is off-screen. | `maxVisited` survives only as *styling* (which segments read as visited), never as a gate. The segbar, the Sections outline, Review's Edit links, `StatusLine` links and `ErrorStrip` chips all reach any section in any order. |
 | **D22** | **The colour tokens gain an alpha channel, and 55 dead classes come alive.** `tokens.css` **keeps its hex values**; `tailwind.config.ts` wraps each colour as `color-mix(in srgb, var(--color-x) calc(<alpha-value> * 100%), transparent)`. **Amends GB-D8**, whose workaround was to add `--color-brand-tint` / `--color-brand-rail` rather than fix the scale. | Verified by probe (§1): `.bg-error/20`, `.border-error/50`, `.ring-brand-primary/25`, `.hover:bg-border/40` all emit, and plain `.bg-error` keeps its `--tw-bg-opacity` path, so nothing that works today breaks. `--color-brand-tint` is **dead code** (0 consumers) and retires; `--color-brand-rail` has one consumer (`OutputSection.tsx:147`) which becomes `border-brand-primary/40`. `tokens.css` stays hex, so `theme.ts`, the `globals.css` scrollbar rules and every `fill="var(--color-…)"` in `PolicySection`/`CreativeGlyph` are untouched — the migration the triplet form would have forced does not happen. **Arbitrary alphas need bracket syntax**: `/8` emits nothing (not a default step), `/[0.08]` does. |
 | **D23** | **`--color-text-emphasis`, and `text-white` stops being "the one literal".** 70 `text-white` occurrences across 29 files have no light-theme counterpart. Add `--color-text-emphasis` (`#0f172a` light / `#ffffff` dark). **Amends `DESIGN.md:65-66`.** | Prerequisite for D24: without it, light theme renders white headings on a white ground. |
 | **D24** | **Ship a theme toggle, because a complete light palette exists that no user can reach.** `:root` in `tokens.css` is a full light theme; the root layout hard-sets `class="dark"`. Adopt the mock's mechanism: the class on `<html>`, a `localStorage` key, a header `icon-btn`, and `color-scheme` so native controls and scrollbars follow. | Requires D23. `DESIGN.md:11` ("Dark first … light must keep working, but it is not what users see") becomes true rather than aspirational. |
@@ -151,7 +151,7 @@ Each needs a domain or API change and is deferred with its cost, not rejected:
 
 ### 3.1 The first run, in Guided
 
-She lands on `/brief/new`. The sidebar shows **Classic / Randomized** as two pictures, then **Sections** — five numbered rows, `01 Identity` lit with a brand rail, no pills anywhere. The main column has a sticky head: `STEP 1 OF 5`, **Identity**, *"Name the campaign and say who it is for."*, the status chip, and a five-segment bar with the first segment tinted. The card below holds the campaign name, the derived id in mono, the region chips and the audience field. The footer reads *"Looking good."* and offers **Next**.
+She lands on `/brief/new`. The sidebar shows **Classic / Randomized** as two pictures, then **Sections** — five numbered rows, `01 Identity` lit with a brand rail, no pills anywhere. The main column has a sticky head: `STEP 1 OF 6`, **Identity**, *"Name the campaign and say who it is for."*, the status chip, and a six-segment bar with the first segment tinted. The card below holds the campaign name, the derived id in mono, the region chips and the audience field. The footer reads *"Looking good."* and offers **Next**.
 
 At ≥1280px a dock sits to the right: a `CreativeGlyph` in a 1:1 frame, in the product's colour, captioned *"Square · no platform yet"*. As she types a headline the glyph's text bars take it. Below 1280px the same information is one strip: swatch · name · headline · `1/5`.
 
@@ -164,6 +164,8 @@ At **05 Output** she taps *Instagram Feed* and *Instagram Story*. The dock refra
 `ModePanel` ×2 (GB-D4, unchanged) · **Sections** outline (D25) · **Campaign Brief** read-only accordion (Aspects derived per mode, D-fix) · **Project Bin** (real assets, unchanged) · **Variety** (Randomized only, unchanged) · **Estimate** (D31, both modes) · footer *Create new* / *Browse briefs* (pinned, unchanged).
 
 ### 3.3 Main column
+
+**Steps are `sectionOrder(mode)` plus Review — six in both modes.** The five sections are what the outline numbers (`01`–`05`); **Review is the sixth step and is not a section**: it has no fields, no error keys and no outline row, because it is where the draft is launched rather than edited. So the counter reads `STEP n OF 6`, the segbar has six segments, and the outline has five numbered rows. Randomized's `05` is **Variety** (Q2), Classic's `04` is Treatments.
 
 **Guided:** sticky head (step count eyebrow · `h1` with `tabindex="-1"` for focus handoff · subtitle · `StatusChip`) · segbar · one section as a step card · footer (step status sentence · Back · Next / *Review & launch*) · the `FloatingBar` only on Review.
 **Everything:** today's layout, plus the segbar as a section-progress readout and the outline scroll-spying.
@@ -280,20 +282,20 @@ W0 is four files. The **sweep** it enables is deliberately not in it — 35 file
 
 | # | Task | Owns |
 |---|------|------|
-| W6.1 | `useStepNavigation(sectionOrder(mode))`: index, direction, `maxVisited` (styling only), range guard, `go(n)` | `lib/use-step-navigation.ts` |
+| W6.1 | `useStepNavigation(steps)` where `steps = [...sectionOrder(mode), "review"]` — **six**, and the one place the count is derived: index, direction, `maxVisited` (styling only), range guard, `go(n)` | `lib/use-step-navigation.ts` |
 | W6.2 | `revealSection(section)` replaces `scrollToSection` at all three call sites. **It cannot scroll synchronously:** in Guided the target section is unmounted until the step state commits, so `document.querySelector` would miss it. Switch the step, store the target in a `pendingReveal` ref, and scroll from a `useLayoutEffect` that fires once the step card has mounted — then clear the ref. In Everything it scrolls immediately, as today | `lib/scroll-to-section.ts`, `BriefEditor.tsx`, `StatusLine.tsx`, `ErrorStrip.tsx` |
 | W6.3 | Presentation toggle (Guided / Everything), persisted; Everything is the default for a loaded brief | `BriefEditor.tsx` |
 | W6.4 | `StepHeader` (eyebrow · `h1 tabindex="-1"` focus handoff · subtitle · `StatusChip`), sticky, scoped to the column | `campaign/StepHeader.tsx` |
 | W6.5 | `StepFooter`: step status sentence (`role="status"`), Back, **Next always live**; a refused Next marks attempted, reveals, nudges once, states the first issue | `campaign/StepFooter.tsx` |
 | W6.6 | Step subtitles and footer strings → `messages.ts`; jargon test extended | `messages.ts` |
-| W6.7 | Extend the error-key coverage test: every section in `sectionOrder` has a step and vice versa | `__tests__/` |
+| W6.7 | Extend the error-key coverage test to totality **in both directions**: every section in `sectionOrder(mode)` has a step, and every step except `review` is a section — so adding a section without a step, or a step with no section and no explicit exemption, fails | `__tests__/` |
 | W6.8 | Tests: Guided renders one section; Next never has `disabled`; a refused Next reveals exactly that section's errors; **an `ErrorStrip` chip for an unmounted section switches step and *then* scrolls — asserted by spying on the scroll after the step commits, which fails against a synchronous implementation** | `__tests__/` |
 
 ### W7 — Guided, part 2: the segbar and the transitions (D27, D28)
 
 | # | Task | Owns |
 |---|------|------|
-| W7.1 | `SegBar`: one segment per section, states done/attempted-with-issues/current/unvisited, `aria-current="step"`, per-segment `aria-label`, **no lock**, hover `scaleY` under `motion-safe:` | `ui/seg-bar.tsx` |
+| W7.1 | `SegBar`: one segment per **step** (six — sections plus Review, from W6.1's list, never a literal), states done/attempted-with-issues/current/unvisited, `aria-current="step"`, per-segment `aria-label`, **no lock**, hover `scaleY` under `motion-safe:` | `ui/seg-bar.tsx` |
 | W7.2 | Step-card `enter/exit` by direction, one-shot, `motion-safe:`; the outgoing card absolutely positioned during exit | `globals.css`, `BriefEditor.tsx` |
 | W7.3 | Swipe (60px, 1.4 ratio) and Arrow Left/Right, suppressed inside inputs and while an overlay is open; swipe hint on coarse pointers | `lib/use-step-navigation.ts`, `StepFooter.tsx` |
 | W7.4 | `nudge` one-shot; `ready-ring` one-shot on becoming valid (never a loop) | `globals.css` |
@@ -353,7 +355,7 @@ W0 is four files. The **sweep** it enables is deliberately not in it — 35 file
 
 | Risk | Mitigation |
 |---|---|
-| **W0 makes 55 previously invisible tints appear at once.** Some will look wrong. | W0 is its own PR with a screenshot pass in both themes over each named victim; the revived classes are enumerated in W0.3 so none is discovered later. |
+| **W0 makes 55 previously invisible tints appear at once.** Some will look wrong. | W0 is its own PR with a screenshot pass in both themes over each named victim; the revived classes are enumerated in W0b.1 so none is discovered later. |
 | `color-mix` support. | Already a dependency: `tokens.css:16` uses it for the hover token and `DESIGN.md:47` documents it. No new browser assumption. |
 | A second presentation is a second editor by accident. | D19 puts the step index in a hook, not in `editor-state.ts`; W6.7's totality test and the shared-component rule are the enforcement. The DoD's "blank brief = zero red **in both presentations**" is the observable check. |
 | `revealSection` misses a call site and a chip silently no-ops. | W6.2 changes all three call sites in one commit; W6.8 tests the unmounted-section path specifically. |
@@ -402,7 +404,7 @@ Every item the mock contains, its status against the code, and where it goes. `�
 | `SHELL-20` | Estimate accordion: Deliverables + Render window † | partial | api | **W4** (UI half) + deferred §2.4 |
 | `SHELL-21` | Field label + fieldbox primitive | present | ui | **W2a** |
 | `SHELL-22` | Campaign Brief read-only accordion (repo only) † | present | ui | **W1** |
-| `SHELL-23` | Editor-published panels: ModePanel top + Variation Policy accordion (repo only | present | ui | **W4** |
+| `SHELL-23` | Editor-published panels: ModePanel top + Variation Policy accordion (repo only) | present | ui | **W4** |
 | `SHELL-24` | Footer: Create new / Browse briefs | present | ui | **W4** |
 | `SHELL-25` | Full-screen menu dialog chrome † | present | ui | **W10** |
 | `SHELL-26` | Menu tab rows with icons + Brief entry | partial | ui | **W1** |
@@ -468,14 +470,14 @@ Every item the mock contains, its status against the code, and where it goes. `�
 | `STEP-24` | Four DIRECTIONS option cards with inline SVG thumbnails (multi-select) | missing | dom | deferred §2.4 |
 | `STEP-25` | Look hint + required-one validation | partial | ui | **W10** |
 | `STEP-26` | Five FORMATS ('Ad types') option cards with icon / spec / description | partial | dom | **W10** (UI half) + deferred §2.4 |
-| `STEP-27` | OOH card disabled by a simulated dooh probe (enter-blocked, leave-allowed) wit | not-applicable | api | rejected §2.3 |
+| `STEP-27` | OOH card disabled by a simulated dooh probe (enter-blocked, leave-allowed) with warning icon | not-applicable | api | rejected §2.3 |
 | `STEP-28` | Six PLATFORM cards with 'video-ready' / 'stills only' meta | partial | ui | **W10** |
 | `STEP-29` | gate-line info / success / warning with probe copy | partial | ui | **W10** |
 | `STEP-30` | gateErr: motion needs a video platform | present | ui | rejected §2.3 |
 | `STEP-31` | Step-7 required-one errors and the missing Video sub-panel | present | ui | rejected §2.3 |
-| `STEP-32` | Foot status sentence + Next button (disabled when invalid, 'Review & launch' o | conflicts | ui | **W6** |
+| `STEP-32` | Foot status sentence + Next button (disabled when invalid, 'Review & launch' on step 7) | conflicts | ui | **W6** |
 | `STEP-33` | 232×464 phone dock with 'Following / For You' chrome | missing | ui | **W9** |
-| `STEP-34` | Direction canvases d-minimal / d-graphic / d-editorial / d-texture driven by - | partial | ui | **W9** |
+| `STEP-34` | Direction canvases d-minimal / d-graphic / d-editorial / d-texture driven by --c | partial | ui | **W9** |
 | `STEP-35` | Story progress bars (infinite loop) | conflicts | ui | rejected §2.3 |
 | `STEP-36` | Glyph from hero asset type | missing | ui | **W9** |
 | `STEP-37` | Headline with typewriter (26 ms/char) and 'YOUR HEADLINE' empty state | missing | ui | **W9** — empty state only; typewriter rejected §2.3 |
@@ -600,7 +602,7 @@ Every item the mock contains, its status against the code, and where it goes. `�
 | `WIZ-28` | Escape closes the Save menu (two handlers) | partial | ui | **W7** |
 | `WIZ-29` | Per-step footer (footHTML) | partial | ui | **W6** |
 | `WIZ-30` | Swipe hint on coarse pointers | missing | ui | **W7** |
-| `WIZ-31` | Next button: disabled when issues, next-ready pulse when clean, 'Review & laun | conflicts | ui | **W6** |
+| `WIZ-31` | Next button: disabled when issues, next-ready pulse when clean, 'Review & launch' on step 7 | conflicts | ui | **W6** |
 | `WIZ-32` | updateNext() — live recompute of footer + segbar + outline | partial | ui | **W6** |
 | `WIZ-33` | setStepErr() — transient refusal in the footer | partial | ui | **W6** |
 | `WIZ-34` | Auto-advance after a colour tap (650ms / 60ms reduced) | missing | ui | rejected §2.3 |
