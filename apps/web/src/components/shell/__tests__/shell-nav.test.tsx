@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement, useEffect, type ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRun, seedPersistedRun, nextMock, exerciseFocusTrap, makeAsset, ShellProviders } from "@/__tests__/helpers";
@@ -392,6 +392,25 @@ describe("guarded navigation when the editor is dirty", () => {
     expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
     expect(globalThis.confirm).not.toHaveBeenCalled();
   });
+
+  // A modified or non-primary click (Cmd/Ctrl/Shift/Alt/middle) is the browser's own
+  // job: it must keep the native behaviour (new tab / new window / download) instead of
+  // being intercepted into a client-side route, a dirty prompt, or a menu close.
+  test.each(["metaKey", "ctrlKey", "shiftKey", "altKey", "button"] as const)(
+    "a %s click on a mobile tab leaves it to the browser: no push, no prompt, no close",
+    (modifier) => {
+      const tabs = [{ href: "/grid", label: "Grid" }] as const;
+      const onClose = vi.fn();
+      globalThis.confirm = vi.fn();
+      render(createElement(ShellProviders, null, createElement(MobileMenu, { open: true, onClose, tabs })));
+      fireEvent.click(screen.getByRole("link", { name: "Grid" }), {
+        [modifier]: modifier === "button" ? 1 : true,
+      });
+      expect(nextMock().router.push).not.toHaveBeenCalled();
+      expect(globalThis.confirm).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+    },
+  );
 
   test("a dirty mobile tab click the user accepts prompts exactly once and navigates", async () => {
     const user = userEvent.setup();
