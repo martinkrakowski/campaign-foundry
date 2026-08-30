@@ -84,7 +84,7 @@ describe("CommandBar", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
-  test("cannot re-roll a classic run once the brief is randomized — the control is disabled and says why", async () => {
+  test("cannot re-roll a classic run once the brief is randomized — the control still answers, and says why", async () => {
     const user = userEvent.setup();
     localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/1:1/default": "rejected" }));
     seedPersistedRun([makeAsset()]);
@@ -106,10 +106,24 @@ describe("CommandBar", () => {
       </>,
     );
     const regen = (await screen.findByText(/Regenerate/)).closest("button") as HTMLButtonElement;
-    await waitFor(() => expect(regen.disabled).toBe(true));
-    expect(screen.getByRole("status").textContent).toMatch(/came from a classic run, but the brief is now a randomized campaign/);
+    // The verb stays live: disabling it made the tap do nothing at all, and `title` is
+    // unreachable on a touch device, so the refusal never reached the user.
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toMatch(
+        /came from a classic run, but the brief is now a randomized campaign/,
+      ),
+    );
+    expect(regen.disabled).toBe(false);
+    // The refusal is reachable without the (touch-invisible) title tooltip.
+    const describedBy = regen.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy!)?.textContent).toMatch(/came from a classic run/);
     await user.click(regen);
+    // Refused, so no confirm — but the bar now states the reason as well.
     expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() =>
+      expect(screen.getAllByText(/came from a classic run, but the brief is now a randomized campaign/)).toHaveLength(2),
+    );
   });
 
   test("does not call /campaigns/plan for a classic brief", async () => {
