@@ -203,13 +203,14 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
             </button>
           )}
 
+          {/* The inverse of the ground rather than a white pill — see export/page.tsx. */}
           <button
             type="button"
             onClick={() => setConfirm("run")}
             disabled={loading || variationBlocked}
             aria-busy={loading || undefined}
             aria-haspopup="dialog"
-            className="flex shrink-0 items-center space-x-2 rounded-full bg-white px-4 py-1.5 text-[13px] font-semibold text-black transition-colors hover:bg-gray-200 disabled:bg-surface-2 disabled:text-text-muted sm:px-6"
+            className="flex shrink-0 items-center space-x-2 rounded-full bg-text-emphasis px-4 py-1.5 text-[13px] font-semibold text-background transition-opacity hover:opacity-90 disabled:bg-surface-2 disabled:text-text-muted sm:px-6"
           >
             {loading ? (
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -388,11 +389,12 @@ function ConfirmDialog({
           >
             Cancel
           </button>
+          {/* The inverse of the ground rather than a white pill — see export/page.tsx. */}
           <button
             ref={confirmRef}
             type="button"
             onClick={onConfirm}
-            className="rounded-full bg-white px-5 py-1.5 text-[13px] font-semibold text-black transition-colors hover:bg-gray-200"
+            className="rounded-full bg-text-emphasis px-5 py-1.5 text-[13px] font-semibold text-background transition-opacity hover:opacity-90"
           >
             {confirmLabel}
           </button>

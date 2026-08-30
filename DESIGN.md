@@ -54,17 +54,27 @@ Source of truth: `apps/web/src/styles/tokens.css`. Change a value there; nothing
 | `--color-border` | `#e2e8f0` | `#333333` | `border-border` | every hairline |
 | `--color-border-hover` | `#cbd5e1` | `#444444` | `hover:bg-border-hover` | |
 | `--color-text-primary` | `#0f172a` | `#e8e8e8` | `text-text-primary` | body |
-| `--color-text-secondary` | `#64748b` | `#9e9e9e` | `text-text-secondary` | |
-| `--color-text-muted` | `#94a3b8` | `#9e9e9e` | `text-text-muted` | labels, hints, captions |
-| `--color-text-emphasis` | `#0f172a` | `#ffffff` | `text-text-emphasis` | emphasised text on dark surfaces |
+| `--color-text-secondary` | `#475569` | `#9e9e9e` | `text-text-secondary` | supporting copy |
+| `--color-text-muted` | `#5b6b80` | `#9e9e9e` | `text-text-muted` | labels, hints, captions |
+| `--color-text-emphasis` | `#0f172a` | `#ffffff` | `text-text-emphasis` | headings, and the inverse of the page ground |
 | `--color-scrim` | `#000000` | `#000000` | `bg-scrim` | overlays, modal backgrounds |
-| `--color-success` | `#10b981` | inherits | `text-success` | applied, passed |
-| `--color-warning` | `#f59e0b` | inherits | `text-warning` | unavailable, degraded |
-| `--color-error` | `#ef4444` | inherits | `text-error` `bg-error/20` | validation, refusals, rejected |
-| `--color-info` | `#3b82f6` | inherits | `text-info` | |
+| `--color-success` | `#065f46` | `#10b981` | `text-success` `bg-success/20` | applied, passed |
+| `--color-warning` | `#92400e` | `#f59e0b` | `text-warning` `bg-warning/20` | unavailable, degraded |
+| `--color-error` | `#991b1b` | `#ef4444` | `text-error` `bg-error/20` | validation, refusals, rejected |
+| `--color-info` | `#1e40af` | `#3b82f6` | `text-info` `bg-info/20` | provenance, informational |
+| `--color-modified` | `#6d28d9` | `#c4b5fd` | `text-modified` `bg-modified/20` | changed since the last apply or save |
 
-Semantic colours (success / warning / error) carry state. The brand blue is *not* a state
-colour; do not use it to mean "good".
+Semantic colours (success / warning / error / info / modified) carry state. The brand blue is
+*not* a state colour; do not use it to mean "good".
+
+**The two themes no longer share a semantic value.** A state colour is painted two ways — as
+text on its own 20 % tint (chips, pills, badges) and as a solid ground behind white text (the
+destructive `Button`) — and one value cannot do both jobs across two grounds. The dark set fits
+the second; on a light ground it failed the first at 1.7–3.1 : 1. Light therefore carries the
+same hues down the ramp, and both blocks state all five. The light text ramp moved for the same
+reason: at `slate-400` `muted` measured 2.3 : 1 on `surface-2`, and `muted` now sits between
+`slate-500` and `slate-600` because the ramp has no step there that clears 4.5 : 1 on that
+ground — the darkest it is painted on. See the W3.2 audit below for the measurements.
 
 Every colour maps to a `color-mix(in srgb, var(--color-x) calc(<alpha-value> * 100%), transparent)` form in `tailwind.config.ts`. This permits native Tailwind opacity modifiers like `bg-error/20` and `hover:bg-border/40` on tokens without defining separate `-alpha` scales in CSS. Arbitrary alphas require bracket syntax, e.g. `bg-black/[0.08]`.
 
@@ -88,6 +98,45 @@ not in the initialiser — the server has no storage, so reading it during rende
 one tree on the server and another in the browser. `Disclosure` is the same shape for the same
 reason. The boot script has already corrected the class by the time the toggle mounts, so what
 is painted and what the control says agree.
+
+### W3.2 — the light-theme audit
+
+Light was a complete palette nobody had ever seen. Every surface W0/W0b/W2a/W2b/W9/W10 touched
+was measured against a light ground in this pass. Contrast is WCAG 2.1 relative luminance;
+small text (10–13 px) needs **4.5 : 1**, a control boundary **3 : 1**.
+
+**Fixed**
+
+| What | Where | Measured (light, before → after) |
+|---|---|---|
+| Three of the four `bg-white` / `text-black` / `hover:bg-gray-200` pills | `export/page.tsx`, `CommandBar.tsx` ×2 → `bg-text-emphasis text-background hover:opacity-90` | invisible: a white button on a white ground. The pill is now the inverse of the ground in both themes — 17.9 : 1 light, 19.2 : 1 dark. The fourth is recorded below, because its ground is not the page |
+| `StatusChip`'s fourth state (`yellow-400`) | `StatusChip.tsx` → `--color-modified` | 1.4 : 1 on its own tint → 4.67 : 1. A new state colour, not a second `warning` (UE-D11) |
+| The semantic tints — `ErrorPill`, the three other chip states, the grid source and compliance badges, `MiniChip`, `FieldLine` | `tokens.css` → a light semantic set | 1.7–3.1 : 1 → 4.67–6.19 : 1 |
+| The light text ramp | `tokens.css` | `muted` 2.3 : 1 → 4.97 : 1 on `surface-2`; `secondary` 4.3 : 1 → 6.9 : 1 on the same ground |
+| The telemetry log panel | `TelemetryDrawer.tsx` → `bg-surface-2`, skeletons to `bg-border` | `text-text-primary` on `#000000` was **1.18 : 1** — unreadable. A ground that is black in both themes cannot carry theme text |
+| `SwitchRow`'s knob | `switch-row.tsx` → `bg-text-emphasis` | a white knob on the near-white `surface-2` rail was 1.1 : 1 — no edge at all. Now 16.3 : 1 off and 3.9 : 1 on the brand rail (light), 15.1 : 1 / 4.5 : 1 (dark) |
+| The secondary `Button` hover | `button.tsx` → `hover:bg-border-hover` | `bg-border/40` over `surface` is a **1.07 : 1** shift — not a hover. Now 1.42 : 1 light / 1.75 : 1 dark |
+| The grid's *can't play* pill | `grid/page.tsx` → `bg-surface` | `text-error` on a 70 % scrim measured 1.30 : 1 in the light theme (2.26 : 1 dark): a translucent ground over a clip hands its contrast to the video. Now 7.9 : 1 light / 4.5 : 1 dark |
+
+**Found, not fixed** — each needs a decision this lane must not take alone:
+
+- **`--color-border` is below 3 : 1 on every ground, in both themes** (1.13–1.23 : 1 light,
+  1.35–1.52 : 1 dark). An input's background is the page ground, so the hairline is the only
+  thing that identifies it. Fixing it moves `--color-border` (and `--color-border-hover`) for
+  both themes, which is a palette change to the shipped product, not an audit fix.
+- **Dark's own tints sit below 4.5 : 1 on a `surface-2` ground** — `error` 3.24 : 1,
+  `info` 3.19 : 1, `success` 4.27 : 1. Raising them collides with their second job: `Button`'s
+  destructive variant is `bg-error text-white`, and a lighter red puts white text below 4.5 : 1
+  on it. No single value serves both; it needs a `-tint` token pair, and the ~40 call sites
+  that spell `/20`.
+- **`text-brand-primary` on `bg-brand-primary/20` is 3.47 : 1** (light) and 3.49 : 1 (dark) —
+  the grid's FIREFLY provenance badge. Unfixable without moving the brand colour itself.
+- **`grid/page.tsx`'s *Preview* pill keeps `bg-white text-black hover:bg-gray-200`.** It is the
+  fourth pill the audit was asked about, and it is the one whose ground is not the page: it
+  sits on `bg-scrim/80`, black in both themes. Tokenising it to `bg-text-emphasis` would make
+  it near-black on near-black in the light theme (1.41 : 1, down from 12.6 : 1). It is a
+  constant over a constant ground — the same category as the twelve `text-white` sites W0b
+  kept deliberately — and it is recorded here rather than left as an unexplained literal.
 
 ### Typography
 
@@ -308,8 +357,10 @@ Skeletal by design — patterns to extend, not a library.
   image thumbnail (or file-type badge when unrendered directly) once populated. The path is relegated
   to 10px monospace meta, elevating visual identity over filesystem mechanics. Houses the *Upload* action
   and an optional *Choose from bin* affordance (when wired), with explicit uploading states.
-- **StatusChip** — four states, border/tint/dot (no emoji): *Draft not applied* (error tint) ·
-  *Applied, never saved* (warning tint) · *Applied, unsaved edits* (yellow tint) · *Saved & applied* (success tint).
+- **StatusChip** — four states, four colours, border/tint/dot (no emoji): *Draft not applied*
+  (error) · *Applied, never saved* (warning) · *Applied, unsaved edits* (modified) · *Saved &
+  applied* (success). UE-D11 requires the four to stay colour-distinct, so the third is its own
+  `--color-modified` state colour rather than a second amber (§2, and the W3.2 audit).
 - **ErrorStrip** — one `rounded-full` chip per section with errors, red border/tint, count
   pill; clicking scrolls to the section. Lives in the action bar.
 - **SaveMenu** — "Save ▾" opening upward (it sits in a footer): *Save & apply*,

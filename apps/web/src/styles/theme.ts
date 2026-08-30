@@ -31,6 +31,7 @@ export const theme = {
       warning: "var(--color-warning)",
       error: "var(--color-error)",
       info: "var(--color-info)",
+      modified: "var(--color-modified)",
     },
   },
   font: {

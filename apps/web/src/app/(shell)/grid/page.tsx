@@ -639,9 +639,13 @@ function MotionCell({
       />
       {children}
       {playFailed && !playing && (
+        // An opaque token ground, not a 70% scrim: the frame behind a clip runs from
+        // black to white, and a translucent ground hands its contrast to whatever the
+        // video happens to be showing. `text-error` on `surface` measures 7.9 : 1 light
+        // and 4.5 : 1 dark; on `#000000/70` it measured 1.3 : 1 in the light theme.
         <span
           role="status"
-          className="absolute bottom-2 left-2 z-20 rounded border border-error/50 bg-black/70 px-2 py-1 font-mono text-[10px] text-error"
+          className="absolute bottom-2 left-2 z-20 rounded border border-error/50 bg-surface px-2 py-1 font-mono text-[10px] text-error"
         >
           can&apos;t play
         </span>

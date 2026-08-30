@@ -167,6 +167,10 @@ export default function ExportPage() {
           ))}
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2">
+          {/* The pill is the inverse of the ground, not a white pill: on a light page a
+              white button has no edge. `text-emphasis` is the light theme's near-black
+              and the dark theme's white, so the pill inverts with the theme while the
+              label stays the colour of the page behind it. */}
           <button
             type="button"
             onClick={() =>
@@ -174,7 +178,7 @@ export default function ExportPage() {
             }
             disabled={packaging || activePlatform === null}
             title={activePlatform === null ? "Select a platform first" : undefined}
-            className="rounded-full bg-white px-4 py-1.5 text-[13px] font-semibold text-black transition-colors hover:bg-gray-200 disabled:bg-surface-2 disabled:text-text-muted"
+            className="rounded-full bg-text-emphasis px-4 py-1.5 text-[13px] font-semibold text-background transition-opacity hover:opacity-90 disabled:bg-surface-2 disabled:text-text-muted"
           >
             {packaging ? "Packaging…" : "Package"}
           </button>
