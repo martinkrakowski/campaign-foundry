@@ -83,6 +83,31 @@
   }
 }
 
+/* Card check badge overshoot animation (W2b.4) */
+@keyframes check-pop {
+  0% {
+    transform: scale(0);
+  }
+  70% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Stagger / Option list rise-in animation (W2b.4) */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 [data-motion="ken-burns-in"] .glyph-ground {
   transform-origin: center;
   animation: kf-ken-burns-in var(--duration-preview) var(--easing-preview) infinite;
@@ -106,12 +131,29 @@
   display: none;
 }
 
+@layer utilities {
+  .animate-check-pop {
+    animation: check-pop var(--duration-fast) cubic-bezier(0.2, 0.9, 0.3, 1.4) both;
+  }
+  .animate-rise-in {
+    animation: rise-in 0.4s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+  }
+  .stagger > * {
+    animation: rise-in 0.4s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .glyph-anim {
     animation: none !important;
   }
   .glyph-cue {
     display: block !important;
+  }
+  .animate-check-pop,
+  .animate-rise-in,
+  .stagger > * {
+    animation: none !important;
   }
 }
 
@@ -124,4 +166,5 @@ button:disabled .glyph-cue,
 button[disabled] .glyph-cue {
   display: block !important;
 }
+
 

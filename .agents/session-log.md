@@ -1175,3 +1175,23 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - `LAYERS.textEdge` (8/46) stays the miniature's approximation; preview resolves a dedicated `headlineAnchor` (1/10). One source, two documented resolutions.
 - **Verification:** build/typecheck/lint(0)/lint:arch/sync:check all green; `test:cov` **2123 passed | 2 skipped — 100% on all four counters**.
 - **Left open:** W6/W8 mount the dock/strip into the editor (they own that). Byte-identity + fabrication-guard net remains as the regression tripwire.
+
+---
+
+## 2026-08-30 — W2b lane: card and chip surfaces (branch feat/w2b-cards)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `apps/web/src/components/ui/axis-card.tsx`: Adopted mock's `.opt` idiom with 1.5px border (`border-[1.5px]`), inverting 44px preview/icon tile (`bg-brand-primary text-white` when selected vs `bg-background text-text-secondary` when unselected), 22px check badge with `animate-check-pop` overshoot, 15px/700 label, `aria-hidden` meta, and motion-safe hover/press micro-interactions. Maintained raw value accessible name via `aria-label`.
+  - `apps/web/src/components/ui/platform-card.tsx`: Applied the 1.5px border, inverting 44px preview frame tile, 22px check badge with `animate-check-pop`, 15px/700 label, and motion-safe micro-interactions. Kept `profile.id` as accessible name and `profile.label` as visible text.
+  - `apps/web/src/components/ui/preview-card.tsx`: Applied the 1.5px border, inverting 44px preview tile, 22px check badge with `animate-check-pop`, 15px/700 label, and motion-safe micro-interactions. Kept raw `value` as accessible name.
+  - `apps/web/src/components/ui/swatch-picker.tsx`: Added `size` prop ("default" 24px, "lg" 52px), ring-style selection (`ring-brand-primary` + offset) preserving border, and 9th custom swatch button opening a labelled visually-hidden `<input type="color">`. Retained `SWATCH_PALETTE` and raw hex `aria-label`s.
+  - `apps/web/src/components/campaign/AssetPickerDrawer.tsx`: Updated selectable row to 1.5px border, `bg-brand-primary/[0.08]` selected background, and motion-safe press/lift interactions.
+  - `apps/web/src/app/globals.css`: Added `@keyframes check-pop` (overshoot on check badge), `@keyframes rise-in`, `.animate-check-pop`, `.animate-rise-in`, `.stagger > *`, and reduced-motion overrides. Gated all new animations to 1 iteration and no looping.
+  - `apps/web/src/components/ui/__tests__/*`: Updated `axis-card.test.tsx`, `platform-card.test.tsx`, `preview-card.test.tsx`, `swatch-picker.test.tsx`, and added `globals-motion.test.ts` asserting the D27 invariant that exactly four looping animations exist in `globals.css`.
+- **Decisions:**
+  - Preserved 1px borders on `ChipGroup` and `SwatchChip` per D29.
+  - Avoided blanket reduced-motion wildcard `*` rule per D28 to protect `Button` and other loading spinner animations.
+  - Maintained exact raw option values as accessible names across all four card types.
+- **Left open:**
+  - None.

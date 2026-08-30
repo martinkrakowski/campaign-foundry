@@ -27,15 +27,15 @@ export interface AxisCardProps {
 }
 
 /**
- * The selectable card for one value of a fixed-vocabulary axis. It is generic
- * over the value: the card knows how to be chosen, not what a choice means —
- * the preview (children) carries that.
+ * The selectable card for one value of a fixed-vocabulary axis (D28 / D29 / W2b.1).
+ * It adopts the mock's .opt idiom: 1.5px border, a 44px preview tile that inverts
+ * when pressed, a 22px overshoot check badge, a 15px/700 label, and motion-safe hover/press.
  *
  * The accessible name is exactly `value` (an explicit aria-label, which
  * overrides content): tests across the app query these controls as
  * getByRole("button", { name: "headline-top" }), and any extra text inside the
  * button would concatenate into the name and break them. The preview, the check
- * mark and the meta line are all aria-hidden for that reason.
+ * badge and the meta line are all aria-hidden for that reason.
  */
 export function AxisCard({
   value,
@@ -58,15 +58,21 @@ export function AxisCard({
       disabled={disabled}
       onClick={() => onToggle(value)}
       className={cn(
-        "relative flex flex-col items-center gap-2 rounded-md border p-3 transition-colors",
+        "relative flex flex-col items-start gap-2 rounded-md border-[1.5px] p-3.5 text-left transition-all",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2",
-        "disabled:cursor-not-allowed disabled:opacity-50",
-        selected ? "border-brand-primary bg-surface-2" : "border-border hover:border-border-hover",
+        "motion-safe:hover:-translate-y-px motion-safe:active:scale-[0.97]",
+        "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:active:scale-100",
+        selected
+          ? "border-brand-primary bg-brand-primary/[0.08]"
+          : "border-border bg-surface-2 hover:border-border-hover",
       )}
     >
       {selected ? (
-        <span className="absolute right-1.5 top-1.5" aria-hidden="true">
-          <svg viewBox="0 0 12 12" focusable="false" aria-hidden="true" className="size-3 text-brand-primary">
+        <span
+          className="absolute right-2.5 top-2.5 flex size-[22px] items-center justify-center rounded-full bg-brand-primary text-white motion-safe:animate-check-pop"
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 12 12" focusable="false" aria-hidden="true" className="size-3 text-white">
             <path
               d="M2 6.5 5 9.5 10 3"
               fill="none"
@@ -78,12 +84,20 @@ export function AxisCard({
           </svg>
         </span>
       ) : null}
-      <span aria-hidden="true" className="flex items-center justify-center">
+      <span
+        aria-hidden="true"
+        className={cn(
+          "flex size-11 shrink-0 items-center justify-center rounded-md transition-colors",
+          selected ? "bg-brand-primary text-white" : "bg-background text-text-secondary",
+        )}
+      >
         {children}
       </span>
-      <span className={cn("font-mono text-[12px]", selected ? "text-text-emphasis" : "text-text-muted")}>{label ?? value}</span>
+      <span className={cn("text-[15px] font-bold leading-tight", selected ? "text-text-emphasis" : "text-text-primary")}>
+        {label ?? value}
+      </span>
       {meta ? (
-        <span aria-hidden="true" className="text-[11px] text-text-muted">
+        <span aria-hidden="true" className="text-[12px] text-text-muted leading-snug">
           {meta}
         </span>
       ) : null}

@@ -17,13 +17,22 @@ describe("PreviewCard", () => {
 
     const card = screen.getByRole("button", { name: "procedural" });
     expect(card.getAttribute("aria-pressed")).toBe("false");
+    expect(card.className).toContain("border-[1.5px]");
+    expect(card.className).toContain("border-border");
+    expect(card.className).toContain("bg-surface-2");
     expect(screen.getByTestId("paint")).toBeTruthy();
     expect(card.textContent).toContain("A pattern we draw");
+
+    // 44px preview tile at rest
+    const tile = card.querySelector("span[aria-hidden='true'].size-11");
+    expect(tile?.className).toContain("bg-background");
+    expect(tile?.className).toContain("text-text-secondary");
+
     await user.click(card);
     expect(onToggle).toHaveBeenCalledWith("procedural");
   });
 
-  test("selected shows the check mark, unselected shows none", () => {
+  test("selected shows the check badge and inverts tile, unselected shows none", () => {
     const { unmount } = render(
       <PreviewCard value="genai" selected meta="Made by AI" onToggle={vi.fn()}>
         {paint}
@@ -31,6 +40,18 @@ describe("PreviewCard", () => {
     );
     const selected = screen.getByRole("button", { name: "genai" });
     expect(selected.getAttribute("aria-pressed")).toBe("true");
+    expect(selected.className).toContain("border-brand-primary");
+    expect(selected.className).toContain("bg-brand-primary/[0.08]");
+
+    // 44px preview tile inverts
+    const tile = selected.querySelector("span[aria-hidden='true'].size-11");
+    expect(tile?.className).toContain("bg-brand-primary");
+    expect(tile?.className).toContain("text-white");
+
+    // 22px check badge with check-pop
+    const checkBadge = selected.querySelector("span[aria-hidden='true'].size-\\[22px\\]");
+    expect(checkBadge).toBeTruthy();
+    expect(checkBadge?.className).toContain("animate-check-pop");
     expect(selected.querySelectorAll("svg").length).toBe(2);
     unmount();
 

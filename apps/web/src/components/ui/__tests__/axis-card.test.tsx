@@ -14,8 +14,15 @@ describe("AxisCard", () => {
     const button = screen.getByRole("button", { name: "headline-top" }) as HTMLButtonElement;
     expect(button.getAttribute("aria-label")).toBe("headline-top");
     expect(button.getAttribute("aria-pressed")).toBe("false");
+    expect(button.className).toContain("border-[1.5px]");
     expect(button.className).toContain("border-border");
+    expect(button.className).toContain("bg-surface-2");
     expect(button.textContent).toContain("headline-top");
+
+    // 44px tile is background / text-secondary when unselected
+    const tile = button.querySelector("span[aria-hidden='true'].size-11");
+    expect(tile?.className).toContain("bg-background");
+    expect(tile?.className).toContain("text-text-secondary");
   });
 
   test("a selected card is marked pressed and carries the selected treatment and a check", () => {
@@ -26,8 +33,20 @@ describe("AxisCard", () => {
     );
     const button = screen.getByRole("button", { name: "bold" }) as HTMLButtonElement;
     expect(button.getAttribute("aria-pressed")).toBe("true");
+    expect(button.className).toContain("border-[1.5px]");
     expect(button.className).toContain("border-brand-primary");
-    expect(button.className).toContain("bg-surface-2");
+    expect(button.className).toContain("bg-brand-primary/[0.08]");
+
+    // 44px preview tile inverts to brand-filled when pressed
+    const tile = button.querySelector("span[aria-hidden='true'].size-11");
+    expect(tile?.className).toContain("bg-brand-primary");
+    expect(tile?.className).toContain("text-white");
+
+    // 22px check badge with check-pop overshoot animation
+    const checkBadge = button.querySelector("span[aria-hidden='true'].size-\\[22px\\]");
+    expect(checkBadge).toBeTruthy();
+    expect(checkBadge?.className).toContain("bg-brand-primary");
+    expect(checkBadge?.className).toContain("animate-check-pop");
     expect(button.querySelector("svg[aria-hidden='true']")).toBeTruthy();
   });
 

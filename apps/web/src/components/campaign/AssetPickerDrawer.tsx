@@ -89,9 +89,10 @@ export function AssetPickerDrawer({
                   <li
                     key={asset.name}
                     className={cn(
-                      "flex items-center gap-3 rounded-md border p-2.5 transition-colors",
+                      "flex items-center gap-3 rounded-md border-[1.5px] p-3 text-left transition-all",
+                      "motion-safe:hover:-translate-y-px motion-safe:active:scale-[0.98]",
                       isSelected
-                        ? "border-brand-primary bg-surface-2"
+                        ? "border-brand-primary bg-brand-primary/[0.08]"
                         : "border-border bg-surface-2 hover:border-border-hover",
                     )}
                   >

@@ -1,5 +1,5 @@
 import { describe, test, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SwatchPicker, SWATCH_PALETTE } from "../swatch-picker";
 
@@ -41,10 +41,73 @@ describe("SwatchPicker", () => {
     const match = screen.getByRole("button", { name: "#E0218A" });
     expect(match.getAttribute("aria-pressed")).toBe("true");
 
+    const customBtn = screen.getByRole("button", { name: "Custom colour" });
+    expect(customBtn.getAttribute("aria-pressed")).toBe("false");
+
     rerender(<SwatchPicker value="#ABCDEF" onChange={vi.fn()} />);
     for (const swatch of SWATCH_PALETTE) {
       expect(screen.getByRole("button", { name: swatch }).getAttribute("aria-pressed")).toBe("false");
     }
+    expect(customBtn.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  test("custom swatch triggers visually-hidden color input and fires onChange", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<SwatchPicker value="#1473E6" onChange={onChange} />);
+
+    const customButton = screen.getByRole("button", { name: "Custom colour" });
+    const colorInput = screen.getByLabelText("Custom colour picker") as HTMLInputElement;
+
+    expect(colorInput).toBeTruthy();
+    expect(colorInput.className).toContain("sr-only");
+    expect(colorInput.type).toBe("color");
+
+    const clickSpy = vi.spyOn(colorInput, "click");
+    await user.click(customButton);
+    expect(clickSpy).toHaveBeenCalled();
+
+    // Trigger color input change
+    fireEvent.change(colorInput, { target: { value: "#336699" } });
+    expect(onChange).toHaveBeenCalledWith("#336699");
+  });
+
+  test("supports size='lg' (52px) and ring-style selection with custom colour and label", () => {
+    const { rerender } = render(
+      <SwatchPicker value="#1473E6" onChange={vi.fn()} size="lg" />,
+    );
+
+    const first = screen.getByRole("button", { name: "#1473E6" });
+    expect(first.className).toContain("size-[52px]");
+    expect(first.className).toContain("ring-brand-primary");
+
+    const customBtn = screen.getByRole("button", { name: "Custom colour" });
+    expect(customBtn.className).toContain("size-[52px]");
+    expect(customBtn.getAttribute("aria-pressed")).toBe("false");
+
+    // Rerender with custom colour selected and size='lg' with label
+    rerender(
+      <SwatchPicker value="#ABCDEF" onChange={vi.fn()} size="lg" label="Product" />,
+    );
+    const customWithLabel = screen.getByRole("button", { name: "Product custom colour" });
+    expect(customWithLabel.getAttribute("aria-pressed")).toBe("true");
+    expect(customWithLabel.className).toContain("ring-brand-primary");
+
+    const colorPicker = screen.getByLabelText("Product custom colour picker") as HTMLInputElement;
+    expect(colorPicker.value).toBe("#abcdef");
+
+    // Custom colour with size='default'
+    rerender(<SwatchPicker value="#ABCDEF" onChange={vi.fn()} size="default" />);
+    const customDefault = screen.getByRole("button", { name: "Custom colour" });
+    expect(customDefault.className).toContain("size-6");
+
+    // Invalid non-hex string falls back safely to default in color input
+    rerender(<SwatchPicker value="not-a-hex" onChange={vi.fn()} size="default" />);
+    const fallbackPicker = screen.getByLabelText("Custom colour picker") as HTMLInputElement;
+    expect(fallbackPicker.value).toBe("#1473e6");
+
+    rerender(<SwatchPicker value="#1473E6" onChange={vi.fn()} size="default" />);
+    expect(first.className).toContain("size-6");
   });
 
   test("disabled and readOnly prevent changes", async () => {
@@ -57,6 +120,9 @@ describe("SwatchPicker", () => {
     await user.click(button);
     expect(onChange).not.toHaveBeenCalled();
 
+    const customButton = screen.getByRole("button", { name: "Custom colour" }) as HTMLButtonElement;
+    expect(customButton.disabled).toBe(true);
+
     const input = screen.getByLabelText("Hex colour") as HTMLInputElement;
     expect(input.disabled).toBe(true);
 
@@ -65,3 +131,4 @@ describe("SwatchPicker", () => {
     expect(inputReadOnly.readOnly).toBe(true);
   });
 });
+
