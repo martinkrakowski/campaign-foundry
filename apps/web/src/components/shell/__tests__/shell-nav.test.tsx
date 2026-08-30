@@ -10,6 +10,7 @@ import { useEditorPanels } from "@/lib/editor-panels-context";
 import { useRun } from "@/lib/run-context";
 import { Header } from "../Header";
 import { MobileMenu } from "../MobileMenu";
+import { DialogShell } from "@/components/ui";
 import * as briefsApi from "@/lib/briefs-api";
 
 beforeEach(() => {
@@ -277,6 +278,26 @@ describe("MobileMenu", () => {
     expect(document.body.style.overflow).toBe("hidden");
     await user.keyboard("{Escape}");
     expect(closed).toBe(true);
+  });
+
+  test("an Escape while a shared-shell overlay holds focus leaves the menu open", async () => {
+    const user = userEvent.setup();
+    let closed = false;
+    const onCloseOverlay = vi.fn();
+    renderWithRun(
+      <div>
+        <MobileMenu open onClose={() => (closed = true)} tabs={tabs} />
+        <DialogShell open onClose={onCloseOverlay} ariaLabel="Menu Overlay">
+          <button type="button">Overlay button</button>
+        </DialogShell>
+      </div>,
+    );
+
+    await screen.findByRole("dialog", { name: "Menu" });
+    await user.keyboard("{Escape}");
+
+    expect(onCloseOverlay).toHaveBeenCalledTimes(1);
+    expect(closed).toBe(false);
   });
 
   test("a tab link closes the menu", async () => {
