@@ -2,7 +2,7 @@
 
 import type { Dispatch } from "react";
 import { useState, useEffect, useRef } from "react";
-import { Button, Input } from "@/components/ui";
+import { Button, Input, DrawerShell, DialogHead } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import { approvedHeadlines, toBrief } from "@/components/campaign/editor-state";
@@ -157,57 +157,54 @@ export function HeadlinePoolDrawer({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-scrim/80 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-96 overflow-y-auto border-l border-border bg-surface p-4">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-text-emphasis">Headline Pool</h3>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            Close
+    <DrawerShell open={open} onClose={onClose} ariaLabel="Headline Pool">
+      <DialogHead
+        title="Headline Pool"
+        onClose={onClose}
+        closeText="Close"
+        className="-mx-4 -mt-4 mb-4"
+      />
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h4 className="font-mono text-[11px] uppercase tracking-widest text-text-muted">
+            Headlines ({approved} approved)
+          </h4>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={busy || loading || unavailable !== undefined}
+            isLoading={busy}
+            onClick={() => void apply(async () => (await generatePool(toBrief(state))).pool)}
+          >
+            Generate {POOL_SUGGESTION_COUNT} suggestions
           </Button>
         </div>
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h4 className="font-mono text-[11px] uppercase tracking-widest text-text-muted">
-              Headlines ({approved} approved)
-            </h4>
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={busy || loading || unavailable !== undefined}
-              isLoading={busy}
-              onClick={() => void apply(async () => (await generatePool(toBrief(state))).pool)}
-            >
-              Generate {POOL_SUGGESTION_COUNT} suggestions
-            </Button>
-          </div>
-          <p className="text-[12px] text-text-muted">
-            Approved entries become the <code>headline: {HEADLINE_POOL_REF}</code> axis in the policy section.
+        <p className="text-[12px] text-text-muted">
+          Approved entries become the <code>headline: {HEADLINE_POOL_REF}</code> axis in the policy section.
+        </p>
+        {unavailable ? <p className="text-[13px] text-warning">{unavailable}</p> : null}
+        {state.headlineAxisDropped ? (
+          <p role="status" className="text-[13px] text-warning">
+            {HEADLINE_AXIS_DROPPED}
           </p>
-          {unavailable ? <p className="text-[13px] text-warning">{unavailable}</p> : null}
-          {state.headlineAxisDropped ? (
-            <p role="status" className="text-[13px] text-warning">
-              {HEADLINE_AXIS_DROPPED}
-            </p>
-          ) : null}
-          {error ? <p className="text-[13px] text-error">{error}</p> : null}
-          {entries.length === 0 ? (
-            <p className="text-[13px] text-text-muted">No headlines yet.</p>
-          ) : (
-            <ul className="space-y-2">
-              {entries.map((entry) => (
-                <PoolEntryRow
-                  key={entry.id}
-                  entry={entry}
-                  busy={busy || loading}
-                  onStatus={(status) => void apply(() => patchPool(briefId, [{ id: entry.id, status }]))}
-                  onEdit={(text) => apply(() => patchPool(briefId, [{ id: entry.id, status: entry.status, text }]))}
-                />
-              ))}
-            </ul>
-          )}
-        </div>
+        ) : null}
+        {error ? <p className="text-[13px] text-error">{error}</p> : null}
+        {entries.length === 0 ? (
+          <p className="text-[13px] text-text-muted">No headlines yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {entries.map((entry) => (
+              <PoolEntryRow
+                key={entry.id}
+                entry={entry}
+                busy={busy || loading}
+                onStatus={(status) => void apply(() => patchPool(briefId, [{ id: entry.id, status }]))}
+                onEdit={(text) => apply(() => patchPool(briefId, [{ id: entry.id, status: entry.status, text }]))}
+              />
+            ))}
+          </ul>
+        )}
       </div>
-    </div>
+    </DrawerShell>
   );
 }

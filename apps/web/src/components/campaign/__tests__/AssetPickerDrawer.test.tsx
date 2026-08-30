@@ -2,6 +2,7 @@ import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AssetPickerDrawer, formatBytes } from "../AssetPickerDrawer";
+import { exerciseFocusTrap } from "@/__tests__/helpers";
 import * as briefsApi from "@/lib/briefs-api";
 
 describe("formatBytes", () => {
@@ -221,7 +222,7 @@ describe("AssetPickerDrawer", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  test("clicking Close button or backdrop calls onClose", async () => {
+  test("clicking Close button, backdrop, Escape calls onClose, and traps focus", async () => {
     const user = userEvent.setup();
     vi.spyOn(briefsApi, "listAssets").mockResolvedValueOnce({ assets: [] });
     const onClose = vi.fn();
@@ -230,13 +231,19 @@ describe("AssetPickerDrawer", () => {
       <AssetPickerDrawer briefId="camp-1" open={true} onClose={onClose} />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Close drawer" }));
+    const drawer = screen.getByRole("dialog", { name: "Asset Bin" });
+    exerciseFocusTrap(drawer);
+
+    await user.keyboard("{Escape}");
     expect(onClose).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Close drawer" }));
+    expect(onClose).toHaveBeenCalledTimes(2);
 
     // Backdrop click
     const backdrop = container.querySelector(".backdrop-blur-sm");
     expect(backdrop).toBeTruthy();
     if (backdrop) await user.click(backdrop);
-    expect(onClose).toHaveBeenCalledTimes(2);
+    expect(onClose).toHaveBeenCalledTimes(3);
   });
 });

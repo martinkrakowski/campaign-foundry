@@ -26,4 +26,18 @@ export {
 export { ConfirmDialog, type ConfirmDialogProps } from "./confirm-dialog";
 export { MiniChip, type MiniChipProps, type MiniChipTone } from "./mini-chip";
 export { EmptyNote, type EmptyNoteProps } from "./empty-note";
+export {
+  DialogHead,
+  DialogBody,
+  DialogFoot,
+  DialogShell,
+  DrawerShell,
+  useDialogFocusTrap,
+  type DialogHeadProps,
+  type DialogBodyProps,
+  type DialogFootProps,
+  type DialogShellProps,
+  type DrawerShellProps,
+  type UseDialogFocusTrapOptions,
+} from "./dialog-shell";
 
