@@ -54,6 +54,8 @@ Source of truth: `apps/web/src/styles/tokens.css`. Change a value there; nothing
 | `--color-text-primary` | `#0f172a` | `#e8e8e8` | `text-text-primary` | body |
 | `--color-text-secondary` | `#64748b` | `#9e9e9e` | `text-text-secondary` | |
 | `--color-text-muted` | `#94a3b8` | `#9e9e9e` | `text-text-muted` | labels, hints, captions |
+| `--color-text-emphasis` | `#0f172a` | `#ffffff` | `text-text-emphasis` | emphasised text on dark surfaces |
+| `--color-scrim` | `#000000` | `#000000` | `bg-scrim` | overlays, modal backgrounds |
 | `--color-success` | `#10b981` | inherits | `text-success` | applied, passed |
 | `--color-warning` | `#f59e0b` | inherits | `text-warning` | unavailable, degraded |
 | `--color-error` | `#ef4444` | inherits | `text-error` `bg-error/20` | validation, refusals, rejected |
@@ -62,8 +64,7 @@ Source of truth: `apps/web/src/styles/tokens.css`. Change a value there; nothing
 Semantic colours (success / warning / error) carry state. The brand blue is *not* a state
 colour; do not use it to mean "good".
 
-`text-white` is used for emphasised text on dark surfaces (headings, selected chips). It is
-the one literal tolerated, because it is equally correct on every surface the app paints.
+Every colour maps to a `color-mix(in srgb, var(--color-x) calc(<alpha-value> * 100%), transparent)` form in `tailwind.config.ts`. This permits native Tailwind opacity modifiers like `bg-error/20` and `hover:bg-border/40` on tokens without defining separate `-alpha` scales in CSS. Arbitrary alphas require bracket syntax, e.g. `bg-black/[0.08]`.
 
 ### Typography
 
@@ -81,27 +82,29 @@ The scale as actually used — these are deliberate, keep to them:
 
 | Role | Classes |
 |---|---|
-| Section heading | `text-lg font-semibold text-white` |
-| Panel / dialog title | `text-sm font-semibold text-white` |
+| Section heading | `text-lg font-semibold text-text-emphasis` |
+| Panel / dialog title | `text-sm font-semibold text-text-emphasis` |
 | Body, controls | `text-sm` (14px) / `text-[13px]` |
 | Field label | `text-[11px] text-text-muted` |
 | Group label (eyebrow) | `font-mono text-[11px] uppercase tracking-widest text-text-muted` |
 | Hint, caption, badge | `text-[11px]` / `text-[10px]` |
+
+The 70 existing `text-white` occurrences across 29 files migrate to `text-text-emphasis` in lane W0b.3; the table above is the instruction for new code.
 
 ### Spacing, radius, elevation, motion
 
 - Spacing: Tailwind's 4px scale (`--space-*` mirror it). Panels pad `p-4`; dialogs `p-6`;
   rows `px-3 py-2`.
 - Radius: `--radius-sm` 4px (inputs' inner), `--radius-md` 8px (buttons, inputs, rows),
-  `--radius-lg` 12px (panels, cards, dialogs, the sidebar), `full` for chips and pills.
-- Shadow: `shadow-sm` on cards; `shadow-2xl` on floating chrome (sidebar, menus, drawers).
+  `--radius-lg` 12px (panels, cards, dialogs, the sidebar), `--radius-full` for chips and pills.
+- Shadow: `--shadow-sm` on cards; `--shadow-md`, `--shadow-lg`; `--shadow-2xl` on floating chrome (sidebar, menus, drawers).
 - Motion: `--duration-fast` 150ms for hover/colour, `--duration-normal` 250ms for
-  open/close. `transition-colors` is the default; respect `prefers-reduced-motion` for
+  open/close, `--duration-preview` 2400ms. `--easing-default` for UI, `--easing-preview` for the creative preview. `transition-colors` is the default; respect `prefers-reduced-motion` for
   anything larger.
 - **Looping previews** (L4.3): the four motion kinds each have a keyframe animation in
   `globals.css` — `kf-ken-burns-in`, `kf-ken-burns-out`, `kf-headline-rise`,
   `kf-accent-wipe` — played on the glyph inside a `MotionKindPanel` so a user sees the
-  transition rather than reading its name. These are the one place a loop is allowed; every
+  transition rather than reading its name. Loading indicators (`animate-spin` in `Button`, `CommandBar`, grid; `animate-pulse` in `ProbeRow`) are the only other permitted loops. Every
   other animation in the system is a one-shot on interaction.
 - **A loop is never the only carrier of meaning.** Each motion glyph renders a static cue
   group *as well as* the animated one, always, so the kind is legible with animation off.
@@ -273,8 +276,8 @@ Skeletal by design — patterns to extend, not a library.
   image thumbnail (or file-type badge when unrendered directly) once populated. The path is relegated
   to 10px monospace meta, elevating visual identity over filesystem mechanics. Houses the *Upload* action
   and an optional *Choose from bin* affordance (when wired), with explicit uploading states.
-- **StatusChip** — four states, colour *and* icon: 🔴 *Draft not applied* · 🟠 *Applied,
-  never saved* · 🟡 *Applied, unsaved edits* · 🟢 *Saved & applied*.
+- **StatusChip** — four states, border/tint/dot (no emoji): *Draft not applied* (error tint) ·
+  *Applied, never saved* (warning tint) · *Applied, unsaved edits* (yellow tint) · *Saved & applied* (success tint).
 - **ErrorStrip** — one `rounded-full` chip per section with errors, red border/tint, count
   pill; clicking scrolls to the section. Lives in the action bar.
 - **SaveMenu** — "Save ▾" opening upward (it sits in a footer): *Save & apply*,
@@ -306,7 +309,7 @@ Skeletal by design — patterns to extend, not a library.
   under the floor take the error tint and say so in words as well as colour. It computes
   nothing itself: a bar that divided the weights would agree with the domain until the
   domain changed, then be quietly wrong.
-- **ErrorPill** (L1.3) — 16px count, red background, white text, rounded full. Used in
+- **ErrorPill** (L1.3) — `min-w-[18px]` count, `bg-error/20` background, `text-error`, rounded full. Used in
   `SectionShell` and sidebar accordion aside.
 - **FloatingBar** (L1.4) — `sticky bottom-6 z-20 mx-auto w-full max-w-[800px] rounded-xl
   border border-border bg-surface p-2 shadow-2xl`. `sticky`, not `absolute` and not
@@ -364,7 +367,7 @@ stack a second `confirm` on top of it.
 lower minDistance (at 1 the maximum is 24), or add axis values"* to *"shortfall"*.
 
 **Text over icons.** Icons accompany labels; they do not replace them. Decorative SVGs are
-`aria-hidden`. Emoji are used only inside the StatusChip, where the label carries the meaning.
+`aria-hidden`.
 
 **Pick the control from the field's shape, not its storage type.** Everything in a brief is
 a string on the way to YAML; that is not a reason to render a text box. Ask what the value

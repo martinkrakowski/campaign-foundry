@@ -1088,3 +1088,16 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Left open:**
   - None.
 
+
+## W0 (alpha-capable colour scale)
+- **Mode:** Implementer
+- **Changes:**
+  - `apps/web/tailwind.config.ts`: Rewrote the `brand`/`surface`/`border`/`text` colour token scale using `color-mix(in srgb, var(--color-x) calc(<alpha-value> * 100%), transparent)`. Retained raw `brand-primary-hover`. Removed retired `brand-tint` and `brand-rail` and added `text-emphasis` and `scrim`.
+  - `apps/web/src/styles/tokens.css`: Removed `--color-brand-tint` and `--color-brand-rail`. Added `--color-text-emphasis` and `--color-scrim` (for both `:root` and `.dark`). Left all existing colour tokens as hex literals.
+  - `apps/web/src/components/campaign/sections/OutputSection.tsx`: Replaced the one `border-brand-rail` usage with `border-brand-primary/40`.
+  - `apps/web/src/__tests__/tailwind-alpha.test.ts`: Added unit test that compiles classes using `postcss`/`tailwindcss` programmatically and verifies `alpha` properties render correctly on token values.
+  - `DESIGN.md`: Documented the new `color-mix` alpha idiom, added missing tokens (`text-emphasis`, `scrim`, `radius-full`, `shadow-md`, `shadow-lg`, `duration-preview`, `easing-default`, `easing-preview`), updated descriptions for `ErrorPill` (`min-w-[18px]` instead of `16px`) and `StatusChip` (dot instead of emoji), and added exceptions for loading indicators (`animate-spin`, `animate-pulse`).
+- **Decisions:**
+  - Implemented the alpha tokens purely in `tailwind.config.ts` exactly as directed by the Guided Brief plan to keep source tokens in `.css` as explicit hex values.
+  - The literal `#000000` is used for `--color-scrim` as standard for overlays, and `#ffffff`/`#0f172a` for `--color-text-emphasis`.
+- **Left open:** W0b will handle applying the new alpha support to replace the existing 55 utilities (such as `bg-error/20`, `hover:bg-border/40`), remove stock literals, and replace `text-white` with `text-text-emphasis`.

@@ -15,8 +15,6 @@
   --color-brand-primary: #1473e6;
   --color-brand-primary-hover: color-mix(in srgb, var(--color-brand-primary) 85%, black);
   --color-brand-secondary: #8b5cf6;
-  --color-brand-tint: rgba(20, 115, 230, 0.15);
-  --color-brand-rail: rgba(20, 115, 230, 0.4);
 
   /* Neutral surfaces & text */
   --color-background: #ffffff;
@@ -28,6 +26,8 @@
   --color-text-primary: #0f172a;
   --color-text-secondary: #64748b;
   --color-text-muted: #94a3b8;
+  --color-text-emphasis: #0f172a;
+  --color-scrim: #000000;
 
   /* Semantic */
   --color-success: #10b981;
@@ -82,4 +82,6 @@
   --color-text-primary: #e8e8e8;
   --color-text-secondary: #9e9e9e;
   --color-text-muted: #9e9e9e;
+  --color-text-emphasis: #ffffff;
+  --color-scrim: #000000;
 }

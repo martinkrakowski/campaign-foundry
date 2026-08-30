@@ -144,7 +144,7 @@ export function OutputSection({
 
         {/* Video options (Motion kinds & Duration) */}
         {motionRequested ? (
-          <div id="motion" className="space-y-6 rounded-md border-l-2 border-brand-rail pl-4 scroll-mt-24">
+          <div id="motion" className="space-y-6 rounded-md border-l-2 border-brand-primary/40 pl-4 scroll-mt-24">
             <fieldset className="space-y-2">
               <legend className="text-[11px] text-text-muted">{messages.outputMotionLegend}</legend>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
