@@ -1161,6 +1161,21 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - **Four `bg-white` / `text-black` / `hover:bg-gray-200` primary buttons left as literals.** An always-white button's hover is the same category as the `text-white` exceptions. They are, however, a genuine light-theme problem — a white button on a white ground — and belong to **W3.2's light-theme audit**.
 - **Left open:** the `StatusChip` fourth-state token; the white primary buttons under a light theme (W3.2). Observed once: `shell-nav.test.tsx` "marks the active tab from the pathname" failed on one full-suite run and passed on two further runs of the **same commit** — recorded for the reviewer, not diagnosed.
 
+## 2026-08-30 — W9 lane: shared preview layers, CreativePreview, dock/strip and the D26 fabrication guard (branch feat/w9-preview, PR #133)
+
+- **Mode:** Implementer (`opencode/big-pickle`)
+- **Changes:**
+  - `preview-layers.ts` — the compositor's layer fractions as numerator-first box fractions (`(size * n) / d`, the only form that round-trips `2.3` / `2.5` exactly; `46 * 0.05` does not).
+  - `CreativeGlyph` refactored onto `preview-layers` (no prop/output/aria change). **Byte-identical**: `creative-glyph.byte-identity.test.tsx` pins all 20 layout × tone × motion combos against a golden captured from the pre-refactor glyph.
+  - `CreativePreview` (real ratio canvas, product colour as `--c`, brief headline as wrapped SVG text ≤ 3 lines, one-shot `kf-*` replay via `motion-safe:animate-[...]`), `PreviewDock`/`PreviewStrip` (toggle at `xl`), new `messages.ts` strings (`previewLegend`, `previewNoPlatform`, `previewCaption`, `previewStep`).
+  - `creative-preview.fabrication.test.tsx` — W9.4 guard: every rendered token must be a substring of a brief-derived corpus; reverse test proves `12.4K / 1,203 / 8,741`, `@handle`, "original sound", "Following / For you" have no home in the corpus.
+- **Decisions:**
+  - **Golden fixture + normalizer, not inline dual-render**, because React 19's `useId` is a process-wide counter (IDs observed as `_r_<base36>_` spanning letters after 9 renders).
+  - Preview **cannot** reuse `.glyph-*` CSS (keyed to `data-motion` + `infinite`, in `globals.css` owned by W2b); it uses the *same* keyframes/tokens one-shot instead. Miniature keeps its loop; preview is a live still.
+  - `LAYERS.textEdge` (8/46) stays the miniature's approximation; preview resolves a dedicated `headlineAnchor` (1/10). One source, two documented resolutions.
+- **Verification:** build/typecheck/lint(0)/lint:arch/sync:check all green; `test:cov` **2123 passed | 2 skipped — 100% on all four counters**.
+- **Left open:** W6/W8 mount the dock/strip into the editor (they own that). Byte-identity + fabrication-guard net remains as the regression tripwire.
+
 ---
 
 ## 2026-08-30 — W2b lane: card and chip surfaces (branch feat/w2b-cards)
@@ -1180,4 +1195,3 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Maintained exact raw option values as accessible names across all four card types.
 - **Left open:**
   - None.
-
