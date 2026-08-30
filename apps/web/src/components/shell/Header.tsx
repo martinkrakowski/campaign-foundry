@@ -57,7 +57,7 @@ export function Header() {
               className={cn(
                 "flex h-full items-center border-b-2 px-1 transition-colors",
                 active
-                  ? "border-white text-text-emphasis"
+                  ? "border-text-emphasis text-text-emphasis"
                   : "border-transparent text-text-muted hover:text-text-emphasis",
               )}
             >

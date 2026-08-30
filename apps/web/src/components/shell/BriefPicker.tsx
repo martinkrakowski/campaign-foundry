@@ -134,7 +134,7 @@ export function BriefPicker() {
   return (
     <div
       ref={dialogRef}
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm sm:p-8"
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-scrim/80 p-4 backdrop-blur-sm sm:p-8"
       onClick={closeBriefPicker}
       role="dialog"
       aria-modal="true"

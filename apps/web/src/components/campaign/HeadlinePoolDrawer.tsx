@@ -158,7 +158,7 @@ export function HeadlinePoolDrawer({
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-scrim/80 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-96 overflow-y-auto border-l border-border bg-surface p-4">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-text-emphasis">Headline Pool</h3>

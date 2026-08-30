@@ -431,7 +431,7 @@ function Artboard({
       <div
         className={cn(
           "absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 opacity-0 transition-opacity group-hover:opacity-100",
-          isMotion(asset) ? "bg-black/40" : "bg-black/80 backdrop-blur-sm",
+          isMotion(asset) ? "bg-scrim/40" : "bg-scrim/80 backdrop-blur-sm",
         )}
       >
         <button
@@ -470,7 +470,7 @@ function Artboard({
 
       {/* Regeneration indicator — shown over each creative while a run is in flight. */}
       {loading && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/60 backdrop-blur-sm">
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-scrim/60 backdrop-blur-sm">
           <span className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
           <span className="text-[11px] font-medium text-white">Regenerating…</span>
         </div>
@@ -705,7 +705,7 @@ function PreviewModal({
   return (
     <div
       ref={dialogRef}
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-black/80 p-4 backdrop-blur-sm sm:p-8"
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-scrim/80 p-4 backdrop-blur-sm sm:p-8"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
