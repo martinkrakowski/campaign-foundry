@@ -40,7 +40,7 @@ export function BriefSelector({ briefs, currentId, onSelect, onCreateNew }: Brie
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-white transition-colors hover:bg-surface-2"
+        className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-emphasis transition-colors hover:bg-surface-2"
       >
         <span className="font-mono text-[13px]">
           {currentBrief ? currentBrief.brief.id : "New brief..."}
@@ -63,7 +63,7 @@ export function BriefSelector({ briefs, currentId, onSelect, onCreateNew }: Brie
               placeholder="Search briefs..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full rounded border border-border bg-background px-3 py-1.5 text-[13px] text-white placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-brand-primary"
+              className="w-full rounded border border-border bg-background px-3 py-1.5 text-[13px] text-text-emphasis placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-brand-primary"
               autoFocus
             />
           </div>
@@ -86,7 +86,7 @@ export function BriefSelector({ briefs, currentId, onSelect, onCreateNew }: Brie
                 type="button"
                 onClick={() => handleSelect(entry)}
                 className={`flex w-full items-center justify-between px-3 py-2 text-left text-[13px] transition-colors hover:bg-surface-2 ${
-                  entry.brief.id === currentId ? "text-white" : "text-text-primary"
+                  entry.brief.id === currentId ? "text-text-emphasis" : "text-text-primary"
                 }`}
               >
                 <span className="font-mono">{entry.brief.id}</span>

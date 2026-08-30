@@ -146,7 +146,7 @@ export function BriefPicker() {
       >
         <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
           <div>
-            <h2 className="text-sm font-semibold text-white">Load a campaign brief</h2>
+            <h2 className="text-sm font-semibold text-text-emphasis">Load a campaign brief</h2>
             <p className="mt-0.5 text-[11px] text-text-muted">
               From the project&apos;s <span className="font-mono">briefs/</span> folder — pick one to
               load it into the workspace.
@@ -157,7 +157,7 @@ export function BriefPicker() {
             type="button"
             onClick={closeBriefPicker}
             aria-label="Close"
-            className="shrink-0 text-text-muted transition-colors hover:text-white"
+            className="shrink-0 text-text-muted transition-colors hover:text-text-emphasis"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -209,7 +209,7 @@ export function BriefPicker() {
                   </button>
                   <button
                     type="button"
-                    className="shrink-0 px-3 text-[11px] font-medium text-text-muted hover:text-white"
+                    className="shrink-0 px-3 text-[11px] font-medium text-text-muted hover:text-text-emphasis"
                     onClick={() => {
                       setDuplicateTarget(entry);
                       setDuplicateId("");

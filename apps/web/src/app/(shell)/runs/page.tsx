@@ -30,7 +30,7 @@ export default function RunsPage() {
 
   return (
     <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col p-4 pb-12 sm:p-8">
-      <h2 className="mb-1 text-lg font-semibold text-white">Runs</h2>
+      <h2 className="mb-1 text-lg font-semibold text-text-emphasis">Runs</h2>
       <p className="mb-6 text-[13px] text-text-muted">Latest pipeline run (current session).</p>
 
       {!hasRun && !loading ? (
@@ -95,7 +95,7 @@ export default function RunsPage() {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="p-4">
-      <div className="text-2xl font-bold text-white">{value}</div>
+      <div className="text-2xl font-bold text-text-emphasis">{value}</div>
       <div className="mt-1 text-[11px] uppercase tracking-wide text-text-muted">{label}</div>
     </div>
   );

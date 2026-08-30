@@ -185,7 +185,7 @@ export default function GridPage() {
   if (assets.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center p-6 text-center">
-        <h2 className="mb-2 text-lg font-semibold text-white">Start orchestrating assets</h2>
+        <h2 className="mb-2 text-lg font-semibold text-text-emphasis">Start orchestrating assets</h2>
         <p className="max-w-md text-[13px] text-text-muted">
           {loading
             ? "Running the pipeline — resolving assets, compositing brand layers, and checking compliance…"
@@ -445,7 +445,7 @@ function Artboard({
           <a
             href={videoSrc(asset, version)}
             download
-            className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-white transition-colors hover:bg-border-hover"
+            className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-text-emphasis transition-colors hover:bg-border-hover"
           >
             Download .MP4
           </a>
@@ -453,7 +453,7 @@ function Artboard({
         <a
           href={assetSrc(asset, version)}
           download
-          className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-white transition-colors hover:bg-border-hover"
+          className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-text-emphasis transition-colors hover:bg-border-hover"
         >
           {isMotion(asset) ? "Download poster .PNG" : "Download .PNG"}
         </a>
@@ -461,7 +461,7 @@ function Artboard({
           <a
             href={`${API}/output/${asset.proofPath}`}
             download
-            className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-white transition-colors hover:bg-border-hover"
+            className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-text-emphasis transition-colors hover:bg-border-hover"
           >
             Print Proof (.PDF)
           </a>

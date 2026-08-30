@@ -70,7 +70,7 @@ export function SectionShell({
       className="space-y-4 scroll-mt-24"
       onBlurCapture={onBlurCapture}
     >
-      <h2 id={headingId} className="flex items-center gap-2 text-lg font-semibold text-white">
+      <h2 id={headingId} className="flex items-center gap-2 text-lg font-semibold text-text-emphasis">
         {displayTitle}
         {errorCount ? <ErrorPill count={errorCount} /> : null}
       </h2>
@@ -157,7 +157,7 @@ export function IdentitySection({ state, dispatch, errors }: SectionProps) {
               type="button"
               onClick={copyBriefId}
               disabled={!state.briefId}
-              className="font-mono text-[10px] uppercase tracking-wider text-text-muted transition-colors hover:text-white disabled:opacity-40"
+              className="font-mono text-[10px] uppercase tracking-wider text-text-muted transition-colors hover:text-text-emphasis disabled:opacity-40"
               aria-label={messages.briefIdCopyAria}
             >
               {copied ? messages.briefIdCopied : messages.briefIdCopy}

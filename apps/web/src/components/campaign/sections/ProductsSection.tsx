@@ -67,7 +67,7 @@ function ProductRow({
               <button
                 type="button"
                 onClick={() => setEditingId(true)}
-                className="font-mono text-[11px] text-text-muted hover:text-white transition-colors"
+                className="font-mono text-[11px] text-text-muted hover:text-text-emphasis transition-colors"
                 aria-label={messages.productIdEditAria}
               >
                 {messages.productIdEdit}

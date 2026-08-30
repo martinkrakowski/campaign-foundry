@@ -95,7 +95,7 @@ export function ChipGroup({
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2",
                 "disabled:cursor-not-allowed disabled:opacity-50",
                 selected
-                  ? "border-brand-primary bg-surface-2 text-white"
+                  ? "border-brand-primary bg-surface-2 text-text-emphasis"
                   : "border-border bg-background text-text-muted hover:border-border-hover",
               )}
             >
@@ -115,7 +115,7 @@ export function ChipGroup({
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2",
               "disabled:cursor-not-allowed disabled:opacity-50",
               showCustomInput
-                ? "border-brand-primary bg-surface-2 text-white"
+                ? "border-brand-primary bg-surface-2 text-text-emphasis"
                 : "border-border bg-background text-text-muted hover:border-border-hover",
             )}
           >

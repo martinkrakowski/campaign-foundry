@@ -56,7 +56,7 @@ export function AssetPickerDrawer({
       <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-96 overflow-y-auto border-l border-border bg-surface p-4">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-white">Asset Bin</h3>
+          <h3 className="text-sm font-semibold text-text-emphasis">Asset Bin</h3>
           <Button variant="ghost" size="sm" aria-label="Close drawer" onClick={onClose}>
             Close
           </Button>

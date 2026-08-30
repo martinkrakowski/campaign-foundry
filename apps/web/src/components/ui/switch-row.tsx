@@ -22,7 +22,7 @@ export function SwitchRow({ label, checked, onToggle, disabled = false, children
   return (
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
-        <span className={cn("block text-[13px]", checked ? "text-white" : "text-text-primary")}>{label}</span>
+        <span className={cn("block text-[13px]", checked ? "text-text-emphasis" : "text-text-primary")}>{label}</span>
         {children ? <span className="mt-0.5 block text-[11px] text-text-muted">{children}</span> : null}
       </div>
       <button

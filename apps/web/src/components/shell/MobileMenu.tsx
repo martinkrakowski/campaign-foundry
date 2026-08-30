@@ -105,7 +105,7 @@ export function MobileMenu({ open, onClose, tabs }: MobileMenuProps) {
           type="button"
           onClick={onClose}
           aria-label="Close menu"
-          className="text-text-muted transition-colors hover:text-white"
+          className="text-text-muted transition-colors hover:text-text-emphasis"
         >
           <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -124,7 +124,7 @@ export function MobileMenu({ open, onClose, tabs }: MobileMenuProps) {
                 onClick={(e) => handleTabClick(e, tab.href)}
                 className={cn(
                   "rounded-lg px-3 py-3 text-[15px] font-medium transition-colors",
-                  active ? "bg-surface-2 text-white" : "text-text-muted hover:bg-surface hover:text-white",
+                  active ? "bg-surface-2 text-text-emphasis" : "text-text-muted hover:bg-surface hover:text-text-emphasis",
                 )}
                 aria-current={active ? "page" : undefined}
               >

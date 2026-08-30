@@ -57,8 +57,8 @@ export function Header() {
               className={cn(
                 "flex h-full items-center border-b-2 px-1 transition-colors",
                 active
-                  ? "border-white text-white"
-                  : "border-transparent text-text-muted hover:text-white",
+                  ? "border-white text-text-emphasis"
+                  : "border-transparent text-text-muted hover:text-text-emphasis",
               )}
             >
               {tab.label}
@@ -79,7 +79,7 @@ export function Header() {
           aria-label="Open menu"
           aria-haspopup="dialog"
           aria-expanded={menuOpen}
-          className="text-text-muted transition-colors hover:text-white lg:hidden"
+          className="text-text-muted transition-colors hover:text-text-emphasis lg:hidden"
         >
           <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />

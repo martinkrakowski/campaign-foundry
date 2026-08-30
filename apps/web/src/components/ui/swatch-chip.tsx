@@ -68,7 +68,7 @@ export function SwatchChip({ value, selected, baseColor, onToggle }: SwatchChipP
       className={cn(
         "flex items-center gap-2 rounded-md border px-3 py-1.5 transition-colors",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2",
-        selected ? "border-brand-primary bg-surface-2 text-white" : "border-border text-text-muted",
+        selected ? "border-brand-primary bg-surface-2 text-text-emphasis" : "border-border text-text-muted",
       )}
     >
       <span

@@ -124,7 +124,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             <a
               href="/brief"
               onClick={handleEditClick}
-              className="text-[11px] font-medium text-text-muted transition-colors hover:text-white"
+              className="text-[11px] font-medium text-text-muted transition-colors hover:text-text-emphasis"
             >
               Edit
             </a>
@@ -158,7 +158,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               <button
                 type="button"
                 onClick={() => setPickerOpen(true)}
-                className="text-[11px] font-medium text-text-muted transition-colors hover:text-white"
+                className="text-[11px] font-medium text-text-muted transition-colors hover:text-text-emphasis"
               >
                 Browse
               </button>
