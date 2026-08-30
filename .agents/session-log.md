@@ -1333,3 +1333,22 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Deviations** (full list on the PR): `app/(shell)/layout.tsx` is edited — the drawer is mounted by that layout, behind a grid-only condition, and the `CommandBar` toggle is wired to the same state, so W5.3 is unreachable within the four owned files; the alternative (a second drawer instance in the header) would put two telemetry drawers on `/grid`. The drawer keeps its bottom-docked placement and stays where it is rendered — the mock's telemetry drawer is a *right* drawer, but restyling an existing non-modal panel is not this lane's. `run-context` gains three telemetry members alongside the one Generate needs, following the `briefPickerOpen` precedent (a shell overlay opened from the sidebar and rendered by the layout). The mounted-restore path (a brief restored from `cf:brief` on load) counts as applied. `DESIGN.md` §3 is untouched — `AGENTS.md` lists it as a file never edited without design review — so its header anatomy now under-describes the bar (Brief tab, Generate, telemetry, and a drawer that is no longer grid-only).
 - **Verification:** gate in order on the committed tree — build, typecheck, lint (**0 problems**), lint:arch, `test:cov` **2258 passed | 2 skipped — 100 % on all four counters (6481/6481 statements, 4737/4737 branches, 1374/1374 functions, 5812/5812 lines)**, then `sync:check`.
 - **Left open:** the `DESIGN.md` §3 anatomy note above; and `messages.ts` still carries pre-existing header literals from earlier lanes (`HITL Mode Active`, `Open menu`, the tab labels), left where W2a/W3 put them rather than moved in this lane.
+
+### 2026-08-30 — W5 orchestrator round: Generate dropped the run on a confirmed prompt
+
+- **Mode:** Orchestrator, verifying `feat/w5-header` before review.
+- **Bug found and fixed:** `Header.handleGenerate` called `guardedPush(HOME)` and returned early
+  on `false`. But `false` is the guard's *deferred* answer, not its refusal: `guardedAction`
+  stashes the action and returns `false` whenever the editor is dirty. The action it was handed
+  was only `router.push`, so pressing **Generate** with unsaved edits and answering **Leave**
+  navigated to `/grid` and **never started the run** — the verb the user pressed silently
+  dropped. The lane's four Generate tests covered nothing-applied (on and off `/brief`),
+  applied-and-clean, and dirty-then-**Stay**; the dirty-then-**Leave** path was the one case
+  none of them drove, which is why a green suite hid it.
+- **Fix:** hand the guard the whole gesture — `guardedAction(() => { router.push(HOME);
+  setNotice(null); void execute(); })`. Leave is consent to Generate, not merely to the route
+  change; Stay still cancels both, because a refused action never fires.
+- **Test:** "a prompt the user accepts navigates AND starts the run", written before the fix and
+  confirmed failing against it (`generatePosts()` was 0, expected 1).
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2259 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.

@@ -1,5 +1,5 @@
 import { describe, test, expect, afterEach, beforeEach, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, useEffect, type ReactElement } from "react";
 import { nextMock, renderWithRun, ShellProviders } from "@/__tests__/helpers";
@@ -154,6 +154,27 @@ describe("Header — Generate (D32)", () => {
     expect(generatePosts()).toHaveLength(1);
     expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
     expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  test("a prompt the user accepts navigates AND starts the run", async () => {
+    const user = userEvent.setup();
+    renderDirty(
+      <>
+        <ApplyBrief />
+        <Header />
+      </>,
+    );
+    await user.click(screen.getByRole("button", { name: "apply" }));
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    await user.click(within(dialog).getByRole("button", { name: "Leave" }));
+
+    // Leaving is consent to the whole gesture, not just to the route change. The guard
+    // defers whatever it was handed, so handing it only the push loses the run: the
+    // user presses Generate, answers the question, lands on the grid and nothing ran.
+    await waitFor(() => expect(generatePosts()).toHaveLength(1));
+    expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
   });
 
   test("a prompt the user refuses leaves the run unstarted", async () => {

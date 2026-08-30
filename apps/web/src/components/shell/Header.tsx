@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 import { cn } from "@/lib/cn";
 import { Button, Eyebrow, IconButton, ThemeToggle } from "@/components/ui";
@@ -33,7 +33,8 @@ export function Header() {
   const [menuOpen, setMenuOpen] = useState(false);
   // The header's one status line: what a verb it owns answered when it was pressed.
   const [notice, setNotice] = useState<string | null>(null);
-  const { guardedPush, isDirty } = useGuardedNavigation();
+  const { guardedPush, guardedAction, isDirty } = useGuardedNavigation();
+  const router = useRouter();
   const { briefApplied, execute, telemetryOpen, toggleTelemetry } = useRun();
   // Stable identity so MobileMenu's focus/scroll-lock effect only runs on open/close,
   // not on unrelated Header re-renders.
@@ -62,11 +63,17 @@ export function Header() {
       if (!pathname.startsWith("/brief")) guardedPush("/brief");
       return;
     }
-    // The guard owns the prompt, and a refusal (Stay) must leave the run unstarted.
-    if (!guardedPush(HOME)) return;
-    setNotice(null);
-    void execute();
-  }, [briefApplied, guardedPush, pathname, execute]);
+    // Hand the guard the *whole* gesture, not just the route change. `guardedPush`
+    // defers only its push, so on a dirty draft the user would answer "Leave", land on
+    // the grid, and find nothing running — the verb they pressed silently dropped.
+    // Leave is consent to Generate; Stay still cancels both, because a refused action
+    // never fires at all.
+    guardedAction(() => {
+      router.push(HOME);
+      setNotice(null);
+      void execute();
+    });
+  }, [briefApplied, guardedPush, guardedAction, router, pathname, execute]);
 
   return (
     <header className="relative z-50 flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-4">
