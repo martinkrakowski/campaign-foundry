@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useId, type ReactNode } from "react";
 import { cn } from "../../lib/cn";
+import { Eyebrow } from "./eyebrow";
 
 const STORAGE_PREFIX = "cf:disclosure:";
 
@@ -60,7 +61,7 @@ export function Disclosure({ id, title, children }: { id: string; title: string;
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2",
         )}
       >
-        <span className="font-mono text-[11px] uppercase tracking-widest text-text-muted">{title}</span>
+        <Eyebrow>{title}</Eyebrow>
         <svg
           viewBox="0 0 24 24"
           focusable="false"

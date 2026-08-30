@@ -1684,3 +1684,31 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
   **2362 passed | 2 skipped — 100 % on all four counters**, `sync:check` **Total ops 0**.
   PR: https://github.com/martinkrakowski/campaign-foundry/pull/145 (not merged).
+
+### 2026-08-30 — E1 the eyebrow sweep: every owned label through Eyebrow
+
+- **Mode:** Implementer. Lane E1 on `refactor/e1-eyebrow-sweep`, worktree `wt-e1`.
+- **Defect:** W2a's `Eyebrow` owned the mono-uppercase group label, but ten sites still wrote
+  the pattern longhand (`font-mono text-[11px] uppercase tracking-widest text-text-muted`),
+  so the family could still drift one site at a time.
+- **Fix shape:** converted all owned sites — compliance page (label + four `<th>` headers),
+  section-outline, disclosure, MobileMenu, EstimatePanel (×3, `as="h4"`), HeadlinePoolDrawer
+  (conditional `text-success`/`text-error` through `className`, resolved by tailwind-merge),
+  PreviewDock (`as="p"`), ProductsSection (`as="h3"`), CopySection. Colour deltas go through
+  `className`; the component is never forked.
+- **Judgement call:** extended `EyebrowTag` with `"th"` rather than leaving the compliance
+  headers longhand — the cells are group labels with the right treatment, and `<Eyebrow
+  as="th">` renders a real `<th>`, so table semantics survive; a span inside a th would not.
+- **Stated visual delta:** `tracking-widest` is 0.1em, `tracking-eyebrow` is 0.08em — each
+  conversion retunes letter-spacing slightly. Intended (the token is canonical and retunes
+  the family from one place), but a real rendering change, never described as a no-op.
+- **Testing lesson:** the first mutation-check attempt stashed the whole tree — change *and*
+  test together — and passed vacuously; a valid mutation keeps the test in place and reverts
+  only the site. With that done, reverting the compliance label to longhand failed exactly
+  as designed (`expected … to contain 'tracking-eyebrow'`). Nine test files extended with
+  per-site assertions; the `tracking-eyebrow` emission test (compiled like
+  `tailwind-alpha.test.ts`) guards the token from silently not emitting.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2371 passed | 2 skipped — 100 % on all four counters**, `sync:check` **Total ops 0**.
+  One API-side flake (`routes.test.ts` timeouts) passed 59/59 in isolation and the full
+  rerun was green on the same tree. PR: https://github.com/martinkrakowski/campaign-foundry/pull/148 (not merged).

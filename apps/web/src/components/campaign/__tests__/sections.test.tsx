@@ -189,7 +189,10 @@ describe("CopySection", () => {
       />,
     );
 
-    expect(screen.getByText("Suggestions")).toBeTruthy();
+    // the suggestions label is an Eyebrow on the tracking token, not a longhand span
+    const suggestionsLabel = screen.getByText("Suggestions");
+    expect(suggestionsLabel.className).toContain("tracking-eyebrow");
+    expect(suggestionsLabel.className).not.toContain("tracking-widest");
     expect(screen.getByText("Reach New Heights")).toBeTruthy();
     expect(screen.getByText("Conquer the Summit")).toBeTruthy();
     expect(screen.queryByText("Rejected Idea")).toBeNull();

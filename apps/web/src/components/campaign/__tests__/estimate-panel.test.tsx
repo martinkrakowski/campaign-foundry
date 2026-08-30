@@ -35,6 +35,13 @@ describe("EstimatePanel", () => {
     vi.mocked(globalThis.fetch).mockImplementation(() => Promise.resolve(json(OK_PLAN)));
   });
 
+  test("the Estimate caption renders through Eyebrow as an h4 on the token", async () => {
+    render(<EstimatePanel state={planReady()} />);
+    const heading = await screen.findByRole("heading", { name: "Estimate", level: 4 });
+    expect(heading.className).toContain("tracking-eyebrow");
+    expect(heading.className).not.toContain("tracking-widest");
+  });
+
   test("asks for nothing until the draft is plannable", () => {
     const before = vi.mocked(globalThis.fetch).mock.calls.length;
     render(<EstimatePanel state={initialEditorState()} />);

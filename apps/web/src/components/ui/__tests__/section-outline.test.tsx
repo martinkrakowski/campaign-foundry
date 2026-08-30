@@ -11,6 +11,14 @@ const briefRows = ["Identity", "Copy", "Products", "Treatments", "Output"];
 const variationRows = ["Identity", "Copy", "Products", "Output", "Variation Policy"];
 
 describe("SectionOutline", () => {
+  test("the legend renders through Eyebrow on the tracking token", () => {
+    render(<SectionOutline mode="brief" visibleErrors={{}} />);
+    const legend = screen.getByText("Sections");
+    expect(legend.tagName).toBe("SPAN");
+    expect(legend.className).toContain("tracking-eyebrow");
+    expect(legend.className).not.toContain("tracking-widest");
+  });
+
   test("a classic outline lists the five classic sections in order", () => {
     render(<SectionOutline mode="brief" visibleErrors={{}} />);
     const buttons = screen.getAllByRole("button");
