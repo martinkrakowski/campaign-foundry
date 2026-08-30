@@ -162,7 +162,7 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
           type="button"
           onClick={onToggleTelemetry}
           aria-label="Toggle telemetry logs"
-          className="flex shrink-0 items-center space-x-2 rounded border border-border bg-surface-2 px-2 py-1 text-[12px] text-text-muted transition-colors hover:text-text-emphasis"
+          className="flex shrink-0 items-center space-x-2 rounded border border-border-control bg-surface-2 px-2 py-1 text-[12px] text-text-muted transition-colors hover:text-text-emphasis"
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M4 15V9a2 2 0 012-2h12a2 2 0 012 2v6a2 2 0 01-2 2H6a2 2 0 01-2-2z" />
@@ -385,7 +385,7 @@ function ConfirmDialog({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full border border-border px-4 py-1.5 text-[13px] text-text-muted transition-colors hover:text-text-emphasis"
+            className="rounded-full border border-border-control px-4 py-1.5 text-[13px] text-text-muted transition-colors hover:text-text-emphasis"
           >
             Cancel
           </button>

@@ -316,3 +316,29 @@ describe("CommandBar", () => {
     await waitFor(() => expect(screen.queryByText("Estimating…")).toBeNull());
   });
 });
+
+/**
+ * The control-boundary token (WCAG 1.4.11): these controls are identified only by
+ * their hairline, so it must be `border-border-control` (≥ 3:1 on every ground).
+ * jsdom applies no CSS, so the class list is the only observable — split, because
+ * `border-border` is a substring of `border-border-control`.
+ */
+const classes = (el: Element): readonly string[] => el.className.split(/\s+/);
+
+describe("CommandBar — control boundaries carry border-control", () => {
+  test("the telemetry toggle and the confirm dialog's Cancel keep the ≥3:1 hairline", async () => {
+    const user = userEvent.setup();
+    renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
+
+    const telemetry = screen.getByRole("button", { name: "Toggle telemetry logs" });
+    expect(classes(telemetry)).toContain("border-border-control");
+    expect(classes(telemetry)).not.toContain("border-border");
+
+    // The dialog's Cancel pill: no fill, the hairline is the entire control.
+    await user.click(screen.getByText(/Execute/));
+    const dialog = await screen.findByRole("dialog");
+    const cancel = within(dialog).getByRole("button", { name: "Cancel" });
+    expect(classes(cancel)).toContain("border-border-control");
+    expect(classes(cancel)).not.toContain("border-border");
+  });
+});

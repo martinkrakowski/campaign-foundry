@@ -3,9 +3,10 @@ import { screen } from "@testing-library/react";
 import { createElement } from "react";
 import userEvent from "@testing-library/user-event";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { renderWithRun } from "@/__tests__/helpers";
+import type { Asset } from "@/lib/run-context";
+import { renderWithRun, seedPersistedRun } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
-import { SidebarContent } from "../Sidebar";
+import { Sidebar, SidebarContent } from "../Sidebar";
 
 const ALL_RATIOS = "1:1, 9:16, 16:9";
 
@@ -79,5 +80,33 @@ describe("SidebarContent — the Aspects readout derives per run mode", () => {
     renderWithRun(createElement(BriefSwitcher, { brief: { ...BASE, mode: "variation" } }));
     await user.click(screen.getByRole("button", { name: "Switch" }));
     expect(screen.getByText(ALL_RATIOS)).toBeTruthy();
+  });
+});
+
+/**
+ * The control-boundary token (WCAG 1.4.11): these controls are identified only by
+ * their hairline, so it must be `border-border-control` (≥ 3:1 on every ground).
+ * jsdom applies no CSS, so the class list is the only observable — split, because
+ * `border-border` is a substring of `border-border-control`.
+ */
+const classes = (el: Element): readonly string[] => el.className.split(/\s+/);
+
+describe("Sidebar — control boundaries carry border-control", () => {
+  test("the Browse-briefs button and the clickable asset rows (with their hover)", async () => {
+    // listAssets resolves through the shared pipeline fetch router: a GET that is
+    // neither a job nor a packages URL answers with the seeded report's assets.
+    seedPersistedRun([{ name: "hero.png", type: "image/png", size: 1024 } as unknown as Asset]);
+    renderWithRun(createElement(Sidebar));
+
+    const browse = screen.getByRole("button", { name: "Browse briefs" });
+    expect(classes(browse)).toContain("border-border-control");
+    expect(classes(browse)).not.toContain("border-border");
+
+    const row = (await screen.findByTitle("hero.png")).closest("div.cursor-pointer") as HTMLElement;
+    expect(classes(row)).toContain("border-border-control");
+    expect(classes(row)).toContain("hover:border-border-control-hover");
+    expect(classes(row)).not.toContain("border-border");
+    // The 36 px thumbnail rim inside the row stays decorative `border-border`.
+    expect(classes(row.querySelector("div.rounded.border") as HTMLElement)).toContain("border-border");
   });
 });

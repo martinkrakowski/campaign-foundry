@@ -109,4 +109,14 @@ describe("BriefSelector", () => {
     await user.click(screen.getByText("beta"));
     expect((screen.getByPlaceholderText("Search briefs...") as HTMLInputElement).value).toBe("");
   });
+
+  test("the trigger keeps the control-boundary hairline (WCAG 1.4.11)", () => {
+    render(<BriefSelector briefs={briefs} currentId="beta" onSelect={vi.fn()} onCreateNew={vi.fn()} />);
+    // jsdom applies no CSS, so the class list is the only observable — split, because
+    // `border-border` is a substring of `border-border-control`.
+    const classes = (el: Element): readonly string[] => el.className.split(/\s+/);
+    const trigger = screen.getByText("beta").closest("button") as HTMLElement;
+    expect(classes(trigger)).toContain("border-border-control");
+    expect(classes(trigger)).not.toContain("border-border");
+  });
 });
