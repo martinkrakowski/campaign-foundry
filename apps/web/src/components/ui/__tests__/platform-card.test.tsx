@@ -23,7 +23,27 @@ describe("PlatformCard", () => {
   test("uses raw id as accessible name (aria-label) and handles toggle", async () => {
     const user = userEvent.setup();
     const onToggle = vi.fn();
-    render(
+    const { rerender } = render(
+      <PlatformCard
+        profile={profile}
+        selected={false}
+        onToggle={onToggle}
+      />,
+    );
+
+    const button = screen.getByRole("button", { name: "instagram-feed" });
+    expect(button).toBeTruthy();
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+    expect(button.className).toContain("border-[1.5px]");
+    expect(button.className).toContain("border-border");
+    expect(button.className).toContain("bg-surface-2");
+
+    // 44px preview tile at rest
+    const tile = button.querySelector("span[aria-hidden='true'].size-11");
+    expect(tile?.className).toContain("bg-background");
+    expect(tile?.className).toContain("text-text-secondary");
+
+    rerender(
       <PlatformCard
         profile={profile}
         selected={true}
@@ -31,9 +51,18 @@ describe("PlatformCard", () => {
       />,
     );
 
-    const button = screen.getByRole("button", { name: "instagram-feed" });
-    expect(button).toBeTruthy();
     expect(button.getAttribute("aria-pressed")).toBe("true");
+    expect(button.className).toContain("border-brand-primary");
+    expect(button.className).toContain("bg-brand-primary/[0.08]");
+
+    // 44px preview tile inverts when pressed
+    expect(tile?.className).toContain("bg-brand-primary");
+    expect(tile?.className).toContain("text-white");
+
+    // 22px check badge
+    const checkBadge = button.querySelector("span[aria-hidden='true'].size-\\[22px\\]");
+    expect(checkBadge).toBeTruthy();
+    expect(checkBadge?.className).toContain("animate-check-pop");
 
     await user.click(button);
     expect(onToggle).toHaveBeenCalledWith("instagram-feed");
