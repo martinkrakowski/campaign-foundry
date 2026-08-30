@@ -1315,3 +1315,14 @@ To keep this file out of version control, add `.agents/session-log.md` to
   no overlap.
 - **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
   **2243 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
+
+### 2026-08-30 — W6 guided engine (lane shipped: `9514f08` → PR #140)
+
+- **Mode:** Implementer / Debugger / Reviewer, working from the earlier W6 summary. All gates green, commit verbatim, PR #140 opened against `main`.
+- **This session closed the guided test suite and coverage gaps:**
+  - Rewired the W6.8 guided tests off jest-dom (`toHaveTextContent`/`toHaveAttribute` are not registered — replaced with `.textContent` / `.getAttribute`) and off `Storage.prototype` spies (the suite's `localStorage` is the vitest.setup memory object — `vi.spyOn(globalThis.localStorage, …)` instead). The double-render in the storage-fallback test was collapsed to one render with a pre-set spy, and the unset-value fallback moved into the first guided test.
+  - Fixed the walk test's Output→Review leg: the last section step's button is named "Review & launch", so the `next()` helper (name "Next") no longer matches there.
+  - **Coverage-gap fixes (all 100 % now):** the everything-branch `renderStepSection` arms for Copy (`onOpenPool`) and Policy were only reachable in Guided — added a variation walk test that opens the headline pool on the Copy step and walks Output → Policy. `readPresentation(preferGuided)` was always called with `true`, leaving two unreachable ternary sides — dropped the parameter (fallback is Guided). `stepSectionErrors("review")` was dead code because `stepFooterStatus` short-circuited before the bucket read — reordered so the "review" bucket read happens first. `StepFooter`'s `nudgeKey = 0` default was never taken (the editor always passes it) — made the prop required.
+  - Stale pre-W6 tests updated to the new contract: `sections.test.tsx` asserted the old raw-key chip fallback — `ErrorStrip` now drops buckets no section declares (covered by a motion-label test); `brief.test.tsx`'s beforeEach seeds `cf:presentation=everything` so the legacy stacked-editor suite keeps its assumption.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `vitest` web **2265 passed | 2 skipped — 100 % on all four counters**, `sync:check` **Total ops 0**, commit `9514f08` (15 files, +990/−82), PR https://github.com/martinkrakowski/campaign-foundry/pull/140 with a Deviations section (nudge keyframe scoped to StepFooter, FloatingBar placement kept for W8.2, no SectionOutline steering, policy sidebar gating, everything-seeding of legacy suites).
+- **Left open:** nothing blocking. W7.4 owns the shared `nudge` keyframe in `globals.css`; W8.2 moves FloatingBar into the flow; StepHeader/StepFooter still lack dedicated unit tests (both arms proven through the editor suites instead).
