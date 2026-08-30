@@ -1227,3 +1227,18 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - None.
 
 - **W10 follow-up (orchestrator):** the lane's remediation fixed the four trap findings but three more stood. The dirty-guard test had replaced W1's four `toHaveBeenCalledTimes(1)` assertions with `getAllByRole("dialog")).toHaveLength(1)`, which cannot see a double interception at all because the dialog is a singleton — restored as an assertion of what a second interception would actually produce (a second push, or a prompt still standing after Leave). `DialogHead` had flattened every overlay to `<h2>`, changing `HeadlinePoolDrawer` and `AssetPickerDrawer` from `<h3>`; it now takes a `headingLevel` and both keep theirs. **Left open:** `BriefEditor` still calls `window.confirm` at three sites (`confirmReplace`, and two Save-as overwrite prompts) — the first is the same dirty-guard concept and should move to the in-app dialog; the two overwrite prompts are a different concept (destructive confirm, not navigation). Not folded in here to keep this lane from growing further.
+
+---
+
+## 2026-08-30 — W2a lane: the kit primitives (branch feat/w2a-kit)
+
+- **Mode:** Implementer
+- **Changes (W2a.1–W2a.6):**
+  - **W2a.1 `IconButton`** — a 32px `grid place-items-center` square, muted → `text-text-emphasis` on hover, `flex-none`, and a **required** `label` prop: an icon-only control with no accessible name is a nameless button. Adopted by the header's hamburger ("Open menu"), `DialogHead`'s close control, and the telemetry drawer's expand/collapse and close. No focus-ring class of its own — W2a.3's global rule covers it.
+  - **W2a.2 `Skeleton`** — surface-2 blocks, `aria-hidden`, **static**: D27 permits four loops (the motion-kind previews) and a pulsing skeleton would be a fifth. Adopted where a loading state previously claimed something untrue — the pool drawer said *"No headlines yet."* while still reading the pool, and the telemetry drawer said *"Ready to orchestrate"* during a run that had not reported. Both now pair the blocks with a `role="status"` sentence.
+  - **W2a.3 globals** — one base-layer `:focus-visible` ring on the brand token (`outline`, so it follows each element's radius and survives forced-colors), `::selection` as `color-mix` on the brand token rather than a new token, and `scrollbar-color` / `scrollbar-width` for the engines that never see the `::-webkit-` rules. `app/__tests__/globals.test.ts` pins the contract the way `globals-motion.test.ts` pins the motion one.
+  - **W2a.4 `Input`** — the solid ring borrowed from `Button` becomes `ring-brand-primary/25` plus the brand border, as a `focus:` state (a field with the caret in it has no keyboard-only case to distinguish). Both inputs that bypassed the component now use it: `BriefSelector`'s filter field and the Save-as field, which had no focus styling at all.
+  - **W2a.5 `Eyebrow`** — `letterSpacing.eyebrow` (0.08em) in the config, and the mono-uppercase group label onto it; `DESIGN.md` §2's group-label row now names the token.
+  - **W2a.6 `FieldLine`** — one primitive for the 11px error/hint line, with a tone vocabulary, replacing seven bespoke copies. Not a live region: none of them had one, and GB-D1 gates their visibility.
+- **Deviations** (see the PR body for the full list): the brief-id copy button, the overlays' **text** close buttons, `ModelSelector`'s close, and eighteen further `tracking-widest` sites sit outside this lane's file ownership; the two drawers had no hand-rolled skeleton to replace after W10, so `Skeleton` is introduced rather than swapped in.
+- **Left open:** `TelemetryDrawer`'s header row grew 32px → 40px so a 32px control fits inside it.
