@@ -71,8 +71,9 @@ export default function ExportPage() {
     return (
       <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col p-4 pb-12 sm:p-8">
         <h2 className="mb-6 text-lg font-semibold text-white">Print Export Queue</h2>
-         <p className="font-mono text-[11px] uppercase tracking-widest text-text-muted">Run the orchestration pipeline to generate PNG renders and CMYK PDF physical proofs.</p>
-
+        <p className="text-text-muted">
+          Run the orchestration pipeline to generate PNG renders and CMYK PDF physical proofs.
+        </p>
       </div>
     );
   }
@@ -84,7 +85,7 @@ export default function ExportPage() {
       {approved.length === 0 ? (
         <div>
           <span className="font-mono text-[11px] uppercase tracking-widest text-text-muted">Export</span>
-         <h2 className="mb-6 text-lg font-semibold text-white">Print Export Queue</h2>
+          <h2 className="mb-6 text-lg font-semibold text-white">Print Export Queue</h2>
           <p className="max-w-md text-text-muted">
             No creatives approved yet. Approve creatives in the <span className="text-text-primary">Grid</span>{" "}
             to add them here — only approved creatives are exported ({pending} pending review).
@@ -94,7 +95,7 @@ export default function ExportPage() {
         <>
           <div>
             <span className="font-mono text-[11px] uppercase tracking-widest text-text-muted">Export</span>
-           <h2 className="text-lg font-semibold text-white">Print Export Queue</h2>
+            <h2 className="text-lg font-semibold text-white">Print Export Queue</h2>
             <p className="mt-1 text-[13px] text-text-muted">
               {approved.length} of {assets.length} creatives approved for export.
             </p>
