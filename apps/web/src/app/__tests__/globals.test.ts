@@ -54,8 +54,6 @@ describe("globals.css token contract (W2a.3 / SHELL-57)", () => {
   });
 
   test("no literal colour or stock Tailwind colour appears anywhere in the file", () => {
-    expect(css).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
-    expect(css).not.toMatch(/rgb\(/);
     // A named handful is a guard a new literal walks straight past. Reject the shapes
     // instead — but only in code: these words appear legitimately in prose explaining
     // *why* a colour was chosen, and a guard that fails on its own rationale is a guard
