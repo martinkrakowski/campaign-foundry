@@ -30,7 +30,7 @@ export default function RunsPage() {
 
   return (
     <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col p-4 pb-12 sm:p-8">
-      <h2 className="mb-1 text-xl font-bold text-white">Runs</h2>
+      <h2 className="mb-1 text-lg font-semibold text-white">Runs</h2>
       <p className="mb-6 text-[13px] text-text-muted">Latest pipeline run (current session).</p>
 
       {!hasRun && !loading ? (

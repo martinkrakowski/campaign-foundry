@@ -70,7 +70,7 @@ export default function ExportPage() {
   if (!hasRun || assets.length === 0) {
     return (
       <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col p-4 pb-12 sm:p-8">
-        <h2 className="mb-6 text-xl font-bold text-white">Print Export Queue</h2>
+        <h2 className="mb-6 text-lg font-semibold text-white">Print Export Queue</h2>
          <p className="font-mono text-[11px] uppercase tracking-widest text-text-muted">Run the orchestration pipeline to generate PNG renders and CMYK PDF physical proofs.</p>
 
       </div>
@@ -141,7 +141,7 @@ export default function ExportPage() {
       )}
 
       <section className="w-full">
-        <h2 className="text-xl font-bold text-white">Platform packages</h2>
+        <h2 className="text-lg font-semibold text-white">Platform packages</h2>
         <p className="mt-1 text-[13px] text-text-muted">
           Copy already-rendered creatives into per-platform folders. Never re-renders.
         </p>
