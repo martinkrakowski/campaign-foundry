@@ -381,21 +381,37 @@ describe("guarded navigation when the editor is dirty", () => {
     expect(nextMock().router.push).not.toHaveBeenCalled();
   });
 
-  test("a mobile tab click is blocked when the prompt is refused, and allowed when accepted", async () => {
+  test("a clean mobile tab click routes client-side instead of reloading", async () => {
     const user = userEvent.setup();
     const tabs = [{ href: "/grid", label: "Grid" }] as const;
-
-    globalThis.confirm = vi.fn(() => false);
-    const refused = renderDirty(
-      createElement(MobileMenu, { open: true, onClose: () => {}, tabs }),
-    );
+    globalThis.confirm = vi.fn();
+    render(createElement(ShellProviders, null, createElement(MobileMenu, { open: true, onClose: () => {}, tabs })));
     await user.click(screen.getByRole("link", { name: "Grid" }));
-    expect(globalThis.confirm).toHaveBeenCalledTimes(1);
-    refused.unmount();
+    // The tab is a raw <a>, so without preventDefault this would be a native page
+    // load — routing through the client router is the "did not reload" proof.
+    expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
+    expect(globalThis.confirm).not.toHaveBeenCalled();
+  });
 
+  test("a dirty mobile tab click the user accepts prompts exactly once and navigates", async () => {
+    const user = userEvent.setup();
+    const tabs = [{ href: "/grid", label: "Grid" }] as const;
     globalThis.confirm = vi.fn(() => true);
     renderDirty(createElement(MobileMenu, { open: true, onClose: () => {}, tabs }));
     await user.click(screen.getByRole("link", { name: "Grid" }));
     expect(globalThis.confirm).toHaveBeenCalledTimes(1);
+    expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
+  });
+
+  test("a dirty mobile tab click the user cancels does not navigate and leaves the menu open", async () => {
+    const user = userEvent.setup();
+    const tabs = [{ href: "/grid", label: "Grid" }] as const;
+    const onClose = vi.fn();
+    globalThis.confirm = vi.fn(() => false);
+    renderDirty(createElement(MobileMenu, { open: true, onClose, tabs }));
+    await user.click(screen.getByRole("link", { name: "Grid" }));
+    expect(globalThis.confirm).toHaveBeenCalledTimes(1);
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

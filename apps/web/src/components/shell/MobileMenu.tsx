@@ -26,15 +26,16 @@ interface MobileMenuProps {
  */
 export function MobileMenu({ open, onClose, tabs }: MobileMenuProps) {
   const pathname = usePathname();
-  const { guardedPush, isDirty } = useGuardedNavigation();
+  const { guardedPush } = useGuardedNavigation();
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
   const handleTabClick = (e: React.MouseEvent, href: string) => {
-    if (isDirty) {
-      e.preventDefault();
-      guardedPush(href);
-    }
+    // The tab map renders a raw <a>, not next/link's <Link>, so the default action is
+    // a native full-page load — always prevent it and route through the guard, which
+    // returns false when the user refuses, so the menu stays open in that case.
+    e.preventDefault();
+    if (!guardedPush(href)) return;
     onClose();
   };
 
