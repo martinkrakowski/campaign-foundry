@@ -1646,3 +1646,11 @@ To keep this file out of version control, add `.agents/session-log.md` to
   new utilities confirmed present in the *built* stylesheet (`.step-enter-r`, `.animate-nudge`,
   `.animate-ready-ring`, `motion-safe:group-hover:scale-y-[1.4]`, `@media(pointer:coarse)`, and
   the reduced-motion block naming all six new classes).
+
+### 2026-08-30 — W7 segbar & transitions: Gesture yielding and transient count drops
+
+- **Mode:** Implementer. Second lane on the `feat/w7-segbar-transitions` branch.
+- **Changes:**
+  - **Gesture guard expanded:** `useStepSwipe` and `useStepKeys` now yield to elements that own their own drag or arrow keys (sliders, range inputs, draggables). The new `ownsItsOwnGesture` predicate guards the gestures alongside `isTypingTarget`. This fixes a bug where dragging a slider horizontally past 60px or using arrow keys on it would trigger a step change instead of adjusting the slider.
+  - **Transient count drop:** `useBecameTrue` was returning a count belonging to the previous subject on the render immediately after the subject changed (due to the state updating in a `useEffect`). This caused the ready-ring to fire on steps that were never valid. It now drops the stale count by returning 0 if `state.subject` does not match the current `subject`.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov` **2351 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
