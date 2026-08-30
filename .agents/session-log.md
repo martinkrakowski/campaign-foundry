@@ -1160,3 +1160,24 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - **`StatusChip`'s `yellow-400` left in place.** UE-D11 requires the four chip states to stay colour-distinct and `warning` is already state two, so folding yellow onto it would make two states identical. No token fits; it needs one, and that is a token decision rather than a sweep.
   - **Four `bg-white` / `text-black` / `hover:bg-gray-200` primary buttons left as literals.** An always-white button's hover is the same category as the `text-white` exceptions. They are, however, a genuine light-theme problem — a white button on a white ground — and belong to **W3.2's light-theme audit**.
 - **Left open:** the `StatusChip` fourth-state token; the white primary buttons under a light theme (W3.2). Observed once: `shell-nav.test.tsx` "marks the active tab from the pathname" failed on one full-suite run and passed on two further runs of the **same commit** — recorded for the reviewer, not diagnosed.
+
+---
+
+## 2026-08-30 — W2b lane: card and chip surfaces (branch feat/w2b-cards)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `apps/web/src/components/ui/axis-card.tsx`: Adopted mock's `.opt` idiom with 1.5px border (`border-[1.5px]`), inverting 44px preview/icon tile (`bg-brand-primary text-white` when selected vs `bg-background text-text-secondary` when unselected), 22px check badge with `animate-check-pop` overshoot, 15px/700 label, `aria-hidden` meta, and motion-safe hover/press micro-interactions. Maintained raw value accessible name via `aria-label`.
+  - `apps/web/src/components/ui/platform-card.tsx`: Applied the 1.5px border, inverting 44px preview frame tile, 22px check badge with `animate-check-pop`, 15px/700 label, and motion-safe micro-interactions. Kept `profile.id` as accessible name and `profile.label` as visible text.
+  - `apps/web/src/components/ui/preview-card.tsx`: Applied the 1.5px border, inverting 44px preview tile, 22px check badge with `animate-check-pop`, 15px/700 label, and motion-safe micro-interactions. Kept raw `value` as accessible name.
+  - `apps/web/src/components/ui/swatch-picker.tsx`: Added `size` prop ("default" 24px, "lg" 52px), ring-style selection (`ring-brand-primary` + offset) preserving border, and 9th custom swatch button opening a labelled visually-hidden `<input type="color">`. Retained `SWATCH_PALETTE` and raw hex `aria-label`s.
+  - `apps/web/src/components/campaign/AssetPickerDrawer.tsx`: Updated selectable row to 1.5px border, `bg-brand-primary/[0.08]` selected background, and motion-safe press/lift interactions.
+  - `apps/web/src/app/globals.css`: Added `@keyframes check-pop` (overshoot on check badge), `@keyframes rise-in`, `.animate-check-pop`, `.animate-rise-in`, `.stagger > *`, and reduced-motion overrides. Gated all new animations to 1 iteration and no looping.
+  - `apps/web/src/components/ui/__tests__/*`: Updated `axis-card.test.tsx`, `platform-card.test.tsx`, `preview-card.test.tsx`, `swatch-picker.test.tsx`, and added `globals-motion.test.ts` asserting the D27 invariant that exactly four looping animations exist in `globals.css`.
+- **Decisions:**
+  - Preserved 1px borders on `ChipGroup` and `SwatchChip` per D29.
+  - Avoided blanket reduced-motion wildcard `*` rule per D28 to protect `Button` and other loading spinner animations.
+  - Maintained exact raw option values as accessible names across all four card types.
+- **Left open:**
+  - None.
+

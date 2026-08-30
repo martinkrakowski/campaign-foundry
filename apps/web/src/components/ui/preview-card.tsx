@@ -22,8 +22,8 @@ export interface PreviewCardProps {
  * The horizontal sibling of `AxisCard`, for options whose preview is a picture of
  * what you get rather than a miniature of the creative (the background sources).
  * Same a11y contract as the kit's cards: the accessible name is exactly the raw
- * value (an explicit aria-label), so the preview, the caption and the check mark
- * are all `aria-hidden` decoration.
+ * value (an explicit aria-label), so the preview, the caption and the check badge
+ * are all `aria-hidden` decoration (D28 / D29 / W2b.2).
  */
 export function PreviewCard({
   value,
@@ -44,15 +44,21 @@ export function PreviewCard({
       disabled={disabled}
       onClick={() => onToggle(value)}
       className={cn(
-        "relative flex w-full items-center gap-3 rounded-md border p-3 text-left transition-colors",
+        "relative flex w-full items-center gap-3 rounded-md border-[1.5px] p-3.5 text-left transition-all",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2",
-        "disabled:cursor-not-allowed disabled:opacity-50",
-        selected ? "border-brand-primary bg-surface-2" : "border-border hover:border-border-hover",
+        "motion-safe:hover:-translate-y-px motion-safe:active:scale-[0.98]",
+        "disabled:cursor-not-allowed disabled:opacity-50 disabled:motion-safe:hover:translate-y-0 disabled:motion-safe:active:scale-100",
+        selected
+          ? "border-brand-primary bg-brand-primary/[0.08]"
+          : "border-border bg-surface-2 hover:border-border-hover",
       )}
     >
       {selected ? (
-        <span className="absolute right-1.5 top-1.5" aria-hidden="true">
-          <svg viewBox="0 0 12 12" focusable="false" aria-hidden="true" className="size-3 text-brand-primary">
+        <span
+          className="absolute right-2.5 top-2.5 flex size-[22px] items-center justify-center rounded-full bg-brand-primary text-white motion-safe:animate-check-pop"
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 12 12" focusable="false" aria-hidden="true" className="size-3 text-white">
             <path
               d="M2 6.5 5 9.5 10 3"
               fill="none"
@@ -64,11 +70,19 @@ export function PreviewCard({
           </svg>
         </span>
       ) : null}
-      <span aria-hidden="true" className="flex shrink-0 items-center justify-center">
+      <span
+        aria-hidden="true"
+        className={cn(
+          "flex size-11 shrink-0 items-center justify-center rounded-md transition-colors",
+          selected ? "bg-brand-primary text-white" : "bg-background text-text-secondary",
+        )}
+      >
         {children}
       </span>
       <span className="min-w-0 flex-1">
-        <span className={cn("block text-[13px]", selected ? "text-text-emphasis" : "text-text-primary")}>{meta}</span>
+        <span className={cn("block text-[15px] font-bold leading-tight", selected ? "text-text-emphasis" : "text-text-primary")}>
+          {meta}
+        </span>
         <span className={cn("block font-mono text-[12px]", selected ? "text-text-emphasis" : "text-text-muted")} aria-hidden="true">
           {value}
         </span>
