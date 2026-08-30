@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, afterEach } from "vitest";
-import { scrollToSection } from "../scroll-to-section";
+import { revealSection } from "../scroll-to-section";
 
 const mount = (html: string) => {
   document.body.innerHTML = html;
@@ -17,11 +17,11 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-describe("scrollToSection", () => {
+describe("revealSection", () => {
   test("scrolls a column section by id", () => {
     const [el] = mount('<section id="identity"></section>');
     el.scrollIntoView = vi.fn();
-    scrollToSection("identity");
+    revealSection("identity");
     expect(el.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
   });
 
@@ -34,7 +34,7 @@ describe("scrollToSection", () => {
     visible.scrollIntoView = vi.fn();
     notLaidOut(hidden);
     laidOut(visible);
-    scrollToSection("output");
+    revealSection("output");
     expect(visible.scrollIntoView).toHaveBeenCalled();
     expect(hidden.scrollIntoView).not.toHaveBeenCalled();
   });
@@ -45,12 +45,12 @@ describe("scrollToSection", () => {
     second.scrollIntoView = vi.fn();
     notLaidOut(first);
     notLaidOut(second);
-    scrollToSection("policy");
+    revealSection("policy");
     expect(first.scrollIntoView).toHaveBeenCalled();
   });
 
   test("a missing section is a no-op", () => {
     mount("<div></div>");
-    expect(() => scrollToSection("nowhere")).not.toThrow();
+    expect(() => revealSection("nowhere")).not.toThrow();
   });
 });

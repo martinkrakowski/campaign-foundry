@@ -22,7 +22,11 @@ const saveVia = async (user: ReturnType<typeof userEvent.setup>, item: "Save & a
 };
 
 beforeEach(() => {
+  localStorage.clear();
   localStorage.setItem("cf:brief-picked", "1");
+  // This legacy suite drives the stacked, everything-on-one-page editor; pin the
+  // presentation so the W6 default (Guided) does not rearrange its assumptions.
+  localStorage.setItem("cf:presentation", "everything");
   // Mock confirm to return true
   globalThis.confirm = vi.fn(() => true);
 });

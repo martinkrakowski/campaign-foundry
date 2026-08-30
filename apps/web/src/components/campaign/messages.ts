@@ -515,3 +515,44 @@ export const telemetryButton = "System telemetry";
 export function modelChanged(modelLabel: string): string {
   return `${modelLabel} will make the next set of creatives.`;
 }
+
+/* ── Guided presentation (W6) ─────────────────────────────────────────────── */
+
+/** The presentation toggle's group label. */
+export const presentationLabel = "Presentation";
+/** The guided presentation's button: one section at a time, in steps. */
+export const presentationGuided = "Guided";
+/** The everything presentation's button: today's scroll, all sections at once. */
+export const presentationEverything = "Everything";
+
+/** The step eyebrow, e.g. "STEP 1 OF 6" — the one place the step count is read. */
+export function stepEyebrow(step: number, total: number): string {
+  return `STEP ${step} OF ${total}`;
+}
+
+/** A step's subtitle — the one line under each step heading. */
+export const stepSubtitleIdentity = "Name the campaign and say who it is for.";
+export const stepSubtitleCopy = "Write the one line you want people to remember.";
+export const stepSubtitleProducts = "Add what you are advertising, with its colour and logo.";
+export const stepSubtitleTreatments = "Choose the looks each product gets.";
+export const stepSubtitlePolicy = "Say how many ads you want, and how much they should differ.";
+export const stepSubtitleOutput = "Pick where the ads run, and whether they move.";
+export const stepSubtitleReview = "Last look, then send it to the pipeline.";
+
+/** The step footer's status sentence when the step has nothing to fix. */
+export const statusStepReady = "Looking good.";
+/**
+ * The review step's footer status sentence. It states readiness rather than naming a
+ * control: Review supplies no Next, so an instruction to "press Review & launch" sent
+ * the user looking for a button that is not on the step. W8 places the action bar
+ * here, and the instruction belongs with it.
+ */
+export const statusStepReview = "Everything checks out — this is the last look.";
+/** The review step's body: the brief has met every step, so this is the last look. */
+export const stepReviewIntro =
+  "The brief is in shape. This is the last look before any of it runs — launch when you are ready.";
+/** Step footer verbs. */
+export const stepBack = "Back";
+export const stepNext = "Next";
+/** The last section step's Next, before the review step. */
+export const stepNextReviewLaunch = "Review & launch";

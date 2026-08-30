@@ -1407,3 +1407,111 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - **`aria-live="polite"` on the status paragraph.** `role="status"` already implies it.
 - **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
   **2267 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
+
+### 2026-08-30 — W6 guided engine (lane shipped: `9514f08` → PR #140)
+
+- **Mode:** Implementer / Debugger / Reviewer, working from the earlier W6 summary. All gates green, commit verbatim, PR #140 opened against `main`.
+- **This session closed the guided test suite and coverage gaps:**
+  - Rewired the W6.8 guided tests off jest-dom (`toHaveTextContent`/`toHaveAttribute` are not registered — replaced with `.textContent` / `.getAttribute`) and off `Storage.prototype` spies (the suite's `localStorage` is the vitest.setup memory object — `vi.spyOn(globalThis.localStorage, …)` instead). The double-render in the storage-fallback test was collapsed to one render with a pre-set spy, and the unset-value fallback moved into the first guided test.
+  - Fixed the walk test's Output→Review leg: the last section step's button is named "Review & launch", so the `next()` helper (name "Next") no longer matches there.
+  - **Coverage-gap fixes (all 100 % now):** the everything-branch `renderStepSection` arms for Copy (`onOpenPool`) and Policy were only reachable in Guided — added a variation walk test that opens the headline pool on the Copy step and walks Output → Policy. `readPresentation(preferGuided)` was always called with `true`, leaving two unreachable ternary sides — dropped the parameter (fallback is Guided). `stepSectionErrors("review")` was dead code because `stepFooterStatus` short-circuited before the bucket read — reordered so the "review" bucket read happens first. `StepFooter`'s `nudgeKey = 0` default was never taken (the editor always passes it) — made the prop required.
+  - Stale pre-W6 tests updated to the new contract: `sections.test.tsx` asserted the old raw-key chip fallback — `ErrorStrip` now drops buckets no section declares (covered by a motion-label test); `brief.test.tsx`'s beforeEach seeds `cf:presentation=everything` so the legacy stacked-editor suite keeps its assumption.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `vitest` web **2265 passed | 2 skipped — 100 % on all four counters**, `sync:check` **Total ops 0**, commit `9514f08` (15 files, +990/−82), PR https://github.com/martinkrakowski/campaign-foundry/pull/140 with a Deviations section (nudge keyframe scoped to StepFooter, FloatingBar placement kept for W8.2, no SectionOutline steering, policy sidebar gating, everything-seeding of legacy suites).
+- **Left open:** nothing blocking. W7.4 owns the shared `nudge` keyframe in `globals.css`; W8.2 moves FloatingBar into the flow; StepHeader/StepFooter still lack dedicated unit tests (both arms proven through the editor suites instead).
+
+### 2026-08-30 — W6 orchestrator round: the motion mapping was declared but not read
+
+- **Mode:** Orchestrator, verifying `feat/w6-guided-engine` before review.
+- **Verified first, before changing anything.** The lane's central risk was W6.2's deferred
+  scroll, and the brief demanded its test **fail against a synchronous implementation**. It
+  does: replacing the `pendingReveal` deferral with an immediate `revealSection` makes
+  `brief-editor.test.tsx:1405` fail — a synchronous scroll runs while the section is still
+  unmounted, so `revealSection` finds no candidate and `scrollIntoView` is never reached. The
+  lane did what it was asked. Gate re-run independently: **2265 passed, 100 % on all four**.
+- **Found and fixed:** `MOTION_HOST_SECTION` was exported, documented and asserted in the
+  totality test — but **nothing read it**. `BriefEditor.reveal` spelled the pair again as
+  `section === "motion" ? "output" : section`, so the constant and the code could diverge in
+  silence and the test would still pass. That is the same drift the vocabulary collapse exists
+  to stop, reintroduced one file over. `reveal` now reads `MOTION_ERROR_KEY` and
+  `MOTION_HOST_SECTION`, and `ErrorStrip`'s chip label reads `MOTION_LABEL` rather than an
+  inline `"Motion"`.
+- **Test strengthened:** the totality suite asserted only `MOTION_HOST_SECTION === "output"`,
+  a tautology. It now also asserts the host appears in `sectionOrder(mode)` for **both** modes —
+  the property that actually matters, because a host absent from a mode's order would leave the
+  motion chip pointing at a step that does not exist in that mode, and clicking it would do
+  nothing there.
+- **Also:** `ErrorStrip.tsx` had lost its trailing newline; restored. The PR title said
+  "Closes #136", which is lane W2a's already-merged PR; retitled.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2266 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
+
+### 2026-08-30 — W6 review round (independent reviewer: `agy/gemini-3.1-pro-high`)
+
+- **Mode:** Orchestrator. Seven findings; six valid, one refuted on evidence.
+- **Fixed:**
+  - **A mode flip moved the user without asking.** The cursor was a bare integer, and the two
+    lists disagree at the same ordinal — classic `[… treatments, output]`, randomized
+    `[… output, policy]`. Standing on **Output** (index 4) and flipping mode landed you on
+    **Variation Policy**. The cursor now remembers the step *id* and follows it, falling back
+    to the remembered ordinal for `treatments`, the one step a flip really removes. Both arms
+    tested.
+  - **StrictMode stole focus on first paint.** `skippedStepHeading` was a "have I run before"
+    flag flipped by the effect's first pass, so React's double invocation let the second pass
+    through and focused the step heading on mount in development. Now keyed off the step
+    actually changing, which is idempotent under a repeated run.
+  - **W6.7's stated criterion was not the test that shipped.** The suite asserted a bijection
+    between error buckets and section titles, not the steps↔sections totality the task named.
+    Added, per mode and in both directions.
+  - **The nudge was a `<style>` element inside `StepFooter`**, with its own hand-rolled
+    reduced-motion query — a per-instance stylesheet outside the audited animation budget.
+    Moved to `globals.css` as a one-shot in `@layer utilities` and added to the **named**
+    `prefers-reduced-motion` list. Confirmed in the built CSS, not assumed: the utility, the
+    keyframes and the reduced-motion entry are all present.
+  - `toHaveBeenCalled()` → `toHaveBeenCalledTimes(1)` on the deferred scroll; it fires once.
+  - **A comment described behaviour the code did not have** — it claimed `ErrorStrip` folds
+    motion into Output "exactly as the FloatingBar's strip treats it". It does not, and should
+    not: a strip chip is a *scroll target* and motion has its own (`#motion`). `StatusLine`
+    folds because it lists **sections**; `ErrorStrip` does not because it lists **buckets**.
+    They answer different questions; the comment now says so.
+- **Refuted:** *"`bg-error/10`, `bg-error/30`, `border-error/50` evaluate to empty on the pinned
+  Tailwind."* Exactly backwards — that is the defect **lane W0 fixed**, by moving the scale to
+  `color-mix(… calc(<alpha-value> * 100%) …)`. `src/__tests__/tailwind-alpha.test.ts` compiles
+  the real config and asserts `bg-error/20` and `border-error/50` emit; all three are default
+  steps.
+- **One unreachable branch removed rather than excluded** (house rule): the cursor's
+  `id === undefined` guard could not be reached, and `indexOf` already answers `-1`.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2270 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
+
+### 2026-08-30 — W6 bot-thread sweep (10 threads on PR #140)
+
+- **Fixed — the serious one:** the presentation toggle carried `hidden` in Everything, and it
+  is the **only** control that returns to Guided. The choice persists, so choosing Everything
+  made Guided **permanently unreachable, across reloads**. Two reviewers caught it; the suite
+  could not, because jsdom applies no CSS, so a role query still found the button and every
+  test passed. Now always visible, with a test that asserts the *class* — the only thing
+  observable in that environment.
+- **Fixed — a test that specified the defect.** `nextLabel` was keyed on
+  `steps[stepIndex] === "output"`, but `output` is the last section step in **classic** only;
+  randomized puts `policy` after it. So the randomized Output step promised "Review & launch"
+  and delivered Variation Policy. The existing walk test asserted exactly that, pinning the bug.
+  Keyed on `stepIndex === steps.length - 2` instead, and the test is **corrected, not deleted**:
+  it now asserts Output does *not* offer the launch in randomized, and that Policy does.
+- **Fixed:** the Review step's status said *"press Review & launch"* while that step
+  deliberately supplies no `onNext`, sending the user after a button that is not there. It now
+  states readiness; W8 places the action bar and the instruction belongs with it.
+- **Fixed:** the two reveal paths disagreed — the immediate one focused the *mapped* step, the
+  deferred one the raw section. A motion reveal with focus would have focused different things
+  depending on whether a step switch was needed. `pendingReveal` now carries the step.
+- **Fixed earlier this round:** the `<style>` block in `StepFooter` (a bot raised it too).
+- **Refuted:**
+  - *"Keep `scrollToSection` as an alias; the rename broke importers."* Replacing it at every
+    call site **was** W6.2. A stale import would fail `typecheck` and `build`; both pass.
+  - *"Guard `stepHeadingRef.current` — the `<h1>` only renders in Guided."* The effect fires on
+    a step change, and `go` is reachable only from the guided branch, so the ref is non-null
+    wherever the effect can run. An optional chain here would add a branch nothing can cover.
+  - *"Tighten the `ErrorStrip` filter to use `SECTION_BY_ERROR_KEY`."* It already does.
+- **Deferred to W8 (its stated scope):** loading a different brief keeps the step cursor. W8.3
+  owns which step a load opens.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2295 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
