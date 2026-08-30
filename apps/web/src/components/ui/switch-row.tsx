@@ -39,10 +39,13 @@ export function SwitchRow({ label, checked, onToggle, disabled = false, children
           checked ? "border-brand-primary bg-brand-primary" : "border-border bg-surface-2",
         )}
       >
+        {/* The knob is the inverse of the rail, not a fixed white: off, the rail is
+            `surface-2`, which is near-white in the light theme, and a white knob on it
+            has no edge. `text-emphasis` reads on both rails in both themes. */}
         <span
           aria-hidden="true"
           className={cn(
-            "absolute size-3.5 rounded-full bg-white transition-[left]",
+            "absolute size-3.5 rounded-full bg-text-emphasis transition-[left]",
             checked ? "left-[1.1875rem]" : "left-0.5",
           )}
         />

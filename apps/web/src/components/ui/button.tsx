@@ -13,8 +13,11 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   primary:
     "bg-brand-primary text-white hover:bg-brand-primary-hover focus-visible:ring-brand-primary",
+  // `hover:bg-border-hover`, not a fraction of `border`: 40% of the border token over
+  // the surface token is a 1.07:1 shift in the light theme, which is not a hover, and
+  // the token named for hovering is the one that reads in both.
   secondary:
-    "bg-surface text-text-primary border border-border hover:bg-border/40",
+    "bg-surface text-text-primary border border-border hover:bg-border-hover",
   ghost: "bg-transparent text-text-primary hover:bg-surface",
   destructive: "bg-error text-white hover:opacity-90",
 };

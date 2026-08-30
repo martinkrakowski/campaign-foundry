@@ -1,8 +1,15 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, afterEach } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRun } from "@/__tests__/helpers";
 import { Header } from "../Header";
+
+// The theme toggle writes to <html>, which is shared by every test in this file and is
+// not the element `cleanup()` unmounts — the next test would inherit a light theme.
+afterEach(() => {
+  document.documentElement.classList.add("dark");
+  localStorage.clear();
+});
 
 describe("Header", () => {
   test("the mobile menu trigger is a 32px icon control, named and marked as a popup", () => {
@@ -37,5 +44,20 @@ describe("Header", () => {
     // the header line, and tailwind-merge keeps a single winner.
     expect(badge.className).toContain("text-[10px]");
     expect(badge.className).not.toContain("text-[11px]");
+  });
+
+  test("the header carries the theme toggle, named for the action it performs", async () => {
+    const user = userEvent.setup();
+    renderWithRun(<Header />);
+
+    // Reachable by its name alone: it is the only control in the app that says this.
+    const toggle = screen.getByRole("button", { name: "Switch to the light theme" });
+    expect(toggle.className).toContain("size-8");
+
+    await user.click(toggle);
+
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
+    expect(localStorage.getItem("cf:theme")).toBe("light");
+    expect(screen.getByRole("button", { name: "Switch to the dark theme" })).toBeTruthy();
   });
 });

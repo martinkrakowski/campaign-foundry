@@ -99,7 +99,12 @@ export function TelemetryDrawer({ open, onClose }: TelemetryDrawerProps) {
           </IconButton>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto bg-black p-4 font-mono text-[11px] leading-5">
+      {/* The log panel is a surface, not a black terminal. A ground painted `#000000`
+          in both themes cannot carry theme text: `text-text-primary` is near-black in
+          the light theme, which measured 1.18:1 — invisible — and the state colours are
+          darker still. `surface-2` is the panel-on-a-panel token, and the skeletons are
+          lifted to `border` so they do not vanish into it. */}
+      <div className="flex-1 overflow-y-auto bg-surface-2 p-4 font-mono text-[11px] leading-5">
         {log.length === 0 ? (
           // A run is in flight but has not spoken yet: the wait is announced by the
           // status sentence, and the skeleton only stands in for the lines to come.
@@ -108,8 +113,8 @@ export function TelemetryDrawer({ open, onClose }: TelemetryDrawerProps) {
               <p role="status" className="text-text-muted">
                 Waiting for the run to report…
               </p>
-              <Skeleton className="h-3 w-3/4" />
-              <Skeleton className="h-3 w-1/2" />
+              <Skeleton className="h-3 w-3/4 bg-border" />
+              <Skeleton className="h-3 w-1/2 bg-border" />
             </div>
           ) : (
             <div className="text-text-muted">[SYSTEM] Ready to orchestrate pipeline…</div>

@@ -30,6 +30,7 @@ export { IconButton, type IconButtonProps } from "./icon-button";
 export { Skeleton, type SkeletonProps } from "./skeleton";
 export { Eyebrow, type EyebrowProps, type EyebrowTag } from "./eyebrow";
 export { FieldLine, type FieldLineProps, type FieldLineTone } from "./field-line";
+export { ThemeToggle } from "./theme-toggle";
 export {
   DialogHead,
   DialogBody,

@@ -439,7 +439,12 @@ function Artboard({
         <button
           type="button"
           onClick={onPreview}
-          className="w-full rounded-full bg-white py-2 text-center text-sm font-semibold text-black transition-colors hover:bg-gray-200"
+          // The ring, not the fill, is what guarantees this control an edge. A motion tile
+          // keeps the scrim at /40 so the clip stays visible, so the pill's real ground is
+          // the video: over a white frame that composites to #999999 and a white pill is
+          // 2.85:1, under the 3:1 WCAG 1.4.11 wants. A dark ring reads on a light frame and
+          // the white fill reads on a dark one, so the boundary holds either way.
+          className="w-full rounded-full bg-white py-2 text-center text-sm font-semibold text-black ring-1 ring-scrim transition-colors hover:bg-gray-200"
         >
           Preview
         </button>
@@ -639,9 +644,13 @@ function MotionCell({
       />
       {children}
       {playFailed && !playing && (
+        // An opaque token ground, not a 70% scrim: the frame behind a clip runs from
+        // black to white, and a translucent ground hands its contrast to whatever the
+        // video happens to be showing. `text-error` on `surface` measures 7.9 : 1 light
+        // and 4.5 : 1 dark; on `#000000/70` it measured 1.3 : 1 in the light theme.
         <span
           role="status"
-          className="absolute bottom-2 left-2 z-20 rounded border border-error/50 bg-black/70 px-2 py-1 font-mono text-[10px] text-error"
+          className="absolute bottom-2 left-2 z-20 rounded border border-error/50 bg-surface px-2 py-1 font-mono text-[10px] text-error"
         >
           can&apos;t play
         </span>

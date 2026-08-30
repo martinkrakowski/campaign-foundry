@@ -184,7 +184,10 @@ describe("TelemetryDrawer", () => {
     const status = await screen.findByRole("status");
     expect(status.textContent).toContain("Waiting for the run to report");
     expect(screen.queryByText(/Ready to orchestrate/)).toBeNull();
-    expect(document.querySelectorAll('div[aria-hidden="true"].bg-surface-2').length).toBe(2);
+    // `bg-border`, not `Skeleton`'s own `bg-surface-2`: the log panel is `surface-2` now
+    // (a black panel cannot carry theme text — see TelemetryDrawer), and a skeleton that
+    // matched its ground would be no placeholder at all.
+    expect(document.querySelectorAll('div[aria-hidden="true"].bg-border').length).toBe(2);
   });
 });
 

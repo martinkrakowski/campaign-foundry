@@ -329,6 +329,19 @@ describe("GridPage", () => {
     await waitFor(() => expect(screen.getByText(/✗ 1 rejected/)).toBeTruthy());
   });
 
+  test("the Preview pill carries its own boundary, not the video's", async () => {
+    // The pill is white on a translucent scrim, so on a motion tile its ground is the clip
+    // itself: over a white frame `bg-scrim/40` composites to #999999 and a white pill is
+    // 2.85:1, under the 3:1 WCAG 1.4.11 asks of a control boundary. The ring is what makes
+    // the edge independent of the frame — drop it and the pill is legible only over dark
+    // video. Asserted as a class because the contrast has no other observable in jsdom.
+    seedPersistedRun([makeAsset()]);
+    renderWithRun(<GridPage />);
+    const pill = (await screen.findAllByText("Preview"))[0];
+    expect(pill.className).toContain("ring-scrim");
+    expect(pill.className).toMatch(/\bring-1\b/);
+  });
+
   test("opens and closes the full-size preview", async () => {
     const user = userEvent.setup();
     seedPersistedRun([makeAsset()]);

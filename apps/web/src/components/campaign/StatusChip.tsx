@@ -13,10 +13,13 @@ export function StatusChip({ state }: StatusChipProps) {
   const isNew = state.source.kind === "new";
   const hasApplied = state.appliedSnapshot !== null;
 
-  // Four states:
+  // Four states, four colours (UE-D11) — the tint, the text and the border all come
+  // from the same token, so a theme carries the whole chip. The third used to be a
+  // stock `yellow-400`; it read as a second `warning` and had no light-theme value at
+  // all, so it is now `--color-modified`, a state colour of its own.
   // 🔴 draft not applied (new, never applied)
   // 🟠 applied, never saved (applied but new)
-  // 🟡 applied, unsaved edits (applied and saved, but dirty)
+  // 🟣 applied, unsaved edits (applied and saved, but dirty)
   // 🟢 saved & applied (applied and not dirty)
 
   let label: string;
@@ -30,7 +33,7 @@ export function StatusChip({ state }: StatusChipProps) {
     color = "bg-warning/20 text-warning border-warning/50";
   } else if (dirtySave || dirtyApply) {
     label = "Applied, unsaved edits";
-    color = "bg-yellow-400/20 text-yellow-400 border-yellow-400/50";
+    color = "bg-modified/20 text-modified border-modified/50";
   } else {
     label = "Saved & applied";
     color = "bg-success/20 text-success border-success/50";

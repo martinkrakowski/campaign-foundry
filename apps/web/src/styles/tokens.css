@@ -6,11 +6,19 @@
  * scale in tailwind.config.ts). Change a value here and it propagates
  * everywhere without a TypeScript recompile. See DESIGN.md for the contract.
  *
- * This app runs in dark mode by default (the root layout sets `class="dark"`
- * on <html>); the `.dark` block below carries the "Firefly" palette.
+ * Dark is the default (the root layout sets `class="dark"` on <html>) and the `.dark`
+ * block below carries the "Firefly" palette, but **light is reachable**: the header's
+ * theme toggle takes the class off, so `:root` is a theme a user can actually see and
+ * every value below is measured against a light ground (see DESIGN.md §2, "Themes").
+ *
+ * `color-scheme` is declared on both blocks rather than left to the user agent: it is
+ * what makes native controls, form widgets, scrollbars and the default canvas follow the
+ * theme instead of staying light under a dark palette.
  */
 
 :root {
+  color-scheme: light;
+
   /* Brand — primary is the generated brand colour; adjust the others to taste */
   --color-brand-primary: #1473e6;
   --color-brand-primary-hover: color-mix(in srgb, var(--color-brand-primary) 85%, black);
@@ -24,16 +32,29 @@
   --color-border: #e2e8f0;
   --color-border-hover: #cbd5e1;
   --color-text-primary: #0f172a;
-  --color-text-secondary: #64748b;
-  --color-text-muted: #94a3b8;
+  /* The light ramp is a step darker than the slate ramp it was cut from: at slate-500
+     `secondary` and slate-400 `muted` both measured under 4.5:1 on a light surface, and
+     slate-400 was 2.3:1 — grey-on-white text no one could read. `muted` sits between
+     slate-500 and slate-600 because the ramp has no step there that clears 4.5:1 on
+     `surface-2`, the darkest ground these colours are painted on. */
+  --color-text-secondary: #475569;
+  --color-text-muted: #5b6b80;
   --color-text-emphasis: #0f172a;
   --color-scrim: #000000;
 
-  /* Semantic */
-  --color-success: #10b981;
-  --color-warning: #f59e0b;
-  --color-error: #ef4444;
-  --color-info: #3b82f6;
+  /* Semantic — the light values are the same hues carried down the ramp, not new ones.
+     A state colour is used two ways: as text on its own 20% tint (chips, pills, badges)
+     and as a solid ground behind white text (the destructive button). The dark values
+     fit the second job and fail the first on a light ground — `#ef4444` on `#ef4444`
+     over white is 2.9:1 — so light gets its own set, measured in DESIGN.md §2. */
+  --color-success: #065f46;
+  --color-warning: #92400e;
+  --color-error: #991b1b;
+  --color-info: #1e40af;
+  /* The fourth StatusChip state (applied, unsaved edits). It is a fifth state colour
+     rather than a second amber: UE-D11 requires the four chip states to stay
+     colour-distinct, and `warning` is already state two — see DESIGN.md §2. */
+  --color-modified: #6d28d9;
 
   /* Typography — Inter / Fira Code are loaded via next/font in the root layout,
      which sets --font-inter / --font-fira-code; these stacks add fallbacks. */
@@ -72,8 +93,14 @@
  * Dark theme — the "Firefly" palette (matches the HITL POC). Class-strategy by
  * default (the root layout adds `dark` to <html>). Only the tokens that differ
  * are overridden; everything else inherits from :root.
+ *
+ * The semantic colours are repeated here even though they are unchanged from the values
+ * this file used to share: light now carries its own set, so inheriting would make the
+ * shipped palette a side effect of a theme it does not belong to.
  */
 .dark {
+  color-scheme: dark;
+
   --color-background: #0f0f0f;
   --color-surface: #1c1c1c;
   --color-surface-2: #262626;
@@ -84,4 +111,11 @@
   --color-text-muted: #9e9e9e;
   --color-text-emphasis: #ffffff;
   --color-scrim: #000000;
+
+  /* Semantic — see :root for why these are stated rather than inherited. */
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-info: #3b82f6;
+  --color-modified: #c4b5fd;
 }
