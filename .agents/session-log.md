@@ -1196,6 +1196,18 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Left open:**
   - None.
 
+
+---
+
+## 2026-08-30 — W4 lane: the Sections outline and a classic estimate (branch feat/w4-sidebar-estimate)
+
+- **Mode:** Implementer (`opencode/big-pickle`), landed by the orchestrator — the CLI again stopped before committing.
+- **Changes:** `SectionOutline` published through `EditorPanelsProvider` **below** the `ModePanel` pair (GB-D4 keeps mode the first decision); `IdentitySection`'s inline copy of the section names deleted in favour of `sectionOrder` (GB-D18); the classic ad count extracted to `derive.ts` as `classicAdCount` and consumed by both `CommandBar` and the newly-published Estimate accordion, so a classic draft finally has a deliverables readout — it previously had none anywhere in the editor, because `EstimatePanel` mounted only inside `PolicySection` and `/campaigns/plan` refuses classic briefs.
+- **Decisions (orchestrator, closing the lane's coverage gap):**
+  - The lane left `BriefEditor.outlineActivate` and the outline's scroll spy uncovered, and two of the branches were **unreachable under a test renderer**, not merely untested: happy-dom lays nothing out, so `getBoundingClientRect().height` is always 0. Rather than exclude them, the spy is now exercised with stubbed geometry (two sections given real boxes, one above the threshold and one below) so the "this section is current" path runs for real.
+  - `SECTION_TITLES[id] ?? id` was a fallback no caller could reach. Removed by making the type total: `sectionOrder` now returns `SectionId[]` and the title map is `Record<SectionId, string>`. The house rule is to restructure an unreachable branch out of existence rather than ignore it, and a closed set is the honest way to say the lookup cannot miss.
+  - A first attempt added a `?? candidates[0]` fallback to `outlineActivate` on the theory that `find` was unreachable; a mutation check showed the test passed either way, so the theory was wrong and the fallback was itself the uncovered branch. Reverted.
+- **Left open:** W6 replaces `scrollToSection` with `revealSection` at the single call site `outlineActivate`, which is commented to say so.
 ---
 
 ## 2026-08-30 — W10 lane: step-content polish (branch feat/w10-polish)

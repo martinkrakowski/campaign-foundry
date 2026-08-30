@@ -322,6 +322,15 @@ export const estimateWorking = "Working out what you will get…";
 /** The planner could not be reached; the brief is unaffected. */
 export const estimateUnavailable = "Cannot work out the estimate right now.";
 
+// --- The Sections outline (D25) ---
+
+/** The sidebar group's legend above the numbered rows. */
+export const outlineLegend = "Sections";
+/** The aside: no issues, or how many things across the draft a visitor still has to fix. */
+export function outlineIssueCount(count: number): string {
+  return count === 0 ? "No issues" : `${count} ${count === 1 ? "thing" : "things"} to fix`;
+}
+
 /** The count slider's readout: what you asked for, against what the axes can make. */
 export function countReadout(count: number, ceiling: number): string {
   return `${count} ad${count === 1 ? "" : "s"} · up to ${ceiling}`;

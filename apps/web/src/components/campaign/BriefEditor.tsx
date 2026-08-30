@@ -51,6 +51,8 @@ import { scrollToSection } from "@/lib/scroll-to-section";
 import { BriefSelector } from "@/components/campaign/BriefSelector";
 import { HeadlinePoolDrawer } from "@/components/campaign/HeadlinePoolDrawer";
 import { ModePanel } from "@/components/ui/mode-panel";
+import { SectionOutline } from "@/components/ui/section-outline";
+import { EstimatePanel } from "@/components/campaign/EstimatePanel";
 import type { CampaignMode } from "@/components/campaign/editor-state";
 
 const LEAVE_PROMPT = "You have unsaved changes. Are you sure you want to leave?";
@@ -303,37 +305,71 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
 
   /** Section errors before the first validation pass lands. */
 
+  // W4.2: the outline's rows crawl their section into view and hand it focus. This is
+  // the outline's one navigation call site — W6 swaps `scrollToSection` for
+  // `revealSection` here, which also switches the guided step and focuses the step
+  // heading, so that lane changes one line instead of searching for every caller.
+  const outlineActivate = useCallback((section: string) => {
+    scrollToSection(section);
+    // Same candidate strategy as `scrollToSection`: a section placed in the left bar
+    // exists twice below `lg`, so prefer the copy that is actually laid out.
+    const target = Array.from(
+      document.querySelectorAll<HTMLElement>(`#${section}, [data-section="${section}"]`),
+    ).find((el) => el.getClientRects().length > 0);
+    if (!target) return;
+    // A `<section>` is not focusable by default; make it so for the handoff, without
+    // pulling the scroll position back (the scroll above already placed it). Assigned
+    // unconditionally — it is idempotent, and guarding it would add a branch no test
+    // can reach, since every section here starts at the default -1.
+    target.tabIndex = -1;
+    target.focus({ preventScroll: true });
+  }, []);
+
   // D4/U1: the mode chooser is the first decision a brief makes, so it is the first
   // thing the bar shows. Published like every other editor panel — the page keeps the
   // dispatch, the bar only places it — which also gives the mobile menu the chooser.
+  // The Sections outline (D25) sits directly below the pair: below the mode, but
+  // before the read-only brief, so mode stays the first decision (GB-D4).
   useEffect(() => {
-    setTopPanels(<ModePanel mode={state.mode} onSetMode={(mode: CampaignMode) => dispatch({ type: "setMode", mode })} />);
+    setTopPanels(
+      <>
+        <ModePanel mode={state.mode} onSetMode={(mode: CampaignMode) => dispatch({ type: "setMode", mode })} />
+        <SectionOutline mode={state.mode} visibleErrors={visibleErrors} onActivate={outlineActivate} />
+      </>,
+    );
     return () => setTopPanels(null);
-  }, [state.mode, setTopPanels]);
+  }, [state.mode, visibleErrors, setTopPanels, outlineActivate]);
 
   // Publish the sections that live in the left bar while this editor is mounted. The
   // page keeps the state, dispatch and validation and republishes on every change; the
-  // bar only places them.
+  // bar only places them. The Estimate travels with it (D31): it was previously inside
+  // PolicySection alone, so a Classic draft had no deliverables readout at all — now it
+  // is published for both modes, randomized through the planner and classic derived.
   const policyErrors = Object.keys(sectionErrorsVisible("policy")).length;
   useEffect(() => {
     setPanels(
-      state.mode === "variation" ? (
-        // The panel renders in the sidebar, outside this page's DOM subtree, so it
-        // needs its own capture: a click on an axis card there is still "the user
-        // has been to the policy section" (D1).
-        <div onClickCapture={touchSectionFromEvent} data-section="policy">
-        <Accordion
-          title="Variation Policy"
-          aside={
-            policyErrors > 0 ? (
-              <ErrorPill count={policyErrors} />
-            ) : null
-          }
-        >
-          <PolicySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("policy")} compact />
+      <>
+        {state.mode === "variation" ? (
+          // The panel renders in the sidebar, outside this page's DOM subtree, so it
+          // needs its own capture: a click on an axis card there is still "the user
+          // has been to the policy section" (D1).
+          <div onClickCapture={touchSectionFromEvent} data-section="policy">
+          <Accordion
+            title="Variation Policy"
+            aside={
+              policyErrors > 0 ? (
+                <ErrorPill count={policyErrors} />
+              ) : null
+            }
+          >
+            <PolicySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("policy")} compact />
+          </Accordion>
+          </div>
+        ) : null}
+        <Accordion title="Estimate">
+          <EstimatePanel state={state} />
         </Accordion>
-        </div>
-      ) : null,
+      </>,
     );
     return () => setPanels(null);
     // sectionErrors only reads what `errors` already covers.

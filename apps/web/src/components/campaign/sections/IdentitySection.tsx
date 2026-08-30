@@ -7,6 +7,7 @@ import type { FieldErrors } from "@/components/campaign/validate";
 import { keyForLabel } from "@/components/campaign/error-sections";
 import { ErrorPill } from "@/components/ui/error-pill";
 import { useSectionMode } from "@/components/campaign/SectionModeContext";
+import { sectionOrder } from "./index";
 
 import * as messages from "@/components/campaign/messages";
 
@@ -36,11 +37,13 @@ export function SectionShell({
   onBlurCapture?: React.FocusEventHandler<HTMLElement>;
 }) {
   const mode = useSectionMode();
-  // D17: Derive numeral from id and mode
-  const order = mode === "variation"
-    ? ["identity", "copy", "products", "output", "policy"]
-    : ["identity", "copy", "products", "treatments", "output"];
-  const index = order.indexOf(id);
+  // D17: Derive numeral from id and mode — `sectionOrder` is the one ordered list of
+  // sections (GB-D18), so the heading and the sidebar outline cannot disagree on it.
+  const order = sectionOrder(mode);
+  // `id` is a plain string on the props (SectionShell is used with ad-hoc ids too), so
+  // widen the closed list for the lookup rather than narrowing the prop and rippling a
+  // type change through every caller.
+  const index = (order as readonly string[]).indexOf(id);
   const numeral = index >= 0 ? String(index + 1).padStart(2, "0") : "";
   // Strip leading "N · " from title (e.g., "1 · Identity" → "Identity")
   const strippedTitle = title.replace(/^\d+ · /, "");
