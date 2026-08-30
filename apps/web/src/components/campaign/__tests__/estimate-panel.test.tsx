@@ -2,6 +2,7 @@ import { describe, test, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import * as messages from "../messages";
 import { EstimatePanel } from "../EstimatePanel";
+import { classicAdCount } from "../derive";
 import { initialEditorState, editorReducer, PLAN_DEBOUNCE_MS, type EditorState } from "../editor-state";
 import { API } from "@/lib/run-context";
 
@@ -184,6 +185,33 @@ describe("EstimatePanel", () => {
     rerender(<EstimatePanel state={{ ...ready, formats: ["static", "motion"] }} />);
     await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.length).toBeGreaterThan(before));
     expect(String(vi.mocked(globalThis.fetch).mock.calls[0][0])).toContain(`${API}/campaigns/plan`);
+  });
+});
+
+describe("EstimatePanel — the classic draft (W4.3)", () => {
+  const classicWith = (treatments: number): EditorState => {
+    let s = planReady(); // a product with an id, but mode variation
+    s = editorReducer(s, { type: "setMode", mode: "brief" });
+    for (let i = 0; i < treatments; i += 1) s = editorReducer(s, { type: "addTreatment" });
+    return s;
+  };
+
+  test("a blank classic brief shows the not-ready sentence", () => {
+    render(<EstimatePanel state={initialEditorState()} />);
+    expect(screen.getByText(messages.estimateNotReady)).toBeTruthy();
+  });
+
+  test("a classic draft derives its count from products × ratios × treatments", () => {
+    render(<EstimatePanel state={classicWith(1)} />);
+    const sentence = screen.getByText(/You will get 3 ads/);
+    expect(sentence.textContent).toBe(
+      "You will get 3 ads — 1 square, 1 tall, 1 wide — for 1 product. No AI image calls.",
+    );
+  });
+
+  test("classic derivation is shared with the CommandBar, so both spell the count alike", () => {
+    // classicAdCount is the single formula the panel and the command bar both read.
+    expect(classicAdCount(2, 4)).toBe(24);
   });
 });
 

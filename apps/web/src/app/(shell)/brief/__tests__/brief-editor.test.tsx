@@ -832,13 +832,17 @@ describe("BriefPage — data flow", () => {
     // input and its Pick button, so the input is addressed by role
     await user.click(await screen.findByRole("button", { name: "Advanced" }));
     await user.type(await screen.findByRole("spinbutton", { name: "Seed" }), "-1");
-    await waitFor(() => expect(screen.getByLabelText("1 issue")).toBeTruthy());
+    // W4.1 surfaces the same single issue twice on purpose: the outline's "Variation
+    // Policy" row and the accordion's aside both carry the ErrorPill, so this is a
+    // plural surface, not a count of places — assert the number of issues, not nodes.
+    await waitFor(() => expect(screen.getAllByLabelText("1 issue").length).toBeGreaterThan(0));
+    expect(screen.queryAllByLabelText("2 issues")).toHaveLength(0);
     // Count, Min distance and the coverage floors are bounded controls that cannot be
     // driven out of range, so the second issue comes from emptying the ratio axis.
     for (const ratio of ["1:1", "9:16", "16:9"]) {
       await user.click(screen.getByRole("button", { name: ratio }));
     }
-    await waitFor(() => expect(screen.getByLabelText("2 issues")).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByLabelText("2 issues").length).toBeGreaterThan(0));
   });
 
   test("an axis keeps its last option — deselecting it would draw nothing", async () => {
@@ -1168,4 +1172,38 @@ describe("BriefPage — capabilities and motion", () => {
       expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false),
     );
   });
+
+  test("an outline row scrolls its section into view and hands it focus", async () => {
+    const user = userEvent.setup();
+    const scrollIntoView = vi.fn();
+    // happy-dom lays nothing out, so `getClientRects` is empty for every candidate and
+    // the fallback in `outlineActivate` is what selects the target — the same fallback
+    // `scrollToSection` relies on. Without it this handoff is unreachable, not merely
+    // untested.
+    Element.prototype.scrollIntoView = scrollIntoView;
+    renderWithRun(<Editor />);
+    const row = await screen.findByRole("button", { name: /Identity/ });
+    await user.click(row);
+    expect(scrollIntoView).toHaveBeenCalled();
+    const section = document.querySelector('#identity, [data-section="identity"]') as HTMLElement | null;
+    expect(section).not.toBeNull();
+    expect(document.activeElement).toBe(section);
+  });
+
+
+  test("an outline row whose section has left the page does nothing", async () => {
+    const user = userEvent.setup();
+    Element.prototype.scrollIntoView = vi.fn();
+    renderWithRun(<Editor />);
+    const row = await screen.findByRole("button", { name: /Identity/ });
+    // Delete the target first: the row then has nothing to hand focus to, which is the
+    // branch a real page reaches when a section is unmounted (guided mode, later).
+    document.querySelectorAll('#identity, [data-section="identity"]').forEach((el) => el.remove());
+    await user.click(row);
+    expect(document.querySelector('#identity, [data-section="identity"]')).toBeNull();
+    // Focus stays on the row the user pressed; nothing else is grabbed. (A click focuses
+    // its own button, so the meaningful assertion is that no section took focus.)
+    expect(document.activeElement).toBe(row);
+  });
+
 });

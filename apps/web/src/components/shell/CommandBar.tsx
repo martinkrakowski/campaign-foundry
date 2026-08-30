@@ -3,7 +3,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { assetKey, encodeMinutes, useRun } from "@/lib/run-context";
-import { ASPECT_RATIOS } from "@/lib/aspect-ratios";
+import { classicAdCount } from "@/components/campaign/derive";
 import { planCampaign, type PlanResult } from "@/lib/briefs-api";
 
 /** Match wizard PLAN_DEBOUNCE_MS without importing wizard-state. */
@@ -42,8 +42,9 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
   const isVariation = brief.mode === "variation";
 
   // What a full run will (re)generate: products × aspect ratios × treatments.
-  const expectedCount =
-    brief.products.length * ASPECT_RATIOS.length * (brief.treatments?.length ?? 1);
+  // The formula lives in `derive.ts` (D31) so the sidebar's classic estimate and this
+  // readout state the same number rather than each guessing.
+  const expectedCount = classicAdCount(brief.products.length, brief.treatments?.length);
 
   useEffect(() => {
     if (!isVariation) {

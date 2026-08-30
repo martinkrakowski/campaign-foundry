@@ -5,6 +5,8 @@ import type { EditorState } from "@/components/campaign/editor-state";
 import { canPlan, toBrief, PLAN_DEBOUNCE_MS } from "@/components/campaign/editor-state";
 import { planCampaign, type PlanResult, type PlanVariant } from "@/lib/briefs-api";
 import { ratioDisplayName } from "@/components/campaign/display-names";
+import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import { classicAdCount } from "@/components/campaign/derive";
 import * as messages from "@/components/campaign/messages";
 
 /**
@@ -21,7 +23,59 @@ function ratioSplit(variants: readonly PlanVariant[]): { label: string; count: n
   return [...counts].map(([ratio, count]) => ({ label: ratioDisplayName(ratio), count }));
 }
 
+/**
+ * The estimate, both modes (D31). A Randomized draft asks the planner — the API's
+ * per-axis plan — while a Classic draft is refused by that endpoint, so its
+ * deliverables count is derived locally from products × ratios × treatments. The
+ * planner's vocabulary never reaches the screen either way (D6).
+ */
 export function EstimatePanel({ state }: { state: EditorState }) {
+  if (state.mode === "brief") {
+    return <ClassicEstimate state={state} />;
+  }
+  return <VariationEstimate state={state} />;
+}
+
+/**
+ * Classic: no planner endpoint exists (plan.post.ts refuses classic briefs), so the
+ * count is derived in the editor and split evenly across the canonical ratios.
+ */
+function ClassicEstimate({ state }: { state: EditorState }) {
+  const products = state.products.filter((product) => product.id.length > 0).length;
+  // A classic draft only says anything once it has a treatment to count; until then it
+  // reads like any other not-filled-in estimate rather than claiming "0 ads" (GB-D1).
+  const ready = state.treatments.length > 0;
+  if (!ready) {
+    return (
+      <div className="rounded-lg border border-border bg-surface p-4">
+        <h4 className="font-mono text-[11px] uppercase tracking-widest text-text-muted">Estimate</h4>
+        <p className="mt-2 text-[13px] text-text-muted">{messages.estimateNotReady}</p>
+      </div>
+    );
+  }
+  const creatives = classicAdCount(products, state.treatments.length);
+  const perRatio = creatives / RATIO_VALUES.length;
+  const ratios = RATIO_VALUES.map((ratio) => ({ label: ratioDisplayName(ratio), count: perRatio }));
+  return (
+    <div className="rounded-lg border border-border bg-surface p-4">
+      <h4 className="font-mono text-[11px] uppercase tracking-widest text-text-muted">Estimate</h4>
+      <p className="mt-2 text-[13px] text-text-primary">
+        {messages.estimateSentence({
+          creatives,
+          ratios,
+          products,
+          genaiCalls: 0,
+        })}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Randomized: ask the planner, debounced, and degrade rather than hang on a failed or
+ * unreachable endpoint. The estimate appears once the draft is plannable (canPlan).
+ */
+function VariationEstimate({ state }: { state: EditorState }) {
   const [plan, setPlan] = useState<PlanResult | null>(null);
   const ready = canPlan(state);
 

@@ -37,8 +37,6 @@ import {
   HEADLINE_POOL_REF,
   approvedHeadlines,
 } from "@/components/campaign/editor-state";
-import { EstimatePanel } from "@/components/campaign/EstimatePanel";
-
 
 /**
  * The card variant of an axis: each option previews what the compositor will
@@ -417,7 +415,6 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
         </fieldset>
           <HeadlineAxisToggle state={state} dispatch={dispatch} />
         </Disclosure>
-        <EstimatePanel state={state} />
       </div>
     </SectionShell>
   );

@@ -45,3 +45,17 @@ export function clampPolicy(state: EditorState): EditorState {
   }
   return state.countNotice === null ? state : { ...state, countNotice: null };
 }
+
+/**
+ * How many creatives a classic brief yields: products × every aspect ratio ×
+ * treatments. Classic draws one set per ratio (W1: it never narrows to the selected
+ * platforms), so every ratio in the canonical set counts. `treatments` is optional on
+ * a stored brief, so the absent-or-empty distinction is the caller's: pass the length
+ * when the key exists, `undefined` when a brief simply has no treatments block.
+ *
+ * This is the estimate's local truth for a classic draft (D31): the planner refuses
+ * classic briefs, so the editor derives the deliverables count instead of asking.
+ */
+export function classicAdCount(products: number, treatments: number | undefined): number {
+  return products * RATIO_VALUES.length * (treatments ?? 1);
+}
