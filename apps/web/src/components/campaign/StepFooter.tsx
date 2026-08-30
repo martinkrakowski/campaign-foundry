@@ -54,18 +54,7 @@ export function StepFooter({ statusText, onBack, onNext, nextLabel, nudgeKey }: 
           </Button>
         ) : null}
       </div>
-      <style>{`
-        .kf-step-nudge {
-          animation: kf-step-nudge 350ms ease-in-out 1;
-        }
-        @keyframes kf-step-nudge {
-          25% { transform: translateX(-5px); }
-          75% { transform: translateX(4px); }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .kf-step-nudge { animation: none; }
-        }
-      `}</style>
+
     </footer>
   );
 }

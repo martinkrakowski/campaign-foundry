@@ -133,6 +133,24 @@ describe("W6.7 error bucket ↔ section totality", () => {
     expect(SECTION_BY_ERROR_KEY).not.toHaveProperty("motion");
   });
 
+  // W6.7's stated criterion, in both directions: adding a section with no step, or a
+  // step that is neither a section nor the declared `review`, must fail here.
+  test.each(["brief", "variation"] as const)(
+    "%s: every section has a step, and every step but review is a section",
+    (mode) => {
+      const sections = sectionOrder(mode);
+      const steps = [...sections, "review"];
+
+      for (const section of sections) expect(steps).toContain(section);
+      for (const step of steps) {
+        if (step === "review") continue;
+        expect(sections).toContain(step as SectionId);
+        expect(SECTION_TITLES).toHaveProperty(step);
+      }
+      expect(steps).toHaveLength(sections.length + 1);
+    },
+  );
+
   test("motion's host is a section that exists in every mode, so the chip is always reachable", () => {
     // The property that actually matters. A motion chip reveals its *host*, and in
     // Guided that means switching to the host's step — so a host absent from a mode's

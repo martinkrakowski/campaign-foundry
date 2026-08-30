@@ -174,7 +174,7 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   // The reveal that drove a step change already pointed at the step's own content, so
   // the step-change focus lands nowhere else. Consumed by the step-focus effect.
   const suppressStepHeading = useRef(false);
-  const skippedStepHeading = useRef(false);
+  const lastFocusedStep = useRef<number | null>(null);
   const [nudgeKey, setNudgeKey] = useState(0);
   // SHELL-55: the guided step heading, the focus handoff target on a step change.
   const stepHeadingRef = useRef<HTMLHeadingElement | null>(null);
@@ -446,10 +446,14 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   // heading is mounted for every guided step (including review), so the call needs no
   // guard: a non-null ref here is guaranteed by construction.
   useEffect(() => {
-    if (!skippedStepHeading.current) {
-      skippedStepHeading.current = true;
-      return;
-    }
+    // Keyed off the step actually changing rather than a "have I run before" flag.
+    // React StrictMode invokes an effect twice on mount, and a flag flipped by the
+    // first pass lets the second one through — which stole focus on first paint in
+    // development. Comparing the previous step is idempotent: a repeated run sees no
+    // change and does nothing.
+    const previous = lastFocusedStep.current;
+    lastFocusedStep.current = stepIndex;
+    if (previous === null || previous === stepIndex) return;
     if (suppressStepHeading.current) {
       suppressStepHeading.current = false;
       return;
@@ -648,7 +652,11 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   // The errors behind one step. `errors` is keyed by every bucket once validation has
   // landed, but the first paint carries the empty put-state — so the bucket read still
   // falls back, and the guided first paint is what exercises that side. Motion folds
-  // into its Output host, exactly as the FloatingBar's strip treats it.
+  // into its Output host. `ErrorStrip` deliberately does NOT: a strip chip is a
+  // *scroll target*, and motion has its own (`#motion`, inside the Output panel), so
+  // folding it there would land the user on the section instead of the field. The two
+  // differ because they answer different questions — which sections are incomplete,
+  // versus which buckets hold errors — not because they drifted.
   const stepSectionErrors = useCallback(
     (step: StepId): FieldErrors => {
       if (step === "review") return {};

@@ -1352,3 +1352,41 @@ To keep this file out of version control, add `.agents/session-log.md` to
   "Closes #136", which is lane W2a's already-merged PR; retitled.
 - **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
   **2266 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
+
+### 2026-08-30 — W6 review round (independent reviewer: `agy/gemini-3.1-pro-high`)
+
+- **Mode:** Orchestrator. Seven findings; six valid, one refuted on evidence.
+- **Fixed:**
+  - **A mode flip moved the user without asking.** The cursor was a bare integer, and the two
+    lists disagree at the same ordinal — classic `[… treatments, output]`, randomized
+    `[… output, policy]`. Standing on **Output** (index 4) and flipping mode landed you on
+    **Variation Policy**. The cursor now remembers the step *id* and follows it, falling back
+    to the remembered ordinal for `treatments`, the one step a flip really removes. Both arms
+    tested.
+  - **StrictMode stole focus on first paint.** `skippedStepHeading` was a "have I run before"
+    flag flipped by the effect's first pass, so React's double invocation let the second pass
+    through and focused the step heading on mount in development. Now keyed off the step
+    actually changing, which is idempotent under a repeated run.
+  - **W6.7's stated criterion was not the test that shipped.** The suite asserted a bijection
+    between error buckets and section titles, not the steps↔sections totality the task named.
+    Added, per mode and in both directions.
+  - **The nudge was a `<style>` element inside `StepFooter`**, with its own hand-rolled
+    reduced-motion query — a per-instance stylesheet outside the audited animation budget.
+    Moved to `globals.css` as a one-shot in `@layer utilities` and added to the **named**
+    `prefers-reduced-motion` list. Confirmed in the built CSS, not assumed: the utility, the
+    keyframes and the reduced-motion entry are all present.
+  - `toHaveBeenCalled()` → `toHaveBeenCalledTimes(1)` on the deferred scroll; it fires once.
+  - **A comment described behaviour the code did not have** — it claimed `ErrorStrip` folds
+    motion into Output "exactly as the FloatingBar's strip treats it". It does not, and should
+    not: a strip chip is a *scroll target* and motion has its own (`#motion`). `StatusLine`
+    folds because it lists **sections**; `ErrorStrip` does not because it lists **buckets**.
+    They answer different questions; the comment now says so.
+- **Refuted:** *"`bg-error/10`, `bg-error/30`, `border-error/50` evaluate to empty on the pinned
+  Tailwind."* Exactly backwards — that is the defect **lane W0 fixed**, by moving the scale to
+  `color-mix(… calc(<alpha-value> * 100%) …)`. `src/__tests__/tailwind-alpha.test.ts` compiles
+  the real config and asserts `bg-error/20` and `border-error/50` emit; all three are default
+  steps.
+- **One unreachable branch removed rather than excluded** (house rule): the cursor's
+  `id === undefined` guard could not be reached, and `indexOf` already answers `-1`.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2270 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.

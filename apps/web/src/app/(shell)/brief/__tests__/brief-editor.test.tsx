@@ -1428,8 +1428,9 @@ describe("BriefPage — guided presentation (W6)", () => {
     // The step switched to Products (the section was unmounted at click time)…
     await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
     expect(document.getElementById("products")).toBeTruthy();
-    // …and the deferred scroll found it once it existed.
-    expect(scroller).toHaveBeenCalled();
+    // …and the deferred scroll found it once it existed — once, not repeatedly.
+    // `toHaveBeenCalled()` alone is this repo's known decorative assertion.
+    expect(scroller).toHaveBeenCalledTimes(1);
     // Scroll-only: the pressed chip keeps focus, the heading is not grabbed.
     expect(document.activeElement).toBe(chip);
   });

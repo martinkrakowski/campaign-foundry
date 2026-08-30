@@ -33,14 +33,24 @@ export function useStepNavigation(steps: readonly string[]): StepNavigation {
   const upper = Math.max(0, steps.length - 1);
   const clamp = useMemo(() => (n: number) => Math.max(0, Math.min(upper, n)), [upper]);
 
-  // The raw values may outlive a list change (mode flips replace the list under the
-  // cursor); everything the UI consumes is the clamped view, so a step that is no
-  // longer there cannot be reached or marked visited.
-  const [rawIndex, setRawIndex] = useState(0);
+  // The cursor remembers *which step* it is on, not just where it sat. A mode flip
+  // replaces the list under it, and the two lists disagree at the same ordinal —
+  // classic is [.., treatments, output], randomized [.., output, policy] — so a
+  // purely positional cursor silently moves the user from Output to Variation Policy
+  // on a flip. Following the id keeps them where they were; the remembered ordinal is
+  // the fallback for the one step a flip really does remove (`treatments`).
+  // `steps[0]` is asserted, not guarded: the same non-empty contract the clamp above
+  // relies on. A guard here would be an unreachable branch, and the house rule is to
+  // restructure one away rather than exclude it from coverage.
+  const [cursor, setCursor] = useState<{ id: string; index: number }>(() => ({
+    id: steps[0] as string,
+    index: 0,
+  }));
+  const byId = steps.indexOf(cursor.id);
   const [rawMaxVisited, setRawMaxVisited] = useState(0);
   const [direction, setDirection] = useState<1 | -1>(1);
 
-  const index = clamp(rawIndex);
+  const index = byId === -1 ? clamp(cursor.index) : byId;
 
   const go = useCallback(
     (requested: number) => {
@@ -48,11 +58,11 @@ export function useStepNavigation(steps: readonly string[]): StepNavigation {
       // Asking for a step outside the list walks to the nearest one in it — the
       // outline's rows ask for the same thing, and the guided variant of them needs
       // the same answer.
-      setRawIndex(next);
+      setCursor({ id: steps[next] as string, index: next });
       setRawMaxVisited((visited) => Math.max(visited, next));
       setDirection(next > index ? 1 : -1);
     },
-    [clamp, index],
+    [clamp, index, steps],
   );
 
   return { index, direction, maxVisited: clamp(rawMaxVisited), go };

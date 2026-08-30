@@ -81,4 +81,41 @@ describe("useStepNavigation", () => {
     act(() => result.current.go(9));
     expect(result.current.index).toBe(2);
   });
+
+  // The two real lists disagree at the same ordinal: classic is
+  // [identity, copy, products, treatments, output, review] and randomized is
+  // [identity, copy, products, output, policy, review]. Index 4 is `output` in one
+  // and `policy` in the other, so a positional cursor moves the user without asking.
+  const CLASSIC = ["identity", "copy", "products", "treatments", "output", "review"];
+  const RANDOMIZED = ["identity", "copy", "products", "output", "policy", "review"];
+
+  test("a mode flip keeps the user on the same step, not the same index", () => {
+    const { result, rerender } = renderHook(
+      (list: readonly string[]) => useStepNavigation(list),
+      { initialProps: CLASSIC as readonly string[] },
+    );
+    act(() => result.current.go(4)); // `output` in classic
+    expect(CLASSIC[result.current.index]).toBe("output");
+
+    rerender(RANDOMIZED);
+
+    // Index 4 is now `policy`. Following the id instead lands on 3, still `output`.
+    expect(result.current.index).toBe(3);
+    expect(RANDOMIZED[result.current.index]).toBe("output");
+  });
+
+  test("a step the flip really removes falls back to the remembered ordinal", () => {
+    const { result, rerender } = renderHook(
+      (list: readonly string[]) => useStepNavigation(list),
+      { initialProps: CLASSIC as readonly string[] },
+    );
+    act(() => result.current.go(3)); // `treatments` — randomized has no such step
+    expect(CLASSIC[result.current.index]).toBe("treatments");
+
+    rerender(RANDOMIZED);
+
+    // Nothing to follow, so the ordinal stands: index 3, which is `output` there.
+    expect(result.current.index).toBe(3);
+    expect(RANDOMIZED[result.current.index]).toBe("output");
+  });
 });
