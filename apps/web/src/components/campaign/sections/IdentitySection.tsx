@@ -161,7 +161,7 @@ export function IdentitySection({ state, dispatch, errors }: SectionProps) {
               onClick={copyBriefId}
               disabled={!state.briefId}
               className="font-mono text-[10px] uppercase tracking-wider text-text-muted transition-colors hover:text-text-emphasis disabled:opacity-40"
-              aria-label={messages.briefIdCopyAria}
+              aria-label={copied ? messages.briefIdCopied : messages.briefIdCopyAria}
             >
               {copied ? messages.briefIdCopied : messages.briefIdCopy}
             </button>

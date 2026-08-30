@@ -76,7 +76,7 @@ export function TelemetryDrawer({ open, onClose }: TelemetryDrawerProps) {
             onClick={copyLog}
             disabled={log.length === 0}
             className="font-mono text-[10px] uppercase tracking-wider text-text-muted transition-colors hover:text-text-emphasis disabled:opacity-40"
-            aria-label="Copy telemetry to clipboard"
+            aria-label={copied ? undefined : "Copy telemetry to clipboard"}
           >
             {copied ? "Copied ✓" : "Copy"}
           </button>
