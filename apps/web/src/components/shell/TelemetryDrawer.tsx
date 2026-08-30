@@ -80,7 +80,11 @@ export function TelemetryDrawer({ open, onClose }: TelemetryDrawerProps) {
             onClick={copyLog}
             disabled={log.length === 0}
             className="font-mono text-[10px] uppercase tracking-wider text-text-muted transition-colors hover:text-text-emphasis disabled:opacity-40"
-            aria-label={copied ? undefined : "Copy telemetry to clipboard"}
+            // Stated in both states, matching the brief-id copy button. Dropping the
+            // label to let the text name the control is not safe as a general rule
+            // here — inside a <label>, the computed name comes out as the field's text
+            // instead — so both copy controls name their copied state explicitly.
+            aria-label={copied ? "Copied ✓" : "Copy telemetry to clipboard"}
           >
             {copied ? "Copied ✓" : "Copy"}
           </button>

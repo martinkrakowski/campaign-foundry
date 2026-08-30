@@ -95,7 +95,9 @@ describe("IdentitySection", () => {
     expect(copiedBtn.textContent).toBe("Copied ✓");
 
     await new Promise((r) => setTimeout(r, 1600));
-    expect(copyBtn.textContent).toBe("Copy");
+    // Re-queried: the name is what reverts, and asserting it is what proves the label
+    // came back rather than the text alone changing.
+    expect(screen.getByRole("button", { name: "Copy brief ID" }).textContent).toBe("Copy");
   });
 
   test("copy brief ID does nothing when clipboard is unavailable", () => {
