@@ -94,7 +94,11 @@ function PreviewPicture(props: Pick<PreviewShowcaseProps, "layout" | "tone" | "p
  */
 export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
   return (
-    <aside className="hidden w-64 shrink-0 flex-col gap-3 border-l border-border bg-surface p-4 xl:flex">
+    <aside
+      role="complementary"
+      aria-label={messages.previewLegend}
+      className="hidden w-64 shrink-0 flex-col gap-3 border-l border-border bg-surface p-4 xl:flex"
+    >
       <p className="font-mono text-[11px] uppercase tracking-widest text-text-muted">{messages.previewLegend}</p>
       <PreviewPicture {...props} className="block h-auto w-full" />
       <div className="flex items-center gap-2">
@@ -121,7 +125,6 @@ export function PreviewStrip(props: PreviewShowcaseProps): ReactNode {
       <div className="flex shrink-0 items-center gap-2">
         <PreviewSwatch primaryColor={props.primaryColor} />
         <PreviewCaption platformId={props.platformId} ratio={props.ratio} />
-        <p className="font-mono text-[11px] text-text-muted">{messages.previewStep(props.step, props.stepCount)}</p>
       </div>
     </div>
   );

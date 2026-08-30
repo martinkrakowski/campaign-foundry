@@ -67,6 +67,13 @@ describe("PreviewDock", () => {
     expect(svg.getAttribute("viewBox")).toBe("0 0 1080 1920");
   });
 
+  test("is labelled as a complementary landmark region using previewLegend", () => {
+    const { container } = render(<PreviewDock {...showcase} platformId="instagram-story" ratio="1:1" />);
+    const aside = container.querySelector("aside")!;
+    expect(aside.getAttribute("role")).toBe("complementary");
+    expect(aside.getAttribute("aria-label")).toBe(messages.previewLegend);
+  });
+
   test("a headline-less brief shows name and step only", () => {
     const { container } = render(<PreviewDock {...showcase} headline={undefined} />);
     expect(container.textContent).toContain("Summer Launch");
@@ -88,5 +95,14 @@ describe("PreviewStrip", () => {
     expect(text).toContain("Square · LinkedIn");
     expect(text).toContain("Summer Launch");
     expect(text).toContain(messages.previewStep(2, 6));
+  });
+
+  test("renders exactly one step readout in the strip", () => {
+    const { container } = render(<PreviewStrip {...showcase} platformId="linkedin" />);
+    const stepText = messages.previewStep(2, 6);
+    const matches = Array.from(container.querySelectorAll("p")).filter(
+      (p) => p.textContent === stepText,
+    );
+    expect(matches).toHaveLength(1);
   });
 });
