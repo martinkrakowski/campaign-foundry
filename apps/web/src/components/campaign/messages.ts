@@ -477,3 +477,14 @@ export function previewCaption(ratioLabel: string, platformLabel: string): strin
 export function previewStep(step: number, total: number): string {
   return `${step} / ${total}`;
 }
+
+// --- Theme (W3) ---
+
+/**
+ * The theme toggle's name while the app is dark. It names the *action*, not the state:
+ * "Light theme" would leave a screen reader announcing where the user already is, and
+ * the control would need a second mechanism to say what a press does.
+ */
+export const themeToLight = "Switch to the light theme";
+/** The theme toggle's name while the app is light. */
+export const themeToDark = "Switch to the dark theme";

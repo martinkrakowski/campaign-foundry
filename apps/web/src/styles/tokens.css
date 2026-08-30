@@ -6,11 +6,19 @@
  * scale in tailwind.config.ts). Change a value here and it propagates
  * everywhere without a TypeScript recompile. See DESIGN.md for the contract.
  *
- * This app runs in dark mode by default (the root layout sets `class="dark"`
- * on <html>); the `.dark` block below carries the "Firefly" palette.
+ * Dark is the default (the root layout sets `class="dark"` on <html>) and the `.dark`
+ * block below carries the "Firefly" palette, but **light is reachable**: the header's
+ * theme toggle takes the class off, so `:root` is a theme a user can actually see and
+ * every value below is measured against a light ground (see DESIGN.md §2, "Themes").
+ *
+ * `color-scheme` is declared on both blocks rather than left to the user agent: it is
+ * what makes native controls, form widgets, scrollbars and the default canvas follow the
+ * theme instead of staying light under a dark palette.
  */
 
 :root {
+  color-scheme: light;
+
   /* Brand — primary is the generated brand colour; adjust the others to taste */
   --color-brand-primary: #1473e6;
   --color-brand-primary-hover: color-mix(in srgb, var(--color-brand-primary) 85%, black);
@@ -74,6 +82,8 @@
  * are overridden; everything else inherits from :root.
  */
 .dark {
+  color-scheme: dark;
+
   --color-background: #0f0f0f;
   --color-surface: #1c1c1c;
   --color-surface-2: #262626;

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useState } from "react";
 import { cn } from "@/lib/cn";
-import { Eyebrow, IconButton } from "@/components/ui";
+import { Eyebrow, IconButton, ThemeToggle } from "@/components/ui";
 import { ModelSelector } from "./ModelSelector";
 import { MobileMenu } from "./MobileMenu";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
@@ -73,6 +73,7 @@ export function Header() {
         <Eyebrow as="span" className="hidden text-[10px] lg:inline">
           HITL Mode Active
         </Eyebrow>
+        <ThemeToggle />
         {/* Hamburger — mobile only. */}
         <IconButton
           label="Open menu"

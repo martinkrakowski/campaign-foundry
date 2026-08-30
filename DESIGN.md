@@ -15,9 +15,11 @@ the pipeline, not this file.
    `tailwind.config.ts` (`bg-surface`, `text-text-muted`, `border-border`, `rounded-lg`…).
    A raw hex value or a stock Tailwind colour (`text-red-400`) in a component is a defect —
    it will not follow a theme change and does not exist in the other theme.
-2. **Dark first.** The root layout sets `class="dark"` on `<html>`; the dark block in
-   `tokens.css` is the "Firefly" palette the product ships with. Light is the un-classed
-   `:root` and must keep working, but it is not what users see.
+2. **Dark first, and light is reachable.** The root layout renders `class="dark"` on
+   `<html>`; the dark block in `tokens.css` is the "Firefly" palette the product ships
+   with and the one the server sends. Light is the un-classed `:root`, and the header's
+   theme toggle takes the class off — so light is a theme a user can actually see, and
+   every value in both blocks is measured against the ground it is painted on (§2).
 3. **Dense and operational, not editorial.** This is a review console: small type,
    monospace identifiers, tight spacing, status encoded in form (chips, pills, badges) as
    well as colour. No hero areas, no marketing rhythm.
@@ -65,6 +67,27 @@ Semantic colours (success / warning / error) carry state. The brand blue is *not
 colour; do not use it to mean "good".
 
 Every colour maps to a `color-mix(in srgb, var(--color-x) calc(<alpha-value> * 100%), transparent)` form in `tailwind.config.ts`. This permits native Tailwind opacity modifiers like `bg-error/20` and `hover:bg-border/40` on tokens without defining separate `-alpha` scales in CSS. Arbitrary alphas require bracket syntax, e.g. `bg-black/[0.08]`.
+
+### Themes
+
+Two themes, one bit of state: the `dark` class on `<html>`. Everything else follows from it,
+including `color-scheme`, which is declared in **both** blocks so native controls, form
+widgets, scrollbars and the default canvas follow the palette instead of staying light under a
+dark theme.
+
+| Part | Where | Why it is there |
+|---|---|---|
+| `class="dark"` | `app/layout.tsx` | The server's answer. It has no `localStorage`, so it always sends dark. |
+| `THEME_BOOT_SCRIPT` | inline, first child of `<body>` | Corrects the class **before first paint**. It cannot go in `<head>`: App Router renders head children into the flight payload but not into the document shell, so they only apply after hydration — which is the flash this exists to prevent. |
+| `cf:theme` (`"light"` \| `"dark"`) | `localStorage` | The remembered choice. Anything that is not exactly `"light"` reads as dark, so no stored value ever needs migrating. |
+| `ThemeToggle` | `Header` | The control. 32px `IconButton`; see §4. |
+| `readStoredTheme` / `storeTheme` / `applyTheme` | `lib/theme.ts` | Every access is wrapped: a private window, a disabled store and a full quota are ordinary, and a toggle that throws takes the header down with it. A blocked or absent store reads as dark and never throws. |
+
+The toggle's first render is always the dark default and the stored theme is adopted on mount,
+not in the initialiser — the server has no storage, so reading it during render would produce
+one tree on the server and another in the browser. `Disclosure` is the same shape for the same
+reason. The boot script has already corrected the class by the time the toggle mounts, so what
+is painted and what the control says agree.
 
 ### Typography
 
@@ -253,6 +276,15 @@ Skeletal by design — patterns to extend, not a library.
   still be removed. Values loaded from a brief are clamped into place rather than producing
   an out-of-range column. It carries a `lanes` slot, which the copy timeline (L6) mounts into
   so beats line up against the same seconds axis.
+- **ThemeToggle** (W3.1 / SHELL-08) — the header's 32px `IconButton`, sun when dark and moon
+  when light. **The accessible name states the action, not the state** — *"Switch to the light
+  theme"* while dark — so it is deliberately *not* `aria-pressed`: a name that says where the
+  user is leaves nothing to say about the button they are on, and a pressed state on a control
+  whose label changes would report the same fact twice in two directions. (§7's `aria-pressed`
+  rule is about state *toggles* — `SwitchRow`, a play/pause — whose label is fixed; this is an
+  action button whose label moves with the state.) It renders the server's dark default first
+  and adopts the stored theme on mount, so it never disagrees with what the pre-paint script
+  has already put on `<html>`.
 
 ### Shell (`src/components/shell`)
 
@@ -406,7 +438,9 @@ after typing.
 - Every interactive element has an accessible name: visible text, `aria-label`, or a
   wrapping `<label>`. Inputs never rely on `placeholder` alone.
 - Toggles use `aria-pressed`; menus `aria-haspopup="menu"` + `aria-expanded`; dialogs
-  `role="dialog"` + `aria-modal` + a label; live messages `role="status"`.
+  `role="dialog"` + `aria-modal` + a label; live messages `role="status"`. The one exception
+  is a control whose name already states the action — `ThemeToggle` — where a pressed state
+  would say the same thing twice (§4).
 - Keyboard: Escape closes anything that floats; focus is trapped inside modal overlays
   (`exerciseFocusTrap` in tests proves it); `focus-visible` rings on every control.
 - Colour never carries meaning alone — pair it with text, an icon, or a count.
