@@ -232,5 +232,5 @@ export function useBecameTrue(watched: boolean, subject: unknown): number {
     });
   }, [watched, subject]);
 
-  return state?.count ?? 0;
+  return state !== null && state.subject === subject ? state.count : 0;
 }

@@ -407,6 +407,20 @@ describe("useBecameTrue", () => {
     expect(result.current).toBe(0);
   });
 
+  test("returns 0 on the render where subject changes, dropping a stale count", () => {
+    const { result, rerender } = renderHook(({ valid, step }) => useBecameTrue(valid, step), {
+      initialProps: { valid: false, step: "identity" },
+    });
+    rerender({ valid: true, step: "identity" }); // count is 1
+    expect(result.current).toBe(1);
+
+    // This rerender flips the subject. `state` will still hold "identity" (count 1)
+    // during the render, before the effect updates it to "copy" (count 0).
+    // The returned value should not expose that stale 1.
+    rerender({ valid: false, step: "copy" });
+    expect(result.current).toBe(0);
+  });
+
 });
 
 describe("STEP_TRANSITION_MS", () => {
