@@ -52,6 +52,9 @@ export const localizedHeadlineLabel = "Localized headline (optional)";
 export const localizedHeadlinePlaceholder = "e.g. Bleib wild. Bleib hydriert.";
 export const extraHeadlines = "Extra headlines…";
 export const extraHeadlinesAria = "Manage Headline Pool";
+export const moreIdeas = "More ideas…";
+export const moreIdeasAria = "Manage Headline Pool";
+export const headlineSuggestionsLabel = "Suggestions";
 
 // --- Products ---
 

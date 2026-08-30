@@ -159,6 +159,93 @@ describe("CopySection", () => {
     expect(counter).toBeTruthy();
     expect(counter.className).toContain("text-error");
   });
+
+  test("renders headline suggestions and clicking one applies it", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    const testPool = {
+      briefId: "camp",
+      generatedAt: "2026-01-01T00:00:00Z",
+      model: "test-model",
+      entries: [
+        { id: "h1", text: "Reach New Heights", status: "approved" as const },
+        { id: "h2", text: "Conquer the Summit", status: "approved" as const },
+        { id: "h3", text: "Rejected Idea", status: "rejected" as const },
+      ],
+    };
+    render(
+      <CopySection
+        state={state({ pool: testPool, campaignMessage: "Reach New Heights" })}
+        dispatch={dispatch}
+        errors={{}}
+      />,
+    );
+
+    expect(screen.getByText("Suggestions")).toBeTruthy();
+    expect(screen.getByText("Reach New Heights")).toBeTruthy();
+    expect(screen.getByText("Conquer the Summit")).toBeTruthy();
+    expect(screen.queryByText("Rejected Idea")).toBeNull();
+
+    const firstCard = screen.getByRole("button", { name: "Reach New Heights" });
+    expect(firstCard.getAttribute("aria-pressed")).toBe("true");
+
+    const secondCard = screen.getByRole("button", { name: "Conquer the Summit" });
+    expect(secondCard.getAttribute("aria-pressed")).toBe("false");
+    await user.click(secondCard);
+    expect(dispatch).toHaveBeenCalledWith({ type: "patch", patch: { campaignMessage: "Conquer the Summit" } });
+  });
+
+  test("clicking More ideas button calls onOpenPool in variation mode", async () => {
+    const user = userEvent.setup();
+    const onOpenPool = vi.fn();
+    render(
+      <CopySection
+        state={state({ mode: "variation" })}
+        dispatch={vi.fn()}
+        errors={{}}
+        onOpenPool={onOpenPool}
+      />,
+    );
+
+    const btn = screen.getByRole("button", { name: /More ideas/i });
+    await user.click(btn);
+    expect(onOpenPool).toHaveBeenCalledTimes(1);
+  });
+
+  test("auto-fetches pool when pool is null and dispatches loadPool", async () => {
+    const dispatch = vi.fn();
+    mockFetch(() =>
+      json({
+        pool: {
+          briefId: "camp",
+          entries: [{ id: "h1", text: "Loaded Headline", status: "approved" }],
+        },
+      }),
+    );
+
+    const { unmount } = render(<CopySection state={state({ pool: null })} dispatch={dispatch} errors={{}} />);
+
+    await waitFor(() =>
+      expect(dispatch).toHaveBeenCalledWith({
+        type: "loadPool",
+        briefId: "camp",
+        pool: {
+          briefId: "camp",
+          entries: [{ id: "h1", text: "Loaded Headline", status: "approved" }],
+        },
+      }),
+    );
+    unmount();
+  });
+
+  test("auto-fetch failure is caught gracefully", async () => {
+    const dispatch = vi.fn();
+    mockFetch(() => new Response("500", { status: 500 }));
+
+    render(<CopySection state={state({ pool: null })} dispatch={dispatch} errors={{}} />);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "loadPool" }));
+  });
 });
 
 describe("OutputSection", () => {
