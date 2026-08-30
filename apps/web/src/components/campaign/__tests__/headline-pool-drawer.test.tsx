@@ -3,6 +3,7 @@ import { useReducer } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HeadlinePoolDrawer } from "../HeadlinePoolDrawer";
+import { exerciseFocusTrap } from "@/__tests__/helpers";
 import { editorReducer, initialEditorState, type EditorState } from "../editor-state";
 
 const json = (body: unknown, status = 200) =>
@@ -283,17 +284,23 @@ describe("HeadlinePoolDrawer", () => {
     expect(await screen.findByRole("status")).toBeTruthy();
   });
 
-  test("it closes from the button and from the backdrop", async () => {
+  test("it closes from the button, backdrop, Escape, and traps focus", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     routes({ get: () => json(poolBody([])) });
     const { container } = render(<Harness initial={state()} onClose={onClose} />);
     await screen.findByText("No headlines yet.");
 
-    await user.click(screen.getByText("Close"));
+    const drawer = screen.getByRole("dialog", { name: "Headline Pool" });
+    exerciseFocusTrap(drawer);
+
+    await user.keyboard("{Escape}");
     expect(onClose).toHaveBeenCalledTimes(1);
 
-    await user.click(container.querySelector(".absolute.inset-0") as HTMLElement);
+    await user.click(screen.getByText("Close"));
     expect(onClose).toHaveBeenCalledTimes(2);
+
+    await user.click(container.querySelector(".absolute.inset-0") as HTMLElement);
+    expect(onClose).toHaveBeenCalledTimes(3);
   });
 });

@@ -610,7 +610,6 @@ describe("BriefPage — data flow", () => {
 
   test("declining the prompt keeps the current draft when starting a new brief", async () => {
     const user = userEvent.setup();
-    globalThis.confirm = vi.fn(() => false);
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<Editor />);
 
@@ -620,7 +619,10 @@ describe("BriefPage — data flow", () => {
     await user.click(screen.getAllByText(/^(New brief\.\.\.|summer-hydration-2026)$/)[0]);
     await user.click(screen.getAllByText("New brief...").slice(-1)[0]);
 
-    expect(globalThis.confirm).toHaveBeenCalled();
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    expect(dialog).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "Stay" }));
+
     expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(before);
   });
 

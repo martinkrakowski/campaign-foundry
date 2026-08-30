@@ -8,6 +8,7 @@ import type { EditorState, EditorAction } from "@/components/campaign/editor-sta
 import type { FieldErrors } from "@/components/campaign/validate";
 import { SectionShell, Field } from "./IdentitySection";
 import { LogoField } from "@/components/campaign/LogoField";
+import { AssetPickerDrawer } from "@/components/campaign/AssetPickerDrawer";
 import { uploadAsset, isBriefsApiError, unknownErrorMessage } from "@/lib/briefs-api";
 import { assetFileName, fileToBase64 } from "@/components/campaign/editor-state";
 
@@ -17,6 +18,7 @@ function ProductRow({
   dispatch,
   uploadingKeys,
   onLogoFile,
+  onChooseFromBin,
   errors,
 }: {
   product: EditorState["products"][number];
@@ -24,6 +26,7 @@ function ProductRow({
   dispatch: Dispatch<EditorAction>;
   uploadingKeys: ReadonlySet<number>;
   onLogoFile: (key: number, productId: string, file: File) => Promise<void> | void;
+  onChooseFromBin: (key: number) => void;
   errors: FieldErrors;
 }) {
   const [editingId, setEditingId] = useState(false);
@@ -111,10 +114,12 @@ function ProductRow({
         >
           <LogoField
             value={product.logoPath}
+            productColor={product.primaryColor}
             onChange={(path) =>
               dispatch({ type: "setProduct", key: product.key, patch: { logoPath: path } })
             }
             onUploadFile={(file) => onLogoFile(product.key, product.id, file)}
+            onChooseFromBin={() => onChooseFromBin(product.key)}
             uploading={uploadingKeys.has(product.key)}
             invalid={Boolean(errors[`product-${index}-logo`])}
           />
@@ -146,6 +151,7 @@ export function ProductsSection({
 }) {
   const [uploadError, setUploadError] = useState<string | undefined>();
   const [uploadingKeys, setUploadingKeys] = useState<ReadonlySet<number>>(new Set());
+  const [assetPickerKey, setAssetPickerKey] = useState<number | null>(null);
 
   const onLogoFile = async (key: number, productId: string, file: File) => {
     setUploadError(undefined);
@@ -207,9 +213,27 @@ export function ProductsSection({
           dispatch={dispatch}
           uploadingKeys={uploadingKeys}
           onLogoFile={onLogoFile}
+          onChooseFromBin={(key) => setAssetPickerKey(key)}
           errors={errors}
         />
       ))}
+
+      {assetPickerKey !== null ? (
+        <AssetPickerDrawer
+          briefId={state.briefId}
+          open={true}
+          onClose={() => setAssetPickerKey(null)}
+          selectedPath={state.products.find((p) => p.key === assetPickerKey)?.logoPath}
+          onSelect={(asset) => {
+            dispatch({
+              type: "setProduct",
+              key: assetPickerKey,
+              patch: { logoPath: `assets/inputs/${state.briefId}/${asset.name}` },
+            });
+            setAssetPickerKey(null);
+          }}
+        />
+      ) : null}
     </SectionShell>
   );
 }

@@ -4,12 +4,17 @@ import { useId, type ChangeEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import * as messages from "@/components/campaign/messages";
+import { formatBytes } from "@/lib/briefs-api";
 
 export interface LogoFieldProps {
   /** The current logo path (e.g. "assets/inputs/camp/hydra-logo.png"). */
   readonly value: string;
   /** Optional resolved thumbnail data URL or preview URL (e.g. from L5 asset store or local upload). */
   readonly thumbnailUrl?: string;
+  /** Primary product colour used to tint the type icon badge. */
+  readonly productColor?: string;
+  /** Optional file size metadata to display in the TYPE · size meta line. */
+  readonly fileSize?: string | number;
   /** Callback when logo path changes. */
   readonly onChange: (path: string) => void;
   /** Callback when a local file is picked for upload. */
@@ -30,7 +35,7 @@ export interface LogoFieldProps {
 
 /**
  * Brand asset upload control that renders as a dashed tile when unset and transitions
- * to an image thumbnail or filename badge once set (D12 / L3.4).
+ * to an image thumbnail or filename badge once set (D12 / L3.4 / W10.2).
  *
  * Displays the asset path as 10px monospace metadata and houses the Upload action.
  * The Choose from bin action renders only when wired via `onChooseFromBin`.
@@ -38,6 +43,8 @@ export interface LogoFieldProps {
 export function LogoField({
   value,
   thumbnailUrl,
+  productColor,
+  fileSize,
   onChange,
   onUploadFile,
   onChooseFromBin,
@@ -116,17 +123,25 @@ export function LogoField({
                   className="max-h-full max-w-full object-contain"
                 />
               ) : (
-                <span className="font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted">
+                <span
+                  className="font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted"
+                  style={productColor ? { color: productColor } : undefined}
+                >
                   {fileExt}
                 </span>
               )}
             </div>
             <div className="min-w-0 flex-1">
               <span
-                className="block font-mono text-[10px] text-text-muted truncate max-w-[200px] sm:max-w-xs"
+                className="block font-mono text-[11px] font-medium text-text-primary truncate max-w-[200px] sm:max-w-xs"
                 title={value}
               >
-                {value}
+                {value.includes("/") ? value.slice(value.lastIndexOf("/") + 1) : value}
+              </span>
+              <span className="flex items-center gap-1 font-mono text-[10px] text-text-muted">
+                <span className="uppercase tracking-wider text-text-muted">{fileExt}</span>
+                <span>·</span>
+                <span>{typeof fileSize === "number" ? formatBytes(fileSize) : fileSize ?? "file"}</span>
               </span>
             </div>
           </div>
@@ -160,7 +175,11 @@ export function LogoField({
             invalid ? "border-error bg-error/5" : "border-border bg-surface-2/30 hover:border-border-hover",
           )}
         >
-          <div className="flex items-center justify-center size-8 rounded-full bg-surface-2 text-text-muted" aria-hidden="true">
+          <div
+            className="flex items-center justify-center size-8 rounded-full bg-surface-2 text-text-muted"
+            style={productColor ? { color: productColor } : undefined}
+            aria-hidden="true"
+          >
             <svg viewBox="0 0 20 20" fill="currentColor" className="size-4">
               <path
                 fillRule="evenodd"

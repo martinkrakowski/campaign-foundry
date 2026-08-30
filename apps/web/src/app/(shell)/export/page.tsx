@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { API, assetKey, assetLabel, useRun } from "@/lib/run-context";
+import { MiniChip } from "@/components/ui";
 
 /** Always-visible PLATFORM_PROFILES (static) — same list as wizard STATIC_PLATFORMS. */
 const STATIC_PLATFORMS = ["instagram-feed", "linkedin", "x"] as const;
@@ -227,16 +228,9 @@ export default function ExportPage() {
 
 function CheckBadge({ label, verdict }: { label: string; verdict: "pass" | "fail" }) {
   return (
-    <span
-      title={label}
-      className={
-        verdict === "pass"
-          ? "rounded border border-success/50 bg-success/20 px-2 py-0.5 text-[10px] text-success"
-          : "rounded border border-error/50 bg-error/20 px-2 py-0.5 text-[10px] text-error"
-      }
-    >
+    <MiniChip title={label} tone={verdict === "pass" ? "success" : "error"}>
       {verdict === "pass" ? "PASS" : "FAIL"}
-    </span>
+    </MiniChip>
   );
 }
 

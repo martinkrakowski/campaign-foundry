@@ -52,6 +52,9 @@ export const localizedHeadlineLabel = "Localized headline (optional)";
 export const localizedHeadlinePlaceholder = "e.g. Bleib wild. Bleib hydriert.";
 export const extraHeadlines = "Extra headlines…";
 export const extraHeadlinesAria = "Manage Headline Pool";
+export const moreIdeas = "More ideas…";
+export const moreIdeasAria = "Manage Headline Pool";
+export const headlineSuggestionsLabel = "Suggestions";
 
 // --- Products ---
 
@@ -209,6 +212,9 @@ export const statusApplyRefusal =
   "Applied, but video cannot be made on this computer right now — Generate will wait until it is set up.";
 /** `status.leavePrompt` */
 export const statusLeavePrompt = "You have changes that are not saved yet — leave anyway?";
+export const confirmDialogTitle = "Unsaved edits";
+export const confirmDialogStay = "Stay";
+export const confirmDialogLeave = "Leave";
 /** `status.saveFailed` */
 export const statusSaveFailed = "Could not save — try Save again.";
 /** `status.saveAsFailed` */
@@ -455,4 +461,19 @@ export function descriptorBeats(count: number): string {
 /** `descriptor.headline` */
 export function descriptorHeadline(text: string): string {
   return `"${text}"`;
+}
+
+// --- Creative preview (W9) ---
+
+/** The dock/rail's legend. */
+export const previewLegend = "Preview";
+/** The preview's caption when no platform has been picked yet. */
+export const previewNoPlatform = "no platform yet";
+/** The preview's caption — ratio and platform are display labels, never raw values (D18). */
+export function previewCaption(ratioLabel: string, platformLabel: string): string {
+  return `${ratioLabel} · ${platformLabel}`;
+}
+/** The preview's step readout, e.g. "2 / 6". */
+export function previewStep(step: number, total: number): string {
+  return `${step} / ${total}`;
 }
