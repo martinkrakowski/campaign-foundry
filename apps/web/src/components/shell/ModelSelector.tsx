@@ -33,7 +33,7 @@ export function ModelSelector({ onModelChange }: ModelSelectorProps) {
         onClick={() => setOpen(true)}
         aria-haspopup="dialog"
         title="Change image model"
-        className="flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-3 py-1 font-mono text-[11px] text-text-primary transition-colors hover:border-border-hover"
+        className="flex min-w-0 max-w-[9rem] items-center gap-1.5 truncate whitespace-nowrap rounded-full border border-border bg-surface-2 px-3 py-1 font-mono text-[11px] text-text-primary transition-colors hover:border-border-hover sm:max-w-none"
       >
         <span className="text-brand-primary" aria-hidden>◆</span>
         <span className="hidden text-text-muted sm:inline">Model:</span> {labelFor(selectedModel)}

@@ -1,5 +1,5 @@
 import { describe, test, expect, afterEach, beforeEach, vi } from "vitest";
-import { render, screen, within, waitFor } from "@testing-library/react";
+import { render, screen, within, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, useEffect, type ReactElement } from "react";
 import { nextMock, renderWithRun, ShellProviders } from "@/__tests__/helpers";
@@ -163,6 +163,45 @@ describe("Header — Generate (D32)", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
+  test("applying a brief clears the standing refusal", async () => {
+    const user = userEvent.setup();
+    nextMock().nav.pathname = "/brief";
+    renderWithRun(
+      <>
+        <ApplyBrief />
+        <Header />
+      </>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    expect(screen.getByRole("status").textContent).toBe(generateNoBrief);
+
+    // Applying is the answer to the refusal, so the refusal must stop standing —
+    // otherwise the header keeps telling the user to do the thing they just did.
+    await user.click(screen.getByRole("button", { name: "apply" }));
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+  });
+
+  test("applying a brief leaves an unrelated notice alone", async () => {
+    const user = userEvent.setup();
+    renderWithRun(
+      <>
+        <ApplyBrief />
+        <Header />
+      </>,
+    );
+
+    await user.click(screen.getByTitle("Change image model"));
+    const dialog = await screen.findByRole("dialog", { name: "Select image model" });
+    await user.click(within(dialog).getByText("Procedural (offline)"));
+    expect(screen.getByRole("status").textContent).toBe(modelChanged("Procedural (offline)"));
+
+    // The clear is scoped to the refusal: a model-change notice is about something
+    // else and applying a brief does not answer it.
+    await user.click(screen.getByRole("button", { name: "apply" }));
+    expect(screen.getByRole("status").textContent).toBe(modelChanged("Procedural (offline)"));
+  });
+
   test("a prompt the user accepts navigates AND starts the run", async () => {
     const user = userEvent.setup();
     renderDirty(
@@ -221,6 +260,22 @@ describe("Header — the brand mark and the telemetry control", () => {
     expect(nextMock().router.push).toHaveBeenCalledTimes(1);
     expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
   });
+
+  // The same guard lane W1 added to MobileMenu, which was never mirrored here: a
+  // modified or non-primary click is the browser's own job (new tab / new window /
+  // download) and must not be intercepted into a dirty prompt.
+  test.each(["metaKey", "ctrlKey", "shiftKey", "altKey", "button"] as const)(
+    "a %s click on the brand mark is left to the browser, even with unsaved edits",
+    (modifier) => {
+      nextMock().router.push.mockClear();
+      renderDirty(<Header />);
+      fireEvent.click(screen.getByRole("link", { name: /Campaign Pipeline/ }), {
+        [modifier]: modifier === "button" ? 1 : true,
+      });
+      expect(nextMock().router.push).not.toHaveBeenCalled();
+      expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
+    },
+  );
 
   test("a brand-mark prompt the user refuses does not navigate", async () => {
     const user = userEvent.setup();

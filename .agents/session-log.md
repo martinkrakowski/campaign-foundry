@@ -1375,3 +1375,35 @@ To keep this file out of version control, add `.agents/session-log.md` to
     up here, and the first draft failed with "Invalid Chai property".
 - **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
   **2260 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
+
+### 2026-08-30 — W5 bot-thread sweep (12 threads on PR #139)
+
+- **Mode:** Orchestrator. Every claim checked against the code before acting; five valid, seven refuted.
+- **Fixed:**
+  - **Modified clicks on the brand mark.** `handleTabClick` called `preventDefault()` on every
+    dirty click without checking modifiers, so a Cmd/Ctrl/Shift/Alt or middle click opened the
+    unsaved-edits flow instead of a new tab. This is the **same defect lane W1 fixed in
+    `MobileMenu`**, never mirrored here. Guard added, with W1's own `test.each` over all five.
+  - **A standing refusal outlived its cause.** Pressing Generate with nothing applied set the
+    notice; applying a brief flipped `briefApplied` but left the notice on screen, so the header
+    kept telling the user to do the thing they had just done. Cleared by effect, **scoped to
+    that one string** so a model-change notice survives — with a test for each direction.
+  - `type="button"` on the header's Generate (`Button` sets no default, unlike `IconButton`).
+  - `aria-controls` on the telemetry control, with `TELEMETRY_DRAWER_ID` exported from
+    `TelemetryDrawer` so the id has one spelling rather than two.
+  - **Mobile overflow:** the right cluster gained two controls this lane, and at 320px the model
+    label pushed the row past the viewport. Cluster is `min-w-0`; the model label truncates at
+    `9rem` below `sm`. Not measured — jsdom has no layout — so this is containment, not proof.
+- **Refuted:**
+  - **`briefApplied` should compare `brief.id` rather than object identity** (four separate
+    threads). Reference equality is the *more* correct test, not a weaker one: it asks "is this
+    still the object the provider started from", which is exactly the uncommitted state. The
+    proposed `brief.id !== DEFAULT_BRIEF.id` would falsely refuse a brief a user legitimately
+    applied under that id, and content equality would refuse any brief identical to the default.
+  - **"`guardedPush` may be asynchronous; await it."** It returns `boolean`, not a Promise.
+  - **`aria-pressed` as a fallback because "IconButton does not forward unknown props".** It
+    does — `icon-button.tsx` spreads `...rest`, which is how the existing `aria-expanded`
+    assertion passes. A second state attribute would also report the same fact twice.
+  - **`aria-live="polite"` on the status paragraph.** `role="status"` already implies it.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2267 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
