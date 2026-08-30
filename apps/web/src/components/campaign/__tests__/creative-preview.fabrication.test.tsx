@@ -51,13 +51,13 @@ function previewFrom(state: EditorState) {
  * plus the display labels and messages the surfaces are allowed to show. A raw ratio,
  * a raw platform id, or a word the compositor never prints is a violation on sight.
  */
-function corpusFor(state: EditorState): string {
+function corpusTokensFor(state: EditorState): Set<string> {
   const caption = messages.previewCaption(
     ratioDisplayName(derivePreviewRatio(state.platforms[0], state.variation.ratio[0])),
     platformDisplayName(state.platforms[0]),
   );
   const fallbackCaption = messages.previewCaption(ratioDisplayName("1:1"), messages.previewNoPlatform);
-  return [
+  const corpusString = [
     state.campaignName,
     state.campaignMessage,
     messages.previewLegend,
@@ -65,6 +65,7 @@ function corpusFor(state: EditorState): string {
     caption,
     fallbackCaption,
   ].join(" ");
+  return new Set(corpusString.split(/\s+/).filter((t) => t.length > 0));
 }
 
 /** Tokenize while keeping the headline's line wrap honest (lines must not fuse words). */
@@ -81,7 +82,12 @@ function previewTokens(view: RenderResult): string[] {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   let node = walker.nextNode();
   while (node !== null) {
-    if (node.parentElement !== null && !node.parentElement.closest("svg")) {
+    // Skip only what the <text>/<tspan> pass above already collected — not the whole
+    // SVG subtree. Excluding every descendant of <svg> would let text smuggled into a
+    // <foreignObject> escape the guard entirely, which is the one thing it exists to
+    // stop.
+    const parent = node.parentElement;
+    if (parent !== null && parent.closest("text") === null) {
       push((node as Text).data);
     }
     node = walker.nextNode();
@@ -91,7 +97,7 @@ function previewTokens(view: RenderResult): string[] {
 
 describe("the previews only ever speak the brief and the sanctioned labels", () => {
   const state = niche();
-  const corpus = corpusFor(state);
+  const corpusTokens = corpusTokensFor(state);
 
   test.each([
     ["PreviewDock", <PreviewDock key="dock" {...previewFrom(state)} />],
@@ -101,14 +107,32 @@ describe("the previews only ever speak the brief and the sanctioned labels", () 
       "PreviewDock without a platform",
       <PreviewDock key="noplatform" {...previewFrom(state)} platformId={undefined} ratio={undefined} />,
     ],
-  ] as const)("%s renders text that is all substrings of the brief-derived corpus", (_name, ui) => {
+  ] as const)("%s renders text that is all exact members of the brief-derived corpus token set", (_name, ui) => {
     const view = render(ui);
     const tokens = previewTokens(view);
     expect(tokens.length).toBeGreaterThan(0);
     for (const token of tokens) {
-      expect(token, `token "${token}" has no home in the sanctioned corpus`).toSatisfy((t: string) =>
-        corpus.includes(t),
-      );
+      expect(
+        corpusTokens.has(token),
+        `token "${token}" has no exact match in the sanctioned corpus token set`,
+      ).toBe(true);
+    }
+  });
+
+  test("no rendered preview contains the mock's invented chrome, whatever the tokeniser does", () => {
+    // Direct and tokenizer-independent: the substring guard above proves every token has
+    // a home in the corpus, but a subtle tokenisation bug could weaken it. This asserts
+    // the rejected chrome (§2.3) against the rendered text itself, so the two checks
+    // fail for different reasons and cannot both be defeated by one mistake.
+    for (const ui of [
+      <PreviewDock key="d" {...previewFrom(state)} />,
+      <PreviewStrip key="s" {...previewFrom(state)} />,
+    ]) {
+      const { container } = render(ui);
+      const rendered = container.textContent ?? "";
+      for (const fake of ["12.4K", "1,203", "8,741", "@", "original sound", "Following", "For You"]) {
+        expect(rendered, `the preview must never render "${fake}"`).not.toContain(fake);
+      }
     }
   });
 
@@ -116,11 +140,11 @@ describe("the previews only ever speak the brief and the sanctioned labels", () 
     // The separators "·" and "/" are sanctioned (the caption and step readout use
     // them), so test the substantive tokens: the numbers, the handle, the credit.
     for (const fake of ["12.4K", "1,203", "8,741", "@handle", "original", "sound", "Following", "For you"]) {
-      expect(corpus, `corpus must stay clean of "${fake}"`).not.toContain(fake);
+      expect(corpusTokens.has(fake), `corpus must stay clean of "${fake}"`).toBe(false);
     }
     // Teeth: had a fake rail been rendered, its tokens would need a corpus home to
     // pass the gate, and the corpus is closed to them.
-    expect(["12.4K", "1,203", "8,741", "@handle"].map((t) => corpus.includes(t))).toEqual([
+    expect(["12.4K", "1,203", "8,741", "@handle"].map((t) => corpusTokens.has(t))).toEqual([
       false,
       false,
       false,
