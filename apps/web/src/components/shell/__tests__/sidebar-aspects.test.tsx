@@ -61,6 +61,19 @@ describe("SidebarContent — the Aspects readout derives per run mode", () => {
     expect(screen.getByText(ALL_RATIOS)).toBeTruthy();
   });
 
+  test("a randomized brief whose ratio axis is empty falls back to every ratio", async () => {
+    const user = userEvent.setup();
+    renderWithRun(
+      createElement(BriefSwitcher, {
+        brief: { ...BASE, mode: "variation", variation: { axes: { ratio: [] } } },
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Switch" }));
+    // An emptied ratio axis is legal (DESIGN.md §5), and `[].join()` is "" — the readout
+    // must show the default set, not a blank field.
+    expect(screen.getByText(ALL_RATIOS)).toBeTruthy();
+  });
+
   test("a variation-mode brief with no variation block still falls back to every ratio", async () => {
     const user = userEvent.setup();
     renderWithRun(createElement(BriefSwitcher, { brief: { ...BASE, mode: "variation" } }));

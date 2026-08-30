@@ -80,7 +80,10 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     const mode = brief.mode ?? "brief";
     if (mode === "variation") {
       const ratios = brief.variation?.axes?.ratio;
-      return ratios?.join(", ") ?? RATIO_VALUES.join(", ");
+      // `length`, not `??`: the ratio axis is the one axis DESIGN.md §5 allows to be
+      // emptied, so `[]` is a legal saved state — and `[].join(", ")` is "", which
+      // would render the Aspects field blank rather than falling back.
+      return ratios?.length ? ratios.join(", ") : RATIO_VALUES.join(", ");
     }
     // classic brief or undefined mode
     return RATIO_VALUES.join(", ");
