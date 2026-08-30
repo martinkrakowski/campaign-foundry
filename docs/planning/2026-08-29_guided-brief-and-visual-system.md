@@ -1,7 +1,7 @@
 # Guided Brief & Visual System — Architecture & Development Plan
 
 **Date:** 2026-08-29
-**Status:** Draft v1.0. Synthesised from a static HTML inspiration mock supplied by the user: **246 discrete items** (tokens, colours, layout, components, interactions, copy, motion, a11y, data, features, gating) inventoried in four slices, each classified against the live codebase, **19 of them contested by a second adversarial pass** and resolved here. Three codebase maps were written first (editor 69 KB, shell 52 KB, constraints 65 KB). The design panel and plan-authoring agents were lost to a spend limit mid-run; the target design in §3 and the lanes in §4 are authored directly from the verified classification, and **every load-bearing defect claim and the one prescribed fix were re-verified by hand** (see §1).
+**Status:** Draft v1.1 — revised after an independent review by Gemini 3.7 Flash (High) run against the live tree. It re-verified every factual claim in §1 as correct (including reproducing the Tailwind probe independently) and returned **2 blocking · 3 major · 2 minor** findings, all fixed here: the `Header.tsx` collision between two lanes scheduled in parallel; a preview spec that `CreativeGlyph` could not satisfy; `revealSection`'s render-cycle race; five Appendix A rows that contradicted §2.3/§2.4; an undeclared hot file; and two stale task numbers. Draft v1.0: Synthesised from a static HTML inspiration mock supplied by the user: **246 discrete items** (tokens, colours, layout, components, interactions, copy, motion, a11y, data, features, gating) inventoried in four slices, each classified against the live codebase, **19 of them contested by a second adversarial pass** and resolved here. Three codebase maps were written first (editor 69 KB, shell 52 KB, constraints 65 KB). The design panel and plan-authoring agents were lost to a spend limit mid-run; the target design in §3 and the lanes in §4 are authored directly from the verified classification, and **every load-bearing defect claim and the one prescribed fix were re-verified by hand** (see §1).
 **Scope:** `apps/web` — the visual token layer, the UI kit, the shell (header/sidebar/overlays) and the `/brief` editor's presentation. `DESIGN.md` — the contract, which this plan finds has drifted from the code. **No brief-schema change, no new API route, no domain change.** Everything the mock implies beyond that boundary is enumerated and deferred in §2.4 and Appendix A.
 **Source material:** `inspiration/2026-08-29_brief-wizard.html` — the mock as supplied, committed so this plan's `mock:NNN` line citations stay resolvable.
 **Related:** `2026-08-26_unified-campaign-editor.md` (UE-D1–D15, locked), `2026-08-28_graphical-brief-editor.md` (GB-D1–D18, shipped across #93, #94, #95, #106, #109, #110), `2026-08-27_motion-copy-timeline.md` (shipped), `DESIGN.md`, PRs #82, #84, #85, #113, #119, #120, #126.
@@ -171,7 +171,16 @@ The presentation choice persists per user in `localStorage`; **Everything** is t
 
 ### 3.4 Preview (D26)
 
-`PreviewDock` (sticky, ≥1280px) and `PreviewStrip` (below). Both render `CreativePreview`: a `CreativeGlyph` — the same component the axis cards use, so it cannot drift from the compositor — sized into the first selected platform's `PreviewFrame`, carrying layout, tone, the first product's colour, the headline text and, on a motion draft, the selected motion kind's one-shot transition. Caption: `<ratio display name> · <PlatformProfile.label>`, or *"no platform yet"*.
+`PreviewDock` (sticky, ≥1280px) and `PreviewStrip` (below), both rendering a **new** `CreativePreview`.
+
+`CreativeGlyph` cannot be reused directly and is **not** modified: its props are `{layout?, tone?, motion?, size?}`, its `viewBox` is a hardcoded 46 × 46 square, its accent is `fill-brand-primary` (the *brand* token, not a product colour), and its "headline" is two static `<rect>` bars (`creative-glyph.tsx:8-13, 24, 103, 109-110`). It is deliberately a 46 px miniature pinned to the axis cards' accessible-name and screenshot contracts, and widening it would put the cards at risk for the preview's benefit.
+
+`CreativePreview` is therefore its own component that **re-implements the same documented layer order** (`DESIGN.md` §4: photo ground → contrast shade on the headline edge → accent band flush to that edge → the copy), at preview scale, taking `{ratio, layout, tone, primaryColor, headline, motion?}`:
+- **ratio** drives a real `viewBox` per `RATIO_VALUES`, so 9:16 is tall rather than a square letterboxed — every layer coordinate is a fraction of the box, not a constant.
+- **primaryColor** is the first product's hex, passed as a `--c` custom property (the mock's technique), so the band and shade are the product's colour, not the brand blue.
+- **headline** is rendered as real text with `textLength`/wrapping, not bars.
+- **motion** replays the selected kind's existing one-shot keyframe.
+A shared `previewLayers.ts` holds the fractions both it and `CreativeGlyph` use, so the two cannot drift from each other or from the compositor. Caption: `<ratio display name> · <PlatformProfile.label>`, or `<ratio display name> · no platform yet`.
 
 ### 3.5 New primitives
 
@@ -187,8 +196,8 @@ The presentation choice persists per user in `localStorage`; **Everything** is t
 
 ## 4. Work Breakdown
 
-**Merge order:** **(W0 ‖ W1) → W0b → W2a → W2b → (W3 ‖ W4 ‖ W5) → W6 → W7 → W8 → W9 → W10.**
-W0 first because every later visual lane assumes `/NN` works, and W0b lands the sweep before anything is restyled on top of it. W1 is independent bug-fixing and ships alongside. W3/W4/W5 are disjoint (theme / sidebar / header). W6–W8 share `BriefEditor.tsx` and merge in order. **Hot files:** `tailwind.config.ts` (W0 only), `DESIGN.md` (append-only, every lane), `messages.ts` (append-only, W6/W8/W9), `BriefEditor.tsx` (W6, W7, W8, W9 — sequential), `Sidebar.tsx` (W4 only).
+**Merge order:** **(W0 ‖ W1) → W0b → W2a → W2b → ((W3 → W5) ‖ W4) → W6 → W7 → W8 → W9 → W10.**
+W0 first because every later visual lane assumes `/NN` works, and W0b lands the sweep before anything is restyled on top of it. W1 is independent bug-fixing and ships alongside. W3/W4/W5 are disjoint (theme / sidebar / header). W6–W8 share `BriefEditor.tsx` and merge in order. **Hot files:** `tailwind.config.ts` (W0 only) · `DESIGN.md` (append-only, every lane) · `messages.ts` (append-only, W5/W6/W8/W9) · **`Header.tsx` (W3 then W5 — this is why they are not parallel)** · **`BriefEditor.tsx` (W4 publish-only, then W6, W7, W8, W9 — sequential)** · `Sidebar.tsx` (W4 only).
 **Cross-lane gate:** every new error or status key must be registered in `error-sections.ts` and covered by the visibility filter, or GB-D1 regresses; W6 extends the existing coverage test to the step→section map so a section with no step is a test failure.
 
 ### W0 — the alpha scale and the contract (P0, ships first)
@@ -264,7 +273,7 @@ W0 is four files. The **sweep** it enables is deliberately not in it — 35 file
 |---|------|------|
 | W5.1 | Add the **Brief** tab with `aria-current`; brand mark routes home through the guard | `Header.tsx` |
 | W5.2 | Header **Generate**: runs the applied brief and routes to `/grid`; with nothing applied it refuses out loud and reveals the blocking section — never disabled | `Header.tsx`, `run-context.tsx` (reuse `execute`), `messages.ts` |
-| W5.3 | Telemetry `IconButton` in the header; model-change feedback line | `Header.tsx`, `ModelSelector.tsx` |
+| W5.3 | Telemetry `IconButton` in the header opening the existing **non-modal right drawer** (not a dialog, and it never trips the dirty guard — it changes no draft state); model-change feedback line | `Header.tsx`, `ModelSelector.tsx` |
 | W5.4 | Tests: Generate with no applied brief refuses and navigates to the section, not to `/grid` | `__tests__/` |
 
 ### W6 — Guided, part 1: the engine (D19, D20, D21)
@@ -272,13 +281,13 @@ W0 is four files. The **sweep** it enables is deliberately not in it — 35 file
 | # | Task | Owns |
 |---|------|------|
 | W6.1 | `useStepNavigation(sectionOrder(mode))`: index, direction, `maxVisited` (styling only), range guard, `go(n)` | `lib/use-step-navigation.ts` |
-| W6.2 | `revealSection(section)` replaces `scrollToSection` at all three call sites: switch the step if Guided, then scroll | `lib/scroll-to-section.ts`, `BriefEditor.tsx`, `StatusLine.tsx`, `ErrorStrip.tsx` |
+| W6.2 | `revealSection(section)` replaces `scrollToSection` at all three call sites. **It cannot scroll synchronously:** in Guided the target section is unmounted until the step state commits, so `document.querySelector` would miss it. Switch the step, store the target in a `pendingReveal` ref, and scroll from a `useLayoutEffect` that fires once the step card has mounted — then clear the ref. In Everything it scrolls immediately, as today | `lib/scroll-to-section.ts`, `BriefEditor.tsx`, `StatusLine.tsx`, `ErrorStrip.tsx` |
 | W6.3 | Presentation toggle (Guided / Everything), persisted; Everything is the default for a loaded brief | `BriefEditor.tsx` |
 | W6.4 | `StepHeader` (eyebrow · `h1 tabindex="-1"` focus handoff · subtitle · `StatusChip`), sticky, scoped to the column | `campaign/StepHeader.tsx` |
 | W6.5 | `StepFooter`: step status sentence (`role="status"`), Back, **Next always live**; a refused Next marks attempted, reveals, nudges once, states the first issue | `campaign/StepFooter.tsx` |
 | W6.6 | Step subtitles and footer strings → `messages.ts`; jargon test extended | `messages.ts` |
 | W6.7 | Extend the error-key coverage test: every section in `sectionOrder` has a step and vice versa | `__tests__/` |
-| W6.8 | Tests: Guided renders one section; Next never has `disabled`; a refused Next reveals exactly that section's errors; an `ErrorStrip` chip for an unmounted section switches step then scrolls | `__tests__/` |
+| W6.8 | Tests: Guided renders one section; Next never has `disabled`; a refused Next reveals exactly that section's errors; **an `ErrorStrip` chip for an unmounted section switches step and *then* scrolls — asserted by spying on the scroll after the step commits, which fails against a synchronous implementation** | `__tests__/` |
 
 ### W7 — Guided, part 2: the segbar and the transitions (D27, D28)
 
@@ -303,7 +312,8 @@ W0 is four files. The **sweep** it enables is deliberately not in it — 35 file
 
 | # | Task | Owns |
 |---|------|------|
-| W9.1 | `CreativePreview`: `CreativeGlyph` + headline text, sized into the first selected platform's `PreviewFrame`; caption `<ratio> · <PlatformProfile.label>` from the domain | `campaign/CreativePreview.tsx` |
+| W9.1 | Extract `previewLayers.ts` (the layer fractions `CreativeGlyph` hardcodes) and refactor `CreativeGlyph` onto it with **no prop or output change** — a byte-comparison test against its current render is the gate | `ui/preview-layers.ts`, `ui/creative-glyph.tsx` |
+| W9.1b | `CreativePreview({ratio, layout, tone, primaryColor, headline, motion?})`: real `viewBox` per ratio, product colour via `--c`, real text; caption from `ratioDisplayName` + `PlatformProfile.label` | `campaign/CreativePreview.tsx` |
 | W9.2 | `PreviewDock` (sticky ≥1280px) and `PreviewStrip` (below): swatch · name · headline · step | `campaign/PreviewDock.tsx` |
 | W9.3 | Motion drafts play the selected kind's existing one-shot transition; no typewriter, no story bars, no engagement chrome | `CreativePreview.tsx` |
 | W9.4 | Tests: the preview renders no text the brief does not contain (a fabrication guard); ratio follows the platform; reduced-motion is static | `__tests__/` |
@@ -322,7 +332,7 @@ W0 is four files. The **sweep** it enables is deliberately not in it — 35 file
 
 ## 5. Definition of Done
 
-- **The alpha scale is proven, not assumed.** `W0.4`'s test compiles the config and fails if `bg-error/20`, `border-error/50`, `ring-brand-primary/25` or `hover:bg-border/40` emits no rule. A grep of the built CSS for `.bg-error\/20` returns a hit.
+- **The alpha scale is proven, not assumed.** `W0.3`'s test compiles the config and fails if `bg-error/20`, `border-error/50`, `ring-brand-primary/25` or `hover:bg-border/40` emits no rule. A grep of the built CSS for `.bg-error\/20` returns a hit.
 - **No stock Tailwind colour and no `text-white` remains** in non-test `apps/web/src` (grep, both zero).
 - **Light theme is reachable and legible**: the toggle round-trips, a blocked `localStorage` reads as dark without throwing, and every surface W0/W2 touched has been audited in both themes.
 - **One prompt, ever.** `shell-nav.test.tsx` asserts `toHaveBeenCalledTimes(1)` on every dirty-navigation path.
@@ -350,7 +360,7 @@ W0 is four files. The **sweep** it enables is deliberately not in it — 35 file
 | The card re-skin orphans `getByRole` queries across the suite. | The accessible name is an explicit `aria-label` of the raw value (`axis-card.tsx:34-38`) and stays; W2b.5 pins it, and the DoD lists the exact queries. |
 | Guided hides a section that carries an error the user cannot see. | The outline pill, the segbar segment and the `ErrorStrip` chip all remain visible in Guided and all navigate; Apply reveals every section at once. |
 | Deferring vibes/directions/subline reads as ignoring the mock. | §2.4 and Appendix A state each one's layer and cost; the *idiom* ships now on the axes that exist, so the screen looks like the inspiration even where the vocabulary cannot. |
-| `DESIGN.md` is appended by every lane. | Append-only in the merge script, as the GB plan established; W0.5 owns the corrections, later lanes only add §4 entries. |
+| `DESIGN.md` is appended by every lane. | Append-only in the merge script, as the GB plan established; W0.4 owns the corrections, later lanes only add §4 entries. |
 
 ---
 
@@ -396,7 +406,7 @@ Every item the mock contains, its status against the code, and where it goes. `�
 | `SHELL-24` | Footer: Create new / Browse briefs | present | ui | **W4** |
 | `SHELL-25` | Full-screen menu dialog chrome † | present | ui | **W10** |
 | `SHELL-26` | Menu tab rows with icons + Brief entry | partial | ui | **W1** |
-| `SHELL-27` | Sidebar body MOVED into the menu (single instance) | partial | ui | **W10** |
+| `SHELL-27` | Sidebar body MOVED into the menu (single instance) | partial | ui | rejected §2.3 |
 | `SHELL-28` | Menu close triggers + scroll lock | present | ui | rejected §2.3 |
 | `SHELL-29` | Double dirty prompt on mobile tab tap (repo defect) | conflicts | ui | **W1** |
 | `SHELL-30` | Picker dialog chrome + copy | partial | ui | **W10** |
@@ -442,16 +452,16 @@ Every item the mock contains, its status against the code, and where it goes. `�
 | `STEP-08` | Max-two tones with a spoken refusal | partial | ui | **W10** |
 | `STEP-09` | Optional-step hint and 'neutral' fallback | partial | ui | **W10** |
 | `STEP-10` | Eight 52px swatches | partial | ui | **W2b** |
-| `STEP-11` | Custom pipette via native color input | missing | ui | **W10** |
+| `STEP-11` | Custom pipette via native color input | missing | ui | **W2b** |
 | `STEP-12` | Colour readout line | partial | ui | **W10** |
-| `STEP-13` | Auto-advance after one tap | missing | ui | deferred §2.4 |
+| `STEP-13` | Auto-advance after one tap | missing | ui | rejected §2.3 |
 | `STEP-14` | Four pool-card suggestions with char counts | missing | ui | **W10** |
 | `STEP-15` | 'More ideas' opens the pool drawer (skeleton → rows → Use) | partial | ui | **W10** |
 | `STEP-16` | Own-headline input with live 'N / 48' counter turning red | present | ui | **W10** |
 | `STEP-17` | Inline headline error line (not touch-gated) | conflicts | ui | **W10** |
 | `STEP-18` | Subline input (optional, maxlength 60) | missing | dom | deferred §2.4 |
 | `STEP-19` | Asset-card rows (tick, brand-tinted type icon, TYPE · size) | partial | ui | **W2b** |
-| `STEP-20` | HERO tag + star hero button | partial | ui | **W10** |
+| `STEP-20` | HERO tag + star hero button | partial | ui | deferred — the control is UI, but there is no hero flag to bind it to (§2.4) |
 | `STEP-21` | Upload card → hidden multi-file input with extension-based type inference | partial | ui | **W10** |
 | `STEP-22` | Step-5 validation and the missing product model | conflicts | ui | **W10** |
 | `STEP-23` | Sidebar Project Bin checkboxes mirror inclusion | missing | ui | **W4** |
@@ -468,7 +478,7 @@ Every item the mock contains, its status against the code, and where it goes. `�
 | `STEP-34` | Direction canvases d-minimal / d-graphic / d-editorial / d-texture driven by - | partial | ui | **W9** |
 | `STEP-35` | Story progress bars (infinite loop) | conflicts | ui | rejected §2.3 |
 | `STEP-36` | Glyph from hero asset type | missing | ui | **W9** |
-| `STEP-37` | Headline with typewriter (26 ms/char) and 'YOUR HEADLINE' empty state | missing | ui | **W9** |
+| `STEP-37` | Headline with typewriter (26 ms/char) and 'YOUR HEADLINE' empty state | missing | ui | **W9** — empty state only; typewriter rejected §2.3 |
 | `STEP-38` | Sub line, engagement rail, caption (@handle from slug), sound line | not-applicable | dom | rejected §2.3 |
 | `STEP-39` | ph-dest 'plays on X · Static · 1080×1080 · JPG' line | missing | ui | **W9** |
 | `STEP-40` | preview-hint sentence | missing | ui | **W9** |
@@ -510,10 +520,10 @@ Every item the mock contains, its status against the code, and where it goes. `�
 | `TOK-27` | Reduced-motion handling (blanket CSS + JS flag) | partial | ui | **W6** |
 | `TOK-28` | Step-card slide transitions enterR / enterL / exitL / exitR | missing | ui | **W7** |
 | `TOK-29` | riseIn stagger on option lists and grid tiles | missing | ui | **W2b** |
-| `TOK-30` | segFill loop on the current progress segment (and phone story bars) | conflicts | ui | **W7** |
+| `TOK-30` | segFill loop on the current progress segment (and phone story bars) | conflicts | ui | **W7** — static, not a loop (D27) |
 | `TOK-31` | readyPulse loop on the Next button | conflicts | ui | **W7** |
 | `TOK-32` | nudge shake on a refused Next | missing | ui | **W7** |
-| `TOK-33` | burst sparks (confetti) on Apply | missing | ui | deferred §2.4 |
+| `TOK-33` | burst sparks (confetti) on Apply | missing | ui | **Q3** (§7) |
 | `TOK-34` | pulse skeleton loop (loading states) | partial | ui | **W2a** |
 | `TOK-35` | Transform micro-interactions (press, lift, hover-scale) | partial | ui | **W2b** |
 | `TOK-36` | Accordion chevron rotate | present | ui | **W2b** |
@@ -551,11 +561,11 @@ Every item the mock contains, its status against the code, and where it goes. `�
 | `TOK-68` | Literal colours the mock still uses vs the repo's stock-Tailwind defects | conflicts | tok | **W0** |
 | `TOK-69` | Look & feel direction canvases (CSS-only, opacity literals) | missing | dom | deferred §2.4 |
 | `TOK-70` | Phone preview chrome tokens | missing | ui | **W9** |
-| `TOK-71` | Creative tile, skeleton and command card | partial | ui | deferred §2.4 |
+| `TOK-71` | Creative tile, skeleton and command card | partial | ui | **W10** |
 | `TOK-72` | Table typography | partial | ui | **W2a** |
 | `TOK-73` | Icon sizing and source | partial | ui | **W2a** |
 | `TOK-74` | aria-live on the step header | missing | ui | **W6** |
-| `TOK-75` | Headline typewriter | missing | ui | deferred §2.4 |
+| `TOK-75` | Headline typewriter | missing | ui | rejected §2.3 |
 | `TOK-76` | theme.ts manifest gaps if triplets are adopted | partial | tok | **W0** |
 | `TOK-77` | DESIGN.md drift surfaced by this comparison | conflicts | doc | **W0** |
 | `TOK-78` | Base resets and utilities shared with Tailwind preflight | present | tok | rejected §2.3 |
@@ -569,11 +579,11 @@ Every item the mock contains, its status against the code, and where it goes. `�
 | `WIZ-07` | aria-live polite wrapper around count/name/subtitle | missing | ui | rejected §2.3 |
 | `WIZ-08` | StatusChip — four states with emoji dot | partial | tok | **W6** |
 | `WIZ-09` | Segbar container | missing | ui | **W7** |
-| `WIZ-10` | Per-segment states: done / err / cur / locked | missing | tok | **W7** |
+| `WIZ-10` | Per-segment states: done / err / cur / locked | missing | tok | **W7** — no locked state (D21) |
 | `WIZ-11` | Segment hover scaleY(1.4) | missing | ui | **W7** |
 | `WIZ-12` | seg-fill pulse on the current segment (infinite loop) | conflicts | ui | **W7** |
 | `WIZ-13` | Segment aria-labels | missing | ui | **W7** |
-| `WIZ-14` | Segment click navigates; locked until maxVisited | missing | ui | **W7** |
+| `WIZ-14` | Segment click navigates; locked until maxVisited | missing | ui | **W7** — lock rejected (D21) |
 | `WIZ-15` | Mobile mini preview strip | missing | ui | **W9** |
 | `WIZ-16` | Stage container | missing | ui | **W7** |
 | `WIZ-17` | Step-card enter animation by direction | missing | tok | **W7** |
@@ -593,16 +603,16 @@ Every item the mock contains, its status against the code, and where it goes. `�
 | `WIZ-31` | Next button: disabled when issues, next-ready pulse when clean, 'Review & laun | conflicts | ui | **W6** |
 | `WIZ-32` | updateNext() — live recompute of footer + segbar + outline | partial | ui | **W6** |
 | `WIZ-33` | setStepErr() — transient refusal in the footer | partial | ui | **W6** |
-| `WIZ-34` | Auto-advance after a colour tap (650ms / 60ms reduced) | missing | ui | **W7** |
+| `WIZ-34` | Auto-advance after a colour tap (650ms / 60ms reduced) | missing | ui | rejected §2.3 |
 | `WIZ-35` | Review step layout (rev-grid + phone + summary rows) | missing | ui | **W8** |
 | `WIZ-36` | Summary rows with per-row Edit links | missing | ui | **W8** |
 | `WIZ-37` | Strip of step chips with issue counts | partial | tok | **W8** |
 | `WIZ-38` | apply-status sentence and setApplyStatus kinds | partial | ui | **W8** |
 | `WIZ-39` | Review actions: Discard / Save menu / Apply to run ('Update run' once applied) | present | ui | **W8** |
 | `WIZ-40` | Save menu: items, open/close, outside-click, arrow cycling | partial | ui | **W8** |
-| `WIZ-41` | Apply to run — success path with sparks and focus | present | ui | **W8** |
+| `WIZ-41` | Apply to run — success path with sparks and focus | present | ui | **W8** — sparks → Q3 |
 | `WIZ-42` | Apply to run — refusal marks every failing step attempted | present | ui | **W8** |
-| `WIZ-43` | Sparks confetti on Apply (one-shot) | missing | ui | deferred §2.4 |
+| `WIZ-43` | Sparks confetti on Apply (one-shot) | missing | ui | **Q3** (§7) |
 | `WIZ-44` | Save & apply (saveApply) — 'Saved with issues — not applied' | conflicts | api | rejected §2.3 |
 | `WIZ-45` | Save as… dialog and confirm | partial | ui | **W8** |
 | `WIZ-46` | Discard — revert to last SAVED snapshot | partial | ui | **W8** |
