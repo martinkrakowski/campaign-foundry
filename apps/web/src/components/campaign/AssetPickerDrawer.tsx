@@ -131,7 +131,7 @@ export function AssetPickerDrawer({
                         {isSelected ? "Selected" : "Choose"}
                       </Button>
                     ) : (
-                      <span className="text-xs text-amber-400" title="Hero asset" aria-label="Hero asset">
+                      <span className="text-xs text-warning" title="Hero asset" aria-label="Hero asset">
                         ★
                       </span>
                     )}
