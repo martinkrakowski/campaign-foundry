@@ -1261,3 +1261,23 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Left open:**
   - Nothing. The decision this entry was written to raise is the one it records as taken: the five empty barrels are converged and `@hexagen-monaco/sync` is on `^0.12.1`, so the skew with `arch-linter` is closed. Kept as history rather than an open question — this log is read as next-session memory, and a stale "decide whether to" would invite a future session to revisit or revert a completed migration.
 
+
+---
+
+## 2026-08-30 — W3 lane: the theme toggle and the light-theme audit (branch feat/w3-theme, PR #138)
+
+- **Mode:** Implementer (`opencode/hy4-preview`)
+- **Changes (W3.1–W3.3):**
+  - **W3.1** `lib/theme.ts` (new) — `THEME_STORAGE_KEY` (`cf:theme`), `readStoredTheme` / `storeTheme` / `applyTheme`, and `THEME_BOOT_SCRIPT`. `ui/theme-toggle.tsx` (new) — a 32px `IconButton` in the header, sun/moon, named for the **action**. `app/layout.tsx` — the boot script as the first child of `<body>`. `tokens.css` — `color-scheme: light` / `dark` on the two blocks. Two strings in `messages.ts`.
+  - **W3.2** the audit: three `bg-white` / `text-black` / `hover:bg-gray-200` pills → `bg-text-emphasis text-background hover:opacity-90`; `StatusChip`'s `yellow-400` → a new `--color-modified`; a light semantic set and a darker light text ramp in `tokens.css` (the dark values unchanged, now stated rather than inherited); `TelemetryDrawer`'s log panel `bg-black` → `bg-surface-2` with its skeletons lifted to `bg-border`; `SwitchRow`'s knob → `bg-text-emphasis`; the secondary `Button` hover → `hover:bg-border-hover`; the grid's *can't play* pill → an opaque `bg-surface`. All measured, all recorded in `DESIGN.md` §2.
+  - **W3.3** `lib/__tests__/theme.test.ts`, `ui/__tests__/theme-toggle.test.tsx`, `styles/__tests__/tokens.test.ts`, one header test.
+- **Decisions:**
+  - **The boot script goes in `<body>`, not `<head>`.** App Router renders head children into the flight payload but **not** into the document shell — verified in `apps/web/.next/server/app/*.html`, where a `<head>` script appeared only in the RSC payload and would therefore have applied after hydration, i.e. after the flash it exists to prevent.
+  - **The module is `lib/theme.ts`, not a constant beside the toggle.** A value exported from a `"use client"` module becomes a client *reference* on the server, not a string, so `layout.tsx` (a server component) could not read it.
+  - **`aria-pressed` is deliberately absent.** The name states the action ("Switch to the light theme"), so a pressed state would report the same fact twice in two directions. §7's `aria-pressed` rule is about toggles whose *label* is fixed; `DESIGN.md` now says so at both ends.
+  - **Light gets its own semantic palette.** A state colour has two jobs — text on its own 20 % tint, and a solid ground behind white text (`Button`'s destructive variant) — and no single value does both across two grounds. Changing the token fixes ~40 call sites at one stroke; changing the ~40 call sites to a `-tint` pair is the bigger fix that is *not* taken here.
+- **Deviations** (full list on the PR): `lib/theme.ts` is one file outside the lane's ownership list; the key is `cf:theme`, not the plan's `'cf-theme'`, to match every other stored key; three of the four white pills are fixed and `grid/page.tsx`'s *Preview* pill is recorded instead, because its ground is `bg-scrim/80` (black in both themes) and tokenising it drops it from 12.63 : 1 to 1.41 : 1; four findings are recorded and not fixed (`--color-border` below 3 : 1 in both themes, dark's own tints marginal on `surface-2`, `text-brand-primary` on its own tint, the Preview pill); `tailwind.config.ts` gains the one `modified` key.
+- **Verification:** gate in order on the committed tree — build, typecheck, lint (0 problems, 176 files), lint:arch, `test:cov` **2242 passed | 2 skipped — 100 % on all four counters**, then `sync:check` **Total ops 0**.
+- **Left open:**
+  - The four "found, not fixed" items above; the largest is the `-tint` token pair that would lift dark's `error` / `info` / `success` tints above 4.5 : 1 on `surface-2` without breaking white-on-`bg-error`.
+  - **This worktree needed one `yarn install` after rebasing onto `1e5edcf`.** That commit bumped `@hexagen-monaco/sync` to `^0.12.1` while `node_modules` still held 0.8.0, which made `yarn lint:arch` and `yarn sync:check` fail with `command not found: hexagen`. Done from the local cache with `YARN_ENABLE_NETWORK=0 yarn install --immutable`; `yarn.lock` untouched. Any worktree created before that commit will hit the same wall.
