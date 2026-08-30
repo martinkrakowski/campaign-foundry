@@ -161,7 +161,14 @@ export function IdentitySection({ state, dispatch, errors }: SectionProps) {
               onClick={copyBriefId}
               disabled={!state.briefId}
               className="font-mono text-[10px] uppercase tracking-wider text-text-muted transition-colors hover:text-text-emphasis disabled:opacity-40"
-              aria-label={messages.briefIdCopyAria}
+              // The label must be stated in BOTH states, not dropped when copied. This
+              // button sits inside `Field`'s <label>, and with no aria-label of its own
+              // its computed name comes out as the field's text — measured here as
+              // "Campaign Name camp-summer camp-summer", not "Copied ✓". So the copied
+              // state names itself explicitly, from the same constant it renders, which
+              // is what lets the confirmation be announced and keeps the accessible name
+              // containing the visible text (WCAG 2.5.3) in both states.
+              aria-label={copied ? messages.briefIdCopied : messages.briefIdCopyAria}
             >
               {copied ? messages.briefIdCopied : messages.briefIdCopy}
             </button>

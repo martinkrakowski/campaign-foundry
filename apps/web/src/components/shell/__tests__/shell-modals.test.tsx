@@ -36,6 +36,19 @@ describe("ModelSelector", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Select image model" })).toBeNull());
   });
 
+  test("reports the chosen model's label so the header can say what runs next", async () => {
+    const user = userEvent.setup();
+    const onModelChange = vi.fn();
+    renderWithRun(<ModelSelector onModelChange={onModelChange} />);
+    await user.click(screen.getByTitle("Change image model"));
+    const dialog = await screen.findByRole("dialog", { name: "Select image model" });
+    await user.click(within(dialog).getByText("Nano Banana"));
+    // A label, never the raw id (`google/gemini-2.5-flash-image`) — and exactly once,
+    // because `toHaveBeenCalledWith` alone passes against a callback that double-fires.
+    expect(onModelChange).toHaveBeenCalledTimes(1);
+    expect(onModelChange).toHaveBeenCalledWith("Nano Banana");
+  });
+
   test("flags a reuse brief that may skip the model", async () => {
     localStorage.setItem(
       "cf:brief",
@@ -145,7 +158,10 @@ describe("TelemetryDrawer", () => {
     await screen.findByText("hello");
     await user.click(screen.getByLabelText("Copy telemetry to clipboard"));
     await waitFor(() => expect(writeText).toHaveBeenCalled());
-    expect(await screen.findByText(/Copied/)).toBeTruthy();
+    // Re-queried by NAME, not reusing the stale handle: the point of the fix is that
+    // the accessible name follows the visible text, so the confirmation is announced.
+    const copiedBtn = await screen.findByRole("button", { name: "Copied ✓" });
+    expect(copiedBtn.textContent).toBe("Copied ✓");
   });
 
   test("closes via the close button", async () => {

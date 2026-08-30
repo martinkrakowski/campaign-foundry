@@ -65,7 +65,10 @@ describe("IdentitySection", () => {
     // Click once
     fireEvent.click(copyBtn);
     expect(writeText).toHaveBeenCalledWith("camp-summer");
-    await waitFor(() => expect(copyBtn.textContent).toBe("Copied ✓"));
+    // Re-queried by NAME, not reusing the stale handle: the point of the fix is that
+    // the accessible name follows the visible text, so the confirmation is announced.
+    const copiedBtn = await screen.findByRole("button", { name: "Copied ✓" });
+    expect(copiedBtn.textContent).toBe("Copied ✓");
 
     // Click second time while timer active
     fireEvent.click(copyBtn);
@@ -86,10 +89,15 @@ describe("IdentitySection", () => {
     const copyBtn = screen.getByRole("button", { name: "Copy brief ID" });
 
     fireEvent.click(copyBtn);
-    await waitFor(() => expect(copyBtn.textContent).toBe("Copied ✓"));
+    // Re-queried by NAME, not reusing the stale handle: the point of the fix is that
+    // the accessible name follows the visible text, so the confirmation is announced.
+    const copiedBtn = await screen.findByRole("button", { name: "Copied ✓" });
+    expect(copiedBtn.textContent).toBe("Copied ✓");
 
     await new Promise((r) => setTimeout(r, 1600));
-    expect(copyBtn.textContent).toBe("Copy");
+    // Re-queried: the name is what reverts, and asserting it is what proves the label
+    // came back rather than the text alone changing.
+    expect(screen.getByRole("button", { name: "Copy brief ID" }).textContent).toBe("Copy");
   });
 
   test("copy brief ID does nothing when clipboard is unavailable", () => {
@@ -720,12 +728,16 @@ describe("ErrorStrip", () => {
     expect(onErrorClick).toHaveBeenCalledWith("identity");
   });
 
-  test("falls back to the raw key for an unknown section and tolerates no click handler", async () => {
+  test("drops buckets no section declares, still tolerates a missing click handler, and spells motion by its motion label", async () => {
     const user = userEvent.setup();
-    render(<ErrorStrip errors={{ mystery: { a: "1" } }} />);
-    const button = screen.getByRole("button", { name: /mystery/ });
-    await user.click(button);
-    expect(button).toBeTruthy();
+    // The W6 totality contract means an undeclared bucket can only reach the strip
+    // from hostile data; it is dropped, never spelled as a raw-key chip. motion is
+    // the one declared non-section, labelled "Motion".
+    render(<ErrorStrip errors={{ mystery: { a: "1" }, motion: { b: "2" } }} />);
+    expect(screen.queryByRole("button", { name: /mystery/i })).toBeNull();
+    const motion = screen.getByRole("button", { name: /Motion/ });
+    await user.click(motion); // no onErrorClick -> no crash
+    expect(motion.textContent).toContain("1");
   });
 });
 
