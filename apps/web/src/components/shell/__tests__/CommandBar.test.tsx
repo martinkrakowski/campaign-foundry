@@ -114,6 +114,11 @@ describe("CommandBar", () => {
       ),
     );
     expect(regen.disabled).toBe(false);
+    // The refusal is reachable without the (touch-invisible) title tooltip.
+    expect(regen.getAttribute("aria-describedby")).toBe("reroll-blocked-reason");
+    expect(document.getElementById("reroll-blocked-reason")?.textContent).toMatch(
+      /came from a classic run/,
+    );
     await user.click(regen);
     // Refused, so no confirm — but the bar now states the reason as well.
     expect(screen.queryByRole("dialog")).toBeNull();

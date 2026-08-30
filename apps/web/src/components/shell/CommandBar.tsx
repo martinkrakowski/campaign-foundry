@@ -16,6 +16,9 @@ interface CommandBarProps {
 /** Which confirmation is open, if any. */
 type Confirm = "run" | "regenerate";
 
+/** Ties the re-roll button to the visible explanation of why it is refused. */
+const REROLL_BLOCKED_ID = "reroll-blocked-reason";
+
 /** Floating bottom orchestrator bar: status, telemetry toggle, regenerate, Execute. */
 export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
   const {
@@ -150,7 +153,7 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
       {/* Why the re-roll is refused — its own row, so a long sentence stays readable
           on a phone instead of being squeezed between two buttons. */}
       {rejectedCount > 0 && rerollBlockedReason !== null && (
-        <p role="status" className="px-2 pt-2 text-[11px] leading-tight text-warning">
+        <p id={REROLL_BLOCKED_ID} role="status" className="px-2 pt-2 text-[11px] leading-tight text-warning">
           {rerollBlockedReason}
         </p>
       )}
@@ -185,6 +188,10 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
               disabled={loading}
               title={rerollBlockedReason ?? undefined}
               aria-haspopup={rerollBlockedReason === null ? "dialog" : undefined}
+              // `title` is unreliable (and absent on touch), so point assistive tech at
+              // the visible reason instead. Not `aria-disabled`: the control is genuinely
+              // interactive — the tap is what reports the refusal.
+              aria-describedby={rerollBlockedReason === null ? undefined : REROLL_BLOCKED_ID}
               className="flex shrink-0 items-center space-x-2 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-[13px] text-text-primary transition-colors hover:bg-border-hover disabled:cursor-not-allowed disabled:text-text-muted sm:px-4"
             >
               <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
