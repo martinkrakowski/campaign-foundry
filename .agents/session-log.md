@@ -1089,6 +1089,21 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - None.
 
 
+---
+
+## 2026-08-29 — W1 lane completion (branch feat/w1-defects, PR #129)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `MobileMenu.handleTabClick`: always `preventDefault()` (the tab map is a raw `<a>`, so a clean tap was hard-reloading), route through `guardedPush`'s boolean, and keep the menu open on a refused confirm. Dropped the now-unused `isDirty` destructure. Three tests in `shell-nav.test.tsx` pin clean/accept/cancel; the wip's two `toHaveBeenCalledTimes(1)` assertions retained.
+  - New `__tests__/sidebar-aspects.test.tsx`: renders `SidebarContent` and asserts the Aspects label per mode — classic → all `RATIO_VALUES`, Randomized + `axes.ratio` subset → that subset in its own order, Randomized without the axis → fallback, plus variation-mode-without-a-variation-block → fallback (closes the `brief.variation?.` null branch). `test:cov` back to 100/100/100/100.
+  - Normalised the 4 remaining drifted view titles to `DESIGN.md:84` (`text-lg font-semibold text-white`): export empty-state, export "Platform packages", runs "Runs", grid "Start orchestrating assets". Wip `7327fd3` had already normalised 3 (compliance + two export "Print Export Queue"); lane-wide real count = 7, not the plan's "five".
+- **Decisions:**
+  - F1 shape uses `guardedPush`'s documented boolean contract (D30's single prompt) rather than re-adding a `window.confirm`; Header.tsx is untouched (it uses `<Link>`, so letting the default through is correct there).
+  - F3 implemented as "every drifted heading on the four owned pages", the smallest faithful reading of the plan's five — the real count (7 instances, 4 remaining) is reported in the PR body under F3/Deviations.
+  - DoD gate run in order and green: build, typecheck, lint (0 problems), lint:arch, test:cov; sync:check `Total ops 0` on the committed tree.
+- **Left open:**
+  - W10 owns the in-app `ConfirmDialog` that replaces `window.confirm` for the dirty guard (post-W1.1). No known gaps in this lane.
 ## W0 (alpha-capable colour scale)
 - **Mode:** Implementer
 - **Changes:**

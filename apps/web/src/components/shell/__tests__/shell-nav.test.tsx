@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement, useEffect, type ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRun, seedPersistedRun, nextMock, exerciseFocusTrap, makeAsset, ShellProviders } from "@/__tests__/helpers";
@@ -252,6 +252,14 @@ describe("MobileMenu", () => {
     { href: "/export", label: "Export" },
   ] as const;
 
+  test("marks only the active tab with aria-current and leaves the others bare", () => {
+    nextMock().nav.pathname = "/export";
+    renderWithRun(<MobileMenu open onClose={() => {}} tabs={tabs} />);
+    const active = screen.getByRole("link", { name: "Export" });
+    expect(active.getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Grid" }).getAttribute("aria-current")).toBeNull();
+  });
+
   test("renders nothing when closed", () => {
     const { container } = renderWithRun(<MobileMenu open={false} onClose={() => {}} tabs={tabs} />);
     expect(container.querySelector('[role="dialog"]')).toBeNull();
@@ -381,21 +389,56 @@ describe("guarded navigation when the editor is dirty", () => {
     expect(nextMock().router.push).not.toHaveBeenCalled();
   });
 
-  test("a mobile tab click is blocked when the prompt is refused, and allowed when accepted", async () => {
+  test("a clean mobile tab click routes client-side instead of reloading", async () => {
     const user = userEvent.setup();
     const tabs = [{ href: "/grid", label: "Grid" }] as const;
-
-    globalThis.confirm = vi.fn(() => false);
-    const refused = renderDirty(
-      createElement(MobileMenu, { open: true, onClose: () => {}, tabs }),
-    );
+    globalThis.confirm = vi.fn();
+    render(createElement(ShellProviders, null, createElement(MobileMenu, { open: true, onClose: () => {}, tabs })));
     await user.click(screen.getByRole("link", { name: "Grid" }));
-    expect(globalThis.confirm).toHaveBeenCalled();
-    refused.unmount();
+    // The tab is a raw <a>, so without preventDefault this would be a native page
+    // load — routing through the client router is the "did not reload" proof.
+    expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
+    expect(globalThis.confirm).not.toHaveBeenCalled();
+  });
 
+  // A modified or non-primary click (Cmd/Ctrl/Shift/Alt/middle) is the browser's own
+  // job: it must keep the native behaviour (new tab / new window / download) instead of
+  // being intercepted into a client-side route, a dirty prompt, or a menu close.
+  test.each(["metaKey", "ctrlKey", "shiftKey", "altKey", "button"] as const)(
+    "a %s click on a mobile tab leaves it to the browser: no push, no prompt, no close",
+    (modifier) => {
+      const tabs = [{ href: "/grid", label: "Grid" }] as const;
+      const onClose = vi.fn();
+      globalThis.confirm = vi.fn();
+      render(createElement(ShellProviders, null, createElement(MobileMenu, { open: true, onClose, tabs })));
+      fireEvent.click(screen.getByRole("link", { name: "Grid" }), {
+        [modifier]: modifier === "button" ? 1 : true,
+      });
+      expect(nextMock().router.push).not.toHaveBeenCalled();
+      expect(globalThis.confirm).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+    },
+  );
+
+  test("a dirty mobile tab click the user accepts prompts exactly once and navigates", async () => {
+    const user = userEvent.setup();
+    const tabs = [{ href: "/grid", label: "Grid" }] as const;
     globalThis.confirm = vi.fn(() => true);
     renderDirty(createElement(MobileMenu, { open: true, onClose: () => {}, tabs }));
     await user.click(screen.getByRole("link", { name: "Grid" }));
-    expect(globalThis.confirm).toHaveBeenCalled();
+    expect(globalThis.confirm).toHaveBeenCalledTimes(1);
+    expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
+  });
+
+  test("a dirty mobile tab click the user cancels does not navigate and leaves the menu open", async () => {
+    const user = userEvent.setup();
+    const tabs = [{ href: "/grid", label: "Grid" }] as const;
+    const onClose = vi.fn();
+    globalThis.confirm = vi.fn(() => false);
+    renderDirty(createElement(MobileMenu, { open: true, onClose, tabs }));
+    await user.click(screen.getByRole("link", { name: "Grid" }));
+    expect(globalThis.confirm).toHaveBeenCalledTimes(1);
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

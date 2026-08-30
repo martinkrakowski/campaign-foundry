@@ -26,19 +26,20 @@ interface MobileMenuProps {
  */
 export function MobileMenu({ open, onClose, tabs }: MobileMenuProps) {
   const pathname = usePathname();
-  const { guardedPush, isDirty } = useGuardedNavigation();
+  const { guardedPush } = useGuardedNavigation();
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
   const handleTabClick = (e: React.MouseEvent, href: string) => {
-    if (isDirty) {
-      e.preventDefault();
-      if (!window.confirm("You have unsaved changes. Are you sure you want to leave?")) {
-        return;
-      }
-    }
+    // A modified or non-primary click is the browser's to handle — new tab, new window,
+    // download. Only a plain activation is ours to route through the guard.
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+    // The tab map renders a raw <a>, not next/link's <Link>, so the default action is a
+    // native full-page load — prevent it and route through the guard, which returns false
+    // when the user refuses, so the menu stays open in that case.
+    e.preventDefault();
+    if (!guardedPush(href)) return;
     onClose();
-    guardedPush(href);
   };
 
   useEffect(() => {
@@ -125,6 +126,7 @@ export function MobileMenu({ open, onClose, tabs }: MobileMenuProps) {
                   "rounded-lg px-3 py-3 text-[15px] font-medium transition-colors",
                   active ? "bg-surface-2 text-white" : "text-text-muted hover:bg-surface hover:text-white",
                 )}
+                aria-current={active ? "page" : undefined}
               >
                 {tab.label}
               </a>
