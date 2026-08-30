@@ -323,6 +323,19 @@ const DEFAULT_BRIEF: CampaignBrief = {
 interface RunContextValue {
   brief: CampaignBrief;
   setBrief: (brief: CampaignBrief) => void;
+  /**
+   * Whether the shell holds a campaign somebody has committed — applied (or saved &
+   * applied) in the editor, loaded from `briefs/`, or chosen in the picker — rather
+   * than one of the two states that mean nothing has been applied: the untouched
+   * default this provider starts from, and the empty brief `/brief/new` releases
+   * (`blankBrief()`, whose `id` is blank because nothing can be saved or run under it).
+   *
+   * Read-only, and derived here rather than lifted out of the editor: whether a draft
+   * is applied is `EditorState.appliedSnapshot` (BriefEditor.tsx:300, a component the
+   * shell does not contain), but every commit there already ends in `setBrief`, so the
+   * brief the shell holds is the one signal the two agree on.
+   */
+  briefApplied: boolean;
   assets: Asset[];
   halted: boolean;
   log: LogEntry[];
@@ -372,6 +385,15 @@ interface RunContextValue {
   briefPickerOpen: boolean;
   openBriefPicker: () => void;
   closeBriefPicker: () => void;
+  /**
+   * The telemetry drawer (W5.3). It is opened from the header, which is on every
+   * route, and from the command bar on the grid — so like the brief picker, its state
+   * lives here rather than in the layout that renders it. Non-modal: it changes no
+   * draft, so opening it never asks the unsaved-changes guard anything.
+   */
+  telemetryOpen: boolean;
+  toggleTelemetry: () => void;
+  closeTelemetry: () => void;
   /** Last settled variation-plan estimate (CommandBar writes; Runs reads). */
   estimate: PlanEstimate | null;
   estimateError: string | null;
@@ -406,6 +428,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [regeneratingKeys, setRegeneratingKeys] = useState<ReadonlySet<string> | null>(null);
   const [briefPickerOpen, setBriefPickerOpen] = useState(false);
+  const [telemetryOpen, setTelemetryOpen] = useState(false);
   const [estimate, setEstimateData] = useState<PlanEstimate | null>(null);
   const [estimateError, setEstimateError] = useState<string | null>(null);
   const [estimateStatus, setEstimateStatus] = useState<EstimateStatus>("idle");
@@ -506,6 +529,14 @@ export function RunProvider({ children }: { children: ReactNode }) {
     },
     [result],
   );
+
+  // Derived, not stored: "applied" is a statement about the brief the shell holds, and
+  // the two uncommitted states are exactly the two this provider can hand out before a
+  // commit — the default it starts from, and the blank one the new-brief route sets.
+  const briefApplied = brief !== DEFAULT_BRIEF && brief.id !== "";
+
+  const toggleTelemetry = useCallback(() => setTelemetryOpen((open) => !open), []);
+  const closeTelemetry = useCallback(() => setTelemetryOpen(false), []);
 
   const openBriefPicker = useCallback(() => setBriefPickerOpen(true), []);
   const closeBriefPicker = useCallback(() => {
@@ -791,6 +822,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
     () => ({
       brief,
       setBrief,
+      briefApplied,
       assets: result?.assets ?? [],
       halted: result?.halted ?? false,
       log: result?.log?.entries ?? EMPTY_LOG,
@@ -812,6 +844,9 @@ export function RunProvider({ children }: { children: ReactNode }) {
       briefPickerOpen,
       openBriefPicker,
       closeBriefPicker,
+      telemetryOpen,
+      toggleTelemetry,
+      closeTelemetry,
       estimate,
       estimateError,
       estimateStatus,
@@ -825,6 +860,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
     [
       brief,
       setBrief,
+      briefApplied,
       result,
       loading,
       error,
@@ -840,6 +876,9 @@ export function RunProvider({ children }: { children: ReactNode }) {
       briefPickerOpen,
       openBriefPicker,
       closeBriefPicker,
+      telemetryOpen,
+      toggleTelemetry,
+      closeTelemetry,
       estimate,
       estimateError,
       estimateStatus,

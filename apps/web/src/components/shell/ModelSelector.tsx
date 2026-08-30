@@ -5,8 +5,17 @@ import { useRun } from "@/lib/run-context";
 import { MODELS, labelFor } from "@/lib/models";
 import { cn } from "@/lib/cn";
 
+export interface ModelSelectorProps {
+  /**
+   * Said in the header's status line when the choice changes: the model only takes
+   * effect on the next run, so the header states what that run will use (W5.3). The
+   * header owns the line, so this is optional — the selector works without it.
+   */
+  readonly onModelChange?: (modelLabel: string) => void;
+}
+
 /** Header control: shows the active image model and opens a modal to switch it. */
-export function ModelSelector() {
+export function ModelSelector({ onModelChange }: ModelSelectorProps) {
   const { selectedModel, setSelectedModel, brief } = useRun();
   const [open, setOpen] = useState(false);
 
@@ -46,6 +55,7 @@ export function ModelSelector() {
           onSelect={(id) => {
             setSelectedModel(id);
             setOpen(false);
+            onModelChange?.(labelFor(id));
           }}
           onClose={() => setOpen(false)}
         />

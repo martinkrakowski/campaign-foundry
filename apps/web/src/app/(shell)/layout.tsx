@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { usePathname } from "next/navigation";
-import { RunProvider } from "@/lib/run-context";
+import { RunProvider, useRun } from "@/lib/run-context";
 import { EditorDirtyProvider } from "@/lib/editor-dirty-context";
 import { EditorPanelsProvider } from "@/lib/editor-panels-context";
 import { Header } from "@/components/shell/Header";
@@ -17,7 +17,6 @@ import { BriefPicker } from "@/components/shell/BriefPicker";
  * `{children}` and read shared run state from RunProvider.
  */
 export default function ShellLayout({ children }: { children: ReactNode }) {
-  const [terminalOpen, setTerminalOpen] = useState(false);
   // The orchestrator (Execute + telemetry) only belongs on the review grid — that's
   // where the creatives and the approve/reject flow live. Other views are read-only
   // reports, so the floating bar would just obscure content there.
@@ -36,12 +35,7 @@ export default function ShellLayout({ children }: { children: ReactNode }) {
                 its own container instead of stretching the whole column past the viewport. */}
             <main className="relative flex h-full min-w-0 flex-1 flex-col">
               <div className="relative flex-1 overflow-auto rounded-xl">{children}</div>
-              {showOrchestrator && (
-                <>
-                  <TelemetryDrawer open={terminalOpen} onClose={() => setTerminalOpen(false)} />
-                  <CommandBar onToggleTelemetry={() => setTerminalOpen((v) => !v)} />
-                </>
-              )}
+              <TelemetrySlot showOrchestrator={showOrchestrator} />
             </main>
           </div>
         </div>
@@ -49,5 +43,23 @@ export default function ShellLayout({ children }: { children: ReactNode }) {
         </EditorPanelsProvider>
       </EditorDirtyProvider>
     </RunProvider>
+  );
+}
+
+/**
+ * The telemetry drawer, and the command bar that also toggles it.
+ *
+ * The drawer is not grid-only any more: the header opens it from every route (W5.3),
+ * so its state lives in the run context beside the brief picker's — and reading that
+ * state has to happen *inside* the provider this layout renders, hence this wrapper.
+ * The command bar stays on the grid, where the creatives it acts on are.
+ */
+function TelemetrySlot({ showOrchestrator }: { showOrchestrator: boolean }) {
+  const { telemetryOpen, toggleTelemetry, closeTelemetry } = useRun();
+  return (
+    <>
+      <TelemetryDrawer open={telemetryOpen} onClose={closeTelemetry} />
+      {showOrchestrator && <CommandBar onToggleTelemetry={toggleTelemetry} />}
+    </>
   );
 }
