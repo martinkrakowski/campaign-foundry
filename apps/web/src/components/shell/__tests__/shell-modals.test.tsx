@@ -145,7 +145,9 @@ describe("TelemetryDrawer", () => {
     await screen.findByText("hello");
     await user.click(screen.getByLabelText("Copy telemetry to clipboard"));
     await waitFor(() => expect(writeText).toHaveBeenCalled());
-    expect(await screen.findByText(/Copied/)).toBeTruthy();
+    // Re-query after click to verify accessible name changes
+const copiedBtn = await screen.findByRole("button", { name: "Copied ✓" });
+expect(copiedBtn.textContent).toBe("Copied ✓");
   });
 
   test("closes via the close button", async () => {

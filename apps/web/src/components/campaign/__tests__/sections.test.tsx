@@ -65,7 +65,9 @@ describe("IdentitySection", () => {
     // Click once
     fireEvent.click(copyBtn);
     expect(writeText).toHaveBeenCalledWith("camp-summer");
-    await waitFor(() => expect(copyBtn.textContent).toBe("Copied ✓"));
+    // Re-query after click to verify accessible name changes
+const copiedBtn = await screen.findByRole("button", { name: "Copied ✓" });
+expect(copiedBtn.textContent).toBe("Copied ✓");
 
     // Click second time while timer active
     fireEvent.click(copyBtn);
@@ -86,7 +88,9 @@ describe("IdentitySection", () => {
     const copyBtn = screen.getByRole("button", { name: "Copy brief ID" });
 
     fireEvent.click(copyBtn);
-    await waitFor(() => expect(copyBtn.textContent).toBe("Copied ✓"));
+    // Re-query after click to verify accessible name changes
+const copiedBtn = await screen.findByRole("button", { name: "Copied ✓" });
+expect(copiedBtn.textContent).toBe("Copied ✓");
 
     await new Promise((r) => setTimeout(r, 1600));
     expect(copyBtn.textContent).toBe("Copy");
