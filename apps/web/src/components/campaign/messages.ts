@@ -556,3 +556,34 @@ export const stepBack = "Back";
 export const stepNext = "Next";
 /** The last section step's Next, before the review step. */
 export const stepNextReviewLaunch = "Review & launch";
+
+/* ── The step segbar and the step gestures (W7) ───────────────────────────── */
+
+/** The segbar's own name: it is the step walk, in one row. */
+export const segBarLabel = "Steps";
+
+/** Where a segment stands — the four states a segment is painted in (WIZ-10). */
+export type SegBarState = "current" | "done" | "issues" | "unvisited";
+
+const SEG_BAR_STATE: Record<SegBarState, string> = {
+  current: "current step",
+  done: "done",
+  issues: "has something to fix",
+  unvisited: "not filled in yet",
+};
+
+/**
+ * One segment's name (WIZ-13). A segment is a bare bar, so its label has to carry
+ * everything a visitor with sight reads off the heading above it: where the step
+ * sits in the walk, what it is called, and where it stands.
+ */
+export function segBarSegment(position: number, total: number, label: string, state: SegBarState): string {
+  return `Step ${position} of ${total}: ${label}, ${SEG_BAR_STATE[state]}`;
+}
+
+/**
+ * The footer's swipe hint (WIZ-30). It is painted on coarse pointers only, so it
+ * promises the gesture a finger can actually make, and says nothing about a
+ * keyboard the device may not have.
+ */
+export const stepSwipeHint = "Swipe left or right to move between steps.";

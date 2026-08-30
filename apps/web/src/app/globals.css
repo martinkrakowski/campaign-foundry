@@ -161,10 +161,70 @@
   display: none;
 }
 
-@keyframes kf-step-nudge {
+/* The refusal nudge (W7.4 / TOK-32). One shot per refused press — the key on the
+   Next label replays it, so a second refusal shakes again. */
+@keyframes nudge {
   0%, 100% { transform: translateX(0); }
   25% { transform: translateX(-4px); }
   75% { transform: translateX(4px); }
+}
+
+/* A step that has just become complete (W7.4 / TOK-31). The mock ran this as an
+   endless pulse on the Next button; a loop on a control is a control that never
+   stops asking for attention, so it is one ring, on the transition into valid. */
+@keyframes ready-ring {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-brand-primary) 55%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--color-brand-primary) 0%, transparent);
+  }
+}
+
+/* The step-card slide (W7.2 / TOK-28): the arriving card comes in from the side the
+   user came from, the leaving card goes out the other way. Both one-shot. */
+@keyframes step-enter-r {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes step-enter-l {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes step-exit-l {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+}
+
+@keyframes step-exit-r {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(24px);
+  }
 }
 
 @layer utilities {
@@ -177,10 +237,32 @@
   .stagger > * {
     animation: rise-in 0.4s cubic-bezier(0.2, 0.9, 0.3, 1) both;
   }
-  /* One shot, never a loop (D27): the refusal nudge fires per press, keyed by the
-     editor so a second refusal replays it. W7.4 takes ownership of this rule. */
-  .kf-step-nudge {
-    animation: kf-step-nudge 350ms ease-in-out 1;
+  /* W7.4 — the shared refusal nudge, owned here now that W6's scoped keyframe
+     retires. One shot, never a loop (D27). */
+  .animate-nudge {
+    animation: nudge var(--duration-normal) var(--easing-default) 1 both;
+  }
+  /* W7.4 — the ring on a step that has just become complete. It is worn by the
+     Next button for one `--duration-normal`; what makes it fire *once* is the
+     caller, which counts the transitions into complete and never renders while a
+     step stays there. */
+  .animate-ready-ring {
+    animation: ready-ring var(--duration-normal) var(--easing-default) 1 both;
+  }
+  /* W7.2 — the step-card pair. The exit classes are worn by a card the caller has
+     already taken out of flow, so the two cards slide past each other instead of
+     reflowing down the column. */
+  .step-enter-r {
+    animation: step-enter-r var(--duration-normal) var(--easing-default) 1 both;
+  }
+  .step-enter-l {
+    animation: step-enter-l var(--duration-normal) var(--easing-default) 1 both;
+  }
+  .step-exit-l {
+    animation: step-exit-l var(--duration-normal) var(--easing-default) 1 both;
+  }
+  .step-exit-r {
+    animation: step-exit-r var(--duration-normal) var(--easing-default) 1 both;
   }
 }
 
@@ -193,9 +275,20 @@
   }
   .animate-check-pop,
   .animate-rise-in,
-  .kf-step-nudge,
+  .animate-nudge,
+  .animate-ready-ring,
+  .step-enter-r,
+  .step-enter-l,
   .stagger > * {
     animation: none !important;
+  }
+  /* The outgoing step card exists for one reason: to be animated out. With motion
+     off it would sit, fully opaque, over the card that replaced it — so it is not
+     painted at all. Reduced motion means no transition, not a slower one. */
+  .step-exit-l,
+  .step-exit-r {
+    animation: none !important;
+    display: none !important;
   }
 }
 

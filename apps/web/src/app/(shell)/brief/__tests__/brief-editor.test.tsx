@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { renderWithRun, json, nextMock } from "@/__tests__/helpers";
 import { API, useRun } from "@/lib/run-context";
 import { fromBrief, saveDraftToStorage } from "@/components/campaign/editor-state";
+import { sectionOrder } from "@/components/campaign/sections";
 import BriefPage from "../page";
 import NewBriefPage from "../new/page";
 
@@ -1311,9 +1312,10 @@ describe("BriefPage — guided presentation (W6)", () => {
     // Still on Identity, now speaking what it needs: the footer says the first error.
     expect(stepHeading().textContent).toBe("Identity");
     expect(footerStatus()).toBe(messages.briefId);
-    // The refused Next replayed the one-shot nudge on the Next label.
+    // The refused Next replayed the one-shot nudge on the Next label. (W7.4 owns the
+    // keyframe now, and named it with the rest of the one-shots.)
     const label = next().querySelector("span");
-    expect(label?.className).toContain("kf-step-nudge");
+    expect(label?.className).toContain("animate-nudge");
   });
 
   test("walk to Review: each Next lands on the next step and hands the step heading focus", async () => {
@@ -1542,5 +1544,213 @@ describe("BriefPage — guided presentation (W6)", () => {
     expect(document.querySelector('[data-section="policy"]')).toBeNull();
     await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
     await waitFor(() => expect(document.querySelector('[data-section="policy"]')).toBeTruthy());
+  });
+});
+
+describe("BriefPage — the walk's chrome and gestures (W7)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:presentation", "guided");
+    globalThis.confirm = vi.fn(() => true);
+  });
+
+  const adopt = async (user: ReturnType<typeof userEvent.setup>, id: string) => {
+    await user.click(screen.getAllByText("New brief...")[0]);
+    await user.click(await screen.findByText(id));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id));
+  };
+
+  const stepHeading = () => screen.getByRole("heading", { level: 1 });
+  const next = () => screen.getByRole("button", { name: messages.stepNext });
+  const segbar = () => within(screen.getByRole("navigation", { name: messages.segBarLabel }));
+  const segments = () => segbar().getAllByRole("button");
+  const card = () => screen.getByTestId("step-card");
+  /** The walk's length, derived from the one list the editor derives it from (W6.1). */
+  const walkLength = sectionOrder("brief").length + 1;
+
+  /** The step-card animation classes on screen right now (W7.2). */
+  const cardMotion = () =>
+    Array.from(document.querySelectorAll("[class]"))
+      .flatMap((element) => Array.from(element.classList))
+      .filter((token) => /^step-(enter|exit)-/.test(token))
+      .sort();
+
+  test("the segbar names one segment per step, and any segment navigates", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "ok");
+
+    // As long as the step list for this mode — never a number the segbar knows: it
+    // maps the list the cursor already walks (W6.1), and the count follows it.
+    expect(segments()).toHaveLength(walkLength);
+    expect(segments()[0].getAttribute("aria-current")).toBe("step");
+    expect(segments()[0].getAttribute("aria-label")).toBe(
+      messages.segBarSegment(1, walkLength, "Identity", "current"),
+    );
+
+    // The review step, from the first step, without having walked there: no lock
+    // (D21). A segment is never disabled, so it never needs a reason off-screen.
+    await user.click(segments()[5]);
+    await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
+    expect(segments()[5].getAttribute("aria-current")).toBe("step");
+  });
+
+  test("a segment for a step with something to fix says so, and still navigates", async () => {
+    const user = userEvent.setup();
+    // "BROKEN" is not a valid brief id, so Identity is the step with the problem.
+    routes({ list: () => json({ briefs: [entry("BROKEN", "r1")] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "BROKEN");
+
+    // Walk by the segbar: Next would refuse (W6), and a segment is not a gate.
+    await user.click(segments()[1]);
+    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
+    expect(segments()[0].getAttribute("aria-label")).toBe(
+      messages.segBarSegment(1, walkLength, "Identity", "issues"),
+    );
+
+    // …and the step behind it still answers a click, straight back to the problem.
+    await user.click(segments()[0]);
+    await waitFor(() => expect(stepHeading().textContent).toBe("Identity"));
+  });
+
+  test("the arrow keys walk, and stop walking inside a text field", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "ok");
+
+    // A left arrow in a text field moves the caret. The walk listens on the window,
+    // so an unsuppressed listener would turn the page out from under the typing.
+    const name = screen.getByLabelText("Campaign Name");
+    await user.click(name);
+    await user.keyboard("{ArrowLeft}{ArrowRight}");
+    expect(stepHeading().textContent).toBe("Identity");
+    expect(document.activeElement).toBe(name);
+
+    // Nothing is disabled for the field's sake: the caret is what moved, and the
+    // moment focus leaves the field the keys are the walk's again.
+    await user.click(stepHeading());
+    await user.keyboard("{ArrowRight}{ArrowRight}");
+    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
+    await user.keyboard("{ArrowLeft}");
+    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
+  });
+
+  test("the arrow keys stay out of an open dialog", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "ok");
+
+    // The save-as dialog, open: every overlay in the app mounts on open, so one in
+    // the DOM is one on screen. The key is aimed at the dialog itself, not at its
+    // field, so what stops the walk is the overlay — not the typing rule.
+    await saveVia(user, "Save as");
+    const dialog = document.querySelector('[role="dialog"][aria-modal="true"]') as HTMLElement;
+    expect(dialog).toBeTruthy();
+    fireEvent.keyDown(dialog, { key: "ArrowRight" });
+    expect(stepHeading().textContent).toBe("Identity");
+  });
+
+  test("a swipe across the step card walks; a tap does not", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "ok");
+
+    // 12px of drift is not a gesture anyone made on purpose.
+    fireEvent.touchStart(card(), { changedTouches: [{ clientX: 200, clientY: 300 }] });
+    fireEvent.touchEnd(card(), { changedTouches: [{ clientX: 188, clientY: 302 }] });
+    await waitFor(() => expect(stepHeading().textContent).toBe("Identity"));
+
+    // Dragging left pulls the next step in, the way a page turn does.
+    fireEvent.touchStart(card(), { changedTouches: [{ clientX: 200, clientY: 300 }] });
+    fireEvent.touchEnd(card(), { changedTouches: [{ clientX: 80, clientY: 310 }] });
+    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
+
+    // …and back again.
+    fireEvent.touchStart(card(), { changedTouches: [{ clientX: 80, clientY: 300 }] });
+    fireEvent.touchEnd(card(), { changedTouches: [{ clientX: 260, clientY: 305 }] });
+    await waitFor(() => expect(stepHeading().textContent).toBe("Identity"));
+  });
+
+  test("a step change slides the arriving card in and takes the leaving card out of flow", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "ok");
+
+    await user.click(next());
+    // The leaving card is absolutely positioned for exactly as long as it is on
+    // screen — held out of the column so the arriving card does not reflow past it.
+    const leaving = document.querySelector(".step-exit-l");
+    expect(leaving).toBeTruthy();
+    expect(leaving?.className).toContain("absolute");
+    expect(leaving?.getAttribute("aria-hidden")).toBe("true");
+    expect(leaving?.hasAttribute("inert")).toBe(true);
+    expect(document.querySelector(".step-enter-r")).toBeTruthy();
+    // …and the pair the walk wears is a pair `globals.css` names in its
+    // reduced-motion block: there is no third card animation a preference could miss.
+    expect(cardMotion()).toEqual(["step-enter-r", "step-exit-l"]);
+
+    // One transition later the copy is gone: a second set of every field in the
+    // section is a trap for a screen reader and for any query by label.
+    await waitFor(() => expect(document.querySelector(".step-exit-l")).toBeNull());
+    expect(document.getElementById("identity")).toBeNull();
+  });
+
+  test("going back slides the other way", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "ok");
+
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
+    await waitFor(() => expect(document.querySelector(".step-exit-l")).toBeNull());
+
+    await user.click(screen.getByRole("button", { name: messages.stepBack }));
+    expect(document.querySelector(".step-exit-r")).toBeTruthy();
+    expect(document.querySelector(".step-enter-l")).toBeTruthy();
+    await waitFor(() => expect(stepHeading().textContent).toBe("Identity"));
+  });
+
+  test("a step that becomes complete rings the Next button once", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "ok");
+    // The loaded brief makes the first step complete, so the ring has fired once —
+    // the step the visitor is standing on has become one they can leave.
+    const opening = document.querySelector(".animate-ready-ring");
+    expect(opening).toBeTruthy();
+
+    // Break it, and fix it: a second transition on the same step is a second ring.
+    await user.clear(screen.getByLabelText("Target Audience"));
+    await user.type(screen.getByLabelText("Target Audience"), "b");
+    expect(document.querySelector(".animate-ready-ring")).not.toBe(opening);
+    const rung = document.querySelector(".animate-ready-ring");
+
+    // Still complete, several keystrokes later: the ring is a one-shot, keyed on the
+    // transitions — so it has not been replayed. The node is the same node.
+    await user.type(screen.getByLabelText("Campaign Name"), "xyz");
+    expect(document.querySelector(".animate-ready-ring")).toBe(rung);
+  });
+
+  test("walking onto a step that was already complete does not ring for it", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "ok");
+    await waitFor(() => expect(document.querySelector(".animate-ready-ring")).toBeTruthy());
+
+    // Copy was finished long before the visitor got here: the ring is for a step
+    // that became complete, not one that already was.
+    await user.click(screen.getByRole("button", { name: messages.stepNext }));
+    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
+    expect(document.querySelector(".animate-ready-ring")).toBeNull();
   });
 });
