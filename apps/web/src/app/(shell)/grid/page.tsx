@@ -561,7 +561,7 @@ function Artboard({
             "rounded-full border px-4 py-1 text-xs font-medium transition-colors",
             decision === "approved"
               ? "border-success bg-success/20 text-success"
-              : "border-border text-text-muted hover:text-white",
+              : "border-border text-text-muted hover:text-text-emphasis",
           )}
         >
           Approve
@@ -573,7 +573,7 @@ function Artboard({
             "rounded-full border px-4 py-1 text-xs font-medium transition-colors",
             decision === "rejected"
               ? "border-error bg-error/20 text-error"
-              : "border-border text-text-muted hover:text-white",
+              : "border-border text-text-muted hover:text-text-emphasis",
           )}
         >
           Reject
@@ -716,7 +716,7 @@ function PreviewModal({
         type="button"
         onClick={onClose}
         aria-label="Close preview"
-        className="absolute right-6 top-6 text-text-muted transition-colors hover:text-white"
+        className="absolute right-6 top-6 text-text-muted transition-colors hover:text-text-emphasis"
       >
         <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

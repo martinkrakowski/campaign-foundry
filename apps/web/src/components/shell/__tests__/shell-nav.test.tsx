@@ -233,7 +233,7 @@ describe("Header", () => {
     nextMock().nav.pathname = "/compliance";
     renderWithRun(<Header />);
     const active = screen.getByRole("link", { name: "Compliance" });
-    expect(active.className).toContain("text-white");
+    expect(active.className).toContain("text-text-emphasis");
   });
 
   test("the hamburger opens and closes the mobile menu", async () => {
