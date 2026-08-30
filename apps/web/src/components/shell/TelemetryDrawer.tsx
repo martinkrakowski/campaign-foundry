@@ -25,6 +25,9 @@ interface TelemetryDrawerProps {
  * Floating telemetry log drawer. Renders the `log[]` returned by the last run
  * (the live-streaming variant is a follow-up — see the plan).
  */
+/** The drawer's element id, so the control that opens it can name it. */
+export const TELEMETRY_DRAWER_ID = "telemetry-drawer";
+
 export function TelemetryDrawer({ open, onClose }: TelemetryDrawerProps) {
   const { log, loading } = useRun();
   const [expanded, setExpanded] = useState(false);
@@ -57,6 +60,7 @@ export function TelemetryDrawer({ open, onClose }: TelemetryDrawerProps) {
 
   return (
     <div
+      id={TELEMETRY_DRAWER_ID}
       className={cn(
         "absolute bottom-24 left-1/2 z-10 flex w-full max-w-[800px] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl transition-all duration-300",
         open ? "opacity-100" : "h-0 opacity-0",

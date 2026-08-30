@@ -303,6 +303,43 @@ describe("RunProvider — review decisions", () => {
   });
 });
 
+describe("RunProvider — briefApplied", () => {
+  test("the default brief nobody has touched is not applied", () => {
+    const { result } = setup();
+    expect(result.current.briefApplied).toBe(false);
+  });
+
+  test("the empty brief the new-brief route releases is not applied", () => {
+    const { result } = setup();
+    // `blankBrief()` (editor-state.ts): a blank id is the marker for "no campaign" —
+    // nothing can be saved, listed or run under it, so nothing has been applied.
+    act(() => {
+      result.current.setBrief({ id: "", targetRegion: "", targetAudience: "", campaignMessage: "", products: [] });
+    });
+    expect(result.current.briefApplied).toBe(false);
+  });
+
+  test("a brief the editor committed is applied", () => {
+    const { result } = setup();
+    act(() => result.current.setBrief({ ...result.current.brief, id: "applied-brief" }));
+    expect(result.current.briefApplied).toBe(true);
+  });
+});
+
+describe("RunProvider — the telemetry drawer", () => {
+  test("starts closed, toggles both ways, and closes", () => {
+    const { result } = setup();
+    expect(result.current.telemetryOpen).toBe(false);
+    act(() => result.current.toggleTelemetry());
+    expect(result.current.telemetryOpen).toBe(true);
+    act(() => result.current.toggleTelemetry());
+    expect(result.current.telemetryOpen).toBe(false);
+    act(() => result.current.toggleTelemetry());
+    act(() => result.current.closeTelemetry());
+    expect(result.current.telemetryOpen).toBe(false);
+  });
+});
+
 describe("RunProvider — brief picker & persistence", () => {
   test("auto-opens the picker on first visit, then remembers dismissal", async () => {
     const { result } = setup();

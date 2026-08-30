@@ -5,8 +5,17 @@ import { useRun } from "@/lib/run-context";
 import { MODELS, labelFor } from "@/lib/models";
 import { cn } from "@/lib/cn";
 
+export interface ModelSelectorProps {
+  /**
+   * Said in the header's status line when the choice changes: the model only takes
+   * effect on the next run, so the header states what that run will use (W5.3). The
+   * header owns the line, so this is optional — the selector works without it.
+   */
+  readonly onModelChange?: (modelLabel: string) => void;
+}
+
 /** Header control: shows the active image model and opens a modal to switch it. */
-export function ModelSelector() {
+export function ModelSelector({ onModelChange }: ModelSelectorProps) {
   const { selectedModel, setSelectedModel, brief } = useRun();
   const [open, setOpen] = useState(false);
 
@@ -24,7 +33,7 @@ export function ModelSelector() {
         onClick={() => setOpen(true)}
         aria-haspopup="dialog"
         title="Change image model"
-        className="flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-3 py-1 font-mono text-[11px] text-text-primary transition-colors hover:border-border-hover"
+        className="flex min-w-0 max-w-[9rem] items-center gap-1.5 truncate whitespace-nowrap rounded-full border border-border bg-surface-2 px-3 py-1 font-mono text-[11px] text-text-primary transition-colors hover:border-border-hover sm:max-w-none"
       >
         <span className="text-brand-primary" aria-hidden>◆</span>
         <span className="hidden text-text-muted sm:inline">Model:</span> {labelFor(selectedModel)}
@@ -46,6 +55,7 @@ export function ModelSelector() {
           onSelect={(id) => {
             setSelectedModel(id);
             setOpen(false);
+            onModelChange?.(labelFor(id));
           }}
           onClose={() => setOpen(false)}
         />

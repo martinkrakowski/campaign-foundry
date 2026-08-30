@@ -1316,6 +1316,98 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
   **2243 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
 
+
+---
+
+## 2026-08-30 — W5 lane: the header (branch feat/w5-header)
+
+- **Mode:** Implementer (`opencode/hy4-preview`), lane W5 of the guided-brief plan (§4 W5, decisions D32/D33), based on `origin/main` d013d98.
+- **Changes (W5.1–W5.4):**
+  - **W5.1** `Header.tsx` — `TABS` gains `/brief` (first), and the desktop tabs now carry `aria-current="page"` as `MobileMenu` already did. The brand mark becomes a `Link` home (`/grid`) through the same `handleTabClick` interception the tabs use, so a dirty draft prompts once, through `guardedPush`, and a plain click stays a plain link.
+  - **W5.2** `Header.tsx` — a **Generate** button: runs the applied brief with the context's own `execute()` and routes to `/grid` through `guardedPush` (a refused prompt leaves the run unstarted). Never disabled: with nothing applied it sets the header's status line to `messages.generateNoBrief` and routes to `/brief`. `run-context.tsx` gains one narrow read-only flag, `briefApplied`.
+  - **W5.3** `Header.tsx` — the telemetry control is a 32px `IconButton` opening the existing non-modal drawer; `ModelSelector.tsx` gains an optional `onModelChange(label)` so the header's status line can say which model the next run will use (`messages.modelChanged`). `run-context.tsx` gains `telemetryOpen` / `toggleTelemetry` / `closeTelemetry`, and `app/(shell)/layout.tsx` moves the drawer out of the grid-only `showOrchestrator` block into a small `TelemetrySlot` that reads that state inside `RunProvider`.
+  - **W5.4** `shell/__tests__/header.test.tsx` (+7), `shell-modals.test.tsx` (+1), `lib/__tests__/run-context.test.tsx` (+4), `app/(shell)/__tests__/layout.test.tsx` (+1).
+- **Decisions (the two the lane brief left open):**
+  - **What "nothing applied" means to the header.** `applied` is `EditorState.appliedSnapshot !== null && !isDirtySinceApply(state)` (`BriefEditor.tsx:300`) — state inside a component the shell does not contain, in a file this lane does not own. Lifting it was not available, so the flag is derived in the provider: **`briefApplied = brief !== DEFAULT_BRIEF && brief.id !== ""`**. The two uncommitted states are exactly the two `RunProvider` can hold before a commit — the `DEFAULT_BRIEF` it starts from (`run-context.tsx:305`, only ever replaced, never mutated) and the blank brief `/brief/new` releases (`BriefEditor.tsx:204`, `blankBrief()`, `id: ""` — "nothing can be saved, listed or run under it"). Every commit path in the editor already ends in `setBrief` (apply `:435`, save & apply `:456`, save-as `:502`, load `:396`), and the picker's select is the same act, so the brief the shell holds is the one signal the editor and the shell agree on.
+  - **The reveal, when the blocking section is not mounted.** `refuseInvalid` (`BriefEditor.tsx:424`) is attempted → reveal → scroll, and the header cannot scroll a section it does not render. From another route the reveal is therefore **the route**: the status line says what is missing and names Apply, and `guardedPush("/brief")` lands the user where that control is — in the action bar, which is `sticky bottom-6` and so already in view once the editor is mounted. On `/brief` itself nothing navigates. No editor internal is exported to borrow the scroll; the copy mirrors `refuseInvalid`'s vocabulary ("<what is missing> — <the one thing to do>") rather than inventing a second one.
+- **Deviations** (full list on the PR): `app/(shell)/layout.tsx` is edited — the drawer is mounted by that layout, behind a grid-only condition, and the `CommandBar` toggle is wired to the same state, so W5.3 is unreachable within the four owned files; the alternative (a second drawer instance in the header) would put two telemetry drawers on `/grid`. The drawer keeps its bottom-docked placement and stays where it is rendered — the mock's telemetry drawer is a *right* drawer, but restyling an existing non-modal panel is not this lane's. `run-context` gains three telemetry members alongside the one Generate needs, following the `briefPickerOpen` precedent (a shell overlay opened from the sidebar and rendered by the layout). The mounted-restore path (a brief restored from `cf:brief` on load) counts as applied. `DESIGN.md` §3 is untouched — `AGENTS.md` lists it as a file never edited without design review — so its header anatomy now under-describes the bar (Brief tab, Generate, telemetry, and a drawer that is no longer grid-only).
+- **Verification:** gate in order on the committed tree — build, typecheck, lint (**0 problems**), lint:arch, `test:cov` **2258 passed | 2 skipped — 100 % on all four counters (6481/6481 statements, 4737/4737 branches, 1374/1374 functions, 5812/5812 lines)**, then `sync:check`.
+- **Left open:** the `DESIGN.md` §3 anatomy note above; and `messages.ts` still carries pre-existing header literals from earlier lanes (`HITL Mode Active`, `Open menu`, the tab labels), left where W2a/W3 put them rather than moved in this lane.
+
+### 2026-08-30 — W5 orchestrator round: Generate dropped the run on a confirmed prompt
+
+- **Mode:** Orchestrator, verifying `feat/w5-header` before review.
+- **Bug found and fixed:** `Header.handleGenerate` called `guardedPush(HOME)` and returned early
+  on `false`. But `false` is the guard's *deferred* answer, not its refusal: `guardedAction`
+  stashes the action and returns `false` whenever the editor is dirty. The action it was handed
+  was only `router.push`, so pressing **Generate** with unsaved edits and answering **Leave**
+  navigated to `/grid` and **never started the run** — the verb the user pressed silently
+  dropped. The lane's four Generate tests covered nothing-applied (on and off `/brief`),
+  applied-and-clean, and dirty-then-**Stay**; the dirty-then-**Leave** path was the one case
+  none of them drove, which is why a green suite hid it.
+- **Fix:** hand the guard the whole gesture — `guardedAction(() => { router.push(HOME);
+  setNotice(null); void execute(); })`. Leave is consent to Generate, not merely to the route
+  change; Stay still cancels both, because a refused action never fires.
+- **Test:** "a prompt the user accepts navigates AND starts the run", written before the fix and
+  confirmed failing against it (`generatePosts()` was 0, expected 1).
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2259 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
+
+### 2026-08-30 — W5 review round (independent reviewer: `agy/gemini-3.1-pro-high`)
+
+- **Mode:** Orchestrator, applying verified review findings to `feat/w5-header`.
+- **The reviewer independently found the Generate bug** recorded in the entry above, by the same
+  route (tracing `guardedPush`'s `false` return). It reviewed the pre-fix commit, so its first
+  finding was already closed by that commit — two readings reaching the same defect is the
+  useful signal, not a second fix.
+- **Changes** (all test strength; no source change beyond the entry above):
+  - `header.test.tsx` — `aria-current` exclusivity now asserts **every** other tab, not only
+    Grid. A prefix bug marks one specific tab, so checking a single sibling catches it only if
+    that sibling is the one marked.
+  - `header.test.tsx` — a **brand-mark refusal** test ("Stay" must not navigate). The suite had
+    only the acceptance path, so a guard that navigated on refusal would have passed.
+    Mutation-checked: replacing `guardedPush` with a bare `router.push` makes it fail.
+  - `header.test.tsx`, `shell-modals.test.tsx` — `toHaveBeenCalledTimes(1)` beside three
+    `toHaveBeenCalledWith` assertions (Generate's navigation, twice, and `onModelChange`).
+    `toHaveBeenCalledWith` alone passes against a double-fire, which is this repo's known
+    shipped defect pattern.
+  - The new assertions use `getAttribute(...)`, not `toHaveAttribute` — `jest-dom` is not set
+    up here, and the first draft failed with "Invalid Chai property".
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2260 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
+
+### 2026-08-30 — W5 bot-thread sweep (12 threads on PR #139)
+
+- **Mode:** Orchestrator. Every claim checked against the code before acting; five valid, seven refuted.
+- **Fixed:**
+  - **Modified clicks on the brand mark.** `handleTabClick` called `preventDefault()` on every
+    dirty click without checking modifiers, so a Cmd/Ctrl/Shift/Alt or middle click opened the
+    unsaved-edits flow instead of a new tab. This is the **same defect lane W1 fixed in
+    `MobileMenu`**, never mirrored here. Guard added, with W1's own `test.each` over all five.
+  - **A standing refusal outlived its cause.** Pressing Generate with nothing applied set the
+    notice; applying a brief flipped `briefApplied` but left the notice on screen, so the header
+    kept telling the user to do the thing they had just done. Cleared by effect, **scoped to
+    that one string** so a model-change notice survives — with a test for each direction.
+  - `type="button"` on the header's Generate (`Button` sets no default, unlike `IconButton`).
+  - `aria-controls` on the telemetry control, with `TELEMETRY_DRAWER_ID` exported from
+    `TelemetryDrawer` so the id has one spelling rather than two.
+  - **Mobile overflow:** the right cluster gained two controls this lane, and at 320px the model
+    label pushed the row past the viewport. Cluster is `min-w-0`; the model label truncates at
+    `9rem` below `sm`. Not measured — jsdom has no layout — so this is containment, not proof.
+- **Refuted:**
+  - **`briefApplied` should compare `brief.id` rather than object identity** (four separate
+    threads). Reference equality is the *more* correct test, not a weaker one: it asks "is this
+    still the object the provider started from", which is exactly the uncommitted state. The
+    proposed `brief.id !== DEFAULT_BRIEF.id` would falsely refuse a brief a user legitimately
+    applied under that id, and content equality would refuse any brief identical to the default.
+  - **"`guardedPush` may be asynchronous; await it."** It returns `boolean`, not a Promise.
+  - **`aria-pressed` as a fallback because "IconButton does not forward unknown props".** It
+    does — `icon-button.tsx` spreads `...rest`, which is how the existing `aria-expanded`
+    assertion passes. A second state attribute would also report the same fact twice.
+  - **`aria-live="polite"` on the status paragraph.** `role="status"` already implies it.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2267 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
+
 ### 2026-08-30 — W6 guided engine (lane shipped: `9514f08` → PR #140)
 
 - **Mode:** Implementer / Debugger / Reviewer, working from the earlier W6 summary. All gates green, commit verbatim, PR #140 opened against `main`.
