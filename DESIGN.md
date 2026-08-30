@@ -124,19 +124,37 @@ small text (10–13 px) needs **4.5 : 1**, a control boundary **3 : 1**.
   1.35–1.52 : 1 dark). An input's background is the page ground, so the hairline is the only
   thing that identifies it. Fixing it moves `--color-border` (and `--color-border-hover`) for
   both themes, which is a palette change to the shipped product, not an audit fix.
-- **Dark's own tints sit below 4.5 : 1 on a `surface-2` ground** — `error` 3.24 : 1,
-  `info` 3.19 : 1, `success` 4.27 : 1. Raising them collides with their second job: `Button`'s
-  destructive variant is `bg-error text-white`, and a lighter red puts white text below 4.5 : 1
-  on it. No single value serves both; it needs a `-tint` token pair, and the ~40 call sites
-  that spell `/20`.
+- **Dark's own tints sit below 4.5 : 1 — on every ground, not only `surface-2`.** An earlier
+  pass measured this against `surface-2` alone and so understated it; the chip idiom
+  (`bg-X/20 text-X border-X/50`) is painted over all three grounds. Measured per ground:
+
+  | | `background` `#0f0f0f` | `surface` `#1c1c1c` | `surface-2` `#262626` |
+  |---|---|---|---|
+  | `error` | 4.12 : 1 | 3.63 : 1 | 3.24 : 1 |
+  | `info` | 4.13 : 1 | 3.60 : 1 | 3.21 : 1 |
+  | `success` | 5.56 : 1 | 4.84 : 1 | 4.29 : 1 |
+  | `warning` | 6.25 : 1 | 5.40 : 1 | 4.79 : 1 |
+  | `modified` | 6.96 : 1 | 5.90 : 1 | 5.21 : 1 |
+
+  So `error` and `info` fail on *all three*, and `success` fails on `surface-2` only —
+  `warning` and `modified` clear it everywhere. Raising the failing values collides with their
+  second job: `Button`'s destructive variant is `bg-error text-white`, and a lighter red puts
+  white text below 4.5 : 1 on it. No single value serves both; it needs a `-tint` token pair,
+  and the ~40 call sites that spell `/20`.
 - **`text-brand-primary` on `bg-brand-primary/20` is 3.47 : 1** (light) and 3.49 : 1 (dark) —
   the grid's FIREFLY provenance badge. Unfixable without moving the brand colour itself.
-- **`grid/page.tsx`'s *Preview* pill keeps `bg-white text-black hover:bg-gray-200`.** It is the
-  fourth pill the audit was asked about, and it is the one whose ground is not the page: it
-  sits on `bg-scrim/80`, black in both themes. Tokenising it to `bg-text-emphasis` would make
-  it near-black on near-black in the light theme (1.41 : 1, down from 12.6 : 1). It is a
-  constant over a constant ground — the same category as the twelve `text-white` sites W0b
-  kept deliberately — and it is recorded here rather than left as an unexplained literal.
+- **`grid/page.tsx`'s *Preview* pill keeps `bg-white text-black hover:bg-gray-200`, and gains
+  a `ring-1 ring-scrim`.** It is the fourth pill the audit was asked about, and the one whose
+  ground is not the page. Tokenising it to `bg-text-emphasis` would make it near-black on
+  near-black in the light theme (1.41 : 1, down from 12.6 : 1), so the literal stays — but the
+  first version of this note justified it as sitting on `bg-scrim/80`, which is only the still
+  tile. A **motion** tile keeps the scrim at `/40` so the clip stays visible, and there the
+  pill's ground is the video: over a white frame a 40 % black scrim composites to `#999999`,
+  against which a white pill is **2.85 : 1** — below the 3 : 1 a control boundary needs
+  (WCAG 1.4.11). The ring fixes it in both directions without touching the fill, because a
+  black ring reads against a light frame (7.37 : 1) and the white fill reads against a dark
+  one (21 : 1); the worst case over any frame is now 7.37 : 1. A translucent ground hands its
+  contrast to whatever is behind it, so a control on one needs a boundary of its own.
 
 ### Typography
 

@@ -19,7 +19,16 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     // repairing one. It cannot go in <head>: App Router renders head children into the
     // flight payload but not into the document shell, so they only apply after
     // hydration — which is the flash this exists to prevent.
-    <html lang="en" className={`dark h-full ${inter.variable} ${firaCode.variable}`}>
+    // `suppressHydrationWarning` is required, not cosmetic: the script above mutates this
+    // element's class list before React hydrates, so the real DOM and the client VDOM
+    // legitimately disagree on exactly the attribute the correction rewrites. It suppresses
+    // one level only — this element's own attributes — so a genuine mismatch anywhere below
+    // still warns.
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`dark h-full ${inter.variable} ${firaCode.variable}`}
+    >
       <body className="h-full">
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
         {children}

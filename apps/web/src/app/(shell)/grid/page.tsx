@@ -439,7 +439,12 @@ function Artboard({
         <button
           type="button"
           onClick={onPreview}
-          className="w-full rounded-full bg-white py-2 text-center text-sm font-semibold text-black transition-colors hover:bg-gray-200"
+          // The ring, not the fill, is what guarantees this control an edge. A motion tile
+          // keeps the scrim at /40 so the clip stays visible, so the pill's real ground is
+          // the video: over a white frame that composites to #999999 and a white pill is
+          // 2.85:1, under the 3:1 WCAG 1.4.11 wants. A dark ring reads on a light frame and
+          // the white fill reads on a dark one, so the boundary holds either way.
+          className="w-full rounded-full bg-white py-2 text-center text-sm font-semibold text-black ring-1 ring-scrim transition-colors hover:bg-gray-200"
         >
           Preview
         </button>

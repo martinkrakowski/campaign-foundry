@@ -1281,3 +1281,37 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Left open:**
   - The four "found, not fixed" items above; the largest is the `-tint` token pair that would lift dark's `error` / `info` / `success` tints above 4.5 : 1 on `surface-2` without breaking white-on-`bg-error`.
   - **This worktree needed one `yarn install` after rebasing onto `1e5edcf`.** That commit bumped `@hexagen-monaco/sync` to `^0.12.1` while `node_modules` still held 0.8.0, which made `yarn lint:arch` and `yarn sync:check` fail with `command not found: hexagen`. Done from the local cache with `YARN_ENABLE_NETWORK=0 yarn install --immutable`; `yarn.lock` untouched. Any worktree created before that commit will hit the same wall.
+
+### 2026-08-30 — W3 review round (independent reviewer: `agy/gemini-3.1-pro-high`)
+
+- **Mode:** Orchestrator, applying verified review findings to `feat/w3-theme` before merge.
+- **Changes:**
+  - `app/layout.tsx` — `suppressHydrationWarning` on `<html>`. The boot script mutates that
+    element's class list before hydration, so the real DOM and the client VDOM legitimately
+    disagree on the one attribute the correction rewrites. It suppresses this element's own
+    attributes only; a genuine mismatch below still warns.
+  - `grid/page.tsx` — the *Preview* pill gains `ring-1 ring-scrim`, plus a grid test asserting
+    it. The pill's recorded justification cited `bg-scrim/80`, but that is only the still tile;
+    a motion tile keeps the scrim at `/40`, so the pill's ground is the video. Over a white
+    frame that composites to `#999999` and a white pill is **2.85 : 1**, under the 3 : 1
+    WCAG 1.4.11 asks of a control boundary. The ring holds either way — dark ring on a light
+    frame (7.37 : 1), white fill on a dark one (21 : 1); worst case over any frame 7.37 : 1.
+  - `DESIGN.md` — the dark-tint deferral was measured against `surface-2` alone and therefore
+    understated. Re-measured on all three grounds and tabulated: `error` and `info` fail on
+    **all three** (4.12 / 3.63 / 3.24 and 4.13 / 3.60 / 3.21), `success` on `surface-2` only
+    (4.29), `warning` and `modified` clear it everywhere. The remedy is unchanged — a `-tint`
+    token pair — but its scope is now stated correctly for the lane that takes it.
+- **Decisions:**
+  - **The palette is not changed here.** Lifting `error` / `info` collides with their second
+    job (`bg-error text-white`), so the fix is a token pair across ~40 call sites, not a value
+    edit. Correcting the *record* is what W3 owns; the change itself is a lane of its own.
+  - **`ring-scrim` was probed, not assumed** — compiled through the real config, which emits
+    `--tw-ring-color: color-mix(in srgb, var(--color-scrim) …)`. The new test was mutation-
+    checked: with the ring removed it fails.
+- **Refuted:** the reviewer's third finding (that touching `CommandBar.tsx` violates the lane
+  and overlaps W5). W3.2's brief named the four white pills, two of which live in `CommandBar`;
+  the boundary sentence forbidding it came from the *review* brief, which was over-broad. W5
+  owns `Header.tsx`, `run-context.tsx` and `ModelSelector.tsx` — not `CommandBar` — so there is
+  no overlap.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2243 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
