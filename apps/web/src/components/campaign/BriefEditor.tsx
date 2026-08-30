@@ -170,7 +170,7 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   // W6.2: a reveal that points at another step cannot scroll there synchronously —
   // in Guided the target section is unmounted until the step change commits. The
   // pending marker is spent in a layout effect on the committed step.
-  const pendingReveal = useRef<{ section: string; focus: boolean } | null>(null);
+  const pendingReveal = useRef<{ section: string; step: string; focus: boolean } | null>(null);
   // The reveal that drove a step change already pointed at the step's own content, so
   // the step-change focus lands nowhere else. Consumed by the step-focus effect.
   const suppressStepHeading = useRef(false);
@@ -414,7 +414,7 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
       const step = section === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : section;
       const targetStepIndex = steps.findIndex((candidate) => candidate === step);
       if (presentation === "guided" && targetStepIndex !== -1 && targetStepIndex !== stepIndex) {
-        pendingReveal.current = { section, focus };
+        pendingReveal.current = { section, step, focus };
         go(targetStepIndex);
         return;
       }
@@ -435,7 +435,10 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     if (!pending) return;
     pendingReveal.current = null;
     revealSection(pending.section);
-    if (pending.focus) focusSection(pending.section);
+    // The mapped step, matching the immediate path above: a motion reveal scrolls
+    // `#motion` but hands focus to its host section, and the two paths must not
+    // disagree about which.
+    if (pending.focus) focusSection(pending.step);
     // The reveal already pointed at the step's own content; the step-change focus
     // handoff must not steal it. (A chip reveal is scroll-only and expects the same.)
     suppressStepHeading.current = true;
@@ -766,7 +769,11 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
             <div
               role="group"
               aria-label={messages.presentationLabel}
-              className={cn("shrink-0 items-center gap-1", presentation === "guided" ? "flex" : "hidden")}
+              // Always visible. It is the only control that returns to Guided, and the
+              // choice persists — hiding it in Everything made Guided unreachable for
+              // good, including across a reload. jsdom applies no CSS, so the suite
+              // could still find the button and the tests passed regardless.
+              className="flex shrink-0 items-center gap-1"
             >
               <button
                 type="button"
@@ -819,7 +826,10 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
                 statusText={stepFooterStatus}
                 onBack={stepIndex > 0 ? () => go(stepIndex - 1) : undefined}
                 onNext={steps[stepIndex] === "review" ? undefined : () => handleNext()}
-                nextLabel={steps[stepIndex] === "output" ? messages.stepNextReviewLaunch : undefined}
+                // The last section step, not a named one: `output` is last in classic
+                // but randomized puts `policy` after it, so keying on the id promised
+                // a launch and delivered the Variation Policy step.
+                nextLabel={stepIndex === steps.length - 2 ? messages.stepNextReviewLaunch : undefined}
                 nudgeKey={nudgeKey}
               />
             </div>

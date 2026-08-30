@@ -1384,9 +1384,38 @@ describe("BriefPage — guided presentation (W6)", () => {
     await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
     await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
-    await user.click(screen.getByRole("button", { name: messages.stepNextReviewLaunch }));
+    // Corrected: this asserted that Output's Next reads "Review & launch" in
+    // randomized mode, which pinned the defect — Output is the last section step in
+    // *classic* only, and here it is followed by Variation Policy. The launch label
+    // belongs to whichever step is actually last.
+    expect(screen.queryByRole("button", { name: messages.stepNextReviewLaunch })).toBeNull();
+    await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Variation Policy"));
     expect(footerStatus()).toBe(messages.statusStepReady);
+
+    // Policy *is* last here, so it is the step that offers the launch.
+    await user.click(screen.getByRole("button", { name: messages.stepNextReviewLaunch }));
+    await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
+  });
+
+  test("the presentation toggle stays reachable from Everything", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "ok");
+
+    await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
+
+    // The group used to carry `hidden` in this presentation, and the choice persists —
+    // so Guided became unreachable for good, including across a reload. jsdom applies
+    // no CSS, so a role query still found the button and every test passed; the class
+    // is the only thing that can be asserted here.
+    const group = screen.getByRole("group", { name: messages.presentationLabel });
+    expect(group.className).not.toContain("hidden");
+    await user.click(screen.getByRole("button", { name: messages.presentationGuided }));
+    expect(
+      screen.getByRole("button", { name: messages.presentationGuided }).getAttribute("aria-pressed"),
+    ).toBe("true");
   });
 
   test("Back returns to the previous step, and disappears again on the first", async () => {

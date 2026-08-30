@@ -541,8 +541,13 @@ export const stepSubtitleReview = "Last look, then send it to the pipeline.";
 
 /** The step footer's status sentence when the step has nothing to fix. */
 export const statusStepReady = "Looking good.";
-/** The review step's footer status sentence. */
-export const statusStepReview = "Ready to send it — press Review & launch.";
+/**
+ * The review step's footer status sentence. It states readiness rather than naming a
+ * control: Review supplies no Next, so an instruction to "press Review & launch" sent
+ * the user looking for a button that is not on the step. W8 places the action bar
+ * here, and the instruction belongs with it.
+ */
+export const statusStepReview = "Everything checks out — this is the last look.";
 /** The review step's body: the brief has met every step, so this is the last look. */
 export const stepReviewIntro =
   "The brief is in shape. This is the last look before any of it runs — launch when you are ready.";

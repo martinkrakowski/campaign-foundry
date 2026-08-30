@@ -1482,3 +1482,36 @@ To keep this file out of version control, add `.agents/session-log.md` to
   `id === undefined` guard could not be reached, and `indexOf` already answers `-1`.
 - **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
   **2270 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
+
+### 2026-08-30 — W6 bot-thread sweep (10 threads on PR #140)
+
+- **Fixed — the serious one:** the presentation toggle carried `hidden` in Everything, and it
+  is the **only** control that returns to Guided. The choice persists, so choosing Everything
+  made Guided **permanently unreachable, across reloads**. Two reviewers caught it; the suite
+  could not, because jsdom applies no CSS, so a role query still found the button and every
+  test passed. Now always visible, with a test that asserts the *class* — the only thing
+  observable in that environment.
+- **Fixed — a test that specified the defect.** `nextLabel` was keyed on
+  `steps[stepIndex] === "output"`, but `output` is the last section step in **classic** only;
+  randomized puts `policy` after it. So the randomized Output step promised "Review & launch"
+  and delivered Variation Policy. The existing walk test asserted exactly that, pinning the bug.
+  Keyed on `stepIndex === steps.length - 2` instead, and the test is **corrected, not deleted**:
+  it now asserts Output does *not* offer the launch in randomized, and that Policy does.
+- **Fixed:** the Review step's status said *"press Review & launch"* while that step
+  deliberately supplies no `onNext`, sending the user after a button that is not there. It now
+  states readiness; W8 places the action bar and the instruction belongs with it.
+- **Fixed:** the two reveal paths disagreed — the immediate one focused the *mapped* step, the
+  deferred one the raw section. A motion reveal with focus would have focused different things
+  depending on whether a step switch was needed. `pendingReveal` now carries the step.
+- **Fixed earlier this round:** the `<style>` block in `StepFooter` (a bot raised it too).
+- **Refuted:**
+  - *"Keep `scrollToSection` as an alias; the rename broke importers."* Replacing it at every
+    call site **was** W6.2. A stale import would fail `typecheck` and `build`; both pass.
+  - *"Guard `stepHeadingRef.current` — the `<h1>` only renders in Guided."* The effect fires on
+    a step change, and `go` is reachable only from the guided branch, so the ref is non-null
+    wherever the effect can run. An optional chain here would add a branch nothing can cover.
+  - *"Tighten the `ErrorStrip` filter to use `SECTION_BY_ERROR_KEY`."* It already does.
+- **Deferred to W8 (its stated scope):** loading a different brief keeps the step cursor. W8.3
+  owns which step a load opens.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2295 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
