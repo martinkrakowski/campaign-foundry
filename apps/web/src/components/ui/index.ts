@@ -33,6 +33,8 @@ export {
   DialogShell,
   DrawerShell,
   useDialogFocusTrap,
+  getFocusableDialogElements,
+  dialogHoldsFocus,
   type DialogHeadProps,
   type DialogBodyProps,
   type DialogFootProps,

@@ -11,6 +11,38 @@ export interface UseDialogFocusTrapOptions {
 }
 
 /**
+ * The elements a Tab cycle can actually reach inside an overlay. Native Tab skips
+ * disabled, hidden and aria-hidden content, so the boundary comparison must target
+ * what a keyboard user can truly focus — otherwise a disabled control at the first
+ * or last DOM position makes the cycle escape the dialog.
+ */
+export function getFocusableDialogElements(container: HTMLElement | null): HTMLElement[] {
+  if (!container) return [];
+  return Array.from(
+    container.querySelectorAll<HTMLElement>('a[href], button, input, textarea, select, [tabindex]'),
+  ).filter(isFocusableCandidate);
+}
+
+function isFocusableCandidate(element: HTMLElement): boolean {
+  if (element.hasAttribute("disabled")) return false;
+  if (element.getAttribute("tabindex") === "-1") return false;
+  if (element.closest("[hidden]")) return false;
+  if (element.closest('[aria-hidden="true"]')) return false;
+  return true;
+}
+
+/**
+ * Whether an Escape keydown belongs to this overlay. An open trap sets focus inside
+ * itself, so the overlay currently holding focus is the topmost one — it and only
+ * it may claim an Escape, and a ConfirmDialog stacked over an overlay leaves the
+ * overlay beneath it open until its own Escape (SHELL-39).
+ */
+export function dialogHoldsFocus(dialog: HTMLElement | null): boolean {
+  if (!dialog) return false;
+  return dialog.contains(document.activeElement);
+}
+
+/**
  * Focus trap and Escape key hook for dialogs and drawers (W10.5 / SHELL-41).
  * Captures previous active element on open, manages Tab wrapping, closes on Escape,
  * and restores focus on unmount.
@@ -21,34 +53,38 @@ export function useDialogFocusTrap({
   dialogRef,
   initialFocusRef,
 }: UseDialogFocusTrapOptions): void {
+  // Hold the close callback in a ref updated on every render so the effect's
+  // lifetime follows `open`, not the identity of a callback several callers pass as
+  // a fresh inline arrow. Tearing the trap down and back up for each new identity
+  // would re-run focus restoration and pull focus off the control the user was
+  // using mid-interaction (SHELL-32).
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!open) return;
 
+    const dialogElement = dialogRef.current;
     const previouslyFocused = document.activeElement as HTMLElement | null;
 
     if (initialFocusRef?.current) {
       initialFocusRef.current.focus();
     } else {
-      const firstFocusable = dialogRef.current?.querySelector<HTMLElement>(
-        'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      );
-      firstFocusable?.focus();
+      getFocusableDialogElements(dialogElement)[0]?.focus();
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        if (!dialogHoldsFocus(dialogElement)) return;
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
       if (e.key !== "Tab") return;
 
-      const focusables = dialogRef.current?.querySelectorAll<HTMLElement>(
-        'a[href], button, input, textarea, select, [tabindex]:not([tabindex="-1"])',
-      );
-      /* istanbul ignore next -- dialogs and drawers always have at least one focusable element */
-      if (!focusables || focusables.length === 0) return;
+      const focusables = getFocusableDialogElements(dialogElement);
+      if (focusables.length === 0) return;
 
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
@@ -67,7 +103,7 @@ export function useDialogFocusTrap({
       window.removeEventListener("keydown", handleKeyDown);
       previouslyFocused?.focus?.();
     };
-  }, [open, onClose, dialogRef, initialFocusRef]);
+  }, [open, dialogRef, initialFocusRef, onCloseRef]);
 }
 
 export interface DialogHeadProps {
