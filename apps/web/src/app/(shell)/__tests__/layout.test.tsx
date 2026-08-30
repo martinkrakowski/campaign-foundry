@@ -34,6 +34,24 @@ describe("ShellLayout", () => {
     expect(screen.getByText(/System Telemetry Stream/)).toBeTruthy(); // still mounted (inert), no throw
   });
 
+  test("the header's telemetry button opens the drawer off the grid route", async () => {
+    const user = userEvent.setup();
+    nextMock().nav.pathname = "/export";
+    render(
+      <ShellLayout>
+        <div>workspace</div>
+      </ShellLayout>,
+    );
+    // The drawer stays mounted for its slide, so openness reads as its aria-hidden
+    // state rather than as its presence.
+    const drawer = () => screen.getByText(/System Telemetry Stream/).closest("[aria-hidden]");
+    expect(drawer()?.getAttribute("aria-hidden")).toBe("true");
+
+    await user.click(screen.getByLabelText("System telemetry"));
+
+    expect(drawer()?.getAttribute("aria-hidden")).toBe("false");
+  });
+
   test("hides the orchestrator off the grid route", () => {
     nextMock().nav.pathname = "/export";
     render(
