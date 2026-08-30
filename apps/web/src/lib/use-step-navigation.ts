@@ -104,6 +104,17 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   return target.closest(TYPING_SELECTOR) !== null;
 }
 
+const GESTURE_SELECTOR = '[role="slider"], input[type="range"], [draggable="true"]';
+
+/**
+ * Whether a target owns its own gesture (e.g. a slider or a draggable element).
+ * A horizontal drag across a slider is the slider, not a step swipe.
+ */
+export function ownsItsOwnGesture(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  return target.closest(GESTURE_SELECTOR) !== null;
+}
+
 /** Whether a modal is on screen — in which case the arrow keys belong to it (W7.3). */
 export function overlayIsOpen(): boolean {
   return document.querySelector(OVERLAY_SELECTOR) !== null;
@@ -138,11 +149,16 @@ export function useStepSwipe(onSwipe: (direction: -1 | 1) => void): StepSwipeHan
   // keystroke elsewhere would be re-bound here too.
   const swipe = useRef(onSwipe);
   swipe.current = onSwipe;
-  const origin = useRef<{ x: number; y: number; typing: boolean } | null>(null);
+  const origin = useRef<{ x: number; y: number; typing: boolean; ownsGesture: boolean } | null>(null);
 
   const onTouchStart = useCallback((event: TouchEvent<HTMLElement>) => {
     const touch = event.changedTouches[0];
-    origin.current = { x: touch.clientX, y: touch.clientY, typing: isTypingTarget(event.target) };
+    origin.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+      typing: isTypingTarget(event.target),
+      ownsGesture: ownsItsOwnGesture(event.target),
+    };
   }, []);
 
   const onTouchEnd = useCallback((event: TouchEvent<HTMLElement>) => {
@@ -150,7 +166,7 @@ export function useStepSwipe(onSwipe: (direction: -1 | 1) => void): StepSwipeHan
     origin.current = null;
     // No start means no gesture: a `touchend` that arrives on its own is not half a
     // swipe, and a spent start cannot be spent twice.
-    if (start === null || start.typing || overlayIsOpen()) return;
+    if (start === null || start.typing || start.ownsGesture || overlayIsOpen()) return;
     const touch = event.changedTouches[0];
     const direction = swipeDirection(touch.clientX - start.x, touch.clientY - start.y);
     if (direction === 0) return;
@@ -182,7 +198,7 @@ export function useStepKeys({ enabled, onStep }: UseStepKeysOptions): void {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-      if (isTypingTarget(event.target) || overlayIsOpen()) return;
+      if (isTypingTarget(event.target) || ownsItsOwnGesture(event.target) || overlayIsOpen()) return;
       // The step walk is the only thing that wanted this key, so it is spent here
       // and nothing else downstream sees an arrow it may also have a use for.
       event.preventDefault();

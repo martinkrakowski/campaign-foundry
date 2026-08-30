@@ -181,6 +181,7 @@ describe("isTypingTarget", () => {
   });
 });
 
+
 describe("overlayIsOpen", () => {
   test("no overlay, no answer to give the arrow keys", () => {
     render(createElement("div", { "data-testid": "plain" }));
@@ -213,6 +214,7 @@ function SwipeCard({
     "div",
     { "data-testid": "card", onTouchStart: swipe.onTouchStart, onTouchEnd: swipe.onTouchEnd },
     withField ? createElement("input", { "data-testid": "field" }) : null,
+    withField ? createElement("div", { "data-testid": "slider", role: "slider" }) : null,
   );
 }
 
@@ -248,6 +250,14 @@ describe("useStepSwipe", () => {
     expect(onSwipe).not.toHaveBeenCalled();
   });
 
+  test("a touch drag beginning on the duration strip's slider does not change step", () => {
+    const onSwipe = vi.fn();
+    render(createElement(SwipeCard, { onSwipe, withField: true }));
+    touch(screen.getByTestId("slider"), "touchStart", 300, 100);
+    touch(screen.getByTestId("card"), "touchEnd", 100, 105);
+    expect(onSwipe).not.toHaveBeenCalled();
+  });
+
   test("a spent start cannot be spent twice, and an overlay swallows the gesture", () => {
     const onSwipe = vi.fn();
     render(createElement(SwipeCard, { onSwipe }));
@@ -270,14 +280,16 @@ describe("useStepSwipe", () => {
   });
 });
 
-/** The page the walk is listening on. `useStepKeys` binds to the window, not a node. */
 function KeyPage({ enabled, onStep, withField = false }: {
   enabled: boolean;
   onStep: (step: -1 | 1) => void;
   withField?: boolean;
 }) {
   useStepKeys({ enabled, onStep });
-  return createElement("div", null, withField ? createElement("input", { "aria-label": "field" }) : null);
+  return createElement("div", null, [
+    withField ? createElement("input", { key: "f", "aria-label": "field" }) : null,
+    withField ? createElement("div", { key: "s", role: "slider", "aria-label": "slider", tabIndex: 0 }) : null,
+  ]);
 }
 
 describe("useStepKeys", () => {
@@ -305,6 +317,14 @@ describe("useStepKeys", () => {
     // about where the key landed, not about the field existing.
     fireEvent.keyDown(window, { key: "ArrowLeft" });
     expect(onStep).toHaveBeenCalledWith(-1);
+  });
+
+  test("Arrow Left/Right with a slider focused does not change step", () => {
+    const onStep = vi.fn();
+    render(createElement(KeyPage, { enabled: true, onStep, withField: true }));
+    fireEvent.keyDown(screen.getByLabelText("slider"), { key: "ArrowLeft" });
+    fireEvent.keyDown(screen.getByLabelText("slider"), { key: "ArrowRight" });
+    expect(onStep).not.toHaveBeenCalled();
   });
 
   test("an arrow key while a dialog is up belongs to the dialog", () => {
@@ -386,6 +406,7 @@ describe("useBecameTrue", () => {
     rerender({ valid: true, step: "products" });
     expect(result.current).toBe(0);
   });
+
 });
 
 describe("STEP_TRANSITION_MS", () => {
