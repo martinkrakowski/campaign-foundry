@@ -8,8 +8,17 @@ describe("globals.css motion contract (D27 / D28 / W2b.4)", () => {
 
   test("exactly four looping animations exist in globals.css (the four motion-kind previews)", () => {
     // Matches all rules with `infinite` animation in globals.css
-    const infiniteMatches = Array.from(cssContent.matchAll(/animation:\s*([a-zA-Z0-9_-]+)[^;]*infinite/g));
-    const animationNames = infiniteMatches.map((m) => m[1]);
+    // Catch every way a loop can be written, not just `animation: <name> … infinite`:
+    // the name may follow `infinite` in the shorthand, and the count may be set on its
+    // own property. A guard that only knows one spelling is a guard a refactor walks past.
+    const shorthand = Array.from(cssContent.matchAll(/animation:\s*([^;]*infinite[^;]*);/g));
+    const longhand = Array.from(cssContent.matchAll(/animation-iteration-count:\s*infinite/g));
+    expect(longhand, "a loop declared via animation-iteration-count bypasses the shorthand guard").toHaveLength(0);
+    const animationNames = shorthand.map((m) => {
+      const token = m[1].split(/\s+/).find((t) => /^kf-|^[a-z][a-z0-9-]*$/.test(t) && t !== "infinite" && !/^\d/.test(t) && !t.endsWith("s") && !t.startsWith("cubic-") && !t.startsWith("ease") && t !== "both" && t !== "linear" && t !== "alternate");
+      return token ?? m[1];
+    });
+    const infiniteMatches = shorthand;
 
     // D27 explicitly locks the allowed looping previews to exactly these four
     const expectedLoopingAnimations = [

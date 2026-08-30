@@ -48,7 +48,7 @@ export function PlatformCard({
         "relative flex flex-col items-start gap-2 rounded-md border-[1.5px] p-3.5 text-left transition-all",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2",
         "motion-safe:hover:-translate-y-px motion-safe:active:scale-[0.97]",
-        "disabled:cursor-not-allowed disabled:opacity-50 disabled:motion-safe:hover:translate-y-0 disabled:motion-safe:active:scale-100",
+        "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:active:scale-100",
         selected
           ? "border-brand-primary bg-brand-primary/[0.08]"
           : "border-border bg-surface-2 hover:border-border-hover",
