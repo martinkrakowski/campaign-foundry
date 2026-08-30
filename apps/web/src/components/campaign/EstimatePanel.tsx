@@ -42,9 +42,10 @@ export function EstimatePanel({ state }: { state: EditorState }) {
  */
 function ClassicEstimate({ state }: { state: EditorState }) {
   const products = state.products.filter((product) => product.id.length > 0).length;
-  // A classic draft only says anything once it has a treatment to count; until then it
-  // reads like any other not-filled-in estimate rather than claiming "0 ads" (GB-D1).
-  const ready = state.treatments.length > 0;
+  // Products are what a classic count needs; treatments are optional, because the use
+  // case substitutes DEFAULT_TREATMENT for an empty list. Gating on treatments hid the
+  // estimate from a brief that runs perfectly well without any.
+  const ready = products > 0;
   if (!ready) {
     return (
       <div className="rounded-lg border border-border bg-surface p-4">

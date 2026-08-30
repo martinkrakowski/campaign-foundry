@@ -165,14 +165,19 @@ describe("EstimatePanel", () => {
     await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.length).toBeGreaterThan(before));
   });
 
-  test("becoming unplannable clears a rendered estimate", async () => {
+  // Corrected by W4 (D31), not deleted: this asserted that switching to classic left the
+  // panel saying "not ready", which was the very gap this lane closes — a classic draft
+  // had no deliverables readout anywhere in the editor. Switching modes now swaps the
+  // planner's estimate for the locally-derived classic one.
+  test("switching to classic swaps the planner estimate for the derived one", async () => {
     vi.mocked(globalThis.fetch).mockResolvedValue(json(OK_PLAN));
     const ready = planReady();
     const { rerender } = render(<EstimatePanel state={ready} />);
     expect(await screen.findByText(/You will get 12 ads/)).toBeTruthy();
 
     rerender(<EstimatePanel state={{ ...ready, mode: "brief" }} />);
-    expect(screen.getByText(messages.estimateNotReady)).toBeTruthy();
+    expect(screen.queryByText(messages.estimateNotReady)).toBeNull();
+    expect(screen.getByText(/You will get/)).toBeTruthy();
   });
 
   test("the request is re-issued when the requested formats change", async () => {
@@ -273,4 +278,14 @@ describe("estimateSentence", () => {
       "You will get 4 ads for 2 products. 9 AI image calls.",
     );
   });
+
+  test("a classic brief with no treatments still shows a count — the pipeline substitutes one", () => {
+    // GenerateCampaignUseCase:163 renders one creative per cell when the treatments list
+    // is absent *or* empty, so the estimate must neither hide nor multiply itself to zero.
+    const state = { ...planReady(), mode: "brief" as const, treatments: [] };
+    render(<EstimatePanel state={state} />);
+    expect(screen.queryByText(messages.estimateNotReady)).toBeNull();
+    expect(screen.getByText(/You will get/)).toBeTruthy();
+  });
+
 });

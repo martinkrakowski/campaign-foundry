@@ -57,5 +57,9 @@ export function clampPolicy(state: EditorState): EditorState {
  * classic briefs, so the editor derives the deliverables count instead of asking.
  */
 export function classicAdCount(products: number, treatments: number | undefined): number {
-  return products * RATIO_VALUES.length * (treatments ?? 1);
+  // A brief with no treatments still renders one creative per cell: the use case
+  // substitutes DEFAULT_TREATMENT when the list is absent *or* empty
+  // (GenerateCampaignUseCase.use-case.ts:163). `?? 1` only catches undefined, so an
+  // empty array would otherwise multiply the whole estimate to zero.
+  return products * RATIO_VALUES.length * Math.max(1, treatments ?? 1);
 }
