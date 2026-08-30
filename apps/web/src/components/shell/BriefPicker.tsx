@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Input } from "@/components/ui";
 import { duplicateBrief, listBriefs, unknownErrorMessage, type BriefEntry } from "@/lib/briefs-api";
+import { useRouter } from "next/navigation";
 import { useRun } from "@/lib/run-context";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 
@@ -17,8 +18,9 @@ const BRIEF_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
  * pick, the × button, the backdrop, or Escape; traps focus.
  */
 export function BriefPicker() {
+  const router = useRouter();
   const { briefPickerOpen, closeBriefPicker, setBrief, brief: current } = useRun();
-  const { guardedPush, isDirty } = useGuardedNavigation();
+  const { guardedAction } = useGuardedNavigation();
   const [entries, setEntries] = useState<BriefEntry[] | null>(null);
   const [error, setError] = useState(false);
   const [actionError, setActionError] = useState<string | undefined>();
@@ -88,22 +90,17 @@ export function BriefPicker() {
   if (!briefPickerOpen) return null;
 
   const select = (entry: BriefEntry) => {
-    if (isDirty) {
-      if (!window.confirm("You have unsaved changes. Are you sure you want to leave?")) {
-        return;
-      }
-    }
-    setBrief(entry.brief);
-    closeBriefPicker();
+    guardedAction(() => {
+      setBrief(entry.brief);
+      closeBriefPicker();
+    });
   };
 
   const createNew = () => {
-    // The blank editor is a route, so this is a plain navigation: it used to land on
-    // `/brief`, which adopts the active brief — the campaign the user was leaving came
-    // straight back. `guardedPush` carries the unsaved-changes prompt, so asking here as
-    // well would show the same dialog twice — and the picker only closes if the user
-    // actually leaves, or declining the prompt would dismiss it anyway.
-    if (guardedPush("/brief/new")) closeBriefPicker();
+    guardedAction(() => {
+      router.push("/brief/new");
+      closeBriefPicker();
+    });
   };
 
   const confirmDuplicate = async () => {

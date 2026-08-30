@@ -23,4 +23,5 @@ export {
   keyToTarget,
   type DurationStripProps,
 } from "./duration-strip";
+export { ConfirmDialog, type ConfirmDialogProps } from "./confirm-dialog";
 

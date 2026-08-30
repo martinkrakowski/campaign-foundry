@@ -212,6 +212,9 @@ export const statusApplyRefusal =
   "Applied, but video cannot be made on this computer right now — Generate will wait until it is set up.";
 /** `status.leavePrompt` */
 export const statusLeavePrompt = "You have changes that are not saved yet — leave anyway?";
+export const confirmDialogTitle = "Unsaved edits";
+export const confirmDialogStay = "Stay";
+export const confirmDialogLeave = "Leave";
 /** `status.saveFailed` */
 export const statusSaveFailed = "Could not save — try Save again.";
 /** `status.saveAsFailed` */

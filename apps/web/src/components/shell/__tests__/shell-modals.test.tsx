@@ -182,25 +182,29 @@ describe("BriefPicker with unsaved editor changes", () => {
 
   test("refusing the prompt keeps the picker open and loads nothing", async () => {
     const user = userEvent.setup();
-    const confirm = vi.fn(() => false);
-    globalThis.confirm = confirm;
     routeBriefs({ briefs: [{ file: "demo.yaml", brief: { id: "demo", targetRegion: "DE", products: [{ id: "a" }] } }] });
     renderDirty();
 
     await user.click(await screen.findByText("demo.yaml"));
-    expect(confirm).toHaveBeenCalled();
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    expect(dialog).toBeTruthy();
+
+    await user.click(within(dialog).getByRole("button", { name: "Stay" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull());
     expect(screen.getByText("demo.yaml")).toBeTruthy();
   });
 
   test("refusing the prompt on Start from scratch also leaves the picker open", async () => {
     const user = userEvent.setup();
-    const confirm = vi.fn(() => false);
-    globalThis.confirm = confirm;
     routeBriefs({ briefs: [] });
     renderDirty();
 
     await user.click(await screen.findByText("Create new"));
-    expect(confirm).toHaveBeenCalled();
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    expect(dialog).toBeTruthy();
+
+    await user.click(within(dialog).getByRole("button", { name: "Stay" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull());
   });
 });
 
@@ -224,7 +228,6 @@ describe("BriefPicker when the prompt is accepted", () => {
 
   test("accepting loads the chosen brief and closes the picker", async () => {
     const user = userEvent.setup();
-    globalThis.confirm = vi.fn(() => true);
     mockPipelineApi({
       result: (url) =>
         url.includes("/campaigns/briefs")
@@ -234,18 +237,25 @@ describe("BriefPicker when the prompt is accepted", () => {
     renderDirty();
 
     await user.click(await screen.findByText("demo.yaml"));
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    expect(dialog).toBeTruthy();
+
+    await user.click(within(dialog).getByRole("button", { name: "Leave" }));
     await waitFor(() => expect(screen.queryByText("demo.yaml")).toBeNull());
   });
 
   test("accepting on Create new closes the picker too", async () => {
     const user = userEvent.setup();
-    globalThis.confirm = vi.fn(() => true);
     mockPipelineApi({
       result: (url) => (url.includes("/campaigns/briefs") ? json({ briefs: [] }) : json(EMPTY_REPORT)),
     });
     renderDirty();
 
     await user.click(await screen.findByText("Create new"));
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    expect(dialog).toBeTruthy();
+
+    await user.click(within(dialog).getByRole("button", { name: "Leave" }));
     await waitFor(() => expect(screen.queryByText("Create new")).toBeNull());
   });
 });

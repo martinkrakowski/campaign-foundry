@@ -344,44 +344,55 @@ describe("guarded navigation when the editor is dirty", () => {
 
   test("the sidebar's Create new button asks once before leaving, and stays put if refused", async () => {
     const user = userEvent.setup();
-    const confirm = vi.fn(() => false);
-    globalThis.confirm = confirm;
     renderDirty(createElement(BrowseBriefsButton, {}));
 
     await user.click(screen.getByRole("button", { name: /Create new/ }));
-    expect(confirm).toHaveBeenCalledTimes(1);
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    expect(dialog).toBeTruthy();
+
+    await user.click(within(dialog).getByRole("button", { name: "Stay" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull());
     expect(nextMock().router.push).not.toHaveBeenCalled();
   });
 
   test("accepting the prompt navigates", async () => {
     const user = userEvent.setup();
-    globalThis.confirm = vi.fn(() => true);
     const onActivate = vi.fn();
     renderDirty(createElement(BrowseBriefsButton, { onActivate }));
 
     await user.click(screen.getByRole("button", { name: /Create new/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    expect(dialog).toBeTruthy();
+
+    await user.click(within(dialog).getByRole("button", { name: "Leave" }));
     expect(onActivate).toHaveBeenCalled();
     expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new");
   });
 
   test("the sidebar's Edit link routes through the guard and dismisses the overlay", async () => {
     const user = userEvent.setup();
-    globalThis.confirm = vi.fn(() => true);
     const onNavigate = vi.fn();
     seedPersistedRun([makeAsset()]);
     renderDirty(createElement(SidebarContent, { onNavigate }));
 
     await user.click(screen.getByText("Edit"));
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    expect(dialog).toBeTruthy();
+
+    await user.click(within(dialog).getByRole("button", { name: "Leave" }));
     expect(onNavigate).toHaveBeenCalled();
     expect(nextMock().router.push).toHaveBeenCalledWith("/brief");
   });
 
   test("a header tab click is intercepted and routed through the guard", async () => {
     const user = userEvent.setup();
-    globalThis.confirm = vi.fn(() => true);
     renderDirty(createElement(Header));
 
     await user.click(screen.getByRole("link", { name: "Compliance" }));
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    expect(dialog).toBeTruthy();
+
+    await user.click(within(dialog).getByRole("button", { name: "Leave" }));
     expect(nextMock().router.push).toHaveBeenCalledWith("/compliance");
   });
 
@@ -397,13 +408,12 @@ describe("guarded navigation when the editor is dirty", () => {
   test("a clean mobile tab click routes client-side instead of reloading", async () => {
     const user = userEvent.setup();
     const tabs = [{ href: "/grid", label: "Grid" }] as const;
-    globalThis.confirm = vi.fn();
     render(createElement(ShellProviders, null, createElement(MobileMenu, { open: true, onClose: () => {}, tabs })));
     await user.click(screen.getByRole("link", { name: "Grid" }));
     // The tab is a raw <a>, so without preventDefault this would be a native page
     // load — routing through the client router is the "did not reload" proof.
     expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
-    expect(globalThis.confirm).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
   });
 
   // A modified or non-primary click (Cmd/Ctrl/Shift/Alt/middle) is the browser's own
@@ -414,13 +424,12 @@ describe("guarded navigation when the editor is dirty", () => {
     (modifier) => {
       const tabs = [{ href: "/grid", label: "Grid" }] as const;
       const onClose = vi.fn();
-      globalThis.confirm = vi.fn();
       render(createElement(ShellProviders, null, createElement(MobileMenu, { open: true, onClose, tabs })));
       fireEvent.click(screen.getByRole("link", { name: "Grid" }), {
         [modifier]: modifier === "button" ? 1 : true,
       });
       expect(nextMock().router.push).not.toHaveBeenCalled();
-      expect(globalThis.confirm).not.toHaveBeenCalled();
+      expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
       expect(onClose).not.toHaveBeenCalled();
     },
   );
@@ -428,10 +437,13 @@ describe("guarded navigation when the editor is dirty", () => {
   test("a dirty mobile tab click the user accepts prompts exactly once and navigates", async () => {
     const user = userEvent.setup();
     const tabs = [{ href: "/grid", label: "Grid" }] as const;
-    globalThis.confirm = vi.fn(() => true);
     renderDirty(createElement(MobileMenu, { open: true, onClose: () => {}, tabs }));
     await user.click(screen.getByRole("link", { name: "Grid" }));
-    expect(globalThis.confirm).toHaveBeenCalledTimes(1);
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    expect(dialog).toBeTruthy();
+    expect(screen.getAllByRole("dialog", { name: "Unsaved edits" })).toHaveLength(1);
+
+    await user.click(within(dialog).getByRole("button", { name: "Leave" }));
     expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
   });
 
@@ -439,10 +451,13 @@ describe("guarded navigation when the editor is dirty", () => {
     const user = userEvent.setup();
     const tabs = [{ href: "/grid", label: "Grid" }] as const;
     const onClose = vi.fn();
-    globalThis.confirm = vi.fn(() => false);
     renderDirty(createElement(MobileMenu, { open: true, onClose, tabs }));
     await user.click(screen.getByRole("link", { name: "Grid" }));
-    expect(globalThis.confirm).toHaveBeenCalledTimes(1);
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    expect(dialog).toBeTruthy();
+
+    await user.click(within(dialog).getByRole("button", { name: "Stay" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull());
     expect(nextMock().router.push).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
   });
