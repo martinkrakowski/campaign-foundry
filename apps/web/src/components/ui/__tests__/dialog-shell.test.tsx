@@ -110,7 +110,10 @@ describe("DialogShell and DrawerShell anatomy", () => {
 
     exerciseFocusTrap(drawer);
 
-    await user.click(screen.getByRole("button", { name: "Custom Close" }));
+    // Corrected, not deleted: this asserted the name "Custom Close" on a button whose
+    // visible word is "Close Drawer" — a WCAG 2.5.3 (Label in Name) violation, and the
+    // exact pairing DialogHead now refuses. The visible text wins.
+    await user.click(screen.getByRole("button", { name: "Close Drawer" }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -329,5 +332,20 @@ describe("dialogHoldsFocus", () => {
 
   test("is false for an absent dialog element", () => {
     expect(dialogHoldsFocus(null)).toBe(false);
+  });
+});
+
+describe("DialogHead — Label in Name (WCAG 2.5.3)", () => {
+  test("a closeLabel that contains the visible word is used as the name", () => {
+    render(<DialogHead title="T" onClose={() => {}} closeText="Close" closeLabel="Close drawer" />);
+    expect(screen.getByRole("button", { name: "Close drawer" })).toBeTruthy();
+  });
+
+  test("a closeLabel that would hide the visible word is ignored", () => {
+    // Announcing "Close drawer" on a button reading "Done" makes voice control fail:
+    // the user says what they see and nothing happens. The visible text wins instead.
+    render(<DialogHead title="T" onClose={() => {}} closeText="Done" closeLabel="Close drawer" />);
+    expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Close drawer" })).toBeNull();
   });
 });

@@ -29,9 +29,12 @@
   /* Selection is 25% of the brand token, not a new token of its own: `color-mix`
      keeps one source of truth, so a brand change moves the highlight with it and
      the tint cannot drift out of step with the colour it is tinting. */
+  /* Background only: forcing a colour here would repaint selected text on surfaces
+     that set their own — white-on-brand inside a primary button, for one — leaving
+     near-black text on a blue ground in the light theme. Letting the element's own
+     colour show through keeps the selection legible on every surface. */
   ::selection {
     background-color: color-mix(in srgb, var(--color-brand-primary) 25%, transparent);
-    color: var(--color-text-emphasis);
   }
 
   /* The standards-track scrollbar colours, for the engines that never see the

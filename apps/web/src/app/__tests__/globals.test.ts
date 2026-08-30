@@ -37,16 +37,34 @@ describe("globals.css token contract (W2a.3 / SHELL-57)", () => {
       expect(colour === "transparent" || colour.startsWith("var(--color-")).toBe(true);
     }
 
-    const webkitColours = Array.from(baseLayer.matchAll(/background:\s*([^;]+);/g))
+    // Every colour-bearing declaration, not just `background`: the thumb also sets a
+    // `border`, and a guard that reads one property lets the other drift to a literal.
+    // Shorthands like `border: 2px solid var(--color-surface)` do not *start* with the
+    // token, so assert on what the value may not contain rather than how it begins.
+    const webkitColours = Array.from(
+      baseLayer.matchAll(/(?:background|border|color)(?:-color)?:\s*([^;]+);/g),
+    )
       .map((m) => m[1].trim())
       .filter((value) => value !== "transparent");
     expect(webkitColours.length).toBeGreaterThan(0);
-    for (const colour of webkitColours) expect(colour.startsWith("var(--color-")).toBe(true);
+    for (const value of webkitColours) {
+      expect(value, `scrollbar colour is not a token: ${value}`).toMatch(/var\(--color-/);
+      expect(value, `scrollbar colour carries a literal: ${value}`).not.toMatch(/#[0-9a-fA-F]{3,8}\b|\b(rgba?|hsla?)\(/);
+    }
   });
 
   test("no literal colour or stock Tailwind colour appears anywhere in the file", () => {
     expect(css).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     expect(css).not.toMatch(/rgb\(/);
-    expect(css).not.toMatch(/\b(white|black|red-400|red-500)\b/);
+    // A named handful is a guard a new literal walks straight past. Reject the shapes
+    // instead — but only in code: these words appear legitimately in prose explaining
+    // *why* a colour was chosen, and a guard that fails on its own rationale is a guard
+    // people delete.
+    const code = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(code, "a raw hex reached globals.css").not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(code, "a literal rgb()/hsl() reached globals.css").not.toMatch(/\b(rgba?|hsla?)\(/);
+    expect(code, "a stock Tailwind colour reached globals.css").not.toMatch(
+      /\b(white|black|slate|gray|grey|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)(-\d{2,3})?\b/,
+    );
   });
 });

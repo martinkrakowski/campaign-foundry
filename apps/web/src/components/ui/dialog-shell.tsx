@@ -139,6 +139,16 @@ export function DialogHead({
   // and only takes one when a caller wants to say *which* thing closes (drawers read
   // "Close drawer", and the suite queries that name).
   const iconCloseLabel = closeLabel ?? "Close";
+  // WCAG 2.5.3 (Label in Name): when the control shows a word, its accessible name must
+  // contain that word, or a voice-control user saying what they can see fails to
+  // activate it. `closeLabel` is still useful for saying *which* thing closes ("Close
+  // drawer"), so it is honoured only when it contains the visible text — otherwise the
+  // visible text wins. This makes the bad pairing unauthorable rather than a caller's
+  // duty to remember.
+  const textCloseLabel =
+    closeText !== undefined && closeLabel !== undefined && closeLabel.includes(closeText)
+      ? closeLabel
+      : undefined;
 
   return (
     <div className={cn("flex items-start justify-between gap-3 border-b border-border px-4 py-3", className)}>
@@ -155,7 +165,7 @@ export function DialogHead({
             <button
               type="button"
               onClick={onClose}
-              aria-label={closeLabel}
+              aria-label={textCloseLabel}
               className="rounded px-2 py-1 text-xs font-medium text-text-muted transition-colors hover:bg-surface-2 hover:text-text-emphasis"
             >
               {closeText}
