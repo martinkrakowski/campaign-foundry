@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useState } from "react";
 import { cn } from "@/lib/cn";
+import { Eyebrow, IconButton } from "@/components/ui";
 import { ModelSelector } from "./ModelSelector";
 import { MobileMenu } from "./MobileMenu";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
@@ -69,22 +70,21 @@ export function Header() {
 
       <div className="flex items-center gap-3 text-sm sm:gap-4">
         <ModelSelector />
-        <span className="hidden font-mono text-[10px] uppercase tracking-widest text-text-muted lg:inline">
+        <Eyebrow as="span" className="hidden text-[10px] lg:inline">
           HITL Mode Active
-        </span>
+        </Eyebrow>
         {/* Hamburger — mobile only. */}
-        <button
-          type="button"
+        <IconButton
+          label="Open menu"
           onClick={() => setMenuOpen(true)}
-          aria-label="Open menu"
           aria-haspopup="dialog"
           aria-expanded={menuOpen}
-          className="text-text-muted transition-colors hover:text-text-emphasis lg:hidden"
+          className="lg:hidden"
         >
           <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
           </svg>
-        </button>
+        </IconButton>
       </div>
 
       <MobileMenu open={menuOpen} onClose={closeMenu} tabs={TABS} />
