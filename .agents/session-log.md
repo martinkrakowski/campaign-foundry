@@ -1684,3 +1684,10 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
   **2362 passed | 2 skipped — 100 % on all four counters**, `sync:check` **Total ops 0**.
   PR: https://github.com/martinkrakowski/campaign-foundry/pull/145 (not merged).
+
+## 2026-08-30 — Lane C1b: the control-boundary consumer sweep (GLM 5.3 Flash / opencode)
+
+- Branch `fix/c1b-border-control-sweep`, PR #146 (worktree `wt-c1b`). Same shape as W0 → W0b: C1 landed the token pair, this lane moved the eleven classified consumer control sites to `border-border-control` (+ `hover:border-border-control-hover` on the asset rows).
+- Read DESIGN.md's rule first: `border-border` frames things, `border-border-control` bounds controls — card/dialog frames, divide rules, image rims and thumbnail rims keep `border-border`; selected/error/disabled arms keep their own tokens.
+- Tests beside each converted file assert the split class list (jsdom applies no CSS; `border-border` is a substring of `border-border-control`); new `TreatmentsSection.test.tsx` (none existed). Mutation-checked by reverting CommandBar.tsx:165 → test failed as designed → restored.
+- Gate: build/typecheck/lint (0 problems)/lint:arch all green; test:cov 2369 passed, 100 % on all four counters; sync:check clean after commit.
