@@ -33,12 +33,9 @@ export function MobileMenu({ open, onClose, tabs }: MobileMenuProps) {
   const handleTabClick = (e: React.MouseEvent, href: string) => {
     if (isDirty) {
       e.preventDefault();
-      if (!window.confirm("You have unsaved changes. Are you sure you want to leave?")) {
-        return;
-      }
+      guardedPush(href);
     }
     onClose();
-    guardedPush(href);
   };
 
   useEffect(() => {
@@ -125,6 +122,7 @@ export function MobileMenu({ open, onClose, tabs }: MobileMenuProps) {
                   "rounded-lg px-3 py-3 text-[15px] font-medium transition-colors",
                   active ? "bg-surface-2 text-white" : "text-text-muted hover:bg-surface hover:text-white",
                 )}
+                aria-current={active ? "page" : undefined}
               >
                 {tab.label}
               </a>

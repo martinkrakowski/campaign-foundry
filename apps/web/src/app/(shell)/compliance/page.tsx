@@ -9,7 +9,11 @@ export default function CompliancePage() {
 
   return (
     <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col p-4 pb-12 sm:p-8">
-      <h2 className="mb-6 text-xl font-bold text-white">Automated Compliance Report</h2>
+       <span className="font-mono text-[11px] uppercase tracking-widest text-text-muted">Compliance</span>
+        <h2 className="mb-6 text-lg font-semibold text-white">Automated Compliance Report</h2>
+        <p className="font-mono text-[11px] uppercase tracking-widest text-text-muted">Run the orchestration pipeline to generate PNG renders and CMYK PDF physical proofs.</p>
+
+
 
       <div className="w-full overflow-x-auto rounded-xl border border-border bg-surface shadow-2xl">
         <table className="w-full min-w-[640px] text-left text-[13px]">

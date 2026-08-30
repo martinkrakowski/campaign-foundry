@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Accordion } from "./Accordion";
 import { useEditorPanels, usePanelSink } from "@/lib/editor-panels-context";
 import { useRun } from "@/lib/run-context";
+import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 import { listAssets, formatBytes, type AssetEntry } from "@/lib/briefs-api";
 import { AssetPickerDrawer } from "@/components/campaign/AssetPickerDrawer";
@@ -75,7 +76,15 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { panels, topPanels } = useEditorPanels();
   usePanelSink();
   const { guardedPush } = useGuardedNavigation();
-  const aspectsLabel = "1:1, 9:16, 16:9";
+  const aspectsLabel = (() => {
+    const mode = brief.mode ?? "brief";
+    if (mode === "variation") {
+      const ratios = brief.variation?.axes?.ratio;
+      return ratios?.join(", ") ?? RATIO_VALUES.join(", ");
+    }
+    // classic brief or undefined mode
+    return RATIO_VALUES.join(", ");
+  })();
   const [assets, setAssets] = useState<AssetEntry[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
 

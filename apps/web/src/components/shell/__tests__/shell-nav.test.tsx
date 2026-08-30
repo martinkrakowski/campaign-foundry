@@ -390,12 +390,12 @@ describe("guarded navigation when the editor is dirty", () => {
       createElement(MobileMenu, { open: true, onClose: () => {}, tabs }),
     );
     await user.click(screen.getByRole("link", { name: "Grid" }));
-    expect(globalThis.confirm).toHaveBeenCalled();
+    expect(globalThis.confirm).toHaveBeenCalledTimes(1);
     refused.unmount();
 
     globalThis.confirm = vi.fn(() => true);
     renderDirty(createElement(MobileMenu, { open: true, onClose: () => {}, tabs }));
     await user.click(screen.getByRole("link", { name: "Grid" }));
-    expect(globalThis.confirm).toHaveBeenCalled();
+    expect(globalThis.confirm).toHaveBeenCalledTimes(1);
   });
 });
