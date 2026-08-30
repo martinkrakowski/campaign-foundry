@@ -63,6 +63,8 @@ Source of truth: `apps/web/src/styles/tokens.css`. Change a value there; nothing
 | `--color-error` | `#991b1b` | `#ef4444` | `text-error` `bg-error/20` | validation, refusals, rejected |
 | `--color-info` | `#1e40af` | `#3b82f6` | `text-info` `bg-info/20` | provenance, informational |
 | `--color-modified` | `#6d28d9` | `#c4b5fd` | `text-modified` `bg-modified/20` | changed since the last apply or save |
+| `--color-brand-tint` | `#cadff8` | `#1a2d44` | `bg-brand-tint` | opaque tint for FIREFLY badge |
+| `--color-brand-on-tint` | `#0b4a8c` | `#7cc4ff` | `text-brand-on-tint` | text on brand tint |
 
 Semantic colours (success / warning / error / info / modified) carry state. The brand blue is
 *not* a state colour; do not use it to mean "good".
@@ -117,6 +119,8 @@ small text (10–13 px) needs **4.5 : 1**, a control boundary **3 : 1**.
 | `SwitchRow`'s knob | `switch-row.tsx` → `bg-text-emphasis` | a white knob on the near-white `surface-2` rail was 1.1 : 1 — no edge at all. Now 16.3 : 1 off and 3.9 : 1 on the brand rail (light), 15.1 : 1 / 4.5 : 1 (dark) |
 | The secondary `Button` hover | `button.tsx` → `hover:bg-border-hover` | `bg-border/40` over `surface` is a **1.07 : 1** shift — not a hover. Now 1.42 : 1 light / 1.75 : 1 dark |
 | The grid's *can't play* pill | `grid/page.tsx` → `bg-surface` | `text-error` on a 70 % scrim measured 1.30 : 1 in the light theme (2.26 : 1 dark): a translucent ground over a clip hands its contrast to the video. Now 7.9 : 1 light / 4.5 : 1 dark |
+| The FIREFLY provenance badge | `grid/page.tsx:390` → an opaque `brand-tint` / `brand-on-tint` pair | 3.34 : 1 light / 3.06 : 1 dark on `bg-surface` — and **2.34 : 1** for the same badge over the lightbox's scrim. Now 6.50 : 1 / 7.45 : 1, ground-independent |
+| The lightbox chrome — close, caption, asset label | `grid/page.tsx:730,760,763` → fixed white | `bg-scrim/80` is black in both themes, so over the **light** page it composites to `#333333`: `text-text-muted` was 2.32 : 1 and `text-text-primary` **1.41 : 1**. Now 7.09 : 1 and 12.63 : 1 light, 9.84 : 1 and 20.6 : 1 dark |
 
 **Found, not fixed** — each needs a decision this lane must not take alone:
 
@@ -141,8 +145,6 @@ small text (10–13 px) needs **4.5 : 1**, a control boundary **3 : 1**.
   second job: `Button`'s destructive variant is `bg-error text-white`, and a lighter red puts
   white text below 4.5 : 1 on it. No single value serves both; it needs a `-tint` token pair,
   and the ~40 call sites that spell `/20`.
-- **`text-brand-primary` on `bg-brand-primary/20` is 3.47 : 1** (light) and 3.49 : 1 (dark) —
-  the grid's FIREFLY provenance badge. Unfixable without moving the brand colour itself.
 - **`grid/page.tsx`'s *Preview* pill keeps `bg-white text-black hover:bg-gray-200`, and gains
   a `ring-1 ring-scrim`.** It is the fourth pill the audit was asked about, and the one whose
   ground is not the page. Tokenising it to `bg-text-emphasis` would make it near-black on

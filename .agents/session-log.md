@@ -1566,3 +1566,40 @@ To keep this file out of version control, add `.agents/session-log.md` to
   handle, so the assertion proves the *name* reverted and not merely the text.
 - **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
   **2295 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
+
+## 2026-08-30 — S1 small-fix lane: the grid view's colour hygiene (branch fix/s1-grid-contrast)
+
+- **Mode:** Implementer (`opencode/inception-mercury-2`), **finished by the orchestrator** — the
+  model exhausted its 128 k context mid-lane (`context_length_exceeded`) with the work
+  uncommitted and one test failing. Its substance was right; the mechanics were not.
+- **Changes (three fixes, all measured):**
+  - **Two stock literals the W0b sweep missed.** `TILE_CLASS`'s `bg-black` and the motion
+    pill's `bg-black/70` → `bg-scrim` / `bg-scrim/70`. `--color-scrim` is `#000000` in both
+    themes, so the rendered output is byte-identical; the same file already spelled the token
+    four times, so this only makes it self-consistent.
+  - **The lightbox chrome was unreadable in the light theme.** `bg-scrim/80` is black in *both*
+    themes, so over the light page it composites to `#333333`. Painted on it: the close X and
+    caption at `text-text-muted` (**2.32 : 1**) and the asset label at `text-text-primary`
+    (**1.41 : 1**). Dark was fine (16.8 / 7.7 : 1), which is why the light-theme audit missed
+    it — the same defect class that audit *did* fix one line away, in the telemetry log panel.
+    Now fixed white: 7.09 : 1 and 12.63 : 1 light, 9.84 : 1 and 20.6 : 1 dark.
+  - **The FIREFLY badge.** `DESIGN.md` recorded it as "3.47 : 1 light / 3.49 : 1 dark —
+    unfixable without moving the brand colour". Both numbers were measured against
+    `background`, a ground the badge never sits on; on its real ground (`bg-surface`) it is
+    **3.34 : 1 / 3.06 : 1**, and the *second* instance inside the lightbox is **2.34 : 1**.
+    The "unfixable" claim was also false. Fixed with an **opaque** `--color-brand-tint` /
+    `--color-brand-on-tint` pair — opaque precisely because the badge renders over a
+    translucent scrim, where a tint hands its contrast to whatever is behind it. 6.50 : 1 light
+    / 7.45 : 1 dark, ground-independent. `--color-brand-primary` is untouched.
+- **Orchestrator corrections to the partial work:** the badge shipped
+  `border-brand-tint bg-brand-tint` — a border the same colour as its fill, i.e. no boundary at
+  all; now `border-brand-on-tint` (8.46 : 1 light / 9.09 : 1 dark against surface). The lightbox
+  assertions had been bolted into the Preview-pill test, which never opens the modal, so
+  `getByLabelText("Close preview")` threw — moved into a test that opens it. Mangled indentation
+  in four places repaired. The stale "Found, not fixed" bullet was left standing beside its own
+  fix; removed.
+- **Verified, not assumed:** all six new/changed utilities compiled through the real config and
+  confirmed to emit real declarations (the W0 lesson). Both new tests mutation-checked —
+  reverting the three source changes fails them.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2244 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.

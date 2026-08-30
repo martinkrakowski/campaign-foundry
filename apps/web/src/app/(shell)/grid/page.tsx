@@ -50,7 +50,7 @@ const formatOf = (a: Asset): "static" | "motion" => a.format ?? "static";
 
 const uniqueSorted = (values: string[]): string[] => [...new Set(values)].sort();
 
-const TILE_CLASS = "relative w-[240px] overflow-hidden rounded border border-border bg-black shadow-2xl";
+const TILE_CLASS = "relative w-[240px] overflow-hidden rounded border border-border bg-scrim shadow-2xl";
 
 interface GridFilters {
   product: string;
@@ -387,7 +387,7 @@ function ComplianceBadge({ asset }: { asset: Asset }) {
 }
 
 const SOURCE_BADGE: Record<Asset["backgroundSource"], { label: string; cls: string }> = {
-  firefly: { label: "FIREFLY", cls: "border-brand-primary/50 bg-brand-primary/20 text-brand-primary" },
+  firefly: { label: "FIREFLY", cls: "border-brand-on-tint bg-brand-tint text-brand-on-tint" },
   imagen: { label: "IMAGEN", cls: "border-info/50 bg-info/20 text-info" },
   openrouter: { label: "OPENROUTER", cls: "border-info/50 bg-info/20 text-info" },
   procedural: { label: "FALLBACK", cls: "border-warning/50 bg-warning/20 text-warning" },
@@ -660,7 +660,7 @@ function MotionCell({
         onClick={playing ? controls?.stop : controls?.play}
         aria-pressed={playing}
         aria-label={`${playing ? "Pause" : "Play"} ${label}`}
-        className="absolute bottom-2 right-2 z-20 rounded-full border border-border bg-black/70 px-2 py-1 font-mono text-[10px] text-white"
+        className="absolute bottom-2 right-2 z-20 rounded-full border border-border bg-scrim/70 px-2 py-1 font-mono text-[10px] text-white"
       >
         {playing ? "❚❚" : "▶"} {asset.durationSec !== undefined ? `${asset.durationSec}s` : "clip"}
       </button>
@@ -727,7 +727,7 @@ function PreviewModal({
         type="button"
         onClick={onClose}
         aria-label="Close preview"
-        className="absolute right-6 top-6 text-text-muted transition-colors hover:text-white"
+        className="absolute right-6 top-6 text-white/70 transition-colors hover:text-white"
       >
         <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -757,10 +757,10 @@ function PreviewModal({
       )}
 
       <div
-        className="flex items-center gap-2 font-mono text-xs text-text-muted"
+        className="flex items-center gap-2 font-mono text-xs text-white/70"
         onClick={(e) => e.stopPropagation()}
       >
-        <span className="text-text-primary">
+        <span className="text-white">
           {assetLabel(asset)}
         </span>
         <SourceBadge source={asset.backgroundSource} />
