@@ -447,3 +447,18 @@ export function descriptorBeats(count: number): string {
 export function descriptorHeadline(text: string): string {
   return `"${text}"`;
 }
+
+// --- Creative preview (W9) ---
+
+/** The dock/rail's legend. */
+export const previewLegend = "Preview";
+/** The preview's caption when no platform has been picked yet. */
+export const previewNoPlatform = "no platform yet";
+/** The preview's caption — ratio and platform are display labels, never raw values (D18). */
+export function previewCaption(ratioLabel: string, platformLabel: string): string {
+  return `${ratioLabel} · ${platformLabel}`;
+}
+/** The preview's step readout, e.g. "2 / 6". */
+export function previewStep(step: number, total: number): string {
+  return `${step} / ${total}`;
+}
