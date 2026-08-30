@@ -24,4 +24,6 @@ export {
   type DurationStripProps,
 } from "./duration-strip";
 export { ConfirmDialog, type ConfirmDialogProps } from "./confirm-dialog";
+export { MiniChip, type MiniChipProps, type MiniChipTone } from "./mini-chip";
+export { EmptyNote, type EmptyNoteProps } from "./empty-note";
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Button, Input } from "@/components/ui";
+import { Button, Input, MiniChip } from "@/components/ui";
 import { duplicateBrief, listBriefs, unknownErrorMessage, type BriefEntry } from "@/lib/briefs-api";
 import { useRouter } from "next/navigation";
 import { useRun } from "@/lib/run-context";
@@ -193,9 +193,9 @@ export function BriefPicker() {
                     <span className="flex w-full items-center justify-between gap-2">
                       <span className="font-mono text-[13px] text-text-primary">{entry.file}</span>
                       {isCurrent && (
-                        <span className="shrink-0 rounded border border-border bg-surface-2 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-text-muted">
+                        <MiniChip tone="neutral" className="shrink-0">
                           current
-                        </span>
+                        </MiniChip>
                       )}
                     </span>
                     <span className="text-[11px] text-text-muted">
