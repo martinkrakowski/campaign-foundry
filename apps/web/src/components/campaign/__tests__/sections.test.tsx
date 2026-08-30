@@ -65,7 +65,10 @@ describe("IdentitySection", () => {
     // Click once
     fireEvent.click(copyBtn);
     expect(writeText).toHaveBeenCalledWith("camp-summer");
-    await waitFor(() => expect(copyBtn.textContent).toBe("Copied ✓"));
+    // Re-queried by NAME, not reusing the stale handle: the point of the fix is that
+    // the accessible name follows the visible text, so the confirmation is announced.
+    const copiedBtn = await screen.findByRole("button", { name: "Copied ✓" });
+    expect(copiedBtn.textContent).toBe("Copied ✓");
 
     // Click second time while timer active
     fireEvent.click(copyBtn);
@@ -86,10 +89,15 @@ describe("IdentitySection", () => {
     const copyBtn = screen.getByRole("button", { name: "Copy brief ID" });
 
     fireEvent.click(copyBtn);
-    await waitFor(() => expect(copyBtn.textContent).toBe("Copied ✓"));
+    // Re-queried by NAME, not reusing the stale handle: the point of the fix is that
+    // the accessible name follows the visible text, so the confirmation is announced.
+    const copiedBtn = await screen.findByRole("button", { name: "Copied ✓" });
+    expect(copiedBtn.textContent).toBe("Copied ✓");
 
     await new Promise((r) => setTimeout(r, 1600));
-    expect(copyBtn.textContent).toBe("Copy");
+    // Re-queried: the name is what reverts, and asserting it is what proves the label
+    // came back rather than the text alone changing.
+    expect(screen.getByRole("button", { name: "Copy brief ID" }).textContent).toBe("Copy");
   });
 
   test("copy brief ID does nothing when clipboard is unavailable", () => {
