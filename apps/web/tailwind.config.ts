@@ -39,6 +39,12 @@ const config: Config = {
         sans: ["var(--font-sans)"],
         mono: ["var(--font-mono)"],
       },
+      letterSpacing: {
+        // The mono-uppercase group label (DESIGN.md §2, `Eyebrow`). A token rather
+        // than Tailwind's `tracking-widest` so the whole eyebrow family retunes from
+        // one value.
+        eyebrow: "0.08em",
+      },
       borderRadius: {
         sm: "var(--radius-sm)",
         md: "var(--radius-md)",

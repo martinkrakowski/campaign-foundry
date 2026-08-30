@@ -8,6 +8,7 @@ import {
   Button,
   CreativeGlyph,
   Disclosure,
+  FieldLine,
   Input,
   PreviewCard,
   Slider,
@@ -76,7 +77,7 @@ function AxisCards<T extends string>({
           </AxisCard>
         ))}
       </div>
-      {error ? <span className="block text-[11px] text-error">{error}</span> : null}
+      {error ? <FieldLine tone="error">{error}</FieldLine> : null}
     </fieldset>
   );
 }
@@ -136,10 +137,12 @@ function RatioAxis({
           onChange={(value) => dispatch({ type: "setVariation", field: "perRatio", value })}
         />
       </Field>
-      <p className={cn("text-[11px]", over ? "text-error" : "text-text-muted")}>
+      {/* One line, two tones: it is a derived readout until the floors it reports
+          cannot be met, at which point it is the refusal. */}
+      <FieldLine tone={over ? "error" : "muted"}>
         floor {floor} × {drawable.length} selected = {ratioFloorTotal} of count {count}
         {over ? " — lower the floor, raise the count, or select fewer ratios" : ""}
-      </p>
+      </FieldLine>
       <div
         className={cn(
           "grid gap-2",
@@ -173,7 +176,7 @@ function RatioAxis({
           </button>
         </div>
       ) : null}
-      {errors.ratio ? <span className="block text-[11px] text-error">{errors.ratio}</span> : null}
+      {errors.ratio ? <FieldLine tone="error">{errors.ratio}</FieldLine> : null}
     </fieldset>
   );
 }
@@ -394,7 +397,7 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
               </PreviewCard>
             ))}
           </div>
-          {errors.background ? <span className="block text-[11px] text-error">{errors.background}</span> : null}
+          {errors.background ? <FieldLine tone="error">{errors.background}</FieldLine> : null}
         </fieldset>
         <fieldset className="space-y-2">
           <legend className="text-[11px] text-text-muted">Palette Shift</legend>
@@ -410,7 +413,7 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
             ))}
           </div>
           {errors.paletteShift ? (
-            <span className="block text-[11px] text-error">{errors.paletteShift}</span>
+            <FieldLine tone="error">{errors.paletteShift}</FieldLine>
           ) : null}
         </fieldset>
           <HeadlineAxisToggle state={state} dispatch={dispatch} />

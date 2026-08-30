@@ -2,6 +2,7 @@ import { describe, test, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRun, exerciseFocusTrap, json, mockPipelineApi, EMPTY_REPORT } from "@/__tests__/helpers";
+import { useRun } from "@/lib/run-context";
 import { ModelSelector } from "../ModelSelector";
 import { createElement, useEffect } from "react";
 import { RunProvider } from "@/lib/run-context";
@@ -153,6 +154,37 @@ describe("TelemetryDrawer", () => {
     renderWithRun(<TelemetryDrawer open onClose={() => (closed = true)} />);
     await user.click(screen.getByLabelText("Close telemetry"));
     expect(closed).toBe(true);
+  });
+
+  test("a run in flight that has not spoken yet is announced, not shown as idle", async () => {
+    const user = userEvent.setup();
+    // Nothing to restore, and the generate POST never settles: the run stays in
+    // flight with an empty log — the one state where a skeleton says something the
+    // "[SYSTEM] Ready" idle line would get wrong.
+    localStorage.setItem(
+      "cf:brief",
+      JSON.stringify({ id: "log4", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", products: [] }),
+    );
+    mockPipelineApi({ report: EMPTY_REPORT, post: () => new Promise<Response>(() => {}) });
+
+    const Harness = () => {
+      const { execute } = useRun();
+      return (
+        <>
+          <button type="button" onClick={() => void execute()}>
+            go
+          </button>
+          <TelemetryDrawer open onClose={() => {}} />
+        </>
+      );
+    };
+    renderWithRun(<Harness />);
+    await user.click(screen.getByText("go"));
+
+    const status = await screen.findByRole("status");
+    expect(status.textContent).toContain("Waiting for the run to report");
+    expect(screen.queryByText(/Ready to orchestrate/)).toBeNull();
+    expect(document.querySelectorAll('div[aria-hidden="true"].bg-surface-2').length).toBe(2);
   });
 });
 

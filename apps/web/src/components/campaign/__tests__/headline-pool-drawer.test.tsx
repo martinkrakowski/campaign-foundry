@@ -26,7 +26,11 @@ const state = (over: Partial<EditorState> = {}): EditorState => ({
 });
 
 /** Route by method, so a GET/POST/PATCH sequence can be scripted per test. */
-const routes = (h: { get?: () => Response; post?: () => Response; patch?: () => Response }) => {
+const routes = (h: {
+  get?: () => Response | Promise<Response>;
+  post?: () => Response | Promise<Response>;
+  patch?: () => Response | Promise<Response>;
+}) => {
   const calls: { url: string; method: string; body?: string }[] = [];
   vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
     const method = (init?.method ?? "GET").toUpperCase();
@@ -74,6 +78,22 @@ describe("HeadlinePoolDrawer", () => {
     expect(await screen.findByText("headline a")).toBeTruthy();
     expect(screen.getByText("headline b")).toBeTruthy();
     expect(screen.getByText("Headlines (1 approved)")).toBeTruthy();
+  });
+
+  test("a load in flight is announced and drawn as static blocks, never as an empty pool", async () => {
+    routes({ get: () => new Promise<Response>(() => {}) });
+    open();
+
+    const status = await screen.findByRole("status");
+    expect(status.textContent).toContain("Loading headlines");
+    // "No headlines yet." while loading would claim a pool that has not been read.
+    expect(screen.queryByText("No headlines yet.")).toBeNull();
+
+    const blocks = Array.from(document.querySelectorAll('div[aria-hidden="true"].bg-surface-2'));
+    expect(blocks.length).toBe(2);
+    // D27 permits exactly four loops — the motion-kind previews — so a fifth cannot
+    // be introduced by a loading state.
+    for (const block of blocks) expect(block.className).not.toContain("animate-");
   });
 
   test("a brief with no pool yet says so rather than erroring", async () => {

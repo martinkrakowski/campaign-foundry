@@ -245,6 +245,18 @@ describe("BriefPage — data flow", () => {
     expect(screen.getByLabelText("New brief id")).toBeTruthy();
   });
 
+  test("the Save as... field is the kit input, so it has the focus halo it lacked", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<Editor />);
+    await fillValidDraft(user);
+
+    await saveVia(user, "Save as");
+    const field = screen.getByLabelText("New brief id");
+    expect(field.className).toContain("focus:ring-brand-primary/25");
+    expect(field.className).toContain("focus:border-brand-primary");
+  });
+
   test("the Save as... dialog can be dismissed", async () => {
     const user = userEvent.setup();
     routes({});

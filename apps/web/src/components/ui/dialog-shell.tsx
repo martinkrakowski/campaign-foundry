@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import { cn } from "@/lib/cn";
+import { IconButton } from "./icon-button";
 
 export interface UseDialogFocusTrapOptions {
   readonly open: boolean;
@@ -134,7 +135,20 @@ export function DialogHead({
   className,
 }: DialogHeadProps): ReactNode {
   const Heading = headingLevel === 3 ? "h3" : "h2";
-  const resolvedCloseLabel = closeLabel ?? (closeText ? undefined : "Close");
+  // An icon is nameless on its own, so it always carries a label; a word names itself
+  // and only takes one when a caller wants to say *which* thing closes (drawers read
+  // "Close drawer", and the suite queries that name).
+  const iconCloseLabel = closeLabel ?? "Close";
+  // WCAG 2.5.3 (Label in Name): when the control shows a word, its accessible name must
+  // contain that word, or a voice-control user saying what they can see fails to
+  // activate it. `closeLabel` is still useful for saying *which* thing closes ("Close
+  // drawer"), so it is honoured only when it contains the visible text — otherwise the
+  // visible text wins. This makes the bad pairing unauthorable rather than a caller's
+  // duty to remember.
+  const textCloseLabel =
+    closeText !== undefined && closeLabel !== undefined && closeLabel.includes(closeText)
+      ? closeLabel
+      : undefined;
 
   return (
     <div className={cn("flex items-start justify-between gap-3 border-b border-border px-4 py-3", className)}>
@@ -145,26 +159,23 @@ export function DialogHead({
       <div className="flex items-center gap-2 shrink-0">
         {actions}
         {onClose ? (
+          // Two shapes, because the close control is either an icon or a word. The
+          // word stays a plain button: it already has a name of its own.
           closeText ? (
             <button
               type="button"
               onClick={onClose}
-              aria-label={resolvedCloseLabel}
+              aria-label={textCloseLabel}
               className="rounded px-2 py-1 text-xs font-medium text-text-muted transition-colors hover:bg-surface-2 hover:text-text-emphasis"
             >
               {closeText}
             </button>
           ) : (
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label={resolvedCloseLabel}
-              className="shrink-0 text-text-muted transition-colors hover:text-text-emphasis"
-            >
+            <IconButton label={iconCloseLabel} onClick={onClose}>
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
-            </button>
+            </IconButton>
           )
         ) : null}
       </div>

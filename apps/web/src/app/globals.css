@@ -14,6 +14,36 @@
     @apply bg-background text-text-primary font-sans antialiased;
   }
 
+  /* One focus ring for the whole app (W2a.3 / SHELL-57). Per-component rings
+     predate this and are kept: they sit in the utilities layer and paint the same
+     2px brand ring at the same 2px offset, so the two coincide rather than stack.
+     What this rule adds is the control nobody remembered to style — a link, a
+     native button, a summary — and one place to change the ring for all of them.
+     `outline` rather than a box-shadow ring: it follows the element's own border
+     radius, costs no layout, and is what Windows High Contrast keeps. */
+  :focus-visible {
+    outline: 2px solid var(--color-brand-primary);
+    outline-offset: 2px;
+  }
+
+  /* Selection is 25% of the brand token, not a new token of its own: `color-mix`
+     keeps one source of truth, so a brand change moves the highlight with it and
+     the tint cannot drift out of step with the colour it is tinting. */
+  /* Background only: forcing a colour here would repaint selected text on surfaces
+     that set their own — white-on-brand inside a primary button, for one — leaving
+     near-black text on a blue ground in the light theme. Letting the element's own
+     colour show through keeps the selection legible on every surface. */
+  ::selection {
+    background-color: color-mix(in srgb, var(--color-brand-primary) 25%, transparent);
+  }
+
+  /* The standards-track scrollbar colours, for the engines that never see the
+     WebKit rules below: the same two tokens, stated once more. */
+  html {
+    scrollbar-color: var(--color-border) transparent;
+    scrollbar-width: thin;
+  }
+
   /* Thin, Firefly-style scrollbars. */
   ::-webkit-scrollbar {
     width: 8px;

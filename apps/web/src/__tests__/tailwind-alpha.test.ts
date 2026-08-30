@@ -70,3 +70,14 @@ describe('Tailwind Alpha Colors', () => {
     expect(css).not.toContain('.bg-test-bare\\/50');
   });
 });
+
+// The other class the kit now writes that a stock Tailwind scale would silently
+// substitute: `Eyebrow` uses `tracking-eyebrow`, and a token that never reaches the
+// stylesheet leaves the label with the default tracking and no error anywhere.
+describe('Tailwind letterSpacing token', () => {
+  it('generates a rule for tracking-eyebrow', async () => {
+    const css = await generateCss(['tracking-eyebrow']);
+    expect(css).toContain('.tracking-eyebrow');
+    expect(css).toContain('letter-spacing: 0.08em');
+  });
+});

@@ -1,7 +1,7 @@
 "use client";
 
 import { useReducer, useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Button } from "@/components/ui";
+import { Button, Input } from "@/components/ui";
 import { useRun } from "@/lib/run-context";
 import { useRouter } from "next/navigation";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
@@ -651,13 +651,15 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
             <p className="mb-4 text-[12px] text-text-muted">
               This creates a copy. The original file stays on disk until deleted.
             </p>
-            <input
+            {/* The kit's input, so the Save-as field has the same focus halo as
+                every other field in the editor — this one had none at all. */}
+            <Input
               type="text"
               aria-label="New brief id"
               placeholder="New brief id"
               value={saveAsId}
               onChange={(e) => setSaveAsId(e.target.value)}
-              className="mb-4 w-full rounded border border-border bg-background px-3 py-2 text-[13px] text-text-emphasis"
+              className="mb-4"
               autoFocus
             />
             <div className="flex gap-2">

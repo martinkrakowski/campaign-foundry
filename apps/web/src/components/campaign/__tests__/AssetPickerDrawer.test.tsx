@@ -5,6 +5,10 @@ import { AssetPickerDrawer, formatBytes } from "../AssetPickerDrawer";
 import { exerciseFocusTrap } from "@/__tests__/helpers";
 import * as briefsApi from "@/lib/briefs-api";
 
+/** The skeleton blocks standing in for rows that have not arrived. */
+const containerBlocks = () =>
+  Array.from(document.querySelectorAll('div[aria-hidden="true"].bg-surface-2'));
+
 describe("formatBytes", () => {
   test("formats byte sizes correctly across B, KB, and MB", () => {
     expect(formatBytes(500)).toBe("500 B");
@@ -37,6 +41,9 @@ describe("AssetPickerDrawer", () => {
     render(<AssetPickerDrawer briefId="camp-1" open={true} onClose={() => {}} />);
 
     expect(screen.getByRole("status").textContent).toContain("Loading assets…");
+    // The wait is drawn as static blocks, not a pulse: D27 permits four loops and
+    // they are the motion-kind previews.
+    expect(containerBlocks()).toHaveLength(2);
 
     await waitFor(() => {
       expect(screen.getByText("No assets uploaded yet.")).toBeTruthy();

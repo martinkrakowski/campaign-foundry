@@ -1,7 +1,7 @@
 "use client";
 
 import type { Dispatch } from "react";
-import { PlatformCard, DurationStrip } from "@/components/ui";
+import { FieldLine, PlatformCard, DurationStrip } from "@/components/ui";
 import { MOTION_KINDS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import { PLATFORM_PROFILES, isPlatformVisible } from "@campaignfoundry/Distribution/platform-profiles";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
@@ -119,7 +119,7 @@ export function OutputSection({
             </div>
           ) : null}
 
-          {errors.platforms ? <p className="text-[11px] text-error">{errors.platforms}</p> : null}
+          {errors.platforms ? <FieldLine tone="error">{errors.platforms}</FieldLine> : null}
         </fieldset>
 
         {/* Formats */}
@@ -139,7 +139,7 @@ export function OutputSection({
               gate={motionGate}
             />
           </div>
-          {errors.formats ? <p className="text-[11px] text-error">{errors.formats}</p> : null}
+          {errors.formats ? <FieldLine tone="error">{errors.formats}</FieldLine> : null}
         </fieldset>
 
         {/* Video options (Motion kinds & Duration) */}
@@ -157,7 +157,7 @@ export function OutputSection({
                   />
                 ))}
               </div>
-              {errors.motion ? <p className="text-[11px] text-error">{errors.motion}</p> : null}
+              {errors.motion ? <FieldLine tone="error">{errors.motion}</FieldLine> : null}
             </fieldset>
 
             <fieldset className="space-y-2">
