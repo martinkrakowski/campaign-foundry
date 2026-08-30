@@ -86,7 +86,7 @@ The scale as actually used — these are deliberate, keep to them:
 | Panel / dialog title | `text-sm font-semibold text-text-emphasis` |
 | Body, controls | `text-sm` (14px) / `text-[13px]` |
 | Field label | `text-[11px] text-text-muted` |
-| Group label (eyebrow) | `font-mono text-[11px] uppercase tracking-widest text-text-muted` |
+| Group label (eyebrow) | `Eyebrow` — `font-mono text-[11px] uppercase tracking-eyebrow text-text-muted` (`tracking-eyebrow` is `0.08em`, a token in `tailwind.config.ts`) |
 | Hint, caption, badge | `text-[11px]` / `text-[10px]` |
 
 The 70 existing `text-white` occurrences across 29 files migrate to `text-text-emphasis` in lane W0b.3; the table above is the instruction for new code.
