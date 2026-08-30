@@ -1,7 +1,15 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { Input } from "@/components/ui";
 import type { BriefEntry } from "@/lib/briefs-api";
+
+/**
+ * The filter field's placeholder and its accessible name are the same words: a
+ * placeholder is a hint, not a name (DESIGN.md §7), so the label repeats them
+ * instead of inventing a second string the two could then drift from.
+ */
+const FILTER_LABEL = "Search briefs...";
 
 interface BriefSelectorProps {
   briefs: BriefEntry[];
@@ -58,12 +66,13 @@ export function BriefSelector({ briefs, currentId, onSelect, onCreateNew }: Brie
       {open && (
         <div className="absolute left-0 top-full z-50 mt-1 w-80 rounded-lg border border-border bg-surface shadow-2xl">
           <div className="border-b border-border p-2">
-            <input
+            <Input
               type="text"
-              placeholder="Search briefs..."
+              placeholder={FILTER_LABEL}
+              aria-label={FILTER_LABEL}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full rounded border border-border bg-background px-3 py-1.5 text-[13px] text-text-emphasis placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-brand-primary"
+              className="h-8 rounded-sm text-[13px]"
               autoFocus
             />
           </div>

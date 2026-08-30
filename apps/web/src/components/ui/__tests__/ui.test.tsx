@@ -70,5 +70,22 @@ describe("Input", () => {
     const el = screen.getByPlaceholderText("name");
     expect(el.getAttribute("aria-invalid")).toBe("true");
     expect(el.className).toContain("border-error");
+    // An invalid field keeps the reason it is red rather than taking the focus colour.
+    expect(el.className).not.toContain("focus:border-brand-primary");
+  });
+
+  test("carries the brand focus halo on the token, at 25%", () => {
+    render(<Input placeholder="name" />);
+    const el = screen.getByPlaceholderText("name");
+    expect(el.className).toContain("focus:ring-2");
+    expect(el.className).toContain("focus:ring-brand-primary/25");
+    expect(el.className).toContain("focus:border-brand-primary");
+  });
+
+  test("a caller's className is merged over the primitive's own", () => {
+    render(<Input placeholder="name" className="h-8 text-[13px]" />);
+    const el = screen.getByPlaceholderText("name");
+    expect(el.className).toContain("h-8");
+    expect(el.className).not.toContain("h-10");
   });
 });

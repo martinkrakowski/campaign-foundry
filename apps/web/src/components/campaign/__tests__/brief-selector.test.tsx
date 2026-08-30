@@ -80,6 +80,18 @@ describe("BriefSelector", () => {
     expect(screen.getByText("No briefs found")).toBeTruthy();
   });
 
+  test("the filter field is the kit input, named by the same words as its placeholder", async () => {
+    const user = userEvent.setup();
+    render(<BriefSelector briefs={briefs} currentId="beta" onSelect={vi.fn()} onCreateNew={vi.fn()} />);
+    await user.click(screen.getByText("beta"));
+
+    const field = screen.getByLabelText("Search briefs...");
+    // A placeholder is a hint, not a name (DESIGN.md §7), and the kit's input brings
+    // the focus halo this field used to hand-roll at a different width.
+    expect(field.className).toContain("focus:ring-brand-primary/25");
+    expect(field.getAttribute("placeholder")).toBe("Search briefs...");
+  });
+
   test("an empty search shows no not-found message", async () => {
     const user = userEvent.setup();
     render(<BriefSelector briefs={[]} currentId={undefined} onSelect={vi.fn()} onCreateNew={vi.fn()} />);
