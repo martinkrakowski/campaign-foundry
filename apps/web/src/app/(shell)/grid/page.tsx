@@ -716,7 +716,7 @@ function PreviewModal({
         type="button"
         onClick={onClose}
         aria-label="Close preview"
-        className="absolute right-6 top-6 text-text-muted transition-colors hover:text-text-emphasis"
+        className="absolute right-6 top-6 text-text-muted transition-colors hover:text-white"
       >
         <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
