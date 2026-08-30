@@ -55,6 +55,10 @@ describe("GridPage", () => {
     renderWithRun(<GridPage />);
     await waitFor(() => expect(screen.getAllByText("IMAGEN").length).toBeGreaterThan(0));
     expect(screen.getByText("FIREFLY")).toBeTruthy();
+    const fireflyBadge = screen.getByText("FIREFLY");
+    expect(fireflyBadge.className).toContain("border-brand-on-tint");
+    expect(fireflyBadge.className).toContain("bg-brand-tint");
+    expect(fireflyBadge.className).toContain("text-brand-on-tint");
     expect(screen.getByText("FALLBACK")).toBeTruthy();
     expect(screen.getByText("REUSED")).toBeTruthy();
     expect(screen.getByText("OPENROUTER")).toBeTruthy();
@@ -340,6 +344,23 @@ describe("GridPage", () => {
     const pill = (await screen.findAllByText("Preview"))[0];
     expect(pill.className).toContain("ring-scrim");
     expect(pill.className).toMatch(/\bring-1\b/);
+  });
+
+  test("the lightbox chrome is fixed-white, because its ground is black in both themes", async () => {
+    // `bg-scrim/80` composites to #333333 over the light page, so theme text painted on
+    // it measured 2.32:1 (muted) and 1.41:1 (primary) — invisible in the light theme,
+    // fine in the dark one, which is why the audit missed it. White is a function of
+    // this ground, not of the theme.
+    const user = userEvent.setup();
+    seedPersistedRun([makeAsset()]);
+    renderWithRun(<GridPage />);
+    await user.click((await screen.findAllByText("Preview"))[0]);
+
+    const modal = await screen.findByRole("dialog");
+    expect(screen.getByLabelText("Close preview").className).toContain("text-white/70");
+    const assetLabel = within(modal).getByText(/alpha @ 1:1/);
+    expect(assetLabel.className).toContain("text-white");
+    expect(assetLabel.parentElement?.className).toContain("text-white/70");
   });
 
   test("opens and closes the full-size preview", async () => {

@@ -23,6 +23,9 @@
   --color-brand-primary: #1473e6;
   --color-brand-primary-hover: color-mix(in srgb, var(--color-brand-primary) 85%, black);
   --color-brand-secondary: #8b5cf6;
+  /* Opaque brand tint pair — used for FIREFLY badge background and text */
+  --color-brand-tint: #cadff8;      /* opaque on purpose: equals brand/20 over `surface` today */
+  --color-brand-on-tint: #0b4a8c;   /* 6.50:1 on the tint */
 
   /* Neutral surfaces & text */
   --color-background: #ffffff;
@@ -111,6 +114,10 @@
   --color-text-muted: #9e9e9e;
   --color-text-emphasis: #ffffff;
   --color-scrim: #000000;
+
+  /* Opaque brand tint pair — used for FIREFLY badge background and text */
+  --color-brand-tint: #1a2d44;
+  --color-brand-on-tint: #7cc4ff;   /* 7.45:1 on the tint */
 
   /* Semantic — see :root for why these are stated rather than inherited. */
   --color-success: #10b981;
