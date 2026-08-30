@@ -1116,3 +1116,32 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Implemented the alpha tokens purely in `tailwind.config.ts` exactly as directed by the Guided Brief plan to keep source tokens in `.css` as explicit hex values.
   - The literal `#000000` is used for `--color-scrim` as standard for overlays, and `#ffffff`/`#0f172a` for `--color-text-emphasis`.
 - **Left open:** W0b will handle applying the new alpha support to replace the existing 55 utilities (such as `bg-error/20`, `hover:bg-border/40`), remove stock literals, and replace `text-white` with `text-text-emphasis`.
+
+---
+
+## 2026-08-29 — Wave 1 orchestration record (W0 ‖ W1, PRs #128 + #129)
+
+- **Mode:** Orchestrator (`docs/workflows/orchestrator-kickoff-prompt.md`). No feature code written by the orchestrator except two last-mile landings and one verified fix, all noted below.
+- **Cast, as resolved at intake and as it actually ran:**
+  - **W0** — `agy --model gemini-3.7-flash-high`. Delivered PR #128 in one pass with a clean tree and no deviations; the orchestrator's independent gate run confirmed its report.
+  - **W1** — `opencode --model inception/mercury-2` was given the small lane deliberately (128k window). It **exhausted its context with no PR**, having done ~90% of the work. That work was committed as `7327fd3` rather than discarded, and `opencode/big-pickle` finished the lane from a three-fix brief.
+  - **Review** — `agy --model claude-opus-4-6-thinking`, read-only by brief. Tier A (a different model from all three implementers).
+  - Both `opencode` agents stopped short of committing at least once; the orchestrator landed `bf36e54` and `4753cda`.
+- **Provider budgets — three seats were unavailable and this is likely to recur:**
+  - `claude` CLI → Anthropic monthly spend limit.
+  - `opencode/claude-sonnet-5` → *"Insufficient balance"* (the premium model only; `big-pickle` kept working).
+  - `grok` → HTTP 402, *"Grok Build usage balance exhausted"*.
+  - `agy` had budget throughout and carried both the implement and review seats on different models.
+- **Decisions taken:**
+  - Preserve a dead lane's work as a `wip` commit with its own attribution rather than discarding it, and name its defects in that commit message so the next agent inherits the diagnosis rather than the mess.
+  - Two defects came from the orchestrator's own fix brief, not the implementers: instructing `preventDefault()` unconditionally (which broke Cmd/Ctrl/Shift/middle-click) and leaving `brand.primary-hover` without `<alpha-value>` (which made the new `DESIGN.md` contract false for one token). Both are recorded on the PRs.
+  - `aspect-ratios` was re-verified as a browser-safe leaf on request: the export map points at one 803-byte file with **zero imports**, and four web modules already depend on it.
+- **Refuted (6), each with the reason on the PR thread:**
+  - Re-introducing `--color-brand-tint` / `--color-brand-rail` as aliases (D22 retires them; 0 and 1 consumers; aliasing to the opaque primary would change the rendered colour).
+  - A regex in place of `toContain` in the Tailwind test (a selector token in compiled CSS is exact).
+  - `StatusChip`'s `yellow-400` and `ErrorStrip`'s `red-500/NN` (untouched files; W0b.2 owns them).
+  - `aria-current={… : undefined}` rendering the literal `"undefined"` (React omits undefined attributes — the real gap was that nothing tested it, which is now fixed).
+  - `aspectsLabel` never being rendered (it renders at `Sidebar.tsx:136`; the suggested second element would break the existing `getByText` queries).
+  - `e.stopPropagation()` (the dialog root has no click handler; the only sibling handler is the close button).
+- **Plan defect corrected in this PR:** §4's Hot-files line named `Sidebar.tsx` as **(W4 only)** while **W1.2 owned it**. Harmless in practice — W1 merged long before W4 — but the line was wrong.
+- **Left open for W0b (the next wave):** the 55-utility bracket-alpha sweep, the stock-colour literals in `ErrorStrip` and six other components, and the `text-white` → `text-text-emphasis` migration (70 occurrences in 29 files). `DESIGN.md`'s typography table already prescribes the token, so the doc leads the code by exactly one lane — stated there deliberately, not by omission.
