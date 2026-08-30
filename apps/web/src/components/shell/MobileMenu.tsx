@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
+import { dialogHoldsFocus } from "@/components/ui/dialog-shell";
 import { SidebarContent, BrowseBriefsButton } from "./Sidebar";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 
@@ -52,6 +53,10 @@ export function MobileMenu({ open, onClose, tabs }: MobileMenuProps) {
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        // Only the topmost overlay may claim an Escape: the ConfirmDialog rendered
+        // over this menu in the dirty-flow holds focus, so this condition is false
+        // and the menu stays open until it, in turn, is the topmost focus holder.
+        if (!dialogHoldsFocus(dialogRef.current)) return;
         onClose();
         return;
       }

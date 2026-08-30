@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { assetKey, assetLabel, encodeMinutes, useRun } from "@/lib/run-context";
-import { cn } from "@/lib/cn";
+import { MiniChip } from "@/components/ui";
 
 /**
  * Runs / history. The API currently persists only the latest run, so this shows
@@ -101,19 +101,13 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
+const STATUS_TONES = {
+  complete: "success",
+  halted: "error",
+  running: "info",
+  idle: "neutral",
+} as const;
+
 function StatusBadge({ status }: { status: "running" | "halted" | "complete" | "idle" }) {
-  return (
-    <span
-      className={cn(
-        "rounded border px-2 py-1 font-mono text-xs uppercase",
-        status === "complete" && "border-success/30 bg-success/20 text-success",
-        status === "halted" && "border-error/30 bg-error/20 text-error",
-        status === "running" && "border-info/30 bg-info/20 text-info",
-        /* istanbul ignore next -- idle never reaches the badge: the summary is hidden when idle */
-        status === "idle" && "border-border bg-surface-2 text-text-muted",
-      )}
-    >
-      {status}
-    </span>
-  );
+  return <MiniChip tone={STATUS_TONES[status]}>{status}</MiniChip>;
 }

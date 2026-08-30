@@ -1,5 +1,5 @@
 import { describe, test, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ProductsSection } from "../ProductsSection";
 import { initialEditorState } from "../../editor-state";
 import type { FieldErrors } from "../../validate";
@@ -44,5 +44,65 @@ describe("ProductsSection", () => {
     const input = screen.getAllByLabelText("Upload product logo")[0] as HTMLInputElement;
     expect(input.type).toBe("file");
     expect(input.className).toContain("hidden");
+  });
+
+  test("clicking Choose from bin opens AssetPickerDrawer and picking an asset sets logoPath", async () => {
+    const state = initialEditorState();
+    const dispatch = vi.fn();
+    // mock listAssets
+    const jsonResponse = (body: unknown) =>
+      new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    vi.mocked(globalThis.fetch).mockImplementation(() =>
+      Promise.resolve(
+        jsonResponse({
+          assets: [{ name: "brand-logo.png", size: 4096, type: "image/png" }],
+        }),
+      ),
+    );
+
+    render(<ProductsSection state={state} dispatch={dispatch} errors={{}} />);
+
+    const chooseBtn = screen.getAllByRole("button", { name: "Choose from bin" })[0];
+    expect(chooseBtn).toBeTruthy();
+    chooseBtn.click();
+
+    const dialog = await screen.findByRole("dialog", { name: "Asset Bin" });
+    expect(dialog).toBeTruthy();
+
+    const pickBtn = await screen.findByRole("button", { name: "Choose brand-logo.png" });
+    pickBtn.click();
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "setProduct",
+      key: state.products[0].key,
+      patch: { logoPath: `assets/inputs/${state.briefId}/brand-logo.png` },
+    });
+  });
+
+  test("closing AssetPickerDrawer without picking leaves logoPath untouched", async () => {
+    const state = initialEditorState();
+    const dispatch = vi.fn();
+    const jsonResponse = (body: unknown) =>
+      new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    vi.mocked(globalThis.fetch).mockImplementation(() =>
+      Promise.resolve(
+        jsonResponse({
+          assets: [{ name: "brand-logo.png", size: 4096, type: "image/png" }],
+        }),
+      ),
+    );
+
+    render(<ProductsSection state={state} dispatch={dispatch} errors={{}} />);
+
+    const chooseBtn = screen.getAllByRole("button", { name: "Choose from bin" })[0];
+    chooseBtn.click();
+
+    const dialog = await screen.findByRole("dialog", { name: "Asset Bin" });
+    expect(dialog).toBeTruthy();
+
+    const closeBtn = screen.getByRole("button", { name: "Close drawer" });
+    fireEvent.click(closeBtn);
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Asset Bin" })).toBeNull());
   });
 });

@@ -5,6 +5,7 @@ import { API, assetKey, assetLabel, useRun, type Asset } from "@/lib/run-context
 import { ASPECT_RATIOS } from "@/lib/aspect-ratios";
 import { cn } from "@/lib/cn";
 import { descriptorBeats, descriptorHeadline } from "@/components/campaign/messages";
+import { EmptyNote } from "@/components/ui";
 
 /** Rank an aspect ratio by the shared display order. */
 const ratioRank = (r: string): number => {
@@ -184,14 +185,15 @@ export default function GridPage() {
 
   if (assets.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center p-6 text-center">
-        <h2 className="mb-2 text-lg font-semibold text-text-emphasis">Start orchestrating assets</h2>
-        <p className="max-w-md text-[13px] text-text-muted">
-          {loading
+      <EmptyNote
+        className="h-full"
+        title="Start orchestrating assets"
+        message={
+          loading
             ? "Running the pipeline — resolving assets, compositing brand layers, and checking compliance…"
-            : "Execute the pipeline below to resolve missing assets, composite brand layers, and run brand-compliance checks."}
-        </p>
-      </div>
+            : "Execute the pipeline below to resolve missing assets, composite brand layers, and run brand-compliance checks."
+        }
+      />
     );
   }
 

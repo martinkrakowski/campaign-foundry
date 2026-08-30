@@ -1,7 +1,7 @@
 "use client";
 
 import { assetKey, assetLabel, useRun } from "@/lib/run-context";
-import { cn } from "@/lib/cn";
+import { MiniChip } from "@/components/ui";
 
 /** Automated compliance report — one row per generated asset. */
 export default function CompliancePage() {
@@ -16,10 +16,10 @@ export default function CompliancePage() {
         <table className="w-full min-w-[640px] text-left text-[13px]">
           <thead className="border-b border-border bg-surface-2 text-text-muted">
             <tr>
-              <th className="p-4 font-medium">Asset Target</th>
-              <th className="p-4 font-medium">Rule Engine</th>
-              <th className="p-4 font-medium">Telemetry Result</th>
-              <th className="p-4 font-medium">Gate Status</th>
+              <th className="p-4 font-mono text-[11px] font-normal uppercase tracking-widest text-text-muted">Asset Target</th>
+              <th className="p-4 font-mono text-[11px] font-normal uppercase tracking-widest text-text-muted">Rule Engine</th>
+              <th className="p-4 font-mono text-[11px] font-normal uppercase tracking-widest text-text-muted">Telemetry Result</th>
+              <th className="p-4 font-mono text-[11px] font-normal uppercase tracking-widest text-text-muted">Gate Status</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border text-text-emphasis">
@@ -58,17 +58,7 @@ export default function CompliancePage() {
 }
 
 function GateBadge({ status }: { status: "pass" | "fail" | "pending" }) {
+  const tone = status === "pass" ? "success" : status === "fail" ? "error" : "neutral";
   const label = status === "pass" ? "PASS" : status === "fail" ? "FAIL" : "PENDING";
-  return (
-    <span
-      className={cn(
-        "rounded border px-2 py-1 font-mono text-xs",
-        status === "pass" && "border-success/30 bg-success/20 text-success",
-        status === "fail" && "border-error/30 bg-error/20 text-error",
-        status === "pending" && "border-border bg-surface-2 text-text-muted",
-      )}
-    >
-      {label}
-    </span>
-  );
+  return <MiniChip tone={tone}>{label}</MiniChip>;
 }

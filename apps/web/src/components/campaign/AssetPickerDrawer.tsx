@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Button } from "@/components/ui";
+import { Button, DrawerShell, DialogHead } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { formatBytes, listAssets, unknownErrorMessage, type AssetEntry } from "@/lib/briefs-api";
 export { formatBytes };
@@ -52,17 +52,16 @@ export function AssetPickerDrawer({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label="Asset Bin">
-      <div className="absolute inset-0 bg-scrim/80 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-96 overflow-y-auto border-l border-border bg-surface p-4">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-text-emphasis">Asset Bin</h3>
-          <Button variant="ghost" size="sm" aria-label="Close drawer" onClick={onClose}>
-            Close
-          </Button>
-        </div>
+    <DrawerShell open={open} onClose={onClose} ariaLabel="Asset Bin">
+      <DialogHead headingLevel={3}
+        title="Asset Bin"
+        onClose={onClose}
+        closeLabel="Close drawer"
+        closeText="Close"
+        className="-mx-4 -mt-4 mb-4"
+      />
 
-        <div className="space-y-3">
+      <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h4 className="font-mono text-[11px] uppercase tracking-widest text-text-muted">
               Assets ({assets.length})
@@ -142,7 +141,6 @@ export function AssetPickerDrawer({
             </ul>
           )}
         </div>
-      </div>
-    </div>
+    </DrawerShell>
   );
 }

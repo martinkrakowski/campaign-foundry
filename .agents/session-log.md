@@ -1195,3 +1195,23 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - Maintained exact raw option values as accessible names across all four card types.
 - **Left open:**
   - None.
+
+---
+
+## 2026-08-30 — W10 lane: step-content polish (branch feat/w10-polish)
+
+- **Mode:** Implementer
+- **Changes:**
+  - **W10.1 (Headline suggestions inline):** Rendered approved headline suggestion cards with live character count pills above the headline input in `CopySection.tsx`. Wired "More ideas…" button opening `HeadlinePoolDrawer` in variation mode. Auto-fetched headline pool on mount.
+  - **W10.2 (Asset rows read as files):** Updated `LogoField.tsx` to accept `productColor` and `fileSize`, tint file type badge/icon with product colour, and render `TYPE · size` metadata line (`PNG · 2.0 KB`). Wired `onChooseFromBin` in `ProductsSection.tsx` to open `AssetPickerDrawer` to select assets directly from the project bin.
+  - **W10.3 (In-app dirty guard):** Built focus-trapped `ConfirmDialog` component. Replaced `window.confirm` in `use-guarded-navigation.ts` and `editor-dirty-context.tsx` with in-app confirmation modal. Preserved prompt once, never stack (D5), and preserved boolean return for `MobileMenu` refusal.
+  - **W10.4 (MiniChip, EmptyNote, table typography):** Created 20px monospace status pill `MiniChip` and shared `EmptyNote` empty-state block. Standardised table header cells (`th`) to `DESIGN.md` §2 eyebrow typography (`font-mono text-[11px] font-normal uppercase tracking-widest text-text-muted`) across view pages (`compliance`, `export`, `runs`, `grid`).
+  - **W10.5 (One dialog anatomy):** Extracted `DialogShell`, `DrawerShell`, `DialogHead`, `DialogBody`, `DialogFoot`, and `useDialogFocusTrap` into `@/components/ui/dialog-shell.tsx`. Refactored `BriefPicker`, `HeadlinePoolDrawer`, `AssetPickerDrawer`, and `ConfirmDialog` to use the shared overlay anatomy while preserving accessible names, focus traps, Escape key handling, and scrim backdrop clicks.
+- **Decisions:**
+  - Implemented `guardedAction` in `EditorDirtyProvider` allowing both route navigation (`router.push`) and modal action callbacks (`select` brief) to unify under the in-app `ConfirmDialog`.
+  - Structured `MiniChip` and `EmptyNote` with dictionary lookups and conditional renders to maintain 100% test branch coverage without `istanbul ignore`.
+  - Added `exerciseFocusTrap` coverage against all dialog and drawer overlays.
+- **Left open:**
+  - None.
+
+- **W10 follow-up (orchestrator):** the lane's remediation fixed the four trap findings but three more stood. The dirty-guard test had replaced W1's four `toHaveBeenCalledTimes(1)` assertions with `getAllByRole("dialog")).toHaveLength(1)`, which cannot see a double interception at all because the dialog is a singleton — restored as an assertion of what a second interception would actually produce (a second push, or a prompt still standing after Leave). `DialogHead` had flattened every overlay to `<h2>`, changing `HeadlinePoolDrawer` and `AssetPickerDrawer` from `<h3>`; it now takes a `headingLevel` and both keep theirs. **Left open:** `BriefEditor` still calls `window.confirm` at three sites (`confirmReplace`, and two Save-as overwrite prompts) — the first is the same dirty-guard concept and should move to the in-app dialog; the two overwrite prompts are a different concept (destructive confirm, not navigation). Not folded in here to keep this lane from growing further.
