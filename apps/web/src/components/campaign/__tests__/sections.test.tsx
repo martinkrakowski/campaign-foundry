@@ -65,9 +65,10 @@ describe("IdentitySection", () => {
     // Click once
     fireEvent.click(copyBtn);
     expect(writeText).toHaveBeenCalledWith("camp-summer");
-    // Re-query after click to verify accessible name changes
-const copiedBtn = await screen.findByRole("button", { name: "Copied ✓" });
-expect(copiedBtn.textContent).toBe("Copied ✓");
+    // Re-queried by NAME, not reusing the stale handle: the point of the fix is that
+    // the accessible name follows the visible text, so the confirmation is announced.
+    const copiedBtn = await screen.findByRole("button", { name: "Copied ✓" });
+    expect(copiedBtn.textContent).toBe("Copied ✓");
 
     // Click second time while timer active
     fireEvent.click(copyBtn);
@@ -88,9 +89,10 @@ expect(copiedBtn.textContent).toBe("Copied ✓");
     const copyBtn = screen.getByRole("button", { name: "Copy brief ID" });
 
     fireEvent.click(copyBtn);
-    // Re-query after click to verify accessible name changes
-const copiedBtn = await screen.findByRole("button", { name: "Copied ✓" });
-expect(copiedBtn.textContent).toBe("Copied ✓");
+    // Re-queried by NAME, not reusing the stale handle: the point of the fix is that
+    // the accessible name follows the visible text, so the confirmation is announced.
+    const copiedBtn = await screen.findByRole("button", { name: "Copied ✓" });
+    expect(copiedBtn.textContent).toBe("Copied ✓");
 
     await new Promise((r) => setTimeout(r, 1600));
     expect(copyBtn.textContent).toBe("Copy");

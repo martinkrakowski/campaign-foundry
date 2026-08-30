@@ -1515,3 +1515,31 @@ To keep this file out of version control, add `.agents/session-log.md` to
   owns which step a load opens.
 - **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
   **2295 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
+
+## 2026-08-30 — S2 small-fix lane: the coverage gate's blind spot, and two copy buttons (branch fix/s2-coverage-and-copy-a11y)
+
+- **Mode:** Implementer (`opencode/inception-mercury-2`), swept by the orchestrator.
+- **The coverage gate was not looking at three files that carry logic.** `vitest.config.ts`
+  enforces 100 % on all four counters and then excluded `**/index.ts` as *"generated barrels:
+  pure re-exports, no logic"*. That comment was false for
+  `components/campaign/sections/index.ts` (`SectionId`, `SECTION_TITLES` and `sectionOrder`'s
+  live branch — the function this whole wave derives its step list from),
+  `apps/api/server/lib/ports/index.ts` (a singleton registry, six functions, two lazy-init
+  branches) and `apps/api/server/routes/index.ts` (a live `GET /` handler). Narrowed to
+  `packages/*/src/**/index.ts`, and the comment corrected to say what is actually excluded.
+  **Measured, not assumed:** the three were already fully exercised, so the gate goes from
+  green to green while gaining teeth — statements 6613 → 6628, functions 1406 → 1414, all four
+  counters still 100 %.
+- **Two copy buttons hid their own confirmation from screen readers.** `IdentitySection` and
+  `TelemetryDrawer` set an `aria-label` on a button whose visible text toggles to *"Copied ✓"*.
+  An `aria-label` overrides that text, so the one piece of feedback the interaction produces was
+  never announced, and in the copied state the name no longer contained the visible text
+  (WCAG 2.5.3). Both now yield to the text once copied — the same rule `dialog-shell.tsx`
+  already enforces by construction.
+- **The existing tests pinned the defect** — they clicked, then asserted `textContent` through a
+  handle captured under the old name. Corrected to re-query **by name**, which is what makes
+  them detect the defect rather than encode it.
+- **Orchestrator corrections:** three test files had statements written at column 0; reindented.
+  The `vitest.config.ts` comment was a single run-on line; rewritten to say why.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2295 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.

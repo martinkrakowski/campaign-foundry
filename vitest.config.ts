@@ -62,7 +62,11 @@ export default defineConfig({
       exclude: [
         "**/*.test.{ts,tsx}",
         "**/__tests__/**",
-        "packages/*/src/**/index.ts", // generated barrels: pure re-exports only; the three index.ts files in apps/web/src/components/campaign/sections, apps/api/server/lib/ports, and apps/api/server/routes contain logic and are intentionally covered
+        // Only the generated package barrels are pure re-exports. A blanket
+        // `**/index.ts` also excused three files that carry real logic — the section
+        // order and titles, the API port registry, and the root route handler — so the
+        // 100% gate above was not looking at them. They are instrumented now.
+        "packages/*/src/**/index.ts",
         "**/*.config.{ts,mts,js,mjs}",
         "**/*.d.ts",
         "apps/web/src/app/layout.tsx", // root html/body shell; uses next/font (build-time only)
