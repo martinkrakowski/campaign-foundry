@@ -50,7 +50,7 @@ export function PreviewCard({
         "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:active:scale-100",
         selected
           ? "border-brand-primary bg-brand-primary/[0.08]"
-          : "border-border bg-surface-2 hover:border-border-hover",
+          : "border-border-control bg-surface-2 hover:border-border-control-hover",
       )}
     >
       {selected ? (

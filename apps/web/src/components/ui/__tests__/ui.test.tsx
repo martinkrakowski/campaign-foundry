@@ -62,7 +62,7 @@ describe("Input", () => {
     render(<Input placeholder="name" />);
     const el = screen.getByPlaceholderText("name");
     expect(el.getAttribute("aria-invalid")).toBeNull();
-    expect(el.className).toContain("border-border");
+    expect(el.className).toContain("border-border-control");
   });
 
   test("reflects the invalid state", () => {

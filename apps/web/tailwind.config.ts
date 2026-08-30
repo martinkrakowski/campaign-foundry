@@ -27,6 +27,10 @@ const config: Config = {
         "surface-2": "color-mix(in srgb, var(--color-surface-2) calc(<alpha-value> * 100%), transparent)",
         border: "color-mix(in srgb, var(--color-border) calc(<alpha-value> * 100%), transparent)",
         "border-hover": "color-mix(in srgb, var(--color-border-hover) calc(<alpha-value> * 100%), transparent)",
+        // The control-boundary pair (WCAG 1.4.11). Same color-mix shape as its
+        // neighbours: a bare var() drops /NN modifiers on tailwind 3.4.19.
+        "border-control": "color-mix(in srgb, var(--color-border-control) calc(<alpha-value> * 100%), transparent)",
+        "border-control-hover": "color-mix(in srgb, var(--color-border-control-hover) calc(<alpha-value> * 100%), transparent)",
         "text-primary": "color-mix(in srgb, var(--color-text-primary) calc(<alpha-value> * 100%), transparent)",
         "text-secondary": "color-mix(in srgb, var(--color-text-secondary) calc(<alpha-value> * 100%), transparent)",
         "text-muted": "color-mix(in srgb, var(--color-text-muted) calc(<alpha-value> * 100%), transparent)",

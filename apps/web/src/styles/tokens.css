@@ -34,6 +34,12 @@
   --color-surface-2: #f1f5f9;
   --color-border: #e2e8f0;
   --color-border-hover: #cbd5e1;
+  /* A control's own edge, where its fill does not distinguish it from its ground
+     (`surface` on `background`, `surface-2` on `surface` — deltas of ~1.05:1). WCAG
+     1.4.11 wants 3:1 for a control boundary; `border` (1.13–1.23:1) is too faint for
+     that job and is deliberately left alone for frames, rules and fills. */
+  --color-border-control: #78889b;        /* 3.31:1 on the worst light ground (surface-2) */
+  --color-border-control-hover: #64748b;
   --color-text-primary: #0f172a;
   /* The light ramp is a step darker than the slate ramp it was cut from: at slate-500
      `secondary` and slate-400 `muted` both measured under 4.5:1 on a light surface, and
@@ -109,6 +115,9 @@
   --color-surface-2: #262626;
   --color-border: #333333;
   --color-border-hover: #444444;
+  /* Control boundary — see :root for the two-token split. */
+  --color-border-control: #757575;        /* 3.28:1 on the worst dark ground (surface-2) */
+  --color-border-control-hover: #8f8f8f;
   --color-text-primary: #e8e8e8;
   --color-text-secondary: #9e9e9e;
   --color-text-muted: #9e9e9e;
