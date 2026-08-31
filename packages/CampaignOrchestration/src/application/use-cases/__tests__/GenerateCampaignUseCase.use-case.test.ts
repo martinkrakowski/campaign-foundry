@@ -60,7 +60,7 @@ describe("GenerateCampaignUseCase — validation", () => {
     ["a non-slug campaign id", baseBrief({ id: "Bad Id" }), /path-safe slug/],
     ["a non-slug product id", baseBrief({ products: [product("Alpha"), product("beta")] }), /Product ids must be path-safe/],
     ["duplicate product ids", baseBrief({ products: [product("alpha"), product("alpha")] }), /unique product ids/],
-    ["fewer than two products", baseBrief({ products: [product("alpha")] }), /at least 2 unique products/],
+    ["zero products", baseBrief({ products: [] }), /at least one unique product/],
     [
       "a non-slug treatment id",
       baseBrief({ treatments: [{ id: "Bad", layout: "headline-top", tone: "bold" }] }),
@@ -85,10 +85,13 @@ describe("GenerateCampaignUseCase — validation", () => {
     expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
   });
 
-  test("accepts a single product with one unique id is still rejected (boundary)", async () => {
+  test("accepts a classic brief with exactly one product (boundary)", async () => {
     const d = deps();
     const result = await new GenerateCampaignUseCase(d).execute(baseBrief({ products: [product("solo")] }));
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.assets.length).toBeGreaterThan(0);
+    expect(result.value.assets.every((a) => a.productId === "solo")).toBe(true);
   });
 });
 
@@ -382,10 +385,10 @@ describe("GenerateCampaignUseCase — variation", () => {
     expect(result.value.log.completedAt).toBeDefined();
   });
 
-  test("classic still requires two products", async () => {
-    const result = await new GenerateCampaignUseCase(deps()).execute(baseBrief({ products: [product("alpha")] }));
+  test("classic still refuses zero products — the floor is 1, never 0", async () => {
+    const result = await new GenerateCampaignUseCase(deps()).execute(baseBrief({ products: [] }));
     expect(result.success).toBe(false);
-    if (!result.success) expect(result.error.message).toMatch(/at least 2 unique products/);
+    if (!result.success) expect(result.error.message).toMatch(/at least one unique product/);
   });
 
   test("produces count assets with v<index> paths, descriptor, and plan provenance", async () => {

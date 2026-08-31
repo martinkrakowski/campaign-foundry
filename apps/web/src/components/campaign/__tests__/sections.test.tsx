@@ -590,10 +590,10 @@ describe("ProductsSection", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "setProduct", key: 1, patch: { id: "hydra-v2" } });
   });
 
-  test("classic mode shows a hint when only one product exists", () => {
+  test("a one-product classic campaign is not warned as incomplete", () => {
     const s = state({ mode: "brief", products: [emptyProduct(1)] });
     render(<ProductsSection state={s} dispatch={vi.fn()} errors={{}} />);
-    expect(screen.getByText("Classic mode needs two different products — add a second one below.")).toBeTruthy();
+    expect(screen.queryByText(/Classic mode needs/)).toBeNull();
   });
 
   test("an upload stores the path the API returns", async () => {

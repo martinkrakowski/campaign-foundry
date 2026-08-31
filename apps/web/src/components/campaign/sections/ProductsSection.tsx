@@ -192,11 +192,6 @@ export function ProductsSection({
     >
       {errors.products ? <p className="text-[13px] text-error">{errors.products}</p> : null}
       {uploadError ? <p className="text-[13px] text-error">{uploadError}</p> : null}
-      {state.mode === "brief" && state.products.length === 1 ? (
-        <p className="text-[11px] text-text-muted">
-          {messages.productsClassicHint}
-        </p>
-      ) : null}
       <div className="flex items-center justify-between">
         <Eyebrow as="h3">
           {messages.productsHeading(state.products.length)}

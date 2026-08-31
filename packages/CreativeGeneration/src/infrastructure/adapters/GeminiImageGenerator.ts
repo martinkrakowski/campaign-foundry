@@ -92,7 +92,7 @@ export class GeminiImageGenerator implements ImageGeneratorPort {
   /** Build a text-to-image prompt personalized to the product and campaign. */
   private buildPrompt(product: Product, context: BackgroundContext): string {
     return [
-      `Premium social-advertising hero background for the product "${product.name}".`,
+      `Premium social-advertising hero background for the subject "${product.name}".`,
       `Audience: ${context.targetAudience}. Market/region: ${context.targetRegion}.`,
       `Evoke the brand accent colour ${product.primaryColor}.`,
       `Cinematic, photographic, high production value, with clean negative space toward the bottom for a headline.`,

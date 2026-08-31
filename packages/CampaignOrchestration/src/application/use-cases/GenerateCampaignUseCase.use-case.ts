@@ -33,9 +33,13 @@ import { MOTION_FPS } from "../../domain/value-objects/MotionKind.vo.js";
 import { resolveTimeline, timelineProblem, type CopyTimeline } from "../../domain/value-objects/CopyTimeline.vo.js";
 import { DEFAULT_DURATION, DEFAULT_DURATION_SEC } from "../../domain/value-objects/variation-defaults.js";
 
-/** Classic briefs keep the two-product floor; variation relaxes to 1 (D10). */
-const MINIMUM_PRODUCTS_CLASSIC = 2;
-const MINIMUM_PRODUCTS_VARIATION = 1;
+/**
+ * A single subject is a legitimate campaign (a conference, a hiring drive), so
+ * every mode shares the one-product floor. It must be 1, never 0: products is
+ * the outer axis of the classic matrix, and at 0 a run would complete
+ * "successfully" having drawn nothing.
+ */
+const MINIMUM_PRODUCTS = 1;
 
 /**
  * Cap on concurrently-generated backgrounds. Backgrounds are the slow GenAI step,
@@ -144,7 +148,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
   ): Promise<Result<PipelineResult, Error>> {
     const log = new PipelineExecutionLog(brief.id, this.deps.now);
 
-    // 1. ValidateBriefIntegrity — MinimumProductsRule, before any port is called.
+    // 1. ValidateBriefIntegrity — the product floor and id rules, before any port is called.
     const validation = this.validateBrief(brief);
     if (!validation.success) return validation;
     log.record("ValidateBriefIntegrity", `Brief valid — ${brief.products.length} products`);
@@ -630,7 +634,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     return { asset, heroImage: writeProof ? video.poster : undefined };
   }
 
-  /** MinimumProductsRule + path-safe/unique ids, or the pipeline never starts. */
+  /** Product floor + path-safe/unique ids, or the pipeline never starts. */
   private validateBrief(brief: CampaignBrief): Result<true, Error> {
     // The brief id is the campaign's persisted-report filename (per-campaign reload);
     // enforce path-safety here too (defense-in-depth) so a caller bypassing parsing
@@ -657,12 +661,10 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     if (unique.size !== productIds.length) {
       return err(new Error("A campaign brief requires unique product ids."));
     }
-    const minProducts =
-      brief.mode === "variation" ? MINIMUM_PRODUCTS_VARIATION : MINIMUM_PRODUCTS_CLASSIC;
-    if (unique.size < minProducts) {
+    if (unique.size < MINIMUM_PRODUCTS) {
       return err(
         new Error(
-          `A campaign brief requires at least ${minProducts} unique products (received ${unique.size}).`,
+          `A campaign brief requires at least one unique product (received ${unique.size}).`,
         ),
       );
     }
