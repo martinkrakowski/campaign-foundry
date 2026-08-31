@@ -69,6 +69,26 @@ describe("BrandComplianceChecker — legal gate", () => {
     }
   });
 
+  describe("zero-tolerance table — underscore adjacency must still halt (true positives)", () => {
+    // \b counts "_" as a word character, so a \b head anchor found no boundary
+    // beside an underscore and silently lost these matches. The gate must halt
+    // on terms preceded OR followed by an underscore.
+    const mustHalt = [
+      "_guaranteed",
+      "results_guaranteed",
+      "a_miracle",
+      "the_best in the world",
+      "miracle_product",
+    ];
+    for (const text of mustHalt) {
+      test(`halts: "${text}"`, async () => {
+        const r = await checker.validateLegalCopy(text);
+        expect(r.passed).toBe(false);
+        expect(r.reason).toMatch(/Prohibited terminology/);
+      });
+    }
+  });
+
   describe("known term-list limitation — under-matching, not a matcher defect", () => {
     // "Curing" alters the stem: it is not "cure" + suffix, so the anchored
     // matcher (like the includes()-based matcher before it) cannot reach it.

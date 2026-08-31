@@ -19,19 +19,27 @@ function escapeRegExp(term: string): string {
 }
 
 /**
- * One anchored matcher per term, built once at module scope: each term must
- * begin at a word boundary and may run on through word characters, so
- * inflections that extend the term ("cure" → "cures", "cured") still hit while
- * embedded substrings ("secure", "obscure", "procurement", "manicure") do not —
- * there is no word boundary before "cure" inside any of them. Stem changes are
- * not reached: "curing", "curative" are not "cure" + suffix, so \w* cannot
- * extend into them and they do not match. That under-matching is unchanged from
- * the previous matcher — a gap in the term list, closed only by adding stems to
- * PROHIBITED_TERMS (a product and legal decision, out of scope here). No
- * trailing \b: \w* is already greedy to the word's end, so a trailing boundary
+ * One anchored matcher per term, built once at module scope. The head is a
+ * lookbehind over [a-z0-9], NOT \b: \b counts "_" as a word character, so no
+ * boundary exists beside it and terms adjacent to an underscore slipped past
+ * ("_guaranteed", "results_guaranteed", "a_miracle" were lost true positives).
+ * What the gate actually wants is that the term is not preceded by a letter or
+ * a digit — text is lowercased before matching, so the lookbehind expresses
+ * exactly that: embedded substrings ("secure", "obscure", "procurement",
+ * "manicure") still do not match because "cure" there is preceded by a letter,
+ * while underscore-adjacent terms match again. The term may run on through
+ * word characters, so inflections that extend it ("cure" → "cures", "cured")
+ * still hit. Stem changes are not reached: "curing", "curative" are not
+ * "cure" + suffix, so \w* cannot extend into them and they do not match. That
+ * under-matching is unchanged from the previous matcher — a gap in the term
+ * list, closed only by adding stems to PROHIBITED_TERMS (a product and legal
+ * decision, out of scope here). No tail anchor: \w* is greedy through "_", so
+ * a term followed by an underscore is over-matched and still halts — the safe
+ * direction for a zero-tolerance gate; a tail lookahead could only turn that
+ * into a miss ("cure_milk" escaping the gate).
  */
 const PROHIBITED_PATTERNS = PROHIBITED_TERMS.map(
-  (term) => [new RegExp(`\\b${escapeRegExp(term)}\\w*`), term] as const,
+  (term) => [new RegExp(`(?<![a-z0-9])${escapeRegExp(term)}\\w*`), term] as const,
 );
 
 /** A brand-colour pixel density below this fails the visual check (MinimumBrandColorDensity). */
