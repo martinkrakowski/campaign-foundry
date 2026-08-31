@@ -69,6 +69,20 @@ describe("BrandComplianceChecker — legal gate", () => {
     }
   });
 
+  describe("known term-list limitation — under-matching, not a matcher defect", () => {
+    // "Curing" alters the stem: it is not "cure" + suffix, so the anchored
+    // matcher (like the includes()-based matcher before it) cannot reach it.
+    // This test PINS the current pass, documenting the gap rather than hiding
+    // it. The remedy is adding stems ("curing", "curative") to PROHIBITED_TERMS
+    // — a product and legal decision, explicitly out of scope here. Do not
+    // "fix" this test without that decision.
+    test('passes: "Curing what ails you." — known gap, pinned', async () => {
+      const r = await checker.validateLegalCopy("Curing what ails you.");
+      expect(r.passed).toBe(true);
+      expect(r.reason).toBeUndefined();
+    });
+  });
+
   describe("zero-tolerance table — must now pass (false positives)", () => {
     // Ordinary copy whose only "hit" was a substring inside an unrelated word
     // (secure, procurement, obscure, manicure): the gate must no longer halt.

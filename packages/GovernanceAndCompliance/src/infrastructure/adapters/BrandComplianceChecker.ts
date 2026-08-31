@@ -21,11 +21,14 @@ function escapeRegExp(term: string): string {
 /**
  * One anchored matcher per term, built once at module scope: each term must
  * begin at a word boundary and may run on through word characters, so
- * inflections ("cure" → "cures", "cured", "curing") still hit while embedded
- * substrings ("secure", "obscure", "procurement", "manicure") do not — there is
- * no word boundary before "cure" inside any of them. No trailing \b: \w* is
- * already greedy to the word's end, so a trailing boundary is always
- * satisfiable by backtracking and adds nothing.
+ * inflections that extend the term ("cure" → "cures", "cured") still hit while
+ * embedded substrings ("secure", "obscure", "procurement", "manicure") do not —
+ * there is no word boundary before "cure" inside any of them. Stem changes are
+ * not reached: "curing", "curative" are not "cure" + suffix, so \w* cannot
+ * extend into them and they do not match. That under-matching is unchanged from
+ * the previous matcher — a gap in the term list, closed only by adding stems to
+ * PROHIBITED_TERMS (a product and legal decision, out of scope here). No
+ * trailing \b: \w* is already greedy to the word's end, so a trailing boundary
  */
 const PROHIBITED_PATTERNS = PROHIBITED_TERMS.map(
   (term) => [new RegExp(`\\b${escapeRegExp(term)}\\w*`), term] as const,
