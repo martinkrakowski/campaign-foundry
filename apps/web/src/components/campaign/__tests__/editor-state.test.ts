@@ -466,6 +466,37 @@ describe("editorReducer — load, apply, save, discard", () => {
     expect(next.source.kind === "file" && next.source.savedSnapshot?.campaignMessage).toBe("Changed");
   });
 
+  test("save with an entry adopts the fresh identity and revision without replacing the draft", () => {
+    const loaded = reduce(base(), { type: "load", brief: savedBrief(), entry: { file: "camp.yaml", revision: "r1" } });
+    // The keystroke lands while the save request is in flight; the response then
+    // carries the brief the server stored.
+    const edited = reduce(loaded, { type: "patch", patch: { campaignMessage: "typed during save" } });
+    const next = reduce(edited, {
+      type: "save",
+      saved: savedBrief(),
+      entry: { file: "camp.yaml", revision: "r2" },
+    });
+    expect(next.source).toMatchObject({ kind: "file", file: "camp.yaml", revision: "r2" });
+    // the in-flight edit survives — `save` never replaces the draft the way `load` does
+    expect(next.campaignMessage).toBe("typed during save");
+    // …and it still reads dirty against the server's snapshot, so it is not lost silently
+    expect(isDirtySinceSave(next)).toBe(true);
+  });
+
+  test("save with an entry that carries no revision leaves the loaded revision alone", () => {
+    const loaded = reduce(base(), { type: "load", brief: savedBrief(), entry: { file: "camp.yaml", revision: "r1" } });
+    const next = reduce(loaded, { type: "save", saved: savedBrief(), entry: { file: "camp.yaml" } });
+    expect(next.source).toMatchObject({ kind: "file", file: "camp.yaml", revision: "r1" });
+  });
+
+  test("save with an entry promotes a new draft to the file the server named", () => {
+    const next = reduce(
+      { ...base(), briefId: "camp" },
+      { type: "save", saved: savedBrief(), entry: { file: "elsewhere.yaml", revision: "r9" } },
+    );
+    expect(next.source).toMatchObject({ kind: "file", file: "elsewhere.yaml", loadedId: "camp", revision: "r9" });
+  });
+
   test("discard on a loaded file reverts to the saved snapshot", () => {
     const loaded = reduce(base(), { type: "load", brief: savedBrief(), entry: { file: "camp.yaml", revision: "r1" } });
     const edited = reduce(loaded, { type: "patch", patch: { campaignMessage: "Changed" } });

@@ -71,7 +71,10 @@ export default defineEventHandler(async (event) => {
       return await getBriefStore().createBrief(brief);
     });
     setResponseStatus(event, 201);
-    return { file: stored.file, brief: stored.brief };
+    // The stored revision rides along: the editor dispatches it into its source so the
+    // next save of this brief guards conditionally instead of sending a stale
+    // load-time revision and getting an untrue 409.
+    return { file: stored.file, brief: stored.brief, revision: stored.revision };
   } catch (error) {
     if (errorMessage(error) === SYMLINK_WRITE_ERROR) {
       setResponseStatus(event, 400);

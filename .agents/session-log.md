@@ -1826,6 +1826,59 @@ To keep this file out of version control, add `.agents/session-log.md` to
   **Total ops: 0**. No existing test deleted or gutted; the three original legal-gate
   tests stand unchanged. PR: https://github.com/martinkrakowski/campaign-foundry/pull/149 (not merged).
 
+### 2026-08-31 — B1 the Save-as id was never validated, and the second save of any loaded brief 409'd
+
+- **Mode:** Implementer. Lane B1 on `fix/b1-save-round-trip`, worktree `wt-b1`.
+- **Defect 1 (the user's 400):** Save as… posted the dialog's raw text as a brief id —
+  `refuseInvalid()` validated the *draft* (whose `briefId` is the old, valid one), the
+  field's only guard was non-empty, so `Trail Blaze 2026` left as a 288-byte POST and
+  came back a 126-byte 400 (slug rule, quoted). A name where a slug was wanted, caught
+  only by the server.
+- **Fix 1:** the field now tests the *trimmed* value against `SAFE_ID_PATTERN`, shows
+  `messages.briefId` (the briefId field's own voice) under the input as it is typed,
+  and offers the slugified form as a click (`Try "trail-blaze-2026" instead` — shown,
+  never applied silently). `handleSaveAs` guards on the trimmed id itself (no
+  unvalidated id reaches `createBrief`) and trims before sending. An id that slugifies
+  to nothing (`"!!!"`) gets the refusal but no suggestion.
+- **Slugify decision:** hint-as-click rather than slugify-on-blur — a blur rewrite
+  fights the user mid-typing (trailing spaces during "a b"), while the click shows the
+  exact id Save will send and requires one gesture to accept.
+- **Defect 2:** `briefs.post.ts` / `briefs/[id].put.ts` returned `{ file, brief }` — no
+  revision — and `handleSave` discarded the response entirely, so `state.source.revision`
+  kept its load-time value; the next save sent it, the conditional write 409'd with an
+  untrue "Brief was modified by another user.", and the fresh revision in the 409 body
+  was dropped too. Only escape: reload.
+- **Fix 2:** both routes now return the store's own `StoredBrief.revision` (the hash
+  `getRevision` computes — no new scheme); `handleSave` captures the result and
+  dispatches it into `state.source` via `load` (the only dispatch that sets the
+  revision, the same one `handleSaveAs` uses), so each save guards with the revision
+  the previous write returned, and a first save converts the source to its file
+  identity; `handleSaveAs` now dispatches the brief the **server** stored — the copy
+  rewrites brief-scoped asset paths, and dispatching the constructed brief silently
+  reverted them in the editor.
+- **Not done, said:** surfacing the 409's fresh revision so the user can retry without
+  reloading needs a revision-only action on `editor-state.ts` — a parallel lane owns
+  that file, and the only existing dispatch (`load`) would replace the draft, exactly
+  what a conflict must not do. Left as stated.
+- **Tests:** 4 for the slug rule (non-slug never reaches createBrief + error shows;
+  slug offer accepted; empty-slug refusal; trim before posting), 2 for the round trip
+  (two consecutive saves of a loaded brief — the regression that failed on the second
+  save; Save as adopts the server-stored brief incl. rewritten logo paths), 2 API
+  (POST and PUT return the stored revision, matching the listing's hash).
+- **Tests corrected, not gutted:** `briefs.test.ts`'s two exact-response assertions
+  expected bodies written before the routes returned a revision — now expect the 64-hex
+  revision; `brief-editor.test.ts`'s `routes()` helper passes the parsed request body
+  to write handlers and the two motion save-and-apply tests echo it, because the real
+  routes return `parseBrief(body)` and the editor now lands on what was stored.
+- **Mutation checks (per test):** removing the `handleSaveAs` guard → non-slug test
+  fails; dropping the trim → trim test fails; removing the live error/suggestion
+  render → the 3 display tests fail; reverting `handleSave` to discard the result →
+  two-consecutive-saves fails; `handleSaveAs` dispatching its constructed brief →
+  server-stored-brief test fails; POST dropping the revision → POST-revision test
+  fails; PUT dropping the revision → PUT-revision test fails.
+- **Verification:** build, typecheck, lint (**0 problems**), lint:arch, `test:cov`
+  **2443 passed | 2 skipped — 100% on all four counters, repo-wide**, commits,
+  `sync:check` **Total ops: 0**. `editor-state.ts` untouched.
 ### 2026-08-31 — B2 a loaded brief reads as dirty on open
 
 - **Mode:** Implementer. Lane B2 on `fix/b2-dirty-on-load`, worktree `wt-b2`.
@@ -1859,6 +1912,58 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Verification:** build/typecheck/lint (0 problems)/lint:arch/test:cov green —
   **2455 passed | 2 skipped, 100% on all four counters (6785/4939/1457/6075)**; commit;
   `sync:check` Total ops 0. PR: https://github.com/martinkrakowski/campaign-foundry/pull/151 (not merged).
+
+### 2026-08-31 — B1 the save that replaced the draft, the 409 nobody could answer, and a press that said nothing
+
+- **Mode:** Implementer. Lane B1 on `fix/b1-save-round-trip`, worktree `wt-b1`. Started by
+  merging `origin/main` (lane B2's `valuesEqual`/`canonicalKeys` work — the merge conflict was
+  session-log ordering only).
+- **Defect 1 (regression):** to carry the revision, `handleSave` had been switched to dispatch
+  `load` — which replaces the whole draft, so edits typed while the save was in flight were
+  discarded. Save (unlike Save-as) stays on the brief being edited; replacing the draft there
+  is data loss.
+- **Fix 1:** the `save` action now carries `saved` and an `entry` (`{ file, revision }`), and the
+  reducer updates `savedSnapshot` plus the source's file identity/revision **in place** — the
+  draft is never replaced. A first-time save still gains its file identity (the file the server
+  named), so the next save is a conditional PUT rather than another POST. An entry that carries
+  no revision never wipes the guard the editor already holds. `handleSave` dispatches `save`
+  with the server's brief as the snapshot and the fresh revision on the entry.
+- **Fix 2 (409):** `BriefsApiError` now carries the fresh `revision` a 409 body includes
+  (parsed once in `requestJson`). `handleSave` adopts it through the entry-only `save` — the
+  draft untouched — and says `messages.statusSaveConflict`; the retry that overwrites the other
+  write stays the user's choice, never an automatic re-send, because the guard exists to make
+  that write visible. Decision: **surface and offer, do not silently re-send.**
+- **Fix 3 (BriefEditor draft recovery):** the key-order-sensitive `JSON.stringify` comparison
+  now uses the same comparison the dirty checks use. B2's `briefsEqual` is generalised and
+  exported as `valuesEqual` (one comparison everywhere — a second one that disagrees is the
+  drift class the key-order bug came from). Editor states are JSON-able, so the same
+  canonicalisation applies unchanged.
+- **Fix 4 (D3):** an invalid Save-as id no longer gets silence: the guard hands focus back to
+  the field (the kit `Input` now accepts a ref — React 19 ref-as-prop). The button stays live.
+- **Tests:** reducer — entry adopts identity/revision without replacing the draft (in-flight
+  edit survives and reads dirty), entry without a revision leaves the loaded one alone, a new
+  draft promotes to the file the server named. UI — an edit typed while the save is in flight
+  survives it, reads dirty (chip), and the next save carries the fresh revision; a 409 adopts
+  the revision it carried and offers the retry; a non-conflict failure and a revision-less
+  response land the snapshot; a 409 on a first-time save (no baseline) and on a snapshot-less
+  file source are refused generically, not adopted; an invalid Save-as press moves focus.
+  Helper — the default POST/PUT mocks now return a `revision` like the real routes.
+- **Mutation checks:** reverting `handleSave` to the `load` dispatch → in-flight test fails;
+  dropping the 409 adoption → the adopt test fails; removing the focus handoff → the focus test
+  fails; always overwriting `source.revision` in the reducer → the no-revision-entry test fails.
+  Survivors, said: reverting the draft-recovery comparison to `stringify` leaves the suite green
+  (a key-order-only difference is value-invisible in the DOM, so no test can discriminate — the
+  change is anti-drift reuse, per the lane instruction); reverting the default mocks'
+  `revision` also survives today (every revision assertion uses custom handlers) — the mock
+  truthfulness is prophylactic for the next lane.
+- **Refuted, not acted:** `aria-invalid` — `input.tsx:33` already sets it from the `invalid`
+  prop; repeating it at the call site would be drift. A fallback string for an absent
+  `stored.revision` — a fabricated revision could satisfy a conditional write that should have
+  failed; the spread omits the key and `asBriefEntry` treats it as optional. A `slugify` null
+  guard — it returns `string` (editor-state.ts), never null; the guard is noise.
+- **Verification:** merge `origin/main`; build, typecheck, lint (**0 problems**), lint:arch,
+  `test:cov` **2473 passed | 2 skipped — 100% on all four counters (6808/4976/1459/6095),
+  repo-wide**; commit; `sync:check` **Total ops: 0**. No test deleted or gutted.
 
 ### 2026-08-31 — B4 a motion run in the boot window is refused as if the brief were invalid
 
