@@ -43,6 +43,8 @@ describe("messages jargon test", () => {
     strings.push(messages.ratioExcludedPackaged(["Square"]));
     strings.push(messages.ratioExcludedNone());
     strings.push(messages.platformsIncompatible("Instagram Feed", ["Still images"]));
+    strings.push(messages.platformsUnknown(["story-tv"]));
+    strings.push(messages.platformsUnknown(["story-tv", "my-tv"]));
     strings.push(messages.formatsUnsupported("Video", ["Instagram Story"]));
     strings.push(messages.statusApplied("test-id"));
     strings.push(messages.durationRange(2, 30));

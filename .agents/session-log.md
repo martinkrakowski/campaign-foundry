@@ -1964,3 +1964,42 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Verification:** merge `origin/main`; build, typecheck, lint (**0 problems**), lint:arch,
   `test:cov` **2473 passed | 2 skipped — 100% on all four counters (6808/4976/1459/6095),
   repo-wide**; commit; `sync:check` **Total ops: 0**. No test deleted or gutted.
+
+### 2026-08-31 — B3 the web validator's blind spots (motion axes checked by their values; unknown platforms named)
+
+- **Mode:** Implementer. Lane B3 on `fix/b3-validator-blind-spots`, worktree `wt-b3`.
+- **Both defects, one shape:** `validateState` passed a draft that `parseBrief` refused —
+  a 400 on Save for something the editor said was fine.
+  1. `validateMotion` early-returned on `!formats.includes("motion")`, but `toBrief`
+     emits `motion`/`duration` whenever they hold values (D12) and the parser validates a
+     present axis whatever `output.formats` says. Repro: `duration: [45]` + `formats:
+     ["static"]`, or an unknown motion kind with Video off — client-clean, server-rejected.
+  2. `validateOutput` mapped platform ids through `PLATFORM_PROFILES` then
+     `.filter(profile => profile !== undefined)`: an unknown id vanished from the
+     compatibility check with no error, while the parser throws `Unknown output platform "…"`.
+- **Fix shape:** the range/duplicate/membership checks key on whether the axes **carry
+  values**, not on the Video toggle (validate what `toBrief` emits, not what the view
+  renders); membership uses the domain's own `MOTION_KINDS` (subpath import, never
+  restated — `MIN/MAX_DURATION_SEC` were already imported). Unknown platform ids are
+  collected and reported under `errors.platforms` via `messages.platformsUnknown`,
+  taking precedence over the compatibility wording exactly as the parser refuses them
+  before compatibility. The Classic+motion early return was also un-nested so mode and
+  axis-value errors surface together (the parser validates carried axes in authoring
+  mode regardless of mode). No rule restated as a literal; new copy only in
+  `messages.ts` (`motionKindUnknown`, `platformsUnknown`), jargon test extended.
+- **Divergence tests (the ones that matter):** each builds a state, asserts
+  `validateState` reports, and asserts the same state's `toBrief` output is refused by
+  the **real** `parseBrief` — imported from `apps/api/server/lib/load-brief` across app
+  boundaries in the test file only (arch linter compliant; no server code reachable from
+  the bundle). Plus the guard: a valid draft (classic and randomized) stays clean and
+  parses. Duration/`toBrief` interplay note: the motion-axes divergences need
+  `mode: "variation"` — `toBrief` writes `variation.axes` only there.
+- **Mutation checks (all run):** reverting `validateMotion` fails exactly the two
+  motion-axis divergence tests; removing the unknown-platform reporting fails exactly
+  the platform divergence test; the clean-draft guard passes before and after both fixes.
+- **Verification:** build 7/7, typecheck 7/7, lint **0 problems**, lint:arch compliant,
+  `test:cov` **2441 passed | 2 skipped — 100% on all four counters, repo-wide**, commit
+  per defect (Conventional Commits), `sync:check` **Total ops: 0** on the committed tree.
+  No test deleted or gutted; one branch gap (plural `platformsUnknown`) caught by the
+  coverage gate and closed in `messages.test.ts`.
+- PR: https://github.com/martinkrakowski/campaign-foundry/pull/153 (not merged).

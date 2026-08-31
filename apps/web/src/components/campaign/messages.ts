@@ -183,6 +183,17 @@ export function platformsIncompatible(platform: string, formats: string[]): stri
 export function formatsUnsupported(format: string, candidates: string[]): string {
   return `None of your platforms can take ${format} — add one of ${joinList(candidates)}, or turn ${format} off.`;
 }
+/**
+ * `platforms.unknown` — `ids` are the entries no platform matches (a loaded file can
+ * carry one). There is no display label for an id we do not know, so the value itself
+ * is named: it is the thing to find and remove.
+ */
+export function platformsUnknown(ids: string[]): string {
+  const named = joinList(ids.map((id) => `"${id}"`));
+  return ids.length === 1
+    ? `${named} is not a platform these ads can run on — remove it under "Where will the ads run?".`
+    : `${named} are not platforms these ads can run on — remove them under "Where will the ads run?".`;
+}
 /** `formats.motionUnavailable` — a fixed sentence: the probe's reason is server vocabulary. */
 export const formatsMotionUnavailable =
   "Video cannot be made on this computer right now — your brief is safe to save and will run once video is set up.";
@@ -198,6 +209,8 @@ export const shapesFromPlatforms = "from your platforms";
 
 /** `motion` */
 export const motion = "No video style picked — tap at least one video card.";
+/** `motion.kindUnknown` — the video-style list holds a kind the picker never offered (a loaded brief can). */
+export const motionKindUnknown = "That video style is not one of the choices — pick again in the Video styles panel.";
 /** `duration` */
 export const duration = "No clip length yet — add one with the stepper, like 6 seconds.";
 /** `duration.range` */
