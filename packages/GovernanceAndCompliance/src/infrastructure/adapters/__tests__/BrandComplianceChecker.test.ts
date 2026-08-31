@@ -28,6 +28,66 @@ describe("BrandComplianceChecker — legal gate", () => {
   test("matches prohibited terms case-insensitively", async () => {
     expect((await checker.validateLegalCopy("GUARANTEED results")).passed).toBe(false);
   });
+
+  test("reports every hit when copy contains several prohibited terms", async () => {
+    const r = await checker.validateLegalCopy("Guaranteed risk-free miracle cure");
+    expect(r.passed).toBe(false);
+    expect(r.reason).toMatch(/guaranteed/);
+    expect(r.reason).toMatch(/risk-free/);
+    expect(r.reason).toMatch(/miracle/);
+    expect(r.reason).toMatch(/cure/);
+  });
+
+  describe("zero-tolerance table — must still halt (true positives)", () => {
+    // Inflections, multi-word terms, and each bare term: the anchored matcher
+    // must not lose a single one of these.
+    const mustHalt = [
+      "Results guaranteed.",
+      "A miracle cure.",
+      "Miracle cures for tired skin.",
+      "It cured my acne.",
+      "Risk-free trial.",
+      "100% safe for children.",
+      "No side effects.",
+      "Clinically proven results.",
+      "The best in the world.",
+      "Guaranteed",
+      "Miracle",
+      "Cure",
+      "Risk-free",
+      "100% safe",
+      "No side effects",
+      "Clinically proven",
+      "Best in the world",
+    ];
+    for (const text of mustHalt) {
+      test(`halts: "${text}"`, async () => {
+        const r = await checker.validateLegalCopy(text);
+        expect(r.passed).toBe(false);
+        expect(r.reason).toMatch(/Prohibited terminology/);
+      });
+    }
+  });
+
+  describe("zero-tolerance table — must now pass (false positives)", () => {
+    // Ordinary copy whose only "hit" was a substring inside an unrelated word
+    // (secure, procurement, obscure, manicure): the gate must no longer halt.
+    const mustPass = [
+      "Secure your seat at Berlin Design Week.",
+      "Procurement Lead — apply now.",
+      "Obscure venues, unforgettable nights.",
+      "Join our secure payments team.",
+      "Manicure and pedicure, walk-ins welcome.",
+      "Insecure by default? Never.",
+    ];
+    for (const text of mustPass) {
+      test(`passes: "${text}"`, async () => {
+        const r = await checker.validateLegalCopy(text);
+        expect(r.passed).toBe(true);
+        expect(r.reason).toBeUndefined();
+      });
+    }
+  });
 });
 
 describe("BrandComplianceChecker — brand-colour density", () => {

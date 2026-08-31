@@ -13,6 +13,24 @@ const PROHIBITED_TERMS = [
   "best in the world",
 ];
 
+/** Escape regex metacharacters so the term list stays data, never a pattern — "100% safe" must not become a regex injection. */
+function escapeRegExp(term: string): string {
+  return term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * One anchored matcher per term, built once at module scope: each term must
+ * begin at a word boundary and may run on through word characters, so
+ * inflections ("cure" → "cures", "cured", "curing") still hit while embedded
+ * substrings ("secure", "obscure", "procurement", "manicure") do not — there is
+ * no word boundary before "cure" inside any of them. No trailing \b: \w* is
+ * already greedy to the word's end, so a trailing boundary is always
+ * satisfiable by backtracking and adds nothing.
+ */
+const PROHIBITED_PATTERNS = PROHIBITED_TERMS.map(
+  (term) => [new RegExp(`\\b${escapeRegExp(term)}\\w*`), term] as const,
+);
+
 /** A brand-colour pixel density below this fails the visual check (MinimumBrandColorDensity). */
 const MIN_BRAND_COLOR_DENSITY = 0.02;
 /** Per-channel tolerance (±) when matching a pixel to the target brand colour. */
@@ -44,7 +62,9 @@ function hexToRgb(hex: string): [number, number, number] {
 export class BrandComplianceChecker implements CompliancePort {
   async validateLegalCopy(text: string): Promise<ComplianceResult> {
     const lower = text.toLowerCase();
-    const hits = PROHIBITED_TERMS.filter((term) => lower.includes(term));
+    const hits = PROHIBITED_PATTERNS.filter(([pattern]) => pattern.test(lower)).map(
+      ([, term]) => term,
+    );
     return hits.length > 0
       ? { passed: false, reason: `Prohibited terminology: ${hits.join(", ")}` }
       : { passed: true };
