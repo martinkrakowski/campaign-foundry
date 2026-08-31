@@ -64,7 +64,6 @@ export function products(min: number, mode: string): string {
   const add = min === 1 ? "one" : "a second one";
   return `A ${mode} campaign needs ${need} — add ${add} below.`;
 }
-export const productsClassicHint = "Classic mode needs two different products — add a second one below.";
 export function productsHeading(count: number): string {
   return `Products (${count})`;
 }

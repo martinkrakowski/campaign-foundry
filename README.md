@@ -12,10 +12,10 @@ composites, checks, and organizes every variation automatically.
 
 ## What it does
 
-Given a campaign brief with **≥2 products**, a **target region**, a **target
-audience**, and a **campaign message**, the pipeline:
+Given a campaign brief with **at least one product**, a **target region**, a
+**target audience**, and a **campaign message**, the pipeline:
 
-1. **Validates** the brief (≥2 products, required fields).
+1. **Validates** the brief (≥1 product, required fields).
 2. **Runs a legal gate** on the copy (prohibited-terms check) before spending any
    effort generating assets.
 3. **Resolves a background** per product — reuses a provided input asset when one
@@ -381,8 +381,8 @@ treatments:
 A brief runs in one of two modes, chosen by the optional `mode` field.
 
 **Classic** (`mode` absent or `brief`) is everything above: `products × three
-ratios × treatments`, identity `productId/aspectRatio/treatment`, at least two
-products. Existing briefs, reports, and output paths are unchanged.
+ratios × treatments`, identity `productId/aspectRatio/treatment`, at least one
+product. Existing briefs, reports, and output paths are unchanged.
 
 **Randomized** (`mode: variation`) hands the matrix to a seeded planner instead.
 The brief declares a *policy* and the planner draws `count` distinct variants

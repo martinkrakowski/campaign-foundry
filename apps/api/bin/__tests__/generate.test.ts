@@ -102,8 +102,8 @@ describe("generate CLI main()", () => {
   });
 
   test("exits 1 on a business-rule failure", async () => {
-    const path = join(dir, "solo.json");
-    writeFileSync(path, briefJson({ products: [{ id: "solo", name: "S", primaryColor: "#111111", logoPath: "x.png" }] }));
+    const path = join(dir, "empty.json");
+    writeFileSync(path, briefJson({ products: [] }));
     await main(path);
     expect(process.exitCode).toBe(1);
   });
