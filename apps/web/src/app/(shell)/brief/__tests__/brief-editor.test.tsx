@@ -58,11 +58,13 @@ const brief = (id: string) => ({
 
 const entry = (id: string, revision?: string) => ({ file: `${id}.yaml`, brief: brief(id), revision });
 
-/** Route each call by URL+method; unmatched calls fail loudly rather than hanging. */
+/** Route each call by URL+method; unmatched calls fail loudly rather than hanging.
+ *  The write handlers receive the parsed request body, so a test can echo it back —
+ *  what the real routes do (`parseBrief(await readBody(...))`), key order included. */
 const routes = (handlers: {
   list?: () => Response;
-  post?: () => Response;
-  put?: (url: string) => Response;
+  post?: (url: string, body?: Record<string, unknown>) => Response;
+  put?: (url: string, body?: Record<string, unknown>) => Response;
   capabilities?: () => Response;
 }) => {
   const calls: { url: string; method: string; body?: Record<string, unknown> }[] = [];
@@ -70,10 +72,11 @@ const routes = (handlers: {
     const u = String(url);
     const method = (init?.method ?? "GET").toUpperCase();
     const raw = init?.body;
+    const parsed = typeof raw === "string" ? (JSON.parse(raw) as Record<string, unknown>) : undefined;
     calls.push({
       url: u,
       method,
-      ...(typeof raw === "string" ? { body: JSON.parse(raw) as Record<string, unknown> } : {}),
+      ...(parsed ? { body: parsed } : {}),
     });
     if (method === "GET" && u === `${API}/campaigns/capabilities`) {
       return Promise.resolve(handlers.capabilities?.() ?? json({ motion: true }));
@@ -81,8 +84,8 @@ const routes = (handlers: {
     if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
       return Promise.resolve(handlers.list?.() ?? json({ briefs: [] }));
     }
-    if (method === "POST") return Promise.resolve(handlers.post?.() ?? json({ file: "x.yaml", brief: brief("x") }, 201));
-    if (method === "PUT") return Promise.resolve(handlers.put?.(u) ?? json({ file: "x.yaml", brief: brief("x") }));
+    if (method === "POST") return Promise.resolve(handlers.post?.(u, parsed) ?? json({ file: "x.yaml", brief: brief("x") }, 201));
+    if (method === "PUT") return Promise.resolve(handlers.put?.(u, parsed) ?? json({ file: "x.yaml", brief: brief("x") }));
     return Promise.resolve(json({}, 404));
   });
   return calls;
@@ -462,6 +465,57 @@ describe("BriefPage — data flow", () => {
       return call!;
     });
     expect((post.body as { id?: string }).id).toBe("my-brief");
+  });
+
+  test("two consecutive saves of a loaded brief both succeed — the second carries the revision the first was handed back", async () => {
+    const user = userEvent.setup();
+    const calls = routes({
+      list: () => json({ briefs: [entry("camp", "rev-load")] }),
+      put: () => json({ file: "camp.yaml", brief: brief("camp"), revision: "rev-2" }, 200),
+    });
+    renderWithRun(<Editor />);
+    await user.click(screen.getByText("New brief..."));
+    await user.click(await screen.findByText("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    // the first save guards with the load-time revision...
+    await saveVia(user, "Save & apply");
+    await waitFor(() => expect(calls.filter((c) => c.method === "PUT").length).toBe(1));
+    // ...and the second must guard with the revision the first PUT returned. Discarding
+    // it replayed rev-load, the write 409'd with an untrue "Brief was modified by
+    // another user.", and the only way out was reloading the brief.
+    await saveVia(user, "Save & apply");
+    await waitFor(() => expect(calls.filter((c) => c.method === "PUT").length).toBe(2));
+
+    const puts = calls.filter((c) => c.method === "PUT");
+    expect(puts[0].url).toContain("revision=rev-load");
+    expect(puts[1].url).toContain("revision=rev-2");
+  });
+
+  test("Save as... adopts the brief the server stored, asset-path rewrites included", async () => {
+    const user = userEvent.setup();
+    const stored = brief("copy");
+    stored.products[0].logoPath = "assets/inputs/copy/a.png";
+    routes({
+      post: () => json({ file: "copy.yaml", brief: stored, revision: "rev-copy" }, 201),
+    });
+    renderWithRun(<Editor />);
+    await fillValidDraft(user);
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), "copy");
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
+    await waitFor(() => expect(screen.queryByLabelText("New brief id")).toBeNull());
+
+    // the editor shows the path the server rewrote during the copy — dispatching the
+    // brief this page constructed instead silently reverted it while the file on disk
+    // carried the rewritten one
+    const logos = screen
+      .getAllByLabelText("Logo Path")
+      .filter((el) => el.tagName === "INPUT" && el.getAttribute("type") !== "file");
+    expect((logos[0] as HTMLInputElement).value).toBe("assets/inputs/copy/a.png");
   });
 
   test("Apply on the blank route keeps the brief it just applied", async () => {
@@ -1050,6 +1104,9 @@ describe("BriefPage — capabilities and motion", () => {
     routes({
       list: () => json({ briefs: [motionBrief] }),
       capabilities: () => json({ motion: false, reason: "no ffmpeg" }),
+      // the real PUT stores and returns the parsed body it was sent — echo it (see the
+      // matching correction in "Save & apply carries the same refusal notice")
+      put: (_url, body) => json({ file: "clip.yaml", brief: body, revision: "r1" }, 200),
     });
     renderWithRun(<Editor />);
 
@@ -1198,6 +1255,9 @@ describe("BriefPage — capabilities and motion", () => {
     const calls = routes({
       list: () => json({ briefs: [{ file: "clip.yaml", brief: clip, revision: "r1" }] }),
       capabilities: () => json({ motion: false, reason: "no ffmpeg" }),
+      // the real PUT stores and returns the parsed body it was sent — echo it (see the
+      // matching correction in "Save & apply carries the same refusal notice")
+      put: (_url, body) => json({ file: "clip.yaml", brief: body, revision: "r1" }, 200),
     });
     renderWithRun(<Editor />);
 

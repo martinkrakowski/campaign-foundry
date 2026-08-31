@@ -620,16 +620,27 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     setPersistError(undefined);
     try {
       const brief = toBrief(state);
-      if (state.source.kind === "file") {
-        await updateBrief(state.source.loadedId, brief, { revision: state.source.revision });
-      } else {
-        await createBrief(brief);
-      }
-      // D3: "Save & apply" does both. Pass the brief that was actually persisted so
-      // edits made while the request was in flight stay dirty.
-      dispatch({ type: "save", saved: brief });
-      dispatch({ type: "apply", applied: brief });
-      setRunBrief(brief);
+      // Keep what the API returns: the stored revision is the conditional-write guard
+      // for the *next* save. Discarding it left state.source.revision at its load-time
+      // value, so the second save of any loaded brief sent a stale revision and was
+      // refused with an untrue "Brief was modified by another user." — the same trap
+      // loadBrief and handleSaveAs carry the revision to avoid.
+      const stored =
+        state.source.kind === "file"
+          ? await updateBrief(state.source.loadedId, brief, { revision: state.source.revision })
+          : await createBrief(brief);
+      // `load` (not `save`) is the dispatch that carries the fresh revision into
+      // state.source — the same one handleSaveAs uses. The editor lands on exactly
+      // what the server stored, and for a first-time save the source gains its file
+      // identity, so the next save is a conditional PUT rather than another POST.
+      dispatch({
+        type: "load",
+        brief: stored.brief,
+        entry: { file: stored.file, ...(stored.revision === undefined ? {} : { revision: stored.revision }) },
+      });
+      // D3: "Save & apply" does both.
+      dispatch({ type: "apply", applied: stored.brief });
+      setRunBrief(stored.brief);
       purgeDraftFromStorage(state);
       await loadBriefs();
     } catch (error) {
@@ -675,14 +686,20 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
         }
         created = await createBrief(newBrief, { replace: true });
       }
+      // Dispatch the brief the SERVER stored, not the one this page constructed: the
+      // copy rewrites brief-scoped asset paths during the copy, and dispatching
+      // newBrief made the editor revert to the pre-copy paths while the file on disk
+      // carried the rewritten ones. The copy's revision is the conditional-write guard
+      // for the *next* save of it — dropping it downgraded that save to
+      // last-write-wins, the same trap `loadBrief` carries the revision to avoid.
       dispatch({
         type: "load",
-        brief: newBrief,
+        brief: created.brief,
         entry: { file: created.file, ...(created.revision === undefined ? {} : { revision: created.revision }) },
       });
       // The editor is on the copy now, so the shell must be too — otherwise Generate
       // runs the brief this one was copied from, which is the trap `loadBrief` documents.
-      setRunBrief(newBrief);
+      setRunBrief(created.brief);
       purgeDraftFromStorage(state);
       await loadBriefs();
       setSaveAsId(null);

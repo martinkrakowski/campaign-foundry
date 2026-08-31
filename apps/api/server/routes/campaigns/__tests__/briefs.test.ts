@@ -169,7 +169,15 @@ describe("authoring briefs", () => {
     });
     const posted = await create()(jsonReq("http://x/campaigns/briefs", "POST", payload));
     expect(posted.status).toBe(201);
-    expect(await posted.json()).toEqual({ file: "camp.yaml", brief: payload });
+    // the route now returns the stored revision alongside file and brief, so the
+    // editor's next save of this brief can guard conditionally — the exact-response
+    // assertion below was written when the body had no revision and was corrected,
+    // not gutted, when that changed
+    expect(await posted.json()).toEqual({
+      file: "camp.yaml",
+      brief: payload,
+      revision: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
 
     const listed = await list()(new Request("http://x/campaigns/briefs"));
     const json = (await listed.json()) as { briefs: { file: string; brief: { id: string } }[] };
@@ -201,6 +209,32 @@ describe("authoring briefs", () => {
     const listed = await list()(new Request("http://x/campaigns/briefs"));
     const json = (await listed.json()) as { briefs: { brief: { notes?: string } }[] };
     expect(json.briefs[0]?.brief.notes).toBe("keep-me");
+  });
+
+  test("POST returns the stored revision, matching the listing's hash", async () => {
+    const { create, list } = await api();
+    const res = await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as { revision?: string };
+    expect(json.revision).toMatch(/^[a-f0-9]{64}$/);
+    const listed = await list()(new Request("http://x/campaigns/briefs"));
+    const listedJson = (await listed.json()) as { briefs: { revision: string }[] };
+    expect(listedJson.briefs[0].revision).toBe(json.revision);
+  });
+
+  test("PUT returns the new revision, so the next save can guard conditionally", async () => {
+    const { create, update, list } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const res = await update()(
+      jsonReq("http://x/campaigns/briefs/camp", "PUT", brief({ campaignMessage: "Edited" })),
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { revision?: string };
+    expect(json.revision).toMatch(/^[a-f0-9]{64}$/);
+    // it is the hash of what is on disk NOW, not of the pre-write bytes
+    const listed = await list()(new Request("http://x/campaigns/briefs"));
+    const listedJson = (await listed.json()) as { briefs: { revision: string }[] };
+    expect(listedJson.briefs[0].revision).toBe(json.revision);
   });
 
   test("POST without replace returns 409 when the yaml already exists", async () => {
@@ -354,9 +388,13 @@ describe("authoring briefs", () => {
       jsonReq("http://x/campaigns/briefs/camp", "PUT", brief({ campaignMessage: "Edited" })),
     );
     expect(res.status).toBe(200);
+    // the route now returns the new revision so the editor's next save can guard
+    // conditionally — this exact-response assertion was written when the body had no
+    // revision and was corrected, not gutted, when that changed
     expect(await res.json()).toEqual({
       file: "camp.yaml",
       brief: brief({ campaignMessage: "Edited" }),
+      revision: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
   });
 
