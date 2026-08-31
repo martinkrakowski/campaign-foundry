@@ -298,7 +298,7 @@ export type EditorAction =
   | { type: "loadPool"; briefId: string; pool: CopyPool | null }
   | { type: "load"; brief: CampaignBrief; entry?: { file: string; revision?: string } }
   | { type: "apply"; applied?: CampaignBrief }
-  | { type: "save"; saved?: CampaignBrief }
+  | { type: "save"; saved?: CampaignBrief; entry?: { file: string; revision?: string } }
   | { type: "restore"; state: EditorState }
   | { type: "discard" }
   | { type: "setCapabilities"; capabilities: { motion: boolean; reason?: string } };
@@ -863,12 +863,35 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       return { ...action.state, capabilities: state.capabilities ?? action.state.capabilities };
     case "save": {
       // Snapshot what was actually persisted, not whatever the reducer holds when the
-      // response lands — edits made during the request must stay dirty.
+      // response lands — edits made during the request must stay dirty. The draft
+      // itself is never replaced: `save` updates the snapshot and the source's file
+      // identity/revision in place, so keystrokes typed while the request was in
+      // flight survive (replacing the draft is `load`'s job, and its cost).
       const savedSnapshot = action.saved ?? toBrief(state);
-      const source: EditorSource = state.source.kind === "file" 
-        ? { ...state.source, savedSnapshot }
-        : { kind: "file", file: `${state.briefId}.yaml`, loadedId: state.briefId, savedSnapshot, revision: undefined };
-      return { ...state, source };
+      const entry = action.entry;
+      if (state.source.kind === "file") {
+        const source = { ...state.source, savedSnapshot };
+        if (entry !== undefined) {
+          source.file = entry.file;
+          // An entry that carries no revision never wipes the guard the editor
+          // already holds — an absent revision would downgrade the next save to
+          // last-write-wins, a fabricated one would satisfy a write that should fail.
+          if (entry.revision !== undefined) source.revision = entry.revision;
+        }
+        return { ...state, source };
+      }
+      // A first save gains its file identity — the file the server named, so the next
+      // save is a conditional PUT rather than another POST.
+      return {
+        ...state,
+        source: {
+          kind: "file",
+          file: entry?.file ?? `${state.briefId}.yaml`,
+          loadedId: state.briefId,
+          savedSnapshot,
+          revision: entry?.revision,
+        },
+      };
     }
     case "discard": {
       if (state.source.kind === "file" && state.source.savedSnapshot) {
@@ -1143,7 +1166,7 @@ export function isPristine(state: EditorState): boolean {
 }
 
 /**
- * Deep brief equality **by value**, not by serialised key order. `JSON.stringify`
+ * Deep equality **by value**, not by serialised key order. `JSON.stringify`
  * is key-order sensitive: a snapshot holds the brief in the order the file wrote
  * it while `toBrief` emits its own fixed order, so comparing the two as strings
  * read every freshly loaded file as dirty the instant it opened. Keys carry no
@@ -1156,8 +1179,14 @@ export function isPristine(state: EditorState): boolean {
  * Arrays are mapped element-wise, never sorted: `products`, `treatments`,
  * `variation.axes.*` and `copy.timeline.beats` are order-carrying, and a swapped
  * pair must stay a real difference.
+ *
+ * The shape is not limited to briefs: the draft-recovery check in BriefEditor
+ * compares whole editor states with it, and a second comparison that disagreed
+ * with this one is exactly the drift class the key-order bug came from. Editor
+ * states are JSON-able (strings, numbers, booleans, arrays, plain objects,
+ * `null`) so the same canonicalisation applies unchanged.
  */
-function briefsEqual(a: unknown, b: unknown): boolean {
+export function valuesEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(canonicalKeys(a)) === JSON.stringify(canonicalKeys(b));
 }
 
@@ -1175,12 +1204,12 @@ function canonicalKeys(value: unknown): unknown {
 export function isDirtySinceSave(state: EditorState): boolean {
   if (state.source.kind === "new") return true;
   if (!state.source.savedSnapshot) return true;
-  return !briefsEqual(toBrief(state), state.source.savedSnapshot);
+  return !valuesEqual(toBrief(state), state.source.savedSnapshot);
 }
 
 export function isDirtySinceApply(state: EditorState): boolean {
   if (!state.appliedSnapshot) return true;
-  return !briefsEqual(toBrief(state), state.appliedSnapshot);
+  return !valuesEqual(toBrief(state), state.appliedSnapshot);
 }
 
 export function draftKeyFor(id: string): string {

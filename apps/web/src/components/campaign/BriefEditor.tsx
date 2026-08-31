@@ -25,16 +25,19 @@ import {
   isDirtySinceSave,
   isDirtySinceApply,
   isPristine,
+  valuesEqual,
   getDraftKey,
   saveDraftToStorage,
   loadDraftFromStorage,
   purgeDraftFromStorage,
   blankBrief,
+  slugify,
 } from "@/components/campaign/editor-state";
 import {
   validateState,
   getTotalErrorCount,
   motionUnavailableReason,
+  SAFE_ID_PATTERN,
   type FieldErrors,
 } from "@/components/campaign/validate";
 import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, OutputSection, PolicySection } from "@/components/campaign/sections";
@@ -141,6 +144,8 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   const [saving, setSaving] = useState(false);
   const [persistError, setPersistError] = useState<string | undefined>();
   const [saveAsId, setSaveAsId] = useState<string | null>(null);
+  // The Save-as dialog's field: where the invalid-id guard hands focus back (D3).
+  const saveAsFieldRef = useRef<HTMLInputElement | null>(null);
   const [showYamlSplit, setShowYamlSplit] = useState(false);
   const [poolDrawerOpen, setPoolDrawerOpen] = useState(false);
   // L1.1: Touched/attempted state for error display gating
@@ -245,7 +250,11 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   const draftKey = getDraftKey(state);
   useEffect(() => {
     const draft = loadDraftFromStorage(state);
-    if (draft && JSON.stringify(draft) !== JSON.stringify(state)) {
+    // The same `valuesEqual` the dirty checks use, not a second stringified
+    // comparison: a key-order-sensitive stringify here would restore a draft
+    // whose keys merely arrived in a different order. The helper is shape-agnostic
+    // — editor states are JSON-able, so the same canonicalisation applies.
+    if (draft && !valuesEqual(draft, state)) {
       dispatch({ type: "restore", state: draft });
     }
   }, [draftKey]);
@@ -618,27 +627,71 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     setPersistError(undefined);
     try {
       const brief = toBrief(state);
-      if (state.source.kind === "file") {
-        await updateBrief(state.source.loadedId, brief, { revision: state.source.revision });
-      } else {
-        await createBrief(brief);
-      }
-      // D3: "Save & apply" does both. Pass the brief that was actually persisted so
-      // edits made while the request was in flight stay dirty.
-      dispatch({ type: "save", saved: brief });
-      dispatch({ type: "apply", applied: brief });
-      setRunBrief(brief);
+      // Keep what the API returns: the stored revision is the conditional-write guard
+      // for the *next* save. Discarding it left state.source.revision at its load-time
+      // value, so the second save of any loaded brief sent a stale revision and was
+      // refused with an untrue "Brief was modified by another user." — the same trap
+      // loadBrief and handleSaveAs carry the revision to avoid.
+      const stored =
+        state.source.kind === "file"
+          ? await updateBrief(state.source.loadedId, brief, { revision: state.source.revision })
+          : await createBrief(brief);
+      // `save` (not `load`): the snapshot and the fresh file identity/revision ride
+      // the save action, so the draft the user kept typing into is NOT replaced —
+      // edits made while the request was in flight survive and stay dirty. A
+      // first-time save still gains its file identity, so the next save is a
+      // conditional PUT rather than another POST.
+      dispatch({
+        type: "save",
+        saved: stored.brief,
+        entry: { file: stored.file, ...(stored.revision === undefined ? {} : { revision: stored.revision }) },
+      });
+      // D3: "Save & apply" does both.
+      dispatch({ type: "apply", applied: stored.brief });
+      setRunBrief(stored.brief);
       purgeDraftFromStorage(state);
       await loadBriefs();
     } catch (error) {
-      setPersistError(unknownErrorMessage(error, "Save failed"));
+      // A 409 carries the store's fresh revision (API E1.0). Adopt it — through the
+      // entry-only `save`, so the draft is untouched — and say what happened: the
+      // retry that overwrites the other write is the user's decision, never an
+      // automatic re-send, because the guard exists to make that write visible.
+      const conflictRevision =
+        isBriefsApiError(error) && error.status === 409 ? error.revision : undefined;
+      if (
+        conflictRevision !== undefined &&
+        state.source.kind === "file" &&
+        state.source.savedSnapshot !== null
+      ) {
+        dispatch({
+          type: "save",
+          saved: state.source.savedSnapshot,
+          entry: { file: state.source.file, revision: conflictRevision },
+        });
+        setPersistError(messages.statusSaveConflict);
+      } else {
+        setPersistError(unknownErrorMessage(error, "Save failed"));
+      }
     } finally {
       setSaving(false);
     }
   };
 
-  const handleSaveAs = async (newId: string) => {
+  const handleSaveAs = async (rawId: string) => {
     if (refuseInvalid()) return;
+    // B1: the dialog asks for an id while the user is thinking of a name — "Trail
+    // Blaze 2026" once reached the server verbatim and came back a 400 nobody
+    // explained. The field shows the rule as it is typed (below); this guard is the
+    // backstop, so no unvalidated id reaches createBrief, and trimming happens here
+    // where an invisible trailing space would otherwise be a server 400.
+    const newId = rawId.trim();
+    // D3: a live button answers. The field shows the rule as it is typed, so this
+    // backstop usually finds the error already on screen — the press still has to
+    // produce a response, so it hands focus back to the field.
+    if (!SAFE_ID_PATTERN.test(newId)) {
+      saveAsFieldRef.current?.focus();
+      return;
+    }
     setSaving(true);
     setPersistError(undefined);
     try {
@@ -666,14 +719,20 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
         }
         created = await createBrief(newBrief, { replace: true });
       }
+      // Dispatch the brief the SERVER stored, not the one this page constructed: the
+      // copy rewrites brief-scoped asset paths during the copy, and dispatching
+      // newBrief made the editor revert to the pre-copy paths while the file on disk
+      // carried the rewritten ones. The copy's revision is the conditional-write guard
+      // for the *next* save of it — dropping it downgraded that save to
+      // last-write-wins, the same trap `loadBrief` carries the revision to avoid.
       dispatch({
         type: "load",
-        brief: newBrief,
+        brief: created.brief,
         entry: { file: created.file, ...(created.revision === undefined ? {} : { revision: created.revision }) },
       });
       // The editor is on the copy now, so the shell must be too — otherwise Generate
       // runs the brief this one was copied from, which is the trap `loadBrief` documents.
-      setRunBrief(newBrief);
+      setRunBrief(created.brief);
       purgeDraftFromStorage(state);
       await loadBriefs();
       setSaveAsId(null);
@@ -683,6 +742,16 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
       setSaving(false);
     }
   };
+
+  // The Save-as field speaks the same rule as the briefId field (messages.briefId),
+  // evaluated on the *trimmed* value so the verdict matches what Save would send.
+  // Because the field asks for an id while the user is thinking of a name, the
+  // slugified form of what was typed is offered as a click — shown, never applied
+  // silently: an id that slugifies to nothing gets the refusal but no suggestion.
+  const saveAsTrimmed = (saveAsId ?? "").trim();
+  const saveAsInvalid =
+    saveAsId !== null && saveAsTrimmed !== "" && !SAFE_ID_PATTERN.test(saveAsTrimmed);
+  const saveAsSlug = slugify(saveAsId ?? "");
 
   // The errors behind one step. `errors` is keyed by every bucket once validation has
   // landed, but the first paint carries the empty put-state — so the bucket read still
@@ -1055,10 +1124,28 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
               aria-label="New brief id"
               placeholder="New brief id"
               value={saveAsId}
+              invalid={saveAsInvalid}
               onChange={(e) => setSaveAsId(e.target.value)}
               className="mb-4"
+              ref={saveAsFieldRef}
               autoFocus
             />
+            {saveAsInvalid ? (
+              <>
+                <p className="mb-2 text-[12px] text-error" role="alert">
+                  {messages.briefId}
+                </p>
+                {saveAsSlug !== "" ? (
+                  <button
+                    type="button"
+                    onClick={() => setSaveAsId(saveAsSlug)}
+                    className="mb-4 block text-left text-[12px] text-text-primary underline hover:text-text-emphasis"
+                  >
+                    {messages.saveAsIdSuggestion(saveAsSlug)}
+                  </button>
+                ) : null}
+              </>
+            ) : null}
             <div className="flex gap-2">
               <Button onClick={() => handleSaveAs(saveAsId)} disabled={saving || !saveAsId}>
                 Save

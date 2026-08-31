@@ -19,6 +19,13 @@ export const briefId = "Brief ID can only use small letters, numbers and dashes 
 export function briefIdDuplicate(conflictingId: string): string {
   return `A brief called ${conflictingId} already exists — pick a different Brief ID.`;
 }
+/**
+ * Save-as: the id field wants a slug while the user is thinking of a name, so the
+ * slugified form of what they typed is offered as a click — never applied silently.
+ */
+export function saveAsIdSuggestion(slug: string): string {
+  return `Try "${slug}" instead`;
+}
 /** `targetRegion` */
 export const targetRegion = "No region yet — pick one of the region chips.";
 /** `targetAudience` */
@@ -229,6 +236,14 @@ export const confirmDialogStay = "Stay";
 export const confirmDialogLeave = "Leave";
 /** `status.saveFailed` */
 export const statusSaveFailed = "Could not save — try Save again.";
+/**
+ * `status.saveConflict` — the conditional write was refused because the file
+ * changed on disk since it was loaded. The fresh revision has been adopted, so a
+ * second Save will answer the guard: the overwrite is the user's call, never an
+ * automatic re-send.
+ */
+export const statusSaveConflict =
+  "This brief changed on disk while you were editing — press Save again to keep your version and overwrite the other changes.";
 /** `status.saveAsFailed` */
 export const statusSaveAsFailed = "Could not save the copy — try Save as again.";
 
