@@ -1142,15 +1142,45 @@ export function isPristine(state: EditorState): boolean {
   return JSON.stringify(toBrief(state)) === JSON.stringify(toBrief(initialEditorState(state.mode)));
 }
 
+/**
+ * Deep brief equality **by value**, not by serialised key order. `JSON.stringify`
+ * is key-order sensitive: a snapshot holds the brief in the order the file wrote
+ * it while `toBrief` emits its own fixed order, so comparing the two as strings
+ * read every freshly loaded file as dirty the instant it opened. Keys carry no
+ * meaning; values do.
+ *
+ * Both sides are canonicalised (object keys sorted recursively) before
+ * stringifying, which sidesteps the `undefined` trap too: `JSON.stringify` drops
+ * `undefined`-valued keys on both sides, so `{ a: 1 }` and `{ a: 1, b: undefined }`
+ * still compare equal — same discipline as `canonicalJson` in `VariationPolicy`.
+ * Arrays are mapped element-wise, never sorted: `products`, `treatments`,
+ * `variation.axes.*` and `copy.timeline.beats` are order-carrying, and a swapped
+ * pair must stay a real difference.
+ */
+function briefsEqual(a: unknown, b: unknown): boolean {
+  return JSON.stringify(canonicalKeys(a)) === JSON.stringify(canonicalKeys(b));
+}
+
+function canonicalKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalKeys);
+  if (value !== null && typeof value === "object") {
+    const source = value as Record<string, unknown>;
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(source).sort()) sorted[key] = canonicalKeys(source[key]);
+    return sorted;
+  }
+  return value;
+}
+
 export function isDirtySinceSave(state: EditorState): boolean {
   if (state.source.kind === "new") return true;
   if (!state.source.savedSnapshot) return true;
-  return JSON.stringify(toBrief(state)) !== JSON.stringify(state.source.savedSnapshot);
+  return !briefsEqual(toBrief(state), state.source.savedSnapshot);
 }
 
 export function isDirtySinceApply(state: EditorState): boolean {
   if (!state.appliedSnapshot) return true;
-  return JSON.stringify(toBrief(state)) !== JSON.stringify(state.appliedSnapshot);
+  return !briefsEqual(toBrief(state), state.appliedSnapshot);
 }
 
 export function draftKeyFor(id: string): string {
