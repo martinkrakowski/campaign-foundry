@@ -1684,3 +1684,28 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
   **2362 passed | 2 skipped — 100 % on all four counters**, `sync:check` **Total ops 0**.
   PR: https://github.com/martinkrakowski/campaign-foundry/pull/145 (not merged).
+
+### 2026-08-30 — T1 StepHeader unit tests (lane shipped: `877694e` → PR #147)
+
+- **Mode:** Implementer, lane T1 — `StepHeader`'s own tests. W6's "StepHeader/StepFooter lack
+  dedicated tests" note was half stale (W7 added the footer's); this closed the header half.
+  Coverage was already 100 % via the editor suite — the lane pinned the contract directly, one
+  behaviour per test, no snapshots, no source changes.
+- **The seven pins** (`components/campaign/__tests__/step-header.test.tsx`): eyebrow derived
+  from props (rerendered with a different total — a hardcoded "STEP 1 OF 6" cannot pass); h1
+  level + accessible name; `tabindex="-1"`; `headingRef` forwarded (the step-change focus
+  target); the subtitle line; the `StatusChip` reflecting the `state` prop (fresh → saved &
+  applied across a rerender); sticky scoped to the column (`sticky top-0`, never `fixed` —
+  commented that the class is the only observable under happy-dom).
+- **Per-test mutation verification:** all seven source mutations (eyebrow literal, title
+  dropped, tabIndex removed, ref dropped, subtitle dropped, chip state frozen, sticky→fixed)
+  each failed **exactly one** test; restored tree 7/7 green. `StepHeader.tsx` untouched — no
+  defects found.
+- **Environment note for future lanes:** jest-dom is still unregistered — plain
+  `.textContent`/`.getAttribute`/`.toBeTruthy()` throughout; expected copy imported from
+  `messages.ts` per the step-footer test's convention. The chip test hardcodes StatusChip's
+  two inline labels (they live in StatusChip.tsx, not `messages.ts`); the test comments that
+  it pins the state wiring, not the chip's copy.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2369 passed | 2 skipped — 100 % on all four counters**, `sync:check` **Total ops 0**.
+  PR: https://github.com/martinkrakowski/campaign-foundry/pull/147 (not merged).
