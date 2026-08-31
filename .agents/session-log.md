@@ -1655,6 +1655,36 @@ To keep this file out of version control, add `.agents/session-log.md` to
   - **Transient count drop:** `useBecameTrue` was returning a count belonging to the previous subject on the render immediately after the subject changed (due to the state updating in a `useEffect`). This caused the ready-ring to fire on steps that were never valid. It now drops the stale count by returning 0 if `state.subject` does not match the current `subject`.
 - **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov` **2351 passed | 2 skipped — 100 % on all four counters**, then `sync:check`.
 
+### 2026-08-30 — C1 border control: the control-boundary token (WCAG 1.4.11)
+
+- **Mode:** Implementer. Lane C1 on `fix/c1-border-control`, worktree `wt-c1`.
+- **Defect:** `--color-border` is below the 3:1 a control boundary needs on every ground, in
+  both themes (recomputed: 1.13–1.23:1 light, 1.35–1.52:1 dark — matched the brief exactly).
+  A control whose fill is ~1.05:1 from its ground is identified only by that hairline, so it
+  has no perceptible edge.
+- **Fix shape:** a new token pair (`--color-border-control[-hover]`: #78889b/#64748b light,
+  #757575/#8f8f8f dark — worst-ground 3.31 light / 3.28 dark, hover 4.34/4.68) rather than
+  darkening `--color-border`, which is double-booked as a fill and paints ~119 decorative
+  hairlines 1.4.11 exempts. Tailwind keys in the identical `color-mix` form (bare `var()`
+  drops alpha modifiers on tailwind 3.4.19). Repointed at the controls' own edges only:
+  Input, Button secondary's border, Stepper's buttons + spinbutton, ChipGroup's toggles +
+  Other chip, SwatchChip's button (the colour-dot rim stays decorative), SwatchPicker,
+  AxisCard, PreviewCard, PlatformCard, ModelSelector's trigger. Container frames, row rules,
+  tick marks, MiniChip all keep `border-border`.
+- **Judgement call:** SwitchRow's off rail **included** — the knob identifies the control's
+  position, but the rail is the control's own edge and carries its state; no principled line
+  excludes one control when every other interactive control now clears 3:1.
+- **Testing lesson:** asserted the new classes on the exact class token (`className.split`)
+  because `border-border` is a substring of `border-border-control` — a substring assertion
+  could never catch a regression. Mutation-checked by reverting `input.tsx:30` (test failed,
+  restored, passed). Utility compilation asserted in `tailwind-alpha.test.ts` (a class that
+  emits nothing looks identical to one that works). Note for future lanes: existing
+  `toContain("border-border")` assertions pass vacuously against the new token for the same
+  substring reason — I tightened the four that sit on repointed controls.
+- **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov`
+  **2362 passed | 2 skipped — 100 % on all four counters**, `sync:check` **Total ops 0**.
+  PR: https://github.com/martinkrakowski/campaign-foundry/pull/145 (not merged).
+
 ### 2026-08-30 — W8 review step: projection rows, the creative beside them, the bar's two placements (branch feat/w8-review-step, PR #144)
 
 - **Mode:** Implementer. Lane W8.1 + W8.2 + W8.4 (W8.3 explicitly out of scope; the editor still opens wherever W6/W7 left it).

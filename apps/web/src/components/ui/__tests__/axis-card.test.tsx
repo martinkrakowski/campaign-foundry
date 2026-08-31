@@ -15,7 +15,7 @@ describe("AxisCard", () => {
     expect(button.getAttribute("aria-label")).toBe("headline-top");
     expect(button.getAttribute("aria-pressed")).toBe("false");
     expect(button.className).toContain("border-[1.5px]");
-    expect(button.className).toContain("border-border");
+    expect(button.className).toContain("border-border-control");
     expect(button.className).toContain("bg-surface-2");
     expect(button.textContent).toContain("headline-top");
 

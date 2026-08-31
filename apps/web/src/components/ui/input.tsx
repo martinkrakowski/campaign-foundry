@@ -27,7 +27,7 @@ export function Input(props: InputProps): ReactNode {
         "placeholder:text-text-muted",
         "focus:outline-none focus:ring-2 focus:ring-brand-primary/25",
         "disabled:cursor-not-allowed disabled:opacity-50",
-        invalid ? "border-error" : "border-border focus:border-brand-primary",
+        invalid ? "border-error" : "border-border-control focus:border-brand-primary",
         className,
       )}
       aria-invalid={invalid || undefined}

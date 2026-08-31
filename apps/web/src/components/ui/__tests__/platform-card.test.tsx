@@ -35,7 +35,7 @@ describe("PlatformCard", () => {
     expect(button).toBeTruthy();
     expect(button.getAttribute("aria-pressed")).toBe("false");
     expect(button.className).toContain("border-[1.5px]");
-    expect(button.className).toContain("border-border");
+    expect(button.className).toContain("border-border-control");
     expect(button.className).toContain("bg-surface-2");
 
     // 44px preview tile at rest

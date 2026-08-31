@@ -15,9 +15,11 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
     "bg-brand-primary text-white hover:bg-brand-primary-hover focus-visible:ring-brand-primary",
   // `hover:bg-border-hover`, not a fraction of `border`: 40% of the border token over
   // the surface token is a 1.07:1 shift in the light theme, which is not a hover, and
-  // the token named for hovering is the one that reads in both.
+  // the token named for hovering is the one that reads in both. The border is
+  // `border-control`, not `border`: the secondary button's fill (`surface`) is 1.05:1
+  // from the page ground, so its hairline is the control's whole edge (WCAG 1.4.11).
   secondary:
-    "bg-surface text-text-primary border border-border hover:bg-border-hover",
+    "bg-surface text-text-primary border border-border-control hover:bg-border-hover",
   ghost: "bg-transparent text-text-primary hover:bg-surface",
   destructive: "bg-error text-white hover:opacity-90",
 };

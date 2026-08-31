@@ -18,7 +18,7 @@ describe("PreviewCard", () => {
     const card = screen.getByRole("button", { name: "procedural" });
     expect(card.getAttribute("aria-pressed")).toBe("false");
     expect(card.className).toContain("border-[1.5px]");
-    expect(card.className).toContain("border-border");
+    expect(card.className).toContain("border-border-control");
     expect(card.className).toContain("bg-surface-2");
     expect(screen.getByTestId("paint")).toBeTruthy();
     expect(card.textContent).toContain("A pattern we draw");

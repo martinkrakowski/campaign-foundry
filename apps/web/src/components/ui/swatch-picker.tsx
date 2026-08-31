@@ -79,13 +79,13 @@ export function SwatchPicker({
               disabled={disabled || readOnly}
               onClick={() => onChange(hex)}
               className={cn(
-                "relative rounded-full border border-border transition-all",
+                "relative rounded-full border border-border-control transition-all",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2",
                 "disabled:cursor-not-allowed disabled:opacity-50",
                 sizeClasses,
                 isSelected
                   ? ringClasses
-                  : "hover:scale-105 hover:border-border-hover",
+                  : "hover:scale-105 hover:border-border-control-hover",
               )}
               style={{ backgroundColor: hex }}
             >
@@ -121,7 +121,7 @@ export function SwatchPicker({
             sizeClasses,
             isCustomSelected
               ? cn(ringClasses, "border-brand-primary")
-              : "border-border bg-surface-2 text-text-muted hover:border-brand-primary hover:text-brand-primary",
+              : "border-border-control bg-surface-2 text-text-muted hover:border-brand-primary hover:text-brand-primary",
           )}
           style={isCustomSelected && isValidHex(value) ? { backgroundColor: value } : undefined}
         >

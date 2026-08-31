@@ -96,7 +96,7 @@ export function ChipGroup({
                 "disabled:cursor-not-allowed disabled:opacity-50",
                 selected
                   ? "border-brand-primary bg-surface-2 text-text-emphasis"
-                  : "border-border bg-background text-text-muted hover:border-border-hover",
+                  : "border-border-control bg-background text-text-muted hover:border-border-control-hover",
               )}
             >
               {option}
@@ -116,7 +116,7 @@ export function ChipGroup({
               "disabled:cursor-not-allowed disabled:opacity-50",
               showCustomInput
                 ? "border-brand-primary bg-surface-2 text-text-emphasis"
-                : "border-border bg-background text-text-muted hover:border-border-hover",
+                : "border-border-control bg-background text-text-muted hover:border-border-control-hover",
             )}
           >
             {otherLabel}

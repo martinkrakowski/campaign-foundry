@@ -63,7 +63,7 @@ export function Stepper({
       disabled={disabled || atLimit}
       onClick={() => step(delta)}
       className={cn(
-        "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border text-text-primary transition-colors",
+        "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border-control text-text-primary transition-colors",
         "hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40",
       )}
     >
@@ -86,7 +86,7 @@ export function Stepper({
         aria-valuetext={unset ? unsetLabel : undefined}
         className={cn(
           "min-w-[4.5rem] rounded-md border px-2 py-1 text-center font-mono text-[12px] tabular-nums",
-          invalid ? "border-error text-error" : "border-border",
+          invalid ? "border-error text-error" : "border-border-control",
           unset ? "text-text-muted" : "text-text-primary",
         )}
       >
