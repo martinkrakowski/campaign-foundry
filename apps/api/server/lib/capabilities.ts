@@ -17,9 +17,21 @@ export type ProbeSpawn = (
 const DEFAULT_TIMEOUT_MS = 5_000;
 const UNAVAILABLE = "ffmpeg-static binary is not available";
 
+/** The boot snapshot before the probe has landed — a transient state, never a verdict. */
+export const NOT_PROBED_REASON = "not probed";
+
 // Nitro does not await async plugins before serving, so a request that arrives
 // while `ffmpeg-check` is still probing sees this initial "not probed" snapshot.
-let current: Capabilities = { motion: false, reason: "not probed" };
+let current: Capabilities = { motion: false, reason: NOT_PROBED_REASON };
+
+// Resolved by the first real probe result, and re-armed whenever the snapshot is
+// reset to "not probed". Run paths await this so a request landing in the boot
+// window waits out the remaining probe instead of reading the transient snapshot
+// as a permanent verdict.
+let notifyProbed!: () => void;
+let probed = new Promise<void>((resolve) => {
+  notifyProbed = resolve;
+});
 
 export function getCapabilities(): Capabilities {
   return current;
@@ -50,6 +62,42 @@ export function resolveFfmpegBinary(
 
 export function setCapabilities(c: Capabilities): void {
   current = c;
+  if (c.reason === NOT_PROBED_REASON) {
+    // Back into a boot window (tests reset to this): re-arm so waiters pend again.
+    probed = new Promise((resolve) => {
+      notifyProbed = resolve;
+    });
+    return;
+  }
+  notifyProbed();
+}
+
+/** Upper bound for a run waiting on the boot probe; matches the probe's own deadline. */
+export const PROBE_WAIT_TIMEOUT_MS = DEFAULT_TIMEOUT_MS;
+
+/** Wait deadline for run paths; tests shrink it to reach the still-pending answer deterministically. */
+export const probeWait = { timeoutMs: PROBE_WAIT_TIMEOUT_MS };
+
+/** The 503 body run paths answer when the probe is still outstanding after the wait. */
+export const PROBE_PENDING_ERROR =
+  "motion capability has not finished probing — the server is still starting; retry the same request shortly (the brief is not invalid)";
+
+/**
+ * The snapshot, waiting out a pending boot probe first. Run paths call this before
+ * validating so a request in the boot window is answered from the probe's real
+ * verdict rather than the transient "not probed" snapshot. The probe settles within
+ * its own timeout, so the wait is bounded; `opts.timeoutMs` short-circuits it
+ * (0 = no wait) so tests reach the still-pending answer deterministically.
+ */
+export async function waitForCapabilities(opts?: { timeoutMs?: number }): Promise<Capabilities> {
+  if (current.reason !== NOT_PROBED_REASON) return current;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, opts?.timeoutMs ?? probeWait.timeoutMs);
+  });
+  await Promise.race([probed, deadline]);
+  clearTimeout(timer);
+  return current;
 }
 
 export async function probeFfmpeg(opts?: {

@@ -2,6 +2,7 @@ import { PlanVariationsUseCase } from "@campaignfoundry/CampaignOrchestration";
 import { nodeCryptoPolicyHasher } from "@campaignfoundry/CampaignOrchestration/infrastructure";
 import { parseBrief } from "../../lib/load-brief.js";
 import { planInputFor } from "../../lib/pools.js";
+import { NOT_PROBED_REASON, PROBE_PENDING_ERROR, waitForCapabilities } from "../../lib/capabilities.js";
 
 /**
  * POST /campaigns/plan — dry-run the variation planner (no generation).
@@ -9,11 +10,20 @@ import { planInputFor } from "../../lib/pools.js";
  * Body is a campaign brief. 200 returns the plan summary the wizard estimates
  * from; planner errors are 422 (including a missing/empty/invalid copy pool when
  * the brief requests `headline: pool://copy`); parse failures are 400 (same as generate).
+ * A run arriving before the boot capability probe settles waits for it (bounded by
+ * the probe's own timeout); if the probe still has not landed the answer is 503 with
+ * a retry hint — never a 400 that reads as an invalid brief.
  */
 export default defineEventHandler(async (event) => {
+  const capabilities = await waitForCapabilities();
+  if (capabilities.reason === NOT_PROBED_REASON) {
+    setResponseStatus(event, 503);
+    setHeader(event, "retry-after", 1);
+    return { error: PROBE_PENDING_ERROR };
+  }
   let brief;
   try {
-    brief = parseBrief(await readBody(event), { enforceCapabilities: true });
+    brief = parseBrief(await readBody(event), { enforceCapabilities: true, capabilities });
   } catch (error) {
     setResponseStatus(event, 400);
     return { error: error instanceof Error ? error.message : "Invalid campaign brief" };

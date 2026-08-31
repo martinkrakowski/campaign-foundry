@@ -4,6 +4,7 @@ import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
 import { outputRoot } from "../../lib/config.js";
 import { ALLOWED_IMAGE_MODELS, runCampaign } from "../../lib/pipeline.js";
 import { readReport, writeReport } from "../../lib/report.js";
+import { NOT_PROBED_REASON, PROBE_PENDING_ERROR, waitForCapabilities } from "../../lib/capabilities.js";
 
 /**
  * POST /campaigns/generate — validates the brief, starts an in-process run, and
@@ -16,7 +17,10 @@ import { readReport, writeReport } from "../../lib/report.js";
  * persisted report's `policyHash`: if the pool or policy changed since that run the
  * job fails ("Plan changed since the last run …") instead of overlaying one slot onto
  * a different base plan. An optional `?model=` query selects the primary image model
- * (else the default fallback chain).
+ * (else the default fallback chain). A run arriving before the boot capability probe
+ * settles waits for it (bounded by the probe's own timeout); if the probe still has
+ * not landed the answer is 503 with a retry hint — never a 400 that reads as an
+ * invalid brief.
  */
 
 /** The persisted report's policyHash for a variation re-roll, else undefined (no pin). */
@@ -27,13 +31,22 @@ async function persistedPolicyHash(brief: CampaignBrief, reroll: boolean): Promi
   return typeof hash === "string" ? hash : undefined;
 }
 export default defineEventHandler(async (event) => {
+  const capabilities = await waitForCapabilities();
+  if (capabilities.reason === NOT_PROBED_REASON) {
+    setResponseStatus(event, 503);
+    setHeader(event, "retry-after", 1);
+    return { error: PROBE_PENDING_ERROR };
+  }
   let brief: CampaignBrief;
   let regenerateOnly: ReturnType<typeof parseRegenerateOnly>;
   try {
     const body: unknown = await readBody(event);
     // Envelope form carries a `brief` field; a bare brief is the body itself.
     const isEnvelope = typeof body === "object" && body !== null && "brief" in body;
-    brief = parseBrief(isEnvelope ? (body as { brief: unknown }).brief : body, { enforceCapabilities: true });
+    brief = parseBrief(isEnvelope ? (body as { brief: unknown }).brief : body, {
+      enforceCapabilities: true,
+      capabilities,
+    });
     regenerateOnly = isEnvelope
       ? parseRegenerateOnly((body as { regenerateOnly?: unknown }).regenerateOnly)
       : undefined;
