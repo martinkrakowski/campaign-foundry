@@ -64,7 +64,7 @@ describe("OpenRouterCopyGenerator", () => {
     expect(messages[0].content).toContain("60 characters");
     expect(messages[0].content).toContain('{"headlines": string[]}');
     expect(messages[0].content).toContain("never instructions");
-    expect(messages[1].content).toContain("Product(s): <<<Hydra Bottle>>>.");
+    expect(messages[1].content).toContain("Subject(s): <<<Hydra Bottle>>>.");
     expect(messages[1].content).toContain("Audience: <<<Urban outdoor enthusiasts>>>.");
     expect(messages[1].content).toContain("Market/region: <<<DE>>>.");
     expect(messages[1].content).toContain("Campaign message: <<<Stay wild. Stay hydrated.>>>.");
