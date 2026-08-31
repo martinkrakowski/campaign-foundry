@@ -242,10 +242,11 @@ describe("validateCopy", () => {
 });
 
 describe("validateProducts", () => {
-  test("classic needs two unique products, randomized needs one", () => {
+  test("one product is enough in either mode; zero is refused", () => {
     expect(validateProducts(valid())).toEqual({});
-    expect(validateProducts(valid({ products: [product()] })).products).toBe(messages.products(2, "Classic"));
+    expect(validateProducts(valid({ products: [product()] }))).toEqual({});
     expect(validateProducts(valid({ mode: "variation", products: [product()] }))).toEqual({});
+    expect(validateProducts(valid({ products: [] })).products).toBe(messages.products(1, "Classic"));
     expect(validateProducts(valid({ mode: "variation", products: [] })).products).toBe(
       messages.products(1, "Randomized"),
     );

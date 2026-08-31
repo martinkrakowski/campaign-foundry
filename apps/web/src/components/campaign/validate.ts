@@ -171,7 +171,7 @@ export function validateTimeline(state: EditorState): FieldErrors {
 
 export function validateProducts(state: EditorState): FieldErrors {
   const errors: FieldErrors = {};
-  const min = state.mode === "variation" ? 1 : 2;
+  const min = 1;
   const ids = state.products.map((product) => product.id);
   const unique = new Set(ids.filter((id) => id.length > 0));
   if (unique.size < min) {

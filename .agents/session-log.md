@@ -1762,3 +1762,36 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Tests first:** both empty-array tests were written and confirmed failing against the `!== undefined` guards (the empty-formats one rendering a blank "LinkedIn" row was the observed failure) before the fix was applied; both pass after. `brief-editor.test.tsx` still has 78 `test(` blocks — none deleted, only one query changed.
 - **Verification:** build, typecheck, lint (0 problems), lint:arch, `test:cov` **2405 passed | 2 skipped — 100 % on all four counters repo-wide**, `sync:check` **Total ops 0**.
 - **Refuted, unchanged:** `brief.products` needs no guard — it is `readonly Product[]` (`CampaignBrief.ts:28`), not optional, and `hasProduct` already gates its use; `useMemo` is imported (`BriefEditor.tsx:3`) — the build passing proves the import exists.
+
+## 2026-08-30 — Lane N2: single-subject campaigns — the classic floor drops to 1, and prompts stop asserting product-ness (GLM 5.3 Flash / opencode)
+
+- **Mode:** Implementer, lane N2 — a campaign need not be about products. Branch
+  `feat/n2-single-subject-campaigns` (worktree `wt-n2`), two commits → PR #150 (not merged).
+  No rename: `productId` stays the persisted wire key; `axisProductSize`'s "product" is the
+  Cartesian sense and is untouched.
+- **Part 1 evidence accepted:** `MINIMUM_PRODUCTS_CLASSIC = 2` traces to a README sentence in
+  `cecf086` and a phantom `MinimumProductsRule` (only two comment hits, no rule ever existed);
+  the 2026-08-25 planning doc argued only the variation relaxation. Collapsed the pair to a
+  single `MINIMUM_PRODUCTS = 1` (1 never 0 — products is the classic matrix's outer axis) and
+  deleted both mode ternaries (use-case site + `validateProducts`); argued in the PR body that
+  a no-op ternary is a maintainer trap. `productsClassicHint` removed (its render condition —
+  classic with exactly one product — is now valid state, so the advice was false), plus its
+  `ProductsSection` block. `messages.products` keeps its generic `min`-keyed branch.
+- **Policy hash confirmed unaffected** by reading `VariationPolicy.vo.ts`: the sha256 payload
+  is the policy's own fields; the product minimum lives in the use case and is not hashed.
+- **Tests corrected, none deleted** — and two *beyond* the lane's named three: the
+  single-product boundary test at use-case line 88 pinned rejection (now asserts acceptance
+  with assets), and two API tests (`generate.test.ts` CLI, `routes.test.ts` POST) used a
+  one-product brief as their business-rule failure fixture — both moved to a zero-product
+  fixture. Both directions pinned everywhere: one product accepted (use case + validator),
+  zero refused (use case + validator, classic and randomized).
+- **Domain error message made grammatical at 1:** "at least one unique product" instead of
+  interpolating "1 unique products"; noted in the PR body.
+- **Part 2:** the three image prompts (identically worded) now say "for the subject
+  \"<name>\"" instead of "for the product"; `OpenRouterCopyGenerator` says "subject" in the
+  system line and `Subject(s):` for the user-message field. Stated plainly in the PR body
+  that this changes what real models receive and generate. Found one pin the lane missed:
+  `OpenRouterCopyGenerator.test.ts:67` pinned `Product(s): <<<Hydra Bottle>>>.` — corrected.
+- **Verification:** build/typecheck/lint (0 problems)/lint:arch green; test:cov **2385 passed
+  | 0 failed | 2 skipped, 100 % on all four counters (6721/4891/1441/6015)**; `sync:check`
+  clean on the committed tree (Total ops 0).

@@ -320,8 +320,8 @@ describe("POST /campaigns/generate", () => {
     }
   });
 
-  test("business-rule failure (one product) fails the job, not the POST", async () => {
-    const res = await call(brief({ products: [{ id: "solo", name: "S", primaryColor: "#111111", logoPath: "x.png" }] }));
+  test("business-rule failure (zero products) fails the job, not the POST", async () => {
+    const res = await call(brief({ products: [] }));
     expect(res.status).toBe(202);
     const { body } = await awaitJob(((await res.json()) as { jobId: string }).jobId);
     expect(body.status).toBe("failed");
