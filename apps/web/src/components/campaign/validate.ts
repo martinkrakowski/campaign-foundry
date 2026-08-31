@@ -11,6 +11,10 @@ import {
   timelineDurations,
 } from "./editor-state";
 
+// The kinds the parser's allowlist accepts, by the domain's own subpath: a duplicated
+// list here is the drift that let a draft the parser refuses look clean (B3).
+import { MOTION_KINDS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
+
 // The float slack on the dwell floor is IMPORTED, not restated: 3 × 1.2 is
 // 3.5999999999999996, and an editor with its own copy of the tolerance would eventually
 // disagree with `timelineProblem` about the boundary case. Same reasoning as the one
@@ -324,31 +328,47 @@ export function validateOutput(state: EditorState): FieldErrors {
 
 export function validateMotion(state: EditorState): FieldErrors {
   const errors: FieldErrors = {};
-  if (!state.formats.includes("motion")) return errors;
+  // The checks key on whether the motion/duration axes CARRY VALUES, not on the Video
+  // toggle: `toBrief` writes both axes whenever they hold values (D12 keeps a loaded
+  // motion brief's fields verbatim), and the parser validates a present axis whatever
+  // `output.formats` says. Keying them on the format selection let a draft pass here
+  // that the parser then refused on Save — pick clip lengths in Randomized, turn Video
+  // off, and the draft still carries them.
+  if (!state.formats.includes("motion") && state.motion.length === 0 && state.duration.length === 0) {
+    return errors;
+  }
   // The FormatPanel gate stops Video being *selected* in Classic, but a brief can arrive
   // here holding it anyway: pick Video in Randomized, switch to Classic, and the format
   // stays. Nothing else catches that — the generate path branches on mode alone, so the
   // brief saves and applies cleanly and then renders stills, silently producing something
   // other than what it asks for. A refusal the user can read is the whole point (D3).
-  if (state.mode !== "variation") {
-    errors.formats = messages.formatsMotionNeedsRandomizedMode;
-    return errors;
+  if (state.formats.includes("motion")) {
+    if (state.mode !== "variation") {
+      errors.formats = messages.formatsMotionNeedsRandomizedMode;
+    } else {
+      if (state.motion.length === 0) {
+        errors.motion = messages.motion;
+      }
+      if (state.duration.length === 0) {
+        errors.duration = messages.duration;
+      }
+    }
   }
-  if (state.motion.length === 0) {
-    errors.motion = messages.motion;
+  if (state.motion.length > 0 && state.motion.some((kind) => !(MOTION_KINDS as readonly string[]).includes(kind))) {
+    errors.motion = messages.motionKindUnknown;
   }
-  if (state.duration.length === 0) {
-    errors.duration = messages.duration;
-  } else if (
-    state.duration.some(
-      (seconds) => !Number.isInteger(seconds) || seconds < MIN_DURATION_SEC || seconds > MAX_DURATION_SEC,
-    )
-  ) {
-    errors.duration = messages.durationRange(MIN_DURATION_SEC, MAX_DURATION_SEC);
-  } else if (new Set(state.duration).size !== state.duration.length) {
-    // The planner de-duplicates this axis, so a repeat draws nothing — say so rather
-    // than letting it look like an extra clip length.
-    errors.duration = messages.durationDuplicate;
+  if (state.duration.length > 0) {
+    if (
+      state.duration.some(
+        (seconds) => !Number.isInteger(seconds) || seconds < MIN_DURATION_SEC || seconds > MAX_DURATION_SEC,
+      )
+    ) {
+      errors.duration = messages.durationRange(MIN_DURATION_SEC, MAX_DURATION_SEC);
+    } else if (new Set(state.duration).size !== state.duration.length) {
+      // The planner de-duplicates this axis, so a repeat draws nothing — say so rather
+      // than letting it look like an extra clip length.
+      errors.duration = messages.durationDuplicate;
+    }
   }
   return errors;
 }

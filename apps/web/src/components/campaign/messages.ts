@@ -191,6 +191,8 @@ export const shapesFromPlatforms = "from your platforms";
 
 /** `motion` */
 export const motion = "No video style picked — tap at least one video card.";
+/** `motion.kindUnknown` — the video-style list holds a kind the picker never offered (a loaded brief can). */
+export const motionKindUnknown = "That video style is not one of the choices — pick again in the Video styles panel.";
 /** `duration` */
 export const duration = "No clip length yet — add one with the stepper, like 6 seconds.";
 /** `duration.range` */
