@@ -223,6 +223,14 @@ export const confirmDialogStay = "Stay";
 export const confirmDialogLeave = "Leave";
 /** `status.saveFailed` */
 export const statusSaveFailed = "Could not save — try Save again.";
+/**
+ * `status.saveConflict` — the conditional write was refused because the file
+ * changed on disk since it was loaded. The fresh revision has been adopted, so a
+ * second Save will answer the guard: the overwrite is the user's call, never an
+ * automatic re-send.
+ */
+export const statusSaveConflict =
+  "This brief changed on disk while you were editing — press Save again to keep your version and overwrite the other changes.";
 /** `status.saveAsFailed` */
 export const statusSaveAsFailed = "Could not save the copy — try Save as again.";
 

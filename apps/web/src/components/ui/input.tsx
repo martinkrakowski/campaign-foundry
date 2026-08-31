@@ -1,9 +1,11 @@
-import type { InputHTMLAttributes, ReactNode } from "react";
+import type { InputHTMLAttributes, ReactNode, Ref } from "react";
 import { cn } from "../../lib/cn";
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   /** Render in an error state (red border + aria-invalid). */
   invalid?: boolean;
+  /** React 19: a ref is an ordinary prop — forwarded onto the input element. */
+  ref?: Ref<HTMLInputElement>;
 }
 
 /**
