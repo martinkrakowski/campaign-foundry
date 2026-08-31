@@ -30,11 +30,13 @@ import {
   loadDraftFromStorage,
   purgeDraftFromStorage,
   blankBrief,
+  slugify,
 } from "@/components/campaign/editor-state";
 import {
   validateState,
   getTotalErrorCount,
   motionUnavailableReason,
+  SAFE_ID_PATTERN,
   type FieldErrors,
 } from "@/components/campaign/validate";
 import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, OutputSection, PolicySection } from "@/components/campaign/sections";
@@ -637,8 +639,15 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     }
   };
 
-  const handleSaveAs = async (newId: string) => {
+  const handleSaveAs = async (rawId: string) => {
     if (refuseInvalid()) return;
+    // B1: the dialog asks for an id while the user is thinking of a name — "Trail
+    // Blaze 2026" once reached the server verbatim and came back a 400 nobody
+    // explained. The field shows the rule as it is typed (below); this guard is the
+    // backstop, so no unvalidated id reaches createBrief, and trimming happens here
+    // where an invisible trailing space would otherwise be a server 400.
+    const newId = rawId.trim();
+    if (!SAFE_ID_PATTERN.test(newId)) return;
     setSaving(true);
     setPersistError(undefined);
     try {
@@ -683,6 +692,16 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
       setSaving(false);
     }
   };
+
+  // The Save-as field speaks the same rule as the briefId field (messages.briefId),
+  // evaluated on the *trimmed* value so the verdict matches what Save would send.
+  // Because the field asks for an id while the user is thinking of a name, the
+  // slugified form of what was typed is offered as a click — shown, never applied
+  // silently: an id that slugifies to nothing gets the refusal but no suggestion.
+  const saveAsTrimmed = (saveAsId ?? "").trim();
+  const saveAsInvalid =
+    saveAsId !== null && saveAsTrimmed !== "" && !SAFE_ID_PATTERN.test(saveAsTrimmed);
+  const saveAsSlug = slugify(saveAsId ?? "");
 
   // The errors behind one step. `errors` is keyed by every bucket once validation has
   // landed, but the first paint carries the empty put-state — so the bucket read still
@@ -1055,10 +1074,27 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
               aria-label="New brief id"
               placeholder="New brief id"
               value={saveAsId}
+              invalid={saveAsInvalid}
               onChange={(e) => setSaveAsId(e.target.value)}
               className="mb-4"
               autoFocus
             />
+            {saveAsInvalid ? (
+              <>
+                <p className="mb-2 text-[12px] text-error" role="alert">
+                  {messages.briefId}
+                </p>
+                {saveAsSlug !== "" ? (
+                  <button
+                    type="button"
+                    onClick={() => setSaveAsId(saveAsSlug)}
+                    className="mb-4 block text-left text-[12px] text-text-primary underline hover:text-text-emphasis"
+                  >
+                    {messages.saveAsIdSuggestion(saveAsSlug)}
+                  </button>
+                ) : null}
+              </>
+            ) : null}
             <div className="flex gap-2">
               <Button onClick={() => handleSaveAs(saveAsId)} disabled={saving || !saveAsId}>
                 Save

@@ -19,6 +19,13 @@ export const briefId = "Brief ID can only use small letters, numbers and dashes 
 export function briefIdDuplicate(conflictingId: string): string {
   return `A brief called ${conflictingId} already exists — pick a different Brief ID.`;
 }
+/**
+ * Save-as: the id field wants a slug while the user is thinking of a name, so the
+ * slugified form of what they typed is offered as a click — never applied silently.
+ */
+export function saveAsIdSuggestion(slug: string): string {
+  return `Try "${slug}" instead`;
+}
 /** `targetRegion` */
 export const targetRegion = "No region yet — pick one of the region chips.";
 /** `targetAudience` */

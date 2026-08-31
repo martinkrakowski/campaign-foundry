@@ -391,6 +391,79 @@ describe("BriefPage — data flow", () => {
     );
   });
 
+  test("Save as... with a non-slug id never reaches createBrief, and the field says why", async () => {
+    const user = userEvent.setup();
+    const calls = routes({});
+    renderWithRun(<Editor />);
+    await fillValidDraft(user);
+
+    // a campaign *name* where a slug is wanted — the exact input that once left the
+    // page as a 288-byte POST and came back a bare 400
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), "Trail Blaze 2026");
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
+
+    expect(writes(calls)).toEqual([]);
+    expect(screen.getByText(messages.briefId)).toBeTruthy();
+    expect(screen.getByLabelText("New brief id")).toBeTruthy();
+  });
+
+  test("Save as... offers the slugified form of a name as a click, never a silent rewrite", async () => {
+    const user = userEvent.setup();
+    const calls = routes({});
+    renderWithRun(<Editor />);
+    await fillValidDraft(user);
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), "Trail Blaze 2026");
+    await user.click(
+      await screen.findByRole("button", { name: 'Try "trail-blaze-2026" instead' }),
+    );
+
+    // the offer fills the field with the slug the user can see and accept
+    expect((screen.getByLabelText("New brief id") as HTMLInputElement).value).toBe(
+      "trail-blaze-2026",
+    );
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
+    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+  });
+
+  test("Save as... refuses an id that slugifies to nothing, with no suggestion to offer", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<Editor />);
+    await fillValidDraft(user);
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), "!!!");
+    expect(screen.getByText(messages.briefId)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /instead/ })).toBeNull();
+  });
+
+  test("Save as... trims the id before posting", async () => {
+    const user = userEvent.setup();
+    const calls = routes({});
+    renderWithRun(<Editor />);
+    await fillValidDraft(user);
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), " my-brief ");
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
+
+    const post = await waitFor(() => {
+      const call = calls.find((c) => c.method === "POST");
+      expect(call).toBeTruthy();
+      return call!;
+    });
+    expect((post.body as { id?: string }).id).toBe("my-brief");
+  });
+
   test("Apply on the blank route keeps the brief it just applied", async () => {
     const user = userEvent.setup();
     routes({});
