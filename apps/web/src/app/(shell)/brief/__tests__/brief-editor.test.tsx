@@ -1870,7 +1870,10 @@ describe("BriefPage — the review step (W8)", () => {
     // error is on screen the moment the walk reaches it, untouched.
     await user.click(segments()[sectionOrder("brief").indexOf("products")]);
     await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
-    expect(within(document.getElementById("products") as HTMLElement).getByText(messages.products(2, "Classic"))).toBeTruthy();
+    // The argument tracks the classic floor this lane moved (2 → 1) — it is not
+    // exported by validate.ts, so the literal restates it. If the floor moves
+    // again, this assertion moving with it is the point: it pins the wording.
+    expect(within(document.getElementById("products") as HTMLElement).getByText(messages.products(1, "Classic"))).toBeTruthy();
   });
 
   test("a row whose field the projection omits disappears", async () => {
