@@ -1452,9 +1452,9 @@ describe("BriefPage — guided presentation (W6)", () => {
 
     // Corrected for W8.2: the action bar (and the ErrorStrip inside it) stands on the
     // Review step in Guided — it is no longer mounted on every step — so the chip is
-    // met from Review, reached past Products by the segbar's unlocked walk.
+    // met from Review, reached by the segbar's own name for it, never by position.
     const segbar = within(screen.getByRole("navigation", { name: messages.segBarLabel }));
-    await user.click(segbar.getAllByRole("button")[sectionOrder("brief").length]);
+    await user.click(segbar.getByRole("button", { name: /: Review, / }));
     await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
 
     const chip = Array.from(document.querySelectorAll<HTMLElement>("button.rounded-full")).find((b) =>
