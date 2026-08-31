@@ -20,6 +20,22 @@ describe("CompliancePage", () => {
     expect(await screen.findByText(/Awaiting pipeline execution/)).toBeTruthy();
   });
 
+  test("the group label and table headers render through Eyebrow on the token", async () => {
+    renderWithRun(<CompliancePage />);
+    const label = await screen.findByText("Compliance");
+    expect(label.tagName).toBe("SPAN");
+    expect(label.className).toContain("tracking-eyebrow");
+    expect(label.className).not.toContain("tracking-widest");
+    // the headers stay real <th> cells — Eyebrow renders through them, not inside them
+    for (const header of ["Asset Target", "Rule Engine", "Telemetry Result", "Gate Status"]) {
+      const th = screen.getByText(header);
+      expect(th.tagName).toBe("TH");
+      expect(th.className).toContain("tracking-eyebrow");
+      expect(th.className).toContain("font-normal");
+      expect(th.className).not.toContain("tracking-widest");
+    }
+  });
+
   test("renders a row per asset with pass/fail gates", async () => {
     seedPersistedRun([
       makeAsset({ passedCompliance: true, logoApplied: true }),

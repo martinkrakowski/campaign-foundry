@@ -52,7 +52,7 @@ export function BrowseBriefsButton({ onActivate }: { onActivate?: () => void }) 
           onActivate?.();
           openBriefPicker();
         }}
-        className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-[12px] font-medium text-text-primary transition-colors hover:bg-border-hover"
+        className="flex w-full items-center justify-center gap-2 rounded-lg border border-border-control bg-surface-2 px-3 py-2 text-[12px] font-medium text-text-primary transition-colors hover:bg-border-hover"
       >
         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
@@ -173,7 +173,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                 <div
                   key={asset.name}
                   onClick={() => setPickerOpen(true)}
-                  className="flex cursor-pointer items-center space-x-3 rounded-lg border border-border bg-surface-2 p-2 transition-colors hover:border-border-hover"
+                  className="flex cursor-pointer items-center space-x-3 rounded-lg border border-border-control bg-surface-2 p-2 transition-colors hover:border-border-control-hover"
                 >
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-surface">
                     {asset.thumbnailUrl ? (

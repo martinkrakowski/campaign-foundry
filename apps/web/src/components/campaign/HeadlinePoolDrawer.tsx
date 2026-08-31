@@ -3,7 +3,6 @@
 import type { Dispatch } from "react";
 import { useState, useEffect, useRef } from "react";
 import { Button, Input, DrawerShell, DialogHead, Eyebrow, Skeleton } from "@/components/ui";
-import { cn } from "@/lib/cn";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import { approvedHeadlines, toBrief } from "@/components/campaign/editor-state";
 import {
@@ -48,14 +47,9 @@ function PoolEntryRow({
           onChange={(e) => setDraft(e.target.value)}
         />
       )}
-      <span
-        className={cn(
-          "font-mono text-[11px] uppercase tracking-widest",
-          approved ? "text-success" : "text-error",
-        )}
-      >
+      <Eyebrow className={approved ? "text-success" : "text-error"}>
         {entry.status}
-      </span>
+      </Eyebrow>
       {entry.reason ? <span className="text-[11px] text-text-muted">{entry.reason}</span> : null}
       {draft === null ? (
         <>

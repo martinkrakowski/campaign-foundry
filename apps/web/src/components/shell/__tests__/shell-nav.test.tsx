@@ -258,6 +258,16 @@ describe("MobileMenu", () => {
     { href: "/export", label: "Export" },
   ] as const;
 
+  test("the menu's title renders through Eyebrow on the tracking token", async () => {
+    seedPersistedRun([]);
+    renderWithRun(<MobileMenu open onClose={() => {}} tabs={tabs} />);
+    const dialog = await screen.findByRole("dialog", { name: "Menu" });
+    const title = within(dialog).getByText("Menu");
+    expect(title.tagName).toBe("SPAN");
+    expect(title.className).toContain("tracking-eyebrow");
+    expect(title.className).not.toContain("tracking-widest");
+  });
+
   test("marks only the active tab with aria-current and leaves the others bare", () => {
     nextMock().nav.pathname = "/export";
     renderWithRun(<MobileMenu open onClose={() => {}} tabs={tabs} />);

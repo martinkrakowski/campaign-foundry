@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { Dispatch } from "react";
-import { Button, Input, SwatchPicker } from "@/components/ui";
+import { Button, Eyebrow, Input, SwatchPicker } from "@/components/ui";
 import * as messages from "@/components/campaign/messages";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import type { FieldErrors } from "@/components/campaign/validate";
@@ -198,9 +198,9 @@ export function ProductsSection({
         </p>
       ) : null}
       <div className="flex items-center justify-between">
-        <h3 className="font-mono text-[11px] uppercase tracking-widest text-text-muted">
+        <Eyebrow as="h3">
           {messages.productsHeading(state.products.length)}
-        </h3>
+        </Eyebrow>
         <Button variant="secondary" size="sm" type="button" onClick={() => dispatch({ type: "addProduct" })}>
           {messages.addProduct}
         </Button>

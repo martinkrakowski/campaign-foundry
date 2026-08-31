@@ -67,6 +67,14 @@ describe("PreviewDock", () => {
     expect(svg.getAttribute("viewBox")).toBe("0 0 1080 1920");
   });
 
+  test("the legend renders through Eyebrow as a p on the token", () => {
+    const { container } = render(<PreviewDock {...showcase} platformId="instagram-story" ratio="1:1" />);
+    const legend = container.querySelector("aside p")!;
+    expect(legend.textContent).toBe(messages.previewLegend);
+    expect(legend.className).toContain("tracking-eyebrow");
+    expect(legend.className).not.toContain("tracking-widest");
+  });
+
   test("is labelled as a complementary landmark region using previewLegend", () => {
     const { container } = render(<PreviewDock {...showcase} platformId="instagram-story" ratio="1:1" />);
     const aside = container.querySelector("aside")!;

@@ -292,7 +292,7 @@ export default function GridPage() {
         <button
           type="button"
           onClick={() => updateFilters({ page: page + 1 })}
-          className="self-center rounded-full border border-border bg-surface px-5 py-2 text-[13px] text-text-primary transition-colors hover:bg-border-hover"
+          className="self-center rounded-full border border-border-control bg-surface px-5 py-2 text-[13px] text-text-primary transition-colors hover:bg-border-hover"
         >
           Show more
         </button>
@@ -323,7 +323,7 @@ function FilterSelect({
         aria-label={label}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded border border-border bg-surface-2 px-2 py-1 text-text-primary"
+        className="rounded border border-border-control bg-surface-2 px-2 py-1 text-text-primary"
       >
         <option value="">All</option>
         {options.map((option) => (
@@ -568,7 +568,7 @@ function Artboard({
             "rounded-full border px-4 py-1 text-xs font-medium transition-colors",
             decision === "approved"
               ? "border-success bg-success/20 text-success"
-              : "border-border text-text-muted hover:text-text-emphasis",
+              : "border-border-control text-text-muted hover:text-text-emphasis",
           )}
         >
           Approve
@@ -580,7 +580,7 @@ function Artboard({
             "rounded-full border px-4 py-1 text-xs font-medium transition-colors",
             decision === "rejected"
               ? "border-error bg-error/20 text-error"
-              : "border-border text-text-muted hover:text-text-emphasis",
+              : "border-border-control text-text-muted hover:text-text-emphasis",
           )}
         >
           Reject

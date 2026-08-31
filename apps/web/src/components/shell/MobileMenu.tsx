@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
+import { Eyebrow } from "@/components/ui";
 import { dialogHoldsFocus } from "@/components/ui/dialog-shell";
 import { SidebarContent, BrowseBriefsButton } from "./Sidebar";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
@@ -104,7 +105,7 @@ export function MobileMenu({ open, onClose, tabs }: MobileMenuProps) {
       aria-label="Menu"
     >
       <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
-        <span className="font-mono text-[11px] uppercase tracking-widest text-text-muted">Menu</span>
+        <Eyebrow>Menu</Eyebrow>
         <button
           ref={closeRef}
           type="button"

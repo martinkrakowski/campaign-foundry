@@ -2,7 +2,7 @@
 
 import type { Dispatch } from "react";
 import { useEffect } from "react";
-import { Button, Input } from "@/components/ui";
+import { Button, Eyebrow, Input } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import * as messages from "@/components/campaign/messages";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
@@ -55,9 +55,9 @@ export function CopySection({
         <div className="space-y-3">
           {suggestions.length > 0 ? (
             <div className="space-y-1.5">
-              <span className="font-mono text-[11px] uppercase tracking-widest text-text-muted">
+              <Eyebrow>
                 {messages.headlineSuggestionsLabel}
-              </span>
+              </Eyebrow>
               <div className="flex flex-col gap-2">
                 {suggestions.map((entry) => {
                   const isSelected = state.campaignMessage === entry.text;

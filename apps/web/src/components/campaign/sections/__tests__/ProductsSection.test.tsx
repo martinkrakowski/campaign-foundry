@@ -11,6 +11,13 @@ function renderWithErrors(errors: FieldErrors) {
 }
 
 describe("ProductsSection", () => {
+  test("the heading renders through Eyebrow as an h3 on the token", () => {
+    renderWithErrors({});
+    const heading = screen.getByRole("heading", { name: "Products (1)", level: 3 });
+    expect(heading.className).toContain("tracking-eyebrow");
+    expect(heading.className).not.toContain("tracking-widest");
+  });
+
   test("renders product-0-name error and sets aria-invalid on name input", () => {
     renderWithErrors({ "product-0-name": "Name is required." });
     expect(screen.getByText("Name is required.")).toBeTruthy();

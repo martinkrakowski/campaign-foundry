@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
 
-/** The tags an eyebrow may be: it is a label, so it is either inline or a heading. */
-export type EyebrowTag = "span" | "p" | "h2" | "h3" | "h4";
+/** The tags an eyebrow may be: it is a label, so it is inline, a table header, or a heading. */
+export type EyebrowTag = "span" | "p" | "th" | "h2" | "h3" | "h4";
 
 export interface EyebrowProps {
   readonly children?: ReactNode;
