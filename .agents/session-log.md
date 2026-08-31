@@ -1772,7 +1772,9 @@ To keep this file out of version control, add `.agents/session-log.md` to
   every campaign type, not a niche one.
 - **Fix shape:** one anchored regex per term, compiled once at module scope:
   `\b<escaped term>\w*` — must start at a word boundary, may run on through word chars.
-  Inflections (cures/cured/curing) still halt; secure/obscure/procurement/manicure pass.
+  Inflections (cures/cured) still halt; "curing"/"curative" do not — they change the
+  stem, not extend it, a known term-list gap pinned by a dedicated test, not a matcher
+  defect. secure/obscure/procurement/manicure pass.
   `escapeRegExp` keeps the term list data (`"100% safe"` can never become a pattern).
   Trailing `\b` considered and omitted: `\w*` is greedy to the word's end, so a trailing
   boundary is always satisfiable by backtracking and adds nothing.
