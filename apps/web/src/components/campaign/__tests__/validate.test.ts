@@ -18,7 +18,11 @@ import {
   hasSectionErrors,
   getTotalErrorCount,
 } from "../validate";
-import { initialEditorState, editorReducer, type EditorState } from "../editor-state";
+import { initialEditorState, editorReducer, toBrief, type EditorState } from "../editor-state";
+// The real gate Save hits, imported across apps for the divergence tests below: tests
+// may cross package boundaries (arch test-double rules), and a mirror without the
+// parser it mirrors is exactly the drift these tests exist to catch.
+import { parseBrief } from "../../../../../api/server/lib/load-brief";
 
 const product = (over: Record<string, unknown> = {}) => ({
   key: 1,
@@ -511,3 +515,57 @@ describe("a Classic brief cannot quietly ask for video", () => {
     expect(validateMotion(randomized).formats).toBeUndefined();
   });
 })
+
+describe("validateMotion — axes carrying values while Video is off", () => {
+  test("a retained kind and a clip length are checked even though Video is off", () => {
+    // `toBrief` writes both axes whenever they hold values (D12), and the parser
+    // validates a present axis whatever `output.formats` says — so the checks key on
+    // the axes, not the toggle. A valid retained kind is not flagged:
+    expect(validateMotion(valid({ motion: ["ken-burns-in"], duration: [6] }))).toEqual({});
+    // an unknown kind and an out-of-range length are, exactly as with Video on:
+    const errors = validateMotion(valid({ motion: ["slow-pan"], duration: [45] }));
+    expect(errors.motion).toBe(messages.motionKindUnknown);
+    expect(errors.duration).toBe(messages.durationRange(2, 30));
+  });
+
+  test("a Classic brief carrying motion values is checked for its mode and its values", () => {
+    const errors = validateMotion({ ...initialEditorState(), mode: "brief" as const, formats: ["static", "motion"], duration: [45] });
+    expect(errors.formats).toBe(messages.formatsMotionNeedsRandomizedMode);
+    expect(errors.duration).toBe(messages.durationRange(2, 30));
+  });
+});
+
+describe("the editor says what the parser refuses (B3 divergences)", () => {
+  // The real gate Save hits: the API's authoring-mode parse of exactly what `toBrief`
+  // sends. Defaults on purpose — the routes call `parseBrief` without options.
+  const parse = (state: EditorState) => parseBrief(toBrief(state));
+
+  test("a clip length out of range with Video off is flagged here and refused by the parser", () => {
+    // pick clip lengths in Randomized, turn Video off: the draft keeps the axis,
+    // so the parser still refuses it on Save even though the editor showed no error
+    const state = valid({ mode: "variation", formats: ["static"], duration: [45] });
+    expect(validateState(state).motion.duration).toBe(messages.durationRange(2, 30));
+    expect(() => parse(state)).toThrow(/variation\.axes\.duration.*between 2 and 30/);
+  });
+
+  test("a video style the picker never offered, with Video off, is flagged here and refused by the parser", () => {
+    const state = valid({ mode: "variation", formats: ["static"], motion: ["slow-pan"] });
+    expect(validateState(state).motion.motion).toBe(messages.motionKindUnknown);
+    expect(() => parse(state)).toThrow(/"variation\.axes\.motion" has unsupported value "slow-pan"/);
+  });
+
+  test("an unknown platform is named here and refused by the parser", () => {
+    // used to vanish: `.filter(profile => profile !== undefined)` dropped the id from
+    // the compatibility check, so the draft looked clean and the parser refused it
+    const state = valid({ platforms: ["instagram-feed", "story-tv"] });
+    expect(validateState(state).output.platforms).toBe(messages.platformsUnknown(["story-tv"]));
+    expect(() => parse(state)).toThrow(/Unknown output platform "story-tv"/);
+  });
+
+  test("a draft that passes every check parses too — the fix is not 'always invalid'", () => {
+    expect(getTotalErrorCount(validateState(valid()))).toBe(0);
+    expect(getTotalErrorCount(validateState(valid({ mode: "variation" })))).toBe(0);
+    expect(() => parse(valid())).not.toThrow();
+    expect(() => parse(valid({ mode: "variation" }))).not.toThrow();
+  });
+});
