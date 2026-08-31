@@ -6,6 +6,7 @@ import { SECTION_TITLES, sectionOrder } from "@/components/campaign/sections";
 import type { CampaignMode } from "@/components/campaign/editor-state";
 import type { FieldErrors } from "@/components/campaign/validate";
 import { ErrorPill } from "./error-pill";
+import { Eyebrow } from "./eyebrow";
 import * as messages from "@/components/campaign/messages";
 
 /**
@@ -67,9 +68,9 @@ export function SectionOutline({
   return (
     <div className="space-y-1">
       <div className="mb-1 flex items-center justify-between">
-        <span className="font-mono text-[11px] uppercase tracking-widest text-text-muted">
+        <Eyebrow>
           {messages.outlineLegend}
-        </span>
+        </Eyebrow>
         <span className="text-[11px] text-text-muted">{messages.outlineIssueCount(total)}</span>
       </div>
       {order.map((id, index) => {

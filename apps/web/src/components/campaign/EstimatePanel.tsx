@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { EditorState } from "@/components/campaign/editor-state";
 import { canPlan, toBrief, PLAN_DEBOUNCE_MS } from "@/components/campaign/editor-state";
 import { planCampaign, type PlanResult, type PlanVariant } from "@/lib/briefs-api";
+import { Eyebrow } from "@/components/ui";
 import { ratioDisplayName } from "@/components/campaign/display-names";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { classicAdCount } from "@/components/campaign/derive";
@@ -49,7 +50,7 @@ function ClassicEstimate({ state }: { state: EditorState }) {
   if (!ready) {
     return (
       <div className="rounded-lg border border-border bg-surface p-4">
-        <h4 className="font-mono text-[11px] uppercase tracking-widest text-text-muted">Estimate</h4>
+        <Eyebrow as="h4">Estimate</Eyebrow>
         <p className="mt-2 text-[13px] text-text-muted">{messages.estimateNotReady}</p>
       </div>
     );
@@ -59,7 +60,7 @@ function ClassicEstimate({ state }: { state: EditorState }) {
   const ratios = RATIO_VALUES.map((ratio) => ({ label: ratioDisplayName(ratio), count: perRatio }));
   return (
     <div className="rounded-lg border border-border bg-surface p-4">
-      <h4 className="font-mono text-[11px] uppercase tracking-widest text-text-muted">Estimate</h4>
+      <Eyebrow as="h4">Estimate</Eyebrow>
       <p className="mt-2 text-[13px] text-text-primary">
         {messages.estimateSentence({
           creatives,
@@ -127,7 +128,7 @@ function VariationEstimate({ state }: { state: EditorState }) {
 
   return (
     <div className="rounded-lg border border-border bg-surface p-4">
-      <h4 className="font-mono text-[11px] uppercase tracking-widest text-text-muted">Estimate</h4>
+      <Eyebrow as="h4">Estimate</Eyebrow>
       {!ready ? (
         <p className="mt-2 text-[13px] text-text-muted">{messages.estimateNotReady}</p>
       ) : plan === null ? (

@@ -23,6 +23,21 @@ describe("Eyebrow", () => {
     expect(el.className).toContain("tracking-eyebrow");
   });
 
+  test("can be a table header, so a table's column labels keep their semantics", () => {
+    render(
+      <table>
+        <thead>
+          <tr>
+            <Eyebrow as="th">Asset Target</Eyebrow>
+          </tr>
+        </thead>
+      </table>,
+    );
+    const el = screen.getByText("Asset Target");
+    expect(el.tagName).toBe("TH");
+    expect(el.className).toContain("tracking-eyebrow");
+  });
+
   test("a caller's className is merged over the pattern", () => {
     render(<Eyebrow as="p" className="hidden lg:inline">
       HITL Mode Active

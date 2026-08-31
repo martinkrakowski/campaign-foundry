@@ -12,6 +12,18 @@ afterEach(() => {
 });
 
 describe("Disclosure", () => {
+  test("the trigger's title renders through Eyebrow on the tracking token", () => {
+    render(
+      <Disclosure id="policy" title="Advanced">
+        <p>the seed</p>
+      </Disclosure>,
+    );
+    const label = screen.getByText("Advanced");
+    expect(label.tagName).toBe("SPAN");
+    expect(label.className).toContain("tracking-eyebrow");
+    expect(label.className).not.toContain("tracking-widest");
+  });
+
   test("starts closed, and opening it shows the content and says so", async () => {
     const user = userEvent.setup();
     render(

@@ -80,6 +80,18 @@ describe("HeadlinePoolDrawer", () => {
     expect(screen.getByText("Headlines (1 approved)")).toBeTruthy();
   });
 
+  test("an entry's status renders through Eyebrow and keeps its conditional tone", async () => {
+    routes({ get: () => json(poolBody([entry("a", "approved"), entry("b", "rejected")])) });
+    open();
+    const approved = await screen.findByText("approved");
+    expect(approved.className).toContain("tracking-eyebrow");
+    expect(approved.className).toContain("text-success");
+    expect(approved.className).not.toContain("tracking-widest");
+    const rejected = screen.getByText("rejected");
+    expect(rejected.className).toContain("tracking-eyebrow");
+    expect(rejected.className).toContain("text-error");
+  });
+
   test("a load in flight is announced and drawn as static blocks, never as an empty pool", async () => {
     routes({ get: () => new Promise<Response>(() => {}) });
     open();

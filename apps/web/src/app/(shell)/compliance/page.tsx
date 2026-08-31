@@ -1,7 +1,7 @@
 "use client";
 
 import { assetKey, assetLabel, useRun } from "@/lib/run-context";
-import { MiniChip } from "@/components/ui";
+import { Eyebrow, MiniChip } from "@/components/ui";
 
 /** Automated compliance report — one row per generated asset. */
 export default function CompliancePage() {
@@ -9,17 +9,17 @@ export default function CompliancePage() {
 
   return (
     <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col p-4 pb-12 sm:p-8">
-      <span className="font-mono text-[11px] uppercase tracking-widest text-text-muted">Compliance</span>
+      <Eyebrow>Compliance</Eyebrow>
       <h2 className="mb-6 text-lg font-semibold text-text-emphasis">Automated Compliance Report</h2>
 
       <div className="w-full overflow-x-auto rounded-xl border border-border bg-surface shadow-2xl">
         <table className="w-full min-w-[640px] text-left text-[13px]">
           <thead className="border-b border-border bg-surface-2 text-text-muted">
             <tr>
-              <th className="p-4 font-mono text-[11px] font-normal uppercase tracking-widest text-text-muted">Asset Target</th>
-              <th className="p-4 font-mono text-[11px] font-normal uppercase tracking-widest text-text-muted">Rule Engine</th>
-              <th className="p-4 font-mono text-[11px] font-normal uppercase tracking-widest text-text-muted">Telemetry Result</th>
-              <th className="p-4 font-mono text-[11px] font-normal uppercase tracking-widest text-text-muted">Gate Status</th>
+              <Eyebrow as="th" className="p-4 font-normal">Asset Target</Eyebrow>
+              <Eyebrow as="th" className="p-4 font-normal">Rule Engine</Eyebrow>
+              <Eyebrow as="th" className="p-4 font-normal">Telemetry Result</Eyebrow>
+              <Eyebrow as="th" className="p-4 font-normal">Gate Status</Eyebrow>
             </tr>
           </thead>
           <tbody className="divide-y divide-border text-text-emphasis">

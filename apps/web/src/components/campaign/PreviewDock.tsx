@@ -3,6 +3,7 @@ import type { AspectRatioValue } from "@campaignfoundry/CampaignOrchestration/as
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
 import { CreativePreview, type CreativePreviewProps } from "@/components/campaign/CreativePreview";
+import { Eyebrow } from "@/components/ui";
 import { platformDisplayName, ratioDisplayName } from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
 
@@ -99,7 +100,7 @@ export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
       aria-label={messages.previewLegend}
       className="hidden w-64 shrink-0 flex-col gap-3 border-l border-border bg-surface p-4 xl:flex"
     >
-      <p className="font-mono text-[11px] uppercase tracking-widest text-text-muted">{messages.previewLegend}</p>
+      <Eyebrow as="p">{messages.previewLegend}</Eyebrow>
       <PreviewPicture {...props} className="block h-auto w-full" />
       <div className="flex items-center gap-2">
         <PreviewSwatch primaryColor={props.primaryColor} />
