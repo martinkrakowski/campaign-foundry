@@ -28,6 +28,100 @@ describe("BrandComplianceChecker — legal gate", () => {
   test("matches prohibited terms case-insensitively", async () => {
     expect((await checker.validateLegalCopy("GUARANTEED results")).passed).toBe(false);
   });
+
+  test("reports every hit when copy contains several prohibited terms", async () => {
+    const r = await checker.validateLegalCopy("Guaranteed risk-free miracle cure");
+    expect(r.passed).toBe(false);
+    expect(r.reason).toMatch(/guaranteed/);
+    expect(r.reason).toMatch(/risk-free/);
+    expect(r.reason).toMatch(/miracle/);
+    expect(r.reason).toMatch(/cure/);
+  });
+
+  describe("zero-tolerance table — must still halt (true positives)", () => {
+    // Inflections, multi-word terms, and each bare term: the anchored matcher
+    // must not lose a single one of these.
+    const mustHalt = [
+      "Results guaranteed.",
+      "A miracle cure.",
+      "Miracle cures for tired skin.",
+      "It cured my acne.",
+      "Risk-free trial.",
+      "100% safe for children.",
+      "No side effects.",
+      "Clinically proven results.",
+      "The best in the world.",
+      "Guaranteed",
+      "Miracle",
+      "Cure",
+      "Risk-free",
+      "100% safe",
+      "No side effects",
+      "Clinically proven",
+      "Best in the world",
+    ];
+    for (const text of mustHalt) {
+      test(`halts: "${text}"`, async () => {
+        const r = await checker.validateLegalCopy(text);
+        expect(r.passed).toBe(false);
+        expect(r.reason).toMatch(/Prohibited terminology/);
+      });
+    }
+  });
+
+  describe("zero-tolerance table — underscore adjacency must still halt (true positives)", () => {
+    // \b counts "_" as a word character, so a \b head anchor found no boundary
+    // beside an underscore and silently lost these matches. The gate must halt
+    // on terms preceded OR followed by an underscore.
+    const mustHalt = [
+      "_guaranteed",
+      "results_guaranteed",
+      "a_miracle",
+      "the_best in the world",
+      "miracle_product",
+    ];
+    for (const text of mustHalt) {
+      test(`halts: "${text}"`, async () => {
+        const r = await checker.validateLegalCopy(text);
+        expect(r.passed).toBe(false);
+        expect(r.reason).toMatch(/Prohibited terminology/);
+      });
+    }
+  });
+
+  describe("known term-list limitation — under-matching, not a matcher defect", () => {
+    // "Curing" alters the stem: it is not "cure" + suffix, so the anchored
+    // matcher (like the includes()-based matcher before it) cannot reach it.
+    // This test PINS the current pass, documenting the gap rather than hiding
+    // it. The remedy is adding stems ("curing", "curative") to PROHIBITED_TERMS
+    // — a product and legal decision, explicitly out of scope here. Do not
+    // "fix" this test without that decision.
+    test('passes: "Curing what ails you." — known gap, pinned', async () => {
+      const r = await checker.validateLegalCopy("Curing what ails you.");
+      expect(r.passed).toBe(true);
+      expect(r.reason).toBeUndefined();
+    });
+  });
+
+  describe("zero-tolerance table — must now pass (false positives)", () => {
+    // Ordinary copy whose only "hit" was a substring inside an unrelated word
+    // (secure, procurement, obscure, manicure): the gate must no longer halt.
+    const mustPass = [
+      "Secure your seat at Berlin Design Week.",
+      "Procurement Lead — apply now.",
+      "Obscure venues, unforgettable nights.",
+      "Join our secure payments team.",
+      "Manicure and pedicure, walk-ins welcome.",
+      "Insecure by default? Never.",
+    ];
+    for (const text of mustPass) {
+      test(`passes: "${text}"`, async () => {
+        const r = await checker.validateLegalCopy(text);
+        expect(r.passed).toBe(true);
+        expect(r.reason).toBeUndefined();
+      });
+    }
+  });
 });
 
 describe("BrandComplianceChecker — brand-colour density", () => {
