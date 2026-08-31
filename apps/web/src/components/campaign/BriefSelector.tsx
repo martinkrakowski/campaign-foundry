@@ -48,7 +48,7 @@ export function BriefSelector({ briefs, currentId, onSelect, onCreateNew }: Brie
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-emphasis transition-colors hover:bg-surface-2"
+        className="flex items-center gap-2 rounded-lg border border-border-control bg-surface px-3 py-2 text-sm text-text-emphasis transition-colors hover:bg-surface-2"
       >
         <span className="font-mono text-[13px]">
           {currentBrief ? currentBrief.brief.id : "New brief..."}
