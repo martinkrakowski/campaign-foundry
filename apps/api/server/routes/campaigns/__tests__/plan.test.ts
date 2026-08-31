@@ -1,4 +1,4 @@
-import { describe, test, expect, afterEach, vi } from "vitest";
+import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -48,6 +48,9 @@ const variationBrief = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("POST /campaigns/plan", () => {
+  // Tests simulate a post-boot server: the probe has landed (the boot-window race
+  // itself is covered in capability-race.test.ts).
+  beforeEach(() => setCapabilities({ motion: true }));
   afterEach(() => setCapabilities({ motion: false, reason: "not probed" }));
 
   test("motion slots carry motion + durationSec; static slots do not; estimate carries frames", async () => {
@@ -104,7 +107,10 @@ describe("POST /campaigns/plan", () => {
     expect(motion.every((v) => v.aspectRatio === "9:16")).toBe(true);
   });
 
-  test("rejects a motion brief with 400 when the capability is off", async () => {
+  test("rejects a motion brief with 400 when the probe says the host cannot encode", async () => {
+    // A genuine probe verdict — not the transient "not probed" snapshot, which the
+    // run path waits out (and 503s on) instead of refusing the brief.
+    setCapabilities({ motion: false, reason: "ffmpeg-static binary is not available" });
     const res = await call(variationBrief({ output: { formats: ["motion"] } }));
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toMatch(/motion output is unavailable/);
@@ -195,6 +201,10 @@ describe("POST /campaigns/plan with headline: pool://copy", () => {
   const origRoot = process.env.PROJECT_ROOT;
   let dir: string | undefined;
 
+  // The top-module handler (used by the last test) needs a settled snapshot too;
+  // freshHandler sets the fresh-module snapshot for the reset-modules handlers.
+  beforeEach(() => setCapabilities({ motion: true }));
+
   afterEach(() => {
     if (dir) rmSync(dir, { recursive: true, force: true });
     dir = undefined;
@@ -223,6 +233,10 @@ describe("POST /campaigns/plan with headline: pool://copy", () => {
       );
     }
     vi.resetModules();
+    // The fresh module registry starts in the boot window ("not probed"); settle it
+    // so these post-boot tests do not wait out the probe.
+    const capabilities = await import("../../../lib/capabilities.js");
+    capabilities.setCapabilities({ motion: true });
     return web((await import("../plan.post.js")).default as EventHandler);
   };
 

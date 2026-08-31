@@ -98,6 +98,10 @@ async function awaitJob(jobId: string): Promise<{ res: Response; body: JobBody }
 }
 
 describe("POST /campaigns/generate", () => {
+  // Tests simulate a post-boot server: the probe has landed (the boot-window race
+  // itself is covered in routes/campaigns/__tests__/capability-race.test.ts).
+  beforeEach(() => setCapabilities({ motion: true }));
+
   const call = (body: unknown, query = "?model=procedural") =>
     web("post", "/campaigns/generate", generateHandler)(
       new Request(`http://x/campaigns/generate${query}`, {
@@ -494,6 +498,10 @@ describe("GET /output/**", () => {
 });
 
 describe("POST /campaigns/package", () => {
+  // These tests were written against the boot snapshot; keep that precondition
+  // explicit instead of relying on what a previous describe leaked.
+  beforeEach(() => setCapabilities({ motion: false, reason: "not probed" }));
+
   const call = (body: unknown) =>
     web("post", "/campaigns/package", packageHandler)(
       new Request("http://x/campaigns/package", {

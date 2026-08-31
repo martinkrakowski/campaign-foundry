@@ -1965,6 +1965,47 @@ To keep this file out of version control, add `.agents/session-log.md` to
   `test:cov` **2473 passed | 2 skipped — 100% on all four counters (6808/4976/1459/6095),
   repo-wide**; commit; `sync:check` **Total ops: 0**. No test deleted or gutted.
 
+### 2026-08-31 — B4 a motion run in the boot window is refused as if the brief were invalid
+
+- **Mode:** Implementer. Lane B4 on `fix/b4-capability-probe-race`, worktree `wt-b4`.
+- **Defect:** Nitro does not await async plugins, so a motion run/plan arriving while
+  `ffmpeg-check` was still probing (window measured at ~7–15 ms by the investigation)
+  read the initial `{ motion: false, reason: "not probed" }` snapshot in `parseBrief`
+  and got a 400 "motion output is unavailable (not probed)" — a transient start-up
+  state reported as a permanently invalid brief.
+- **Position:** (a) + (b), which the brief said are not exclusive. Run paths
+  (`plan.post.ts`, `generate.post.ts`) now `await waitForCapabilities()` — a deferred
+  resolved by `setCapabilities` on a real verdict, raced against a deadline mirroring
+  the probe's own 5 s bound (zero cost post-boot). If the snapshot is *still*
+  "not probed" after the wait (plugin never ran), they answer **503 + `Retry-After: 1`**
+  with a retry-the-same-request message — never the misleading 400.
+- **Guard rails kept:** `parseBrief` untouched (never treats "not probed" as
+  `motion: true`); a genuinely unable host is still refused with the probe's reason
+  before any spend; `capabilities.get` untouched (client treats "not probed" as
+  retry-able); `package.post` untouched (a persisted report implies a completed run
+  implies a settled probe).
+- **Tests:** new `capability-race.test.ts` drives both handlers in-process via
+  `toWebHandler` (Request → Response, the investigation's technique): boot-window
+  plan → 200 with motion variants; boot-window generate → 202; genuine
+  unavailable → 400 naming the probe reason (both routes); never-landing probe → 503
+  with retry hint, then the probe lands and leaves no stale snapshot (fresh
+  `getCapabilities()`, retried plan → 200). Plus 4 `waitForCapabilities` unit tests.
+  Determinism: the probe is controlled via `setCapabilities` (which re-arms a pending
+  wait when reset to "not probed"); the 503 path via `probeWait.timeoutMs = 0` — no sleeps.
+- **Mutation checks (all run):** M0 full revert → all 4 race tests + 4 unit tests fail;
+  M1 wait removed → plan/generate race tests + 2 unit tests fail; M2 503 branch removed
+  → the never-landing-probe test fails; M3 gate disabled (the forbidden shortcut) → the
+  true-positive refusal test fails. Each mutation restored before the next.
+- **Verification:** build, typecheck, lint (**0 problems**), lint:arch, `test:cov`
+  **2443 passed | 0 failed | 2 skipped (pre-existing skipIf) — 100% on all four counters
+  (6803/4943/1459/6094)**, commit, `sync:check` **Total ops: 0**.
+- **Deviations:** edited (not deleted) three existing tests that silently relied on the
+  old snapshot semantics — `plan.test.ts` (beforeEach settle; capability-off refusal now
+  uses a genuine probe verdict; pool describe settles fresh module registries after
+  `vi.resetModules()`), `routes.test.ts` (generate/package describes settle the snapshot
+  explicitly; package tests had been riding on leaked state). `probeWait` is a mutable
+  export purely as the deterministic test seam for the deadline. PR:
+  https://github.com/martinkrakowski/campaign-foundry/pull/154 (not merged).
 ### 2026-08-31 — B3 the web validator's blind spots (motion axes checked by their values; unknown platforms named)
 
 - **Mode:** Implementer. Lane B3 on `fix/b3-validator-blind-spots`, worktree `wt-b3`.

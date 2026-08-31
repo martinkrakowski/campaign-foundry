@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach } from "vitest";
-import { getCapabilities, resolveFfmpegBinary, setCapabilities } from "../capabilities.js";
+import { getCapabilities, resolveFfmpegBinary, setCapabilities, waitForCapabilities } from "../capabilities.js";
 
 describe("capabilities", () => {
   beforeEach(() => {
@@ -15,6 +15,41 @@ describe("capabilities", () => {
     expect(getCapabilities()).toEqual({ motion: true });
     setCapabilities({ motion: false, reason: "missing binary" });
     expect(getCapabilities()).toEqual({ motion: false, reason: "missing binary" });
+  });
+});
+
+describe("waitForCapabilities", () => {
+  beforeEach(() => {
+    setCapabilities({ motion: false, reason: "not probed" });
+  });
+
+  test("returns the settled snapshot without waiting", async () => {
+    setCapabilities({ motion: true });
+    await expect(waitForCapabilities()).resolves.toEqual({ motion: true });
+  });
+
+  test("waits out a pending probe and returns the landed result", async () => {
+    const pending = waitForCapabilities();
+    setCapabilities({ motion: true });
+    await expect(pending).resolves.toEqual({ motion: true });
+  });
+
+  test("returns the still-pending snapshot when the deadline expires first", async () => {
+    await expect(waitForCapabilities({ timeoutMs: 0 })).resolves.toEqual({
+      motion: false,
+      reason: "not probed",
+    });
+  });
+
+  test("a reset to 'not probed' re-arms the wait for a fresh boot window", async () => {
+    setCapabilities({ motion: true });
+    setCapabilities({ motion: false, reason: "not probed" });
+    const pending = waitForCapabilities();
+    setCapabilities({ motion: false, reason: "ffmpeg-static binary is not available" });
+    await expect(pending).resolves.toEqual({
+      motion: false,
+      reason: "ffmpeg-static binary is not available",
+    });
   });
 });
 
