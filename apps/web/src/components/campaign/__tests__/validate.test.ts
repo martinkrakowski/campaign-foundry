@@ -554,6 +554,14 @@ describe("the editor says what the parser refuses (B3 divergences)", () => {
     expect(() => parse(state)).toThrow(/"variation\.axes\.motion" has unsupported value "slow-pan"/);
   });
 
+  test("an unknown platform is named here and refused by the parser", () => {
+    // used to vanish: `.filter(profile => profile !== undefined)` dropped the id from
+    // the compatibility check, so the draft looked clean and the parser refused it
+    const state = valid({ platforms: ["instagram-feed", "story-tv"] });
+    expect(validateState(state).output.platforms).toBe(messages.platformsUnknown(["story-tv"]));
+    expect(() => parse(state)).toThrow(/Unknown output platform "story-tv"/);
+  });
+
   test("a draft that passes every check parses too — the fix is not 'always invalid'", () => {
     expect(getTotalErrorCount(validateState(valid()))).toBe(0);
     expect(getTotalErrorCount(validateState(valid({ mode: "variation" })))).toBe(0);

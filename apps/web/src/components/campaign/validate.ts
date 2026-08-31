@@ -318,6 +318,14 @@ export function validateOutput(state: EditorState): FieldErrors {
       break;
     }
   }
+  // An id no profile matches used to vanish above: `.filter(profile => …)` silently
+  // dropped it from the compatibility check, so the draft looked clean here and the
+  // parser refused it on Save ("Unknown output platform \"…\""). Name the ids instead —
+  // the parser's judgement, said where the user can act on it.
+  const unknownPlatforms = state.platforms.filter((id) => PLATFORM_PROFILES[id] === undefined);
+  if (unknownPlatforms.length > 0) {
+    errors.platforms = messages.platformsUnknown(unknownPlatforms);
+  }
   // Per-card gating is the single, non-red home for the "motion not available / needs
   // randomized mode" notices (D7: gates are never red). They are surfaced on the
   // FormatPanel gate, and the Save/apply refusal path uses `motionUnavailableReason`
