@@ -64,6 +64,7 @@ import { EstimatePanel } from "@/components/campaign/EstimatePanel";
 import { StepHeader } from "@/components/campaign/StepHeader";
 import { StepFooter } from "@/components/campaign/StepFooter";
 import { SECTION_TITLES, sectionOrder, type SectionId } from "./sections";
+import { ReviewStep } from "./ReviewStep";
 import * as messages from "./messages";
 import type { CampaignMode } from "@/components/campaign/editor-state";
 
@@ -763,8 +764,7 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
    * over the closed six (exhaustive): the review step is handled by the caller, and the
    * mode-derived step list guarantees this only ever receives one of these six.
    */
-  const renderStepSection = (section: SectionId) => {
-    switch (section) {
+  const renderStepSection = (section: SectionId) => {    switch (section) {
       case "identity":
         return <IdentitySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("identity")} />;
       case "copy":
@@ -793,13 +793,77 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     }
   };
 
+  // W8.1 — the review step renders the projection itself: one `toBrief` call, passed
+  // into `ReviewStep`, so its rows are generated from exactly what Apply and Save
+  // send — a field the projection drops loses its row too, and the review can never
+  // disagree with the submission about what the brief contains.
+  const draftBrief = useMemo(() => toBrief(state), [state]);
+
   /** The review step is the one card that is not a section (W6.1). */
   const renderStepCard = (step: StepId): ReactNode =>
     step === "review" ? (
-      <p className="text-[13px] text-text-primary">{messages.stepReviewIntro}</p>
+      <>
+        <p className="text-[13px] text-text-primary">{messages.stepReviewIntro}</p>
+        <ReviewStep brief={draftBrief} onEdit={reveal} />
+      </>
     ) : (
       renderStepSection(step)
     );
+
+  /**
+   * W8.2 — the action bar, one component with two placements: on the Review step in
+   * Guided (where the launch lives) and at the foot in Everything. The bar's content
+   * is built once here; only the placement differs, so the two presentations cannot
+   * grow two divergent copies of the verbs.
+   */
+  const actionBar = (
+    <FloatingBar data-testid="action-bar">
+      <div className="flex items-center gap-3 w-full">
+        <StatusLine
+          state={state}
+          attempted={attempted}
+          applyRefusal={applyRefusal}
+          persistError={persistError}
+          onScrollToSection={reveal}
+        />
+        <div className="min-w-0 flex-1">
+          {getTotalErrorCount(visibleErrors) > 0 ? <ErrorStrip errors={visibleErrors} onErrorClick={reveal} /> : null}
+        </div>
+        <Button variant="ghost" onClick={handleDiscard}>
+          Discard
+        </Button>
+        <SaveMenu
+          /* D3: never a dead primary button — pressing an invalid brief sets
+             `attempted`, reveals every error and speaks the refusal. */
+          saving={saving}
+          onSaveAndApply={() => void handleSave()}
+          onSaveAs={() => setSaveAsId("")}
+        />
+        <Button onClick={handleApply}>
+          Apply to run
+        </Button>
+        {/* D3: the bar's primary row is the status sentence and the three verbs.
+            Developer affordances live behind the overflow so the sentence has room. */}
+        <details className="relative">
+          <summary
+            className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md text-text-muted hover:bg-surface-2 hover:text-text-primary"
+            aria-label="More actions"
+          >
+            ⋯
+          </summary>
+          <div className="absolute bottom-full right-0 z-30 mb-2 min-w-[200px] rounded-md border border-border bg-surface p-1 shadow-2xl">
+            <button
+              type="button"
+              className="w-full rounded-sm px-3 py-2 text-left text-[13px] text-text-primary hover:bg-surface-2"
+              onClick={() => setShowYamlSplit(!showYamlSplit)}
+            >
+              YAML split {showYamlSplit ? "off" : "on"}
+            </button>
+          </div>
+        </details>
+      </div>
+    </FloatingBar>
+  );
 
   return (
     // No h-full / inner overflow: like every other view, this one flows and the
@@ -917,6 +981,9 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
                   nudgeKey={nudgeKey}
                   readyKey={readyKey}
                 />
+                {/* W8.2 — Guided placement: the bar stands on the Review step, the one
+                    card that is not a section, where the launch verbs belong. */}
+                {steps[stepIndex] === "review" ? actionBar : null}
               </div>
             </div>
           ) : (
@@ -956,53 +1023,9 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
         </SectionModeContext.Provider>
       </div>
 
-      {/* Floating bar (L1.4) */}
-       <FloatingBar data-testid="action-bar">
-         <div className="flex items-center gap-3 w-full">
-           <StatusLine
-             state={state}
-             attempted={attempted}
-             applyRefusal={applyRefusal}
-             persistError={persistError}
-             onScrollToSection={reveal}
-           />
-           <div className="min-w-0 flex-1">
-             {getTotalErrorCount(visibleErrors) > 0 ? <ErrorStrip errors={visibleErrors} onErrorClick={reveal} /> : null}
-           </div>
-           <Button variant="ghost" onClick={handleDiscard}>
-             Discard
-           </Button>
-           <SaveMenu
-             /* D3: never a dead primary button — pressing an invalid brief sets
-                `attempted`, reveals every error and speaks the refusal. */
-             saving={saving}
-             onSaveAndApply={() => void handleSave()}
-             onSaveAs={() => setSaveAsId("")}
-           />
-           <Button onClick={handleApply}>
-             Apply to run
-           </Button>
-           {/* D3: the bar's primary row is the status sentence and the three verbs.
-               Developer affordances live behind the overflow so the sentence has room. */}
-           <details className="relative">
-             <summary
-               className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md text-text-muted hover:bg-surface-2 hover:text-text-primary"
-               aria-label="More actions"
-             >
-               ⋯
-             </summary>
-             <div className="absolute bottom-full right-0 z-30 mb-2 min-w-[200px] rounded-md border border-border bg-surface p-1 shadow-2xl">
-               <button
-                 type="button"
-                 className="w-full rounded-sm px-3 py-2 text-left text-[13px] text-text-primary hover:bg-surface-2"
-                 onClick={() => setShowYamlSplit(!showYamlSplit)}
-               >
-                 YAML split {showYamlSplit ? "off" : "on"}
-               </button>
-             </div>
-           </details>
-         </div>
-       </FloatingBar>
+      {/* W8.2 — Everything placement: the bar at the foot, floating over the whole
+          stack as it always has. Guided mounts the same bar on Review instead. */}
+      {presentation === "everything" ? actionBar : null}
 
        {/* Headline pool drawer */}
        <HeadlinePoolDrawer

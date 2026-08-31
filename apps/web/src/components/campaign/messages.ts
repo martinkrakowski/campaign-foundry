@@ -586,3 +586,27 @@ export function segBarSegment(position: number, total: number, label: string, st
  * keyboard the device may not have.
  */
 export const stepSwipeHint = "Swipe left or right to move between steps.";
+
+/**
+ * Display labels for the review step's generated summary rows.
+ * Kept free of domain jargon (axes, pool, floor, package).
+ */
+export const reviewRowId = "Campaign Name";
+export const reviewRowTargetRegion = "Target Region";
+export const reviewRowTargetAudience = "Target Audience";
+export const reviewRowCampaignMessage = "Campaign Message";
+export const reviewRowLocalizedMessage = "Localized Message";
+/** The summary row's edit verb. */
+export const reviewEdit = "Edit";
+/**
+ * The edit control's accessible name. A bare "Edit" would name every row alike, so
+ * the control names the section it opens — the section title comes from the one
+ * vocabulary (`SECTION_TITLES`) and is passed here as a display label.
+ */
+export function reviewEditLabel(section: string): string {
+  return `Edit ${section}`;
+}
+/** The variation policy row's value: what the count will make. */
+export function reviewPolicyValue(count: number): string {
+  return `${count} ad${count === 1 ? "" : "s"}`;
+}
