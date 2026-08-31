@@ -105,11 +105,19 @@ export type PlanResult =
 /** HTTP error whose message is the API `{ error }` string when present. */
 export class BriefsApiError extends Error {
   readonly status: number;
+  /**
+   * The fresh revision a 409 conflict carries in its body — the store's answer to
+   * "what is there now". Absent on every other failure. The client drops it only
+   * if it never reads it: it is what lets the next Save answer the conditional
+   * write instead of the user reloading.
+   */
+  readonly revision?: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, revision?: string) {
     super(message);
     this.name = "BriefsApiError";
     this.status = status;
+    if (revision !== undefined) this.revision = revision;
   }
 }
 
@@ -148,7 +156,13 @@ async function requestJson(url: string, init?: RequestInit): Promise<unknown> {
   }
   const data = await parseJsonBody(res);
   if (!res.ok) {
-    throw new BriefsApiError(errorFrom(data, `Request failed (HTTP ${res.status})`), res.status);
+    // A conflict body carries the store's fresh revision alongside `error` (API E1.0);
+    // every other failure has none. Parse it here, once, so callers can adopt it.
+    const revision =
+      typeof data === "object" && data !== null && typeof (data as { revision?: unknown }).revision === "string"
+        ? ((data as { revision: string }).revision)
+        : undefined;
+    throw new BriefsApiError(errorFrom(data, `Request failed (HTTP ${res.status})`), res.status, revision);
   }
   return data;
 }

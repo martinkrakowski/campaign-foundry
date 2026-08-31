@@ -58,22 +58,25 @@ const brief = (id: string) => ({
 
 const entry = (id: string, revision?: string) => ({ file: `${id}.yaml`, brief: brief(id), revision });
 
-/** Route each call by URL+method; unmatched calls fail loudly rather than hanging. */
+/** Route each call by URL+method; unmatched calls fail loudly rather than hanging.
+ *  The write handlers receive the parsed request body, so a test can echo it back —
+ *  what the real routes do (`parseBrief(await readBody(...))`), key order included. */
 const routes = (handlers: {
-  list?: () => Response;
-  post?: () => Response;
-  put?: (url: string) => Response;
-  capabilities?: () => Response;
+  list?: () => Response | Promise<Response>;
+  post?: (url: string, body?: Record<string, unknown>) => Response | Promise<Response>;
+  put?: (url: string, body?: Record<string, unknown>) => Response | Promise<Response>;
+  capabilities?: () => Response | Promise<Response>;
 }) => {
   const calls: { url: string; method: string; body?: Record<string, unknown> }[] = [];
   vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
     const u = String(url);
     const method = (init?.method ?? "GET").toUpperCase();
     const raw = init?.body;
+    const parsed = typeof raw === "string" ? (JSON.parse(raw) as Record<string, unknown>) : undefined;
     calls.push({
       url: u,
       method,
-      ...(typeof raw === "string" ? { body: JSON.parse(raw) as Record<string, unknown> } : {}),
+      ...(parsed ? { body: parsed } : {}),
     });
     if (method === "GET" && u === `${API}/campaigns/capabilities`) {
       return Promise.resolve(handlers.capabilities?.() ?? json({ motion: true }));
@@ -81,8 +84,17 @@ const routes = (handlers: {
     if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
       return Promise.resolve(handlers.list?.() ?? json({ briefs: [] }));
     }
-    if (method === "POST") return Promise.resolve(handlers.post?.() ?? json({ file: "x.yaml", brief: brief("x") }, 201));
-    if (method === "PUT") return Promise.resolve(handlers.put?.(u) ?? json({ file: "x.yaml", brief: brief("x") }));
+    // The defaults match what the real routes answer — `{ file, brief, revision }`:
+    // a write mock less truthful than the route sends the next lane home green on
+    // an editor that drops the revision.
+    if (method === "POST")
+      return Promise.resolve(
+        handlers.post?.(u, parsed) ?? json({ file: "x.yaml", brief: brief("x"), revision: "mock-rev" }, 201),
+      );
+    if (method === "PUT")
+      return Promise.resolve(
+        handlers.put?.(u, parsed) ?? json({ file: "x.yaml", brief: brief("x"), revision: "mock-rev" }),
+      );
     return Promise.resolve(json({}, 404));
   });
   return calls;
@@ -389,6 +401,284 @@ describe("BriefPage — data flow", () => {
     await waitFor(() =>
       expect(calls.some((c) => c.method === "PUT" && c.url.includes("revision=rev-copy"))).toBe(true),
     );
+  });
+
+  test("Save as... with a non-slug id never reaches createBrief, and the field says why", async () => {
+    const user = userEvent.setup();
+    const calls = routes({});
+    renderWithRun(<Editor />);
+    await fillValidDraft(user);
+
+    // a campaign *name* where a slug is wanted — the exact input that once left the
+    // page as a 288-byte POST and came back a bare 400
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), "Trail Blaze 2026");
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
+
+    expect(writes(calls)).toEqual([]);
+    expect(screen.getByText(messages.briefId)).toBeTruthy();
+    expect(screen.getByLabelText("New brief id")).toBeTruthy();
+  });
+
+  test("Save as... offers the slugified form of a name as a click, never a silent rewrite", async () => {
+    const user = userEvent.setup();
+    const calls = routes({});
+    renderWithRun(<Editor />);
+    await fillValidDraft(user);
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), "Trail Blaze 2026");
+    await user.click(
+      await screen.findByRole("button", { name: 'Try "trail-blaze-2026" instead' }),
+    );
+
+    // the offer fills the field with the slug the user can see and accept
+    expect((screen.getByLabelText("New brief id") as HTMLInputElement).value).toBe(
+      "trail-blaze-2026",
+    );
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
+    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+  });
+
+  test("Save as... refuses an id that slugifies to nothing, with no suggestion to offer", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<Editor />);
+    await fillValidDraft(user);
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), "!!!");
+    expect(screen.getByText(messages.briefId)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /instead/ })).toBeNull();
+  });
+
+  test("pressing Save with an invalid id answers by handing focus back to the field", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<Editor />);
+    await fillValidDraft(user);
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), "!!!");
+    // the press comes from somewhere else on the page, not the already-focused field
+    const saveButton = within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", {
+      name: "Save",
+    });
+    saveButton.focus();
+    await user.click(saveButton);
+
+    // D3: a live button answers — the guard hands focus back to the field the rule
+    // is about, so the press produces a visible response instead of silence
+    expect(document.activeElement).toBe(screen.getByLabelText("New brief id"));
+  });
+
+  test("Save as... trims the id before posting", async () => {
+    const user = userEvent.setup();
+    const calls = routes({});
+    renderWithRun(<Editor />);
+    await fillValidDraft(user);
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), " my-brief ");
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
+
+    const post = await waitFor(() => {
+      const call = calls.find((c) => c.method === "POST");
+      expect(call).toBeTruthy();
+      return call!;
+    });
+    expect((post.body as { id?: string }).id).toBe("my-brief");
+  });
+
+  test("two consecutive saves of a loaded brief both succeed — the second carries the revision the first was handed back", async () => {
+    const user = userEvent.setup();
+    const calls = routes({
+      list: () => json({ briefs: [entry("camp", "rev-load")] }),
+      put: () => json({ file: "camp.yaml", brief: brief("camp"), revision: "rev-2" }, 200),
+    });
+    renderWithRun(<Editor />);
+    await user.click(screen.getByText("New brief..."));
+    await user.click(await screen.findByText("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    // the first save guards with the load-time revision...
+    await saveVia(user, "Save & apply");
+    await waitFor(() => expect(calls.filter((c) => c.method === "PUT").length).toBe(1));
+    // ...and the second must guard with the revision the first PUT returned. Discarding
+    // it replayed rev-load, the write 409'd with an untrue "Brief was modified by
+    // another user.", and the only way out was reloading the brief.
+    await saveVia(user, "Save & apply");
+    await waitFor(() => expect(calls.filter((c) => c.method === "PUT").length).toBe(2));
+
+    const puts = calls.filter((c) => c.method === "PUT");
+    expect(puts[0].url).toContain("revision=rev-load");
+    expect(puts[1].url).toContain("revision=rev-2");
+  });
+
+  test("an edit typed while the save is in flight survives it, stays dirty, and the next save carries the fresh revision", async () => {
+    const user = userEvent.setup();
+    let resolvePut: (response: Response) => void = () => {};
+    const calls = routes({
+      list: () => json({ briefs: [entry("camp", "rev-load")] }),
+      // hold the save in flight until the test releases it, like a real round trip
+      put: () =>
+        new Promise<Response>((resolve) => {
+          resolvePut = resolve;
+        }),
+    });
+    renderWithRun(<Editor />);
+    await user.click(screen.getByText("New brief..."));
+    await user.click(await screen.findByText("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    await saveVia(user, "Save & apply");
+    await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true));
+
+    // the user types while the request is still pending
+    await user.type(screen.getByLabelText("Target Audience"), " who hike");
+    resolvePut(json({ file: "camp.yaml", brief: brief("camp"), revision: "rev-2" }));
+
+    // (a) the in-flight edit survives — `save` never replaces the draft the way `load` did
+    await waitFor(() => expect(screen.getByText("Applied, unsaved edits")).toBeTruthy());
+    expect((screen.getByLabelText("Target Audience") as HTMLInputElement).value).toBe("a who hike");
+    // (b) is the chip above: the edit reads dirty against what the server stored.
+
+    // (c) the next save answers the guard with the revision the first save was
+    // handed back, rather than replaying the load-time one and 409ing
+    await saveVia(user, "Save & apply");
+    await waitFor(() => expect(calls.filter((c) => c.method === "PUT").length).toBe(2));
+    const puts = calls.filter((c) => c.method === "PUT");
+    expect(puts[1].url).toContain("revision=rev-2");
+  });
+
+  test("a 409 adopts the fresh revision it carried and offers the retry as the user's choice", async () => {
+    const user = userEvent.setup();
+    let putCount = 0;
+    const calls = routes({
+      list: () => json({ briefs: [entry("camp", "rev-load")] }),
+      put: () => {
+        putCount += 1;
+        return putCount === 1
+          ? json({ error: "Brief was modified by another user.", revision: "rev-fresh" }, 409)
+          : json({ file: "camp.yaml", brief: brief("camp"), revision: "rev-3" });
+      },
+    });
+    renderWithRun(<Editor />);
+    await user.click(screen.getByText("New brief..."));
+    await user.click(await screen.findByText("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    await saveVia(user, "Save & apply");
+    // the refusal says what happened and what to do — the overwrite is never re-sent
+    // automatically, because the guard exists to make the other write visible
+    expect(await screen.findByText(messages.statusSaveConflict)).toBeTruthy();
+
+    // the fresh revision was adopted, so the next Save answers the guard instead of
+    // the user reloading the brief
+    await saveVia(user, "Save & apply");
+    await waitFor(() => expect(calls.filter((c) => c.method === "PUT").length).toBe(2));
+    const puts = calls.filter((c) => c.method === "PUT");
+    expect(puts[1].url).toContain("revision=rev-fresh");
+  });
+
+  test("a non-conflict save failure is reported without adopting anything", async () => {
+    const user = userEvent.setup();
+    routes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      put: () => json({ error: "disk full" }, 500),
+    });
+    renderWithRun(<Editor />);
+    await user.click(screen.getByText("New brief..."));
+    await user.click(await screen.findByText("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    await saveVia(user, "Save & apply");
+    expect(await screen.findByText(/disk full/)).toBeTruthy();
+  });
+
+  test("a write response without a revision still lands the snapshot clean", async () => {
+    const user = userEvent.setup();
+    routes({
+      list: () => json({ briefs: [entry("camp", "rev-load")] }),
+      put: (_url, body) => json({ file: "camp.yaml", brief: body }),
+    });
+    renderWithRun(<Editor />);
+    await user.click(screen.getByText("New brief..."));
+    await user.click(await screen.findByText("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    await saveVia(user, "Save & apply");
+    await waitFor(() => expect(screen.getByText("Saved & applied")).toBeTruthy());
+  });
+
+  test("a 409 on a first-time save has no baseline to adopt the fresh revision against", async () => {
+    const user = userEvent.setup();
+    routes({
+      post: () => json({ error: 'Brief "fresh" already exists.', revision: "rev-fresh" }, 409),
+    });
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await fillValidDraft(user, "fresh");
+
+    await saveVia(user, "Save & apply");
+    // the server's own refusal stands: a first save has no file identity, so the
+    // revision in the body cannot be adopted and no retry is offered
+    expect(await screen.findByText(/already exists/)).toBeTruthy();
+    expect(screen.queryByText(messages.statusSaveConflict)).toBeNull();
+  });
+
+  test("a 409 on a file source with no saved snapshot is refused generically, not adopted", async () => {
+    const user = userEvent.setup();
+    // a file identity without a baseline — the shape a legacy or hand-edited draft
+    // can carry. Nothing to keep dirty against, so nothing to protect on a conflict.
+    const orphan = fromBrief(brief("camp") as never, { file: "camp.yaml", revision: "r1" });
+    saveDraftToStorage({
+      ...orphan,
+      source: { kind: "file", file: "camp.yaml", loadedId: "camp", savedSnapshot: null, revision: "r1" },
+    });
+    localStorage.setItem("cf:brief", JSON.stringify(brief("camp")));
+    routes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      put: () => json({ error: "Brief was modified by another user.", revision: "rev-fresh" }, 409),
+    });
+    renderWithRun(<Editor />);
+    // the editor adopts camp, then draft recovery restores the orphan over it
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    await saveVia(user, "Save & apply");
+    expect(await screen.findByText(/Brief was modified by another user/)).toBeTruthy();
+  });
+
+  test("Save as... adopts the brief the server stored, asset-path rewrites included", async () => {
+    const user = userEvent.setup();
+    const stored = brief("copy");
+    stored.products[0].logoPath = "assets/inputs/copy/a.png";
+    routes({
+      post: () => json({ file: "copy.yaml", brief: stored, revision: "rev-copy" }, 201),
+    });
+    renderWithRun(<Editor />);
+    await fillValidDraft(user);
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), "copy");
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
+    await waitFor(() => expect(screen.queryByLabelText("New brief id")).toBeNull());
+
+    // the editor shows the path the server rewrote during the copy — dispatching the
+    // brief this page constructed instead silently reverted it while the file on disk
+    // carried the rewritten one
+    const logos = screen
+      .getAllByLabelText("Logo Path")
+      .filter((el) => el.tagName === "INPUT" && el.getAttribute("type") !== "file");
+    expect((logos[0] as HTMLInputElement).value).toBe("assets/inputs/copy/a.png");
   });
 
   test("Apply on the blank route keeps the brief it just applied", async () => {
@@ -977,6 +1267,9 @@ describe("BriefPage — capabilities and motion", () => {
     routes({
       list: () => json({ briefs: [motionBrief] }),
       capabilities: () => json({ motion: false, reason: "no ffmpeg" }),
+      // the real PUT stores and returns the parsed body it was sent — echo it (see the
+      // matching correction in "Save & apply carries the same refusal notice")
+      put: (_url, body) => json({ file: "clip.yaml", brief: body, revision: "r1" }, 200),
     });
     renderWithRun(<Editor />);
 
@@ -1125,6 +1418,9 @@ describe("BriefPage — capabilities and motion", () => {
     const calls = routes({
       list: () => json({ briefs: [{ file: "clip.yaml", brief: clip, revision: "r1" }] }),
       capabilities: () => json({ motion: false, reason: "no ffmpeg" }),
+      // the real PUT stores and returns the parsed body it was sent — echo it (see the
+      // matching correction in "Save & apply carries the same refusal notice")
+      put: (_url, body) => json({ file: "clip.yaml", brief: body, revision: "r1" }, 200),
     });
     renderWithRun(<Editor />);
 

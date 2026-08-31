@@ -38,7 +38,10 @@ export default defineEventHandler(async (event) => {
     const stored = await getBriefStore().withBriefLock(id, async () => {
       return await getBriefStore().rewriteBrief(brief, { expectedRevision });
     });
-    return { file: stored.file, brief: stored.brief };
+    // The new revision rides along: the editor dispatches it into its source, so the
+    // next save guards conditionally instead of replaying the load-time revision and
+    // getting an untrue "Brief was modified by another user."
+    return { file: stored.file, brief: stored.brief, revision: stored.revision };
   } catch (error) {
     if (errorMessage(error) === SYMLINK_WRITE_ERROR) {
       setResponseStatus(event, 400);
