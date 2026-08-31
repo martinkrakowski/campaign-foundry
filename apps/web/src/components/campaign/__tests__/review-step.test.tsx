@@ -82,6 +82,19 @@ describe("ReviewStep — summary rows", () => {
     expect(row("policy")).toBeNull();
   });
 
+  test("an empty treatments list draws no treatments row rather than a blank one", () => {
+    renderRows({ ...classic, treatments: [] });
+    expect(row("treatments")).toBeNull();
+  });
+
+  test("an empty formats or platforms list draws no output row rather than a blank one", () => {
+    const emptyFormats = renderRows({ ...classic, output: { formats: [], platforms: ["linkedin"] } });
+    expect(row("output")).toBeNull();
+    emptyFormats.unmount();
+    renderRows({ ...classic, output: { formats: ["static"], platforms: [] } });
+    expect(row("output")).toBeNull();
+  });
+
   test("an output block missing either list draws no output row rather than a half row", () => {
     const missingPlatforms = renderRows({ ...classic, output: {} });
     expect(row("output")).toBeNull();

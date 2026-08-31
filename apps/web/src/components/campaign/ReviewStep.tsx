@@ -58,7 +58,9 @@ function summaryRows(brief: CampaignBrief): SummaryRow[] {
         });
         break;
       case "treatments":
-        if (brief.treatments !== undefined) {
+        // Content, not presence: an empty list would join to a blank line, and a
+        // blank row is the same wrongness as a missing one (W8.1's contract).
+        if (brief.treatments !== undefined && brief.treatments.length > 0) {
           rows.push({
             section,
             lines: [messages.joinList(brief.treatments.map((treatment) => treatment.id))],
@@ -68,7 +70,12 @@ function summaryRows(brief: CampaignBrief): SummaryRow[] {
       case "output": {
         const formats = brief.output?.formats;
         const platforms = brief.output?.platforms;
-        if (formats !== undefined && platforms !== undefined) {
+        if (
+          formats !== undefined &&
+          formats.length > 0 &&
+          platforms !== undefined &&
+          platforms.length > 0
+        ) {
           rows.push({
             section,
             lines: [
@@ -132,8 +139,9 @@ export function ReviewStep({
               <dt className="text-[11px] uppercase tracking-widest text-text-muted">
                 {SECTION_TITLES[row.section]}
               </dt>
-              {row.lines.map((line) => (
-                <dd key={line} className="truncate text-[13px] text-text-primary">
+              {row.lines.map((line, index) => (
+                // Index, not line text: a fixed positional list, never reordered, and line text can repeat.
+                <dd key={index} className="truncate text-[13px] text-text-primary">
                   {line}
                 </dd>
               ))}
