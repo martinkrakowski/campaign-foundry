@@ -658,3 +658,39 @@ describe("GridPage — motion cells", () => {
     expect(screen.getByText(/90\.0%/)).toBeTruthy();
   });
 });
+
+/**
+ * The control-boundary token (WCAG 1.4.11): these controls are identified only by
+ * their hairline, so it must be `border-border-control` (≥ 3:1 on every ground).
+ * jsdom applies no CSS, so the class list is the only observable — split, because
+ * `border-border` is a substring of `border-border-control`.
+ */
+const classes = (el: Element): readonly string[] => el.className.split(/\s+/);
+
+describe("GridPage — control boundaries carry border-control", () => {
+  test("the pager, the native filter selects, and the unselected decision arms", async () => {
+    const thirty = Array.from({ length: 30 }, (_, i) =>
+      makeAsset({ outputPath: `a-${i}.png`, treatment: `t${i}` }),
+    );
+    seedPersistedRun(thirty);
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText(/Showing 24 of 30/)).toBeTruthy();
+
+    // Pager: bg-surface on the page ground — a ~1.05:1 fill delta.
+    const pager = screen.getByRole("button", { name: "Show more" });
+    expect(classes(pager)).toContain("border-border-control");
+    expect(classes(pager)).not.toContain("border-border");
+
+    // Native <select>, bg-surface-2.
+    const product = screen.getByLabelText("Product");
+    expect(classes(product)).toContain("border-border-control");
+    expect(classes(product)).not.toContain("border-border");
+
+    // The unselected arm of each decision toggle; the decided arm keeps success/error.
+    for (const name of ["Approve", "Reject"]) {
+      const arm = screen.getAllByRole("button", { name })[0];
+      expect(classes(arm)).toContain("border-border-control");
+      expect(classes(arm)).not.toContain("border-border");
+    }
+  });
+});

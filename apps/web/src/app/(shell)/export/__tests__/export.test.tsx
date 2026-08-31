@@ -284,3 +284,36 @@ describe("ExportPage — motion", () => {
     expect(bodies[0]).toMatchObject({ campaignId: "other", platforms: ["linkedin"] });
   });
 });
+
+/**
+ * The control-boundary token (WCAG 1.4.11): these controls are identified only by
+ * their hairline, so it must be `border-border-control` (≥ 3:1 on every ground).
+ * jsdom applies no CSS, so the class list is the only observable — split, because
+ * `border-border` is a substring of `border-border-control`.
+ */
+const classes = (el: Element): readonly string[] => el.className.split(/\s+/);
+
+describe("ExportPage — control boundaries carry border-control", () => {
+  test("the unfilled platform pill and the disabled download hint keep the ≥3:1 hairline", async () => {
+    seedPersistedRun([makeAsset()]);
+    mockPipelineApi({
+      report: { halted: false, assets: [makeAsset()], log: { entries: [], campaignId: "seed" } },
+      packages: () => json({ platforms: [] }, 404),
+    });
+    renderWithRun(<ExportPage />);
+    expect(await screen.findByRole("group", { name: "Platforms" })).toBeTruthy();
+
+    // Unselected pill: no fill, the hairline is the entire control.
+    const pill = screen.getByRole("button", { name: "linkedin", pressed: false });
+    expect(classes(pill)).toContain("border-border-control");
+    expect(classes(pill)).not.toContain("border-border");
+    // The selected arm keeps the brand token instead.
+    const selected = screen.getByRole("button", { name: "instagram-feed", pressed: true });
+    expect(classes(selected)).toContain("border-brand-primary");
+
+    // Download hint: a pill with a disabled arm, still a control boundary.
+    const download = screen.getByRole("button", { name: "Download zip" });
+    expect(classes(download)).toContain("border-border-control");
+    expect(classes(download)).not.toContain("border-border");
+  });
+});

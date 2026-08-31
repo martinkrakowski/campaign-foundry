@@ -159,7 +159,7 @@ export default function ExportPage() {
               className={
                 activePlatform === id
                   ? "rounded-full border border-brand-primary bg-surface-2 px-3 py-1.5 font-mono text-[12px] text-text-emphasis"
-                  : "rounded-full border border-border px-3 py-1.5 font-mono text-[12px] text-text-muted"
+                  : "rounded-full border border-border-control px-3 py-1.5 font-mono text-[12px] text-text-muted"
               }
             >
               {id}
@@ -196,7 +196,7 @@ export default function ExportPage() {
               type="button"
               disabled
               title="Package this platform first"
-              className="rounded-full border border-border px-4 py-1.5 text-[13px] text-text-muted disabled:cursor-not-allowed"
+              className="rounded-full border border-border-control px-4 py-1.5 text-[13px] text-text-muted disabled:cursor-not-allowed"
             >
               Download zip
             </button>
