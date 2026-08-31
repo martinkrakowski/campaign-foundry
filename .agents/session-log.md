@@ -1743,3 +1743,31 @@ To keep this file out of version control, add `.agents/session-log.md` to
   **2371 passed | 2 skipped — 100 % on all four counters**, `sync:check` **Total ops 0**.
   One API-side flake (`routes.test.ts` timeouts) passed 59/59 in isolation and the full
   rerun was green on the same tree. PR: https://github.com/martinkrakowski/campaign-foundry/pull/148 (not merged).
+
+### 2026-08-30 — N1 the legal gate matches substrings, and halts ordinary copy
+
+- **Mode:** Implementer. Lane N1 on `fix/n1-legal-gate-word-boundaries`, worktree `wt-n1`.
+- **Defect:** `BrandComplianceChecker.validateLegalCopy` matched `PROHIBITED_TERMS` with
+  `lower.includes(term)` — a raw substring test. `"cure"` halted *"Secure your seat"*,
+  *"Procurement Lead"*, *"Obscure venues"*, *"Manicure and pedicure"*: a live defect for
+  every campaign type, not a niche one.
+- **Fix shape:** one anchored regex per term, compiled once at module scope:
+  `\b<escaped term>\w*` — must start at a word boundary, may run on through word chars.
+  Inflections (cures/cured/curing) still halt; secure/obscure/procurement/manicure pass.
+  `escapeRegExp` keeps the term list data (`"100% safe"` can never become a pattern).
+  Trailing `\b` considered and omitted: `\w*` is greedy to the word's end, so a trailing
+  boundary is always satisfiable by backtracking and adds nothing.
+- **Naive fix rejected:** plain `\b<term>\b` breaks inflections — mutation check #2
+  confirmed it loses *"It cured my acne."* (a true positive). `\b…\w*` gets both halves.
+- **Tests:** two-half table in the existing suite — 17 must-still-halt (nine sentence
+  cases including inflections and multi-word terms, plus each of the 8 terms on its own)
+  and 6 must-now-pass. Reason still names every hit; dedicated multi-hit test
+  ("Guaranteed risk-free miracle cure" → all four named).
+- **Mutation checks (both run, both reported):** reverting to `includes()` failed exactly
+  the 6 false-positive cases (25/31 passed); swapping in plain `\b…\b` failed
+  *"It cured my acne."* — *"Miracle cures…"* still halted but only because `miracle`
+  masked the lost `cure` hit, which is why the sole-hit case was pinned.
+- **Verification:** build, typecheck, lint (**0 problems**), lint:arch, `test:cov`
+  **2409 passed | 2 skipped — 100% on all four counters, repo-wide**, commit, `sync:check`
+  **Total ops: 0**. No existing test deleted or gutted; the three original legal-gate
+  tests stand unchanged. PR: https://github.com/martinkrakowski/campaign-foundry/pull/149 (not merged).
