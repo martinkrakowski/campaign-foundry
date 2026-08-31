@@ -1826,6 +1826,40 @@ To keep this file out of version control, add `.agents/session-log.md` to
   **Total ops: 0**. No existing test deleted or gutted; the three original legal-gate
   tests stand unchanged. PR: https://github.com/martinkrakowski/campaign-foundry/pull/149 (not merged).
 
+### 2026-08-31 — B2 a loaded brief reads as dirty on open
+
+- **Mode:** Implementer. Lane B2 on `fix/b2-dirty-on-load`, worktree `wt-b2`.
+- **Defect:** `isDirtySinceSave`/`isDirtySinceApply` (web `editor-state.ts:1145/:1151`)
+  compared `toBrief(state)` against the saved snapshot via `JSON.stringify`, which is
+  key-order sensitive: the snapshot holds the brief in the order the YAML file wrote it,
+  `toBrief` emits its own fixed order. Semantically identical, different as strings —
+  every freshly loaded file read dirty with zero edits. Sharpest case: files declare
+  `localizedMessage` fifth, `toBrief` appends it near the end.
+- **Fix shape:** `briefsEqual`/`canonicalKeys` — both sides canonicalised (object keys
+  sorted recursively, arrays mapped element-wise) before stringifying, mirroring the
+  existing `canonicalJson` discipline in `VariationPolicy.vo.ts`. Two stated decisions:
+  (1) arrays never sorted — `products`/`treatments`/`variation.axes.*`/`copy.timeline.beats`
+  are order-carrying, a swapped pair stays a real edit; (2) `undefined` counts as absent —
+  `JSON.stringify` still drops `undefined`-valued keys on both sides, so `{a:1}` equals
+  `{a:1, b:undefined}`. `toBrief`'s emission order untouched (D7 is about written bytes,
+  not in-memory comparison). `isPristine` audited: compares two `toBrief` outputs, same
+  deterministic construction both sides — not affected. `differsFrom` is order-sensitive
+  by design — not affected.
+- **Tests:** new corpus describe in `editor-state.test.ts`, driven over the real
+  `briefs/` directory (`.yaml`/`.yml`/`.json` via `readdirSync`): every file loads clean,
+  `localizedMessage` case clean, real edits dirty (per file), swapped `products` dirty,
+  `{a:1}` vs `{a:1,b:undefined}` equal. Note: lane brief cited `trail-blaze-motion2-2026`,
+  which does not exist in this checkout; the real-directory drive covers the corpus as it
+  is (8 files).
+- **Mutation checks:** reverting to the old comparison failed exactly the 9 clean-on-load
+  tests (dirty tests correctly still passed); "always clean" (`return false`) failed 12 —
+  all 8 per-file dirty tests, the reorder test, and 3 pre-existing dirty-tracking tests.
+  No existing test asserted the defective behaviour; one pre-existing assertion
+  accidentally altered during editing was restored before commit.
+- **Verification:** build/typecheck/lint (0 problems)/lint:arch/test:cov green —
+  **2455 passed | 2 skipped, 100% on all four counters (6785/4939/1457/6075)**; commit;
+  `sync:check` Total ops 0. PR: https://github.com/martinkrakowski/campaign-foundry/pull/151 (not merged).
+
 ### 2026-08-31 — B3 the web validator's blind spots (motion axes checked by their values; unknown platforms named)
 
 - **Mode:** Implementer. Lane B3 on `fix/b3-validator-blind-spots`, worktree `wt-b3`.

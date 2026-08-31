@@ -2061,4 +2061,72 @@ describe("copy timeline (E5.1)", () => {
       expect(missingWeight.timeline.keyBeat).toBe(1);
     });
   });
-})
+});
+
+describe("dirty-on-load over the corpus (B2)", () => {
+  // Driven over the real directory, so a new sample brief cannot silently
+  // reintroduce the dirty-on-load bug.
+  const briefsDir = path.resolve(__dirname, "../../../../../../briefs");
+  const briefFiles = fs
+    .readdirSync(briefsDir)
+    .filter((f) => [".yaml", ".yml", ".json"].includes(path.extname(f).toLowerCase()));
+  const parseBriefFile = (filename: string): CampaignBrief => {
+    const raw = fs.readFileSync(path.join(briefsDir, filename), "utf8");
+    return path.extname(filename).toLowerCase() === ".json"
+      ? (JSON.parse(raw) as CampaignBrief)
+      : (load(raw) as CampaignBrief);
+  };
+  const reloaded = (state: EditorState, snapshot: CampaignBrief): EditorState => ({
+    ...state,
+    source:
+      state.source.kind === "file"
+        ? { ...state.source, savedSnapshot: snapshot }
+        : { kind: "file", file: "camp.yaml", loadedId: state.briefId, savedSnapshot: snapshot, revision: undefined },
+  });
+
+  test("discovers every corpus brief file on disk", () => {
+    expect(briefFiles.length).toBeGreaterThanOrEqual(8);
+  });
+
+  test.each(briefFiles)("a freshly loaded %s reads clean with zero edits", (filename) => {
+    const state = fromBrief(parseBriefFile(filename), { file: filename });
+    expect(state.source.kind).toBe("file");
+    expect(isDirtySinceSave(state)).toBe(false);
+  });
+
+  test("a brief whose file declares localizedMessage reads clean — the sharpest key-order case", () => {
+    // The files declare `localizedMessage` fifth; `toBrief` appends it near the
+    // end, so the old serialised-string comparison read every such file dirty
+    // the instant it opened.
+    const brief = parseBriefFile("sample-campaign.yaml");
+    expect(brief.localizedMessage).toBeTruthy();
+    expect(isDirtySinceSave(fromBrief(brief, { file: "sample-campaign.yaml" }))).toBe(false);
+  });
+
+  test.each(briefFiles)("a real edit to %s still reads dirty", (filename) => {
+    const state = fromBrief(parseBriefFile(filename), { file: filename });
+    const edited = reduce(state, { type: "patch", patch: { campaignMessage: `${state.campaignMessage} edited` } });
+    expect(isDirtySinceSave(edited)).toBe(true);
+  });
+
+  test("reordering an array still reads dirty — key sorting must not hide element order", () => {
+    // `products` is order-carrying: swapping two products is a real edit, and the
+    // key-sort must not make it invisible the way the key-order bug was made visible.
+    const brief = parseBriefFile("sample-campaign.yaml");
+    const state = fromBrief(brief, { file: "sample-campaign.yaml" });
+    expect(brief.products.length).toBeGreaterThanOrEqual(2);
+    const swapped: CampaignBrief = {
+      ...brief,
+      products: [brief.products[1], brief.products[0], ...brief.products.slice(2)],
+    };
+    expect(isDirtySinceSave(reloaded(state, swapped))).toBe(true);
+  });
+
+  test("an undefined-valued key counts as absent — {a: 1} equals {a: 1, b: undefined}", () => {
+    // JSON.stringify drops undefined-valued keys; the comparison must keep doing
+    // so, or the fix becomes its mirror image and any such snapshot reads dirty.
+    const state = fromBrief(parseBriefFile("sample-campaign.yaml"), { file: "sample-campaign.yaml" });
+    const withGhost = { ...toBrief(state), ghost: undefined } as unknown as CampaignBrief;
+    expect(isDirtySinceSave(reloaded(state, withGhost))).toBe(false);
+  });
+});
