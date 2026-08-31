@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { renderWithRun, json, nextMock } from "@/__tests__/helpers";
 import { API, useRun } from "@/lib/run-context";
 import { fromBrief, saveDraftToStorage } from "@/components/campaign/editor-state";
-import { sectionOrder } from "@/components/campaign/sections";
+import { sectionOrder, SECTION_TITLES } from "@/components/campaign/sections";
 import BriefPage from "../page";
 import NewBriefPage from "../new/page";
 
@@ -1450,6 +1450,13 @@ describe("BriefPage — guided presentation (W6)", () => {
     renderWithRun(<Editor />);
     await adopt(user, "prod");
 
+    // Corrected for W8.2: the action bar (and the ErrorStrip inside it) stands on the
+    // Review step in Guided — it is no longer mounted on every step — so the chip is
+    // met from Review, reached past Products by the segbar's unlocked walk.
+    const segbar = within(screen.getByRole("navigation", { name: messages.segBarLabel }));
+    await user.click(segbar.getAllByRole("button")[sectionOrder("brief").length]);
+    await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
+
     const chip = Array.from(document.querySelectorAll<HTMLElement>("button.rounded-full")).find((b) =>
       /Products/.test(b.textContent ?? ""),
     ) as HTMLElement;
@@ -1462,8 +1469,12 @@ describe("BriefPage — guided presentation (W6)", () => {
     // …and the deferred scroll found it once it existed — once, not repeatedly.
     // `toHaveBeenCalled()` alone is this repo's known decorative assertion.
     expect(scroller).toHaveBeenCalledTimes(1);
-    // Scroll-only: the pressed chip keeps focus, the heading is not grabbed.
-    expect(document.activeElement).toBe(chip);
+    // The reveal stayed scroll-only: nothing grabbed focus for itself. (Corrected
+    // alongside the placement: the chip unmounts with the Review card it stands on,
+    // so focus falls to the body — the invariant is that neither the section nor the
+    // step heading took it.)
+    await waitFor(() => expect(document.activeElement).not.toBe(stepHeading()));
+    expect(document.activeElement).not.toBe(document.getElementById("products"));
   });
 
   test("an outline row on another step switches the step and hands the section focus", async () => {
@@ -1645,6 +1656,11 @@ describe("BriefPage — the walk's chrome and gestures (W7)", () => {
     renderWithRun(<Editor />);
     await adopt(user, "ok");
 
+    // Corrected for W8.2: the bar (and the Save verb it carries) stands on the Review
+    // step in Guided, so the dialog is opened from there.
+    await user.click(segments()[walkLength - 1]);
+    await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
+
     // The save-as dialog, open: every overlay in the app mounts on open, so one in
     // the DOM is one on screen. The key is aimed at the dialog itself, not at its
     // field, so what stops the walk is the overlay — not the typing rule.
@@ -1652,7 +1668,7 @@ describe("BriefPage — the walk's chrome and gestures (W7)", () => {
     const dialog = document.querySelector('[role="dialog"][aria-modal="true"]') as HTMLElement;
     expect(dialog).toBeTruthy();
     fireEvent.keyDown(dialog, { key: "ArrowRight" });
-    expect(stepHeading().textContent).toBe("Identity");
+    expect(stepHeading().textContent).toBe("Review");
   });
 
   test("a swipe across the step card walks; a tap does not", async () => {
@@ -1752,5 +1768,145 @@ describe("BriefPage — the walk's chrome and gestures (W7)", () => {
     await user.click(screen.getByRole("button", { name: messages.stepNext }));
     await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
     expect(document.querySelector(".animate-ready-ring")).toBeNull();
+  });
+});
+
+describe("BriefPage — the review step (W8)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:presentation", "guided");
+    globalThis.confirm = vi.fn(() => true);
+  });
+
+  const adopt = async (user: ReturnType<typeof userEvent.setup>, id: string) => {
+    await user.click(screen.getAllByText("New brief...")[0]);
+    await user.click(await screen.findByText(id));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id));
+  };
+
+  const stepHeading = () => screen.getByRole("heading", { level: 1 });
+  const segments = () =>
+    within(screen.getByRole("navigation", { name: messages.segBarLabel })).getAllByRole("button");
+  // The review step is the walk's last, derived from the one list — never a number.
+  const reviewIndex = sectionOrder("brief").length;
+  const toReview = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(segments()[reviewIndex]);
+    await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
+  };
+  const row = (section: string) => document.querySelector(`[data-review-row="${section}"]`);
+
+  /** A classic brief carrying treatments and output, so every row can show. */
+  const fullEntry = {
+    file: "full.yaml",
+    revision: "r1",
+    brief: {
+      ...brief("full"),
+      treatments: [{ id: "bold-hero", layout: "headline-top", tone: "bold" }],
+      output: { formats: ["static"], platforms: ["linkedin"] },
+    },
+  };
+
+  test("every summary row's Edit reaches its section — the step switches and the section scrolls", async () => {
+    const user = userEvent.setup();
+    const scroller = vi.fn();
+    Element.prototype.scrollIntoView = scroller;
+    routes({ list: () => json({ briefs: [fullEntry] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "full");
+    await toReview(user);
+
+    // One row per section the projection carries — and the rows speak display
+    // names (D18), never the raw ids the brief file spells.
+    for (const section of sectionOrder("brief")) {
+      expect(row(section)).not.toBeNull();
+    }
+    const outputRow = row("output") as HTMLElement;
+    expect(outputRow.textContent).toContain("Still images");
+    expect(outputRow.textContent).toContain("LinkedIn");
+    expect(outputRow.textContent).not.toContain("linkedin");
+    // The preview beside the rows draws the brief's own headline (D26). The page
+    // carries other svg chrome, so pick the preview by what it draws.
+    const preview = Array.from(document.querySelectorAll("svg")).find((el) =>
+      el.textContent?.includes("Hi"),
+    );
+    expect(preview).toBeTruthy();
+
+    // Each Edit hands its section to W6's reveal: the step switches, and the
+    // deferred scroll finds the section once it has mounted.
+    for (const section of sectionOrder("brief")) {
+      const scrollsBefore = scroller.mock.calls.length;
+      await user.click(
+        screen.getByRole("button", { name: messages.reviewEditLabel(SECTION_TITLES[section]) }),
+      );
+      await waitFor(() => expect(stepHeading().textContent).toBe(SECTION_TITLES[section]));
+      expect(scroller.mock.calls.length).toBeGreaterThan(scrollsBefore);
+      // …and back to Review for the next row.
+      await user.click(segments()[reviewIndex]);
+      await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
+    }
+  });
+
+  test("Apply's refusal marks every failing section and reveals the first", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+
+    // A blank draft fails Identity, Copy and Products — but nothing is marked yet
+    // (D1): the user has been nowhere and has attempted nothing.
+    await toReview(user);
+    expect(screen.queryByText(messages.briefId)).toBeNull();
+
+    // D3: Apply is never disabled — pressing it is how the user asks what is wrong.
+    await user.click(screen.getByText("Apply to run"));
+
+    // The first failing section is the one revealed…
+    await waitFor(() => expect(stepHeading().textContent).toBe("Identity"));
+    // (The footer's status sentence speaks the first error too, so scope the
+    // "marked" assertions to the sections themselves.)
+    expect(within(document.getElementById("identity") as HTMLElement).getByText(messages.briefId)).toBeTruthy();
+    // …and every failing section is marked, not only the first: Products' own
+    // error is on screen the moment the walk reaches it, untouched.
+    await user.click(segments()[sectionOrder("brief").indexOf("products")]);
+    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
+    expect(within(document.getElementById("products") as HTMLElement).getByText(messages.products(2, "Classic"))).toBeTruthy();
+  });
+
+  test("a row whose field the projection omits disappears", async () => {
+    const user = userEvent.setup();
+    Element.prototype.scrollIntoView = vi.fn();
+    routes({ list: () => json({ briefs: [fullEntry] }) });
+    const first = renderWithRun(<Editor />);
+    await adopt(user, "full");
+    await toReview(user);
+    // Treatments are in the projection, so the row is there.
+    expect(row("treatments")).not.toBeNull();
+    first.unmount();
+
+    // A classic brief without treatments: toBrief omits the field, and its row
+    // goes with it — Review shows what will actually be submitted.
+    routes({ list: () => json({ briefs: [entry("plain", "r1")] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "plain");
+    await toReview(user);
+    expect(row("identity")).not.toBeNull();
+    expect(row("treatments")).toBeNull();
+  });
+
+  test("the action bar stands on Review in Guided and returns to the foot in Everything", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "ok");
+
+    // Guided keeps the verbs on the step that performs them — not on Identity.
+    expect(screen.queryByTestId("action-bar")).toBeNull();
+    await toReview(user);
+    expect(screen.getByTestId("action-bar")).toBeTruthy();
+
+    // Everything mounts the same bar back at the foot of the whole stack.
+    await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
+    await waitFor(() => expect(screen.getByTestId("action-bar")).toBeTruthy());
   });
 });
