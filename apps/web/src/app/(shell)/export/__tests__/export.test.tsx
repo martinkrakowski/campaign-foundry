@@ -15,6 +15,30 @@ function SwitchToOther() {
   );
 }
 
+/** Test-only control: run an on-screen draft the shell does not hold (D35). */
+function RunDraft() {
+  const { execute } = useRun();
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        execute({
+          id: "on-screen-draft",
+          targetRegion: "US",
+          targetAudience: "x",
+          campaignMessage: "the draft as typed",
+          products: [
+            { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" },
+            { id: "p2", name: "P2", primaryColor: "#222222", logoPath: "b.png" },
+          ],
+        })
+      }
+    >
+      run draft
+    </button>
+  );
+}
+
 beforeEach(() => localStorage.setItem("cf:brief-picked", "1"));
 
 const item = (over: Record<string, unknown> = {}) => ({
@@ -173,6 +197,41 @@ describe("ExportPage — platform packaging", () => {
     expect(screen.getByText("packages/seed/instagram-feed/alpha/1x1.png")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Download zip" }).getAttribute("href")).toBe(
       `${API}/campaigns/packages/seed/instagram-feed.zip`,
+    );
+  });
+
+  test("the zip link keys off the campaign the run ran under, not the shell brief (R6)", async () => {
+    const user = userEvent.setup();
+    // The shell still holds its own brief; the run on screen came from the draft.
+    mockPipelineApi({
+      report: {
+        halted: false,
+        assets: [makeAsset()],
+        log: { entries: [], campaignId: "on-screen-draft" },
+      },
+      packages: () => json({ platforms: [] }, 404),
+      packagePost: () =>
+        json({
+          platforms: [
+            {
+              platformId: "instagram-feed",
+              items: [item({ packagedPath: "packages/on-screen-draft/instagram-feed/alpha/1x1.png" })],
+            },
+          ],
+        }),
+    });
+    renderWithRun(
+      <>
+        <RunDraft />
+        <ExportPage />
+      </>,
+    );
+    await user.click(screen.getByRole("button", { name: "run draft" }));
+    expect(await screen.findByRole("group", { name: "Platforms" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Package" }));
+    expect(await screen.findByText("packages/on-screen-draft/instagram-feed/alpha/1x1.png")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Download zip" }).getAttribute("href")).toBe(
+      `${API}/campaigns/packages/on-screen-draft/instagram-feed.zip`,
     );
   });
 });

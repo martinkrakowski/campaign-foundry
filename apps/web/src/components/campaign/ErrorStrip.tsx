@@ -30,6 +30,16 @@ export const MOTION_HOST_SECTION: SectionId = "output";
 /** Motion is not a `SectionId`, so its chip label cannot come from `SECTION_TITLES`. */
 export const MOTION_LABEL = "Motion";
 
+/**
+ * The section a validation bucket stands for — the one mapping the walk, `reveal`
+ * and the D35 handoff's published verdict all share: the six sections pass through
+ * unchanged, motion folds into its host. Null is "nothing blocks".
+ */
+export function sectionForErrorBucket(bucket: string | null): SectionId | null {
+  if (bucket === null) return null;
+  return bucket === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : (bucket as SectionId);
+}
+
 export function ErrorStrip({ errors, onErrorClick }: ErrorStripProps) {
   const sectionsWithErrors = Object.entries(errors)
     .filter(([, sectionErrors]) => sectionErrors && Object.keys(sectionErrors).length > 0)

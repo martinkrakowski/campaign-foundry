@@ -23,6 +23,7 @@ export default function ExportPage() {
     hasRun,
     decisions,
     brief,
+    ranCampaignId,
     packages,
     packaging,
     packageError,
@@ -30,6 +31,12 @@ export default function ExportPage() {
     loadPackages,
   } = useRun();
   const [platform, setPlatform] = useState<string>(STATIC_PLATFORMS[0]);
+
+  // The manifests — and the zips built from them — live under the campaign id the
+  // on-screen run ran under, which a "Run this draft" run keeps even though the
+  // shell's brief never took it on (R6). Derived before the empty-state return so
+  // it is a plain derived value, not a branch guarded on having a run.
+  const campaignId = ranCampaignId ?? brief.id;
 
   useEffect(() => {
     void loadPackages();
@@ -184,7 +191,7 @@ export default function ExportPage() {
           </button>
           {selected ? (
             <a
-              href={`${API}/campaigns/packages/${encodeURIComponent(brief.id)}/${selected.platformId}.zip`}
+              href={`${API}/campaigns/packages/${encodeURIComponent(campaignId)}/${selected.platformId}.zip`}
               download
               className="rounded-full border border-border bg-surface-2 px-4 py-1.5 text-[13px] text-text-emphasis transition-colors hover:bg-border-hover"
             >

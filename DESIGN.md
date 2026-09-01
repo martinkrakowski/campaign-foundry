@@ -386,21 +386,43 @@ Skeletal by design — patterns to extend, not a library.
   image thumbnail (or file-type badge when unrendered directly) once populated. The path is relegated
   to 10px monospace meta, elevating visual identity over filesystem mechanics. Houses the *Upload* action
   and an optional *Choose from bin* affordance (when wired), with explicit uploading states.
-- **StatusChip** — four states, four colours, border/tint/dot (no emoji): *Draft not applied*
-  (error) · *Applied, never saved* (warning) · *Applied, unsaved edits* (modified) · *Saved &
-  applied* (success). UE-D11 requires the four to stay colour-distinct, so the third is its own
-  `--color-modified` state colour rather than a second amber (§2, and the W3.2 audit).
+- **StatusChip** — two states, two colours, border/tint/dot (no emoji): *Unsaved changes*
+  (modified) · *Saved* (success). The chip answers **written-or-not**, never applied-or-not:
+  with every persist path committing the brief to the shell (the verb model below), the
+  applied/saved distinction the old four states drew could no longer diverge, and the
+  *"Draft not applied"* badge stops existing rather than being hidden. This **amends
+  UE-D11** (four colour-distinct states), which governed states that no longer exist; the
+  `--color-modified` token the fourth state introduced (§2) is the surviving tint.
 - **ErrorStrip** — one `rounded-full` chip per section with errors, red border/tint, count
   pill; clicking scrolls to the section. Lives in the action bar.
-- **SaveMenu** — "Save ▾" opening upward (it sits in a footer): *Save & apply*,
-  *Save as…*, each with a one-line description. `role="menu"` / `menuitem`, Escape and outside-click close.
+- **Save** — the bar's primary verb, one press, no menu: it writes the file and commits
+  the brief the shell runs (the verb model below — every persist path applies). Never
+  disabled (D3): pressing an invalid brief is how the user asks what is wrong, so it
+  answers with the refusal; the verb is held back only while a write is in flight
+  (`isLoading`, `aria-busy`). A disclosure whose first item was also called *Save*
+  existed briefly and was retired — the same two-labels-one-verb confusion in a new
+  shape.
+- **Save as…** — the copy verb, in the bar's overflow (`⋯`) beside YAML split and
+  *Revert*: writes a copy under a new id, with the id rule shown as typed, the
+  slugified suggestion offered as a click, and an explicit overwrite confirm.
 - **EstimatePanel**, **HeadlinePoolDrawer**, **BriefSelector** — panels; a panel that can be
   in a loading, empty, error or unavailable state renders each one explicitly.
 - **StatusLine** (L1.3) — `role="status"`, progressive sentence that updates as the brief is
   filled in: *New brief — fill Identity, Copy, Products and Output to make it runnable* →
-  *Almost there — fill Products to make it runnable* → *Ready — Apply to run, or Save & apply
-  to keep it* → *Applied — press Generate in the top bar to make ${briefId}*. Refusal
-  sentence on Apply/Save with errors.
+  *Almost there — fill Products to make it runnable* → *Ready — Save to keep it, or press
+  Generate in the top bar to run it* → *Saved — press Generate in the top bar to make
+  ${briefId}*. Refusal sentence on Save with errors.
+- **The verb model (D35/D40, amends UE-D3).** The editor's bar is *Cancel · Save · ⋯*
+  (*Save as…*, YAML split and *Revert* behind the overflow). *Apply to run* is retired — it named an
+  implementation detail of "the shell needs a brief to run", and every persist path already
+  committed it. Run-without-write survives on the **Generate** side: while the editor is
+  mounted and its on-screen draft differs from the shell's brief, Generate asks
+  *Run this draft · Save and run · Cancel* — the three-way **replaces** the dirty guard's
+  prompt for the whole gesture, so any path meets exactly one question. *Cancel* leaves the
+  editor for the grid through the dirty guard; *Revert* keeps the destructive meaning,
+  confirms first through the same `confirmReplace` every other replace path uses, and does
+  not fight the autosave (the recovery copy is rewritten with the reverted state, or purged
+  when the reverted state is pristine).
 - **TimelineSection** (L6-E5) — the copy-sequence sub-panel inside Copy, shown only on a
   Randomized draft (only a Randomized brief renders motion). One row per beat: text `Input`,
   a share `Stepper` bounded `[1, MAX_WEIGHT]`, a *Poster frame* toggle (`aria-pressed`, and
@@ -457,13 +479,13 @@ for 2 products. No AI image calls.* The planner's own vocabulary (`axisProductSi
 `genaiCalls`, `feasible`) never reaches the screen.
 
 **Nothing is disabled for being invalid.** Pressing a primary verb is how a user asks what is
-wrong, and a dead button cannot answer. Apply, Save and Save as stay live; an invalid draft is
+wrong, and a dead button cannot answer. Save, Save as… and Generate stay live; an invalid draft is
 answered by revealing every error, saying the refusal in the status line, and scrolling to the
 first problem. Only work in flight (`saving`) disables a control.
 
 
 **Status feedback.** Anything that changes state the user cannot see from where they are
-says so in a `role="status"` line next to the control — *"Applied — Generate in the top bar
+says so in a `role="status"` line next to the control — *"Saved — Generate in the top bar
 will run "clip""*. Success is `text-success`, a refusal `text-error`.
 
 **Capability gating.** When the host cannot do something (no ffmpeg → no motion) the control

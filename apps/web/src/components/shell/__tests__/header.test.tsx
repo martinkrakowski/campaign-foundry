@@ -1,15 +1,21 @@
 import { describe, test, expect, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, within, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createElement, useEffect, type ReactElement } from "react";
-import { nextMock, renderWithRun, ShellProviders } from "@/__tests__/helpers";
+import { createElement, useEffect, useRef, type ReactElement } from "react";
+import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { nextMock, renderWithRun, ShellProviders, jobOk, mockPipelineApi } from "@/__tests__/helpers";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { useRun } from "@/lib/run-context";
 import {
+  generateDraftBlocked,
   generateNoBrief,
+  generateDraftTitle,
+  generateDraftRunThis,
+  generateDraftSaveRun,
   modelChanged,
   telemetryButton,
 } from "@/components/campaign/messages";
+import { SECTION_TITLES, type SectionId } from "@/components/campaign/sections";
 import { Header } from "../Header";
 
 // The theme toggle writes to <html>, which is shared by every test in this file and is
@@ -242,6 +248,323 @@ describe("Header — Generate (D32)", () => {
 
     expect(generatePosts()).toHaveLength(0);
     expect(nextMock().router.push).not.toHaveBeenCalled();
+  });
+});
+
+describe("Header — Generate's three-way question (D35)", () => {
+  beforeEach(() => {
+    localStorage.setItem("cf:brief-picked", "1");
+    mockPipelineApi();
+  });
+
+  /**
+   * Stands in for the mounted editor: publishes D35's handoff the way BriefEditor
+   * does — the on-screen draft through a ref the editor refreshes, and a save path.
+   * The full editor-plus-header flow is driven by the real components in
+   * brief-editor.test.tsx; this pins the header's side of the contract.
+   */
+  const onScreenDraft = {
+    id: "on-screen-draft",
+    targetRegion: "DE",
+    targetAudience: "a",
+    campaignMessage: "Hi",
+    products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "a.png" }],
+  } as CampaignBrief;
+
+  const PublishDraft = ({ savedBriefId = "saved-copy" }: { savedBriefId?: string }) => {
+    const { setDraftRun } = useEditorDirty();
+    // The draft rides a stable ref the editor refreshes on every render — the same
+    // shape BriefEditor publishes — so "Run this draft" always reads the freshest one.
+    const draftRef = useRef<CampaignBrief>(onScreenDraft);
+    const blockedRef = useRef<SectionId | null>(null);
+    useEffect(() => {
+      setDraftRun({
+        draftRef,
+        blockedRef,
+        refuseInvalid: () => false,
+        saveAndRun: () => Promise.resolve({ ...onScreenDraft, id: savedBriefId }),
+      });
+      return () => setDraftRun(null);
+    }, [setDraftRun, savedBriefId, draftRef, blockedRef]);
+    return null;
+  };
+
+  test("with a differing draft the press asks the three-way question — one prompt, never two", async () => {
+    const user = userEvent.setup();
+    render(
+      <ShellProviders>
+        <PublishDraft />
+        <Header />
+      </ShellProviders>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    // The three-way is the whole gesture's question: the guard's dialog is nowhere
+    // behind it — exactly one prompt on any path.
+    expect(screen.getByRole("dialog", { name: generateDraftTitle })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
+    expect(generatePosts()).toHaveLength(0);
+  });
+
+  test('"Run this draft" POSTs the on-screen draft, writes nothing, and navigates once', async () => {
+    const user = userEvent.setup();
+    render(
+      <ShellProviders>
+        <PublishDraft />
+        <Header />
+      </ShellProviders>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await user.click(within(screen.getByRole("dialog", { name: generateDraftTitle })).getByRole("button", { name: new RegExp(`^${generateDraftRunThis}`) }));
+
+    await waitFor(() => expect(generatePosts()).toHaveLength(1));
+    const body = JSON.parse(String(generatePosts()[0][1]?.body)) as { id?: string };
+    expect(body.id).toBe("on-screen-draft");
+    // zero writes: no brief POST/PUT left the page — run-without-write
+    const briefWrites = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(
+        ([url, init]) =>
+          String(url).includes("/campaigns/briefs") && (init as RequestInit | undefined)?.method !== "GET",
+      );
+    expect(briefWrites).toHaveLength(0);
+    expect(nextMock().router.push).toHaveBeenCalledTimes(1);
+    expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
+  });
+
+  test('"Save and run" writes, then runs what was written', async () => {
+    const user = userEvent.setup();
+    render(
+      <ShellProviders>
+        <PublishDraft />
+        <Header />
+      </ShellProviders>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await user.click(within(screen.getByRole("dialog", { name: generateDraftTitle })).getByRole("button", { name: new RegExp(`^${generateDraftSaveRun}`) }));
+
+    await waitFor(() => expect(generatePosts()).toHaveLength(1));
+    const body = JSON.parse(String(generatePosts()[0][1]?.body)) as { id?: string };
+    // the brief as the server stored it — not the un-written draft
+    expect(body.id).toBe("saved-copy");
+    expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
+  });
+
+  test("Cancel answers the question and does nothing at all", async () => {
+    const user = userEvent.setup();
+    render(
+      <ShellProviders>
+        <PublishDraft />
+        <Header />
+      </ShellProviders>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await user.click(within(screen.getByRole("dialog", { name: generateDraftTitle })).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog", { name: generateDraftTitle })).toBeNull();
+    expect(generatePosts()).toHaveLength(0);
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+  });
+
+  test("the backdrop answers the question too — nothing runs", async () => {
+    const user = userEvent.setup();
+    render(
+      <ShellProviders>
+        <PublishDraft />
+        <Header />
+      </ShellProviders>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    expect(screen.getByRole("dialog", { name: generateDraftTitle })).toBeTruthy();
+
+    // click the overlay itself, not the card inside it
+    const overlay = screen.getByRole("dialog", { name: generateDraftTitle });
+    fireEvent.click(overlay);
+
+    expect(screen.queryByRole("dialog", { name: generateDraftTitle })).toBeNull();
+    expect(generatePosts()).toHaveLength(0);
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+  });
+
+  test("Escape answers the question as a cancel — nothing runs (DESIGN §7)", async () => {
+    const user = userEvent.setup();
+    render(
+      <ShellProviders>
+        <PublishDraft />
+        <Header />
+      </ShellProviders>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    expect(screen.getByRole("dialog", { name: generateDraftTitle })).toBeTruthy();
+
+    // a key that is not Escape answers nothing
+    fireEvent.keyDown(window, { key: "Shift" });
+    expect(screen.getByRole("dialog", { name: generateDraftTitle })).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog", { name: generateDraftTitle })).toBeNull();
+    expect(generatePosts()).toHaveLength(0);
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+  });
+
+  test("a failed write answers the question with nothing to run", async () => {
+    const user = userEvent.setup();
+    // The editor's save path resolves null when the write failed — the refusal is
+    // spoken by the editor, so the header adds nothing and runs nothing. (An invalid
+    // draft never reaches the save path: the dialog refuses it on the published
+    // verdict — see the "Run this draft" refusal test.)
+    const RefusingDraft = () => {
+      const { setDraftRun } = useEditorDirty();
+      const draftRef = useRef<CampaignBrief>(onScreenDraft);
+      const blockedRef = useRef<SectionId | null>(null);
+      useEffect(() => {
+        setDraftRun({
+          draftRef,
+          blockedRef,
+          refuseInvalid: () => false,
+          saveAndRun: () => Promise.resolve(null),
+        });
+        return () => setDraftRun(null);
+      }, [setDraftRun, draftRef, blockedRef]);
+      return null;
+    };
+    render(
+      <ShellProviders>
+        <RefusingDraft />
+        <Header />
+      </ShellProviders>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: generateDraftTitle })).getByRole("button", {
+        name: new RegExp(`^${generateDraftSaveRun}`),
+      }),
+    );
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: generateDraftTitle })).toBeNull());
+    expect(generatePosts()).toHaveLength(0);
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+  });
+
+  test('"Run this draft" on a draft the editor refuses: no POST, the section named, the reveal performed', async () => {
+    const user = userEvent.setup();
+    // A half-filled brief must never reach the run endpoint — the pipeline would
+    // start and the user would be charged for a run the server refuses. The
+    // handoff carries the editor's verdict (`blockedRef`), and the refusal is the
+    // editor's own (attempted → reveal → focus), captured at press time.
+    const refuseInvalid = vi.fn(() => true);
+    const BlockDraft = () => {
+      const { setDraftRun } = useEditorDirty();
+      const draftRef = useRef<CampaignBrief>(onScreenDraft);
+      const blockedRef = useRef<SectionId | null>("products");
+      useEffect(() => {
+        setDraftRun({ draftRef, blockedRef, refuseInvalid, saveAndRun: () => Promise.resolve(null) });
+        return () => setDraftRun(null);
+      }, [setDraftRun, draftRef, blockedRef, refuseInvalid]);
+      return null;
+    };
+    render(
+      <ShellProviders>
+        <BlockDraft />
+        <Header />
+      </ShellProviders>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: generateDraftTitle })).getByRole("button", {
+        name: new RegExp(`^${generateDraftRunThis}`),
+      }),
+    );
+
+    // The question is answered (nothing stays modal over the revealed section)…
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: generateDraftTitle })).toBeNull());
+    // …the money: the run never left the page…
+    expect(generatePosts()).toHaveLength(0);
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+    // …the refusal names the blocking section (the one-vocabulary title)…
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe(generateDraftBlocked(SECTION_TITLES.products)),
+    );
+    // …and the editor's reveal ran — the navigation to the blocking section.
+    expect(refuseInvalid).toHaveBeenCalledTimes(1);
+  });
+
+  test("the three-way takes focus when it opens and traps Tab inside itself", async () => {
+    const user = userEvent.setup();
+    render(
+      <ShellProviders>
+        <PublishDraft />
+        <Header />
+      </ShellProviders>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    const dialog = screen.getByRole("dialog", { name: generateDraftTitle });
+
+    // Focus entered the dialog on open — a keyboard user is IN the question, not
+    // left behind on the page it floats over.
+    expect(dialog.contains(document.activeElement)).toBe(true);
+
+    // …and Tab cannot leave it: forward from the last control wraps to the first,
+    // backward from the first wraps to the last.
+    const run = within(dialog).getByRole("button", { name: new RegExp(`^${generateDraftRunThis}`) });
+    const cancel = within(dialog).getByRole("button", { name: "Cancel" });
+    cancel.focus();
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(document.activeElement).toBe(run);
+
+    run.focus();
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(cancel);
+  });
+
+  test("closing the three-way restores focus to the verb that opened it", async () => {
+    const user = userEvent.setup();
+    render(
+      <ShellProviders>
+        <PublishDraft />
+        <Header />
+      </ShellProviders>,
+    );
+
+    const generate = screen.getByRole("button", { name: "Generate" });
+    await user.click(generate);
+    await user.click(within(screen.getByRole("dialog", { name: generateDraftTitle })).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog", { name: generateDraftTitle })).toBeNull();
+    // The trap hands focus back where it came from — the page behind an open modal
+    // is not operable while it stands, and closing puts the user back where the
+    // gesture started.
+    expect(document.activeElement).toBe(generate);
+  });
+
+  test("without a differing draft the press behaves as it always has (the C4 path)", async () => {
+    const user = userEvent.setup();
+    mockPipelineApi({ job: () => jobOk({ halted: false, assets: [], log: { entries: [] } }) });
+    renderWithRun(
+      <>
+        <ApplyBrief />
+        <Header />
+      </>,
+    );
+    await user.click(screen.getByRole("button", { name: "apply" }));
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    // No three-way, no guard dialog: the committed brief runs at once.
+    expect(screen.queryByRole("dialog", { name: generateDraftTitle })).toBeNull();
+    await waitFor(() => expect(generatePosts()).toHaveLength(1));
+    const body = JSON.parse(String(generatePosts()[0][1]?.body)) as { id?: string };
+    expect(body.id).toBe("applied-brief");
   });
 });
 

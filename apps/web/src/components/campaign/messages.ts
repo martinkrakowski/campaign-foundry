@@ -14,7 +14,7 @@
 // --- Identity ---
 
 /** `briefId` */
-export const briefId = "Brief ID can only use small letters, numbers and dashes — try something like summer-launch.";
+export const briefId = "Brief ID can only use small letters, numbers and dashes — try something like summer-spark.";
 /** `briefId.duplicate` */
 export function briefIdDuplicate(conflictingId: string): string {
   return `A brief called ${conflictingId} already exists — pick a different Brief ID.`;
@@ -31,7 +31,7 @@ export const targetRegion = "No region yet — pick one of the region chips.";
 /** `targetAudience` */
 export const targetAudience = "No audience yet — tell us who this campaign is for.";
 export const campaignNameLabel = "Campaign Name";
-export const campaignNamePlaceholder = "e.g. Summer Launch";
+export const campaignNamePlaceholder = "e.g. Summer Spark";
 export const briefIdReadout = "This is the brief id — made from the name";
 export const briefIdCopy = "Copy";
 export const briefIdCopied = "Copied ✓";
@@ -222,13 +222,17 @@ export const durationDuplicate = "Two clip lengths are the same — remove one o
 
 // --- Status ---
 
-/** `status.applied` */
+/**
+ * `status.applied` — the draft is committed (saved, or loaded from a file) and clean.
+ * D35: "applied" no longer appears in rendered copy — committing and running are one
+ * continuous story now, and the run verb is Generate, wherever it lives.
+ */
 export function statusApplied(briefId: string): string {
-  return `Applied — press Generate in the top bar to make ${briefId}.`;
+  return `Saved — press Generate in the top bar to make ${briefId}.`;
 }
-/** `status.applyRefusal` — applied, but the host cannot run video (its own string, not the field error). */
+/** `status.applyRefusal` — committed, but the host cannot run video (its own string, not the field error). */
 export const statusApplyRefusal =
-  "Applied, but video cannot be made on this computer right now — Generate will wait until it is set up.";
+  "The brief is complete, but video cannot be made on this computer right now — Generate will wait until it is set up.";
 /** `status.leavePrompt` */
 export const statusLeavePrompt = "You have changes that are not saved yet — leave anyway?";
 export const confirmDialogTitle = "Unsaved edits";
@@ -301,15 +305,15 @@ export function statusAlmostThere(): SectionSentence {
 
 export function statusNotApplied(errorCount: number): SectionSentence {
   return {
-    lead: `Not applied — ${errorCount} ${errorCount === 1 ? "thing" : "things"} to fix in`,
-    tail: `. Fix the marked ${errorCount === 1 ? "field" : "fields"}, or Save without applying.`,
+    lead: `Not saved yet — ${errorCount} ${errorCount === 1 ? "thing" : "things"} to fix in`,
+    tail: `. Fix the marked ${errorCount === 1 ? "field" : "fields"}, then Save.`,
   };
 }
 
-export const statusReady = "Ready — Apply to run, or Save & apply to keep it.";
+export const statusReady = "Ready — Save to keep it, or press Generate in the top bar to run it.";
 
 export function statusLoaded(briefId: string): string {
-  return `Loaded ${briefId} — Apply to run to stage it.`;
+  return `Loaded ${briefId} — press Generate in the top bar to run it.`;
 }
 
 /** Join list items the way a sentence reads them: "a", "a and b", "a, b and c". */
@@ -519,16 +523,62 @@ export const themeToDark = "Switch to the dark theme";
 // --- Header (W5) ---
 
 /**
- * The header's run verb (D32). It runs the applied brief and takes the user to the
- * grid; it is never disabled, so everything it refuses to do it says here.
+ * The header's run verb (D32). It runs the committed brief and takes the user to the
+ * grid; it is never disabled, so everything it refuses to do it says here. When the
+ * editor is mounted with an unsaved draft, the press opens the three-way question
+ * (`generateDraftTitle` below) instead.
  */
 export const generate = "Generate";
 /**
- * `header.generate` with nothing applied. The remedy is the one control that stages a
- * brief — Apply, in the editor's action bar — and the header routes to the view that
- * carries it, because that bar does not exist anywhere else.
+ * `header.generate` with nothing committed to run. The remedy is a saved brief, and
+ * the route it names is where the editor lives. D35: "press Apply to run" is gone —
+ * that verb no longer exists.
  */
-export const generateNoBrief = "Nothing applied yet — press Apply to run on the brief first.";
+export const generateNoBrief = "Nothing is ready to run yet — open the Brief editor and save a brief first.";
+
+/* ── The three-way Generate question (D35) ── */
+
+/**
+ * While the editor is mounted and its on-screen draft differs from the shell's
+ * committed brief, Generate asks which brief to run. Three answers, exactly one
+ * prompt: this question replaces the dirty guard's prompt for the whole gesture
+ * (the lane's "never the guard's and the confirm's"), so the choices navigate
+ * without a second question.
+ */
+export const generateDraftTitle = "Run the brief you are editing?";
+export const generateDraftRunThis = "Run this draft";
+export const generateDraftRunThisHint = "Run what is on screen without writing it to disk.";
+export const generateDraftSaveRun = "Save and run";
+export const generateDraftSaveRunHint = "Write the brief to disk, then run the saved file.";
+export const confirmCancel = "Cancel";
+/**
+ * "Run this draft" pressed while the draft would not pass validation (GB-D3 — the
+ * verb is never disabled, so the press is the question and this is the answer). The
+ * D2 shape — what is missing, then the one thing to do — naming the first section
+ * that stands in the way; the editor has already revealed it and handed it focus.
+ * The label comes from the one section vocabulary (`SECTION_TITLES`) at the call site.
+ */
+export function generateDraftBlocked(sectionLabel: string): string {
+  return `${sectionLabel} still needs attention before this draft can run — fix what is marked there.`;
+}
+
+/* ── The editor's action-bar verbs (D35/D40) ── */
+
+/** The bar's primary verb: one press writes the file, and the shell runs what was written (D35 — every persist path applies). */
+export const editorSave = "Save";
+/** The copy verb, in the overflow (⋯): the same, under a new id. */
+export const editorSaveAs = "Save as…";
+/**
+ * D40: the exit verb. It leaves the editor for the grid, prompting through the dirty
+ * guard when there is unsaved work — the prompt the user's report asked for.
+ */
+export const editorCancel = "Cancel";
+/**
+ * D40: the destructive verb, split out of the old Discard. It restores the last
+ * saved state and asks first, through the same confirmation every other replace
+ * path uses.
+ */
+export const editorRevert = "Revert";
 /**
  * The header's telemetry control. It opens a panel rather than performing an action on
  * a draft, so the name names the panel — it never trips the unsaved-changes guard.
@@ -570,19 +620,21 @@ export const stepSubtitleReview = "Last look, then send it to the pipeline.";
 export const statusStepReady = "Looking good.";
 /**
  * The review step's footer status sentence. It states readiness rather than naming a
- * control: Review supplies no Next, so an instruction to "press Review & launch" sent
- * the user looking for a button that is not on the step. W8 places the action bar
- * here, and the instruction belongs with it.
+ * control: Review supplies no Next, and the run verb (Generate) lives in the top bar.
  */
 export const statusStepReview = "Everything checks out — this is the last look.";
 /** The review step's body: the brief has met every step, so this is the last look. */
 export const stepReviewIntro =
-  "The brief is in shape. This is the last look before any of it runs — launch when you are ready.";
+  "The brief is in shape. This is the last look — Generate in the top bar runs it.";
 /** Step footer verbs. */
 export const stepBack = "Back";
 export const stepNext = "Next";
-/** The last section step's Next, before the review step. */
-export const stepNextReviewLaunch = "Review & launch";
+/**
+ * The last section step's Next, before the review step. D35: "Review & launch"
+ * promised a launch the review step does not carry — the run verb is Generate in
+ * the top bar, so the label only names where the walk goes next.
+ */
+export const stepNextReview = "Review & finish";
 
 /* ── The step segbar and the step gestures (W7) ───────────────────────────── */
 
