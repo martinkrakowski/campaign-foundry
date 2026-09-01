@@ -554,14 +554,10 @@ export const confirmCancel = "Cancel";
 
 /* ── The editor's action-bar verbs (D35/D40) ── */
 
-/** The disclosure button's label and the menu's accessible name. */
-export const saveMenuLabel = "Save";
-/** The first menu item: write the file, and the shell runs it (D35 — every persist path applies). */
-export const saveMenuItemSave = "Save";
-export const saveMenuItemSaveHint = "Write the file and use it for the next run";
-/** The second menu item: the same, under a new id. */
-export const saveMenuItemSaveAs = "Save as…";
-export const saveMenuItemSaveAsHint = "Write a copy under a new id";
+/** The bar's primary verb: one press writes the file, and the shell runs what was written (D35 — every persist path applies). */
+export const editorSave = "Save";
+/** The copy verb, in the overflow (⋯): the same, under a new id. */
+export const editorSaveAs = "Save as…";
 /**
  * D40: the exit verb. It leaves the editor for the grid, prompting through the dirty
  * guard when there is unsaved work — the prompt the user's report asked for.

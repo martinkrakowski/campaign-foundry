@@ -395,8 +395,16 @@ Skeletal by design — patterns to extend, not a library.
   `--color-modified` token the fourth state introduced (§2) is the surviving tint.
 - **ErrorStrip** — one `rounded-full` chip per section with errors, red border/tint, count
   pill; clicking scrolls to the section. Lives in the action bar.
-- **SaveMenu** — "Save ▾" opening upward (it sits in a footer): *Save*,
-  *Save as…*, each with a one-line description. `role="menu"` / `menuitem`, Escape and outside-click close. "Apply" appears in no item: both ways to persist also commit the brief the shell runs.
+- **Save** — the bar's primary verb, one press, no menu: it writes the file and commits
+  the brief the shell runs (the verb model below — every persist path applies). Never
+  disabled (D3): pressing an invalid brief is how the user asks what is wrong, so it
+  answers with the refusal; the verb is held back only while a write is in flight
+  (`isLoading`, `aria-busy`). A disclosure whose first item was also called *Save*
+  existed briefly and was retired — the same two-labels-one-verb confusion in a new
+  shape.
+- **Save as…** — the copy verb, in the bar's overflow (`⋯`) beside YAML split and
+  *Revert*: writes a copy under a new id, with the id rule shown as typed, the
+  slugified suggestion offered as a click, and an explicit overwrite confirm.
 - **EstimatePanel**, **HeadlinePoolDrawer**, **BriefSelector** — panels; a panel that can be
   in a loading, empty, error or unavailable state renders each one explicitly.
 - **StatusLine** (L1.3) — `role="status"`, progressive sentence that updates as the brief is
@@ -404,8 +412,8 @@ Skeletal by design — patterns to extend, not a library.
   *Almost there — fill Products to make it runnable* → *Ready — Save to keep it, or press
   Generate in the top bar to run it* → *Saved — press Generate in the top bar to make
   ${briefId}*. Refusal sentence on Save with errors.
-- **The verb model (D35/D40, amends UE-D3).** The editor's bar is *Cancel · Save ▾ · ⋯*
-  (YAML split and *Revert* behind the overflow). *Apply to run* is retired — it named an
+- **The verb model (D35/D40, amends UE-D3).** The editor's bar is *Cancel · Save · ⋯*
+  (*Save as…*, YAML split and *Revert* behind the overflow). *Apply to run* is retired — it named an
   implementation detail of "the shell needs a brief to run", and every persist path already
   committed it. Run-without-write survives on the **Generate** side: while the editor is
   mounted and its on-screen draft differs from the shell's brief, Generate asks

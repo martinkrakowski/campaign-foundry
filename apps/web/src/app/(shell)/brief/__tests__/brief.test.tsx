@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRun } from "@/__tests__/helpers";
+import * as messages from "@/components/campaign/messages";
 import BriefPage from "../page";
 
 /**
@@ -15,10 +16,15 @@ const Editor = () => (
   </>
 );
 
-/** Save actions live behind the "Save" menu now: open it, then pick the item. */
+/** Corrected for D35's verb model: Save is the bar's primary, one press; Save as…
+ *  lives in the overflow — the old disclosure that hid Save behind Save is gone. */
 const saveVia = async (user: ReturnType<typeof userEvent.setup>, item: "Save" | "Save as") => {
-  await user.click(screen.getByRole("button", { name: /^Save$/ }));
-  await user.click(await screen.findByRole("menuitem", { name: item === "Save" ? /^Save(?!\s*as)/ : /^Save as/ }));
+  if (item === "Save") {
+    await user.click(screen.getByRole("button", { name: /^Save$/ }));
+    return;
+  }
+  await user.click(screen.getByText("⋯"));
+  await user.click(await screen.findByText(messages.editorSaveAs));
 };
 
 beforeEach(() => {

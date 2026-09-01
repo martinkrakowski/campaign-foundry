@@ -1,12 +1,11 @@
 "use client";
 
-import { useReducer, useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect, type ReactNode } from "react";
+import { useReducer, useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect, type ReactNode, type RefObject } from "react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { Button, Input, SegBar } from "@/components/ui";
 import { useRun } from "@/lib/run-context";
 import { useRouter } from "next/navigation";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
-import { useEditorDirty, type DraftRunHandoff } from "@/lib/editor-dirty-context";
 import {
   listBriefs,
   createBrief,
@@ -46,7 +45,7 @@ import { StatusChip } from "@/components/campaign/StatusChip";
 import { StatusLine } from "@/components/campaign/StatusLine";
 import { ErrorStrip, MOTION_ERROR_KEY, MOTION_HOST_SECTION } from "@/components/campaign/ErrorStrip";
 import { ErrorPill } from "@/components/ui/error-pill";
-import { SaveMenu } from "@/components/campaign/SaveMenu";
+import { useEditorDirty, type DraftRunHandoff } from "@/lib/editor-dirty-context";
 import { FloatingBar } from "@/components/shell/FloatingBar";
 import { SectionModeContext } from "@/components/campaign/SectionModeContext";
 import { useEditorPanels } from "@/lib/editor-panels-context";
@@ -793,7 +792,12 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
       return;
     }
     const handoff: DraftRunHandoff = {
-      draftRef: draftRunDraftRef,
+      // Assigned every render: null exactly when `!draftDiffers`, which is when this
+      // effect's other branch unpublishes the handoff — so while the handoff stands
+      // the ref always holds the freshest draft. The cast only restates that
+      // invariant for the type, the same way `saveAndRun`'s does below; the dialog
+      // that reads it has no null branch to guard, because none exists.
+      draftRef: draftRunDraftRef as Readonly<RefObject<CampaignBrief>>,
       // Assigned every render before any handoff can be published, so the cast only
       // restates the invariant — the call itself is always the freshest save.
       saveAndRun: () => (draftRunSaveRef.current as () => Promise<CampaignBrief | null>)(),
@@ -988,24 +992,28 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   const actionVerbs = (
     <>
       {/*
-        D35 — the verb model: `Cancel` exits to the grid, the Save menu persists,
-        and "Apply to run" is retired (every persist path already commits the brief,
-        so a third verb for the same idea was the confusion the user reported).
-        D40 — Revert, the destructive half of the old Discard, lives behind the
-        overflow: it is the one verb here that throws work away, so it confirms. */}
+        D35 — the verb model: `Cancel` exits to the grid, `Save` persists with one
+        press, and "Apply to run" is retired (every persist path already commits the
+        brief, so a third verb for the same idea was the confusion the user reported).
+        A disclosure that hid Save behind Save was the same two-labels-one-verb
+        problem in a new shape, so the primary is a plain button.
+        D40 — Revert and the secondary `Save as…` live behind the overflow, which
+        also keeps the developer affordances off the primary row. */}
       <Button variant="ghost" onClick={handleCancel}>
         {messages.editorCancel}
       </Button>
-      <SaveMenu
+      <Button
         /* D3: never a dead primary button — pressing an invalid brief sets
            `attempted`, reveals every error and speaks the refusal. */
-        saving={saving}
-        onSave={() => void handleSave()}
-        onSaveAs={() => setSaveAsId("")}
-      />
+        disabled={saving}
+        isLoading={saving}
+        onClick={() => void handleSave()}
+      >
+        {messages.editorSave}
+      </Button>
       {/* D3: the bar's primary row is the status sentence and the two verbs.
-          Developer affordances and Revert live behind the overflow so the
-          sentence has room. */}
+          Save as…, developer affordances and Revert live behind the overflow so
+          the sentence has room. */}
       <details className="relative">
         <summary
           className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md text-text-muted hover:bg-surface-2 hover:text-text-primary"
@@ -1014,6 +1022,13 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
           ⋯
         </summary>
         <div className="absolute bottom-full right-0 z-30 mb-2 min-w-[200px] rounded-md border border-border bg-surface p-1 shadow-2xl">
+          <button
+            type="button"
+            className="w-full rounded-sm px-3 py-2 text-left text-[13px] text-text-primary hover:bg-surface-2"
+            onClick={() => setSaveAsId("")}
+          >
+            {messages.editorSaveAs}
+          </button>
           <button
             type="button"
             className="w-full rounded-sm px-3 py-2 text-left text-[13px] text-text-primary hover:bg-surface-2"

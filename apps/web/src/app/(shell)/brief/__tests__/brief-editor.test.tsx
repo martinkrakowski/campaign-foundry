@@ -40,10 +40,21 @@ const NewEditorWithPicker = () => {
   );
 };
 
-/** Save actions live behind the "Save" menu now: open it, then pick the item. */
+/** Corrected for D35's verb model: Save is the bar's primary, one press; Save as…
+ *  lives in the overflow — the old disclosure that hid Save behind Save is gone. */
 const saveVia = async (user: ReturnType<typeof userEvent.setup>, item: "Save" | "Save as") => {
-  await user.click(screen.getByRole("button", { name: /^Save$/ }));
-  await user.click(await screen.findByRole("menuitem", { name: item === "Save" ? /^Save(?!\s*as)/ : /^Save as/ }));
+  if (item === "Save") {
+    await user.click(screen.getByRole("button", { name: /^Save$/ }));
+    return;
+  }
+  await user.click(screen.getByText("⋯"));
+  await user.click(await screen.findByText(messages.editorSaveAs));
+};
+
+/** Shows the brief the shell would run, so a test can assert Save retargeted the run. */
+const RunBriefProbe = () => {
+  const { brief } = useRun();
+  return <span data-testid="run-brief">{brief.id}</span>;
 };
 
 const brief = (id: string) => ({
@@ -233,6 +244,82 @@ describe("BriefPage — data flow", () => {
 
     await saveVia(user, "Save");
     expect(await screen.findByText(/conflict/)).toBeTruthy();
+  });
+
+  test("Save is one press — it writes and retargets the run, with no menu in between", async () => {
+    const user = userEvent.setup();
+    const calls = routes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      put: () => json({ file: "camp.yaml", brief: brief("camp"), revision: "r2" }),
+    });
+    renderWithRun(
+      <>
+        <RunBriefProbe />
+        <Editor />
+      </>,
+    );
+    await user.click(screen.getByText("New brief..."));
+    await user.click(await screen.findByText("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    // The verb model (D35): Save is the verb itself, not a disclosure whose first
+    // item is also called Save — the bar must carry no menu before the press.
+    expect(screen.queryByRole("menu")).toBeNull();
+    await user.click(screen.getByRole("button", { name: /^Save$/ }));
+
+    const write = await waitFor(() => {
+      const call = writes(calls)[0];
+      expect(call).toBeTruthy();
+      return call!;
+    });
+    expect(write.method).toBe("PUT");
+    // and the shell runs what was written — one press did both
+    await waitFor(() => expect(screen.getByTestId("run-brief").textContent).toBe("camp"));
+    // still no menu afterwards: one press, one write, nothing else opened
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  test("Save as… is reachable in one press from the overflow", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<Editor />);
+    await waitForEditorReady();
+
+    await user.click(screen.getByText("⋯"));
+    await user.click(screen.getByText(messages.editorSaveAs));
+
+    // the dialog is the Save-as surface, exactly as it was behind the old disclosure
+    expect(screen.getByRole("dialog", { name: /Save as/ })).toBeTruthy();
+  });
+
+  test("Save is held back only while a write is in flight, and says so", async () => {
+    const user = userEvent.setup();
+    let release!: () => void;
+    const gate = new Promise<Response>((resolve) => {
+      release = () => resolve(json({ file: "x.yaml", brief: brief("camp"), revision: "mock-rev" }));
+    });
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }), put: () => gate });
+    renderWithRun(<Editor />);
+    await user.click(screen.getByText("New brief..."));
+    await user.click(await screen.findByText("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    const save = screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+    await user.click(save);
+
+    // In flight: the button is disabled and wears `aria-busy` (the isLoading render
+    // replaces its label with the spinner, so find it by the busy state). This is the
+    // only thing that closes the verb off — an invalid draft never does (D3).
+    await waitFor(() => {
+      const busy = screen.getAllByRole("button").find((b) => b.getAttribute("aria-busy") === "true");
+      expect(busy).toBeTruthy();
+      expect((busy as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    release();
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^Save$/ })).toBeTruthy());
+    expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   test("Save as... creates a copy under the new id and closes the dialog", async () => {
@@ -1107,7 +1194,7 @@ describe("BriefPage — data flow", () => {
     // reference captured beforehand can be stale by the time the draft turns invalid.
     expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false);
 
-    // "Save" opens the menu; the verb the user actually presses is inside it.
+    // Save is the verb itself now (one press); Save as… sits in the overflow.
     await saveVia(user, "Save");
     await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "elsewhere");
