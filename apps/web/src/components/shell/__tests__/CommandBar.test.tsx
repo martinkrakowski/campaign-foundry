@@ -2,7 +2,6 @@ import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, waitFor, within, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, Fragment } from "react";
-import { useEffect } from "react";
 import { renderWithRun, seedPersistedRun, makeAsset, exerciseFocusTrap, json, mockPipelineApi } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import { CommandBar } from "../CommandBar";
@@ -85,33 +84,23 @@ describe("CommandBar", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
-  test("cannot re-roll a classic run once the brief is randomized — the control still answers, and says why", async () => {
+  test("cannot re-roll a classic run recorded under a randomized brief — the control still answers, and says why", async () => {
     const user = userEvent.setup();
     localStorage.setItem("cf:decisions", JSON.stringify({ "alpha/1:1/default": "rejected" }));
-    seedPersistedRun([makeAsset()]);
-    // switch the (same) brief to a randomized campaign after the classic run is showing
-    const Randomize = () => {
-      const { brief, setBrief, hasRun } = useRun();
-      // only once the persisted run has attached — setBrief before that would race the restore
-      useEffect(() => {
-        if (hasRun && brief.mode !== "variation") {
-          setBrief({ ...brief, mode: "variation", variation: { count: 1 } } as never);
-        }
-      }, [hasRun, brief, setBrief]);
-      return null;
-    };
-    renderWithRun(
-      <>
-        <Randomize />
-        <CommandBar onToggleTelemetry={() => {}} />
-      </>,
-    );
+    // The mismatch the mode guard refuses: a persisted classic report that restores
+    // under a brief on file which is a randomized campaign (R6 — the re-roll would
+    // POST the recorded brief, whose mode disagrees with the classic targets).
+    localStorage.setItem("cf:brief", JSON.stringify(variationBrief));
+    mockPipelineApi({
+      report: { halted: false, assets: [makeAsset()], log: { entries: [], campaignId: "seed" } },
+    });
+    renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
     const regen = (await screen.findByText(/Regenerate/)).closest("button") as HTMLButtonElement;
     // The verb stays live: disabling it made the tap do nothing at all, and `title` is
     // unreachable on a touch device, so the refusal never reached the user.
     await waitFor(() =>
       expect(screen.getByRole("status").textContent).toMatch(
-        /came from a classic run, but the brief is now a randomized campaign/,
+        /came from a classic run, but the brief they were produced under is now a randomized campaign/,
       ),
     );
     expect(regen.disabled).toBe(false);
@@ -123,7 +112,9 @@ describe("CommandBar", () => {
     // Refused, so no confirm — but the bar now states the reason as well.
     expect(screen.queryByRole("dialog")).toBeNull();
     await waitFor(() =>
-      expect(screen.getAllByText(/came from a classic run, but the brief is now a randomized campaign/)).toHaveLength(2),
+      expect(
+        screen.getAllByText(/came from a classic run, but the brief they were produced under is now a randomized campaign/),
+      ).toHaveLength(2),
     );
   });
 

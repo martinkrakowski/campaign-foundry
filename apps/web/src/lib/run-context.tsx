@@ -356,13 +356,16 @@ interface RunContextValue {
   /**
    * Re-roll only the creatives currently marked rejected: regenerates those cells,
    * merges them back in, and returns them to review (clears their decisions). No-op
-   * when nothing is rejected. Approved/pending creatives are left untouched.
+   * when nothing is rejected. Approved/pending creatives are left untouched. The
+   * re-roll POSTs the brief the run actually ran — recorded beside its result —
+   * never the shell's active brief, which a draft run leaves untouched (R6).
    */
   regenerateRejected: () => Promise<void>;
   /**
    * The mode the current run was produced under, read off its assets (a randomized
    * run carries `variantIndex`), or null with no run. A re-roll is only possible
-   * when this matches the brief's mode — the targets are keyed differently otherwise.
+   * when this matches the mode of the brief the run actually ran — the targets are
+   * keyed differently otherwise.
    */
   runMode: "brief" | "variation" | null;
   /** Why a re-roll is impossible right now, or null. */
@@ -376,6 +379,12 @@ interface RunContextValue {
   policyHash?: string;
   /** Variation-plan seed, when the current run produced one. */
   seed?: number;
+  /**
+   * The campaign id the run on screen was produced under (null with no run) — the
+   * report, its packages and its re-rolls all key by this, never by the shell
+   * brief's id, which a "Run this draft" run never took on (R6).
+   */
+  ranCampaignId: string | null;
   /**
    * Bumped each time a run completes. Appended to creative image URLs as a cache
    * buster — runs overwrite the same output paths, so without it the browser
@@ -424,11 +433,26 @@ interface RunContextValue {
 
 const EMPTY_LOG: LogEntry[] = [];
 
+/**
+ * A committed run and the brief that produced it — always committed together. The
+ * pairing is the fix for the re-roll-after-a-draft-run defect: `execute()` can run
+ * an on-screen draft (D35) the shell does not hold, so "which campaign did these
+ * assets come from?" is a property of the run, not of the shell. Carrying the target
+ * on the same state (rather than a ref or a second state) makes it unrepresentable
+ * to commit a result without naming its producer, and gives the re-roll guard and
+ * every result-scoped action one consistent, reactive source to read.
+ */
+interface CommittedRun {
+  result: RunResult;
+  /** The brief this run POSTed — the shell's, or the draft "Run this draft" handed in. */
+  target: CampaignBrief;
+}
+
 const RunContext = createContext<RunContextValue | null>(null);
 
 export function RunProvider({ children }: { children: ReactNode }) {
   const [brief, setBriefState] = useState<CampaignBrief>(DEFAULT_BRIEF);
-  const [result, setResult] = useState<RunResult | null>(null);
+  const [run, setRun] = useState<CommittedRun | null>(null);
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -515,7 +539,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
         /* storage unavailable — brief just won't persist across reloads */
       }
       // (1) Already showing this brief's run — leave the grid (and decisions) intact.
-      if (result?.log?.campaignId === next.id) return;
+      // The run's recorded target is left alone too: the run on screen was produced by
+      // the brief as it was when it ran, and a re-roll must keep regenerating under
+      // that — never under this newer same-id edit (R6).
+      if (run?.result.log?.campaignId === next.id) return;
       setEstimateData(null);
       setEstimateError(null);
       setEstimateStatus("idle");
@@ -534,16 +561,17 @@ export function RunProvider({ children }: { children: ReactNode }) {
       // (2)/(3) Clear, then adopt this brief's own persisted run if one exists. The API
       // keys reports by campaign id, so we ask for exactly this brief's report — every
       // brief's run survives independently, not just the most recent. Empty → grid stays
-      // in the "ready to run" state.
-      setResult(null);
+      // in the "ready to run" state. The restored run's target is the brief being
+      // loaded: it is the only producer we can honestly name for it.
+      setRun(null);
       setDecisions({});
       void fetchPersistedRun(next.id).then((d) => {
         if (briefIdRef.current !== next.id || !d) return; // superseded, or no run on disk
-        setResult(d);
+        setRun({ result: d, target: next });
         if (d.assets?.length) setAssetVersion((v) => v + 1);
       });
     },
-    [result],
+    [run],
   );
 
   // Derived, not stored: "applied" is a statement about the brief the shell holds, and
@@ -583,10 +611,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
     }
     // Restore any real persisted run for the starting brief (fetchPersistedRun applies
     // the shared "real run for this campaign" rule). Guard against a brief switch racing
-    // this initial fetch.
+    // this initial fetch. The restored run's target is the brief it is restored under.
     void fetchPersistedRun(startBrief.id).then((d) => {
       if (!active || briefIdRef.current !== startBrief.id || !d) return;
-      setResult(d);
+      setRun({ result: d, target: startBrief });
       if (d.assets?.length) setAssetVersion((v) => v + 1);
     });
     return () => {
@@ -688,14 +716,17 @@ export function RunProvider({ children }: { children: ReactNode }) {
       if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this
       if (outcome.kind === "lost") {
         // The job vanished mid-run. Whatever is on disk is the *previous* run, so show
-        // it without pretending it is new: no cache-bust, review decisions kept.
+        // it without pretending it is new: no cache-bust, review decisions kept. It
+        // shares the target's campaign id, so the target is recorded unchanged.
         const persisted = await fetchPersistedRun(target.id);
         if (runSeq.current !== owned) return;
-        if (persisted) setResult(persisted);
+        if (persisted) setRun({ result: persisted, target });
         setError(LOST_JOB_MESSAGE);
         return;
       }
-      setResult(outcome.result);
+      // Commit the result beside the brief it actually ran — the draft handed in when
+      // there was one, so every result-scoped action can key off it (R6).
+      setRun({ result: outcome.result, target });
       setAssetVersion((v) => v + 1);
       setDecisions({});
       setError(null); // the result replaces any stale complaint about this run
@@ -708,21 +739,30 @@ export function RunProvider({ children }: { children: ReactNode }) {
   }, [brief, postGenerate]);
 
   const runMode = useMemo<"brief" | "variation" | null>(() => {
-    const assets = result?.assets ?? [];
+    const assets = run?.result.assets ?? [];
     if (assets.length === 0) return null;
     return assets.some((a) => a.variantIndex !== undefined) ? "variation" : "brief";
-  }, [result]);
+  }, [run]);
   const rerollBlockedReason = useMemo(() => {
-    const briefMode = brief.mode ?? "brief";
-    if (runMode === null || runMode === briefMode) return null;
+    // The re-roll POSTs the brief the run actually ran (the recorded target), so the
+    // mode it must agree with is that brief's — not the shell's current brief, which
+    // the user may have edited (or replaced with a draft) since the run (R6).
+    const targetMode = run?.target.mode ?? "brief";
+    if (runMode === null || runMode === targetMode) return null;
     return runMode === "brief"
-      ? "These creatives came from a classic run, but the brief is now a randomized campaign — the mode changed since that run, so they cannot be re-rolled. Run the full campaign."
-      : "These creatives came from a randomized run, but the brief is now a classic campaign — the mode changed since that run, so they cannot be re-rolled. Run the full campaign.";
-  }, [runMode, brief.mode]);
+      ? "These creatives came from a classic run, but the brief they were produced under is now a randomized campaign — the mode changed since that run, so they cannot be re-rolled. Run the full campaign."
+      : "These creatives came from a randomized run, but the brief they were produced under is now a classic campaign — the mode changed since that run, so they cannot be re-rolled. Run the full campaign.";
+  }, [runMode, run]);
 
   const regenerateRejected = useCallback(async () => {
-    const rejected = (result?.assets ?? []).filter((a) => decisions[assetKey(a)] === "rejected");
-    if (rejected.length === 0) return;
+    const current = run;
+    const rejected = (current?.result.assets ?? []).filter((a) => decisions[assetKey(a)] === "rejected");
+    if (current === null || rejected.length === 0) return;
+    // The brief this run actually ran — an override draft when "Run this draft" was
+    // used, the shell's brief otherwise. A re-roll regenerates the assets on screen,
+    // so it must go out under exactly this brief; the shell's active brief is never
+    // consulted (R6).
+    const target = current.target;
     // Defence in depth: the command bar disables the control, but a stale render must
     // not be able to send targets keyed for the other mode.
     if (rerollBlockedReason !== null) {
@@ -748,7 +788,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setError(null);
     try {
-      const jobId = await postGenerate({ brief, regenerateOnly: targets });
+      const jobId = await postGenerate({ brief: target, regenerateOnly: targets });
       if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this press
       const started = beginRun();
       owned = started.seq;
@@ -762,18 +802,22 @@ export function RunProvider({ children }: { children: ReactNode }) {
       }
       const data = outcome.result;
       // The response carries only the regenerated cells — overlay them onto the
-      // existing set by identity so approved/pending creatives are preserved.
-      setResult((prev) => {
+      // existing set by identity so approved/pending creatives are preserved. The
+      // recorded target is unchanged: the re-roll ran under exactly that brief.
+      setRun((prev) => {
         /* istanbul ignore next -- regenerate runs only with an existing run, so prev is non-null */
-        const existing = prev?.assets ?? [];
-        const byKey = new Map(existing.map((a) => [assetKey(a), a] as const));
+        if (prev === null) return prev;
+        const byKey = new Map(prev.result.assets.map((a) => [assetKey(a), a] as const));
         for (const a of data.assets) byKey.set(assetKey(a), a);
         return {
-          halted: data.halted,
-          assets: [...byKey.values()],
-          log: data.log,
-          policyHash: data.policyHash ?? prev?.policyHash,
-          seed: data.seed ?? prev?.seed,
+          result: {
+            halted: data.halted,
+            assets: [...byKey.values()],
+            log: data.log,
+            policyHash: data.policyHash ?? prev.result.policyHash,
+            seed: data.seed ?? prev.result.seed,
+          },
+          target: prev.target,
         };
       });
       setAssetVersion((v) => v + 1);
@@ -795,7 +839,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
         setRegeneratingKeys(null);
       }
     }
-  }, [rerollBlockedReason, brief, decisions, result, postGenerate]);
+  }, [rerollBlockedReason, run, decisions, postGenerate]);
 
   const decide = useCallback((key: string, decision: Decision) => {
     setDecisions((prev) => {
@@ -823,11 +867,15 @@ export function RunProvider({ children }: { children: ReactNode }) {
   const packageSelected = useCallback(
     async (platforms: readonly string[], include?: readonly string[]) => {
       const briefId = brief.id;
+      // The package POST reads the run report by campaign id, so it must name the
+      // campaign the on-screen run actually ran — a "Run this draft" run is keyed by
+      // the draft's id, which the shell's brief never took on (R6).
+      const campaignId = run?.target.id ?? briefId;
       const seq = packageSeq.current;
       setPackaging(true);
       setPackageError(null);
       try {
-        const result = await packageCampaign(briefId, platforms, { include, signal: packageSignal() });
+        const result = await packageCampaign(campaignId, platforms, { include, signal: packageSignal() });
         if (briefIdRef.current !== briefId || packageSeq.current !== seq) return; // superseded
         packageSeq.current += 1;
         setPackages((prev) => {
@@ -842,14 +890,17 @@ export function RunProvider({ children }: { children: ReactNode }) {
         if (briefIdRef.current === briefId) setPackaging(false);
       }
     },
-    [brief.id],
+    [brief.id, run],
   );
 
   const loadPackages = useCallback(async () => {
     const briefId = brief.id;
+    // Same result-scoping as packageSelected: the manifests live under the campaign
+    // id the on-screen run ran under, not the shell's current brief (R6).
+    const campaignId = run?.target.id ?? briefId;
     const seq = packageSeq.current;
     try {
-      const result = await listPackages(briefId, packageSignal());
+      const result = await listPackages(campaignId, packageSignal());
       // A listing that resolves after a brief switch, or after a package call completed
       // in the meantime, is stale — the fresher state already on screen wins.
       if (briefIdRef.current !== briefId || packageSeq.current !== seq) return;
@@ -859,19 +910,19 @@ export function RunProvider({ children }: { children: ReactNode }) {
       if (briefIdRef.current !== briefId) return; // aborted by a brief switch
       setPackageError(unknownErrorMessage(e, "Failed to list packages"));
     }
-  }, [brief.id]);
+  }, [brief.id, run]);
 
   const value = useMemo<RunContextValue>(
     () => ({
       brief,
       setBrief,
       briefApplied,
-      assets: result?.assets ?? [],
-      halted: result?.halted ?? false,
-      log: result?.log?.entries ?? EMPTY_LOG,
+      assets: run?.result.assets ?? [],
+      halted: run?.result.halted ?? false,
+      log: run?.result.log?.entries ?? EMPTY_LOG,
       loading,
       error,
-      hasRun: result !== null,
+      hasRun: run !== null,
       decisions,
       decide,
       execute,
@@ -879,8 +930,9 @@ export function RunProvider({ children }: { children: ReactNode }) {
       runMode,
       rerollBlockedReason,
       regeneratingKeys,
-      policyHash: result?.policyHash,
-      seed: result?.seed,
+      policyHash: run?.result.policyHash,
+      seed: run?.result.seed,
+      ranCampaignId: run?.target.id ?? null,
       assetVersion,
       selectedModel,
       setSelectedModel,
@@ -904,7 +956,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       brief,
       setBrief,
       briefApplied,
-      result,
+      run,
       loading,
       error,
       decisions,
@@ -916,6 +968,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       regeneratingKeys,
       assetVersion,
       selectedModel,
+      setSelectedModel,
       briefPickerOpen,
       openBriefPicker,
       closeBriefPicker,
