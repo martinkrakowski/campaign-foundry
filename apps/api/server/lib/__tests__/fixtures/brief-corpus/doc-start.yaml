@@ -1,0 +1,11 @@
+---
+# A leading document start marker must survive a save.
+id: corpus-doc-start
+campaignMessage: Documented.
+targetAudience: Marker check
+targetRegion: DE
+products:
+  - id: solo
+    name: Solo
+    logoPath: assets/inputs/solo.png
+    primaryColor: "#000000"

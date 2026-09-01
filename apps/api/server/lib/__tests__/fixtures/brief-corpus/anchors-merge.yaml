@@ -1,0 +1,15 @@
+# Anchors and merge keys must survive a save untouched.
+
+defaults: &defaults
+  primaryColor: "#1473E6"
+  tone: bold
+
+id: corpus-anchors-merge
+campaignMessage: Merge me.
+targetAudience: Everyone
+targetRegion: DE
+products:
+  - id: hydra-bottle
+    name: Hydra Bottle
+    logoPath: assets/inputs/hydra-logo.png
+    <<: *defaults

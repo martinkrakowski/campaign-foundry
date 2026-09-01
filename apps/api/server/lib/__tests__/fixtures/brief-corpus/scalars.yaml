@@ -1,0 +1,11 @@
+id: corpus-scalars
+campaignMessage: Scalars stay scalars.
+targetAudience: Schema check
+targetRegion: DE
+reviewBy: 2026-08-31 # a timestamp scalar — a string under the 1.2 default schema
+mask: 0b1010 # a binary literal — a string under 1.2, a number under 1.1
+products:
+  - id: solo
+    name: Solo
+    logoPath: assets/inputs/solo.png
+    primaryColor: "#000000"
