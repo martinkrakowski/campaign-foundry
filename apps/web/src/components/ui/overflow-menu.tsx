@@ -138,10 +138,11 @@ export function OverflowMenu({ label, items }: OverflowMenuProps): ReactNode {
           break;
         case "Enter":
         case " ":
-        case "Space":
           // Stand in for the native click exactly: preventDefault keeps the
-          // button's own activation from toggling a second time. ("Space" is
-          // the same key — happy-dom names it that where browsers say " ".)
+          // button's own activation from toggling a second time. The space bar
+          // reports `key === " "`; a `"Space"` case would be dead code, and the
+          // test must press it as `[Space]` (the code) or " " — userEvent's
+          // `{Space}` means a key literally NAMED "Space", which no browser sends.
           event.preventDefault();
           if (open) close();
           else openAndFocus(0);

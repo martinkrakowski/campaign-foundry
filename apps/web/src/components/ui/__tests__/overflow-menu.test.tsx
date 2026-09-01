@@ -163,7 +163,7 @@ describe("OverflowMenu", () => {
 
     await user.keyboard("{Escape}");
     trigger().focus();
-    await user.keyboard("{Space}");
+    await user.keyboard("[Space]");
     expect(document.activeElement).toBe(screen.getAllByRole("menuitem")[0]);
   });
 
@@ -175,7 +175,7 @@ describe("OverflowMenu", () => {
     expect(document.activeElement).toBe(trigger());
 
     await user.click(trigger());
-    await user.keyboard("{Space}");
+    await user.keyboard("[Space]");
     expect(screen.queryByRole("menu")).toBeNull();
     expect(document.activeElement).toBe(trigger());
   });
