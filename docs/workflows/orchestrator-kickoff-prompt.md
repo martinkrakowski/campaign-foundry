@@ -136,13 +136,28 @@ git worktree add "../wt-<lane>" -b "feat/<lane>" origin/<default-branch>
 - **Delegated:** write `/tmp/brief-<lane>.md` from **Template A** in the pipeline doc, filled
   from the plan, then launch the implement CLI **detached** so a harness timeout cannot kill it:
   `nohup zsh -c 'CLI … > /tmp/<lane>.log 2>&1; echo "EXIT $?" >> /tmp/<lane>.log' >/dev/null 2>&1 & disown`.
-  Respect the parallelism cap. Wait for the `EXIT` marker with a **`Monitor`** (or a Bash
-  `run_in_background` command that *exits* when the condition is true) — **not** a polling loop
-  with `sleep` in it. A backgrounded `for … sleep 20` loop was observed returning almost
-  immediately rather than waiting, which turns "waiting for the lane" into a tight poll that
-  reports "still running" indefinitely. Then **derive** the lane's state rather than reading its
-  summary (see below). A lane is done when a PR exists and the gate
-  passes, both confirmed by you.
+  Respect the parallelism cap. Then **wait for the `EXIT` marker with a command that blocks until
+  it appears and then exits** — this one is portable and is the fallback if your harness offers
+  nothing better:
+
+  ```sh
+  # blocks until the lane settles; prints the marker and exits
+  while ! grep -qE '^EXIT [0-9]+$' "/tmp/<lane>.log" 2>/dev/null; do sleep 30; done
+  grep -E '^EXIT [0-9]+$' "/tmp/<lane>.log" | tail -1
+  ```
+
+  If your harness has a background-task or event-stream facility (Claude Code exposes `Monitor`
+  and a backgrounded `Bash`), run **that same command** through it so the wait happens off the
+  critical path — the mechanism is the harness's, the command above is the contract.
+
+  **Then verify the wait actually waited.** A backgrounded `for … sleep 20` loop was observed
+  returning almost immediately, which silently converts "waiting for the lane" into a tight poll
+  that reports "still running" indefinitely while the orchestrator believes it is blocked. Cheap
+  check: compare the log's mtime and byte count across two reads, and confirm wall-clock time
+  actually passed. If it did not, your wait is not waiting.
+
+  Then **derive** the lane's state rather than reading its summary (see below). A lane is done
+  when a PR exists and the gate passes, both confirmed by you.
 - **Self:** do the same work yourself in that worktree, one lane at a time, and open the PR the
   same way — same gates, same Deviations section.
 
