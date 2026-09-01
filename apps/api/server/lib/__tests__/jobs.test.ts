@@ -7,6 +7,7 @@ import {
   createJob,
   failJob,
   getJob,
+  getRunningJobId,
   hasRunningJob,
   resetJobs,
   runJob,
@@ -41,6 +42,15 @@ describe("in-memory jobs", () => {
     expect(hasRunningJob("other")).toBe(false);
     completeJob(id, payload());
     expect(hasRunningJob("camp")).toBe(false);
+  });
+
+  test("getRunningJobId names the running job's handle, and nothing once it settles", () => {
+    expect(getRunningJobId("camp")).toBeUndefined();
+    const id = createJob("camp");
+    expect(getRunningJobId("camp")).toBe(id);
+    expect(getRunningJobId("other")).toBeUndefined();
+    completeJob(id, payload());
+    expect(getRunningJobId("camp")).toBeUndefined();
   });
 
   test("completeJob records assets.length as done/total", () => {
