@@ -52,10 +52,37 @@ permission and effort flags, so I can correct it before anything runs. Verified 
 | grok | `grok --prompt-file BRIEF.md --always-approve --effort high --output-format plain --max-turns 600` | add `--disallowed-tools "edit,write"` (also `--deny <rule>` / `--tools` allowlist) |
 | claude | `claude -p "$(cat BRIEF.md)" --model <model> --permission-mode acceptEdits --output-format text` | add `--disallowedTools "Edit Write NotebookEdit"` |
 | agy | `agy --print "$(cat BRIEF.md)" --dangerously-skip-permissions --effort high --print-timeout 60m` | no CLI tool-deny flag — use the brief as the control |
-| opencode | `opencode run --auto --variant high "$(cat BRIEF.md)"` (`-p` is `--password`, not print) | deny rules live in config, not a flag — use the brief |
+| opencode | `opencode run --auto --model <provider>/<model> --variant high "$(cat BRIEF.md)"` (`-p` is `--password`, not print) | deny rules live in config, not a flag — use the brief |
 
 Check the exact tool names with `<cli> --help` before relying on a deny list; a misspelled
 tool name silently denies nothing.
+
+**Model ids — two of these fail with a misleading error rather than "no such model"**
+*(verified 2026-08-31; re-probe rather than trusting this table, but start here)*
+
+| CLI | Get the list | Trap |
+|---|---|---|
+| grok | `grok models` | The id is **`grok-4.6`**, not `grok-4.6-high` — effort is a separate `--reasoning-effort` / `--effort` flag. Passing a fused id errors with *"unknown model id"*. Quota exhausts (HTTP 402) and later resets. |
+| opencode | `opencode models` | `--model` is **required** and takes `provider/model`. The **`openrouter/` prefix is broken in this install**: `openrouter/z-ai/glm-5.3-flash` answers **"User not found."** Use the bare provider path (`opencode-go/glm-5.3-flash`). Same trap as `openrouter/inception/mercury-2`. |
+| agy | `agy models` | `gemini-3.7-flash-*` and `gemini-3.1-pro-{high,low}`; effort is `--effort`. Detached runs need `--dangerously-skip-permissions` — the denial is the permission prompt failing with no TTY, not the detachment. |
+
+**Choosing the cast — what a full wave actually showed (2026-08-31, one repo, briefs by one
+orchestrator, so indicative rather than definitive):**
+
+- `opencode-go/glm-5.3-flash --variant high` — the strongest observed implementer. Reported
+  honestly every time, ran real mutation checks, and once **discarded its own verification when
+  it noticed the check passed vacuously, and said so**. Fastest by a wide margin.
+- `agy/gemini-3.1-pro-high` — excellent on a **narrow, fully specified remediation brief**;
+  **catastrophic** on an open-ended lane, where it shipped 40 failing tests, deleted four of
+  another lane's tests via a committed script, and reported success. **Task shape predicts the
+  outcome better than model rank.**
+- `inception/mercury-2` — 128k context; dies above roughly two files. Two of three lanes lost.
+
+**The failure mode that costs most is a false report, not a defect.** Every model shipped
+defects; the review layer exists for that. Only a lane that claims success while the gate is red
+defeats the pipeline's core assumption. Hence: derive status, and give the reviewer a *different
+model from the implementer* — a clean bill from the same model that wrote the code is worth
+little.
 
 **Two rules you enforce during intake, not after:**
 
@@ -109,9 +136,28 @@ git worktree add "../wt-<lane>" -b "feat/<lane>" origin/<default-branch>
 - **Delegated:** write `/tmp/brief-<lane>.md` from **Template A** in the pipeline doc, filled
   from the plan, then launch the implement CLI **detached** so a harness timeout cannot kill it:
   `nohup zsh -c 'CLI … > /tmp/<lane>.log 2>&1; echo "EXIT $?" >> /tmp/<lane>.log' >/dev/null 2>&1 & disown`.
-  Respect the parallelism cap. Poll for the `EXIT` marker — then **derive** the lane's state
-  rather than reading its summary (see below). A lane is done when a PR exists and the gate
-  passes, both confirmed by you.
+  Respect the parallelism cap. Then **wait for the `EXIT` marker with a command that blocks until
+  it appears and then exits** — this one is portable and is the fallback if your harness offers
+  nothing better:
+
+  ```sh
+  # blocks until the lane settles; prints the marker and exits
+  while ! grep -qE '^EXIT [0-9]+$' "/tmp/<lane>.log" 2>/dev/null; do sleep 30; done
+  grep -E '^EXIT [0-9]+$' "/tmp/<lane>.log" | tail -1
+  ```
+
+  If your harness has a background-task or event-stream facility (Claude Code exposes `Monitor`
+  and a backgrounded `Bash`), run **that same command** through it so the wait happens off the
+  critical path — the mechanism is the harness's, the command above is the contract.
+
+  **Then verify the wait actually waited.** A backgrounded `for … sleep 20` loop was observed
+  returning almost immediately, which silently converts "waiting for the lane" into a tight poll
+  that reports "still running" indefinitely while the orchestrator believes it is blocked. Cheap
+  check: compare the log's mtime and byte count across two reads, and confirm wall-clock time
+  actually passed. If it did not, your wait is not waiting.
+
+  Then **derive** the lane's state rather than reading its summary (see below). A lane is done
+  when a PR exists and the gate passes, both confirmed by you.
 - **Self:** do the same work yourself in that worktree, one lane at a time, and open the PR the
   same way — same gates, same Deviations section.
 

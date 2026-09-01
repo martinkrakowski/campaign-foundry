@@ -46,7 +46,7 @@ Flags below were read from each CLI's `--help` on 2026-08-26. Re-check after upg
 | **grok** | `grok --prompt-file BRIEF.md --always-approve --effort high --output-format plain --max-turns 600` | **Use `--prompt-file`, never `-p`** — long briefs are truncated through `-p`. |
 | **claude** | `claude -p "$(cat BRIEF.md)" --permission-mode acceptEdits --output-format text` | `--dangerously-skip-permissions` only in a sandbox. `--bg` returns immediately. |
 | **agy** | `agy --print "$(cat BRIEF.md)" --dangerously-skip-permissions --effort high --output-format text --print-timeout 60m` | No `--prompt-file`; raise `--print-timeout` (default 5 m) or long lanes are cut off. |
-| **opencode** | `opencode run --auto --variant high "$(cat BRIEF.md)"` | **`-p` is `--password` here, not print.** `--auto` is the permission bypass. |
+| **opencode** | `opencode run --auto --model <provider>/<model> --variant high "$(cat BRIEF.md)"` | **`-p` is `--password` here, not print.** `--auto` is the permission bypass. **`--model` is required**, and the **`openrouter/` prefix is broken** — it answers *"User not found."* Use the bare provider path (`opencode-go/glm-5.3-flash`). See the model-id table in `orchestrator-kickoff-prompt.md`. |
 
 Launch each one **detached from the orchestrator's task runner**, or a harness timeout
 will kill a lane mid-flight:
