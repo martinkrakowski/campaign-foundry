@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { IconButton } from "./icon-button";
 
 export interface OverflowMenuItem {
@@ -71,11 +72,19 @@ export function OverflowMenu({ label, items }: OverflowMenuProps): ReactNode {
   }, [open]);
 
   /**
-   * Close and restore focus BEFORE acting: the action may mount a dialog, and that
-   * dialog's trap reads `document.activeElement` to know where to send focus back.
+   * Close and restore focus BEFORE acting, and *commit* that close first.
+   *
+   * Two reasons the ordinary batched `setOpen(false)` is not enough. An action may
+   * mount a dialog, whose focus trap reads `document.activeElement` to learn where
+   * to send focus back — it must not read a menu item about to unmount. And an
+   * action may hand control away synchronously: `handleRevert` calls
+   * `window.confirm`, which blocks the thread, so with React's normal batching the
+   * panel is still painted behind that native dialog until the user answers it.
+   * `flushSync` is the supported way to get the DOM updated before code that does
+   * not go through React takes over.
    */
   const choose = (action: () => void) => {
-    close();
+    flushSync(close);
     action();
   };
 

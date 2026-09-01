@@ -71,6 +71,18 @@ describe("OverflowMenu", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  test("the panel is already gone by the time the action runs", async () => {
+    // `handleRevert` calls window.confirm, which blocks the thread synchronously —
+    // under React's ordinary batching the panel would still be painted behind it.
+    let menuWhileActing: HTMLElement | null = null;
+    const { user } = setup([
+      { label: "Revert", onSelect: () => { menuWhileActing = screen.queryByRole("menu"); } },
+    ]);
+    await user.click(trigger());
+    await user.click(screen.getByRole("menuitem", { name: "Revert" }));
+    expect(menuWhileActing).toBeNull();
+  });
+
   test("every deliberate close hands focus back to the trigger", async () => {
     const { user } = setup();
     await user.click(trigger());
