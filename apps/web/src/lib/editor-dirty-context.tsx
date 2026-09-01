@@ -14,10 +14,15 @@ import { ConfirmDialog } from "@/components/ui";
  * The draft rides a stable ref the editor refreshes on every render, so the published
  * object never goes stale while the user keeps typing — and publishing stays a
  * dirty-transition event, not a per-keystroke churn of every provider consumer.
+ *
+ * The ref is typed non-nullable on purpose: the editor nulls it exactly when it
+ * unpublishes the handoff, so while the handoff stands the draft always exists. The
+ * null case is gone from the type rather than guarded downstream — the three-way
+ * dialog reads it with no branch to ignore.
  */
 export interface DraftRunHandoff {
-  /** The freshest on-screen draft, read at press time (null once it no longer differs). */
-  draftRef: Readonly<RefObject<CampaignBrief | null>>;
+  /** The freshest on-screen draft, read at press time (the handoff exists only while it differs). */
+  draftRef: Readonly<RefObject<CampaignBrief>>;
   /**
    * Persist the draft through the editor's own save path — validation, the refusal,
    * and conflict handling all belong to it. Resolves with the brief exactly as the

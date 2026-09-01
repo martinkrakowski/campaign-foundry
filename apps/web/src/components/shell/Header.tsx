@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { cn } from "@/lib/cn";
 import { Button, Eyebrow, IconButton, ThemeToggle } from "@/components/ui";
 import {
@@ -22,6 +23,7 @@ import { ModelSelector } from "./ModelSelector";
 import { TELEMETRY_DRAWER_ID } from "./TelemetryDrawer";
 import { MobileMenu } from "./MobileMenu";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
+import type { DraftRunHandoff } from "@/lib/editor-dirty-context";
 
 /** Where the app opens, and where the brand mark goes back to. */
 const HOME = "/grid";
@@ -38,6 +40,97 @@ const TABS = [
   { href: "/export", label: "Export" },
   { href: "/runs", label: "Runs" },
 ] as const;
+
+/**
+ * D35 — the three-way question, rendered only from a published handoff. The handoff
+ * arrives as a prop (never read from context at press time), so the answers close
+ * over a `DraftRunHandoff` that exists — the null case was removed from the handoff's
+ * draft type, so there is no unreachable "dialog outlived its draft" branch to
+ * exclude from coverage.
+ */
+function DraftRunDialog({
+  handoff,
+  onClose,
+  onRun,
+}: {
+  handoff: DraftRunHandoff;
+  onClose: () => void;
+  onRun: (brief: CampaignBrief) => void;
+}) {
+  // DESIGN §7: Escape closes anything that floats. Escape answers "Cancel". The
+  // listener lives on the mounted dialog itself, so there is no open-flag branch.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  /** "Run this draft" — POST the on-screen draft, write nothing, commit nothing. */
+  const runThisDraft = useCallback(() => {
+    // Read the draft before closing: the editor unpublishes the handoff exactly when
+    // its draft stops differing, and that unmounts this dialog with it.
+    const draft = handoff.draftRef.current;
+    onClose();
+    onRun(draft);
+  }, [handoff, onClose, onRun]);
+
+  /** "Save and run" — write through the editor's save path, then run what was written. */
+  const saveAndRun = useCallback(async () => {
+    onClose();
+    // A refused save (invalid draft, failed write) answers with null: the editor has
+    // already spoken the refusal and bounced to the first failing section, so there is
+    // nothing for the header to add and nothing to run.
+    const saved = await handoff.saveAndRun();
+    if (saved === null) return;
+    onRun(saved);
+  }, [handoff, onClose, onRun]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-scrim/80 p-4 backdrop-blur-sm"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={generateDraftTitle}
+    >
+      <div
+        className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-base font-semibold text-text-emphasis">{generateDraftTitle}</h2>
+        <div className="mt-4 flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={runThisDraft}
+            className="flex w-full flex-col items-start rounded-lg border border-border px-4 py-3 text-left transition-colors hover:bg-surface-2"
+          >
+            <span className="text-[13px] font-medium text-text-primary">{generateDraftRunThis}</span>
+            <span className="text-[11px] text-text-muted">{generateDraftRunThisHint}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void saveAndRun()}
+            className="flex w-full flex-col items-start rounded-lg border border-border px-4 py-3 text-left transition-colors hover:bg-surface-2"
+          >
+            <span className="text-[13px] font-medium text-text-primary">{generateDraftSaveRun}</span>
+            <span className="text-[11px] text-text-muted">{generateDraftSaveRunHint}</span>
+          </button>
+        </div>
+        <div className="mt-5 flex justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-border-control px-4 py-1.5 text-[13px] text-text-muted transition-colors hover:text-text-emphasis"
+          >
+            {confirmCancel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /** Top application bar: brand, centered tab nav (desktop), model selector, mobile menu. */
 export function Header() {
@@ -88,16 +181,6 @@ export function Header() {
     if (draftRun === null) setDraftConfirmOpen(false);
   }, [draftRun]);
 
-  // DESIGN §7: Escape closes anything that floats. Escape answers "Cancel".
-  useEffect(() => {
-    if (!draftConfirmOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setDraftConfirmOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [draftConfirmOpen]);
-
   const handleGenerate = useCallback(() => {
     // D35: while the editor is mounted and its on-screen draft differs from the shell
     // brief, Generate asks which brief to run. The three-way REPLACES the guard's
@@ -124,41 +207,16 @@ export function Header() {
     });
   }, [draftRun, briefApplied, guardedPush, guardedAction, router, pathname, execute]);
 
-  /** "Run this draft" — POST the on-screen draft, write nothing, commit nothing. */
-  const runThisDraft = useCallback(() => {
-    const handoff = draftRun;
-    setDraftConfirmOpen(false);
-    /* istanbul ignore next -- the dialog only renders while `draftRun` stands, and this
-       handler is recreated with the current one on every render, so the guard cannot
-       be false at press time; it keeps a stale closure from ever running anything. */
-    if (!handoff) return;
-    const draft = handoff.draftRef.current;
-    /* istanbul ignore next -- the editor nulls `draftRef.current` exactly when it
-       unpublishes the handoff, which also closes this dialog; the guard is the same
-       stale-closure backstop as above. */
-    if (!draft) return;
-    // The three-way was the consent: navigating on answers it, and asking the dirty
-    // guard again would be the double prompt the verb model exists to prevent.
-    router.push(HOME);
-    setNotice(null);
-    void execute(draft);
-  }, [draftRun, router, execute]);
-
-  /** "Save and run" — write through the editor's save path, then run what was written. */
-  const saveAndRun = useCallback(async () => {
-    const handoff = draftRun;
-    setDraftConfirmOpen(false);
-    /* istanbul ignore next -- see runThisDraft: the dialog cannot outlive its handoff. */
-    if (!handoff) return;
-    // A refused save (invalid draft, failed write) answers with null: the editor has
-    // already spoken the refusal and bounced to the first failing section, so there is
-    // nothing for the header to add and nothing to run.
-    const saved = await handoff.saveAndRun();
-    if (saved === null) return;
-    router.push(HOME);
-    setNotice(null);
-    void execute(saved);
-  }, [draftRun, router, execute]);
+  // The shared tail of both three-way answers: the run is the whole gesture's
+  // consent, so it navigates and speaks once, at home.
+  const runBrief = useCallback(
+    (brief: CampaignBrief) => {
+      router.push(HOME);
+      setNotice(null);
+      void execute(brief);
+    },
+    [router, execute],
+  );
 
   return (
     <header className="relative z-50 flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-4">
@@ -257,49 +315,11 @@ export function Header() {
 
       {/* D35 — the three-way question. Open only while the editor publishes a differing
           draft; Escape and the backdrop both answer "Cancel" (nothing happens). The two
-          run answers are the whole gesture's consent, so neither asks again. */}
+          run answers are the whole gesture's consent, so neither asks again. The dialog
+          renders only from the non-null handoff, so its answers close over a draft
+          that exists — there is no "the dialog outlived its handoff" case to guard. */}
       {draftConfirmOpen && draftRun !== null && (
-        <div
-          className="fixed inset-0 z-[70] flex items-center justify-center bg-scrim/80 p-4 backdrop-blur-sm"
-          onClick={() => setDraftConfirmOpen(false)}
-          role="dialog"
-          aria-modal="true"
-          aria-label={generateDraftTitle}
-        >
-          <div
-            className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 className="text-base font-semibold text-text-emphasis">{generateDraftTitle}</h2>
-            <div className="mt-4 flex flex-col gap-2">
-              <button
-                type="button"
-                onClick={runThisDraft}
-                className="flex w-full flex-col items-start rounded-lg border border-border px-4 py-3 text-left transition-colors hover:bg-surface-2"
-              >
-                <span className="text-[13px] font-medium text-text-primary">{generateDraftRunThis}</span>
-                <span className="text-[11px] text-text-muted">{generateDraftRunThisHint}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => void saveAndRun()}
-                className="flex w-full flex-col items-start rounded-lg border border-border px-4 py-3 text-left transition-colors hover:bg-surface-2"
-              >
-                <span className="text-[13px] font-medium text-text-primary">{generateDraftSaveRun}</span>
-                <span className="text-[11px] text-text-muted">{generateDraftSaveRunHint}</span>
-              </button>
-            </div>
-            <div className="mt-5 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setDraftConfirmOpen(false)}
-                className="rounded-full border border-border-control px-4 py-1.5 text-[13px] text-text-muted transition-colors hover:text-text-emphasis"
-              >
-                {confirmCancel}
-              </button>
-            </div>
-          </div>
-        </div>
+        <DraftRunDialog handoff={draftRun} onClose={() => setDraftConfirmOpen(false)} onRun={runBrief} />
       )}
 
       <MobileMenu open={menuOpen} onClose={closeMenu} tabs={TABS} />
