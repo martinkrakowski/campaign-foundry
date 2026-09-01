@@ -53,7 +53,7 @@ It answers three questions the one-line row does not:
 
 | id | Finding | Consequence |
 |---|---|---|
-| **C1** | **D42 as written renders the same creative twice.** A dock mounted at the proven slot renders on every guided step; the Review step already draws its own `<figure>`. `ReviewStep.tsx:162` and `PreviewDock.tsx:76` are byte-identical wrappers around the same `CreativePreview` call with the same `className="block h-auto w-full"`, and `ReviewStep`'s figcaption inlines the same `messages.previewCaption(...)` expression as `PreviewCaption`. | Two pictures of one brief, side by side, at ≥1280 px. Resolved by **D43**. |
+| **C1** | **D42 as written renders the same creative twice.** A dock mounted at the proven slot renders on every guided step; the Review step already draws its own `<figure>`. The wrapper `<div>` at `ReviewStep.tsx:162` is byte-identical to `PreviewDock.tsx:76`, both hand `CreativePreview` the same `className="block h-auto w-full"`, and `ReviewStep`'s figcaption inlines the same `messages.previewCaption(...)` expression as `PreviewCaption`. The calls themselves are **not** identical, and the difference is a trap for §6 question 4: `ReviewStep` pre-derives at `:121` (`derivePreviewRatio(platformId, undefined)`) and passes the **result** as `ratio`, while `PreviewDock` takes `ratio` as a **hint** and derives internally at `:83`. One prop name, two meanings — sharing the component naively double-derives. | Two pictures of one brief, side by side, at ≥1280 px. Resolved by **D43**. |
 
 ### High
 
@@ -85,7 +85,7 @@ It answers three questions the one-line row does not:
 | **L2** | **`DESIGN.md` has absorbed none of the W6–W9 wave**, and its responsive rule still contradicts the dock's breakpoint. `yarn sync:check` is `hexagen sync --check` — a scaffold/manifest check — so nothing in the gate forces the contract to describe what shipped. R7 is the last lane; nobody after it will. |
 | **L3** | The 2026-08-31 plan's **M2 row is stale**: it says *"all 15 references are in tests"*. There are 26 matched lines across 4 files, and `ReviewStep.tsx:5` is not a test — the module is a live dependency of a rendered component. |
 | **L4** | **`kf-headline-rise` is geometrically invisible on this canvas.** It was authored for the 46-unit glyph and reused verbatim at 1080×1920; a CSS transform length on an SVG element resolves in the local user coordinate system, so `translateY(3px)` is ≈0.1 CSS px here. |
-| **L5** | **`GB-D20` does not exist.** The graphical-brief series stops at GB-D18. The binding ids for R7 are **D42, D26, D27, D38, GB-D3, GB-D18**. |
+| **L5** | **The binding decision ids for R7 are D42, D26, D27, D38, GB-D3 and GB-D18** — the graphical-brief series stops at GB-D18, so any reference to a "GB-D20" is a slip. |
 | **L6** | **`accent-wipe` scales about the canvas, not the rect** — no `transform-box` is declared anywhere in `apps/web/src` or `packages`, so the reference box is the view-box. |
 | **L7** | The Review figure ignores the brief's ratio: `ReviewStep.tsx:121` calls `derivePreviewRatio(platformId, undefined)`, so the common case is **1:1**, not the 9:16 the defect narrative emphasises. At a 20rem cap that is a 318×318 square — the size the design call should actually be judged at. |
 
@@ -148,11 +148,15 @@ model about to change.
 The content column width, and therefore whether the fix holds, depends on the YAML split view —
 a sibling of the main column, toggled from the ⋯ menu. **Six checks, not three:**
 
+These are **Review-step** widths, so the dock is absent (**D43**) and no rail width is
+subtracted. Derived from `(shell)/layout.tsx:31` (`gap-4`, `p-4`), `Sidebar.tsx:18` (`w-[320px]`
+at ≥`lg`), `BriefEditor.tsx:1085` (`max-w-5xl`, `sm:p-8`) and the YAML split at `:1230` (`w-96`).
+
 | Viewport | YAML split closed | YAML split open |
 |---|---|---|
 | 1440 px | 960 px | 624 px |
-| 1280 px | 592 px | 464 px |
-| 1024 px | 326 px | **208 px** |
+| 1280 px | 848 px | 464 px |
+| 1024 px | 592 px | **208 px** |
 
 At 208 px every candidate cap still zeroes the summary while `lg:` forces two columns. That is an
 argument for moving the two-column split to `xl:`, or suppressing it while the split is open — a
@@ -221,4 +225,3 @@ question §5 leaves open rather than settling here.
 | Lane table (`:132`, `:145`) | R1.3 and R7.1 are one lane, not two (**D49**). R1.3 never landed; `ReviewStep.tsx` is byte-for-byte what W8 shipped in #144. |
 | Order (`:147`) | R7's stated rationale — *"so the dock is not mounted against a verb model about to change"* — was satisfied by R6. The real constraint is **R5**, which rewrites the editor's mount. |
 | §5 open question 2 | *"Should `cf:brief` survive D37"* is answered by D37's own wording and is settled in R5's brief, not here. |
-| Any citation of `GB-D20` | No such decision (**L5**). |
