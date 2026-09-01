@@ -551,6 +551,16 @@ export const generateDraftRunThisHint = "Run what is on screen without writing i
 export const generateDraftSaveRun = "Save and run";
 export const generateDraftSaveRunHint = "Write the brief to disk, then run the saved file.";
 export const confirmCancel = "Cancel";
+/**
+ * "Run this draft" pressed while the draft would not pass validation (GB-D3 — the
+ * verb is never disabled, so the press is the question and this is the answer). The
+ * D2 shape — what is missing, then the one thing to do — naming the first section
+ * that stands in the way; the editor has already revealed it and handed it focus.
+ * The label comes from the one section vocabulary (`SECTION_TITLES`) at the call site.
+ */
+export function generateDraftBlocked(sectionLabel: string): string {
+  return `${sectionLabel} still needs attention before this draft can run — fix what is marked there.`;
+}
 
 /* ── The editor's action-bar verbs (D35/D40) ── */
 

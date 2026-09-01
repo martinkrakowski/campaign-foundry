@@ -1,6 +1,7 @@
 "use client";
 
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import type { SectionId } from "@/components/campaign/sections";
 import { createContext, useContext, useState, useCallback, type ReactNode, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/ui";
@@ -23,6 +24,19 @@ import { ConfirmDialog } from "@/components/ui";
 export interface DraftRunHandoff {
   /** The freshest on-screen draft, read at press time (the handoff exists only while it differs). */
   draftRef: Readonly<RefObject<CampaignBrief>>;
+  /**
+   * The editor's verdict on its own draft: the first section that blocks a save, or
+   * null while the draft would pass. A ref refreshed every render, exactly like
+   * `draftRef` — the handoff is published on a differs-flip, so a plain value would
+   * go stale the moment the user fixed (or broke) the field it named.
+   */
+  blockedRef: Readonly<RefObject<SectionId | null>>;
+  /**
+   * Refuse an invalid draft the way Save refuses it (GB-D3): mark the attempt,
+   * reveal the first blocking section and hand it focus. Returns whether the draft
+   * was refused; the caller speaks the wording where the user is.
+   */
+  refuseInvalid: () => boolean;
   /**
    * Persist the draft through the editor's own save path — validation, the refusal,
    * and conflict handling all belong to it. Resolves with the brief exactly as the

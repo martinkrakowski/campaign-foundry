@@ -43,7 +43,7 @@ import {
 import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, OutputSection, PolicySection } from "@/components/campaign/sections";
 import { StatusChip } from "@/components/campaign/StatusChip";
 import { StatusLine } from "@/components/campaign/StatusLine";
-import { ErrorStrip, MOTION_ERROR_KEY, MOTION_HOST_SECTION } from "@/components/campaign/ErrorStrip";
+import { ErrorStrip, MOTION_ERROR_KEY, MOTION_HOST_SECTION, sectionForErrorBucket } from "@/components/campaign/ErrorStrip";
 import { ErrorPill } from "@/components/ui/error-pill";
 import { useEditorDirty, type DraftRunHandoff } from "@/lib/editor-dirty-context";
 import { FloatingBar } from "@/components/shell/FloatingBar";
@@ -784,7 +784,14 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
    */
   const draftRunDraftRef = useRef<CampaignBrief | null>(null);
   const draftRunSaveRef = useRef<(() => Promise<CampaignBrief | null>) | undefined>(undefined);
+  const draftRunBlockedRef = useRef<SectionId | null>(null);
+  const draftRunRefuseRef = useRef<(() => boolean) | undefined>(undefined);
   draftRunDraftRef.current = draftDiffers ? draftBrief : null;
+  // `blockedAt` keys validateState's buckets, and motion is one of them without being
+  // a section — the refusal that reads this hands it to `reveal`, which folds motion
+  // into its host. Publish the same mapped section, from the one mapping helper.
+  draftRunBlockedRef.current = sectionForErrorBucket(blockedAt);
+  draftRunRefuseRef.current = refuseInvalid;
   draftRunSaveRef.current = handleSave;
   useEffect(() => {
     if (!draftDiffers) {
@@ -798,6 +805,13 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
       // invariant for the type, the same way `saveAndRun`'s does below; the dialog
       // that reads it has no null branch to guard, because none exists.
       draftRef: draftRunDraftRef as Readonly<RefObject<CampaignBrief>>,
+      // The editor's own verdict, on the same ref-and-refresh cadence as the draft:
+      // a plain `blocked` would go stale the moment the user fixed the field it
+      // named, because this effect only runs on a differs-flip.
+      blockedRef: draftRunBlockedRef,
+      // Assigned every render before any handoff can be published — the same cast
+      // restating the invariant as the two refs above.
+      refuseInvalid: () => (draftRunRefuseRef.current as () => boolean)(),
       // Assigned every render before any handoff can be published, so the cast only
       // restates the invariant — the call itself is always the freshest save.
       saveAndRun: () => (draftRunSaveRef.current as () => Promise<CampaignBrief | null>)(),

@@ -856,9 +856,11 @@ describe("BriefPage — data flow", () => {
     routes({ post: (_url, body) => json({ file: "fresh.yaml", brief: body, revision: "r1" }) });
     renderWithRun(<Editor />);
 
+    // Corrected with the pristine-chip fix: an untouched editor holds a blank form,
+    // so the chip has nothing to report yet — it appears once the draft has content.
+    await fillValidDraft(user);
     expect(screen.getByText("Unsaved changes")).toBeTruthy();
     expect(screen.queryByText("Draft not applied")).toBeNull();
-    await fillValidDraft(user);
     await saveVia(user, "Save");
     await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
   });
@@ -2629,6 +2631,80 @@ describe("BriefPage — Generate's three-way question (D35)", () => {
     const put = calls.find((c) => c.method === "PUT");
     expect(put?.url).toContain("revision=r1");
     expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
+  });
+
+  test("'Run this draft' on an invalid draft refuses: no run charged, the section named, the editor reveals it", async () => {
+    const user = userEvent.setup();
+    Element.prototype.scrollIntoView = vi.fn();
+    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<EditorAndHeader />);
+    await user.click(screen.getByText("New brief..."));
+    await user.click(await screen.findByText("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    // Differ AND be invalid: edit the headline, then clear it — Copy blocks an empty
+    // headline, and the draft still differs from the shell's committed brief.
+    // (Campaign Name is readOnly on a loaded brief, so the headline is the field
+    // that can carry the invalidity here.)
+    await user.type(screen.getByLabelText("Headline"), " edited");
+    await user.clear(screen.getByLabelText("Headline"));
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    const dialog = await screen.findByRole("dialog", { name: messages.generateDraftTitle });
+    await user.click(within(dialog).getByRole("button", { name: new RegExp(`^${messages.generateDraftRunThis}`) }));
+
+    // The money: pressing with a half-filled brief must never start the pipeline —
+    // the server would refuse it and the user would be charged anyway.
+    expect(calls.filter((c) => c.url.includes("/campaigns/generate"))).toEqual([]);
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+
+    // The refusal names the first blocking section (GB-D3: the press answers — the
+    // verb is never disabled)…
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByRole("status")
+          .some((el) => el.textContent === messages.generateDraftBlocked(SECTION_TITLES.copy)),
+      ).toBe(true),
+    );
+    // …the editor's own refusal spoke too (attempted → the status sentence refuses)…
+    expect(
+      screen.getAllByRole("status").some((el) => el.textContent.startsWith("Not saved yet —")),
+    ).toBe(true);
+    // …and the reveal is real: the user is sent to the blocking section, with focus
+    // on it — the same landing Save's refusal gives (H2).
+    expect(document.activeElement).toBe(document.getElementById("copy"));
+  });
+
+  test("'Save and run' on an invalid draft inherits the refusal through the save path", async () => {
+    const user = userEvent.setup();
+    Element.prototype.scrollIntoView = vi.fn();
+    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<EditorAndHeader />);
+    await user.click(screen.getByText("New brief..."));
+    await user.click(await screen.findByText("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    await user.type(screen.getByLabelText("Headline"), " edited");
+    await user.clear(screen.getByLabelText("Headline"));
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    const dialog = await screen.findByRole("dialog", { name: messages.generateDraftTitle });
+    await user.click(within(dialog).getByRole("button", { name: new RegExp(`^${messages.generateDraftSaveRun}`) }));
+
+    // The save path's own `refuseInvalid` gates it — nothing is written, nothing
+    // runs, and the editor has already bounced to Copy with the refusal on screen;
+    // the header carries no gate of its own to disagree with.
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByRole("status")
+          .some((el) => el.textContent.startsWith("Not saved yet —")),
+      ).toBe(true),
+    );
+    expect(writes(calls)).toEqual([]);
+    expect(calls.filter((c) => c.url.includes("/campaigns/generate"))).toEqual([]);
+    expect(document.activeElement).toBe(document.getElementById("copy"));
   });
 
   test("Generate from a clean editor runs the committed brief without asking", async () => {

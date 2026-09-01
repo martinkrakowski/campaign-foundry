@@ -2,7 +2,12 @@ import { describe, test, expect } from "vitest";
 import { validateState } from "@/components/campaign/validate";
 import { initialEditorState } from "@/components/campaign/editor-state";
 import { isKnownKey } from "@/components/campaign/error-sections";
-import { SECTION_BY_ERROR_KEY, MOTION_HOST_SECTION } from "@/components/campaign/ErrorStrip";
+import {
+  SECTION_BY_ERROR_KEY,
+  MOTION_ERROR_KEY,
+  MOTION_HOST_SECTION,
+  sectionForErrorBucket,
+} from "@/components/campaign/ErrorStrip";
 import { SECTION_TITLES, sectionOrder, type SectionId } from "@/components/campaign/sections";
 import type { EditorState, ProductDraft } from "@/components/campaign/editor-state";
 
@@ -131,6 +136,19 @@ describe("W6.7 error bucket ↔ section totality", () => {
   test("motion is the one non-section bucket, and lives inside its Output host", () => {
     expect(MOTION_HOST_SECTION).toBe("output");
     expect(SECTION_BY_ERROR_KEY).not.toHaveProperty("motion");
+  });
+
+  test("sectionForErrorBucket is the one bucket→section mapping: sections pass through, motion folds into its host, null is nothing", () => {
+    // The mapping the walk, `reveal` and the D35 handoff's published verdict share.
+    // Pinned here beside the map it is built on, so a new bucket cannot silently
+    // bypass it (the `as SectionId` inside is safe exactly because this file proves
+    // the bucket universe is the six sections plus motion).
+    expect(sectionForErrorBucket(null)).toBeNull();
+    expect(sectionForErrorBucket(MOTION_ERROR_KEY)).toBe(MOTION_HOST_SECTION);
+    const ids = Object.keys(SECTION_TITLES) as SectionId[];
+    for (const id of ids) {
+      expect(sectionForErrorBucket(id)).toBe(id);
+    }
   });
 
   // W6.7's stated criterion, in both directions: adding a section with no step, or a

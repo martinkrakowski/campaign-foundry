@@ -5,10 +5,11 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { cn } from "@/lib/cn";
-import { Button, Eyebrow, IconButton, ThemeToggle } from "@/components/ui";
+import { Button, DialogBody, DialogFoot, DialogHead, DialogShell, Eyebrow, IconButton, ThemeToggle } from "@/components/ui";
 import {
   confirmCancel,
   generate,
+  generateDraftBlocked,
   generateDraftRunThis,
   generateDraftRunThisHint,
   generateDraftSaveRun,
@@ -18,6 +19,7 @@ import {
   modelChanged,
   telemetryButton,
 } from "@/components/campaign/messages";
+import { SECTION_TITLES, type SectionId } from "@/components/campaign/sections";
 import { useRun } from "@/lib/run-context";
 import { ModelSelector } from "./ModelSelector";
 import { TELEMETRY_DRAWER_ID } from "./TelemetryDrawer";
@@ -52,55 +54,64 @@ function DraftRunDialog({
   handoff,
   onClose,
   onRun,
+  onRefuse,
 }: {
   handoff: DraftRunHandoff;
   onClose: () => void;
   onRun: (brief: CampaignBrief) => void;
+  onRefuse: (blocked: SectionId, refuse: () => boolean) => void;
 }) {
-  // DESIGN §7: Escape closes anything that floats. Escape answers "Cancel". The
-  // listener lives on the mounted dialog itself, so there is no open-flag branch.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   /** "Run this draft" — POST the on-screen draft, write nothing, commit nothing. */
   const runThisDraft = useCallback(() => {
-    // Read the draft before closing: the editor unpublishes the handoff exactly when
-    // its draft stops differing, and that unmounts this dialog with it.
+    // Read the draft and the editor's verdict before closing: the editor unpublishes
+    // the handoff exactly when its draft stops differing, and that unmounts this
+    // dialog with it.
     const draft = handoff.draftRef.current;
+    const blocked = handoff.blockedRef.current;
     onClose();
+    if (blocked !== null) {
+      // GB-D3: never a dead button. An invalid draft refuses the way Save refuses —
+      // attempted, reveal, state the first issue — so the press sends the user to the
+      // blocking section instead of charging them for a run the server would refuse.
+      // The editor's own refusal rides along, captured at press time; running it is
+      // one commit away (see `refuseDraftRun`), so the focus restore that comes with
+      // closing cannot steal the reveal.
+      onRefuse(blocked, handoff.refuseInvalid);
+      return;
+    }
     onRun(draft);
-  }, [handoff, onClose, onRun]);
+  }, [handoff, onClose, onRun, onRefuse]);
 
-  /** "Save and run" — write through the editor's save path, then run what was written. */
+  /**
+   * "Save and run" — write through the editor's save path, then run what was written.
+   * The gate is the SAME verdict "Run this draft" reads — `blockedRef` is the editor's
+   * `blockedAt`, and `refuseInvalid` is the editor's own — so this answer inherits the
+   * save path's refusal by construction rather than carrying a second one that could
+   * disagree. A refused press takes the same two-phase path as "Run this draft": close
+   * first, refuse after the trap's focus restore, so the reveal keeps focus (H2).
+   */
   const saveAndRun = useCallback(async () => {
+    const blocked = handoff.blockedRef.current;
     onClose();
-    // A refused save (invalid draft, failed write) answers with null: the editor has
-    // already spoken the refusal and bounced to the first failing section, so there is
-    // nothing for the header to add and nothing to run.
+    if (blocked !== null) {
+      onRefuse(blocked, handoff.refuseInvalid);
+      return;
+    }
+    // A failed write answers null: the editor has already spoken the refusal, so
+    // there is nothing for the header to add and nothing to run.
     const saved = await handoff.saveAndRun();
     if (saved === null) return;
     onRun(saved);
-  }, [handoff, onClose, onRun]);
+  }, [handoff, onClose, onRefuse, onRun]);
 
+  // W10.5 — one dialog anatomy. DialogShell carries the scrim, the focus trap,
+  // Escape and the backdrop click, and restores focus on close; Escape answers
+  // "Cancel" (DESIGN §7) by construction, not by a second hand-rolled listener.
   return (
-    <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-scrim/80 p-4 backdrop-blur-sm"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label={generateDraftTitle}
-    >
-      <div
-        className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-base font-semibold text-text-emphasis">{generateDraftTitle}</h2>
-        <div className="mt-4 flex flex-col gap-2">
+    <DialogShell open onClose={onClose} ariaLabel={generateDraftTitle} className="max-w-md">
+      <DialogHead title={generateDraftTitle} />
+      <DialogBody>
+        <div className="flex flex-col gap-2 p-4">
           <button
             type="button"
             onClick={runThisDraft}
@@ -118,17 +129,17 @@ function DraftRunDialog({
             <span className="text-[11px] text-text-muted">{generateDraftSaveRunHint}</span>
           </button>
         </div>
-        <div className="mt-5 flex justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-border-control px-4 py-1.5 text-[13px] text-text-muted transition-colors hover:text-text-emphasis"
-          >
-            {confirmCancel}
-          </button>
-        </div>
-      </div>
-    </div>
+      </DialogBody>
+      <DialogFoot className="flex justify-end">
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-full border border-border-control px-4 py-1.5 text-[13px] text-text-muted transition-colors hover:text-text-emphasis"
+        >
+          {confirmCancel}
+        </button>
+      </DialogFoot>
+    </DialogShell>
   );
 }
 
@@ -140,6 +151,10 @@ export function Header() {
   const [notice, setNotice] = useState<string | null>(null);
   // D35: the three-way question, open only while the editor has a differing draft.
   const [draftConfirmOpen, setDraftConfirmOpen] = useState(false);
+  // A refused "Run this draft" (GB-D3): the section the editor named, plus the
+  // editor's refusal itself captured at press time. Spent one commit later — see
+  // the effect below for why the refusal cannot run inside the press.
+  const [pendingRefusal, setPendingRefusal] = useState<{ blocked: SectionId; refuse: () => boolean } | null>(null);
   const { guardedPush, guardedAction, isDirty, draftRun } = useGuardedNavigation();
   const router = useRouter();
   const { briefApplied, execute, telemetryOpen, toggleTelemetry } = useRun();
@@ -180,6 +195,29 @@ export function Header() {
   useEffect(() => {
     if (draftRun === null) setDraftConfirmOpen(false);
   }, [draftRun]);
+
+  // The refused press, spent one commit after it landed. The dialog's focus trap
+  // restores focus when it unmounts, so a refusal run inside the press would have
+  // its reveal (the section focus, H2) immediately stolen by that restore. Closing
+  // first and refusing here — after the trap's cleanup has run — lands focus on the
+  // revealed section, exactly where Save's refusal leaves it.
+  useEffect(() => {
+    if (pendingRefusal === null) return;
+    setPendingRefusal(null);
+    pendingRefusal.refuse();
+    setNotice(generateDraftBlocked(SECTION_TITLES[pendingRefusal.blocked]));
+  }, [pendingRefusal]);
+
+  // GB-D3 — the refusal names the blocking section and defers the editor's reveal
+  // (attempted → reveal → focus) to the effect above. The refusal itself arrives from
+  // the dialog — the handoff prop it renders from — so it is the editor's own, captured
+  // at press time.
+  const refuseDraftRun = useCallback(
+    (blocked: SectionId, refuse: () => boolean) => {
+      setPendingRefusal({ blocked, refuse });
+    },
+    [],
+  );
 
   const handleGenerate = useCallback(() => {
     // D35: while the editor is mounted and its on-screen draft differs from the shell
@@ -314,12 +352,19 @@ export function Header() {
       )}
 
       {/* D35 — the three-way question. Open only while the editor publishes a differing
-          draft; Escape and the backdrop both answer "Cancel" (nothing happens). The two
-          run answers are the whole gesture's consent, so neither asks again. The dialog
-          renders only from the non-null handoff, so its answers close over a draft
-          that exists — there is no "the dialog outlived its handoff" case to guard. */}
+          draft; Escape and the backdrop both answer "Cancel" (nothing happens) — the
+          shared DialogShell's trap guarantees both, and restores focus on close. The
+          two run answers are the whole gesture's consent, so neither asks again. The
+          dialog renders only from the non-null handoff, so its answers close over a
+          draft that exists — there is no "the dialog outlived its handoff" case to
+          guard. */}
       {draftConfirmOpen && draftRun !== null && (
-        <DraftRunDialog handoff={draftRun} onClose={() => setDraftConfirmOpen(false)} onRun={runBrief} />
+        <DraftRunDialog
+          handoff={draftRun}
+          onClose={() => setDraftConfirmOpen(false)}
+          onRun={runBrief}
+          onRefuse={refuseDraftRun}
+        />
       )}
 
       <MobileMenu open={menuOpen} onClose={closeMenu} tabs={TABS} />
