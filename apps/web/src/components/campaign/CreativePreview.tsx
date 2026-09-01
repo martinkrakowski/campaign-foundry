@@ -211,6 +211,7 @@ export function CreativePreview({
           <text
             x={textEdge}
             y={firstBaseline}
+            fontSize={fontSize}
             fontFamily="var(--font-sans)"
             fontWeight={bold ? 700 : 500}
             className="fill-text-primary"
