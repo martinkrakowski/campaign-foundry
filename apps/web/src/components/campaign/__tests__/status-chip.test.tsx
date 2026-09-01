@@ -21,10 +21,24 @@ describe("StatusChip", () => {
   // applied-or-not. The old four-state vocabulary (and the "Draft not applied"
   // badge it produced) no longer exists.
 
-  test("a fresh, never-written draft reads Unsaved changes, and nothing speaks of applying", () => {
+  test("a pristine, untouched new editor renders no chip — there is nothing to be unsaved", () => {
+    // The two-state reduction regressed here: `isDirtySinceSave` treats a new source
+    // as unwritten (true, and other callers depend on that), so a blank form the user
+    // never touched rendered "Unsaved changes" — a report about changes that do not
+    // exist. The chip declines to speak until the draft has something in it; the old
+    // four-state vocabulary stays gone either way.
     render(<StatusChip state={initialEditorState()} />);
-    expect(screen.getByText("Unsaved changes")).toBeTruthy();
+    expect(screen.queryByText("Unsaved changes")).toBeNull();
+    expect(screen.queryByText("Saved")).toBeNull();
     expect(screen.queryByText("Draft not applied")).toBeNull();
+  });
+
+  test("a new editor with content typed reads Unsaved changes", () => {
+    // The suppression above is about *untouched*, not about new: once the user has
+    // typed, there are real changes to be unsaved and the chip must say so.
+    const typed = reduce(initialEditorState(), { type: "patch", patch: { campaignMessage: "Hi" } });
+    render(<StatusChip state={typed} />);
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
   });
 
   test("a committed-but-unsaved draft reads Unsaved changes — the chip says written-or-not, not applied-or-not", () => {

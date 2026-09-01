@@ -1,7 +1,7 @@
 "use client";
 
 import type { EditorState } from "./editor-state";
-import { isDirtySinceSave } from "./editor-state";
+import { isDirtySinceSave, isPristine } from "./editor-state";
 
 interface StatusChipProps {
   state: EditorState;
@@ -14,6 +14,12 @@ export function StatusChip({ state }: StatusChipProps) {
   // the "Draft not applied" badge the distinction produced stops existing rather than
   // being hidden. This amends UE-D11 (four colour-distinct states), which governed
   // states that no longer exist.
+  // A pristine editor is a blank, untouched form: there are no changes to be unsaved,
+  // and "Saved" would claim a write that never happened. The chip has nothing to
+  // report, so it says nothing — absence is not a third state on the written-or-not
+  // axis, it is the axis declining to speak until there is a draft to describe.
+  if (isPristine(state)) return null;
+
   const dirty = isDirtySinceSave(state);
 
   const label = dirty ? "Unsaved changes" : "Saved";

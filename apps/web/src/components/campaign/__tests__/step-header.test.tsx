@@ -20,7 +20,9 @@ const header = (over: Partial<ComponentProps<typeof StepHeader>> = {}) => render
 
 /** A draft that has been applied and saved — the chip's settled green state. */
 const savedAndApplied = (): EditorState => {
-  const state = initialEditorState();
+  // A draft with content: a saved *blank* brief is pristine (nothing was ever
+  // written), and the chip renders nothing for that.
+  const state = { ...initialEditorState(), campaignMessage: "Hi" };
   const brief = toBrief(state);
   return {
     ...state,
@@ -65,13 +67,20 @@ describe("StepHeader", () => {
   test("the status chip reflects the editor state it is handed", () => {
     // The labels below are StatusChip's own two-state vocabulary (D41); what this
     // pins is the wiring — the `state` prop flows through to the chip, so a Guided
-    // step head cannot freeze one chip state for every draft.
-    const { rerender } = header({ state: initialEditorState() });
+    // step head cannot freeze one chip state for every draft. A pristine state is
+    // outside the two states entirely: with nothing in the draft, the chip renders
+    // nothing at all.
+    const typed = { ...initialEditorState(), campaignMessage: "Hi" };
+    const { rerender } = header({ state: typed });
     expect(screen.getByText("Unsaved changes")).toBeTruthy();
 
     rerender(<StepHeader {...props({ state: savedAndApplied() })} />);
     expect(screen.getByText("Saved")).toBeTruthy();
     expect(screen.queryByText("Unsaved changes")).toBeNull();
+
+    rerender(<StepHeader {...props()} />);
+    expect(screen.queryByText("Unsaved changes")).toBeNull();
+    expect(screen.queryByText("Saved")).toBeNull();
   });
 
   test("sticky is scoped to the column, not the viewport", () => {

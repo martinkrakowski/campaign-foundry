@@ -38,12 +38,17 @@ beforeEach(() => {
 });
 
 describe("BriefPage E1 Features", () => {
-  // Corrected for D41: the chip has two states now — a fresh draft reads
-  // "Unsaved changes" (written-or-not), and "Draft not applied" no longer exists.
-  test("renders the editor with status chip", () => {
+  // Corrected for D41, twice over: the chip has two states (written-or-not) and
+  // "Draft not applied" no longer exists — and a pristine editor holds a blank form,
+  // so the chip says nothing at all until the draft has content.
+  test("renders the editor with status chip", async () => {
+    const user = userEvent.setup();
     renderWithRun(<Editor />);
-    expect(screen.getByText("Unsaved changes")).toBeTruthy();
+    expect(screen.queryByText("Unsaved changes")).toBeNull();
     expect(screen.queryByText("Draft not applied")).toBeNull();
+
+    await user.type(screen.getByLabelText("Campaign Name"), "spark");
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
   });
 
   test("has BriefSelector component", () => {
