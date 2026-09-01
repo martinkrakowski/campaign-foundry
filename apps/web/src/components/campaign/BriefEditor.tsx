@@ -2,7 +2,7 @@
 
 import { useReducer, useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect, type ReactNode, type RefObject } from "react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { Button, Input, SegBar } from "@/components/ui";
+import { Button, Input, SegBar, OverflowMenu, useDialogFocusTrap } from "@/components/ui";
 import { useRun } from "@/lib/run-context";
 import { useRouter } from "next/navigation";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
@@ -146,6 +146,17 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   const [saveAsId, setSaveAsId] = useState<string | null>(null);
   // The Save-as dialog's field: where the invalid-id guard hands focus back (D3).
   const saveAsFieldRef = useRef<HTMLInputElement | null>(null);
+  const saveAsDialogRef = useRef<HTMLDivElement | null>(null);
+  // The Save-as dialog is `aria-modal` but was hand-rolled, so it had no Escape and
+  // no focus containment: Cancel was the only way out, and Tab walked off into the
+  // editor behind the scrim. The kit hook every other overlay uses supplies both,
+  // plus focus restoration to whatever opened it.
+  useDialogFocusTrap({
+    open: saveAsId !== null,
+    onClose: () => setSaveAsId(null),
+    dialogRef: saveAsDialogRef,
+    initialFocusRef: saveAsFieldRef,
+  });
   const [showYamlSplit, setShowYamlSplit] = useState(false);
   const [poolDrawerOpen, setPoolDrawerOpen] = useState(false);
   // L1.1: Touched/attempted state for error display gating
@@ -1028,37 +1039,14 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
       {/* D3: the bar's primary row is the status sentence and the two verbs.
           Save as…, developer affordances and Revert live behind the overflow so
           the sentence has room. */}
-      <details className="relative">
-        <summary
-          className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md text-text-muted hover:bg-surface-2 hover:text-text-primary"
-          aria-label="More actions"
-        >
-          ⋯
-        </summary>
-        <div className="absolute bottom-full right-0 z-30 mb-2 min-w-[200px] rounded-md border border-border bg-surface p-1 shadow-2xl">
-          <button
-            type="button"
-            className="w-full rounded-sm px-3 py-2 text-left text-[13px] text-text-primary hover:bg-surface-2"
-            onClick={() => setSaveAsId("")}
-          >
-            {messages.editorSaveAs}
-          </button>
-          <button
-            type="button"
-            className="w-full rounded-sm px-3 py-2 text-left text-[13px] text-text-primary hover:bg-surface-2"
-            onClick={() => setShowYamlSplit(!showYamlSplit)}
-          >
-            YAML split {showYamlSplit ? "off" : "on"}
-          </button>
-          <button
-            type="button"
-            className="w-full rounded-sm px-3 py-2 text-left text-[13px] text-text-primary hover:bg-surface-2"
-            onClick={handleRevert}
-          >
-            {messages.editorRevert}
-          </button>
-        </div>
-      </details>
+      <OverflowMenu
+        label="More actions"
+        items={[
+          { label: messages.editorSaveAs, onSelect: () => setSaveAsId("") },
+          { label: `YAML split ${showYamlSplit ? "off" : "on"}`, onSelect: () => setShowYamlSplit(!showYamlSplit) },
+          { label: messages.editorRevert, onSelect: handleRevert },
+        ]}
+      />
     </>
   );
 
@@ -1258,6 +1246,7 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
       {saveAsId !== null && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-scrim/80 p-4 backdrop-blur-sm">
           <div
+            ref={saveAsDialogRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="save-as-title"

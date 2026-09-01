@@ -81,7 +81,7 @@ describe("BriefPage E1 Features", () => {
     expect(labels).not.toContain("Discard");
     expect(labels).not.toContain("YAML split on");
     // D3: a blank draft is invalid, but the verbs stay pressable so the refusal can
-    // be spoken; the menu's own behaviour is covered in save-menu.test.tsx
+    // be spoken; the menu's own behaviour is covered in ui/__tests__/overflow-menu.test.tsx
     expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false);
   });
 
@@ -112,10 +112,24 @@ describe("BriefPage E1 Features", () => {
     expect(screen.getByLabelText("New brief id")).toBeTruthy();
   });
 
+  test("Escape closes the Save-as dialog", async () => {
+    const user = userEvent.setup();
+    renderWithRun(<Editor />);
+    await saveVia(user, "Save as");
+    expect(screen.getByRole("dialog", { name: /Save as/ })).toBeTruthy();
+    // It is `aria-modal`, but it was hand-rolled and had no Escape: Cancel was the
+    // only way out. It now runs the same focus trap as every other overlay.
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: /Save as/ })).toBeNull();
+  });
+
   test("YAML split toggle", async () => {
     const user = userEvent.setup();
     renderWithRun(<Editor />);
-    await user.click(screen.getByText("YAML split on"));
-    expect(screen.getByText("YAML split off")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "YAML split on" }));
+    // The panel closes behind the choice, so the flipped label is read on reopen.
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    expect(screen.getByRole("menuitem", { name: "YAML split off" })).toBeTruthy();
   });
 });

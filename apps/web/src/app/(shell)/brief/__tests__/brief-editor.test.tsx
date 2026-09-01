@@ -130,6 +130,16 @@ const writes = (calls: readonly { url: string; method: string }[]) =>
   calls.filter((c) => c.method !== "GET" && !c.url.includes("/campaigns/plan"));
 
 /** The editor adopts the shell's active brief only after the listing arrives. */
+/**
+ * The developer affordances live behind the action bar's ⋯ menu, which unmounts its
+ * items when closed. Before #163 they sat in a `<details>` that left them in the DOM
+ * while hidden, so these tests used to click a control no user could see.
+ */
+const chooseFromOverflow = async (user: ReturnType<typeof userEvent.setup>, item: string) => {
+  await user.click(screen.getByRole("button", { name: "More actions" }));
+  await user.click(screen.getByRole("menuitem", { name: item }));
+};
+
 const waitForEditorReady = async () =>
   waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).not.toBe(""));
 
@@ -1008,9 +1018,9 @@ describe("BriefPage — data flow", () => {
     renderWithRun(<Editor />);
     await waitForEditorReady();
 
-    await user.click(screen.getByText("YAML split on"));
+    await chooseFromOverflow(user, "YAML split on");
     expect(screen.getByText(/"targetRegion"/)).toBeTruthy();
-    await user.click(screen.getByText("YAML split off"));
+    await chooseFromOverflow(user, "YAML split off");
     expect(screen.queryByText(/"targetRegion"/)).toBeNull();
   });
 
@@ -1362,7 +1372,7 @@ describe("BriefPage — data flow", () => {
     routes({});
     renderWithRun(<Editor />);
     await waitForEditorReady();
-    await user.click(screen.getByText("YAML split on"));
+    await chooseFromOverflow(user, "YAML split on");
     const pre = screen.getByText(/"targetRegion"/);
     const panel = pre.closest(".sticky") as HTMLElement;
     expect(panel).toBeTruthy();
