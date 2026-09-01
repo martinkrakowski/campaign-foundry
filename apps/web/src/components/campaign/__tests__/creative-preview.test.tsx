@@ -148,6 +148,35 @@ describe("CreativePreview", () => {
     expect(lines.join(" ").replace(/\s+/g, " ").trim()).toBe("Stay wild. Stay hydrated.");
   });
 
+  test("renders the headline at the size fitHeadline planned, as a real font-size attribute", () => {
+    // The pure function's return value was always asserted — but the attribute itself
+    // never was, so the headline silently fell back to the inherited 16px inside the
+    // 1080×1920 viewBox. Assert the rendered attribute, not just the plan.
+    for (const ratio of ["1:1", "9:16"] as const) {
+      const headline = "Stay wild. Stay hydrated.";
+      const svg = svgOf(
+        <CreativePreview primaryColor="#1473E6" headline={headline} ratio={ratio} />,
+      );
+      const { height: H, width: W } = RATIO_DIMENSIONS[ratio];
+      const textEdge = times(LAYERS.textEdge, W);
+      const anchor = times(LAYERS.headlineAnchor, H);
+      const fit = fitHeadline(
+        headline,
+        W - 2 * textEdge,
+        H - 2 * anchor,
+        H * PREVIEW_FONT_RATIO,
+        H * PREVIEW_MIN_FONT_RATIO,
+      );
+      const text = svg.querySelector("text")!;
+      expect(text).not.toBeNull();
+      expect(Number(text.getAttribute("font-size"))).toBe(fit.fontSize);
+      // The tspans inherit the size from the <text>, so no tspan carries its own.
+      for (const tspan of text.querySelectorAll("tspan")) {
+        expect(tspan.getAttribute("font-size")).toBeNull();
+      }
+    }
+  });
+
   test("subtle tone settles for the lighter headline weight", () => {
     const svg = svgOf(<CreativePreview primaryColor="#1473E6" tone="subtle" headline="Stay wild" />);
     const text = svg.querySelector("text")!;
