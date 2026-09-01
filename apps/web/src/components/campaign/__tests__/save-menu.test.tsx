@@ -4,32 +4,34 @@ import userEvent from "@testing-library/user-event";
 import { SaveMenu } from "../SaveMenu";
 
 const setup = (over: Partial<Parameters<typeof SaveMenu>[0]> = {}) => {
-  const onSaveAndApply = vi.fn();
+  const onSave = vi.fn();
   const onSaveAs = vi.fn();
   render(
     <div>
       <button type="button">outside</button>
-      <SaveMenu saving={false} onSaveAndApply={onSaveAndApply} onSaveAs={onSaveAs} {...over} />
+      <SaveMenu saving={false} onSave={onSave} onSaveAs={onSaveAs} {...over} />
     </div>,
   );
-  return { onSaveAndApply, onSaveAs, user: userEvent.setup() };
+  return { onSave, onSaveAs, user: userEvent.setup() };
 };
 
 describe("SaveMenu", () => {
   test("opens on click, lists both ways to persist, and closes after a choice", async () => {
-    const { user, onSaveAndApply, onSaveAs } = setup();
+    const { user, onSave, onSaveAs } = setup();
     const trigger = screen.getByRole("button", { name: /^Save$/ });
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByRole("menu")).toBeNull();
 
     await user.click(trigger);
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    await user.click(screen.getByRole("menuitem", { name: /Save & apply/ }));
-    expect(onSaveAndApply).toHaveBeenCalledTimes(1);
+    // D35: the items are "Save" and "Save as…" — "Save & apply" is gone, because both
+    // items already commit the brief and saying so twice was the confusion.
+    await user.click(screen.getByRole("menuitem", { name: /^Save(?!\s*as)/ }));
+    expect(onSave).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("menu")).toBeNull();
 
     await user.click(trigger);
-    await user.click(screen.getByRole("menuitem", { name: /Save as/ }));
+    await user.click(screen.getByRole("menuitem", { name: /^Save as/ }));
     expect(onSaveAs).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("menu")).toBeNull();
   });

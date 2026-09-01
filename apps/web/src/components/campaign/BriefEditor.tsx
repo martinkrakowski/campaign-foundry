@@ -1,11 +1,12 @@
 "use client";
 
 import { useReducer, useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect, type ReactNode } from "react";
+import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { Button, Input, SegBar } from "@/components/ui";
 import { useRun } from "@/lib/run-context";
 import { useRouter } from "next/navigation";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
-import { useEditorDirty } from "@/lib/editor-dirty-context";
+import { useEditorDirty, type DraftRunHandoff } from "@/lib/editor-dirty-context";
 import {
   listBriefs,
   createBrief,
@@ -132,7 +133,7 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   const { brief: runBrief, setBrief: setRunBrief } = useRun();
   const router = useRouter();
   const { guardedPush } = useGuardedNavigation();
-  const { setDirty } = useEditorDirty();
+  const { setDirty, setDraftRun } = useEditorDirty();
   const { setPanels, setTopPanels } = useEditorPanels();
   const [state, dispatch] = useReducer(editorReducer, initialEditorState());
   const [errors, setErrors] = useState<Record<string, FieldErrors>>({});
@@ -355,6 +356,24 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     saveDraftToStorage(state);
   }, [state]);
 
+  // W8.1 — the review step's projection: one `toBrief` call, passed into `ReviewStep`,
+  // so its rows are generated from exactly what Save sends — a field the projection
+  // drops loses its row too, and the review can never disagree with the submission
+  // about what the brief contains. Declared here (not beside the review step) because
+  // the D35 handoff below reads it on every render.
+  const draftBrief = useMemo(() => toBrief(state), [state]);
+  /**
+   * D35 — whether Generate's default target (the shell's brief) and the screen
+   * disagree. A pristine editor holds the blank template, not a draft anybody is
+   * editing, so it never counts as differing — otherwise a freshly mounted editor
+   * (or a reverted one) would offer to run an empty form over a perfectly good
+   * committed brief.
+   */
+  const draftDiffers = useMemo(
+    () => !isPristine(state) && !valuesEqual(draftBrief, runBrief),
+    [state, draftBrief, runBrief],
+  );
+
   const loadBriefs = async () => {
     try {
       const entries = await listBriefs();
@@ -399,16 +418,16 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   const sectionErrorsVisible = (section: string): FieldErrors => visibleErrors[section] ?? {};
 
 
-  // Derived, not stored: the refusal describes the draft *as applied*, so it holds
-  // exactly while the applied snapshot still matches the draft. Any edit — switching
+  // Derived, not stored: the refusal describes the draft *as committed*, so it holds
+  // exactly while the committed snapshot still matches the draft. Any edit — switching
   // away from motion, or a capability verdict landing — re-evaluates it, and storing
   // it would leave the page claiming motion is unavailable after that stopped being
-  // true. Both Apply and Save & apply set the snapshot, so both surface it.
+  // true. Save and load both set the snapshot, so both surface it.
   const applied = state.appliedSnapshot !== null && !isDirtySinceApply(state);
   const applyRefusal = applied ? motionUnavailableReason(state) : undefined;
-  // Apply changes state the user cannot see from here — the pipeline lives in the top
-  // bar — so say plainly what happened and what runs it. Without this, Apply looked
-  // like it did nothing at all.
+  // Committing changes state the user cannot see from here — the pipeline lives in the
+  // top bar — so say plainly what happened and what runs it. Without this, a save
+  // looked like it did nothing at all.
 
   /** Section errors before the first validation pass lands. */
 
@@ -626,18 +645,14 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     return true;
   };
 
-  const handleApply = () => {
-    if (refuseInvalid()) return;
-    const brief = toBrief(state);
-    dispatch({ type: "apply", applied: brief });
-    setRunBrief(brief);
-    // D7: applying a motion brief on a host that cannot run it must not pretend it
-    // will produce clips — surface the probe's reason (the text the API's 400 would
-    // quote) as the status message. Run still refuses it server-side.
-  };
-
-  const handleSave = async () => {
-    if (refuseInvalid()) return;
+  /**
+   * D35: Save writes the file and commits the brief to the shell — the one act, told
+   * once. Resolves with the brief exactly as the server stored it (what Generate's
+   * "Save and run" runs), or null when the draft was refused or the write failed; the
+   * status surface already speaks for those, so callers have nothing to add.
+   */
+  const handleSave = async (): Promise<CampaignBrief | null> => {
+    if (refuseInvalid()) return null;
     setSaving(true);
     setPersistError(undefined);
     try {
@@ -661,11 +676,12 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
         saved: stored.brief,
         entry: { file: stored.file, ...(stored.revision === undefined ? {} : { revision: stored.revision }) },
       });
-      // D3: "Save & apply" does both.
+      // D35: committing and saving are one act — the shell runs what was written.
       dispatch({ type: "apply", applied: stored.brief });
       setRunBrief(stored.brief);
       purgeDraftFromStorage(state);
       await loadBriefs();
+      return stored.brief;
     } catch (error) {
       // A 409 carries the store's fresh revision (API E1.0). Adopt it — through the
       // entry-only `save`, so the draft is untouched — and say what happened: the
@@ -687,6 +703,7 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
       } else {
         setPersistError(unknownErrorMessage(error, "Save failed"));
       }
+      return null;
     } finally {
       setSaving(false);
     }
@@ -757,6 +774,33 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
       setSaving(false);
     }
   };
+
+  /**
+   * D35 — the run-without-write handoff. The freshest draft and save path ride refs
+   * assigned every render, so the published handoff never goes stale while the user
+   * keeps typing; the publish effect runs only on a differs-flip, so keystrokes never
+   * churn every provider consumer. While the handoff stands, Generate asks the
+   * three-way question (Header.tsx) — which replaces the guard's prompt for the whole
+   * gesture, exactly one question either way.
+   */
+  const draftRunDraftRef = useRef<CampaignBrief | null>(null);
+  const draftRunSaveRef = useRef<(() => Promise<CampaignBrief | null>) | undefined>(undefined);
+  draftRunDraftRef.current = draftDiffers ? draftBrief : null;
+  draftRunSaveRef.current = handleSave;
+  useEffect(() => {
+    if (!draftDiffers) {
+      setDraftRun(null);
+      return;
+    }
+    const handoff: DraftRunHandoff = {
+      draftRef: draftRunDraftRef,
+      // Assigned every render before any handoff can be published, so the cast only
+      // restates the invariant — the call itself is always the freshest save.
+      saveAndRun: () => (draftRunSaveRef.current as () => Promise<CampaignBrief | null>)(),
+    };
+    setDraftRun(handoff);
+    return () => setDraftRun(null);
+  }, [draftDiffers, setDraftRun]);
 
   // The Save-as field speaks the same rule as the briefId field (messages.briefId),
   // evaluated on the *trimmed* value so the verdict matches what Save would send.
@@ -877,11 +921,11 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     }
   };
 
-  // W8.1 — the review step renders the projection itself: one `toBrief` call, passed
-  // into `ReviewStep`, so its rows are generated from exactly what Apply and Save
-  // send — a field the projection drops loses its row too, and the review can never
-  // disagree with the submission about what the brief contains.
-  const draftBrief = useMemo(() => toBrief(state), [state]);
+  // W8.1 — the review step renders the projection itself: the `draftBrief` memo
+  // (declared beside the dirty-flag effect, where the D35 handoff also reads it) is
+  // passed into `ReviewStep`, so its rows are generated from exactly what Save sends —
+  // a field the projection drops loses its row too, and the review can never disagree
+  // with the submission about what the brief contains.
 
   /** The review step is the one card that is not a section (W6.1). */
   const renderStepCard = (step: StepId): ReactNode =>
@@ -929,13 +973,10 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
         /* D3: never a dead primary button — pressing an invalid brief sets
            `attempted`, reveals every error and speaks the refusal. */
         saving={saving}
-        onSaveAndApply={() => void handleSave()}
+        onSave={() => void handleSave()}
         onSaveAs={() => setSaveAsId("")}
       />
-      <Button onClick={handleApply}>
-        Apply to run
-      </Button>
-      {/* D3: the bar's primary row is the status sentence and the three verbs.
+      {/* D3: the bar's primary row is the status sentence and the verbs.
           Developer affordances live behind the overflow so the sentence has room. */}
       <details className="relative">
         <summary
@@ -959,10 +1000,10 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
 
   /**
    * W8.2 — the action bar, one component with two placements: on the Review step in
-   * Guided (where the launch lives) and at the foot in Everything. Guided's Review
-   * placement takes the verbs ONLY (D38): the status surface is already mounted on
-   * every guided step, and a second one in the bar would read the refusal twice.
-   * Everything's foot keeps the surface in the bar — it has no per-step mount.
+   * Guided (the last look) and at the foot in Everything. Guided's Review placement
+   * takes the verbs ONLY (D38): the status surface is already mounted on every guided
+   * step, and a second one in the bar would read the refusal twice. Everything's foot
+   * keeps the surface in the bar — it has no per-step mount.
    */
   const actionBar = (withStatus: boolean) => (
     <FloatingBar data-testid="action-bar">
@@ -1085,7 +1126,7 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
                   // The last section step, not a named one: `output` is last in classic
                   // but randomized puts `policy` after it, so keying on the id promised
                   // a launch and delivered the Variation Policy step.
-                  nextLabel={stepIndex === steps.length - 2 ? messages.stepNextReviewLaunch : undefined}
+                  nextLabel={stepIndex === steps.length - 2 ? messages.stepNextReview : undefined}
                   nudgeKey={nudgeKey}
                   readyKey={readyKey}
                 />

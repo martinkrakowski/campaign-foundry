@@ -344,7 +344,15 @@ interface RunContextValue {
   hasRun: boolean;
   decisions: Record<string, Decision>;
   decide: (key: string, decision: Decision) => void;
-  execute: () => Promise<void>;
+  /**
+   * Run the pipeline. With no argument the shell's active brief is POSTed, exactly as
+   * always (the grid's Execute, the header's Generate over a committed brief). D35:
+   * the editor's Generate asks to run *the on-screen draft* — a brief that may never
+   * have been written to disk — so the brief to run is a parameter, not a closure over
+   * `brief`. The run result still keys by the target's campaign id; the shell's brief
+   * is untouched (run-without-write commits nothing).
+   */
+  execute: (override?: CampaignBrief) => Promise<void>;
   /**
    * Re-roll only the creatives currently marked rejected: regenerates those cells,
    * merges them back in, and returns them to review (clears their decisions). No-op
@@ -657,7 +665,12 @@ export function RunProvider({ children }: { children: ReactNode }) {
     [selectedModel],
   );
 
-  const execute = useCallback(async () => {
+  const execute = useCallback(async (override?: CampaignBrief) => {
+    // The brief this press runs: the shell's active brief by default, or the draft
+    // handed in (Generate's "Run this draft" — the on-screen draft, which may never
+    // have been saved). Everything below keys off the target, never off `brief`, so
+    // a run cannot silently POST the previous campaign (R6).
+    const target = override ?? brief;
     // The token this press owns while its POST is in flight — captured, not bumped:
     // beginRun() runs only once the POST has answered with a job to poll. Of two
     // presses racing, the first to get a job claims the run and the other drops out
@@ -667,7 +680,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setError(null);
     try {
-      const jobId = await postGenerate(brief);
+      const jobId = await postGenerate(target);
       if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this press
       const started = beginRun();
       owned = started.seq;
@@ -676,7 +689,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       if (outcome.kind === "lost") {
         // The job vanished mid-run. Whatever is on disk is the *previous* run, so show
         // it without pretending it is new: no cache-bust, review decisions kept.
-        const persisted = await fetchPersistedRun(brief.id);
+        const persisted = await fetchPersistedRun(target.id);
         if (runSeq.current !== owned) return;
         if (persisted) setResult(persisted);
         setError(LOST_JOB_MESSAGE);

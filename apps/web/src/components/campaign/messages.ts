@@ -519,8 +519,10 @@ export const themeToDark = "Switch to the dark theme";
 // --- Header (W5) ---
 
 /**
- * The header's run verb (D32). It runs the applied brief and takes the user to the
- * grid; it is never disabled, so everything it refuses to do it says here.
+ * The header's run verb (D32). It runs the committed brief and takes the user to the
+ * grid; it is never disabled, so everything it refuses to do it says here. When the
+ * editor is mounted with an unsaved draft, the press opens the three-way question
+ * (`generateDraftTitle` below) instead.
  */
 export const generate = "Generate";
 /**
@@ -529,6 +531,33 @@ export const generate = "Generate";
  * carries it, because that bar does not exist anywhere else.
  */
 export const generateNoBrief = "Nothing applied yet — press Apply to run on the brief first.";
+
+/* ── The three-way Generate question (D35) ── */
+
+/**
+ * While the editor is mounted and its on-screen draft differs from the shell's
+ * committed brief, Generate asks which brief to run. Three answers, exactly one
+ * prompt: this question replaces the dirty guard's prompt for the whole gesture
+ * (the lane's "never the guard's and the confirm's"), so the choices navigate
+ * without a second question.
+ */
+export const generateDraftTitle = "Run the brief you are editing?";
+export const generateDraftRunThis = "Run this draft";
+export const generateDraftRunThisHint = "Run what is on screen without writing it to disk.";
+export const generateDraftSaveRun = "Save and run";
+export const generateDraftSaveRunHint = "Write the brief to disk, then run the saved file.";
+export const confirmCancel = "Cancel";
+
+/* ── The editor's action-bar verbs (D35/D40) ── */
+
+/** The disclosure button's label and the menu's accessible name. */
+export const saveMenuLabel = "Save";
+/** The first menu item: write the file, and the shell runs it (D35 — every persist path applies). */
+export const saveMenuItemSave = "Save";
+export const saveMenuItemSaveHint = "Write the file and use it for the next run";
+/** The second menu item: the same, under a new id. */
+export const saveMenuItemSaveAs = "Save as…";
+export const saveMenuItemSaveAsHint = "Write a copy under a new id";
 /**
  * The header's telemetry control. It opens a panel rather than performing an action on
  * a draft, so the name names the panel — it never trips the unsaved-changes guard.
@@ -570,9 +599,7 @@ export const stepSubtitleReview = "Last look, then send it to the pipeline.";
 export const statusStepReady = "Looking good.";
 /**
  * The review step's footer status sentence. It states readiness rather than naming a
- * control: Review supplies no Next, so an instruction to "press Review & launch" sent
- * the user looking for a button that is not on the step. W8 places the action bar
- * here, and the instruction belongs with it.
+ * control: Review supplies no Next, and the run verb (Generate) lives in the top bar.
  */
 export const statusStepReview = "Everything checks out — this is the last look.";
 /** The review step's body: the brief has met every step, so this is the last look. */
@@ -581,8 +608,12 @@ export const stepReviewIntro =
 /** Step footer verbs. */
 export const stepBack = "Back";
 export const stepNext = "Next";
-/** The last section step's Next, before the review step. */
-export const stepNextReviewLaunch = "Review & launch";
+/**
+ * The last section step's Next, before the review step. D35: "Review & launch"
+ * promised a launch the review step does not carry — the run verb is Generate in
+ * the top bar, so the label only names where the walk goes next.
+ */
+export const stepNextReview = "Review & finish";
 
 /* ── The step segbar and the step gestures (W7) ───────────────────────────── */
 

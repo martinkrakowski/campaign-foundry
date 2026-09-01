@@ -67,6 +67,37 @@ describe("RunProvider — execute", () => {
     expect(result.current.assetVersion).toBeGreaterThan(0);
   });
 
+  test("an override brief is POSTed in place of the shell's, and the shell's brief is untouched (D35)", async () => {
+    const bodies: unknown[] = [];
+    mockPipelineApi({
+      post: (_url, init) => {
+        bodies.push(JSON.parse(init.body as string));
+        return json({ jobId: "job-1" }, 202);
+      },
+      job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [], campaignId: "on-screen-draft" } }),
+    });
+    const { result } = setup();
+    // The shell holds one brief; the editor hands Generate the on-screen draft — a
+    // brief that may never have been written to disk.
+    const onScreenDraft = {
+      id: "on-screen-draft",
+      targetRegion: "US",
+      targetAudience: "x",
+      campaignMessage: "the draft as typed",
+      products: [
+        { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" },
+        { id: "p2", name: "P2", primaryColor: "#222222", logoPath: "b.png" },
+      ],
+    };
+    await act(async () => {
+      await result.current.execute(onScreenDraft);
+    });
+    expect(bodies[0]).toMatchObject({ id: "on-screen-draft", campaignMessage: "the draft as typed" });
+    // Run-without-write commits nothing: the shell still holds what it held.
+    expect(result.current.brief.id).toBe("summer-hydration-2026");
+    expect(result.current.assets).toHaveLength(1);
+  });
+
   test("sends the selected model in the query string", async () => {
     const urls: string[] = [];
     mockPipelineApi({
