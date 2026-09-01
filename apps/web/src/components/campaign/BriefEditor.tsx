@@ -153,7 +153,14 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   // plus focus restoration to whatever opened it.
   useDialogFocusTrap({
     open: saveAsId !== null,
-    onClose: () => setSaveAsId(null),
+    // Not while the write is in flight. `handleSaveAs` captures the draft before it
+    // awaits and dispatches `load` — a full state replace — when the server answers,
+    // so any edit typed between a dismissal and that answer is silently discarded.
+    // The door was already open via Cancel, which `main` never gated either; adding
+    // Escape without this would have widened a live data-loss race.
+    onClose: () => {
+      if (!saving) setSaveAsId(null);
+    },
     dialogRef: saveAsDialogRef,
     initialFocusRef: saveAsFieldRef,
   });
@@ -1289,7 +1296,10 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
               <Button onClick={() => handleSaveAs(saveAsId)} disabled={saving || !saveAsId}>
                 Save
               </Button>
-              <Button variant="ghost" onClick={() => setSaveAsId(null)}>
+              {/* Held back only while the write is in flight, for the reason the
+                  focus trap's `onClose` gives — and visibly, so a press that does
+                  nothing is not the answer a user gets. */}
+              <Button variant="ghost" disabled={saving} onClick={() => setSaveAsId(null)}>
                 Cancel
               </Button>
             </div>

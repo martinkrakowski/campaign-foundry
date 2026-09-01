@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
 import { cn } from "@/lib/cn";
 
 export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label"> {
@@ -8,6 +8,13 @@ export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonEle
    * — invisible to `getByLabelText` and to anything reading the page aloud.
    */
   readonly label: string;
+  /**
+   * React 19 passes `ref` as an ordinary prop, and this component spreads its rest
+   * props onto the `<button>` — but `ButtonHTMLAttributes` does not declare it, so
+   * without this a caller that needs the node (to restore focus to it, say) cannot
+   * ask for one.
+   */
+  readonly ref?: Ref<HTMLButtonElement>;
 }
 
 /**

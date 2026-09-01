@@ -524,6 +524,26 @@ describe("BriefPage — data flow", () => {
     expect(screen.getByLabelText("New brief id")).toBeTruthy();
   });
 
+  test("neither Escape nor Cancel dismisses Save as… while the write is in flight", async () => {
+    const user = userEvent.setup();
+    // A POST that never answers, so the dialog stays mid-write for the whole test.
+    routes({ post: () => new Promise<Response>(() => {}) });
+    renderWithRun(<Editor />);
+    await fillValidDraft(user);
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), "trail-blaze-2026");
+    const dialog = screen.getByRole("dialog", { name: /Save as/ });
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    // `handleSaveAs` captured the draft before awaiting and dispatches `load` — a
+    // full state replace — when the server answers. Dismissing here would hand the
+    // user an editable page whose edits that pending load is about to discard.
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: /Save as/ })).toBeTruthy();
+    expect((within(dialog).getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   test("Save as... offers the slugified form of a name as a click, never a silent rewrite", async () => {
     const user = userEvent.setup();
     const calls = routes({});

@@ -71,6 +71,38 @@ describe("OverflowMenu", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  test("every deliberate close hands focus back to the trigger", async () => {
+    const { user } = setup();
+    await user.click(trigger());
+    await user.keyboard("{Escape}");
+    expect(document.activeElement).toBe(trigger());
+
+    // The item is unmounted by the very click that activates it, so without the
+    // restore the keyboard user who chose it lands on document.body — and a dialog
+    // opened from here would capture that vanishing item as its focus-return target.
+    await user.click(trigger());
+    await user.click(screen.getByRole("menuitem", { name: "Revert" }));
+    expect(document.activeElement).toBe(trigger());
+  });
+
+  test("a press outside closes without stealing focus back", async () => {
+    const { user } = setup();
+    await user.click(trigger());
+    const outside = screen.getByText("outside");
+    await user.click(outside);
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(outside);
+  });
+
+  test("aria-controls names the panel only while the panel exists", async () => {
+    const { user } = setup();
+    expect(trigger().getAttribute("aria-controls")).toBeNull();
+    await user.click(trigger());
+    expect(trigger().getAttribute("aria-controls")).toBe(screen.getByRole("menu").id);
+    await user.keyboard("{Escape}");
+    expect(trigger().getAttribute("aria-controls")).toBeNull();
+  });
+
   test("the listeners are torn down with the panel", async () => {
     const remove = vi.spyOn(document, "removeEventListener");
     const { user } = setup();
