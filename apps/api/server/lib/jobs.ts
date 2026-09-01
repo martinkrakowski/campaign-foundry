@@ -67,12 +67,21 @@ export function getJob(id: string): Job | undefined {
   return jobs.get(id)?.job;
 }
 
+/**
+ * The id of the job still running for this campaign, else undefined — the handle a
+ * 409 "already in progress" hands back, so the second press can adopt the run that
+ * is actually in flight instead of discarding it.
+ */
+export function getRunningJobId(campaignId: string): string | undefined {
+  for (const [id, entry] of jobs) {
+    if (entry.campaignId === campaignId && entry.job.status === "running") return id;
+  }
+  return undefined;
+}
+
 /** True while a job for this campaign is still running — one run per campaign at a time. */
 export function hasRunningJob(campaignId: string): boolean {
-  for (const entry of jobs.values()) {
-    if (entry.campaignId === campaignId && entry.job.status === "running") return true;
-  }
-  return false;
+  return getRunningJobId(campaignId) !== undefined;
 }
 
 function settle(id: string, job: Job): void {

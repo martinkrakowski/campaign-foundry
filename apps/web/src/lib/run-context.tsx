@@ -451,13 +451,15 @@ export function RunProvider({ children }: { children: ReactNode }) {
   // earlier switch can't land on the grid after the user has moved to another brief.
   const briefIdRef = useRef(brief.id);
 
-  // Monotonic run token. Bumped when a run starts and when a brief switch invalidates
-  // any in-flight run; execute()/regenerateRejected() capture it before awaiting and
-  // only commit their results if it still matches — so a run that resolves after the
-  // user switched briefs can't repopulate the grid with the previous brief's creatives.
+  // Monotonic run token. Bumped when a run actually starts (beginRun, after the POST
+  // answers with a job to poll) and when a brief switch invalidates any in-flight run;
+  // execute()/regenerateRejected() capture it before awaiting and only commit their
+  // results if it still matches — so a run that resolves after the user switched
+  // briefs can't repopulate the grid with the previous brief's creatives.
   const runSeq = useRef(0);
-  // The in-flight job poller. Starting a run, switching briefs, or unmounting aborts it
-  // so an abandoned run never keeps hitting /campaigns/jobs/:id in the background.
+  // The in-flight job poller. Starting a run (once the POST has answered), switching
+  // briefs, or unmounting aborts it so an abandoned run never keeps hitting
+  // /campaigns/jobs/:id in the background.
   const pollAbort = useRef<AbortController | null>(null);
   // Packaging shares the brief-identity guard: a package call captures brief.id and
   // drops its result if the user has moved on, or if a newer package call has already
@@ -468,6 +470,12 @@ export function RunProvider({ children }: { children: ReactNode }) {
     packageAbort.current ??= new AbortController();
     return packageAbort.current.signal;
   };
+  /**
+   * Mark a run as started: abort any previous poller, take a fresh token, and hand
+   * back the signal the new poller must die on. Called only once the POST has
+   * answered with a job to poll — never before, or a second Generate would abort
+   * the poller of the run that is actually in flight and bury its result (C4).
+   */
   const beginRun = (): { seq: number; signal: AbortSignal } => {
     pollAbort.current?.abort();
     const controller = new AbortController();
@@ -616,13 +624,17 @@ export function RunProvider({ children }: { children: ReactNode }) {
   }, [decisions]);
 
   // Shared POST to the generate endpoint. The body is either a bare brief (full run)
-  // or a `{ brief, regenerateOnly }` envelope (selective re-roll). A 202 `{ jobId }`
-  // is polled until the job completes or fails; a 404 on the job recovers from the
-  // persisted report. The pipeline API is reached through a same-origin proxy; when
-  // it isn't running the proxy returns a non-JSON 5xx, so parse defensively and
-  // surface an actionable message instead of a raw "Unexpected token" JSON error.
+  // or a `{ brief, regenerateOnly }` envelope (selective re-roll). Resolves with the
+  // job id to poll: a 202's fresh job, or — from a 409 "already in progress" — the
+  // handle of the run that is actually in flight, so a second press adopts it instead
+  // of discarding it (C4). Any other answer throws: a 409 without a handle is the
+  // failure it honestly is (nothing was started, and there is nothing to adopt), and
+  // a 2xx without a job id is an API/UI version mismatch. The pipeline API is reached
+  // through a same-origin proxy; when it isn't running the proxy returns a non-JSON
+  // 5xx, so parse defensively and surface an actionable message instead of a raw
+  // "Unexpected token" JSON error.
   const postGenerate = useCallback(
-    async (body: unknown, signal: AbortSignal): Promise<PollOutcome> => {
+    async (body: unknown): Promise<string> => {
       const url = selectedModel
         ? `${API}/campaigns/generate?model=${encodeURIComponent(selectedModel)}`
         : `${API}/campaigns/generate`;
@@ -633,7 +645,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       });
       const data = parseJson(await res.text());
       const jobId = typeof data?.jobId === "string" ? data.jobId : undefined;
-      if (res.status === 202 && jobId) return pollJob(jobId, signal);
+      if ((res.status === 202 || res.status === 409) && jobId) return jobId;
       if (res.ok) {
         // A 2xx that is not a job handle: an API that predates the job protocol.
         throw new Error(
@@ -646,17 +658,26 @@ export function RunProvider({ children }: { children: ReactNode }) {
   );
 
   const execute = useCallback(async () => {
-    const { seq, signal } = beginRun();
+    // The token this press owns while its POST is in flight — captured, not bumped:
+    // beginRun() runs only once the POST has answered with a job to poll. Of two
+    // presses racing, the first to get a job claims the run and the other drops out
+    // silently here (its 409, when the server sent one, named the very job being
+    // polled), so exactly one run is ever adopted and one result committed.
+    let owned = runSeq.current;
     setLoading(true);
     setError(null);
     try {
-      const outcome = await postGenerate(brief, signal);
-      if (runSeq.current !== seq) return; // a brief switch (or newer run) superseded this
+      const jobId = await postGenerate(brief);
+      if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this press
+      const started = beginRun();
+      owned = started.seq;
+      const outcome = await pollJob(jobId, started.signal);
+      if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this
       if (outcome.kind === "lost") {
         // The job vanished mid-run. Whatever is on disk is the *previous* run, so show
         // it without pretending it is new: no cache-bust, review decisions kept.
         const persisted = await fetchPersistedRun(brief.id);
-        if (runSeq.current !== seq) return;
+        if (runSeq.current !== owned) return;
         if (persisted) setResult(persisted);
         setError(LOST_JOB_MESSAGE);
         return;
@@ -664,11 +685,12 @@ export function RunProvider({ children }: { children: ReactNode }) {
       setResult(outcome.result);
       setAssetVersion((v) => v + 1);
       setDecisions({});
+      setError(null); // the result replaces any stale complaint about this run
     } catch (e) {
-      if (runSeq.current !== seq) return;
+      if (runSeq.current !== owned) return;
       setError(e instanceof Error ? e.message : "Generation failed");
     } finally {
-      if (runSeq.current === seq) setLoading(false);
+      if (runSeq.current === owned) setLoading(false);
     }
   }, [brief, postGenerate]);
 
@@ -705,13 +727,20 @@ export function RunProvider({ children }: { children: ReactNode }) {
         : { productId: a.productId, aspectRatio: a.aspectRatio, treatment: a.treatment },
     );
 
-    const { seq, signal } = beginRun();
+    // Same claim discipline as execute: the press's token is captured before the POST
+    // and beginRun() runs only once the POST answers, so a re-roll can never abort
+    // the poller of a run still in flight.
+    let owned = runSeq.current;
     setRegeneratingKeys(targetKeys);
     setLoading(true);
     setError(null);
     try {
-      const outcome = await postGenerate({ brief, regenerateOnly: targets }, signal);
-      if (runSeq.current !== seq) return; // a brief switch (or newer run) superseded this
+      const jobId = await postGenerate({ brief, regenerateOnly: targets });
+      if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this press
+      const started = beginRun();
+      owned = started.seq;
+      const outcome = await pollJob(jobId, started.signal);
+      if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this
       if (outcome.kind === "lost") {
         // Nothing was regenerated that we can see: leave the grid and the rejected
         // decisions exactly as they were and say so.
@@ -735,6 +764,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
         };
       });
       setAssetVersion((v) => v + 1);
+      setError(null); // the re-rolled grid replaces any stale complaint about this run
       // Regenerated creatives return to review: clear their (rejected) decisions.
       // The identity key is unchanged on a variation re-roll (productId/v<index>),
       // so the tile updates in place.
@@ -744,10 +774,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
         return next;
       });
     } catch (e) {
-      if (runSeq.current !== seq) return;
+      if (runSeq.current !== owned) return;
       setError(e instanceof Error ? e.message : "Regeneration failed");
     } finally {
-      if (runSeq.current === seq) {
+      if (runSeq.current === owned) {
         setLoading(false);
         setRegeneratingKeys(null);
       }
