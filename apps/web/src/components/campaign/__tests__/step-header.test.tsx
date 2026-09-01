@@ -63,15 +63,15 @@ describe("StepHeader", () => {
   });
 
   test("the status chip reflects the editor state it is handed", () => {
-    // The labels below are StatusChip's own four-state vocabulary; what this pins
-    // is the wiring — the `state` prop flows through to the chip, so a Guided
+    // The labels below are StatusChip's own two-state vocabulary (D41); what this
+    // pins is the wiring — the `state` prop flows through to the chip, so a Guided
     // step head cannot freeze one chip state for every draft.
     const { rerender } = header({ state: initialEditorState() });
-    expect(screen.getByText("Draft not applied")).toBeTruthy();
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
 
     rerender(<StepHeader {...props({ state: savedAndApplied() })} />);
-    expect(screen.getByText("Saved & applied")).toBeTruthy();
-    expect(screen.queryByText("Draft not applied")).toBeNull();
+    expect(screen.getByText("Saved")).toBeTruthy();
+    expect(screen.queryByText("Unsaved changes")).toBeNull();
   });
 
   test("sticky is scoped to the column, not the viewport", () => {

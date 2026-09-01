@@ -2,7 +2,7 @@ import { describe, test, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { StatusChip } from "../StatusChip";
-import { editorReducer, initialEditorState, type EditorState } from "../editor-state";
+import { editorReducer, initialEditorState, toBrief, type EditorState } from "../editor-state";
 
 const saved = (): CampaignBrief =>
   ({
@@ -17,37 +17,48 @@ const reduce = (state: EditorState, ...actions: Parameters<typeof editorReducer>
   actions.reduce(editorReducer, state);
 
 describe("StatusChip", () => {
-  test("a fresh draft has not been applied", () => {
+  // D41: two states — "Unsaved changes" / "Saved" — written-or-not, never
+  // applied-or-not. The old four-state vocabulary (and the "Draft not applied"
+  // badge it produced) no longer exists.
+
+  test("a fresh, never-written draft reads Unsaved changes, and nothing speaks of applying", () => {
     render(<StatusChip state={initialEditorState()} />);
-    expect(screen.getByText("Draft not applied")).toBeTruthy();
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
+    expect(screen.queryByText("Draft not applied")).toBeNull();
   });
 
-  test("applying a new draft reports that it was never saved", () => {
+  test("a committed-but-unsaved draft reads Unsaved changes — the chip says written-or-not, not applied-or-not", () => {
     const applied = reduce({ ...initialEditorState(), briefId: "camp" }, { type: "apply" });
     render(<StatusChip state={applied} />);
-    expect(screen.getByText("Applied, never saved")).toBeTruthy();
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
   });
 
-  test("a loaded brief that is applied and saved is green", () => {
+  test("a loaded brief reads Saved", () => {
     const state = reduce(
       initialEditorState(),
       { type: "load", brief: saved(), entry: { file: "camp.yaml", revision: "r1" } },
-      { type: "save" },
-      { type: "apply" },
     );
     render(<StatusChip state={state} />);
-    expect(screen.getByText("Saved & applied")).toBeTruthy();
+    expect(screen.getByText("Saved")).toBeTruthy();
   });
 
-  test("editing after a save reports unsaved edits", () => {
-    const state = reduce(
+  test("editing after a save reads Unsaved changes, and saving returns it to Saved", () => {
+    const edited = reduce(
       initialEditorState(),
       { type: "load", brief: saved(), entry: { file: "camp.yaml", revision: "r1" } },
-      { type: "save" },
-      { type: "apply" },
       { type: "patch", patch: { campaignMessage: "Changed" } },
     );
-    render(<StatusChip state={state} />);
-    expect(screen.getByText("Applied, unsaved edits")).toBeTruthy();
+    const { rerender } = render(<StatusChip state={edited} />);
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
+
+    // the save snapshots what the server stored — the brief the PUT echoed
+    const storedBrief = toBrief(edited);
+    const stored = reduce(
+      edited,
+      { type: "save", saved: storedBrief },
+      { type: "apply", applied: storedBrief },
+    );
+    rerender(<StatusChip state={stored} />);
+    expect(screen.getByText("Saved")).toBeTruthy();
   });
 });
