@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { extname, isAbsolute, resolve } from "node:path";
 import { projectRoot } from "@campaignfoundry/shared";
-import * as yaml from "js-yaml";
+import { parse as parseYaml } from "yaml";
 import {
   HEADLINE_POOL_REF,
   LAYOUT_VALUES,
@@ -21,6 +21,15 @@ import { isPlatformVisible, platformProfile, type PlatformProfile } from "@campa
 import { getCapabilities, type Capabilities } from "./capabilities.js";
 
 const REQUIRED_FIELDS = ["id", "targetRegion", "targetAudience", "campaignMessage", "products"] as const;
+
+/**
+ * Explicit cap on YAML alias expansion (a billion-laughs bomb is a brief with
+ * a few anchors and a deep list). The `yaml` package defaults to 100; pinning
+ * it here keeps the load path and the Document write path (`brief-files.ts`)
+ * on the same cap. The load path's schema is the `yaml` package default, YAML
+ * 1.2 — the same schema `dumpBrief` writes with, so load and dump agree.
+ */
+export const YAML_ALIAS_CAP = 100;
 
 /** Throw unless `value` is a path-safe slug. `label` names the field in the error. */
 export function assertSafeId(value: unknown, label: string): asserts value is string {
@@ -617,7 +626,10 @@ export function parseRegenerateOnly(value: unknown): RegenerationTarget[] | unde
  */
 
 export function parseBriefText(path: string, raw: string, opts: ParseBriefOptions = {}): CampaignBrief {
-  const data = extname(path).toLowerCase() === ".json" ? JSON.parse(raw) : yaml.load(raw);
+  const data =
+    extname(path).toLowerCase() === ".json"
+      ? JSON.parse(raw)
+      : parseYaml(raw, { maxAliasCount: YAML_ALIAS_CAP });
   return parseBrief(data, opts);
 }
 

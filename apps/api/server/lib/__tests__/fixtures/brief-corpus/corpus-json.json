@@ -1,0 +1,14 @@
+{
+  "id": "corpus-json",
+  "targetRegion": "DE",
+  "targetAudience": "JSON readers",
+  "campaignMessage": "Stay wild. Stay hydrated.",
+  "products": [
+    {
+      "id": "hydra-bottle",
+      "name": "Hydra Bottle",
+      "primaryColor": "#1473E6",
+      "logoPath": "assets/inputs/hydra-logo.png"
+    }
+  ]
+}

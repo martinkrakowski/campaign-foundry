@@ -1,5 +1,5 @@
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { completeJob, createJob, failJob, hasRunningJob, runJob } from "../../lib/jobs.js";
+import { completeJob, createJob, failJob, getRunningJobId, hasRunningJob, runJob } from "../../lib/jobs.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
 import { outputRoot } from "../../lib/config.js";
 import { ALLOWED_IMAGE_MODELS, runCampaign } from "../../lib/pipeline.js";
@@ -66,10 +66,17 @@ export default defineEventHandler(async (event) => {
   }
 
   // One run per campaign at a time: a double-click or a retry after a poll blip must
-  // not start a second pipeline writing the same output paths and report.
+  // not start a second pipeline writing the same output paths and report. The 409
+  // carries the running job's handle (`jobId`) so the second press can adopt the run
+  // in progress and keep polling it — the pipeline really is running, and discarding
+  // it threw away a campaign that succeeded.
   if (hasRunningJob(brief.id)) {
     setResponseStatus(event, 409);
-    return { error: `A run for campaign "${brief.id}" is already in progress.` };
+    return {
+      error: `A run for campaign "${brief.id}" is already in progress.`,
+      jobId: getRunningJobId(brief.id),
+      campaignId: brief.id,
+    };
   }
 
   const jobId = createJob(brief.id);

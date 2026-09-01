@@ -14,6 +14,7 @@ if it is not here (or is in "Never Suggest"), do not introduce it without asking
 | @testing-library/react | UI tests | Render/query components under happy-dom; assert with `expect`. |
 | happy-dom     | Test DOM      | Vitest `environment: "happy-dom"` for the web project.           |
 | ffmpeg-static | Video encode (motion creatives) | Pinned 5.3.0 (exact, both package.jsons); GPL-licensed binary — note for client distribution |
+| `yaml`        | YAML load/dump | `apps/api` (brief load + Document patch writes) and `packages/shared` (canonical `dumpBrief`). One library, one schema — the package default, YAML 1.2 — for both load and save. Alias expansion capped (`maxAliasCount`). |
 
 > Keep this table accurate. When you add a dependency (or a Hexagen template
 > adds one), add its row here in the same change — a stale stack reference is

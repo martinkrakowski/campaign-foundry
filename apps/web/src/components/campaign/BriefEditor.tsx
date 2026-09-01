@@ -326,8 +326,18 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     // runs the same validation with the capability unknown. The API parses saves in
     // authoring mode; a motion brief must round-trip on a host without ffmpeg.
     const structural = validateState({ ...state, capabilities: null }, existingIds);
+    // M1: the refusal bounces to the first failing *step* in the order the user
+    // walks, never the first bucket in validateState's key order — that order puts
+    // `policy` before `output`, so a variation draft failing both used to land the
+    // user on Variation Policy while the walk reaches Output first. Motion is not a
+    // step; it sorts at its host's position, where its panel lives.
+    const walk = sectionOrder(state.mode);
+    const walkIndex = (bucket: string) =>
+      walk.indexOf((bucket === MOTION_ERROR_KEY ? MOTION_HOST_SECTION : bucket) as SectionId);
     setBlockedAt(
-      Object.keys(structural).find((section) => getTotalErrorCount({ [section]: structural[section] }) > 0) ?? null,
+      Object.keys(structural)
+        .filter((bucket) => getTotalErrorCount({ [bucket]: structural[bucket] }) > 0)
+        .sort((a, b) => walkIndex(a) - walkIndex(b))[0] ?? null,
     );
   }, [state, briefs]);
 
@@ -607,7 +617,12 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   const refuseInvalid = (): boolean => {
     setAttempted(true);
     if (blockedAt === null) return false;
-    reveal(blockedAt);
+    // H2: the press that bounces unmounts its own button, so focus would drop to
+    // `document.body` — no landing point at all for a keyboard or screen-reader
+    // user. The refusal hands focus to the revealed section, the same target the
+    // outline's activation uses (W4.2); the reveal's step-heading suppression keeps
+    // the step handoff from fighting it.
+    reveal(blockedAt, true);
     return true;
   };
 
@@ -880,56 +895,80 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     );
 
   /**
-   * W8.2 — the action bar, one component with two placements: on the Review step in
-   * Guided (where the launch lives) and at the foot in Everything. The bar's content
-   * is built once here; only the placement differs, so the two presentations cannot
-   * grow two divergent copies of the verbs.
+   * D38 — the status surface is not review-only. The refusal a verb speaks is
+   * produced and consumed in one React commit: `refuseInvalid` sets `attempted`
+   * (which makes `StatusLine` emit the refusal) and bounces to the first failing
+   * step in the same commit — so a surface that lived only in the Review-step bar
+   * was unmounted by the very press that filled it, and the user landed elsewhere
+   * with no message and no "Apply" on the page. It renders on every guided step,
+   * so the refusal survives the jump and is readable where the user lands. The
+   * verbs stay in the Review-step bar alone.
    */
-  const actionBar = (
+  const statusSurface = (
+    <>
+      <StatusLine
+        state={state}
+        attempted={attempted}
+        applyRefusal={applyRefusal}
+        persistError={persistError}
+        onScrollToSection={reveal}
+      />
+      <div className="min-w-0 flex-1">
+        {getTotalErrorCount(visibleErrors) > 0 ? <ErrorStrip errors={visibleErrors} onErrorClick={reveal} /> : null}
+      </div>
+    </>
+  );
+
+  /** The bar's verbs, once — the two placements below cannot grow divergent copies. */
+  const actionVerbs = (
+    <>
+      <Button variant="ghost" onClick={handleDiscard}>
+        Discard
+      </Button>
+      <SaveMenu
+        /* D3: never a dead primary button — pressing an invalid brief sets
+           `attempted`, reveals every error and speaks the refusal. */
+        saving={saving}
+        onSaveAndApply={() => void handleSave()}
+        onSaveAs={() => setSaveAsId("")}
+      />
+      <Button onClick={handleApply}>
+        Apply to run
+      </Button>
+      {/* D3: the bar's primary row is the status sentence and the three verbs.
+          Developer affordances live behind the overflow so the sentence has room. */}
+      <details className="relative">
+        <summary
+          className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md text-text-muted hover:bg-surface-2 hover:text-text-primary"
+          aria-label="More actions"
+        >
+          ⋯
+        </summary>
+        <div className="absolute bottom-full right-0 z-30 mb-2 min-w-[200px] rounded-md border border-border bg-surface p-1 shadow-2xl">
+          <button
+            type="button"
+            className="w-full rounded-sm px-3 py-2 text-left text-[13px] text-text-primary hover:bg-surface-2"
+            onClick={() => setShowYamlSplit(!showYamlSplit)}
+          >
+            YAML split {showYamlSplit ? "off" : "on"}
+          </button>
+        </div>
+      </details>
+    </>
+  );
+
+  /**
+   * W8.2 — the action bar, one component with two placements: on the Review step in
+   * Guided (where the launch lives) and at the foot in Everything. Guided's Review
+   * placement takes the verbs ONLY (D38): the status surface is already mounted on
+   * every guided step, and a second one in the bar would read the refusal twice.
+   * Everything's foot keeps the surface in the bar — it has no per-step mount.
+   */
+  const actionBar = (withStatus: boolean) => (
     <FloatingBar data-testid="action-bar">
       <div className="flex items-center gap-3 w-full">
-        <StatusLine
-          state={state}
-          attempted={attempted}
-          applyRefusal={applyRefusal}
-          persistError={persistError}
-          onScrollToSection={reveal}
-        />
-        <div className="min-w-0 flex-1">
-          {getTotalErrorCount(visibleErrors) > 0 ? <ErrorStrip errors={visibleErrors} onErrorClick={reveal} /> : null}
-        </div>
-        <Button variant="ghost" onClick={handleDiscard}>
-          Discard
-        </Button>
-        <SaveMenu
-          /* D3: never a dead primary button — pressing an invalid brief sets
-             `attempted`, reveals every error and speaks the refusal. */
-          saving={saving}
-          onSaveAndApply={() => void handleSave()}
-          onSaveAs={() => setSaveAsId("")}
-        />
-        <Button onClick={handleApply}>
-          Apply to run
-        </Button>
-        {/* D3: the bar's primary row is the status sentence and the three verbs.
-            Developer affordances live behind the overflow so the sentence has room. */}
-        <details className="relative">
-          <summary
-            className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md text-text-muted hover:bg-surface-2 hover:text-text-primary"
-            aria-label="More actions"
-          >
-            ⋯
-          </summary>
-          <div className="absolute bottom-full right-0 z-30 mb-2 min-w-[200px] rounded-md border border-border bg-surface p-1 shadow-2xl">
-            <button
-              type="button"
-              className="w-full rounded-sm px-3 py-2 text-left text-[13px] text-text-primary hover:bg-surface-2"
-              onClick={() => setShowYamlSplit(!showYamlSplit)}
-            >
-              YAML split {showYamlSplit ? "off" : "on"}
-            </button>
-          </div>
-        </details>
+        {withStatus ? statusSurface : null}
+        {actionVerbs}
       </div>
     </FloatingBar>
   );
@@ -1050,9 +1089,14 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
                   nudgeKey={nudgeKey}
                   readyKey={readyKey}
                 />
-                {/* W8.2 — Guided placement: the bar stands on the Review step, the one
-                    card that is not a section, where the launch verbs belong. */}
-                {steps[stepIndex] === "review" ? actionBar : null}
+                {/* D38 — the surface stands on every guided step, Review included: a
+                    refusal spoken from the Review bar names sections on steps the user
+                    is about to be bounced to, and it must still be on screen there. */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">{statusSurface}</div>
+                {/* W8.2 — Guided placement: the verbs stand on the Review step. The
+                    status surface above is the step's own, so the bar carries only
+                    the verbs (D38) — one status line, not two. */}
+                {steps[stepIndex] === "review" ? actionBar(false) : null}
               </div>
             </div>
           ) : (
@@ -1093,8 +1137,9 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
       </div>
 
       {/* W8.2 — Everything placement: the bar at the foot, floating over the whole
-          stack as it always has. Guided mounts the same bar on Review instead. */}
-      {presentation === "everything" ? actionBar : null}
+          stack as it always has, surface and verbs together — there is no per-step
+          mount to carry the surface here. */}
+      {presentation === "everything" ? actionBar(true) : null}
 
        {/* Headline pool drawer */}
        <HeadlinePoolDrawer

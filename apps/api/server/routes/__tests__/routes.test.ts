@@ -311,13 +311,17 @@ describe("POST /campaigns/generate", () => {
     expect(res.status).toBe(400);
   });
 
-  test("refuses a second run for a campaign whose job is still running with 409", async () => {
+  test("refuses a second run for a campaign whose job is still running with 409, handing back the running job's handle", async () => {
     const id = createJob("camp");
     try {
       const res = await call(brief());
       expect(res.status).toBe(409);
+      // The handle is the whole point: with it, the second press adopts the run in
+      // progress and keeps its result; without it the run was silently discarded.
       expect(await res.json()).toEqual({
         error: 'A run for campaign "camp" is already in progress.',
+        jobId: id,
+        campaignId: "camp",
       });
     } finally {
       failJob(id, "test teardown");

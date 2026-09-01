@@ -1,9 +1,12 @@
 import { describe, test, expect, vi, afterEach } from "vitest";
-import { renderHook, act, waitFor } from "@testing-library/react";
+import { renderHook, act, waitFor, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createElement, type ReactNode } from "react";
 import { assetIdentity } from "@campaignfoundry/CampaignOrchestration";
 import { RunProvider, useRun, assetKey, assetLabel, type Asset } from "@/lib/run-context";
-import { json, jobOk, mockPipelineApi, EMPTY_REPORT } from "@/__tests__/helpers";
+import { json, jobOk, mockPipelineApi, EMPTY_REPORT, renderWithRun } from "@/__tests__/helpers";
+import { Header } from "@/components/shell/Header";
+import { CommandBar } from "@/components/shell/CommandBar";
 
 const wrapper = ({ children }: { children: ReactNode }) => createElement(RunProvider, null, children);
 const setup = () => renderHook(() => useRun(), { wrapper });
@@ -877,6 +880,93 @@ describe("RunProvider — job polling", () => {
     expect(result.current.error).toMatch(/Run was interrupted/);
   });
 
+  test("a 409 carrying a handle adopts the run in progress and polls it to completion", async () => {
+    // The server refused the POST because a run is already in flight, and named it:
+    // the honest answer is to poll that job, not to treat the response as a failure.
+    mockPipelineApi({
+      post: () =>
+        json(
+          {
+            error: 'A run for campaign "summer-hydration-2026" is already in progress.',
+            jobId: "in-flight",
+            campaignId: "summer-hydration-2026",
+          },
+          409,
+        ),
+      job: (url) =>
+        String(url).includes("/campaigns/jobs/in-flight")
+          ? jobOk({ halted: false, assets: [asset()], log: { entries: [] } })
+          : json({ error: "not found" }, 404),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.assets).toHaveLength(1);
+    expect(result.current.hasRun).toBe(true);
+    expect(result.current.error).toBeNull();
+    expect(result.current.loading).toBe(false);
+  });
+
+  test("a 409 without a handle surfaces the error honestly and fabricates no run", async () => {
+    // An API that predates the handle: there is nothing to adopt, so the press says
+    // why it did not start a run instead of pretending one is underway.
+    mockPipelineApi({
+      post: () => json({ error: 'A run for campaign "summer-hydration-2026" is already in progress.' }, 409),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.error).toMatch(/already in progress/);
+    expect(result.current.hasRun).toBe(false);
+    expect(result.current.assets).toHaveLength(0);
+    expect(result.current.loading).toBe(false);
+  });
+
+  test("a re-roll result that lands after a brief switch is dropped", async () => {
+    let resolveJob!: (r: Response) => void;
+    mockPipelineApi({
+      post: (_url, init) => {
+        const body = JSON.parse(init.body as string) as { regenerateOnly?: unknown };
+        if (body.regenerateOnly) return json({ jobId: "job-reroll" }, 202);
+        return json({ jobId: "job-1" }, 202);
+      },
+      job: (url) =>
+        String(url).includes("job-reroll")
+          ? new Promise<Response>((res) => (resolveJob = res))
+          : jobOk({ halted: false, assets: [asset()], log: { entries: [] } }),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    act(() => result.current.decide("alpha/1:1/default", "rejected"));
+    let regen!: Promise<void>;
+    act(() => {
+      regen = result.current.regenerateRejected();
+    });
+    await waitFor(() => expect(typeof resolveJob).toBe("function"));
+    act(() =>
+      result.current.setBrief({
+        id: "switched",
+        targetRegion: "US",
+        targetAudience: "x",
+        campaignMessage: "y",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" },
+          { id: "p2", name: "P2", primaryColor: "#222222", logoPath: "b.png" },
+        ],
+      }),
+    );
+    await act(async () => {
+      resolveJob(jobOk({ halted: false, assets: [asset({ complianceScore: 0.9 })], log: { entries: [] } }));
+      await regen;
+    });
+    expect(result.current.assets).toHaveLength(0); // the switched brief has no run
+    expect(result.current.regeneratingKeys).toBeNull();
+  });
+
   test("a lost re-roll leaves the grid and the rejected decisions untouched", async () => {
     mockPipelineApi({
       job: () => jobOk({ halted: false, assets: [asset()], log: { entries: [], campaignId: "summer-hydration-2026" } }),
@@ -1510,5 +1600,64 @@ describe("re-roll across a mode change", () => {
   });
 });
 
+});
+
+describe("RunProvider — a second Generate does not lose the campaign (C4)", () => {
+  /** Commits a brief the way Apply does — the one thing that turns Generate into a run. */
+  const ApplyBrief = () => {
+    const { brief, setBrief } = useRun();
+    return (
+      <button type="button" onClick={() => setBrief({ ...brief, id: "applied-brief" })}>apply</button>
+    );
+  };
+
+  test("Header Generate and CommandBar Execute fired in one tick leave one run and show its result", async () => {
+    const user = userEvent.setup();
+    // Both POSTs are held so the two run verbs fire while both are in flight — the
+    // exact state a double press creates. The real server serializes them: the first
+    // POST finds no running job and answers 202; the second is refused 409, carrying
+    // the running job's handle.
+    const postAnswers: Array<(r: Response) => void> = [];
+    mockPipelineApi({
+      post: () => new Promise<Response>((res) => postAnswers.push(res)),
+      job: () =>
+        jobOk({ halted: false, assets: [asset()], log: { entries: [], campaignId: "applied-brief" } }),
+    });
+    renderWithRun(
+      <>
+        <ApplyBrief />
+        <Header />
+        <CommandBar onToggleTelemetry={() => {}} />
+      </>,
+    );
+    await user.click(screen.getByRole("button", { name: "apply" }));
+    // The bar's Execute opens its confirm; the verb that actually runs is the dialog's
+    // Generate — which, like the header's, is never disabled by loading. Both stay
+    // pressable while a run is in flight: exactly how a campaign gets pressed twice.
+    await user.click(screen.getByRole("button", { name: /Execute/ }));
+    const headerGenerate = within(screen.getByRole("banner")).getByRole("button", { name: "Generate" });
+    const dialogGenerate = within(screen.getByRole("dialog", { name: "Confirm pipeline action" })).getByText("Generate");
+    // One tick: both presses dispatch in the same synchronous burst, before React can
+    // flush the first press's loading state or either POST can answer.
+    act(() => {
+      headerGenerate.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      dialogGenerate.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(postAnswers.length).toBe(2); // both presses really did ask the server
+    postAnswers[0](json({ jobId: "job-1" }, 202));
+    postAnswers[1](
+      json(
+        {
+          error: 'A run for campaign "applied-brief" is already in progress.',
+          jobId: "job-1",
+          campaignId: "applied-brief",
+        },
+        409,
+      ),
+    );
+    // The run the server kept is on the grid — not an error about a run that was fine.
+    await waitFor(() => expect(screen.getByText(/Execution complete/)).toBeTruthy());
+    expect(screen.queryByText(/already in progress/)).toBeNull();
+  });
 });
 

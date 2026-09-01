@@ -1,0 +1,26 @@
+# Corpus fixture — leading comment block.
+# A save must keep every line of this file byte for byte when nothing changed.
+
+campaignMessage: Stay wild. Stay hydrated.
+# A hand-written note about the audience.
+targetAudience: Trail runners, 25-40
+
+targetRegion: DE # inline note on targetRegion
+id: corpus-comments
+variation:
+  count: 4 # how many creatives per slot
+
+  axes:
+    layout: [headline-top, headline-bottom]
+    tone: [bold, subtle]
+
+# product block notes
+products:
+  - id: hydra-bottle
+    name: Hydra Bottle
+    primaryColor: "#1473E6" # brand blue
+    logoPath: assets/inputs/hydra-logo.png
+
+campaignTagline: "Trail days #nofilter" # hash inside a quoted string
+
+# Trailing comment at EOF
