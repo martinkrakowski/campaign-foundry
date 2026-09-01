@@ -2172,6 +2172,105 @@ describe("BriefPage — the review step (W8)", () => {
     expect(within(document.getElementById("products") as HTMLElement).getByText(messages.products(1, "Classic"))).toBeTruthy();
   });
 
+  /**
+   * A variation draft failing both Output and Variation Policy is the case that
+   * exposes the bucket-order bounce (M1): `validateState`'s key order puts `policy`
+   * before `output`, but the walk reaches Output first — so the old first-key
+   * bounce landed the user on Policy, a step they would not have walked to yet.
+   */
+  const brokenOutputAndPolicy = {
+    file: "op.yaml",
+    revision: "r1",
+    brief: {
+      ...brief("op"),
+      mode: "variation",
+      variation: {
+        count: 0,
+        axes: { layout: ["headline-top"], tone: ["bold"], background: { source: ["procedural"] }, paletteShift: [0] },
+      },
+      output: { formats: [], platforms: [] },
+    },
+  };
+
+  test("a refused Apply bounces to the first failing step in walk order, not the first error bucket (M1)", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [brokenOutputAndPolicy] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "op");
+    await toReview(user);
+
+    await user.click(screen.getByText("Apply to run"));
+
+    // Output precedes Variation Policy in sectionOrder — the walk's order, which
+    // the bounce follows. validateState's key order alone would have chosen Policy.
+    await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
+    expect(stepHeading().textContent).not.toBe("Variation Policy");
+  });
+
+  test("a refused Apply speaks its refusal on the step it lands on (D38)", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await toReview(user);
+
+    await user.click(screen.getByText("Apply to run"));
+
+    // The bounce lands on Identity — and the refusal sentence is on screen THERE.
+    // The status surface used to live only in the Review-step bar, which the same
+    // React commit that produced the refusal unmounted: the user landed on a step
+    // with no message and no "Apply" anywhere on the page.
+    await waitFor(() => expect(stepHeading().textContent).toBe("Identity"));
+    const refusal = screen
+      .getAllByRole("status")
+      .find((el) => el.textContent.startsWith("Not applied —"));
+    expect(refusal).toBeTruthy();
+  });
+
+  test("a refused Apply leaves focus on the revealed section, never the body (H2)", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [brokenOutputAndPolicy] }) });
+    renderWithRun(<Editor />);
+    await adopt(user, "op");
+    await toReview(user);
+
+    await user.click(screen.getByText("Apply to run"));
+
+    // The pressed verb is unmounted by the bounce, so focus used to drop to
+    // document.body — no landing point for a keyboard or screen-reader user. The
+    // refusal now hands focus to the revealed section, the same target the
+    // outline's activation uses.
+    await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
+    expect(document.activeElement).toBe(document.getElementById("output"));
+  });
+
+  test("Review renders exactly one status surface (D38)", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+
+    // Refuse from Review, land on Identity, then walk back to Review with every
+    // error now marked — the surface must appear once, not once per placement.
+    await toReview(user);
+    await user.click(screen.getByText("Apply to run"));
+    await waitFor(() => expect(stepHeading().textContent).toBe("Identity"));
+    await user.click(segments()[sectionOrder("brief").length]);
+    await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
+
+    // One StatusLine speaking the refusal…
+    const refusals = screen
+      .getAllByRole("status")
+      .filter((el) => el.textContent.startsWith("Not applied —"));
+    expect(refusals).toHaveLength(1);
+    // …and one ErrorStrip chip per failing section (the footer's own status
+    // sentence and the segbar never match these selectors).
+    const identityChips = Array.from(document.querySelectorAll("button.rounded-full")).filter((b) =>
+      /Identity/.test(b.textContent ?? ""),
+    );
+    expect(identityChips).toHaveLength(1);
+  });
+
   test("a row whose field the projection omits disappears", async () => {
     const user = userEvent.setup();
     Element.prototype.scrollIntoView = vi.fn();
