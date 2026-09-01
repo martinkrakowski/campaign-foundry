@@ -638,3 +638,20 @@ export function reviewEditLabel(section: string): string {
 export function reviewPolicyValue(count: number): string {
   return `${count} ad${count === 1 ? "" : "s"}`;
 }
+
+/* ── The orchestrator bar's Execute answer (H2) ──────────────────────────────── */
+
+/**
+ * Execute pressed while the estimate is still being worked out — or hung. The confirm
+ * spends credits, so it is not opened on a guess; pressing again later answers
+ * differently once the estimate lands (or times out).
+ */
+export const executeStillEstimating =
+  "Still working out the estimate — press Execute again in a moment.";
+/**
+ * The estimate could not be worked out (or gave up waiting). It is advisory only:
+ * the run may still go, and the server refuses an impossible one. Said while the
+ * confirm opens, so the user knows what pressing on means.
+ */
+export const executeNoEstimate =
+  "Couldn't work out the estimate — the run will still go, and the server will refuse it if the plan is impossible.";

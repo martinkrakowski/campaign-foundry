@@ -4,10 +4,17 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefOb
 import { createPortal } from "react-dom";
 import { assetKey, encodeMinutes, useRun } from "@/lib/run-context";
 import { classicAdCount } from "@/components/campaign/derive";
+import { executeNoEstimate, executeStillEstimating } from "@/components/campaign/messages";
 import { planCampaign, type PlanResult } from "@/lib/briefs-api";
 
 /** Match wizard PLAN_DEBOUNCE_MS without importing wizard-state. */
 const PLAN_DEBOUNCE_MS = 250;
+/**
+ * Bound the estimate wait: a hung `/campaigns/plan` settles into `unavailable` after
+ * this long instead of pinning `plan` on `null` forever. 8 s — long enough for a slow
+ * API, short enough that "still estimating" stays a real transient.
+ */
+const PLAN_TIMEOUT_MS = 8000;
 
 interface CommandBarProps {
   onToggleTelemetry: () => void;
@@ -33,6 +40,8 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
   } =
     useRun();
   const [confirm, setConfirm] = useState<Confirm | null>(null);
+  /** The press's answer when the confirm would be meaningless — or why the run may still go. */
+  const [notice, setNotice] = useState<{ text: string; tone: "warning" | "error" } | null>(null);
   /** Ties the re-roll button to the visible explanation of why it is refused. */
   const rerollBlockedId = useId();
   const [plan, setPlan] = useState<PlanResult | null>(null);
@@ -50,19 +59,35 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
     if (!isVariation) {
       shownHashRef.current = null;
       setPlan(null);
+      setNotice(null);
       setEstimate({ status: "idle" });
       return;
     }
-    // The previous estimate no longer describes this brief: clear it at once so
-    // Execute stays disabled until the new one lands (the Runs page shows "estimating…").
+    // The previous estimate no longer describes this brief: clear it at once (the Runs
+    // page shows "estimating…"), and clear any answer a press made to the old estimate.
     setPlan(null);
+    setNotice(null);
     setEstimate({ status: "loading" });
     let cancelled = false;
     const controller = new AbortController();
+    // Race the plan against a deadline (H2): a hung POST must not leave `plan` null
+    // forever. When the deadline wins, the request is aborted so nothing dangles, and
+    // the race settles into `unavailable` — the estimate is advisory from there.
+    let settleId: number | undefined;
     const timer = window.setTimeout(() => {
-      void planCampaign(brief, controller.signal).then((result) => {
+      void Promise.race([
+        planCampaign(brief, controller.signal),
+        new Promise<PlanResult>((resolve) => {
+          settleId = window.setTimeout(() => {
+            controller.abort();
+            resolve({ kind: "unavailable" });
+          }, PLAN_TIMEOUT_MS);
+        }),
+      ]).then((result) => {
+        window.clearTimeout(settleId);
         if (cancelled) return;
         setPlan(result);
+        setNotice(null);
         // Same policyHash as the estimate already on the context: skip the redundant write.
         if (result.kind === "ok" && result.policyHash === shownHashRef.current) return;
         shownHashRef.current = result.kind === "ok" ? result.policyHash : null;
@@ -79,10 +104,10 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
       cancelled = true;
       controller.abort();
       window.clearTimeout(timer);
+      window.clearTimeout(settleId);
     };
   }, [brief, isVariation, setEstimate]);
 
-  const variationBlocked = isVariation && (plan === null || plan.kind === "infeasible");
   const creativeCount = plan?.kind === "ok" ? plan.estimate.creatives : expectedCount;
 
   const rejectedCount = useMemo(
@@ -101,6 +126,33 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
           : "Standing by…";
 
   const statusColor = error || halted ? "text-error" : hasRun && !loading ? "text-success" : "text-text-primary";
+
+  /**
+   * The verb is never disabled for being invalid (GB-D3) — the press is how a user
+   * asks what is wrong, so every state answers. The credit-spending confirm opens
+   * only when a run makes sense:
+   *  - still estimating (or the estimate hung): say so, spend nothing;
+   *  - infeasible: show the planner's own reason — the server would refuse the run
+   *    anyway, so a confirm here would teach the user the dialog is meaningless;
+   *  - unavailable / timed out: the estimate is advisory, so the run may still go —
+   *    say so, and open the confirm.
+   */
+  const onExecutePress = () => {
+    // A classic brief is never estimated — `plan` is null there by design, so the
+    // "still estimating" answer belongs to variation briefs only.
+    if (isVariation && plan === null) {
+      setNotice({ text: executeStillEstimating, tone: "warning" });
+      return;
+    }
+    if (plan?.kind === "infeasible") {
+      // The planner's reason is server vocabulary, shown verbatim — like the probe's
+      // reason in the format panel, it is the one text that names the real refusal.
+      setNotice({ text: plan.error, tone: "error" });
+      return;
+    }
+    setNotice(plan?.kind === "unavailable" ? { text: executeNoEstimate, tone: "warning" } : null);
+    setConfirm("run");
+  };
 
   // Confirm-dialog copy per action — the dialog itself is presentational.
   const dialog =
@@ -157,6 +209,13 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
           {rerollBlockedReason}
         </p>
       )}
+      {/* Why the press did (or did not) open the confirm — same reasoning: the answer
+          is the point, so it gets its own readable row and a live region. */}
+      {notice !== null && (
+        <p role="status" className={`px-2 pt-2 text-[11px] leading-tight ${notice.tone === "error" ? "text-error" : "text-warning"}`}>
+          {notice.text}
+        </p>
+      )}
       <div className="flex items-center justify-between gap-2 px-2 pt-2">
         <button
           type="button"
@@ -206,8 +265,10 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
           {/* The inverse of the ground rather than a white pill — see export/page.tsx. */}
           <button
             type="button"
-            onClick={() => setConfirm("run")}
-            disabled={loading || variationBlocked}
+            onClick={onExecutePress}
+            // Only work in flight may disable (GB-D3): a hung estimate used to grey
+            // the verb out forever. Every other state answers the press.
+            disabled={loading}
             aria-busy={loading || undefined}
             aria-haspopup="dialog"
             className="flex shrink-0 items-center space-x-2 rounded-full bg-text-emphasis px-4 py-1.5 text-[13px] font-semibold text-background transition-opacity hover:opacity-90 disabled:bg-surface-2 disabled:text-text-muted sm:px-6"

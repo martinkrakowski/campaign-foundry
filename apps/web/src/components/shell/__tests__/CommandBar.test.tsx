@@ -1,11 +1,12 @@
-import { describe, test, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
+import { screen, waitFor, within, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, Fragment } from "react";
 import { useEffect } from "react";
 import { renderWithRun, seedPersistedRun, makeAsset, exerciseFocusTrap, json, mockPipelineApi } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import { CommandBar } from "../CommandBar";
+import { executeNoEstimate, executeStillEstimating } from "@/components/campaign/messages";
 
 const variationBrief = {
   id: "seed",
@@ -137,13 +138,16 @@ describe("CommandBar", () => {
     expect((screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  test("shows a feasible variation estimate and keeps Execute enabled", async () => {
+  test("shows a feasible variation estimate and Execute answers every state (never disabled mid-estimate)", async () => {
     const user = userEvent.setup();
     seedVariation();
     mockPipelineApi({ plan: () => okPlan() });
     renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
     expect(screen.getByText("Estimating…")).toBeTruthy();
-    expect((screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement).disabled).toBe(true);
+    // The verb is never disabled for being mid-estimate (GB-D3) — that greying-out is
+    // what made a hung estimate look like "unable to generate a campaign". A settled
+    // feasible plan opens the confirm as before.
+    expect((screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement).disabled).toBe(false);
     expect(await screen.findByText("12")).toBeTruthy();
     expect(screen.getByText("36")).toBeTruthy();
     expect(screen.getByText("yes")).toBeTruthy();
@@ -161,17 +165,25 @@ describe("CommandBar", () => {
     expect(screen.getByText("≈ 0.4 min")).toBeTruthy();
   });
 
-  test("shows an infeasible 422 message verbatim and disables Execute", async () => {
+  test("shows an infeasible 422 message verbatim; the press answers with the reason, not the confirm", async () => {
+    const user = userEvent.setup();
     seedVariation();
     mockPipelineApi({
       plan: () => json({ error: "shortfall: accepted 4 of 100" }, 422),
     });
     renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
     expect(await screen.findByText("shortfall: accepted 4 of 100")).toBeTruthy();
-    expect((screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement).disabled).toBe(true);
+    const execute = screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement;
+    // The verb never greys out for being invalid — the press is how the user asks why.
+    expect(execute.disabled).toBe(false);
+    await user.click(execute);
+    // The planner's own reason moves into the answer row; the credit dialog does not open.
+    expect(screen.getAllByText("shortfall: accepted 4 of 100")).toHaveLength(2);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  test("shows estimate unavailable on a plan network error", async () => {
+  test("shows estimate unavailable on a plan network error — and the press still runs", async () => {
+    const user = userEvent.setup();
     seedVariation();
     mockPipelineApi({
       plan: () => {
@@ -180,7 +192,12 @@ describe("CommandBar", () => {
     });
     renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
     expect(await screen.findByText("estimate unavailable")).toBeTruthy();
-    expect((screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement).disabled).toBe(false);
+    const execute = screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement;
+    expect(execute.disabled).toBe(false);
+    await user.click(execute);
+    // The estimate is advisory — the confirm opens and says so.
+    expect(within(screen.getByRole("dialog")).getByText(/from the variation plan/)).toBeTruthy();
+    expect(screen.getByText(executeNoEstimate)).toBeTruthy();
   });
 
   test("warns when the plan will make GenAI calls and shows feasible=no", async () => {
@@ -224,7 +241,7 @@ describe("CommandBar", () => {
     expect(screen.getByText("12")).toBeTruthy();
   });
 
-  test("a brief change disables Execute until the new estimate arrives", async () => {
+  test("a brief change re-estimates: Execute stays live, and a mid-estimate press answers instead of confirming", async () => {
     function Tweak() {
       const { setBrief, brief, estimateStatus } = useRun();
       return createElement(Fragment, null,
@@ -254,17 +271,22 @@ describe("CommandBar", () => {
     const execute = () => screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement;
     expect(execute().disabled).toBe(false);
     await user.click(screen.getByText("tweak"));
-    // Immediately — before the debounce fires — the stale plan is gone and Run is blocked.
+    // Immediately — before the debounce fires — the stale plan is gone.
     expect(screen.getByText("Estimating…")).toBeTruthy();
     expect(screen.getByText("status:loading")).toBeTruthy();
-    expect(execute().disabled).toBe(true);
+    // Never disabled for being mid-estimate; the press answers and spends nothing.
+    expect(execute().disabled).toBe(false);
     expect(calls).toBe(1);
+    await user.click(execute());
+    expect(screen.getByText(executeStillEstimating)).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
     await waitFor(() => expect(resolveSecond).toEqual(expect.any(Function)));
-    expect(execute().disabled).toBe(true);
     resolveSecond?.(okPlan({ policyHash: "h2", estimate: { ...okEstimate, creatives: 7 } }));
     expect(await screen.findByText("7")).toBeTruthy();
     expect(screen.getByText("status:ok")).toBeTruthy();
     expect(execute().disabled).toBe(false);
+    // The mid-estimate answer is spent once the new estimate lands.
+    expect(screen.queryByText(executeStillEstimating)).toBeNull();
   });
 
   test("replaces a cached ok estimate when a later plan is infeasible", async () => {
@@ -291,7 +313,8 @@ describe("CommandBar", () => {
     expect(await screen.findByText("12")).toBeTruthy();
     await user.click(screen.getByText("tweak"));
     expect(await screen.findByText("shortfall: accepted 4 of 100")).toBeTruthy();
-    expect((screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement).disabled).toBe(true);
+    // The cached estimate was replaced, and the verb answers instead of greying out.
+    expect((screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   test("aborts an in-flight plan on unmount", async () => {
@@ -314,6 +337,80 @@ describe("CommandBar", () => {
     expect(signal?.aborted).toBe(true);
     resolvePlan?.(okPlan());
     await waitFor(() => expect(screen.queryByText("Estimating…")).toBeNull());
+  });
+});
+
+/**
+ * H2: the verb is never disabled for being invalid (GB-D3) — `disabled` covers only
+ * work in flight, and the press answers every other state. A hung estimate used to
+ * grey Execute out forever with no message and no way to ask why.
+ */
+describe("CommandBar — the press always answers (H2)", () => {
+  beforeEach(() => localStorage.setItem("cf:brief-picked", "1"));
+  afterEach(() => vi.useRealTimers());
+
+  test("a /campaigns/plan POST that never settles: Execute stays enabled and the press says so without the confirm", async () => {
+    vi.useFakeTimers();
+    seedVariation();
+    mockPipelineApi({ plan: () => new Promise<Response>(() => {}) });
+    renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
+    // Fire the estimate debounce; the POST never settles, so `plan` stays null.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    const execute = screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement;
+    // The regression: this used to be disabled forever, with no message and no way to ask why.
+    expect(execute.disabled).toBe(false);
+    fireEvent.click(execute);
+    expect(screen.getByText(executeStillEstimating)).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  test("the estimate wait is bounded: a hung POST settles into unavailable, the request is cut loose, and the press still runs", async () => {
+    vi.useFakeTimers();
+    seedVariation();
+    let signal: AbortSignal | null | undefined;
+    mockPipelineApi({
+      plan: (_url, init) => {
+        signal = init.signal;
+        return new Promise<Response>(() => {});
+      },
+    });
+    renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300); // debounce fires; the deadline (8 s) is now armed
+    });
+    expect(screen.getByText("Estimating…")).toBeTruthy();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8001); // past the deadline
+    });
+    // The hang settled into `unavailable` instead of pinning `plan` on null forever…
+    expect(screen.getByText("estimate unavailable")).toBeTruthy();
+    // …and nothing dangles: the hung request was aborted at the deadline.
+    expect(signal?.aborted).toBe(true);
+    // A timed-out estimate is advisory — the press opens the confirm and says so.
+    fireEvent.click(screen.getByRole("button", { name: /Execute/ }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByText(executeNoEstimate)).toBeTruthy();
+  });
+
+  test("disabled is true only while work is in flight — never for the estimate", async () => {
+    const user = userEvent.setup();
+    seedVariation();
+    mockPipelineApi({
+      plan: () => okPlan(),
+      post: () => new Promise<Response>(() => {}), // the run never completes: loading stays true
+    });
+    renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
+    expect(await screen.findByText("12")).toBeTruthy();
+    const execute = screen.getByRole("button", { name: /Execute/ }) as HTMLButtonElement;
+    expect(execute.disabled).toBe(false);
+    await user.click(execute);
+    await user.click(within(screen.getByRole("dialog")).getByText("Generate"));
+    // Orchestrating is the one state that may disable the verb.
+    const running = screen.getByRole("button", { name: /Orchestrating/ }) as HTMLButtonElement;
+    expect(screen.getAllByText("Orchestrating…").length).toBeGreaterThan(0);
+    expect(running.disabled).toBe(true);
   });
 });
 
