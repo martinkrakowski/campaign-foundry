@@ -61,6 +61,46 @@ describe("messages jargon test", () => {
     }
   });
 
+  test("no message offers apply or launch — the D35 verbs moved (H8)", () => {
+    // D35 retired "apply" as a user-facing concept and H8's "Save without applying"
+    // advertised a control that does not exist; D35 also dropped "launch", because
+    // the run verb is Generate. The words may survive in code, state and types —
+    // only the rendered strings moved. "appl" catches apply/applied/applies.
+    const strings = collectStrings(messages as unknown as Record<string, unknown>);
+    // Add known function return values with dummy args
+    strings.push(messages.briefIdDuplicate("test"));
+    strings.push(messages.products(1, "Randomized"));
+    strings.push(messages.productIdDuplicate("test"));
+    strings.push(messages.treatmentIdDuplicate("test"));
+    strings.push(messages.minDistance(5));
+    strings.push(messages.perRatioExceeds(2, 3, 12));
+    strings.push(messages.ratioNoneDrawablePackaged(["Square"]));
+    strings.push(messages.ratioNoneDrawableNone());
+    strings.push(messages.ratioExcludedPackaged(["Square"]));
+    strings.push(messages.ratioExcludedNone());
+    strings.push(messages.platformsIncompatible("Instagram Feed", ["Still images"]));
+    strings.push(messages.platformsUnknown(["story-tv"]));
+    strings.push(messages.platformsUnknown(["story-tv", "my-tv"]));
+    strings.push(messages.formatsUnsupported("Video", ["Instagram Story"]));
+    strings.push(messages.statusApplied("test-id"));
+    strings.push(messages.durationRange(2, 30));
+    strings.push(messages.headlineCounter(10, 60));
+    strings.push(messages.productsHeading(2));
+    strings.push(messages.descriptorBeats(1));
+    strings.push(messages.descriptorBeats(3));
+    strings.push(messages.descriptorHeadline("Stay wild"));
+    strings.push(messages.statusLoaded("test-id"));
+    strings.push(messages.statusNotApplied(1).lead);
+    strings.push(messages.statusNotApplied(2).tail);
+    strings.push(messages.saveAsIdSuggestion("test-id"));
+
+    for (const str of strings) {
+      const lower = str.toLowerCase();
+      expect(lower).not.toContain("appl");
+      expect(lower).not.toContain("launch");
+    }
+  });
+
   test("display names replace raw format/ratio/platform ids", () => {
     expect(formatDisplayName("Still images")).toBe("Still images");
     expect(formatDisplayName("Video")).toBe("Video");

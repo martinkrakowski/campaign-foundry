@@ -14,7 +14,7 @@
 // --- Identity ---
 
 /** `briefId` */
-export const briefId = "Brief ID can only use small letters, numbers and dashes — try something like summer-launch.";
+export const briefId = "Brief ID can only use small letters, numbers and dashes — try something like summer-spark.";
 /** `briefId.duplicate` */
 export function briefIdDuplicate(conflictingId: string): string {
   return `A brief called ${conflictingId} already exists — pick a different Brief ID.`;
@@ -31,7 +31,7 @@ export const targetRegion = "No region yet — pick one of the region chips.";
 /** `targetAudience` */
 export const targetAudience = "No audience yet — tell us who this campaign is for.";
 export const campaignNameLabel = "Campaign Name";
-export const campaignNamePlaceholder = "e.g. Summer Launch";
+export const campaignNamePlaceholder = "e.g. Summer Spark";
 export const briefIdReadout = "This is the brief id — made from the name";
 export const briefIdCopy = "Copy";
 export const briefIdCopied = "Copied ✓";
@@ -222,13 +222,17 @@ export const durationDuplicate = "Two clip lengths are the same — remove one o
 
 // --- Status ---
 
-/** `status.applied` */
+/**
+ * `status.applied` — the draft is committed (saved, or loaded from a file) and clean.
+ * D35: "applied" no longer appears in rendered copy — committing and running are one
+ * continuous story now, and the run verb is Generate, wherever it lives.
+ */
 export function statusApplied(briefId: string): string {
-  return `Applied — press Generate in the top bar to make ${briefId}.`;
+  return `Saved — press Generate in the top bar to make ${briefId}.`;
 }
-/** `status.applyRefusal` — applied, but the host cannot run video (its own string, not the field error). */
+/** `status.applyRefusal` — committed, but the host cannot run video (its own string, not the field error). */
 export const statusApplyRefusal =
-  "Applied, but video cannot be made on this computer right now — Generate will wait until it is set up.";
+  "The brief is complete, but video cannot be made on this computer right now — Generate will wait until it is set up.";
 /** `status.leavePrompt` */
 export const statusLeavePrompt = "You have changes that are not saved yet — leave anyway?";
 export const confirmDialogTitle = "Unsaved edits";
@@ -301,15 +305,15 @@ export function statusAlmostThere(): SectionSentence {
 
 export function statusNotApplied(errorCount: number): SectionSentence {
   return {
-    lead: `Not applied — ${errorCount} ${errorCount === 1 ? "thing" : "things"} to fix in`,
-    tail: `. Fix the marked ${errorCount === 1 ? "field" : "fields"}, or Save without applying.`,
+    lead: `Not saved yet — ${errorCount} ${errorCount === 1 ? "thing" : "things"} to fix in`,
+    tail: `. Fix the marked ${errorCount === 1 ? "field" : "fields"}, then Save.`,
   };
 }
 
-export const statusReady = "Ready — Apply to run, or Save & apply to keep it.";
+export const statusReady = "Ready — Save to keep it, or press Generate in the top bar to run it.";
 
 export function statusLoaded(briefId: string): string {
-  return `Loaded ${briefId} — Apply to run to stage it.`;
+  return `Loaded ${briefId} — press Generate in the top bar to run it.`;
 }
 
 /** Join list items the way a sentence reads them: "a", "a and b", "a, b and c". */
@@ -526,11 +530,11 @@ export const themeToDark = "Switch to the dark theme";
  */
 export const generate = "Generate";
 /**
- * `header.generate` with nothing applied. The remedy is the one control that stages a
- * brief — Apply, in the editor's action bar — and the header routes to the view that
- * carries it, because that bar does not exist anywhere else.
+ * `header.generate` with nothing committed to run. The remedy is a saved brief, and
+ * the route it names is where the editor lives. D35: "press Apply to run" is gone —
+ * that verb no longer exists.
  */
-export const generateNoBrief = "Nothing applied yet — press Apply to run on the brief first.";
+export const generateNoBrief = "Nothing is ready to run yet — open the Brief editor and save a brief first.";
 
 /* ── The three-way Generate question (D35) ── */
 
@@ -615,7 +619,7 @@ export const statusStepReady = "Looking good.";
 export const statusStepReview = "Everything checks out — this is the last look.";
 /** The review step's body: the brief has met every step, so this is the last look. */
 export const stepReviewIntro =
-  "The brief is in shape. This is the last look before any of it runs — launch when you are ready.";
+  "The brief is in shape. This is the last look — Generate in the top bar runs it.";
 /** Step footer verbs. */
 export const stepBack = "Back";
 export const stepNext = "Next";
