@@ -16,9 +16,9 @@ const Editor = () => (
 );
 
 /** Save actions live behind the "Save" menu now: open it, then pick the item. */
-const saveVia = async (user: ReturnType<typeof userEvent.setup>, item: "Save & apply" | "Save as") => {
+const saveVia = async (user: ReturnType<typeof userEvent.setup>, item: "Save" | "Save as") => {
   await user.click(screen.getByRole("button", { name: /^Save$/ }));
-  await user.click(await screen.findByRole("menuitem", { name: new RegExp(item.replace("&", "&")) }));
+  await user.click(await screen.findByRole("menuitem", { name: item === "Save" ? /^Save(?!\s*as)/ : /^Save as/ }));
 };
 
 beforeEach(() => {
@@ -32,9 +32,12 @@ beforeEach(() => {
 });
 
 describe("BriefPage E1 Features", () => {
+  // Corrected for D41: the chip has two states now — a fresh draft reads
+  // "Unsaved changes" (written-or-not), and "Draft not applied" no longer exists.
   test("renders the editor with status chip", () => {
     renderWithRun(<Editor />);
-    expect(screen.getByText("Draft not applied")).toBeTruthy();
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
+    expect(screen.queryByText("Draft not applied")).toBeNull();
   });
 
   test("has BriefSelector component", () => {
@@ -48,7 +51,9 @@ describe("BriefPage E1 Features", () => {
     expect(screen.getByText("Randomized")).toBeTruthy();
   });
 
-  test("has action bar buttons — Discard, Apply and Save, with YAML split behind the overflow", async () => {
+  // Corrected for D35/D40: the verbs are Cancel / Save (menu) / Save as…, with Revert
+  // behind the overflow — "Apply to run" is retired and Discard split in two.
+  test("has action bar buttons — Cancel and Save, with YAML split and Revert behind the overflow", async () => {
     renderWithRun(<Editor />);
     const bar = screen.getByTestId("action-bar");
     // the error strip's chips sit in the bar too; the action buttons are the rest
@@ -57,14 +62,16 @@ describe("BriefPage E1 Features", () => {
     const labels = Array.from(bar.querySelectorAll("button"))
       .filter((b) => !b.classList.contains("rounded-full") && !b.closest("details"))
       .map((b) => b.textContent?.trim());
-    // D3: the bar carries the status sentence and the three verbs; the YAML split
-    // moved out of the primary row into the ⋯ overflow so the sentence has room.
-    expect(labels).toEqual(expect.arrayContaining(["Discard", "Save", "Apply to run"]));
+    // D3/D35: the bar carries the status sentence and the two verbs; the YAML split
+    // and Revert moved out of the primary row into the ⋯ overflow so the sentence
+    // has room.
+    expect(labels).toEqual(expect.arrayContaining(["Cancel", "Save"]));
+    expect(labels).not.toContain("Apply to run");
+    expect(labels).not.toContain("Discard");
     expect(labels).not.toContain("YAML split on");
-    // D3: a blank draft is invalid, but the verbs stay pressable so the refusal can be
-    // spoken; the menu's own behaviour is covered in save-menu.test.tsx
+    // D3: a blank draft is invalid, but the verbs stay pressable so the refusal can
+    // be spoken; the menu's own behaviour is covered in save-menu.test.tsx
     expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false);
-    expect((screen.getByText("Apply to run").closest("button") as HTMLButtonElement).disabled).toBe(false);
   });
 
   test("Save as... opens dialog", async () => {

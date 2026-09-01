@@ -559,6 +559,17 @@ export const saveMenuItemSaveHint = "Write the file and use it for the next run"
 export const saveMenuItemSaveAs = "Save as…";
 export const saveMenuItemSaveAsHint = "Write a copy under a new id";
 /**
+ * D40: the exit verb. It leaves the editor for the grid, prompting through the dirty
+ * guard when there is unsaved work — the prompt the user's report asked for.
+ */
+export const editorCancel = "Cancel";
+/**
+ * D40: the destructive verb, split out of the old Discard. It restores the last
+ * saved state and asks first, through the same confirmation every other replace
+ * path uses.
+ */
+export const editorRevert = "Revert";
+/**
  * The header's telemetry control. It opens a panel rather than performing an action on
  * a draft, so the name names the panel — it never trips the unsaved-changes guard.
  */

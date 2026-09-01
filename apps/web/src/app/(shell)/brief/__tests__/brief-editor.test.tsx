@@ -8,6 +8,7 @@ import { fromBrief, saveDraftToStorage } from "@/components/campaign/editor-stat
 import { sectionOrder, SECTION_TITLES } from "@/components/campaign/sections";
 import BriefPage from "../page";
 import NewBriefPage from "../new/page";
+import { Header } from "@/components/shell/Header";
 
 /**
  * The page as a user meets it. `renderWithRun` supplies the outlet that stands in for
@@ -40,9 +41,9 @@ const NewEditorWithPicker = () => {
 };
 
 /** Save actions live behind the "Save" menu now: open it, then pick the item. */
-const saveVia = async (user: ReturnType<typeof userEvent.setup>, item: "Save & apply" | "Save as") => {
+const saveVia = async (user: ReturnType<typeof userEvent.setup>, item: "Save" | "Save as") => {
   await user.click(screen.getByRole("button", { name: /^Save$/ }));
-  await user.click(await screen.findByRole("menuitem", { name: new RegExp(item.replace("&", "&")) }));
+  await user.click(await screen.findByRole("menuitem", { name: item === "Save" ? /^Save(?!\s*as)/ : /^Save as/ }));
 };
 
 const brief = (id: string) => ({
@@ -181,7 +182,7 @@ describe("BriefPage — data flow", () => {
     // the editor now holds the loaded brief
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
 
-    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save");
     await waitFor(() => {
       const put = calls.find((c) => c.method === "PUT");
       expect(put?.url).toContain("revision=rev-abc");
@@ -201,7 +202,7 @@ describe("BriefPage — data flow", () => {
     await waitFor(() =>
       expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false),
     );
-    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save");
 
     const post = await waitFor(() => {
       const call = calls.find((c) => c.method === "POST");
@@ -230,7 +231,7 @@ describe("BriefPage — data flow", () => {
     await user.click(await screen.findByText("camp"));
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
 
-    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save");
     expect(await screen.findByText(/conflict/)).toBeTruthy();
   });
 
@@ -281,7 +282,11 @@ describe("BriefPage — data flow", () => {
     await fillValidDraft(user);
 
     await saveVia(user, "Save as");
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    // Corrected for D35: the action bar now carries its own Cancel verb, so the
+    // dialog's Cancel is addressed inside the dialog it belongs to.
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Cancel" }),
+    );
     expect(screen.queryByLabelText("New brief id")).toBeNull();
   });
 
@@ -397,7 +402,7 @@ describe("BriefPage — data flow", () => {
 
     // saving the copy must send the revision the POST handed back; without it the write
     // silently drops to last-write-wins, the trap `loadBrief` carries the revision to avoid
-    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save");
     await waitFor(() =>
       expect(calls.some((c) => c.method === "PUT" && c.url.includes("revision=rev-copy"))).toBe(true),
     );
@@ -508,12 +513,12 @@ describe("BriefPage — data flow", () => {
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
 
     // the first save guards with the load-time revision...
-    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save");
     await waitFor(() => expect(calls.filter((c) => c.method === "PUT").length).toBe(1));
     // ...and the second must guard with the revision the first PUT returned. Discarding
     // it replayed rev-load, the write 409'd with an untrue "Brief was modified by
     // another user.", and the only way out was reloading the brief.
-    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save");
     await waitFor(() => expect(calls.filter((c) => c.method === "PUT").length).toBe(2));
 
     const puts = calls.filter((c) => c.method === "PUT");
@@ -537,7 +542,7 @@ describe("BriefPage — data flow", () => {
     await user.click(await screen.findByText("camp"));
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
 
-    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save");
     await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true));
 
     // the user types while the request is still pending
@@ -545,13 +550,15 @@ describe("BriefPage — data flow", () => {
     resolvePut(json({ file: "camp.yaml", brief: brief("camp"), revision: "rev-2" }));
 
     // (a) the in-flight edit survives — `save` never replaces the draft the way `load` did
-    await waitFor(() => expect(screen.getByText("Applied, unsaved edits")).toBeTruthy());
+    // Corrected for D41: the chip is two-state now, so an unsaved edit reads
+    // "Unsaved changes" (written-or-not) rather than "Applied, unsaved edits".
+    await waitFor(() => expect(screen.getByText("Unsaved changes")).toBeTruthy());
     expect((screen.getByLabelText("Target Audience") as HTMLInputElement).value).toBe("a who hike");
     // (b) is the chip above: the edit reads dirty against what the server stored.
 
     // (c) the next save answers the guard with the revision the first save was
     // handed back, rather than replaying the load-time one and 409ing
-    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save");
     await waitFor(() => expect(calls.filter((c) => c.method === "PUT").length).toBe(2));
     const puts = calls.filter((c) => c.method === "PUT");
     expect(puts[1].url).toContain("revision=rev-2");
@@ -574,14 +581,14 @@ describe("BriefPage — data flow", () => {
     await user.click(await screen.findByText("camp"));
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
 
-    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save");
     // the refusal says what happened and what to do — the overwrite is never re-sent
     // automatically, because the guard exists to make the other write visible
     expect(await screen.findByText(messages.statusSaveConflict)).toBeTruthy();
 
     // the fresh revision was adopted, so the next Save answers the guard instead of
     // the user reloading the brief
-    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save");
     await waitFor(() => expect(calls.filter((c) => c.method === "PUT").length).toBe(2));
     const puts = calls.filter((c) => c.method === "PUT");
     expect(puts[1].url).toContain("revision=rev-fresh");
@@ -598,7 +605,7 @@ describe("BriefPage — data flow", () => {
     await user.click(await screen.findByText("camp"));
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
 
-    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save");
     expect(await screen.findByText(/disk full/)).toBeTruthy();
   });
 
@@ -613,8 +620,8 @@ describe("BriefPage — data flow", () => {
     await user.click(await screen.findByText("camp"));
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
 
-    await saveVia(user, "Save & apply");
-    await waitFor(() => expect(screen.getByText("Saved & applied")).toBeTruthy());
+    await saveVia(user, "Save");
+    await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
   });
 
   test("a 409 on a first-time save has no baseline to adopt the fresh revision against", async () => {
@@ -626,7 +633,7 @@ describe("BriefPage — data flow", () => {
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
     await fillValidDraft(user, "fresh");
 
-    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save");
     // the server's own refusal stands: a first save has no file identity, so the
     // revision in the body cannot be adopted and no retry is offered
     expect(await screen.findByText(/already exists/)).toBeTruthy();
@@ -651,7 +658,7 @@ describe("BriefPage — data flow", () => {
     // the editor adopts camp, then draft recovery restores the orphan over it
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
 
-    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save");
     expect(await screen.findByText(/Brief was modified by another user/)).toBeTruthy();
   });
 
@@ -681,20 +688,43 @@ describe("BriefPage — data flow", () => {
     expect((logos[0] as HTMLInputElement).value).toBe("assets/inputs/copy/a.png");
   });
 
-  test("Apply on the blank route keeps the brief it just applied", async () => {
+  /**
+   * Corrected for D35: "Apply to run" is retired. The capability it carried — running
+   * a brief that was never written to disk — moves to Generate's three-way question,
+   * so this is now the proof that a NEW, NEVER-SAVED brief stays runnable (retiring
+   * Apply without it would have made a brand-new brief unrunnable — a regression,
+   * not a simplification), and that running it writes nothing.
+   */
+  test("a new, never-saved brief is runnable: Generate's 'Run this draft' POSTs the on-screen draft with zero writes", async () => {
     const user = userEvent.setup();
-    routes({});
-    renderWithRun(<NewEditor />);
+    const calls = routes({});
+    renderWithRun(
+      <>
+        <Header />
+        <NewEditor />
+      </>,
+    );
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
     await fillValidDraft(user, "fresh");
 
-    await user.click(screen.getByText("Apply to run").closest("button") as HTMLButtonElement);
+    // The editor publishes the differing draft; Generate asks instead of running the
+    // previous campaign silently.
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    const dialog = await screen.findByRole("dialog", { name: messages.generateDraftTitle });
+    // Exactly one prompt: the guard's "Unsaved edits" is nowhere behind the question.
+    expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
 
-    // the release must not fire again on the brief this page just created: applying is
-    // how a campaign becomes the active one, and clearing it here leaves Generate with
-    // nothing to run
-    await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief"));
-    expect(JSON.parse(localStorage.getItem("cf:brief") ?? "null")?.id).toBe("fresh");
+    await user.click(within(dialog).getByRole("button", { name: new RegExp(`^${messages.generateDraftRunThis}`) }));
+
+    // The on-screen draft was POSTed — not the shell's (empty) brief...
+    const generatePost = await waitFor(() => {
+      const call = calls.find((c) => c.url.includes("/campaigns/generate"));
+      expect(call).toBeTruthy();
+      return call!;
+    });
+    expect((generatePost.body as { id?: string }).id).toBe("fresh");
+    // ...and zero brief writes left the page: run-without-write.
+    expect(calls.filter((c) => c.method !== "GET" && c.url.includes("/campaigns/briefs"))).toEqual([]);
   });
 
   test("arriving on the blank route lets go of the campaign being left", async () => {
@@ -722,40 +752,165 @@ describe("BriefPage — data flow", () => {
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
 
     await fillValidDraft(user, "fresh");
-    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save");
 
     // otherwise a reload would blank the brief that was just saved
     await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief"));
   });
 
-  test("Apply to run moves the status chip off the unapplied state", async () => {
+  // Corrected for D35/D41: "Apply to run" is retired and the chip has two states.
+  // What the old test pinned — that committing the draft retires the unapplied badge —
+  // is now pinned by Save, and the badge it retired ("Draft not applied") is asserted
+  // to exist nowhere.
+  test("saving returns the chip to Saved, and 'Draft not applied' exists nowhere", async () => {
     const user = userEvent.setup();
-    routes({});
+    // the PUT/POST echoes what was sent, so the stored snapshot matches the draft
+    // and the chip can actually read clean
+    routes({ post: (_url, body) => json({ file: "fresh.yaml", brief: body, revision: "r1" }) });
     renderWithRun(<Editor />);
 
-    expect(screen.getByText("Draft not applied")).toBeTruthy();
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
+    expect(screen.queryByText("Draft not applied")).toBeNull();
     await fillValidDraft(user);
-    await user.click(screen.getByText("Apply to run"));
-    await waitFor(() => expect(screen.queryByText("Draft not applied")).toBeNull());
+    await saveVia(user, "Save");
+    await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
   });
 
-  test("Discard throws away the edit", async () => {
+  test("Cancel leaves the editor for the grid through the dirty guard, and a refused prompt keeps the draft", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor />);
+    await user.click(screen.getByText("New brief..."));
+    await user.click(await screen.findByText("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    await user.type(screen.getByLabelText("Headline"), " edited");
+    await user.click(screen.getByRole("button", { name: messages.editorCancel }));
+
+    // D40: the dirty guard owns the one question — the ConfirmDialog is the prompt,
+    // exactly one, and Leave is consent to leave for the grid.
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    expect(within(dialog).getByRole("button", { name: "Leave" })).toBeTruthy();
+
+    // A refused Cancel changes nothing: no navigation, the draft still on screen.
+    await user.click(within(dialog).getByRole("button", { name: "Stay" }));
+    expect(nextMock().router.push).not.toHaveBeenCalledWith("/grid");
+    expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("Hi edited");
+  });
+
+  test("a clean editor's Cancel reaches the grid without prompting", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor />);
+    await user.click(screen.getByText("New brief..."));
+    await user.click(await screen.findByText("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    await user.click(screen.getByRole("button", { name: messages.editorCancel }));
+    expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
+    expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
+  });
+
+  test("Revert restores the last saved state, after asking through the replace confirmation", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor />);
+    await user.click(screen.getByText("New brief..."));
+    await user.click(await screen.findByText("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    await user.type(screen.getByLabelText("Headline"), " edited");
+    expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("Hi edited");
+
+    // D40: Revert is the destructive half of the old Discard, so it confirms first —
+    // M5: the old Discard never confirmed (with `confirm` stubbed false it still
+    // wiped the field and the stub was never called). A fresh stub, because the
+    // adoption above already consumed one confirmation.
+    globalThis.confirm = vi.fn(() => true);
+    await user.click(screen.getByText("⋯"));
+    await user.click(screen.getByText(messages.editorRevert));
+    expect(globalThis.confirm).toHaveBeenCalledTimes(1);
+
+    // The edit is thrown away and the saved state is back on screen.
+    await waitFor(() =>
+      expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("Hi"),
+    );
+  });
+
+  test("a refused Revert changes nothing", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor />);
+    await user.click(screen.getByText("New brief..."));
+    await user.click(await screen.findByText("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    // the refusal is pointed at the REVERT's confirmation, not the adoption's
+    globalThis.confirm = vi.fn(() => false);
+    await user.type(screen.getByLabelText("Headline"), " edited");
+    await user.click(screen.getByText("⋯"));
+    await user.click(screen.getByText(messages.editorRevert));
+
+    expect(globalThis.confirm).toHaveBeenCalled();
+    // The refusal held: the draft keeps the edit the user declined to throw away.
+    expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("Hi edited");
+  });
+
+  test("the recovery draft is not resurrected by autosave after a Revert (L1)", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor />);
+    await user.click(screen.getByText("New brief..."));
+    await user.click(await screen.findByText("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    // Type an edit (autosaved under the brief's draft key), then revert it.
+    await user.type(screen.getByLabelText("Headline"), " edited");
+    await waitFor(() => expect(localStorage.getItem("cf:draft:camp")).not.toBeNull());
+    const autosaved = JSON.parse(localStorage.getItem("cf:draft:camp") ?? "null");
+    expect(autosaved.state.campaignMessage).toBe("Hi edited");
+
+    await user.click(screen.getByText("⋯"));
+    await user.click(screen.getByText(messages.editorRevert));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("Hi"),
+    );
+
+    // L1: the reverted state is not pristine, so autosave refills the key — with the
+    // REVERTED content, never the discarded edit. (The old code purged here and
+    // autosave immediately rewrote it: a no-op fight that this assertion pins.)
+    await waitFor(() => {
+      const draft = JSON.parse(localStorage.getItem("cf:draft:camp") ?? "null");
+      expect(draft?.state?.campaignMessage).toBe("Hi");
+    });
+  });
+
+  test("a Revert of a never-saved draft purges its recovery copy (L1, new source)", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<Editor />);
-    await waitForEditorReady();
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    await fillValidDraft(user, "typed");
 
-    const before = (screen.getByLabelText("Headline") as HTMLInputElement).value;
-    await user.type(screen.getByLabelText("Headline"), " edited");
-    expect((screen.getByLabelText("Headline") as HTMLInputElement).value).not.toBe(before);
+    // autosaved under the new draft's temp-id key. (The suite's localStorage is the
+    // in-memory stand-in from vitest.setup, whose keys are read via key(i), not
+    // Object.keys.)
+    await waitFor(() => {
+      const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i) ?? "");
+      expect(keys.filter((k) => k.startsWith("cf:draft:"))).toHaveLength(1);
+    });
 
-    // Discard resets to a blank draft. The run-context sync does not pull the active
-    // brief back in — its dependencies have not changed — so the editor stays empty
-    // until the user picks something.
-    await user.click(screen.getByText("Discard"));
-    await waitFor(() =>
-      expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe(""),
-    );
+    await user.click(screen.getByText("⋯"));
+    await user.click(screen.getByText(messages.editorRevert));
+
+    // Reverting a new source mints a fresh temp id and leaves the editor pristine, so
+    // autosave will not rewrite anything: the purge is what keeps the discarded edits
+    // from lingering in storage forever.
+    await waitFor(() => {
+      const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i) ?? "");
+      expect(keys.filter((k) => k.startsWith("cf:draft:"))).toEqual([]);
+    });
+    expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("");
   });
 
   test("the YAML split shows the serialized brief and hides the contents list", async () => {
@@ -933,7 +1088,9 @@ describe("BriefPage — data flow", () => {
     expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(before);
   });
 
-  test("Apply, Save and Save as… all refuse an invalid draft", async () => {
+  // Corrected for D35: "Apply to run" is retired; Save and Save as… are the verbs
+  // that carry the refusal now.
+  test("Save and Save as… refuse an invalid draft", async () => {
     const user = userEvent.setup();
     const calls = routes({});
     renderWithRun(<Editor />);
@@ -948,22 +1105,17 @@ describe("BriefPage — data flow", () => {
     // written, and the errors that were hidden until now become visible.
     // Re-query inside the assertion — React replaces these nodes on re-render, so a
     // reference captured beforehand can be stale by the time the draft turns invalid.
-    const button = (label: string) =>
-      screen.getByText(label).closest("button") as HTMLButtonElement;
-    await waitFor(() => expect(screen.getByText("Apply to run").closest("button")).toBeTruthy());
-    expect(button("Apply to run").disabled).toBe(false);
-    expect(button("Save").disabled).toBe(false);
+    expect((screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement).disabled).toBe(false);
 
-    await user.click(button("Apply to run"));
     // "Save" opens the menu; the verb the user actually presses is inside it.
-    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save");
     await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New brief id"), "elsewhere");
     await user.click(
       within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
     );
 
-    // all three refused: no write left the page, and the refusal is on screen
+    // both refused: no write left the page, and the refusal is on screen
     expect(writes(calls)).toEqual([]);
     expect(screen.getByText(messages.targetRegion)).toBeTruthy();
   });
@@ -1062,7 +1214,7 @@ describe("BriefPage — data flow", () => {
     await waitFor(() => expect(screen.getByLabelText("Campaign Name").hasAttribute("readonly")).toBe(true));
 
     const user = userEvent.setup();
-    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save");
     await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.url).toContain("revision=rev-live"));
   });
 
@@ -1240,7 +1392,7 @@ describe("BriefPage — capabilities and motion", () => {
     expect(screen.queryByText(/not probed/)).toBeNull();
   });
 
-  test("Save & apply carries the same refusal notice that Apply does", async () => {
+  test("Save carries the same motion refusal that a committed draft owes (D7)", async () => {
     const user = userEvent.setup();
     const motionBrief = {
       file: "clip.yaml",
@@ -1268,7 +1420,7 @@ describe("BriefPage — capabilities and motion", () => {
       list: () => json({ briefs: [motionBrief] }),
       capabilities: () => json({ motion: false, reason: "no ffmpeg" }),
       // the real PUT stores and returns the parsed body it was sent — echo it (see the
-      // matching correction in "Save & apply carries the same refusal notice")
+      // matching correction in "Save carries the same motion refusal")
       put: (_url, body) => json({ file: "clip.yaml", brief: body, revision: "r1" }, 200),
     });
     renderWithRun(<Editor />);
@@ -1286,7 +1438,7 @@ describe("BriefPage — capabilities and motion", () => {
     // and having applied it, it owes the user the same reason Apply gives.
     const save = screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement;
     await waitFor(() => expect(save.disabled).toBe(false));
-    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save");
 
     // the Output section already shows this as a field error; the notice is the
     // separate status the action bar owes after applying
@@ -1351,7 +1503,7 @@ describe("BriefPage — capabilities and motion", () => {
     await user.click(screen.getByRole("button", { name: "accent-wipe" }));
     await user.click(screen.getByRole("button", { name: "instagram-reel" }));
 
-    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save");
     const post = await waitFor(() => {
       const call = calls.find((c) => c.method === "POST" && c.url.includes("/campaigns/briefs"));
       expect(call).toBeTruthy();
@@ -1390,7 +1542,7 @@ describe("BriefPage — capabilities and motion", () => {
     // The control named "Save" opens the menu; the verb a user actually presses is inside
     // it. Clicking only the menu button proved nothing here — this assertion passed with
     // the refusal removed entirely, because opening a menu never writes.
-    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save");
     expect(writes(calls)).toEqual([]);
   });
 
@@ -1419,7 +1571,7 @@ describe("BriefPage — capabilities and motion", () => {
       list: () => json({ briefs: [{ file: "clip.yaml", brief: clip, revision: "r1" }] }),
       capabilities: () => json({ motion: false, reason: "no ffmpeg" }),
       // the real PUT stores and returns the parsed body it was sent — echo it (see the
-      // matching correction in "Save & apply carries the same refusal notice")
+      // matching correction in "Save carries the same motion refusal")
       put: (_url, body) => json({ file: "clip.yaml", brief: body, revision: "r1" }, 200),
     });
     renderWithRun(<Editor />);
@@ -1444,7 +1596,7 @@ describe("BriefPage — capabilities and motion", () => {
     // structurally valid ⇒ persistable: Save stays offered and keeps the fields verbatim
     const save = () => screen.getByRole("button", { name: /^Save$/ }) as HTMLButtonElement;
     await waitFor(() => expect(save().disabled).toBe(false));
-    await saveVia(user, "Save & apply");
+    await saveVia(user, "Save");
     const put = await waitFor(() => {
       const call = calls.find((c) => c.method === "PUT");
       expect(call).toBeTruthy();
@@ -1458,8 +1610,8 @@ describe("BriefPage — capabilities and motion", () => {
       output: { formats: ["static", "motion"], platforms: ["instagram-feed", "instagram-reel"] },
     });
 
-    // Apply is not blocked by the capability, and it reports the refusal
-    await user.click(screen.getByText("Apply to run"));
+    // Corrected for D35: "Apply to run" is retired — Save is the verb that commits,
+    // and having committed, it owes the user the same motion refusal Apply gave (D7).
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe(messages.statusApplyRefusal));
   });
 
@@ -1633,13 +1785,14 @@ describe("BriefPage — guided presentation (W6)", () => {
     await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
 
-    // The last section step's Next says what it leads to.
-    const launch = screen.getByRole("button", { name: messages.stepNextReviewLaunch });
-    expect(launch.textContent).toBe(messages.stepNextReviewLaunch);
-    await user.click(launch);
+    // The last section step's Next says what it leads to. (Corrected for D35: the
+    // label was "Review & launch", promising a launch the review step does not carry.)
+    const finish = screen.getByRole("button", { name: messages.stepNextReview });
+    expect(finish.textContent).toBe(messages.stepNextReview);
+    await user.click(finish);
     await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
 
-    // Review: no Next — the launch is the last look, already on screen.
+    // Review: no Next — this is the last look, already on screen.
     expect(screen.queryByRole("button", { name: messages.stepNext })).toBeNull();
     expect(back()).toBeTruthy();
     expect(screen.getByText(messages.stepReviewIntro)).toBeTruthy();
@@ -1686,13 +1839,13 @@ describe("BriefPage — guided presentation (W6)", () => {
     // randomized mode, which pinned the defect — Output is the last section step in
     // *classic* only, and here it is followed by Variation Policy. The launch label
     // belongs to whichever step is actually last.
-    expect(screen.queryByRole("button", { name: messages.stepNextReviewLaunch })).toBeNull();
+    expect(screen.queryByRole("button", { name: messages.stepNextReview })).toBeNull();
     await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Variation Policy"));
     expect(footerStatus()).toBe(messages.statusStepReady);
 
     // Policy *is* last here, so it is the step that offers the launch.
-    await user.click(screen.getByRole("button", { name: messages.stepNextReviewLaunch }));
+    await user.click(screen.getByRole("button", { name: messages.stepNextReview }));
     await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
   });
 
@@ -2143,7 +2296,8 @@ describe("BriefPage — the review step (W8)", () => {
     }
   });
 
-  test("Apply's refusal marks every failing section and reveals the first", async () => {
+  // Corrected for D35: Save carries the refusal now that "Apply to run" is retired.
+  test("Save's refusal marks every failing section and reveals the first", async () => {
     const user = userEvent.setup();
     routes({});
     renderWithRun(<NewEditor />);
@@ -2154,8 +2308,8 @@ describe("BriefPage — the review step (W8)", () => {
     await toReview(user);
     expect(screen.queryByText(messages.briefId)).toBeNull();
 
-    // D3: Apply is never disabled — pressing it is how the user asks what is wrong.
-    await user.click(screen.getByText("Apply to run"));
+    // D3: Save is never disabled — pressing it is how the user asks what is wrong.
+    await saveVia(user, "Save");
 
     // The first failing section is the one revealed…
     await waitFor(() => expect(stepHeading().textContent).toBe("Identity"));
@@ -2192,14 +2346,14 @@ describe("BriefPage — the review step (W8)", () => {
     },
   };
 
-  test("a refused Apply bounces to the first failing step in walk order, not the first error bucket (M1)", async () => {
+  test("a refused Save bounces to the first failing step in walk order, not the first error bucket (M1)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [brokenOutputAndPolicy] }) });
     renderWithRun(<Editor />);
     await adopt(user, "op");
     await toReview(user);
 
-    await user.click(screen.getByText("Apply to run"));
+    await saveVia(user, "Save");
 
     // Output precedes Variation Policy in sectionOrder — the walk's order, which
     // the bounce follows. validateState's key order alone would have chosen Policy.
@@ -2207,34 +2361,34 @@ describe("BriefPage — the review step (W8)", () => {
     expect(stepHeading().textContent).not.toBe("Variation Policy");
   });
 
-  test("a refused Apply speaks its refusal on the step it lands on (D38)", async () => {
+  test("a refused Save speaks its refusal on the step it lands on (D38)", async () => {
     const user = userEvent.setup();
     routes({});
     renderWithRun(<NewEditor />);
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
     await toReview(user);
 
-    await user.click(screen.getByText("Apply to run"));
+    await saveVia(user, "Save");
 
     // The bounce lands on Identity — and the refusal sentence is on screen THERE.
     // The status surface used to live only in the Review-step bar, which the same
     // React commit that produced the refusal unmounted: the user landed on a step
-    // with no message and no "Apply" anywhere on the page.
+    // with no message and no verb anywhere on the page.
     await waitFor(() => expect(stepHeading().textContent).toBe("Identity"));
     const refusal = screen
       .getAllByRole("status")
-      .find((el) => el.textContent.startsWith("Not applied —"));
+      .find((el) => el.textContent.startsWith("Not saved yet —"));
     expect(refusal).toBeTruthy();
   });
 
-  test("a refused Apply leaves focus on the revealed section, never the body (H2)", async () => {
+  test("a refused Save leaves focus on the revealed section, never the body (H2)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [brokenOutputAndPolicy] }) });
     renderWithRun(<Editor />);
     await adopt(user, "op");
     await toReview(user);
 
-    await user.click(screen.getByText("Apply to run"));
+    await saveVia(user, "Save");
 
     // The pressed verb is unmounted by the bounce, so focus used to drop to
     // document.body — no landing point for a keyboard or screen-reader user. The
@@ -2253,7 +2407,7 @@ describe("BriefPage — the review step (W8)", () => {
     // Refuse from Review, land on Identity, then walk back to Review with every
     // error now marked — the surface must appear once, not once per placement.
     await toReview(user);
-    await user.click(screen.getByText("Apply to run"));
+    await saveVia(user, "Save");
     await waitFor(() => expect(stepHeading().textContent).toBe("Identity"));
     await user.click(segments()[sectionOrder("brief").length]);
     await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
@@ -2261,7 +2415,7 @@ describe("BriefPage — the review step (W8)", () => {
     // One StatusLine speaking the refusal…
     const refusals = screen
       .getAllByRole("status")
-      .filter((el) => el.textContent.startsWith("Not applied —"));
+      .filter((el) => el.textContent.startsWith("Not saved yet —"));
     expect(refusals).toHaveLength(1);
     // …and one ErrorStrip chip per failing section (the footer's own status
     // sentence and the segbar never match these selectors).
@@ -2306,5 +2460,108 @@ describe("BriefPage — the review step (W8)", () => {
     // Everything mounts the same bar back at the foot of the whole stack.
     await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
     await waitFor(() => expect(screen.getByTestId("action-bar")).toBeTruthy());
+  });
+});
+
+describe("BriefPage — Generate's three-way question (D35)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:presentation", "everything");
+    globalThis.confirm = vi.fn(() => true);
+  });
+
+  /**
+   * The real editor and the real header, mounted together — the D35 question is a
+   * contract between the two, so neither a mock handoff nor a mock editor can prove
+   * it. While the editor's on-screen draft differs from the shell's brief, Generate
+   * must ask; while it does not, Generate must behave exactly as it always has.
+   */
+  const EditorAndHeader = () => (
+    <>
+      <Header />
+      <BriefPage />
+    </>
+  );
+
+  test("Generate from a dirty editor asks the three-way, one prompt, and 'Run this draft' never runs the previous campaign", async () => {
+    const user = userEvent.setup();
+    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<EditorAndHeader />);
+    await user.click(screen.getByText("New brief..."));
+    await user.click(await screen.findByText("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    // Edit the loaded brief: the shell still holds camp, the screen holds camp+edit.
+    await user.type(screen.getByLabelText("Headline"), " edited");
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    const dialog = await screen.findByRole("dialog", { name: messages.generateDraftTitle });
+    // Exactly one prompt on this path: the guard's "Unsaved edits" is nowhere.
+    expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
+
+    await user.click(within(dialog).getByRole("button", { name: new RegExp(`^${messages.generateDraftRunThis}`) }));
+
+    // The ON-SCREEN draft was POSTed — never the shell's previous campaign.
+    const generatePost = await waitFor(() => {
+      const call = calls.find((c) => c.url.includes("/campaigns/generate"));
+      expect(call).toBeTruthy();
+      return call!;
+    });
+    expect((generatePost.body as { campaignMessage?: string }).campaignMessage).toBe("Hi edited");
+    // run-without-write: no brief write left the page
+    expect(calls.filter((c) => c.method !== "GET" && c.url.includes("/campaigns/briefs"))).toEqual([]);
+    expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
+  });
+
+  test("'Save and run' writes, then runs what was written", async () => {
+    const user = userEvent.setup();
+    const calls = routes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      // the real PUT stores and returns the parsed body it was sent
+      put: (_url, body) => json({ file: "camp.yaml", brief: body, revision: "r2" }),
+    });
+    renderWithRun(<EditorAndHeader />);
+    await user.click(screen.getByText("New brief..."));
+    await user.click(await screen.findByText("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    await user.type(screen.getByLabelText("Headline"), " edited");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    const dialog = await screen.findByRole("dialog", { name: messages.generateDraftTitle });
+    await user.click(within(dialog).getByRole("button", { name: new RegExp(`^${messages.generateDraftSaveRun}`) }));
+
+    // The write went through the editor's own save path (conditional PUT with the
+    // load-time revision), and the run carried the brief as the server stored it.
+    const generatePost = await waitFor(() => {
+      const call = calls.find((c) => c.url.includes("/campaigns/generate"));
+      expect(call).toBeTruthy();
+      return call!;
+    });
+    expect((generatePost.body as { campaignMessage?: string }).campaignMessage).toBe("Hi edited");
+    const put = calls.find((c) => c.method === "PUT");
+    expect(put?.url).toContain("revision=r1");
+    expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
+  });
+
+  test("Generate from a clean editor runs the committed brief without asking", async () => {
+    const user = userEvent.setup();
+    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<EditorAndHeader />);
+    await user.click(screen.getByText("New brief..."));
+    await user.click(await screen.findByText("camp"));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    // No edits: the draft matches the shell brief, so there is no question to ask.
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    expect(screen.queryByRole("dialog", { name: messages.generateDraftTitle })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
+    const generatePost = await waitFor(() => {
+      const call = calls.find((c) => c.url.includes("/campaigns/generate"));
+      expect(call).toBeTruthy();
+      return call!;
+    });
+    expect((generatePost.body as { id?: string }).id).toBe("camp");
   });
 });

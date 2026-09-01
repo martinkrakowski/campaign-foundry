@@ -877,10 +877,31 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   useStepKeys({ enabled: presentation === "guided", onStep: (move) => go(stepIndex + move) });
   const swipe = useStepSwipe((move) => go(stepIndex + move));
 
-  const handleDiscard = () => {
+  /**
+   * D40 — the exit verb. Cancel leaves the editor for the grid, and the dirty guard
+   * owns the one question: unsaved work is asked about, a clean editor just leaves.
+   * (The old Discard took the user nowhere and never asked.)
+   */
+  const handleCancel = () => {
+    guardedPush("/grid");
+  };
+
+  /**
+   * D40 — the destructive verb, split out of Discard: Revert restores the last saved
+   * state, and asks first, through the same `confirmReplace` every other replace path
+   * uses. M5: the old Discard never confirmed — with `confirm` stubbed to return
+   * false it still wiped the field, and the stub was never called.
+   */
+  const handleRevert = () => {
+    if (!confirmReplace()) return;
+    // L1 — purge only when the autosave effect will not rewrite the key. A
+    // revert-to-saved is not pristine, so autosave refills the key with the reverted
+    // (== saved) state in the same tick and a purge here would be a no-op fight;
+    // a discarded NEW source mints a fresh temp id, so nothing overwrites the old
+    // key and the purge is what keeps the discarded edits from lingering forever.
+    if (state.source.kind === "new") purgeDraftFromStorage(state);
     dispatch({ type: "discard" });
-    purgeDraftFromStorage(state);
-    // L1.1: Discard resets touched/attempted
+    // L1.1: Revert resets touched/attempted
     setAttempted(false);
     setTouched(new Set());
     setTouchedSections(new Set());
@@ -966,8 +987,14 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   /** The bar's verbs, once — the two placements below cannot grow divergent copies. */
   const actionVerbs = (
     <>
-      <Button variant="ghost" onClick={handleDiscard}>
-        Discard
+      {/*
+        D35 — the verb model: `Cancel` exits to the grid, the Save menu persists,
+        and "Apply to run" is retired (every persist path already commits the brief,
+        so a third verb for the same idea was the confusion the user reported).
+        D40 — Revert, the destructive half of the old Discard, lives behind the
+        overflow: it is the one verb here that throws work away, so it confirms. */}
+      <Button variant="ghost" onClick={handleCancel}>
+        {messages.editorCancel}
       </Button>
       <SaveMenu
         /* D3: never a dead primary button — pressing an invalid brief sets
@@ -976,8 +1003,9 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
         onSave={() => void handleSave()}
         onSaveAs={() => setSaveAsId("")}
       />
-      {/* D3: the bar's primary row is the status sentence and the verbs.
-          Developer affordances live behind the overflow so the sentence has room. */}
+      {/* D3: the bar's primary row is the status sentence and the two verbs.
+          Developer affordances and Revert live behind the overflow so the
+          sentence has room. */}
       <details className="relative">
         <summary
           className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md text-text-muted hover:bg-surface-2 hover:text-text-primary"
@@ -992,6 +1020,13 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
             onClick={() => setShowYamlSplit(!showYamlSplit)}
           >
             YAML split {showYamlSplit ? "off" : "on"}
+          </button>
+          <button
+            type="button"
+            className="w-full rounded-sm px-3 py-2 text-left text-[13px] text-text-primary hover:bg-surface-2"
+            onClick={handleRevert}
+          >
+            {messages.editorRevert}
           </button>
         </div>
       </details>
