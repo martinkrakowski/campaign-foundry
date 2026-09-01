@@ -141,11 +141,21 @@ Each lane is one worktree, one branch, one PR. Ownership is exclusive; two lanes
 | **R6.1** | Collapse the verbs to Save / Save as… / Cancel (**D35**) | `campaign/SaveMenu.tsx`, `BriefEditor.tsx`, `messages.ts` |
 | **R6.2** | `StatusChip` → two states (**D41**); retire the *"Save without applying"* copy (**H8**) | `campaign/StatusChip.tsx`, `StatusLine.tsx` |
 | **R6.3** | Cancel → grid; Revert confirms (**M5**, D40) | `campaign/BriefEditor.tsx` |
+| **R6.4** | Restore popup dismissal — Escape, outside press, close-on-select (**regression from R6.1**, PR #163) | `ui/overflow-menu.tsx`, `BriefEditor.tsx` |
 | **R7.1** | Mount `PreviewDock` / `PreviewStrip` in the guided column (**M2**, D42) | `campaign/BriefEditor.tsx` |
 
 **Order.** `R1 ‖ R3 ‖ R4` → `R2` → `R5` → `R6` → `R7`.
 
 R4 gates R6 (D36). R2 and R6 both own `BriefEditor.tsx`, so they are sequential; R7 follows R6 so the dock is not mounted against a verb model about to change. R1 and R3 are independent of everything and should go first — **C1 and C3 are the two the user will notice within a minute.**
+
+**R6.4 was not planned — it repairs R6.1.** Collapsing the verbs deleted `SaveMenu.tsx`,
+and with it the only outside-click handler in `apps/web`; the bare `<details>` that
+replaced it closes solely on its own summary, so the ⋯ menu could not be dismissed at
+all. Two lessons worth carrying into R5 and R7: deleting a component deletes its
+*behaviour*, not just its markup — the diff showed 90 lines going and nothing arriving
+to replace three event paths — and three tests kept passing throughout, because
+`<details>` leaves hidden children in the DOM and they were clicking a control no user
+could see. A test that reaches a control the user cannot reach proves nothing.
 
 ---
 
