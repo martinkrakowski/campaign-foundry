@@ -130,6 +130,16 @@ const writes = (calls: readonly { url: string; method: string }[]) =>
   calls.filter((c) => c.method !== "GET" && !c.url.includes("/campaigns/plan"));
 
 /** The editor adopts the shell's active brief only after the listing arrives. */
+/**
+ * The developer affordances live behind the action bar's ⋯ menu, which unmounts its
+ * items when closed. Before #163 they sat in a `<details>` that left them in the DOM
+ * while hidden, so these tests used to click a control no user could see.
+ */
+const chooseFromOverflow = async (user: ReturnType<typeof userEvent.setup>, item: string) => {
+  await user.click(screen.getByRole("button", { name: "More actions" }));
+  await user.click(screen.getByRole("menuitem", { name: item }));
+};
+
 const waitForEditorReady = async () =>
   waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).not.toBe(""));
 
@@ -512,6 +522,26 @@ describe("BriefPage — data flow", () => {
     expect(writes(calls)).toEqual([]);
     expect(screen.getByText(messages.briefId)).toBeTruthy();
     expect(screen.getByLabelText("New brief id")).toBeTruthy();
+  });
+
+  test("neither Escape nor Cancel dismisses Save as… while the write is in flight", async () => {
+    const user = userEvent.setup();
+    // A POST that never answers, so the dialog stays mid-write for the whole test.
+    routes({ post: () => new Promise<Response>(() => {}) });
+    renderWithRun(<Editor />);
+    await fillValidDraft(user);
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), "trail-blaze-2026");
+    const dialog = screen.getByRole("dialog", { name: /Save as/ });
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    // `handleSaveAs` captured the draft before awaiting and dispatches `load` — a
+    // full state replace — when the server answers. Dismissing here would hand the
+    // user an editable page whose edits that pending load is about to discard.
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: /Save as/ })).toBeTruthy();
+    expect((within(dialog).getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   test("Save as... offers the slugified form of a name as a click, never a silent rewrite", async () => {
@@ -1008,9 +1038,9 @@ describe("BriefPage — data flow", () => {
     renderWithRun(<Editor />);
     await waitForEditorReady();
 
-    await user.click(screen.getByText("YAML split on"));
+    await chooseFromOverflow(user, "YAML split on");
     expect(screen.getByText(/"targetRegion"/)).toBeTruthy();
-    await user.click(screen.getByText("YAML split off"));
+    await chooseFromOverflow(user, "YAML split off");
     expect(screen.queryByText(/"targetRegion"/)).toBeNull();
   });
 
@@ -1362,7 +1392,7 @@ describe("BriefPage — data flow", () => {
     routes({});
     renderWithRun(<Editor />);
     await waitForEditorReady();
-    await user.click(screen.getByText("YAML split on"));
+    await chooseFromOverflow(user, "YAML split on");
     const pre = screen.getByText(/"targetRegion"/);
     const panel = pre.closest(".sticky") as HTMLElement;
     expect(panel).toBeTruthy();

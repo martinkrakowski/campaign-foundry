@@ -24,6 +24,7 @@ export {
   type DurationStripProps,
 } from "./duration-strip";
 export { ConfirmDialog, type ConfirmDialogProps } from "./confirm-dialog";
+export { OverflowMenu, type OverflowMenuProps, type OverflowMenuItem } from "./overflow-menu";
 export { MiniChip, type MiniChipProps, type MiniChipTone } from "./mini-chip";
 export { EmptyNote, type EmptyNoteProps } from "./empty-note";
 export { IconButton, type IconButtonProps } from "./icon-button";
