@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from "react";
 import { flushSync } from "react-dom";
 import { IconButton } from "./icon-button";
 
@@ -35,14 +42,18 @@ export interface OverflowMenuProps {
  * dialog's focus trap captures that vanishing item as its restoration target and
  * returns focus to nothing on close.
  *
- * Known gap: `role="menu"` conventionally promises Arrow/Home/End navigation, which
- * this does not implement — the items are ordinary tabbable buttons, so the menu is
- * operable by Tab but does not behave as the ARIA authoring practices describe.
+ * The menu behaves as the ARIA authoring practices describe for a menu button:
+ * ArrowDown/ArrowUp on the trigger open it onto the first/last item (Enter and Space
+ * open onto the first), the items hold roving focus — `tabIndex={-1}` and reachable
+ * only from inside — moved with ArrowUp/ArrowDown (wrapping at both ends) and jumped
+ * with Home/End, and Tab closes the menu and lets the browser move focus on. A mouse
+ * click opens without moving focus, as a click anywhere does.
  */
 export function OverflowMenu({ label, items }: OverflowMenuProps): ReactNode {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const menuId = `overflow-menu-${useId()}`;
 
   /** Close, then put focus back where it can be seen. */
@@ -88,8 +99,81 @@ export function OverflowMenu({ label, items }: OverflowMenuProps): ReactNode {
     action();
   };
 
+  /**
+   * Open and land focus on an item, without waiting for a render.
+   *
+   * The items exist only once React commits, and a keydown handler runs before
+   * that — so the open is flushed here, exactly like `choose` flushes the close,
+   * and the focus lands on a ref the commit just filled.
+   */
+  const openAndFocus = (index: number) => {
+    flushSync(() => setOpen(true));
+    itemRefs.current[index]?.focus();
+  };
+
+  /** Move roving focus one step from the item it sits on, wrapping at both ends. */
+  const navigate = (delta: number) => {
+    const refs = itemRefs.current;
+    const index = refs.findIndex((node) => node === document.activeElement);
+    refs[(index + delta + refs.length) % refs.length]?.focus();
+  };
+
+  /**
+   * The menu keyboard contract (APG). On the trigger: ArrowDown/ArrowUp open onto
+   * the last/first item, Enter and Space toggle like the click they stand in for.
+   * On the items: arrows move (wrapping), Home/End jump, Tab closes and — because
+   * the items are out of the tab order — lets the browser carry focus past the
+   * trigger. Escape is deliberately absent: the document listener below owns it.
+   */
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.target === trigger.current) {
+      switch (event.key) {
+        case "ArrowDown":
+          event.preventDefault();
+          openAndFocus(0);
+          break;
+        case "ArrowUp":
+          event.preventDefault();
+          openAndFocus(items.length - 1);
+          break;
+        case "Enter":
+        case " ":
+        case "Space":
+          // Stand in for the native click exactly: preventDefault keeps the
+          // button's own activation from toggling a second time. ("Space" is
+          // the same key — happy-dom names it that where browsers say " ".)
+          event.preventDefault();
+          if (open) close();
+          else openAndFocus(0);
+          break;
+      }
+      return;
+    }
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        navigate(1);
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        navigate(-1);
+        break;
+      case "Home":
+        event.preventDefault();
+        itemRefs.current[0]?.focus();
+        break;
+      case "End":
+        event.preventDefault();
+        itemRefs.current[items.length - 1]?.focus();
+        break;
+      case "Tab":
+        close();
+        break;
+    }
+  };
+
   return (
-    <div ref={root} className="relative">
+    <div ref={root} className="relative" onKeyDown={onKeyDown}>
       <IconButton
         ref={trigger}
         label={label}
@@ -109,11 +193,17 @@ export function OverflowMenu({ label, items }: OverflowMenuProps): ReactNode {
           aria-label={label}
           className="absolute bottom-full right-0 z-30 mb-2 min-w-[200px] overflow-hidden rounded-md border border-border bg-surface p-1 shadow-2xl"
         >
-          {items.map((item) => (
+          {items.map((item, index) => (
             <button
               key={item.label}
+              ref={(node) => {
+                itemRefs.current[index] = node;
+              }}
               type="button"
               role="menuitem"
+              // Roving focus: Tab leaves the menu rather than walking it, so the
+              // items are reachable only through the arrow keys.
+              tabIndex={-1}
               className="w-full rounded-sm px-3 py-2 text-left text-[13px] text-text-primary hover:bg-surface-2"
               onClick={() => choose(item.onSelect)}
             >
