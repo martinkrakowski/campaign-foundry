@@ -1,5 +1,5 @@
-import { lstat, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
+import { lstat, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, resolve } from "node:path";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { projectRoot, errorMessage } from "@campaignfoundry/shared";
 import { resolveConfined } from "../confined-path.js";
@@ -10,6 +10,7 @@ import {
   hashBytes,
   isBriefSourceName,
   isErrno,
+  patchBriefYaml,
   serializeBrief,
   SYMLINK_WRITE_ERROR,
 } from "../brief-files.js";
@@ -113,6 +114,13 @@ export class FsBriefStore implements BriefStorePort {
     return { file: `${brief.id}.yaml`, brief, revision };
   }
 
+  /**
+   * Non-destructive writer for Save and `POST ?replace=1` (R4.1): read the
+   * existing bytes, patch the changed paths in place as a YAML Document, and
+   * atomically replace the file via a temp rename. Comments, blank lines, key
+   * order and quoting the operator wrote survive; an unparseable file refuses
+   * the write (fail closed) rather than falling back to a whole-object dump.
+   */
   async rewriteBrief(
     brief: CampaignBrief,
     options?: { expectedRevision?: string },
@@ -134,8 +142,9 @@ export class FsBriefStore implements BriefStorePort {
       throw err;
     }
     const filePath = resolveConfined(this.dir, file);
+    const raw = await readFile(filePath);
     if (options?.expectedRevision) {
-      const currentRev = hashBytes(await readFile(filePath));
+      const currentRev = hashBytes(raw);
       if (currentRev !== options.expectedRevision) {
         const conflictErr = new Error("Brief was modified by another user.");
         (conflictErr as { code?: string; revision?: string }).code = "ECONFLICT";
@@ -143,8 +152,26 @@ export class FsBriefStore implements BriefStorePort {
         throw conflictErr;
       }
     }
-    const content = serializeBrief(filePath, brief);
-    await writeFile(filePath, content, "utf8");
+    let content: string;
+    if (extname(filePath).toLowerCase() === ".json") {
+      // R4.2 — named carve-out, deliberate: a `.json` brief keeps JSON. A YAML
+      // Document patch here would write YAML into a `.json` file and hide the
+      // brief on the next load. Never Document-patched, never fail-closed for
+      // "not a YAML Document".
+      content = serializeBrief(filePath, brief);
+    } else {
+      content = patchBriefYaml(filePath, raw.toString("utf8"), brief);
+    }
+    // Atomic replace: write a sibling temp file, then rename over the target, so
+    // a failure mid-write leaves the operator's original bytes untouched.
+    const tmpPath = `${filePath}.tmp`;
+    try {
+      await writeFile(tmpPath, content, "utf8");
+      await rename(tmpPath, filePath);
+    } catch (error) {
+      await unlink(tmpPath).catch(() => undefined);
+      throw error;
+    }
     const revision = hashBytes(Buffer.from(content, "utf8"));
     return { file: basename(filePath), brief, revision };
   }

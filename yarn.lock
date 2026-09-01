@@ -250,15 +250,14 @@ __metadata:
     "@campaignfoundry/Distribution": "workspace:*"
     "@campaignfoundry/GovernanceAndCompliance": "workspace:*"
     "@campaignfoundry/shared": "workspace:*"
-    "@types/js-yaml": "npm:^4.0.9"
     "@types/node": "npm:^20.11.0"
     "@typescript-eslint/eslint-plugin": "npm:^8.0.0"
     "@typescript-eslint/parser": "npm:^8.0.0"
     eslint: "npm:^9.0.0"
     ffmpeg-static: "npm:5.3.0"
-    js-yaml: "npm:^4.1.0"
     nitropack: "npm:^2.13.0"
     typescript: "npm:^5.5.4"
+    yaml: "npm:^2.9.0"
   languageName: unknown
   linkType: soft
 
@@ -267,6 +266,7 @@ __metadata:
   resolution: "@campaignfoundry/shared@workspace:packages/shared"
   dependencies:
     typescript: "npm:^5.0.0"
+    yaml: "npm:^2.9.0"
   languageName: unknown
   linkType: soft
 
@@ -4698,7 +4698,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"js-yaml@npm:^4.1.0, js-yaml@npm:^4.1.1":
+"js-yaml@npm:^4.1.1":
   version: 4.2.0
   resolution: "js-yaml@npm:4.2.0"
   dependencies:
@@ -7724,6 +7724,15 @@ __metadata:
   version: 5.0.0
   resolution: "yallist@npm:5.0.0"
   checksum: 10c0/a499c81ce6d4a1d260d4ea0f6d49ab4da09681e32c3f0472dee16667ed69d01dae63a3b81745a24bd78476ec4fcf856114cb4896ace738e01da34b2c42235416
+  languageName: node
+  linkType: hard
+
+"yaml@npm:^2.9.0":
+  version: 2.9.0
+  resolution: "yaml@npm:2.9.0"
+  bin:
+    yaml: bin.mjs
+  checksum: 10c0/f340718df45e97a9551b9bf9dac61c80050bc464513b710debfb5067c380c8472e3b67809cffacb4ab5ffb5e66ef9310816c88b05f371cec60abfedd8c88e0a2
   languageName: node
   linkType: hard
 

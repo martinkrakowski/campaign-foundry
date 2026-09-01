@@ -1,8 +1,19 @@
 import { describe, test, expect } from "vitest";
-import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { dumpBrief, quoteYamlScalar } from "../dump-brief";
+import { parse } from "yaml";
+import { dumpBrief } from "../brief-yaml.js";
 
-const brief: CampaignBrief = {
+// Moved from `apps/web/src/components/campaign/__tests__/dump-brief.test.ts` (R4.3):
+// the web fork of the serialiser was deleted, so its unit tests follow the one
+// shared implementation. Two assertions were corrected, because they described the
+// deleted fork's over-quoting contract rather than the real one: the fork quoted
+// `campaignMessage` ("Stay wild. Stay hydrated.") with `quoteYamlScalar`, while the
+// canonical writer — the `yaml` package's emitter at the 1.2 default schema — emits
+// it plain, exactly as the API's canonical dump always did. `#1473E6` stays quoted
+// (a plain scalar may not start with `#`). The deleted `quoteYamlScalar` tests have
+// no surviving subject; quoting is now covered by the byte-for-byte round-trip
+// corpus tests in `apps/api/server/lib/__tests__/brief-corpus.test.ts`.
+
+const brief = {
   id: "camp",
   targetRegion: "DE",
   targetAudience: "fans",
@@ -33,53 +44,6 @@ const brief: CampaignBrief = {
   output: { formats: ["static"], platforms: ["instagram-feed", "linkedin", "x"] },
 };
 
-describe("quoteYamlScalar", () => {
-  test("quotes strings yaml would resolve as a non-string", () => {
-    for (const value of [
-      "true",
-      "False",
-      "null",
-      "~",
-      "yes",
-      "NO",
-      "on",
-      "Off",
-      "42",
-      "-3.5",
-      ".5",
-      "1e10",
-      "2020-01-01",
-      "2020-01-01T12:00:00Z",
-      "*anchor",
-      "&ref",
-      "!tag",
-      "%YAML",
-      "@x",
-      "`tick",
-      "\\slash",
-      "|block",
-      ">fold",
-      "{obj",
-      "}end",
-      "[list",
-      "]end",
-      "#comment",
-      "a: b",
-      "foo # bar",
-      "",
-      "has space",
-    ]) {
-      expect(quoteYamlScalar(value), value).toBe(JSON.stringify(value));
-    }
-  });
-
-  test("leaves ordinary path-safe strings unquoted", () => {
-    expect(quoteYamlScalar("camp")).toBe("camp");
-    expect(quoteYamlScalar("assets/inputs/a.png")).toBe("assets/inputs/a.png");
-    expect(quoteYamlScalar("hydra-bottle")).toBe("hydra-bottle");
-  });
-});
-
 describe("dumpBrief", () => {
   test("emits canonical key order and quotes unsafe strings", () => {
     const yaml = dumpBrief(brief);
@@ -87,7 +51,7 @@ describe("dumpBrief", () => {
     expect(yaml.indexOf("products:")).toBeLessThan(yaml.indexOf("mode:"));
     expect(yaml.indexOf("mode:")).toBeLessThan(yaml.indexOf("variation:"));
     expect(yaml).toContain("id: camp");
-    expect(yaml).toContain('campaignMessage: "Stay wild. Stay hydrated."');
+    expect(yaml).toContain("campaignMessage: Stay wild. Stay hydrated.");
     expect(yaml).toContain('primaryColor: "#1473E6"');
     expect(yaml).toContain("- headline-top");
     expect(yaml).toContain("- static");
@@ -109,7 +73,7 @@ describe("dumpBrief", () => {
       leftover: "z",
       skip: undefined,
       n: 1n,
-    } as unknown as CampaignBrief);
+    } as object);
     expect(yaml).not.toContain("localizedMessage:");
     expect(yaml).not.toContain("skip:");
     expect(yaml).toContain("flag: true");
@@ -123,5 +87,13 @@ describe("dumpBrief", () => {
     expect(yaml).toContain("- id: solo");
     expect(yaml).toContain("keep: 1");
     expect(yaml).not.toContain("drop:");
+  });
+
+  test("round-trips through the loader's schema — what is dumped parses back identical", () => {
+    // One schema for load and dump (R4.3): the `yaml` package default, YAML 1.2.
+    // A writer and a parser on different schemas is the real hazard, so the writer
+    // is pinned to the same default the loader parses with.
+    const dumped = dumpBrief(brief);
+    expect(parse(dumped)).toEqual(brief);
   });
 });

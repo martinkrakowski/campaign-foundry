@@ -36,7 +36,7 @@ import {
   type EditorState,
   type EditorAction,
 } from "../editor-state";
-import { dumpBrief } from "../dump-brief";
+import { dumpBrief } from "@campaignfoundry/shared";
 import { load } from "js-yaml";
 import fs from "node:fs";
 import path from "node:path";
@@ -1399,7 +1399,7 @@ describe("L4.1 Whole-corpus round-trip tests (D7)", () => {
 
       // A platform toggle must not clobber a stored format/ratio divergence, and
       // toggling on then off must leave the brief deep-equal to the original. The
-      // API `dumpBrief` is deterministic (fixed key order, no refs), so deep
+      // The shared `dumpBrief` is deterministic (fixed key order, no refs), so deep
       // equality of `toBrief` objects means the saved bytes are identical too —
       // which in turn keeps `policyHash` and `axisProductSize` stable (D7/D9).
       const testPlatform = state.platforms.includes("tiktok") ? "x" : "tiktok";
