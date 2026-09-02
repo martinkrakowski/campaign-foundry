@@ -49,13 +49,33 @@ describe("ModelSelector", () => {
     expect(onModelChange).toHaveBeenCalledWith("Nano Banana");
   });
 
+  test("closes via the close button, and the modal's copy comes from the one vocabulary", async () => {
+    const user = userEvent.setup();
+    renderWithRun(<ModelSelector />);
+    await user.click(screen.getByTitle("Change image model"));
+    const dialog = await screen.findByRole("dialog", { name: "Select image model" });
+    expect(within(dialog).getByRole("heading", { name: "Image model" })).toBeTruthy();
+    expect(within(dialog).getByText(/falls back automatically/)).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Select image model" })).toBeNull());
+  });
+
   test("flags a reuse brief that may skip the model", async () => {
     localStorage.setItem(
       "cf:brief",
       JSON.stringify({ id: "reuse", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", products: [{ id: "p", name: "P", primaryColor: "#111111", logoPath: "l.png", inputAsset: "assets/x.png" }] }),
     );
     renderWithRun(<ModelSelector />);
-    expect(await screen.findByText(/reuse brief/)).toBeTruthy();
+    const note = await screen.findByRole("note");
+    expect(note.textContent).toContain("reuse brief · model may be skipped");
+    // The rendered strings are pinned literally: they moved to messages.ts, and the
+    // pin is what stops the move from quietly rewording what the user is told.
+    expect(note.getAttribute("aria-label")).toBe(
+      "Reuse brief: a product sets inputAsset, so the selected image model may be skipped for it. A missing or unreadable asset falls back to model generation.",
+    );
+    expect(note.getAttribute("title")).toBe(
+      "This brief sets inputAsset on a product. When that image resolves, it's reused and the selected model is skipped for that product; a missing or unreadable asset falls back to model generation.",
+    );
   });
 });
 

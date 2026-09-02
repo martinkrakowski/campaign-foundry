@@ -732,3 +732,26 @@ export const executeStillEstimating =
  */
 export const executeNoEstimate =
   "Couldn't work out the estimate — the run will still go, and the server will refuse it if the plan is impossible.";
+
+/* ── The header's model selector ─────────────────────────────────────────────── */
+
+/** The trigger's tooltip; assistive tech reads it as the control's name too. */
+export const modelSelectorTriggerTitle = "Change image model";
+/** The modal's accessible name. */
+export const modelSelectorDialogLabel = "Select image model";
+/** The modal's heading. */
+export const modelSelectorHeading = "Image model";
+/** The modal close button's accessible name. */
+export const modelSelectorClose = "Close";
+/**
+ * The modal footer: the selected model is a preference, never a dependency — the
+ * fallback chain (models.ts) means a dead model does not block a run.
+ */
+export const modelSelectorFallbackNote =
+  "Selected model is the primary; the pipeline falls back automatically if it's unavailable.";
+/** The pill beside the trigger when a product carries an input asset the run may reuse. */
+export const modelReuseNote = "reuse brief · model may be skipped";
+export const modelReuseNoteAria =
+  "Reuse brief: a product sets inputAsset, so the selected image model may be skipped for it. A missing or unreadable asset falls back to model generation.";
+export const modelReuseNoteTitle =
+  "This brief sets inputAsset on a product. When that image resolves, it's reused and the selected model is skipped for that product; a missing or unreadable asset falls back to model generation.";
