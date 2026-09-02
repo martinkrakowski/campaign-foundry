@@ -286,27 +286,38 @@ describe("CreativePreview", () => {
     const H = RATIO_DIMENSIONS["1:1"].height;
     const margin = RATIO_DIMENSIONS["1:1"].width * CREATIVE_GEOMETRY.logoMarginFraction;
 
-    test("a top headline's logo rests flush to the bottom edge", () => {
+    test("a top headline's logo RESTS margined at the bottom edge", () => {
       expect(resolveOverlappingLogoY(undefined, logo, H, true, margin)).toBe(H - logo.height - margin);
     });
 
-    test("a bottom headline's logo rests flush to the top edge", () => {
+    test("a bottom headline's logo RESTS margined at the top edge", () => {
       expect(resolveOverlappingLogoY(undefined, logo, H, false, margin)).toBe(margin);
     });
 
-    test("a headline overlapping the rest pose snaps the logo to the other edge", () => {
-      // Top headline: rest pose is the bottom edge; a headline reaching it
-      // snaps the logo to the top edge.
+    test("a headline overlapping the rest pose snaps the logo FLUSH to the far edge", () => {
+      // Parity fix (qodo, PR #171): the compositor's snap targets are the safe-inset
+      // edges — flush, no margin — while only the REST pose is margined. These
+      // previously asserted margined snap positions, pinning the divergence.
+      // Top headline: margined bottom rest overlaps; bottom-flush overlaps too;
+      // the logo lands flush at the TOP edge (y = 0).
       const overlapping = { x: 0, y: H - 300, width: 1080, height: 300 };
-      expect(resolveOverlappingLogoY(overlapping, logo, H, true, margin)).toBe(margin);
-      // Bottom headline: rest pose is the top edge; same snap, mirrored.
+      expect(resolveOverlappingLogoY(overlapping, logo, H, true, margin)).toBe(0);
+      // Bottom headline, mirrored: flush at the BOTTOM edge.
       const fromBelow = { x: 0, y: 0, width: 1080, height: 300 };
-      expect(resolveOverlappingLogoY(fromBelow, logo, H, false, margin)).toBe(H - logo.height - margin);
+      expect(resolveOverlappingLogoY(fromBelow, logo, H, false, margin)).toBe(H - logo.height);
     });
 
-    test("a headline blocking both edges leaves the logo at its rest pose", () => {
+    test("a headline grazing only the margined rest snaps flush at the SAME edge", () => {
+      // The margin is the whole difference between rest and flush, so a headline can
+      // overlap the margined rest box while the flush box below it stays clear —
+      // the compositor then keeps the edge and merely drops the margin.
+      const grazing = { x: 0, y: H - logo.height - margin - 10, width: 1080, height: 40 };
+      expect(resolveOverlappingLogoY(grazing, logo, H, true, margin)).toBe(H - logo.height);
+    });
+
+    test("a headline blocking both edges gives up at the flush rest edge", () => {
       const everywhere = { x: 0, y: 0, width: 1080, height: H };
-      expect(resolveOverlappingLogoY(everywhere, logo, H, true, margin)).toBe(H - logo.height - margin);
+      expect(resolveOverlappingLogoY(everywhere, logo, H, true, margin)).toBe(H - logo.height);
     });
 
     test("a headline clear of the rest pose never moves the logo", () => {

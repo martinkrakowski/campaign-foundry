@@ -311,14 +311,19 @@ function boxesOverlap(a: Box, b: Box): boolean {
 }
 
 /** The logo y when it rests flush to `edge`, at the given margin (insets are zero here). */
-function flushLogoY(edge: "top" | "bottom", height: number, logoH: number, margin: number): number {
-  return edge === "top" ? margin : height - logoH - margin;
+function flushLogoY(edge: "top" | "bottom", height: number, logoH: number): number {
+  // A SNAPPED logo goes flush to the safe-inset edge (`insets.top` / bottom in the
+  // compositor) — and the preview draws with zero insets, so flush means the canvas
+  // edge. Only the REST pose keeps the margin; keeping it here too was a parity miss
+  // qodo caught: a snapped logo sat ~4% of the width away from where the render puts it.
+  return edge === "top" ? 0 : height - logoH;
 }
 
 /**
- * The compositor's logo snap (`resolveOverlappingLogoY`), mirrored exactly: the
- * logo rests opposite the headline; when the headline box overlaps it, the
- * headline-side edge is tried, and the rest pose wins if both are blocked.
+ * The compositor's logo placement, mirrored exactly — rest AND snap. The rest pose
+ * is margined (`prepare`'s rawY at zero insets); only when the headline box overlaps
+ * it does the snap begin, and snap targets are FLUSH: the rest edge first, the
+ * opposite edge second, and the flush rest edge again if both are blocked.
  * `headlineBox` is undefined when there is no headline to overlap.
  */
 export function resolveOverlappingLogoY(
@@ -328,17 +333,16 @@ export function resolveOverlappingLogoY(
   top: boolean,
   margin: number,
 ): number {
+  const overlaps = (y: number): boolean =>
+    headlineBox !== undefined &&
+    boxesOverlap(headlineBox, { x: logo.x, y, width: logo.width, height: logo.height });
+  // Rest: opposite the headline, margined — exactly `prepare`'s rawY at zero insets.
+  const restY = top ? height - logo.height - margin : margin;
+  if (!overlaps(restY)) return restY;
   const preferred: "top" | "bottom" = top ? "bottom" : "top";
-  const preferredY = flushLogoY(preferred, height, logo.height, margin);
-  if (
-    headlineBox === undefined ||
-    !boxesOverlap(headlineBox, { x: logo.x, y: preferredY, width: logo.width, height: logo.height })
-  ) {
-    return preferredY;
-  }
-  const otherY = flushLogoY(preferred === "top" ? "bottom" : "top", height, logo.height, margin);
-  if (!boxesOverlap(headlineBox, { x: logo.x, y: otherY, width: logo.width, height: logo.height })) {
-    return otherY;
-  }
+  const preferredY = flushLogoY(preferred, height, logo.height);
+  if (!overlaps(preferredY)) return preferredY;
+  const otherY = flushLogoY(preferred === "top" ? "bottom" : "top", height, logo.height);
+  if (!overlaps(otherY)) return otherY;
   return preferredY;
 }
