@@ -182,6 +182,9 @@ describe("PreviewCreativeFrameUseCase — the frame and its cache key", () => {
       source: "procedural" as const,
     }));
     const shifted = await new PreviewCreativeFrameUseCase(otherBackground).execute(baseBrief(), cell());
+    // The tripwire must not be able to pass vacuously: a failed execute here is a
+    // broken fixture, not a pass (CodeRabbit, PR #177).
+    expect(shifted.success).toBe(true);
     if (!shifted.success) return;
     expect(shifted.value.cacheKey).not.toBe(first.value.cacheKey);
 

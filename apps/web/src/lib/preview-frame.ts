@@ -122,7 +122,17 @@ export function usePreviewFrame(
   const identity =
     request === null
       ? null
-      : [request.brief.id, request.cell.productId, request.cell.ratio, request.cell.layout, request.cell.tone, request.cell.anchor ?? ""].join("\u0000");
+      : [
+          request.brief.id,
+          request.cell.productId,
+          request.cell.ratio,
+          request.cell.layout,
+          request.cell.tone,
+          request.cell.anchor ?? "",
+          // The background axis is part of WHAT is previewed: without it, a
+          // procedural frame lingers while the caption already says "stand-in".
+          (request.brief.variation?.axes?.background?.source ?? []).join(","),
+        ].join("\u0000");
   const lastIdentity = useRef(identity);
   if (identity !== lastIdentity.current) {
     lastIdentity.current = identity;
