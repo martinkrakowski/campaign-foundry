@@ -181,6 +181,9 @@ export class PreviewCreativeFrameUseCase {
       tone: selection.tone,
       // Absent → the compositor derives from layout, byte-identical to the pre-axis path.
       ...(selection.anchor !== undefined ? { anchor: selection.anchor } : {}),
+      // The template's type block rides the frame exactly as it rides the run
+      // (GenerateCampaignUseCase:261) — a preview that ignores it is D45's failure.
+      ...(brief.style !== undefined ? { style: brief.style } : {}),
       ...(safeInsets !== undefined ? { safeInsets } : {}),
     };
     return { request, backgroundSource: background.source };

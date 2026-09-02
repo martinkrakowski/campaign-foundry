@@ -6,6 +6,7 @@ import type { CampaignBrief, PreviewCellSelection } from "@campaignfoundry/Campa
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import type { AnchorOption, LayoutOption, ToneOption } from "./CreativePreview";
 import { PreviewPicture } from "./PreviewDock";
+import type { CreativePreviewProps } from "./CreativePreview";
 import { usePreviewFrame } from "@/lib/preview-frame";
 
 /**
@@ -23,6 +24,7 @@ export function PreviewFrame({
   layout,
   tone,
   anchor,
+  style,
   primaryColor,
   headline,
   motion,
@@ -33,6 +35,7 @@ export function PreviewFrame({
   readonly layout?: LayoutOption;
   readonly tone?: ToneOption;
   readonly anchor?: AnchorOption;
+  readonly style?: CreativePreviewProps["style"];
   readonly primaryColor: string;
   readonly headline?: string;
   readonly motion?: MotionKind;
@@ -65,6 +68,7 @@ export function PreviewFrame({
       layout={layout}
       tone={tone}
       anchor={anchor}
+      style={style}
       primaryColor={primaryColor}
       headline={headline}
       motion={motion}

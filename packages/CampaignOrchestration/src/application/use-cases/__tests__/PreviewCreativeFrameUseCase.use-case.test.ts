@@ -217,3 +217,19 @@ describe("PreviewCreativeFrameUseCase — the frame and its cache key", () => {
     expect(result.success).toBe(true);
   });
 });
+
+test("the template's style block rides the frame request exactly as it rides the run (D45)", async () => {
+  const d = deps();
+  const styled = { ...baseBrief(), style: { fontFamily: "Lora" as const, sizeScale: 0.08 } };
+  const result = await new PreviewCreativeFrameUseCase(d).execute(styled, cell());
+  expect(result.success).toBe(true);
+  expect(d.compositor.compositeAsset).toHaveBeenCalledWith(
+    expect.objectContaining({ style: { fontFamily: "Lora", sizeScale: 0.08 } }),
+  );
+
+  // And absent stays absent — the key must not appear for a style-less brief.
+  const d2 = deps();
+  await new PreviewCreativeFrameUseCase(d2).execute(baseBrief(), cell());
+  const plainRequest = vi.mocked(d2.compositor.compositeAsset).mock.calls[0][0];
+  expect("style" in plainRequest).toBe(false);
+});

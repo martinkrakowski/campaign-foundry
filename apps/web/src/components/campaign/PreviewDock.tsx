@@ -104,6 +104,7 @@ export function PreviewPicture(props: {
   readonly layout?: PreviewShowcaseProps["layout"];
   readonly tone?: PreviewShowcaseProps["tone"];
   readonly anchor?: PreviewShowcaseProps["anchor"];
+  readonly style?: PreviewShowcaseProps["style"];
   readonly primaryColor: string;
   readonly headline?: string;
   readonly motion?: MotionKind;
@@ -116,6 +117,7 @@ export function PreviewPicture(props: {
         layout={props.layout}
         tone={props.tone}
         anchor={props.anchor}
+        style={props.style}
         primaryColor={props.primaryColor}
         headline={props.headline}
         motion={props.motion}
@@ -144,6 +146,7 @@ export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
         layout={props.layout}
         tone={props.tone}
         anchor={props.anchor}
+        style={props.style}
         primaryColor={props.primaryColor}
         headline={props.headline}
         motion={props.motion}

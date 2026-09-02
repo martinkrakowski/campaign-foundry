@@ -181,6 +181,7 @@ export function ReviewStep({
             layout={layout}
             tone={tone}
             anchor={anchor}
+            style={brief.style}
             primaryColor={product.primaryColor}
             headline={brief.campaignMessage}
             motion={motion}
