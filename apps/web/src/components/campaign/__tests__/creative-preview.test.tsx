@@ -11,6 +11,7 @@ import {
   PREVIEW_ANCHOR_TOP,
   PREVIEW_ANCHOR_MIDDLE,
   PREVIEW_ANCHOR_BOTTOM,
+  previewFitMaxHeight,
   CHAR_WIDTH_RATIO,
   fitHeadline,
   wrapHeadline,
@@ -41,7 +42,7 @@ const fitArgs = (ratio: AspectRatioValue) => {
     W,
     H,
     textWidth: W - 2 * times(LAYERS.textEdge, W),
-    maxHeight: H - 2 * times(LAYERS.headlineAnchor, H),
+    maxHeight: previewFitMaxHeight(H),
     start,
     min: Math.round(start * PREVIEW_FONT_FLOOR_FRACTION),
   };

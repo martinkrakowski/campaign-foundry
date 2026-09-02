@@ -48,8 +48,6 @@ export const LAYERS = {
   band: { n: 1, d: 20 },
   /** Layer 4 — the headline block's edge inset; the miniature's 8 px ≈ height × 0.1. */
   textEdge: { n: 8, d: 46 },
-  /** Layer 4 — the compositor's headline anchor: height × 0.1 (the real-size preview). */
-  headlineAnchor: { n: 1, d: 10 },
   /** The gap between the two miniature message bars. */
   barGap: { n: 3, d: 46 },
   /** Layer 3 — the soft fade the accent band melts into (the accent-wipe layer). */

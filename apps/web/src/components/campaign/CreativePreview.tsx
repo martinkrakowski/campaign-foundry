@@ -42,6 +42,16 @@ export const PREVIEW_FONT_FLOOR_FRACTION = CREATIVE_GEOMETRY.headlineTypeFloorFr
 export const PREVIEW_ANCHOR_TOP = CREATIVE_GEOMETRY.headlineAnchor.top;
 export const PREVIEW_ANCHOR_MIDDLE = CREATIVE_GEOMETRY.headlineAnchor.middle;
 export const PREVIEW_ANCHOR_BOTTOM = CREATIVE_GEOMETRY.headlineAnchor.bottom;
+/**
+ * The headline block's vertical fit budget: the canvas minus the leaf's own top
+ * and bottom anchor fractions — the same values that place the block — so the
+ * computed fit cannot disagree with the drawn position (T4). One source: the
+ * budget used to read the miniature's 1/10 for both edges while placement read
+ * the leaf's 0.1/0.08, and the two engines' diverged envelopes are exactly the
+ * C1 class of drift.
+ */
+export const previewFitMaxHeight = (height: number): number =>
+  height - height * PREVIEW_ANCHOR_TOP - height * PREVIEW_ANCHOR_BOTTOM;
 /** Line-to-line spacing as a multiple of the font size. */
 export const LINE_HEIGHT_RATIO = 1.08;
 /** Rough per-glyph advance, in ems, used to plan line breaks without measuring text. */
@@ -184,12 +194,12 @@ export function CreativePreview({
 
   const band = H * CREATIVE_GEOMETRY.accentSolidHeightFraction;
   const fadeH = H * CREATIVE_GEOMETRY.accentFadeHeightFraction;
-  const blockEdge = times(LAYERS.headlineAnchor, H);
   const textEdge = times(LAYERS.textEdge, W);
   const textWidth = W - 2 * textEdge;
-  // The fit budget stays the pre-axis envelope (the miniatures' own proportion)
-  // so the anchor changes where the fitted block sits, never its planned size.
-  const maxHeight = H - 2 * blockEdge;
+  // The fit budget is the leaf's edge-to-edge envelope (previewFitMaxHeight) —
+  // the same fractions that place the block — so the anchor changes where the
+  // fitted block sits, never its planned size.
+  const maxHeight = previewFitMaxHeight(H);
   const startFontSize = Math.round(W * PREVIEW_FONT_RATIO);
   const minFontSize = Math.round(startFontSize * PREVIEW_FONT_FLOOR_FRACTION);
   const { fontSize, lines } = fitHeadline(headline ?? "", textWidth, maxHeight, startFontSize, minFontSize);

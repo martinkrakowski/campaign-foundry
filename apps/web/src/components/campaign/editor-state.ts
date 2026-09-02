@@ -218,13 +218,16 @@ export interface EditorState {
    * `toBrief` writes one only to keep such a file byte-identical. */
   copyExplicit: boolean;
   /**
-   * True when the loaded brief declared `variation.axes.anchor` (T4). The absent axis
-   * and an authored top+bottom selection render identically but hash differently —
-   * the one case the selection data cannot distinguish — so the flag preserves a
-   * hand-authored derived selection through a save, exactly as `outputExplicit`
-   * preserves a declared default `output`. A toggle recomputes it (never latches):
-   * toggling a divergence back to the derived selection returns the brief to the
-   * absent-key form, the same on→off discipline `ratioOverridden` follows.
+   * True when the saved brief must carry `variation.axes.anchor` (T4): the loaded
+   * brief declared the key, or the user toggled the axis this session. The absent
+   * axis and an authored top+bottom selection are different variant spaces —
+   * absent derives each variant's anchor from its own layout, the pair draws it
+   * independently — so the flag LATCHES on toggle rather than recomputing (the
+   * `ratioOverridden` discipline does not transfer: that collapse is lossless,
+   * this one is lossy). Consequence: a toggle back to the derived pair leaves a
+   * dirty brief that still carries the axis; only an untouched loaded brief —
+   * whose flag comes from key presence in `fromBrief`, never a toggle —
+   * round-trips the absent-key form byte-identically (D57).
    */
   anchorExplicit: boolean;
   variation: {
@@ -740,10 +743,16 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       return {
         ...state,
         variation: { ...state.variation, anchor },
-        // Recomputed, not latched (the ratioOverridden discipline): a toggle that
-        // returns the selection to the derived pair puts the brief back on the
-        // absent-key form, so a toggle-on→off cycle serialises byte-identically.
-        anchorExplicit: !isDerivedAnchorSelection(anchor),
+        // Latched, never recomputed. The ratioOverridden discipline does not
+        // transfer: for ratio, full-set ≡ absent is lossless, but here absent
+        // means "each variant's anchor derives from its own layout" while an
+        // explicit top+bottom pair means the planner draws the anchor
+        // independently — different variant spaces with layout locked, so
+        // recomputing would collapse the user's expressed intent back to the
+        // absent key. A toggle on→off therefore leaves a dirty brief that still
+        // carries the axis; only an untouched loaded brief (flag from key
+        // presence in fromBrief) round-trips byte-identically (D57).
+        anchorExplicit: true,
       };
     }
     case "toggleRatio": {
@@ -1414,6 +1423,15 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     string,
     unknown
   >;
+  // `list` proves an array, not its members: a hand-edited draft's `anchor:
+  // ["diagonal"]` (the #169 `[null]` pattern) would otherwise ride the
+  // `as AnchorOption` cast preview-props makes into CreativePreview's leaf
+  // lookups. Only the axis' own vocabulary survives, and min-one holds — a
+  // filter that empties falls back to the pair the absent axis behaves as.
+  const anchorSelection = list(v.anchor, initial.variation.anchor).filter((value) =>
+    ANCHOR_OPTIONS.includes(value),
+  );
+  const anchor = anchorSelection.length > 0 ? anchorSelection : [...initial.variation.anchor];
   const variation: EditorState["variation"] = {
     count: str(v.count, initial.variation.count),
     seed: str(v.seed, initial.variation.seed),
@@ -1422,7 +1440,7 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     perRatio: str(v.perRatio, initial.variation.perRatio),
     layout: list(v.layout, initial.variation.layout),
     tone: list(v.tone, initial.variation.tone),
-    anchor: list(v.anchor, initial.variation.anchor),
+    anchor,
     ratio: list(v.ratio, initial.variation.ratio),
     background: list(v.background, initial.variation.background),
     paletteShift: list(v.paletteShift, initial.variation.paletteShift),

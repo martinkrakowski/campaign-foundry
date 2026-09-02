@@ -437,6 +437,24 @@ describe("VariationPolicy anchor axis", () => {
     expect(duplicated.value.axisProductSize).toBe(once.value.axisProductSize);
     expect(duplicated.value.policyHash).toBe(once.value.policyHash);
   });
+
+  test("absent and an explicit top+bottom pair are different variant spaces", () => {
+    // Absent: each variant's anchor derives from its own layout, so the axis
+    // joins nothing — the golden 24. An explicit pair makes the planner draw
+    // the anchor INDEPENDENTLY of layout: twice the space the absent axis
+    // spans, which is exactly why the editor must not collapse the pair back
+    // to the absent key on save.
+    const absent = fromBrief(brief({ variation: { count: 12, seed: 7 } }));
+    const paired = fromBrief(
+      brief({ variation: { count: 12, seed: 7, axes: { anchor: ["top", "bottom"] } } }),
+    );
+    expect(absent.success && paired.success).toBe(true);
+    if (!absent.success || !paired.success) return;
+    expect(absent.value.anchor).toEqual([]);
+    expect(paired.value.anchor).toEqual(["top", "bottom"]);
+    expect(paired.value.axisProductSize).toBe(absent.value.axisProductSize * 2);
+    expect(paired.value.policyHash).not.toBe(absent.value.policyHash);
+  });
 });
 
 describe("VariationPolicy requested ratio subset", () => {
