@@ -544,6 +544,16 @@ describe("the lock-or-vary hint (T2 / F6)", () => {
     expect(screen.getAllByText(messages.axisVaries(2)).length).toBe(2);
   });
 
+  test("a malformed sole entry from a hand-edited draft does not crash the hint", () => {
+    // The draft loader tolerates non-string entries by design; before the hint
+    // existed they were merely unselectable. qodo caught that the lock message
+    // would have dereferenced one — this pins the guard.
+    const malformed = state();
+    malformed.variation.layout = [null] as unknown as string[];
+    render(<PolicySection state={malformed} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.getAllByText(messages.axisVaries(1)).length).toBeGreaterThan(0);
+  });
+
   test("a single selected value is spoken as the lock, named", () => {
     const locked = state();
     locked.variation.layout = ["headline-bottom"];

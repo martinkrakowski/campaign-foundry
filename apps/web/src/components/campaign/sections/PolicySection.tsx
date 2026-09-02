@@ -68,8 +68,15 @@ function AxisCards<T extends string>({
       {/* T2 (F6): the min-one guard makes one selected value a LOCK — the planner
           draws only it for every variant — and more than one a draw pool. The cards
           alone read as a mere style picker, so the semantics are spoken here. */}
+      {/* `list()` proves a hydrated draft value is an array, not that its entries
+          are strings — a hand-edited `layout: [null]` reaches here (the loader
+          tolerates it by design, editor-state.ts:1360). Before this hint existed
+          such an entry was silently unselectable; it must not become a render
+          crash now, so only a real string is ever spoken as the lock. */}
       <FieldLine tone="muted">
-        {selected.length === 1 ? messages.axisLocked(selected[0] as string) : messages.axisVaries(selected.length)}
+        {selected.length === 1 && typeof selected[0] === "string"
+          ? messages.axisLocked(selected[0])
+          : messages.axisVaries(selected.length)}
       </FieldLine>
       <div
         className={cn(
