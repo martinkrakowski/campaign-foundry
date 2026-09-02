@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-01
 **Status:** for review
-**Decision ids introduced:** D51 – D60 (D43–D50 are claimed by `2026-09-01_r7-preview-panel.md`, PR #165)
+**Decision ids introduced:** D51 – D60, D62 – D63 (D43–D50 are claimed by `2026-09-01_r7-preview-panel.md`, PR #165)
 **Relates to:** D26 (the preview shows only what the compositor draws), D10 (`drawLegacy` freeze)
 
 ---
@@ -44,6 +44,9 @@ two features with very different costs, only one of which (2) needs.
 
 | **D59** | **The font control is a server-validated allowlist of bundled families — and `MESSAGE_FONT` is validated the same way, in the same lane.** | The renderer can see **312 system font families**; `has("Helvetica")` and `has("Georgia")` are both true and they render differently from Inter, with distinct hashes and an unknown family falling back to a fourth. `pipeline.ts` passes `process.env.MESSAGE_FONT` into the constructor **unvalidated**, so the determinism hole is already open at deployment scope. A per-brief control widens it to per-creative; validating one and not the other leaves the identical bug reachable. |
 | **D60** | **Weight exposes only the weights that have faces**, or the asset decision is made explicitly first. | Only Inter/Lora **Regular (400) and Bold (700)** are registered. Measured: 13 CSS weight tokens collapse to **3 distinct rasters** — 100–500 render Regular, 600–800 render Bold, and 900 is synthetic emboldening (same metrics as bold, 11 454 lit pixels vs 9 164). A 100–900 slider is decorative over four faces. Today's `subtle` tone already asks for `"500"` and silently renders Regular. |
+
+| **D62** | **A user can author a NEW template, not only choose between presets.** v1 scope: composing a template from the vocabulary — layout anchor, tone, type (the T5 `style` block), and, when T6 lands, a text effect — with the preview beside the controls. A template is **stored in the brief** (T5's home); a cross-brief template *library* (named, reusable artifacts) is explicitly future work, deferred like D51's finishing. | Owner decision (2026-09-01). Choosing between `headline-top` and `headline-bottom` is not authoring. Storing in the brief first keeps v1 off a new persistence concept; the library needs an identity, versioning and sharing story that deserves its own plan. |
+| **D63** | **The guided wizard gains a Layout step** hosting the template editor of D62: the authoring controls with the real-ratio preview beside them. With `PreviewStrip` deleted (R7 plan, D61 owner decisions), this step is also **where sub-rail-breakpoint users see the preview at all** — step-scoped, not persistent. | Owner decision. The persistent dock serves wide viewports; the step serves authoring and narrow ones. One surface per job, and the step gives template authoring a home in the wizard's own grammar instead of a modal bolted on. |
 
 ---
 
@@ -124,8 +127,9 @@ One lane per PR. Ownership is exclusive.
 | **T4** | **Vocabulary: layouts and tones** (**D56**). Grow `LAYOUT_VALUES` beyond two — as a new optional axis where position is concerned (**D57**) — with goldens for defaults only and structural tests per control. | Makes T2 worth using. |
 | **T5** | **Vocabulary: type** (**D55**, **D58**, **D59**, **D60**). Font family from the bundled set, weight-with-faces only, size fraction, line height, letter spacing (**F1**), alignment (**C2**). **Schema home: a brief-level `style` block — NOT a variation axis** (a new axis is rejected at parse, and a hashed one trips **D57**) **and not a `Treatment` widening** (classic-only). Defaults equal today's literals; hashed nowhere, so `policyHash` is untouched. **Mandatory same-lane files:** `CampaignBrief.ts`, `load-brief.ts`, `brief-files.ts`, `editor-state.ts` (`toBrief`/`fromBrief`/normalize), `CompositorPort.ts`, `NodeCanvasCompositor.prepare` + `layoutAt` + both blit paths (**F5a**), and the wizard round-trip tests. This lane triggers **T1b**. | The typography half of the request, honestly, in the one home that does not re-plan existing campaigns. |
 | **T6** | **Text effects** (**H3**, **H4**). A new effect vocabulary with a designed rest pose per kind, drawn per frame (**F2**, **F4**). | The animated half. Largest lane; do it last, when the surface is trustworthy. |
+| **T7** | **The Layout step** (**D62**, **D63**): a new guided step hosting the template editor — the T4/T5 controls with the real-ratio preview beside them, honest about the stand-in background (**D52**). Sequenced with T5: the step ships when there is something to author beyond two presets. Touches `BriefEditor.tsx` (step list), `use-step-navigation` consumers, `SectionOutline`, and the wizard round-trip tests. | "Author a new template" gets a surface in the wizard's own grammar, and the sub-rail preview gets its home. |
 
-**Order.** T1a ‖ T2 ‖ T3 now, independently — none gates another. Then T4 → T5 (+ T1b) → T6.
+**Order.** T1a ‖ T2 ‖ T3 now, independently — none gates another. Then T4 → T5 (+ T1b) → **T7** → T6.
 **D53 gates only the NEW controls** (T4–T6): the compositor honours a setting before the UI offers
 it. It does not gate mounting chrome or naming what exists — v1 of this plan over-applied it, and
 mis-attributed it to D26, which is a fabrication guard ("show only what the compositor paints"),
