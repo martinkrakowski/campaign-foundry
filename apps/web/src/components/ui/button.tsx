@@ -21,7 +21,9 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   secondary:
     "bg-surface text-text-primary border border-border-control hover:bg-border-hover",
   ghost: "bg-transparent text-text-primary hover:bg-surface",
-  destructive: "bg-error text-white hover:opacity-90",
+  // `text-on-error`, not white: the dark error ground brightened for its tint job
+  // (tokens.css), and white on it is 2.25:1 — the ink flips with the ground.
+  destructive: "bg-error text-on-error hover:opacity-90",
 };
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {

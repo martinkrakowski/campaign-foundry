@@ -59,6 +59,10 @@
   --color-success: #065f46;
   --color-warning: #92400e;
   --color-error: #991b1b;
+  /* Text ON the solid error ground (the destructive button). One dark value cannot
+     serve both of a state colour's jobs (bound ≈ 3.0:1 — measured in the tests), so
+     the ground's ink is its own token: white passes here (8.31:1)… */
+  --color-on-error: #ffffff;
   --color-info: #1e40af;
   /* The fourth StatusChip state (applied, unsaved edits). It is a fifth state colour
      rather than a second amber: UE-D11 requires the four chip states to stay
@@ -140,6 +144,9 @@
   --color-success: #10b981;
   --color-warning: #f59e0b;
   --color-error: #ff8b8b;   /* was #ef4444 — 3.24:1 on its tint over surface-2 */
+  /* …and dark flips to near-black ink (8.54:1) — white on this brighter ground is
+     2.25:1, worse than the 3.76:1 it already failed at before the retune. */
+  --color-on-error: #1a0a0a;
   --color-info: #6bb2ff;    /* was #3b82f6 — 3.21:1 on its tint over surface-2 */
   --color-modified: #c4b5fd;
 }

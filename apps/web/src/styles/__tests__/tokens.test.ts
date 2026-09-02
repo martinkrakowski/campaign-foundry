@@ -146,3 +146,18 @@ describe("the state-tint contract (the carried dark-theme contrast audit)", () =
     }
   });
 });
+
+describe("the solid error ground keeps readable ink in both palettes (WCAG 4.5:1)", () => {
+  // One dark value cannot serve both of a state colour's jobs (the tint retune above
+  // proved the bound), so the destructive button's ink is its own token and flips
+  // with the ground: white on the deep light-mode red, near-black on the bright
+  // dark-mode one — where white measures 2.25:1 (pinned so the number that forced
+  // the token stays executable).
+  test("white on the retuned dark error ground is the failure the token exists for", () => {
+    expect(contrast("#ffffff", hexValue(dark, "error"))).toBeCloseTo(2.25, 1);
+  });
+  test("on-error over error clears 4.5:1 in both palettes", () => {
+    expect(contrast(hexValue(light, "on-error"), hexValue(light, "error")), "light").toBeGreaterThanOrEqual(4.5);
+    expect(contrast(hexValue(dark, "on-error"), hexValue(dark, "error")), "dark").toBeGreaterThanOrEqual(4.5);
+  });
+});
