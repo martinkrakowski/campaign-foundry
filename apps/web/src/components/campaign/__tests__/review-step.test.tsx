@@ -160,6 +160,16 @@ describe("ReviewStep — the preview (D26)", () => {
     expect(screen.getByText(messages.previewCaption("Square", messages.previewNoPlatform))).toBeTruthy();
   });
 
+  test("a non-procedural background axis adds the stand-in suffix to the figure's caption (D52)", () => {
+    renderRows({ ...classic, variation: { count: 2, axes: { background: { source: ["genai"] } } } as CampaignBrief["variation"] });
+    expect(document.querySelector("figcaption")?.textContent).toContain(messages.previewFrameStandInBackground);
+  });
+
+  test("a procedural background axis carries no stand-in claim — the frame is the real background", () => {
+    renderRows({ ...classic, variation: { count: 2, axes: { background: { source: ["procedural"] } } } as CampaignBrief["variation"] });
+    expect(document.querySelector("figcaption")?.textContent).not.toContain(messages.previewFrameStandInBackground);
+  });
+
   test("a motion brief previews the axis's own motion kind", () => {
     const motionBrief: CampaignBrief = {
       ...classic,

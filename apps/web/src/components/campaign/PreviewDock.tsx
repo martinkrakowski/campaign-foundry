@@ -1,12 +1,15 @@
 import type { CSSProperties, ReactNode } from "react";
 import type { AspectRatioValue } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
 import { CreativePreview, type CreativePreviewProps } from "@/components/campaign/CreativePreview";
+import { PreviewFrame } from "@/components/campaign/PreviewFrame";
 import { Eyebrow } from "@/components/ui";
 import { MOTION_KIND_META } from "@/components/campaign/MotionKindPanel";
 import { platformDisplayName, ratioDisplayName } from "@/components/campaign/display-names";
+import { briefBackgroundIsStandIn } from "@/lib/preview-frame";
 import * as messages from "@/components/campaign/messages";
 
 /**
@@ -31,6 +34,12 @@ export function derivePreviewRatio(
 export interface PreviewShowcaseProps extends Omit<CreativePreviewProps, "className"> {
   readonly campaignName: string;
   readonly platformId?: string;
+  /**
+   * The draft's projection (T1b): when present, the dock composites a REAL frame
+   * from the preview route and derives the stand-in caption from the brief's
+   * background axis (D52). Absent → the SVG placeholder only.
+   */
+  readonly brief?: CampaignBrief;
   /** The wizard's current step, 1-based (`stepIndex + 1`) — where the walk stands, never a position in the creative set (M2). */
   readonly step: number;
   readonly stepCount: number;
@@ -47,23 +56,26 @@ function PreviewSwatch({ primaryColor }: { primaryColor: string }): ReactNode {
   );
 }
 
-/** `<ratio display name> · <platform label>`, joined by the video style's own name in words when the creative moves (D50) — display labels, never raw kind ids (D18). */
+/** `<ratio display name> · <platform label>`, joined by the video style's own name in words when the creative moves (D50) — display labels, never raw kind ids (D18). A non-procedural background axis adds the stand-in suffix (D52). */
 function PreviewCaption({
   platformId,
   ratio,
   motion,
+  standIn,
 }: {
   platformId?: string;
   ratio: AspectRatioValue;
   motion?: MotionKind;
+  standIn: boolean;
 }): ReactNode {
   const platformLabel =
     platformId !== undefined ? platformDisplayName(platformId) : messages.previewNoPlatform;
+  const caption = motion !== undefined
+    ? messages.previewCaptionMotion(ratioDisplayName(ratio), platformLabel, MOTION_KIND_META[motion])
+    : messages.previewCaption(ratioDisplayName(ratio), platformLabel);
   return (
     <p className="truncate font-mono text-[11px] text-text-muted">
-      {motion !== undefined
-        ? messages.previewCaptionMotion(ratioDisplayName(ratio), platformLabel, MOTION_KIND_META[motion])
-        : messages.previewCaption(ratioDisplayName(ratio), platformLabel)}
+      {standIn ? `${caption} · ${messages.previewFrameStandInBackground}` : caption}
     </p>
   );
 }
@@ -127,7 +139,8 @@ export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <Eyebrow as="p">{messages.previewLegend}</Eyebrow>
-      <PreviewPicture
+      <PreviewFrame
+        brief={props.brief}
         layout={props.layout}
         tone={props.tone}
         anchor={props.anchor}
@@ -139,7 +152,12 @@ export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
       />
       <div className="flex items-center gap-2">
         <PreviewSwatch primaryColor={props.primaryColor} />
-        <PreviewCaption platformId={props.platformId} ratio={ratio} motion={props.motion} />
+        <PreviewCaption
+          platformId={props.platformId}
+          ratio={ratio}
+          motion={props.motion}
+          standIn={props.brief !== undefined && briefBackgroundIsStandIn(props.brief)}
+        />
       </div>
       <PreviewIdentity {...props} />
     </div>

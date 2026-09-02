@@ -99,3 +99,38 @@ describe("PreviewDock", () => {
     expect(container.textContent).not.toContain("Stay wild");
   });
 });
+
+describe("PreviewDock — the stand-in caption (D52)", () => {
+  // The dock composites a real frame only when the host passes the brief's
+  // projection; the caption derives from the brief's background axis either way.
+  const briefWithAxis = (source: string[]) =>
+    ({
+      id: "camp",
+      targetRegion: "DE",
+      targetAudience: "a",
+      campaignMessage: "Hello",
+      products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "a.png" }],
+      variation: { count: 2, axes: { background: { source } } },
+    }) as never;
+
+  test("a generated or pooled background axis says the background is a stand-in, in words — never a raw axis id", () => {
+    const { container } = render(
+      <PreviewDock {...showcase} platformId="linkedin" brief={briefWithAxis(["genai"])} />,
+    );
+    expect(container.textContent).toContain(messages.previewFrameStandInBackground);
+    expect(container.textContent).not.toContain("genai");
+    expect(container.textContent).not.toContain("asset-pool");
+  });
+
+  test("a procedural brief gets no label — the frame IS the real background", () => {
+    const { container } = render(
+      <PreviewDock {...showcase} platformId="linkedin" brief={briefWithAxis(["procedural"])} />,
+    );
+    expect(container.textContent).not.toContain(messages.previewFrameStandInBackground);
+  });
+
+  test("without the brief's projection, no stand-in claim is made either way", () => {
+    const { container } = render(<PreviewDock {...showcase} platformId="linkedin" />);
+    expect(container.textContent).not.toContain(messages.previewFrameStandInBackground);
+  });
+});
