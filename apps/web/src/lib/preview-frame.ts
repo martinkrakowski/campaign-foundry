@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CampaignBrief, PreviewCellSelection } from "@campaignfoundry/CampaignOrchestration";
 
 /** Same path as `briefs-api`'s `API`. Local so this module stays dependency-free. */
@@ -114,6 +114,23 @@ export function usePreviewFrame(
       controller.abort();
     };
   }, [request]);
+
+  // A stale frame may smooth over a debounce during same-identity edits — but it must
+  // never survive a change of WHICH creative is being previewed. Identity is the brief
+  // and the cell; a switch clears to the SVG placeholder immediately, while copy and
+  // style edits keep the last frame until the fresh one lands (no flicker per keystroke).
+  const identity =
+    request === null
+      ? null
+      : [request.brief.id, request.cell.productId, request.cell.ratio, request.cell.layout, request.cell.tone, request.cell.anchor ?? ""].join("\u0000");
+  const lastIdentity = useRef(identity);
+  if (identity !== lastIdentity.current) {
+    lastIdentity.current = identity;
+    if (frame !== null || failed) {
+      setFrame(null);
+      setFailed(false);
+    }
+  }
 
   return { frame, failed };
 }

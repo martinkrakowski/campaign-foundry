@@ -209,3 +209,36 @@ describe("briefBackgroundIsStandIn (D52)", () => {
     expect(briefBackgroundIsStandIn(brief())).toBe(false); // no variation block at all
   });
 });
+
+describe("identity-scoped frame retention (the stale-frame finding on PR #177)", () => {
+  test("a brief switch clears the old frame to the placeholder immediately", async () => {
+    vi.useFakeTimers();
+    vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+    const { result, rerender } = renderHook(({ id }) => usePreviewFrame(brief({ id }), cell()), {
+      initialProps: { id: "camp" },
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS + 10); });
+    expect(result.current.frame).not.toBeNull();
+
+    // Which creative is previewed changed: the previous brief's frame must not
+    // survive even for the debounce window.
+    rerender({ id: "camp-b" });
+    expect(result.current.frame).toBeNull();
+    expect(result.current.failed).toBe(false);
+  });
+
+  test("an identity-preserving rerender keeps the last frame (no flicker per keystroke)", async () => {
+    vi.useFakeTimers();
+    vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+    const { result, rerender } = renderHook(({ id }) => usePreviewFrame(brief({ id }), cell()), {
+      initialProps: { id: "camp" },
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS + 10); });
+    const first = result.current.frame;
+    expect(first).not.toBeNull();
+
+    // Same brief, same cell — a plain rerender (a keystroke elsewhere) keeps the frame.
+    rerender({ id: "camp" });
+    expect(result.current.frame).toBe(first);
+  });
+});
