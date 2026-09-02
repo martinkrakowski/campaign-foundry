@@ -50,4 +50,23 @@ export const CREATIVE_GEOMETRY = {
    * this object, so the two engines cannot drift.
    */
   headlineAnchor: { top: 0.1, bottom: 0.08, middle: 0.5 },
+  /**
+   * The text effects (T6), the one source both draw paths read — like the
+   * anchor fractions, so the renderer and any future preview cannot drift.
+   * Every kind plays on a beat's OWN local progress over the entrance window
+   * and eases with the motion kinds' easeOutCubic; at the window's end (and on
+   * the still/poster path) each kind is the identity pose — the rest pose the
+   * still delivers (H4/D54). Offsets are canvas fractions, matching the
+   * width/height-fraction model the rest of this leaf speaks.
+   */
+  textEffect: {
+    /** Entrance window: the share of the beat-local progress the entrance takes. */
+    entranceFraction: 0.3,
+    /** rise-in: the block starts this far BELOW its rest pose, × canvas height. */
+    riseOffsetFraction: 0.08,
+    /** slide-in: the block starts this far RIGHT of its rest pose, × canvas width. */
+    slideOffsetFraction: 0.2,
+    /** scale-in: the block starts scaled down by this fraction, easing to 1. */
+    scaleAmplitude: 0.12,
+  },
 } as const;

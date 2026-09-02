@@ -514,6 +514,15 @@ export function previewCaption(ratioLabel: string, platformLabel: string): strin
 export function previewCaptionMotion(ratioLabel: string, platformLabel: string, styleLabel: string): string {
   return `${ratioLabel} · ${platformLabel} · ${styleLabel}`;
 }
+/**
+ * The step caption when the template carries a text effect (T6, the D50
+ * pattern): the frame is a still — the effect's rest pose — so its NAME is what
+ * says the delivered video animates. A display label via `TEXT_EFFECT_META`,
+ * never a raw kind id (D18).
+ */
+export function previewCaptionTextEffect(ratioLabel: string, platformLabel: string, effectLabel: string): string {
+  return `${ratioLabel} · ${platformLabel} · ${effectLabel}`;
+}
 /** The preview's step readout, e.g. "2 / 6". */
 export function previewStep(step: number, total: number): string {
   return `${step} / ${total}`;
@@ -650,6 +659,13 @@ export const stepSubtitleOutput = "Pick where the ads run, and whether they move
 export const stepSubtitleReview = "Last look, then send it to the pipeline.";
 
 /* ── The Layout step (T7) ─────────────────────────────────────────────────── */
+
+/**
+ * The Effect row's no-effect chip face (T6): the absent field, which names
+ * itself. The raw vocabulary has deliberately no "none" member — absence is
+ * the default — so this is the one display label with no kind behind it.
+ */
+export const styleEffectNone = "None";
 
 /**
  * The size slider's readout (D55): the type size is stored as a fraction of the

@@ -13,6 +13,7 @@ import {
   MIN_LETTER_SPACING,
   MIN_LINE_HEIGHT,
   MIN_SIZE_SCALE,
+  TEXT_EFFECT_VALUES,
   type AlignKind,
   type FontWeightKind,
 } from "@campaignfoundry/CampaignOrchestration/creative-style";
@@ -21,7 +22,12 @@ import { toBrief, type EditorState } from "@/components/campaign/editor-state";
 import { derivePreviewRatio } from "@/components/campaign/PreviewDock";
 import { PreviewFrame } from "@/components/campaign/PreviewFrame";
 import { previewLook } from "@/components/campaign/preview-props";
-import { platformDisplayName, ratioDisplayName } from "@/components/campaign/display-names";
+import {
+  platformDisplayName,
+  ratioDisplayName,
+  TEXT_EFFECT_META,
+  textEffectDisplayName,
+} from "@/components/campaign/display-names";
 import { briefBackgroundIsStandIn } from "@/lib/preview-frame";
 import * as messages from "@/components/campaign/messages";
 import { SectionShell, Field, type SectionProps } from "./IdentitySection";
@@ -48,6 +54,15 @@ const WEIGHT_LABELS: Record<FontWeightKind, string> = { 400: "Regular", 700: "Bo
 const WEIGHT_CHOICES = choices(FONT_WEIGHT_VALUES, (weight) => WEIGHT_LABELS[weight]);
 const ALIGN_LABELS: Record<AlignKind, string> = { left: "Left", center: "Center", right: "Right" };
 const ALIGN_CHOICES = choices(ALIGN_VALUES, (align) => ALIGN_LABELS[align]);
+const EFFECT_CHOICES = choices(TEXT_EFFECT_VALUES, (value) => TEXT_EFFECT_META[value]);
+/**
+ * The Effect row is single-choice with "None" (T6): the four kinds plus the
+ * absent field, whose face is the one label with no kind behind it. `parse` is
+ * total over the faces the group renders because the "None" face is handled at
+ * the dispatch site — it patches `textEffect: undefined`, the absent key.
+ */
+const EFFECT_NONE = messages.styleEffectNone;
+const EFFECT_OPTIONS = [EFFECT_NONE, ...EFFECT_CHOICES.options];
 
 /**
  * D60: absent `fontWeight` follows the tone-derived RENDERED face — `subtle`
@@ -105,7 +120,17 @@ export function LayoutSection({ state, dispatch, errors, preview = false }: Sect
   const sizePx = Math.round(sizeScale * RATIO_DIMENSIONS[ratio].width);
   const platformLabel =
     look?.platformId !== undefined ? platformDisplayName(look.platformId) : messages.previewNoPlatform;
-  const caption = messages.previewCaption(ratioDisplayName(ratio), platformLabel);
+  // The caption names the effect when the template carries one (T6, the D50
+  // pattern): the frame is the effect's REST pose, so the name in words — a
+  // display label, never a raw kind id — is what says the video animates.
+  const caption =
+    brief.style?.textEffect !== undefined
+      ? messages.previewCaptionTextEffect(
+          ratioDisplayName(ratio),
+          platformLabel,
+          textEffectDisplayName(brief.style.textEffect),
+        )
+      : messages.previewCaption(ratioDisplayName(ratio), platformLabel);
   const captionText = briefBackgroundIsStandIn(brief)
     ? `${caption} · ${messages.previewFrameStandInBackground}`
     : caption;
@@ -166,6 +191,21 @@ export function LayoutSection({ state, dispatch, errors, preview = false }: Sect
                 />
               </Field>
             </div>
+            <Field label="Effect" hint="An entrance for the headline — the preview shows its final pose">
+              <ChipGroup
+                label="Effect"
+                options={EFFECT_OPTIONS}
+                value={
+                  style.textEffect !== undefined ? TEXT_EFFECT_META[style.textEffect] : EFFECT_NONE
+                }
+                onChange={(value) =>
+                  dispatch({
+                    type: "setStyle",
+                    patch: { textEffect: value === EFFECT_NONE ? undefined : EFFECT_CHOICES.parse(value) },
+                  })
+                }
+              />
+            </Field>
             <Field label="Size" hint="A share of the canvas width, shown as pixels at the previewed ratio">
               <Slider
                 aria-label="Size"

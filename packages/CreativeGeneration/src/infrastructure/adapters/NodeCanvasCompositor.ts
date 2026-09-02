@@ -13,6 +13,7 @@ import {
   type ResolvedStyle,
   type SafeInsets,
   type AnchorKind,
+  type TextEffectKind,
 } from "@campaignfoundry/CampaignOrchestration";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import { hexToRgb, wrapText } from "./canvas-util.js";
@@ -53,6 +54,14 @@ interface PreparedCreative {
    * at every layout and blit.
    */
   readonly style: ResolvedStyle;
+  /**
+   * The text effect (T6), resolved here in `prepare`: undefined = none — the
+   * pre-effect path bit for bit (D54). Present, it drives ONLY the copy
+   * layer's entrance on the beat-local clock, composing with any motion kind
+   * (translations add, alphas multiply); at rest every kind is the identity,
+   * so stills and posters are byte-identical to the effect-less brief (H4).
+   */
+  readonly textEffect: TextEffectKind | undefined;
   readonly message: string;
   readonly brandColor: string;
   readonly background: Image;
@@ -222,25 +231,28 @@ export class NodeCanvasCompositor implements CompositorPort {
     // T5). wrapText uses this ctx so metrics match the blit.
     const headline = layoutHeadline(ctx, prepared);
     const rise = motion === "headline-rise";
-    const dy = rise ? (1 - eased) * 0.12 * height : 0;
-    const alpha = rise ? eased : 1;
+    const riseDy = rise ? (1 - eased) * 0.12 * height : 0;
+    const riseAlpha = rise ? eased : 1;
+    // The text effect (T6) rides the same clock this path has — the whole
+    // clip — and COMPOSES with the motion kind: translations add, alphas
+    // multiply. Undefined effect → the identity pose → exactly the pre-effect
+    // bytes (D54; the goldens and the byte-identity suite prove the amendment).
+    const fx = textEffectPose(prepared.textEffect, t, width, height);
+    const dy = riseDy + fx.dy;
+    const alpha = riseAlpha * fx.alpha;
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = prepared.style.align;
     ctx.textBaseline = "alphabetic";
     // A ctx-state control (F5a): re-stated at the blit, not inherited from the
     // layout pass — the default 0px is a no-op, the goldens pin it.
     ctx.letterSpacing = `${prepared.style.letterSpacing * headline.fontSize}px`;
-    if (dy !== 0 || alpha !== 1) {
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.translate(0, dy);
-    }
+    const posed = openTextPose(ctx, alpha, fx.dx, dy, fx.scale, headline);
     let y = headline.firstY;
     for (const line of headline.lines) {
       ctx.fillText(line, headlineTextX(prepared, headline.centerX), y);
       y += headline.lineHeight;
     }
-    if (dy !== 0 || alpha !== 1) {
+    if (posed) {
       ctx.restore();
     }
 
@@ -331,6 +343,7 @@ export class NodeCanvasCompositor implements CompositorPort {
       fontWeight: style.fontWeight,
       fontFamily: style.fontFamily,
       style,
+      textEffect: style.textEffect,
       message: request.message,
       brandColor: request.brandColor,
       background,
@@ -365,6 +378,69 @@ const KEN_BURNS_ZOOM = 0.08;
 
 function easeOutCubic(t: number): number {
   return 1 - (1 - t) ** 3;
+}
+
+/** The copy layer's whole-block pose at a moment: the text effect's output (T6). */
+interface TextEffectPose {
+  readonly dx: number;
+  readonly dy: number;
+  readonly alpha: number;
+  readonly scale: number;
+}
+
+const TEXT_EFFECT_REST: TextEffectPose = { dx: 0, dy: 0, alpha: 1, scale: 1 };
+
+/**
+ * The text effect's pose at a beat-local progress (T6): a whole-block
+ * alpha/translate/scale on the COPY layer only, eased with the motion kinds'
+ * own `easeOutCubic` over the leaf's entrance window (one source, both draw
+ * paths read it). Rest pose (H4): at or past the window's end — in particular
+ * at `t = 1` and on the still/poster path — every kind is the identity pose,
+ * so the frame is byte-identical to the same brief with no effect (D54).
+ */
+function textEffectPose(
+  kind: TextEffectKind | undefined,
+  local: number,
+  width: number,
+  height: number,
+): TextEffectPose {
+  if (kind === undefined) return TEXT_EFFECT_REST;
+  const settled = easeOutCubic(clamp01(local / CREATIVE_GEOMETRY.textEffect.entranceFraction));
+  const { riseOffsetFraction, slideOffsetFraction, scaleAmplitude } = CREATIVE_GEOMETRY.textEffect;
+  switch (kind) {
+    case "fade-in":
+      return { ...TEXT_EFFECT_REST, alpha: settled };
+    case "rise-in":
+      return { ...TEXT_EFFECT_REST, dy: (1 - settled) * riseOffsetFraction * height };
+    case "slide-in":
+      return { ...TEXT_EFFECT_REST, dx: (1 - settled) * slideOffsetFraction * width };
+    case "scale-in":
+      return { ...TEXT_EFFECT_REST, scale: 1 - (1 - settled) * scaleAmplitude };
+  }
+}
+
+/**
+ * Open the copy layer's save block for a composed pose, when one is needed.
+ * The text effect COMPOSES with the motion kind's rise (T6): translations add,
+ * alphas multiply — `headline-rise` keeps its layer and the effect drives only
+ * the copy entrance. `scale-in` scales about the block's own centre, so a
+ * growing headline grows where it rests. Identity pose touches no ctx state:
+ * the style-less (and rest-pose) frame renders byte-identically (D54). Returns
+ * whether a block was opened — the caller closes it with `ctx.restore()`.
+ */
+function openTextPose(ctx: SKRSContext2D, alpha: number, dx: number, dy: number, scale: number, layout: HeadlineLayout): boolean {
+  if (dx === 0 && dy === 0 && alpha === 1 && scale === 1) return false;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(dx, dy);
+  if (scale !== 1) {
+    const cx = layout.box.x + layout.box.width / 2;
+    const cy = layout.box.y + layout.box.height / 2;
+    ctx.translate(cx, cy);
+    ctx.scale(scale, scale);
+    ctx.translate(-cx, -cy);
+  }
+  return true;
 }
 
 /** Identity at restT: in eases 1.08 → 1.00, out eases 1.00 → 1.08. */
@@ -738,8 +814,16 @@ function drawBeat(
   // each beat (Q1) while the global pose clock keeps the ground layers continuous.
   const local = clamp01((t - beat.startT) / (beat.endT - beat.startT));
   const eased = rise ? easeOutCubic(local) : 1;
-  const dy = rise ? (1 - eased) * 0.12 * prepared.height : 0;
-  const alpha = rise ? eased : 1;
+  const riseDy = rise ? (1 - eased) * 0.12 * prepared.height : 0;
+  const riseAlpha = rise ? eased : 1;
+  // The text effect (T6) plays on each beat's OWN local progress — the same
+  // clock the rise rides — and composes with it: translations add, alphas
+  // multiply. The beat's exit mix (`layerAlpha`) keeps its behaviour; the
+  // effect shapes entrances only. Undefined → the identity pose → the
+  // pre-effect bytes (D54).
+  const fx = textEffectPose(prepared.textEffect, local, prepared.width, prepared.height);
+  const dy = riseDy + fx.dy;
+  const alpha = riseAlpha * fx.alpha;
   const opacity = alpha * layerAlpha;
   ctx.fillStyle = "#ffffff";
   // F5a: this path measures on a throwaway 1×1 context and re-sets ctx.font
@@ -749,17 +833,13 @@ function drawBeat(
   ctx.textBaseline = "alphabetic";
   ctx.letterSpacing = `${prepared.style.letterSpacing * layout.fontSize}px`;
   ctx.font = `${prepared.fontWeight} ${layout.fontSize}px ${prepared.fontFamily}, sans-serif`;
-  if (dy !== 0 || opacity !== 1) {
-    ctx.save();
-    ctx.globalAlpha = opacity;
-    ctx.translate(0, dy);
-  }
+  const posed = openTextPose(ctx, opacity, fx.dx, dy, fx.scale, layout);
   let y = layout.firstY;
   for (const line of layout.lines) {
     ctx.fillText(line, headlineTextX(prepared, layout.centerX), y);
     y += layout.lineHeight;
   }
-  if (dy !== 0 || opacity !== 1) {
+  if (posed) {
     ctx.restore();
   }
 }

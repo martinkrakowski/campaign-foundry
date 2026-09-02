@@ -41,6 +41,12 @@ describe("LayoutSection — the type controls (T5/T7)", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "setStyle", patch: { fontWeight: 700 } });
     await user.click(screen.getByRole("button", { name: "Left" }));
     expect(dispatch).toHaveBeenCalledWith({ type: "setStyle", patch: { align: "left" } });
+    // The Effect row (T6): a kind dispatches the kind, never its display label.
+    await user.click(screen.getByRole("button", { name: "Fade in" }));
+    expect(dispatch).toHaveBeenCalledWith({ type: "setStyle", patch: { textEffect: "fade-in" } });
+    // None is the absent field: the patch carries the undefined key.
+    await user.click(screen.getByRole("button", { name: "None" }));
+    expect(dispatch).toHaveBeenCalledWith({ type: "setStyle", patch: { textEffect: undefined } });
 
     fireEvent.change(screen.getByRole("slider", { name: "Size" }), { target: { value: "0.08" } });
     expect(dispatch).toHaveBeenCalledWith({ type: "setStyle", patch: { sizeScale: 0.08 } });
@@ -58,6 +64,32 @@ describe("LayoutSection — the type controls (T5/T7)", () => {
     expect(screen.getByRole("button", { name: "Inter" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "Bold" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "Center" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  test("the Effect row shows the kind's label when the draft carries one, None otherwise (T6)", () => {
+    const { unmount } = render(
+      <LayoutSection state={state({ style: { textEffect: "scale-in" } })} dispatch={vi.fn()} errors={{}} />,
+    );
+    expect(screen.getByRole("button", { name: "Scale in" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "None" }).getAttribute("aria-pressed")).toBe("false");
+    // Raw kind ids never render (D18/D50) — the label map is the only face.
+    expect(screen.queryByRole("button", { name: "scale-in" })).toBeNull();
+    unmount();
+    render(<LayoutSection state={state()} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.getByRole("button", { name: "None" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  test("the caption names the carried effect — the still is its rest pose (D50/T6)", () => {
+    vi.mocked(globalThis.fetch).mockRejectedValue(new Error("route down"));
+    render(
+      <LayoutSection
+        state={variationState({ style: { textEffect: "fade-in" } })}
+        dispatch={vi.fn()}
+        errors={{}}
+        preview
+      />,
+    );
+    expect(screen.getByText(/· Fade in/)).toBeTruthy();
   });
 
   test("an absent weight chip follows the tone-derived rendered face (D60)", () => {

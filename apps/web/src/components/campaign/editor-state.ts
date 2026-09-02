@@ -36,6 +36,7 @@ import {
   MIN_SIZE_SCALE,
   styleDiverges,
   styleProblem,
+  TEXT_EFFECT_VALUES,
   type Style,
 } from "@campaignfoundry/CampaignOrchestration/creative-style";
 
@@ -825,6 +826,13 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // the same constants, so nothing the UI can dispatch is refused — but a
       // hand-restored draft cannot smuggle a value through either.
       const merged = { ...state.style, ...action.patch };
+      // A patch may set a field to `undefined` — the Effect row's None chip is
+      // exactly that (T6) — and the absent key is the block's own spelling of
+      // "no effect". Delete rather than park, so the draft's shape always
+      // matches what a loaded brief's style holds.
+      for (const key of Object.keys(merged) as (keyof Style)[]) {
+        if (merged[key] === undefined) delete merged[key];
+      }
       if (styleProblem(merged) !== undefined) return state;
       // Latched, like `anchorExplicit`: a control touched this session says "I wrote
       // this key", so returning a value to its default KEEPS the block — an
@@ -1525,6 +1533,9 @@ function normalizeStyleDraft(value: unknown): Style {
   }
   if (typeof raw.align === "string" && (ALIGN_VALUES as readonly string[]).includes(raw.align)) {
     style.align = raw.align as Style["align"];
+  }
+  if (typeof raw.textEffect === "string" && (TEXT_EFFECT_VALUES as readonly string[]).includes(raw.textEffect)) {
+    style.textEffect = raw.textEffect as Style["textEffect"];
   }
   return style;
 }

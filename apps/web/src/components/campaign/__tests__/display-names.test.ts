@@ -5,10 +5,12 @@ import {
   formatDisplayName,
   platformDisplayName,
   ratioDisplayName,
+  textEffectDisplayName,
   weightDisplayName,
 } from "../display-names";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { ANCHOR_VALUES } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
+import { TEXT_EFFECT_VALUES } from "@campaignfoundry/CampaignOrchestration/creative-style";
 
 describe("display names", () => {
   test("formats read as things a person makes, not enum values", () => {
@@ -55,6 +57,18 @@ describe("display names", () => {
     expect(alignDisplayName("center")).toBe("Center");
     expect(alignDisplayName("right")).toBe("Right");
     expect(alignDisplayName("diagonal")).toBe("diagonal");
+  });
+
+  test("every text effect the style vocabulary knows has a plain-English name (T6)", () => {
+    for (const effect of TEXT_EFFECT_VALUES) {
+      expect(textEffectDisplayName(effect)).not.toBe(effect);
+    }
+    expect(textEffectDisplayName("fade-in")).toBe("Fade in");
+    expect(textEffectDisplayName("rise-in")).toBe("Rise in");
+    expect(textEffectDisplayName("slide-in")).toBe("Slide in");
+    expect(textEffectDisplayName("scale-in")).toBe("Scale in");
+    // an out-of-set value passes through rather than rendering "undefined"
+    expect(textEffectDisplayName("spin")).toBe("spin");
   });
 });
 
