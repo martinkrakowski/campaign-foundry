@@ -187,4 +187,14 @@ describe("ReviewStep — the preview (D26)", () => {
     const ground = document.querySelector("svg g") as SVGGElement | null;
     expect(ground?.getAttribute("class") ?? "").not.toContain("animate-");
   });
+
+  test("the figure's grid track is capped on the inline axis (D46)", () => {
+    renderRows(classic);
+    const grid = document.querySelector("dl")?.parentElement;
+    // Pinning the chosen template only (D47): happy-dom performs no layout, so a
+    // green class assertion here does not prove the summary column is non-zero or
+    // that the Edit buttons are clickable — that half is verified by the six-cell
+    // browser matrix in docs/planning/2026-09-01_r7-preview-panel.md §4.
+    expect(grid?.className).toContain("lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)]");
+  });
 });

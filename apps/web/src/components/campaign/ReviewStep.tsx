@@ -127,7 +127,7 @@ export function ReviewStep({
     wantsMotion && axes?.motion !== undefined ? (axes.motion[0] as MotionKind) : undefined;
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)] lg:items-start">
       <dl className="min-w-0 divide-y divide-border">
         {rows.map((row) => (
           <div
