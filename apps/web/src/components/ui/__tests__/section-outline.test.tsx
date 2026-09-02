@@ -4,11 +4,12 @@ import { SectionOutline } from "../section-outline";
 
 /**
  * The outline's rows come straight from `sectionOrder(mode)` — the one ordered
- * list of sections (GB-D18) — so the brief's five and the variation's five differ
- * only where the plan says: classic gets Treatments, randomized gets Variation Policy.
+ * list of sections (GB-D18) — so the two modes' six rows differ only where the
+ * plan says: classic gets Treatments, randomized gets Variation Policy. The
+ * Layout step (T7) is the template's home, in both modes' orders.
  */
-const briefRows = ["Identity", "Copy", "Products", "Treatments", "Output"];
-const variationRows = ["Identity", "Copy", "Products", "Output", "Variation Policy"];
+const briefRows = ["Identity", "Copy", "Products", "Treatments", "Layout", "Output"];
+const variationRows = ["Identity", "Copy", "Products", "Layout", "Output", "Variation Policy"];
 
 describe("SectionOutline", () => {
   test("the legend renders through Eyebrow on the tracking token", () => {
@@ -19,7 +20,7 @@ describe("SectionOutline", () => {
     expect(legend.className).not.toContain("tracking-widest");
   });
 
-  test("a classic outline lists the five classic sections in order", () => {
+  test("a classic outline lists the six classic sections in order", () => {
     render(<SectionOutline mode="brief" visibleErrors={{}} />);
     const buttons = screen.getAllByRole("button");
     expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual(briefRows);
@@ -28,7 +29,7 @@ describe("SectionOutline", () => {
     expect(buttons[4].textContent).toContain("05");
   });
 
-  test("a randomized outline swaps Treatments for Variation Policy", () => {
+  test("a randomized outline swaps Treatments for Variation Policy and keeps the Layout step", () => {
     render(<SectionOutline mode="variation" visibleErrors={{}} />);
     const buttons = screen.getAllByRole("button");
     expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual(variationRows);

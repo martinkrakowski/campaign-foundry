@@ -1,10 +1,17 @@
 import type { ReactNode } from "react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
+import { RATIO_DIMENSIONS, type AspectRatioValue } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import type { LayoutOption, ToneOption, AnchorOption } from "./CreativePreview";
 import { derivePreviewRatio } from "./PreviewDock";
 import { PreviewFrame } from "./PreviewFrame";
-import { formatDisplayName, platformDisplayName, ratioDisplayName } from "./display-names";
+import {
+  alignDisplayName,
+  formatDisplayName,
+  platformDisplayName,
+  ratioDisplayName,
+  weightDisplayName,
+} from "./display-names";
 import { briefBackgroundIsStandIn } from "@/lib/preview-frame";
 import { SECTION_TITLES, sectionOrder, type SectionId } from "./sections";
 import * as messages from "./messages";
@@ -28,7 +35,7 @@ interface SummaryRow {
  * The rows walk `sectionOrder` of the brief's own mode, and every row title is the
  * one `SECTION_TITLES` vocabulary — no second list lives here.
  */
-function summaryRows(brief: CampaignBrief): SummaryRow[] {
+function summaryRows(brief: CampaignBrief, ratio: AspectRatioValue): SummaryRow[] {
   const rows: SummaryRow[] = [];
   for (const section of sectionOrder(brief.mode ?? "brief")) {
     switch (section) {
@@ -93,6 +100,30 @@ function summaryRows(brief: CampaignBrief): SummaryRow[] {
           rows.push({ section, lines: [messages.reviewPolicyValue(brief.variation.count)] });
         }
         break;
+      case "layout": {
+        // The template row (T7): the brief's authored type, in display labels
+        // (D18), the size in derived px at this row's own ratio (D55). Content,
+        // not presence: a brief that carries no style block gets no row (W8.1).
+        const style = brief.style;
+        if (style !== undefined) {
+          const lines = [
+            ...(style.fontFamily !== undefined ? [messages.reviewStyleFamily(style.fontFamily)] : []),
+            ...(style.fontWeight !== undefined
+              ? [messages.reviewStyleWeight(weightDisplayName(style.fontWeight))]
+              : []),
+            ...(style.sizeScale !== undefined
+              ? [messages.styleSizeReadout(Math.round(style.sizeScale * RATIO_DIMENSIONS[ratio].width), ratioDisplayName(ratio))]
+              : []),
+            ...(style.lineHeight !== undefined ? [messages.reviewStyleLineHeight(style.lineHeight.toFixed(2))] : []),
+            ...(style.letterSpacing !== undefined
+              ? [messages.reviewStyleLetterSpacing(style.letterSpacing.toFixed(2))]
+              : []),
+            ...(style.align !== undefined ? [messages.reviewStyleAlign(alignDisplayName(style.align))] : []),
+          ];
+          rows.push({ section, lines });
+        }
+        break;
+      }
     }
   }
   return rows;
@@ -113,14 +144,16 @@ export function ReviewStep({
   brief: CampaignBrief;
   onEdit: (section: SectionId) => void;
 }): ReactNode {
-  const rows = summaryRows(brief);
   const hasProduct = brief.products.length > 0;
   const product = brief.products[0];
   const treatment = brief.treatments?.[0];
   const axes = brief.variation?.axes;
   const wantsMotion = brief.output?.formats?.includes("motion") ?? false;
   const platformId = firstOf(brief.output?.platforms);
+  // Derived once, here (§6 question 4) — and handed to the row generation, so
+  // the template row's derived px (D55) and the figure cannot disagree.
   const ratio = derivePreviewRatio(platformId, undefined);
+  const rows = summaryRows(brief, ratio);
   const layout: LayoutOption | undefined =
     treatment !== undefined ? treatment.layout : (firstOf(axes?.layout) as LayoutOption | undefined);
   const tone: ToneOption | undefined =

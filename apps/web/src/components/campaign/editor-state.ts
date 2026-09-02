@@ -35,6 +35,7 @@ import {
   MIN_LINE_HEIGHT,
   MIN_SIZE_SCALE,
   styleDiverges,
+  styleProblem,
   type Style,
 } from "@campaignfoundry/CampaignOrchestration/creative-style";
 
@@ -244,21 +245,23 @@ export interface EditorState {
    */
   anchorExplicit: boolean;
   /**
-   * The brief-level creative style (T5), held verbatim. The wizard exposes no
-   * controls for it in this lane — the authoring surface is T7's Layout step —
-   * so the draft's only jobs are preservation and honesty: a hand-authored
-   * YAML `style` must survive load → save byte-identically (D58), and the
-   * preview must read exactly what the saved brief will carry.
+   * The brief-level creative style (T5), held verbatim. The authoring surface is
+   * T7's Layout step, whose controls dispatch `setStyle`; the draft's remaining
+   * jobs are preservation and honesty: a hand-authored YAML `style` must survive
+   * load → save byte-identically (D58), and the preview must read exactly what
+   * the saved brief will carry.
    */
-  style: Style;
+  style: Style,
   /**
    * True only when the loaded brief declared a `style` block — the D11
    * preservation rule, the `anchorExplicit`/`copyExplicit` lesson: an
    * explicit-but-default style (`fontFamily: Inter` spelled out) says "I wrote
    * this key" and must round-trip verbatim, while the absent key serialises as
    * absent. A draft that diverges from the defaults without the flag (a
-   * hand-edited restored draft) is emitted too — the divergence makes the
-   * block real. The wizard itself never authors a style this session.
+   * hand-edited restored draft) is emitted too — the divergence makes the block
+   * real. `setStyle` latches the flag the way `toggleAnchor` latches its own:
+   * a control touched this session has written the key, and returning a value
+   * to its default does not unwrite it.
    */
   styleExplicit: boolean;
   variation: {
@@ -345,6 +348,7 @@ export type EditorAction =
   | { type: "toggleBackground"; value: string }
   | { type: "togglePalette"; value: number }
   | { type: "toggleHeadline" }
+  | { type: "setStyle"; patch: Partial<Style> }
   | { type: "toggleMotion"; value: string }
   | { type: "setDuration"; index: number; value: number }
   | { type: "addDuration"; value?: number }
@@ -814,6 +818,20 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
     }
     case "toggleHeadline":
       return { ...state, variation: { ...state.variation, headline: !state.variation.headline } };
+    case "setStyle": {
+      // The domain's own validator is the contract here, the way `setBeatWeight`'s
+      // bounds are: a patch that would leave the block outside the Style VO's
+      // vocabulary or bounds is a no-op. The Layout step's controls are bounded by
+      // the same constants, so nothing the UI can dispatch is refused — but a
+      // hand-restored draft cannot smuggle a value through either.
+      const merged = { ...state.style, ...action.patch };
+      if (styleProblem(merged) !== undefined) return state;
+      // Latched, like `anchorExplicit`: a control touched this session says "I wrote
+      // this key", so returning a value to its default KEEPS the block — an
+      // explicit-but-default style round-trips verbatim (D58), and a brief whose
+      // style was never touched never grows one.
+      return { ...state, style: merged, styleExplicit: true };
+    }
     case "toggleMotion": {
       const next = state.motion.includes(action.value)
         ? state.motion.filter((m) => m !== action.value)

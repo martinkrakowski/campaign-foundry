@@ -6,6 +6,12 @@ export interface SliderProps {
   min: number;
   max: number;
   onChange: (value: number) => void;
+  /**
+   * The granule the track moves in, default 1 (the bounded integer the slider
+   * was). Fractional values serve bounds that are themselves fractional — the
+   * Style VO's type metrics (T7) — without re-scaling the stored value.
+   */
+  step?: number;
   disabled?: boolean;
   invalid?: boolean;
   "aria-label": string;
@@ -19,7 +25,7 @@ export interface SliderProps {
 }
 
 /**
- * Bounded integer input. A range is the right control when the bound is the point —
+ * Bounded range input. A range is the right control when the bound is the point —
  * the user is choosing within a budget (how many creatives, how different they must
  * be) rather than typing an exact figure, and the track shows how much room is left.
  * The readout keeps the number legible, since a range alone shows only a position.
@@ -28,6 +34,7 @@ export function Slider({
   value,
   min,
   max,
+  step = 1,
   onChange,
   disabled = false,
   invalid = false,
@@ -45,7 +52,7 @@ export function Slider({
           aria-label={ariaLabel}
           min={min}
           max={safeMax}
-          step={1}
+          step={step}
           value={clamped}
           disabled={disabled}
           aria-invalid={invalid || undefined}

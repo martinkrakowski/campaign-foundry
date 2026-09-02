@@ -2,6 +2,7 @@
 // infrastructure adapters, which pull node:fs/path/crypto into the browser bundle.
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { ANCHOR_VALUES } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
+import { ALIGN_VALUES, FONT_WEIGHT_VALUES } from "@campaignfoundry/CampaignOrchestration/creative-style";
 import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
 
 /** Display name for a format key. */
@@ -41,6 +42,30 @@ const ANCHOR_LABELS: Record<(typeof ANCHOR_VALUES)[number], string> = {
 
 export function anchorDisplayName(anchor: string): string {
   return ANCHOR_LABELS[anchor as (typeof ANCHOR_VALUES)[number]] ?? anchor;
+}
+
+/**
+ * Display labels for the style weights and alignments (T7) — keyed by the
+ * domain's own vocabularies, so a new member is a compile error rather than a
+ * raw value on screen (D18).
+ */
+const WEIGHT_LABELS: Record<(typeof FONT_WEIGHT_VALUES)[number], string> = {
+  400: "Regular",
+  700: "Bold",
+};
+
+export function weightDisplayName(weight: number): string {
+  return WEIGHT_LABELS[weight as (typeof FONT_WEIGHT_VALUES)[number]] ?? String(weight);
+}
+
+const ALIGN_LABELS: Record<(typeof ALIGN_VALUES)[number], string> = {
+  left: "Left",
+  center: "Center",
+  right: "Right",
+};
+
+export function alignDisplayName(align: string): string {
+  return ALIGN_LABELS[align as (typeof ALIGN_VALUES)[number]] ?? align;
 }
 
 /** Display name for a platform id (from PlatformProfile.label). */

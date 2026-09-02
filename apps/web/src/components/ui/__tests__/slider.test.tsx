@@ -17,6 +17,16 @@ describe("Slider", () => {
     expect(onChange).toHaveBeenCalledWith(7);
   });
 
+  test("a fractional step serves fractional bounds without re-scaling the value", () => {
+    const { onChange, input, view } = setup({ min: 0.02, max: 0.12, step: 0.005, value: 0.06 });
+    expect(input.step).toBe("0.005");
+    fireEvent.change(input, { target: { value: "0.08" } });
+    expect(onChange).toHaveBeenCalledWith(0.08);
+    view.unmount();
+    // Default stays the bounded integer the slider always was.
+    expect(setup().input.step).toBe("1");
+  });
+
   test("shows the value against the ceiling, with a suffix when given", () => {
     const { unmount } = render(<Slider aria-label="Count" value={4} min={1} max={10} onChange={vi.fn()} />);
     expect(screen.getByText(/4/).textContent).toContain("/ 10");

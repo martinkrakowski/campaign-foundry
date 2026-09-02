@@ -1,5 +1,12 @@
 import { describe, test, expect } from "vitest";
-import { formatDisplayName, ratioDisplayName, platformDisplayName, anchorDisplayName } from "../display-names";
+import {
+  alignDisplayName,
+  anchorDisplayName,
+  formatDisplayName,
+  platformDisplayName,
+  ratioDisplayName,
+  weightDisplayName,
+} from "../display-names";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { ANCHOR_VALUES } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 
@@ -36,6 +43,18 @@ describe("display names", () => {
     expect(anchorDisplayName("middle")).toBe("Middle");
     expect(anchorDisplayName("bottom")).toBe("Bottom");
     expect(anchorDisplayName("sideways")).toBe("sideways");
+  });
+
+  test("every weight and alignment the style vocabulary knows has a plain-English name (T7)", () => {
+    // the raw values a user must never see (D18) — an out-of-set value passes
+    // through rather than rendering "undefined", like the format names above.
+    expect(weightDisplayName(400)).toBe("Regular");
+    expect(weightDisplayName(700)).toBe("Bold");
+    expect(weightDisplayName(500)).toBe("500");
+    expect(alignDisplayName("left")).toBe("Left");
+    expect(alignDisplayName("center")).toBe("Center");
+    expect(alignDisplayName("right")).toBe("Right");
+    expect(alignDisplayName("diagonal")).toBe("diagonal");
   });
 });
 
