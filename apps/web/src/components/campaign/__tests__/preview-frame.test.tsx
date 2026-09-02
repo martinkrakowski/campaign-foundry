@@ -75,6 +75,7 @@ describe("PreviewFrame (D52)", () => {
   test.each([
     ["no brief at all", { brief: undefined }],
     ["a brief without products", { brief: brief({ products: [] }) }],
+    ["a product with an empty id", { brief: brief({ products: [{ id: "", name: "A", primaryColor: "#1473E6", logoPath: "a.png" }] }) }],
     ["no layout", { layout: undefined }],
     ["no tone", { tone: undefined }],
   ])("with %s, the look is unspecified and nothing is ever requested", async (_label, props) => {
@@ -85,6 +86,34 @@ describe("PreviewFrame (D52)", () => {
     });
     expect(globalThis.fetch).not.toHaveBeenCalled();
     expect(container.querySelector("svg")).not.toBeNull();
+  });
+
+  test("a blank product id never fetches; naming the product fires the request", async () => {
+    vi.useFakeTimers();
+    vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+    const view = renderFrame({
+      brief: brief({ products: [{ id: "", name: "A", primaryColor: "#1473E6", logoPath: "a.png" }] }),
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
+    });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+
+    view.rerender(
+      <PreviewFrame
+        brief={brief()}
+        layout="headline-bottom"
+        tone="bold"
+        primaryColor="#1473E6"
+        headline="Hello"
+        ratio="9:16"
+        className="block h-auto w-full"
+      />,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
+    });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 
   test("the cell request carries the anchor only when one is set", async () => {

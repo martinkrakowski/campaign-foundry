@@ -69,7 +69,7 @@ import { SectionOutline } from "@/components/ui/section-outline";
 import { EstimatePanel } from "@/components/campaign/EstimatePanel";
 import { StepHeader } from "@/components/campaign/StepHeader";
 import { StepFooter } from "@/components/campaign/StepFooter";
-import { SECTION_TITLES, sectionOrder, type SectionId } from "./sections";
+import { SECTION_TITLES, sectionOrder, LayoutSection, type SectionId } from "./sections";
 import { ReviewStep } from "./ReviewStep";
 import { PreviewDock } from "./PreviewDock";
 import { previewDockProps } from "./preview-props";
@@ -145,6 +145,7 @@ const STEP_SUBTITLES: Record<StepId, string> = {
   copy: messages.stepSubtitleCopy,
   products: messages.stepSubtitleProducts,
   treatments: messages.stepSubtitleTreatments,
+  layout: messages.stepSubtitleLayout,
   policy: messages.stepSubtitlePolicy,
   output: messages.stepSubtitleOutput,
   review: messages.stepSubtitleReview,
@@ -1054,6 +1055,10 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
         return <ProductsSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("products")} />;
       case "treatments":
         return <TreatmentsSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("treatments")} />;
+      case "layout":
+        // The template's home (T7): the T5 type block and the step's own
+        // compositor frame (D63) — the guided walk mounts the preview.
+        return <LayoutSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("layout")} preview />;
       case "output":
         return (
           <OutputSection
@@ -1327,6 +1332,10 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
                    <TreatmentsSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("treatments")} />
                  ) : null}
                </div>
+               {/* The template view (T7): the type block, no frame — the Everything
+                   stack has no composed preview surface by design (D43 keeps the
+                   preview Guided-only), so the step-scoped frame stays a step's. */}
+               <LayoutSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("layout")} />
                <OutputSection
                  state={state}
                  dispatch={dispatch}
@@ -1341,10 +1350,14 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
             column — never inside `renderStepCard`, which renders two live copies during
             a step change and whose `transform` traps overlays (M7). `sticky top-0
             self-start` resolves against the shell's own scrollport; never `fixed`.
-            Guided only, and suppressed on Review — the figure owns that step, so
-            exactly one composed preview is on screen (D43). Visibility is the row's
-            container query (§6 question 1): the rail shows when the row has room for it. */}
-          {presentation === "guided" && steps[stepIndex] !== "review" && railProps !== null ? (
+            Guided only, and suppressed on Review and on the Layout step — the figure
+            owns Review and the Layout step carries its own frame (D63), so exactly
+            one composed preview is on screen (D43). Visibility is the row's container
+            query (§6 question 1): the rail shows when the row has room for it. */}
+          {presentation === "guided" &&
+          steps[stepIndex] !== "review" &&
+          steps[stepIndex] !== "layout" &&
+          railProps !== null ? (
           <aside
             role="complementary"
             aria-label={messages.previewLegend}

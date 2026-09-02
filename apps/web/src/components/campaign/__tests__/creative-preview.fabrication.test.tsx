@@ -29,7 +29,10 @@ const niche = (): EditorState => {
   state.campaignMessage = "Stay wild. Stay hydrated.";
   state.targetAudience = "Urban outdoor enthusiasts, 25-40";
   state.targetRegion = "LATAM";
-  state.products = [emptyProduct(1, "#1473E6"), emptyProduct(2, "#F04E23")];
+  state.products = [
+    { ...emptyProduct(1, "#1473E6"), id: "alpha" },
+    { ...emptyProduct(2, "#F04E23"), id: "beta" },
+  ];
   state.variation.layout = ["headline-bottom", "headline-top"];
   state.variation.tone = ["bold", "subtle"];
   state.variation.ratio = ["9:16", "1:1"];
@@ -43,7 +46,7 @@ const classic = (): EditorState => {
   const state = initialEditorState("brief");
   state.campaignName = "Summer Launch";
   state.campaignMessage = "Stay wild. Stay hydrated.";
-  state.products = [emptyProduct(1, "#1473E6")];
+  state.products = [{ ...emptyProduct(1, "#1473E6"), id: "alpha" }];
   state.treatments = [{ id: "bold-hero", layout: "headline-bottom", tone: "subtle" }];
   // Leftovers a visit to Randomized would leave behind: the classic look must not read them.
   state.variation.layout = ["headline-top"];

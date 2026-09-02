@@ -22,6 +22,7 @@ export const SECTION_BY_ERROR_KEY: Record<SectionId, SectionId> = {
   treatments: "treatments",
   output: "output",
   policy: "policy",
+  layout: "layout",
 };
 
 /** The one non-section bucket: motion's errors render inside its Output host. */

@@ -89,10 +89,11 @@ export function useStepNavigation(steps: readonly string[]): StepNavigation {
 
   // The cursor remembers *which step* it is on, not just where it sat. A mode flip
   // replaces the list under it, and the two lists disagree at the same ordinal —
-  // classic is [.., treatments, output], randomized [.., output, policy] — so a
-  // purely positional cursor silently moves the user from Output to Variation Policy
-  // on a flip. Following the id keeps them where they were; the remembered ordinal is
-  // the fallback for the one step a flip really does remove (`treatments`).
+  // classic is [.., treatments, layout, output], randomized [.., layout, output,
+  // policy] — so a purely positional cursor silently moves the user from Output to
+  // Variation Policy on a flip. Following the id keeps them where they were; the
+  // remembered ordinal is the fallback for the one step a flip really does remove
+  // (`policy`, when returning to classic).
   // `steps[0]` is asserted, not guarded: the same non-empty contract the clamp above
   // relies on. A guard here would be an unreachable branch, and the house rule is to
   // restructure one away rather than exclude it from coverage.

@@ -644,9 +644,21 @@ export const stepSubtitleIdentity = "Name the campaign and say who it is for.";
 export const stepSubtitleCopy = "Write the one line you want people to remember.";
 export const stepSubtitleProducts = "Add what you are advertising, with its colour and logo.";
 export const stepSubtitleTreatments = "Choose the looks each product gets.";
+export const stepSubtitleLayout = "Set the type every creative inherits — the preview shows the result.";
 export const stepSubtitlePolicy = "Say how many ads you want, and how much they should differ.";
 export const stepSubtitleOutput = "Pick where the ads run, and whether they move.";
 export const stepSubtitleReview = "Last look, then send it to the pipeline.";
+
+/* ── The Layout step (T7) ─────────────────────────────────────────────────── */
+
+/**
+ * The size slider's readout (D55): the type size is stored as a fraction of the
+ * canvas width, and DISPLAYED as the pixels it means at the previewed ratio —
+ * derived text, never the stored fraction.
+ */
+export function styleSizeReadout(pixels: number, ratioLabel: string): string {
+  return `~${pixels} px at ${ratioLabel}`;
+}
 
 /** The step footer's status sentence when the step has nothing to fix. */
 export const statusStepReady = "Looking good.";
@@ -729,6 +741,25 @@ export function axisLocked(value: string): string {
 }
 export function axisVaries(count: number): string {
   return `Varies — each creative gets one of the ${count} selected.`;
+}
+
+/* ── The Review step's template row (T7) ─────────────────────────────────────── */
+
+/** The authored type, in display labels (D18); the size line is `styleSizeReadout`. */
+export function reviewStyleFamily(family: string): string {
+  return `Typeface: ${family}`;
+}
+export function reviewStyleWeight(weight: string): string {
+  return `Weight: ${weight}`;
+}
+export function reviewStyleLineHeight(value: string): string {
+  return `${value} line height`;
+}
+export function reviewStyleLetterSpacing(value: string): string {
+  return `${value} em letter spacing`;
+}
+export function reviewStyleAlign(label: string): string {
+  return `${label} aligned`;
 }
 
 export function reviewPolicyValue(count: number): string {

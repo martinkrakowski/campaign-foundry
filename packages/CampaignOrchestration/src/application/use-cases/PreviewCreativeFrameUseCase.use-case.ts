@@ -90,6 +90,7 @@ export function compositeRequestFingerprint(
       layout: request.layout,
       tone: request.tone,
       ...(request.anchor !== undefined ? { anchor: request.anchor } : {}),
+      ...(request.style !== undefined ? { style: request.style } : {}),
       ...(request.safeInsets !== undefined ? { safeInsets: request.safeInsets } : {}),
     }),
   );

@@ -194,6 +194,31 @@ describe("PreviewCreativeFrameUseCase — the frame and its cache key", () => {
     expect(compositeRequestFingerprint(twin, sha256)).not.toBe(first.value.cacheKey);
   });
 
+  test("two requests that differ only in style.sizeScale never share a key", async () => {
+    const a = await new PreviewCreativeFrameUseCase(deps()).execute(
+      baseBrief({ style: { sizeScale: 0.08 } }),
+      cell(),
+    );
+    const b = await new PreviewCreativeFrameUseCase(deps()).execute(
+      baseBrief({ style: { sizeScale: 0.06 } }),
+      cell(),
+    );
+    expect(a.success && b.success).toBe(true);
+    if (!a.success || !b.success) return;
+    expect(a.value.cacheKey).not.toBe(b.value.cacheKey);
+  });
+
+  test("a style-less request hashes exactly as it did before style joined the fingerprint", async () => {
+    const result = await new PreviewCreativeFrameUseCase(deps()).execute(baseBrief(), cell());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    // Pre-fix golden of this suite's style-less fixture (background [1,2,3],
+    // localized "Hallo", no anchor/insets/style). Absent must not move the key.
+    expect(result.value.cacheKey).toBe(
+      "0db05026a4f815d53be5b9fefa79f26a775bcfc10ea0c034e25260027826dd52",
+    );
+  });
+
   test("a cache hit returns the stored bytes without compositing again; a miss stores them", async () => {
     const cache = memoryCache();
     const d = deps({ frameCache: cache });

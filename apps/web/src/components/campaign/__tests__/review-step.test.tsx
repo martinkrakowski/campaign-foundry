@@ -25,6 +25,7 @@ const classic: CampaignBrief = {
   ],
   treatments: [{ id: "bold-hero", layout: "headline-top", tone: "bold" }],
   output: { formats: ["static"], platforms: ["linkedin"] },
+  style: { fontFamily: "Lora", fontWeight: 700 },
 };
 
 /** The row container for one section — the review step's own list, not the sidebar's. */
@@ -85,6 +86,41 @@ describe("ReviewStep — summary rows", () => {
   test("an empty treatments list draws no treatments row rather than a blank one", () => {
     renderRows({ ...classic, treatments: [] });
     expect(row("treatments")).toBeNull();
+  });
+
+  test("the template row speaks the authored type in display labels, the size in derived px (T7/D55)", () => {
+    const styled = renderRows({
+      ...classic,
+      style: { fontFamily: "Lora", fontWeight: 700, sizeScale: 0.08, lineHeight: 1.4, letterSpacing: 0.05, align: "left" },
+    });
+    // linkedin's own ratio is 1:1 (1080 px across): 0.08 → 86 px, derived (D55).
+    expect(row("layout")?.textContent).toContain(messages.reviewStyleFamily("Lora"));
+    expect(row("layout")?.textContent).toContain(messages.reviewStyleWeight("Bold"));
+    expect(row("layout")?.textContent).toContain(messages.styleSizeReadout(86, "Square"));
+    expect(row("layout")?.textContent).toContain(messages.reviewStyleLineHeight("1.40"));
+    expect(row("layout")?.textContent).toContain(messages.reviewStyleLetterSpacing("0.05"));
+    expect(row("layout")?.textContent).toContain(messages.reviewStyleAlign("Left"));
+    expect(row("layout")?.textContent).not.toContain("0.08");
+    styled.unmount();
+    // A brief without a style block draws no template row rather than a blank one.
+    renderRows({ ...classic, style: undefined });
+    expect(row("layout")).toBeNull();
+  });
+
+  test("the template row carries only the fields the block declares", () => {
+    renderRows({ ...classic, style: { sizeScale: 0.08, align: "right" } });
+    const template = row("layout");
+    expect(template?.textContent).toContain(messages.styleSizeReadout(86, "Square"));
+    expect(template?.textContent).toContain(messages.reviewStyleAlign("Right"));
+    expect(template?.textContent).not.toContain("Typeface:");
+    expect(template?.textContent).not.toContain("Weight:");
+    expect(template?.textContent).not.toContain("line height");
+    expect(template?.textContent).not.toContain("letter spacing");
+  });
+
+  test("an empty style block draws no template row rather than a blank one", () => {
+    renderRows({ ...classic, style: {} });
+    expect(row("layout")).toBeNull();
   });
 
   test("an empty formats or platforms list draws no output row rather than a blank one", () => {

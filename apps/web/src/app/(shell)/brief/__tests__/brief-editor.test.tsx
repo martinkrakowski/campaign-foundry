@@ -1901,6 +1901,8 @@ describe("BriefPage — guided presentation (W6)", () => {
     await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Treatments"));
     await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
+    await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
     await user.click(screen.getByRole("button", { name: messages.stepNextReview }));
     await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
@@ -1925,7 +1927,7 @@ describe("BriefPage — guided presentation (W6)", () => {
     renderWithRun(<Editor id="ok" />);
     await adopt(user, "ok");
 
-    // Identity (step 1 of 6) -> Copy; the heading is the focus handoff target.
+    // Identity (step 1 of 7) -> Copy; the heading is the focus handoff target.
     await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
     expect(document.activeElement).toBe(stepHeading());
@@ -1935,6 +1937,8 @@ describe("BriefPage — guided presentation (W6)", () => {
     await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
     await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Treatments"));
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
     await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
 
@@ -1983,9 +1987,12 @@ describe("BriefPage — guided presentation (W6)", () => {
     expect(screen.getByRole("heading", { level: 3, name: "Headline Pool" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /Close/ }));
 
-    // Copy -> Products -> Output -> Policy: the variation order skips treatments.
+    // Copy -> Products -> Layout -> Output -> Policy: the variation order skips
+    // treatments, and the Layout step (T7) carries the template before Output.
     await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
     await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
     // Corrected: this asserted that Output's Next reads "Review & launch" in
@@ -2210,9 +2217,9 @@ describe("BriefPage — the walk's chrome and gestures (W7)", () => {
 
     // The review step, from the first step, without having walked there: no lock
     // (D21). A segment is never disabled, so it never needs a reason off-screen.
-    await user.click(segments()[5]);
+    await user.click(segments()[sectionOrder("brief").length]);
     await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
-    expect(segments()[5].getAttribute("aria-current")).toBe("step");
+    expect(segments()[sectionOrder("brief").length].getAttribute("aria-current")).toBe("step");
   });
 
   test("a segment for a step with something to fix says so, and still navigates", async () => {
@@ -2409,7 +2416,7 @@ describe("BriefPage — the review step (W8)", () => {
   };
   const row = (section: string) => document.querySelector(`[data-review-row="${section}"]`);
 
-  /** A classic brief carrying treatments and output, so every row can show. */
+  /** A classic brief carrying treatments, output and a style block, so every row can show. */
   const fullEntry = {
     file: "full.yaml",
     revision: "r1",
@@ -2417,6 +2424,7 @@ describe("BriefPage — the review step (W8)", () => {
       ...brief("full"),
       treatments: [{ id: "bold-hero", layout: "headline-top", tone: "bold" }],
       output: { formats: ["static"], platforms: ["linkedin"] },
+      style: { fontFamily: "Lora", fontWeight: 700 },
     },
   };
 
@@ -2667,7 +2675,7 @@ describe("BriefPage — the preview rail (R7)", () => {
     // The dock's own words live inside the landmark: the caption names the platform
     // as a display label, and the step readout is the walk's cursor.
     expect(within(rail).getByText("Square · LinkedIn")).toBeTruthy();
-    expect(within(rail).getByText(messages.previewStep(1, 6))).toBeTruthy();
+    expect(within(rail).getByText(messages.previewStep(1, 7))).toBeTruthy();
     // D44: the rail is a sibling of the walk's card — never a copy inside it, where a
     // step change would render two live copies and the card's transform would trap it.
     expect(screen.getByTestId("step-card").contains(rail)).toBe(false);
@@ -2812,6 +2820,124 @@ describe("BriefPage — the preview rail (R7)", () => {
     // browser matrix in the R7 plan §4 records the layout half the suite cannot.
     expect(root.querySelector('[class*="container-type"]')).not.toBeNull();
     expect(rail.className).toContain("[@container(min-width:56rem)]:flex");
+  });
+});
+
+describe("BriefPage — the Layout step (T7)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:presentation", "guided");
+    globalThis.confirm = vi.fn(() => true);
+  });
+
+  // D37: adopting a brief IS arriving at its route — and the first step's validation
+  // must have settled before the walk is driven (the same gate the guided suite uses).
+  const adopt = async (_user: ReturnType<typeof userEvent.setup>, id: string) => {
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id));
+    await waitFor(() => expect(document.querySelector(".animate-ready-ring")).toBeTruthy());
+  };
+
+  const stepHeading = () => screen.getByRole("heading", { level: 1 });
+  const next = () => screen.getByRole("button", { name: messages.stepNext });
+  const back = () => screen.getByRole("button", { name: messages.stepBack });
+  const seg = (name: RegExp) =>
+    within(screen.getByRole("navigation", { name: messages.segBarLabel })).getByRole("button", { name });
+  const okEntry = {
+    file: "ok.yaml",
+    revision: "r1",
+    brief: { ...brief("ok"), output: { formats: ["static"], platforms: ["linkedin"] } },
+  };
+  const randEntry = {
+    file: "rand.yaml",
+    revision: "r1",
+    brief: {
+      ...brief("rand"),
+      mode: "variation" as const,
+      variation: {
+        count: 8,
+        axes: { layout: ["headline-top"], tone: ["bold"], background: { source: ["procedural"] }, paletteShift: [0] },
+      },
+    },
+  };
+
+  test("the classic walk carries the Layout step after Treatments, and Next/Back traverse it", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    await user.click(seg(/: Layout,/));
+    await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
+    await user.click(back());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Treatments"));
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
+  });
+
+  test("randomized places the Layout step between Products and Output (T7)", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [randEntry] }) });
+    renderWithRun(<Editor id="rand" />);
+    await adopt(user, "rand");
+
+    await user.click(seg(/: Layout,/));
+    await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
+    await user.click(back());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
+  });
+
+  test("the Sections outline reaches the Layout step (D25/GB-D18)", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    const row = await screen.findByRole("button", { name: "Layout" });
+    await user.click(row);
+    await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
+  });
+
+  test("the rail is suppressed on the Layout step — exactly one composed preview is on screen (D43/D63)", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    await user.click(seg(/: Layout,/));
+    await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
+
+    // No rail: the step carries its own frame, and one slot is the whole rule.
+    expect(screen.queryByRole("complementary", { name: messages.previewLegend })).toBeNull();
+    // Counted, as the rail tests count — the creatives are picked by what they draw.
+    const headlineCreatives = Array.from(document.querySelectorAll("svg")).filter((el) =>
+      el.textContent?.includes("Hi"),
+    );
+    expect(headlineCreatives).toHaveLength(1);
+  });
+
+  test("a style choice made on the Layout step reaches the brief the save would send (D58)", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    await user.click(seg(/: Layout,/));
+    await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
+    await user.click(screen.getByRole("button", { name: "Lora" }));
+
+    // The projection is on screen in the rail's YAML view — a step the rail serves,
+    // since the Layout step itself carries the frame (D43).
+    await user.click(seg(/: Output,/));
+    const rail = screen.getByRole("complementary", { name: messages.previewLegend });
+    await user.click(within(rail).getByRole("button", { name: messages.previewRailYamlView }));
+    expect(within(rail).getByText(/fontFamily: Lora/)).toBeTruthy();
   });
 });
 

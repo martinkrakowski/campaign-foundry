@@ -2372,6 +2372,36 @@ describe("the brief style block round-trips (T5/D58)", () => {
   });
 });
 
+describe("the Layout step's setStyle action (T7)", () => {
+  test("a control's patch merges into the style and latches the flag (D58)", () => {
+    const next = editorReducer(base(), { type: "setStyle", patch: { fontFamily: "Lora" } });
+    expect(next.style).toEqual({ fontFamily: "Lora" });
+    expect(next.styleExplicit).toBe(true);
+    expect(toBrief(next).style).toEqual({ fontFamily: "Lora" });
+  });
+
+  test("returning a value to its default keeps the authored block (the anchorExplicit latch)", () => {
+    const touched = editorReducer(base(), { type: "setStyle", patch: { fontWeight: 700 } });
+    const reverted = editorReducer(touched, { type: "setStyle", patch: { fontWeight: 400 } });
+    // An explicit-but-default weight says "I wrote this key" — the block survives.
+    expect(reverted.style).toEqual({ fontWeight: 400 });
+    expect(toBrief(reverted).style).toEqual({ fontWeight: 400 });
+  });
+
+  test("a patch that would leave the block outside the Style VO's bounds is a no-op", () => {
+    const state = base();
+    const next = editorReducer(state, { type: "setStyle", patch: { sizeScale: 5 } });
+    expect(next).toBe(state);
+    // A legal field cannot smuggle an illegal sibling through either.
+    const mixed = editorReducer(state, { type: "setStyle", patch: { lineHeight: 9, fontFamily: "Lora" } });
+    expect(mixed).toBe(state);
+  });
+
+  test("the untouched draft still serialises style-free (D54/D57)", () => {
+    expect(toBrief(base()).style).toBeUndefined();
+  });
+});
+
 describe("dirty-on-load over the corpus (B2)", () => {
   // Driven over the real directory, so a new sample brief cannot silently
   // reintroduce the dirty-on-load bug.
