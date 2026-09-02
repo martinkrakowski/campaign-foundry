@@ -706,7 +706,7 @@ export function reviewEditLabel(section: string): string {
  * only that value for every variant — but nothing on the cards said so.
  */
 export function axisLocked(value: string): string {
-  return `Locked — every creative uses ${value.replace(/-/g, " ")}.`;
+  return `Locked — every creative uses ${value.replace(/-/g, " ").trim()}.`;
 }
 export function axisVaries(count: number): string {
   return `Varies — each creative gets one of the ${count} selected.`;
