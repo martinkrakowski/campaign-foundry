@@ -103,9 +103,10 @@
  * default (the root layout adds `dark` to <html>). Only the tokens that differ
  * are overridden; everything else inherits from :root.
  *
- * The semantic colours are repeated here even though they are unchanged from the values
- * this file used to share: light now carries its own set, so inheriting would make the
- * shipped palette a side effect of a theme it does not belong to.
+ * The semantic colours are repeated here even though success, warning and modified are
+ * unchanged from the values this file used to share: light now carries its own set, so
+ * inheriting would make the shipped palette a side effect of a theme it does not belong
+ * to. Error and info now diverge too — see the comment on the semantic block below.
  */
 .dark {
   color-scheme: dark;
@@ -128,10 +129,17 @@
   --color-brand-tint: #1a2d44;
   --color-brand-on-tint: #7cc4ff;   /* 7.45:1 on the tint */
 
-  /* Semantic — see :root for why these are stated rather than inherited. */
+  /* Semantic — see :root for the two jobs a state colour does. Success, warning and
+     modified keep the darker values that favour the solid job; error and info take the
+     lightest step that clears 4.5:1 as text on their own 20% tint over the worst dark
+     ground (surface-2) — the chips' job, which the audit measured them failing at
+     3.24:1 and 3.21:1. No value passes both jobs in dark (a red light enough for the
+     tint puts white below 3:1 on the solid), so the chips' job wins here and the
+     destructive Button's white text measures 2.25:1 on the solid — it was already
+     failing at 3.76:1. */
   --color-success: #10b981;
   --color-warning: #f59e0b;
-  --color-error: #ef4444;
-  --color-info: #3b82f6;
+  --color-error: #ff8b8b;   /* was #ef4444 — 3.24:1 on its tint over surface-2 */
+  --color-info: #6bb2ff;    /* was #3b82f6 — 3.21:1 on its tint over surface-2 */
   --color-modified: #c4b5fd;
 }
