@@ -1,9 +1,11 @@
 import type { CSSProperties, ReactNode } from "react";
 import type { AspectRatioValue } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
 import { CreativePreview, type CreativePreviewProps } from "@/components/campaign/CreativePreview";
 import { Eyebrow } from "@/components/ui";
+import { MOTION_KIND_META } from "@/components/campaign/MotionKindPanel";
 import { platformDisplayName, ratioDisplayName } from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
 
@@ -29,7 +31,7 @@ export function derivePreviewRatio(
 export interface PreviewShowcaseProps extends Omit<CreativePreviewProps, "className"> {
   readonly campaignName: string;
   readonly platformId?: string;
-  /** 1-based position in the campaign's creative set. */
+  /** The wizard's current step, 1-based (`stepIndex + 1`) — where the walk stands, never a position in the creative set (M2). */
   readonly step: number;
   readonly stepCount: number;
 }
@@ -45,14 +47,23 @@ function PreviewSwatch({ primaryColor }: { primaryColor: string }): ReactNode {
   );
 }
 
-/** `<ratio display name> · <platform label>` (D18 — display names, never raw values). */
-function PreviewCaption({ platformId, ratio }: { platformId?: string; ratio?: string }): ReactNode {
+/** `<ratio display name> · <platform label>`, joined by the video style's own name in words when the creative moves (D50) — display labels, never raw kind ids (D18). */
+function PreviewCaption({
+  platformId,
+  ratio,
+  motion,
+}: {
+  platformId?: string;
+  ratio: AspectRatioValue;
+  motion?: MotionKind;
+}): ReactNode {
+  const platformLabel =
+    platformId !== undefined ? platformDisplayName(platformId) : messages.previewNoPlatform;
   return (
     <p className="truncate font-mono text-[11px] text-text-muted">
-      {messages.previewCaption(
-        ratioDisplayName(derivePreviewRatio(platformId, ratio)),
-        platformId !== undefined ? platformDisplayName(platformId) : messages.previewNoPlatform,
-      )}
+      {motion !== undefined
+        ? messages.previewCaptionMotion(ratioDisplayName(ratio), platformLabel, MOTION_KIND_META[motion])
+        : messages.previewCaption(ratioDisplayName(ratio), platformLabel)}
     </p>
   );
 }
@@ -70,8 +81,22 @@ function PreviewIdentity(props: PreviewShowcaseProps): ReactNode {
   );
 }
 
-/** The picture at its true ratio, bounded by the box handed to it. */
-function PreviewPicture(props: Pick<PreviewShowcaseProps, "layout" | "tone" | "primaryColor" | "headline" | "motion" | "ratio" | "platformId"> & { readonly className: string }): ReactNode {
+/**
+ * The picture at its true ratio, bounded by the box handed to it. The one rule
+ * (§6 question 4): `ratio` is FINAL — the caller derives it with
+ * `derivePreviewRatio` at the call site and this never derives again, so the
+ * dock and the Review figure cannot disagree by deriving twice. Shared by both
+ * surfaces for exactly that reason.
+ */
+export function PreviewPicture(props: {
+  readonly layout?: PreviewShowcaseProps["layout"];
+  readonly tone?: PreviewShowcaseProps["tone"];
+  readonly primaryColor: string;
+  readonly headline?: string;
+  readonly motion?: MotionKind;
+  readonly ratio: AspectRatioValue;
+  readonly className: string;
+}): ReactNode {
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-text-muted">
       <CreativePreview
@@ -80,7 +105,7 @@ function PreviewPicture(props: Pick<PreviewShowcaseProps, "layout" | "tone" | "p
         primaryColor={props.primaryColor}
         headline={props.headline}
         motion={props.motion}
-        ratio={derivePreviewRatio(props.platformId, props.ratio)}
+        ratio={props.ratio}
         className={props.className}
       />
     </div>
@@ -88,45 +113,32 @@ function PreviewPicture(props: Pick<PreviewShowcaseProps, "layout" | "tone" | "p
 }
 
 /**
- * The desktop rail (≥ 1280 px): the creative at its own ratio, the caption under it,
- * and the brief's name, headline and step beside it — the outgoing creative stays in
- * the corner of the eye while the brief is edited (D26). `hidden xl:flex`/`flex xl:hidden`
- * pair with `PreviewStrip` so exactly one is on screen.
+ * The preview itself (D26): the creative at its own ratio, the caption under it,
+ * and the brief's name, headline and step beside it — the outgoing creative stays
+ * in the corner of the eye while the brief is edited. Props come from the one
+ * exported derivation (`previewDockProps`, D45); the complementary landmark, the
+ * sticky positioning and the container-query visibility belong to the host rail
+ * that mounts this body (D44/D61) — exactly one slot, whatever view it holds.
  */
 export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
+  const ratio = derivePreviewRatio(props.platformId, props.ratio);
   return (
-    <aside
-      role="complementary"
-      aria-label={messages.previewLegend}
-      className="hidden w-64 shrink-0 flex-col gap-3 border-l border-border bg-surface p-4 xl:flex"
-    >
+    <div className="flex min-w-0 flex-col gap-3">
       <Eyebrow as="p">{messages.previewLegend}</Eyebrow>
-      <PreviewPicture {...props} className="block h-auto w-full" />
+      <PreviewPicture
+        layout={props.layout}
+        tone={props.tone}
+        primaryColor={props.primaryColor}
+        headline={props.headline}
+        motion={props.motion}
+        ratio={ratio}
+        className="block h-auto w-full"
+      />
       <div className="flex items-center gap-2">
         <PreviewSwatch primaryColor={props.primaryColor} />
-        <PreviewCaption platformId={props.platformId} ratio={props.ratio} />
+        <PreviewCaption platformId={props.platformId} ratio={ratio} motion={props.motion} />
       </div>
       <PreviewIdentity {...props} />
-    </aside>
-  );
-}
-
-/**
- * The mobile/tablet rail (< 1280 px): the same information as `PreviewDock`, compressed
- * into a horizontal bar across the bottom — picture, campaign name, headline, caption,
- * the swatch and the step.
- */
-export function PreviewStrip(props: PreviewShowcaseProps): ReactNode {
-  return (
-    <div className="flex xl:hidden items-center gap-3 border-t border-border bg-surface px-4 py-3">
-      <div className="flex-none">
-        <PreviewPicture {...props} className="block h-16 w-auto" />
-      </div>
-      <PreviewIdentity {...props} />
-      <div className="flex shrink-0 items-center gap-2">
-        <PreviewSwatch primaryColor={props.primaryColor} />
-        <PreviewCaption platformId={props.platformId} ratio={props.ratio} />
-      </div>
     </div>
   );
 }

@@ -504,10 +504,27 @@ export const previewNoPlatform = "no platform yet";
 export function previewCaption(ratioLabel: string, platformLabel: string): string {
   return `${ratioLabel} · ${platformLabel}`;
 }
+/**
+ * The preview's caption when the creative moves (D50): the style names itself in
+ * words — `MOTION_KIND_META`'s display labels, never a raw kind id (D18) — so the
+ * reading is not the only carrier of the meaning.
+ */
+export function previewCaptionMotion(ratioLabel: string, platformLabel: string, styleLabel: string): string {
+  return `${ratioLabel} · ${platformLabel} · ${styleLabel}`;
+}
 /** The preview's step readout, e.g. "2 / 6". */
 export function previewStep(step: number, total: number): string {
   return `${step} / ${total}`;
 }
+
+// --- The preview rail (R7) ---
+
+/** The rail switcher's group label. */
+export const previewRailViews = "Preview views";
+/** The eye segment: the composed preview. */
+export const previewRailPreviewView = "Show the preview";
+/** The code segment: the brief as the pipeline reads it. */
+export const previewRailYamlView = "Show the YAML view";
 
 // --- Theme (W3) ---
 

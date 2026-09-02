@@ -402,7 +402,7 @@ Skeletal by design — patterns to extend, not a library.
   (`isLoading`, `aria-busy`). A disclosure whose first item was also called *Save*
   existed briefly and was retired — the same two-labels-one-verb confusion in a new
   shape.
-- **Save as…** — the copy verb, in the bar's overflow (`⋯`) beside YAML split and
+- **Save as…** — the copy verb, in the bar's overflow (`⋯`) beside
   *Revert*: writes a copy under a new id, with the id rule shown as typed, the
   slugified suggestion offered as a click, and an explicit overwrite confirm.
 - **EstimatePanel**, **HeadlinePoolDrawer**, **BriefSelector** — panels; a panel that can be
@@ -413,7 +413,7 @@ Skeletal by design — patterns to extend, not a library.
   Generate in the top bar to run it* → *Saved — press Generate in the top bar to make
   ${briefId}*. Refusal sentence on Save with errors.
 - **The verb model (D35/D40, amends UE-D3).** The editor's bar is *Cancel · Save · ⋯*
-  (*Save as…*, YAML split and *Revert* behind the overflow). *Apply to run* is retired — it named an
+  (*Save as…* and *Revert* behind the overflow). *Apply to run* is retired — it named an
   implementation detail of "the shell needs a brief to run", and every persist path already
   committed it. Run-without-write survives on the **Generate** side: while the editor is
   mounted and its on-screen draft differs from the shell's brief, Generate asks
@@ -453,6 +453,25 @@ Skeletal by design — patterns to extend, not a library.
   StatusLine, ErrorStrip and the action buttons — none of which is ever disabled by
   invalidity: pressing a verb is how a user asks what is wrong, so the refusal is
   spoken (see §5).
+- **PreviewDock & the preview rail (R7, D26/D43/D44/D45/D61).** The composed preview of
+  what the compositor will draw, fed only by the brief through the exported
+  `previewDockProps` derivation — the mapping is product code (the fabrication guard
+  imports it), mode-aware exactly like the Review figure's own rule, so the two surfaces
+  can never disagree about the same brief. It mounts as **one right-rail slot beside the
+  editor row** — `sticky top-0 self-start`, never `fixed`, never inside the animated step
+  card (which renders two live copies during a step change and whose `transform` traps
+  overlays). Guided only, and suppressed on the Review step where the figure owns the
+  preview: **exactly one composed preview is on screen at any time**. The slot's head is a
+  segmented switcher — an eye for the preview, a code glyph for the brief as the pipeline
+  reads it — the views are exclusive, never side by side, and the last choice is
+  remembered (`cf:preview-rail-view`, guarded like every stored preference). The old
+  side-by-side YAML split and its ⋯ menu item are retired with it. When the creative
+  moves, the caption names the video style in words (`MOTION_KIND_META`'s display labels,
+  never a raw kind id) — a loop is never the only carrier of meaning. `PreviewPicture` —
+  the bounded canvas both surfaces share — takes a **final** ratio; every caller derives
+  it with `derivePreviewRatio` at the call site, so no surface ever derives twice.
+  **PreviewStrip is deleted** (owner decision): below the rail's threshold the preview
+  belongs to the wizard's layout-editor step, not to a bottom bar.
 
 ---
 
@@ -551,10 +570,14 @@ after typing.
 
 ## 7. Responsive
 
-Breakpoints are Tailwind's. `lg` is the line: below it the sidebar hides and its content
-moves into the mobile menu; the header tabs collapse behind the hamburger. Wide content
-(tables, YAML, the 100-creative grid) scrolls inside its own `overflow-auto` container —
-the page body never scrolls sideways.
+Breakpoints are Tailwind's, plus one container line. `lg` is the sidebar line: below it
+the sidebar hides and its content moves into the mobile menu; the header tabs collapse
+behind the hamburger. The preview rail is deliberately **not** a viewport breakpoint:
+it shows when the editor row it sits beside has room for it — a container query on that
+row (`@container (min-width: 56rem)`, Tailwind 3.4 arbitrary variants) — because the
+rail itself changes the row's real width, and a viewport breakpoint would lie about what
+fits (R7 §6 question 1). Wide content (tables, YAML, the 100-creative grid) scrolls
+inside its own `overflow-auto` container — the page body never scrolls sideways.
 
 ---
 

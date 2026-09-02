@@ -1,6 +1,6 @@
 import { describe, test, expect } from "vitest";
 import { render } from "@testing-library/react";
-import { PreviewDock, PreviewStrip, derivePreviewRatio } from "../PreviewDock";
+import { PreviewDock, PreviewPicture, derivePreviewRatio } from "../PreviewDock";
 import * as messages from "../messages";
 
 const showcase = {
@@ -34,12 +34,25 @@ describe("derivePreviewRatio", () => {
   });
 });
 
+describe("PreviewPicture", () => {
+  test("draws the final ratio it is handed — it never derives again", () => {
+    // §6 question 4's trap, pinned: the caller derives once (the dock from the
+    // platform, the Review figure before it ever calls) and this passes the RESULT
+    // through. A second derivation here would need a platform it is not given —
+    // so a final 16:9 must reach the canvas as exactly 16:9.
+    const { container } = render(
+      <PreviewPicture primaryColor="#1473E6" headline="Hi" ratio="16:9" className="block h-auto w-full" />,
+    );
+    const svg = container.querySelector("svg")!;
+    expect(svg.getAttribute("viewBox")).toBe("0 0 1920 1080");
+  });
+});
+
 describe("PreviewDock", () => {
-  test("is the desktop rail: hidden below, flex from xl", () => {
+  test("derives the ratio once, at its own call site: the platform wins over the shape chips", () => {
     const { container } = render(<PreviewDock {...showcase} platformId="instagram-story" ratio="1:1" />);
-    const aside = container.querySelector("aside")!;
-    expect(aside.getAttribute("class")).toContain("hidden");
-    expect(aside.getAttribute("class")).toContain("xl:flex");
+    const svg = container.querySelector("svg")!;
+    expect(svg.getAttribute("viewBox")).toBe("0 0 1080 1920");
   });
 
   test("names the platform and ratio as display labels, never raw values", () => {
@@ -54,6 +67,17 @@ describe("PreviewDock", () => {
     expect(container.textContent).toContain("Square · no platform yet");
   });
 
+  test("a moving creative names its video style in the caption, in words (D50)", () => {
+    const { container } = render(
+      <PreviewDock {...showcase} platformId="instagram-story" motion="ken-burns-in" />,
+    );
+    expect(container.textContent).toContain(
+      messages.previewCaptionMotion("Tall", "Instagram Story", "slow zoom in"),
+    );
+    // The raw kind id is display-name territory: the words are the caption, the id never is.
+    expect(container.textContent).not.toContain("ken-burns-in");
+  });
+
   test("shows the campaign name, headline and step readout", () => {
     const { container } = render(<PreviewDock {...showcase} platformId="linkedin" />);
     expect(container.textContent).toContain("Summer Launch");
@@ -61,56 +85,17 @@ describe("PreviewDock", () => {
     expect(container.textContent).toContain(messages.previewStep(2, 6));
   });
 
-  test("renders the preview at the platform ratio, not the shape chips", () => {
-    const { container } = render(<PreviewDock {...showcase} platformId="instagram-story" ratio="1:1" />);
-    const svg = container.querySelector("svg")!;
-    expect(svg.getAttribute("viewBox")).toBe("0 0 1080 1920");
-  });
-
   test("the legend renders through Eyebrow as a p on the token", () => {
     const { container } = render(<PreviewDock {...showcase} platformId="instagram-story" ratio="1:1" />);
-    const legend = container.querySelector("aside p")!;
+    const legend = container.querySelector("p")!;
     expect(legend.textContent).toBe(messages.previewLegend);
     expect(legend.className).toContain("tracking-eyebrow");
     expect(legend.className).not.toContain("tracking-widest");
-  });
-
-  test("is labelled as a complementary landmark region using previewLegend", () => {
-    const { container } = render(<PreviewDock {...showcase} platformId="instagram-story" ratio="1:1" />);
-    const aside = container.querySelector("aside")!;
-    expect(aside.getAttribute("role")).toBe("complementary");
-    expect(aside.getAttribute("aria-label")).toBe(messages.previewLegend);
   });
 
   test("a headline-less brief shows name and step only", () => {
     const { container } = render(<PreviewDock {...showcase} headline={undefined} />);
     expect(container.textContent).toContain("Summer Launch");
     expect(container.textContent).not.toContain("Stay wild");
-  });
-});
-
-describe("PreviewStrip", () => {
-  test("is the mobile rail: flex below, hidden from xl", () => {
-    const { container } = render(<PreviewStrip {...showcase} platformId="linkedin" />);
-    const bar = container.firstElementChild as HTMLElement;
-    expect(bar.getAttribute("class")).toContain("flex");
-    expect(bar.getAttribute("class")).toContain("xl:hidden");
-  });
-
-  test("carries the same caption, name and step as the dock", () => {
-    const { container } = render(<PreviewStrip {...showcase} platformId="linkedin" />);
-    const text = container.textContent ?? "";
-    expect(text).toContain("Square · LinkedIn");
-    expect(text).toContain("Summer Launch");
-    expect(text).toContain(messages.previewStep(2, 6));
-  });
-
-  test("renders exactly one step readout in the strip", () => {
-    const { container } = render(<PreviewStrip {...showcase} platformId="linkedin" />);
-    const stepText = messages.previewStep(2, 6);
-    const matches = Array.from(container.querySelectorAll("p")).filter(
-      (p) => p.textContent === stepText,
-    );
-    expect(matches).toHaveLength(1);
   });
 });

@@ -111,3 +111,21 @@ describe('divide-border-control (the ModelSelector row boundary)', () => {
     expect(css).toMatch(/divide-border-control[^{]*>[^{]*\{/);
   });
 });
+
+// R7 §6 question 1: the preview rail's visibility is a CONTAINER query on the editor
+// row, not a viewport breakpoint. Tailwind 3.4 has no container-query variants built
+// in, but its arbitrary variants accept any at-rule — this proves the variant the
+// rail ships actually emits a real `@container` rule, since a class that compiles to
+// nothing would look identical to one that works.
+describe('Tailwind container query variant (the preview rail)', () => {
+  it('emits a real @container rule for the rail visibility variant', async () => {
+    const css = await generateCss(['[@container(min-width:56rem)]:flex']);
+    expect(css).toContain('@container(min-width:56rem)');
+    expect(css).toContain('display: flex');
+  });
+
+  it('emits container-type for the row that hosts the query', async () => {
+    const css = await generateCss(['[container-type:inline-size]']);
+    expect(css).toContain('container-type: inline-size');
+  });
+});

@@ -113,9 +113,10 @@ describe("the blank editor route (/brief/new)", () => {
     expect(screen.getByText("Randomized")).toBeTruthy();
   });
 
-  // Corrected for D35/D40: the verbs are Cancel / Save (menu) / Save as…, with Revert
-  // behind the overflow — "Apply to run" is retired and Discard split in two.
-  test("has action bar buttons — Cancel and Save, with YAML split and Revert behind the overflow", async () => {
+  // Corrected for D35/D40/D61: the verbs are Cancel / Save (menu) / Save as…, with Revert
+  // behind the overflow — "Apply to run" is retired and Discard split in two, and the
+  // YAML split left the menu entirely (the preview rail owns that view now).
+  test("has action bar buttons — Cancel and Save, with Revert behind the overflow", async () => {
     renderWithRun(<Editor />);
     const bar = screen.getByTestId("action-bar");
     // the error strip's chips sit in the bar too; the action buttons are the rest
@@ -174,13 +175,12 @@ describe("the blank editor route (/brief/new)", () => {
     expect(screen.queryByRole("dialog", { name: /Save as/ })).toBeNull();
   });
 
-  test("YAML split toggle", async () => {
+  // Corrected for D61: the side-by-side YAML split is retired — the preview rail owns
+  // the YAML view now, so the ⋯ menu offers no split toggle at all.
+  test("the ⋯ menu no longer offers a YAML split", async () => {
     const user = userEvent.setup();
     renderWithRun(<Editor />);
     await user.click(screen.getByRole("button", { name: "More actions" }));
-    await user.click(screen.getByRole("menuitem", { name: "YAML split on" }));
-    // The panel closes behind the choice, so the flipped label is read on reopen.
-    await user.click(screen.getByRole("button", { name: "More actions" }));
-    expect(screen.getByRole("menuitem", { name: "YAML split off" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: /YAML split/ })).toBeNull();
   });
 });
