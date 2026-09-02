@@ -91,6 +91,7 @@ function PreviewIdentity(props: PreviewShowcaseProps): ReactNode {
 export function PreviewPicture(props: {
   readonly layout?: PreviewShowcaseProps["layout"];
   readonly tone?: PreviewShowcaseProps["tone"];
+  readonly anchor?: PreviewShowcaseProps["anchor"];
   readonly primaryColor: string;
   readonly headline?: string;
   readonly motion?: MotionKind;
@@ -102,6 +103,7 @@ export function PreviewPicture(props: {
       <CreativePreview
         layout={props.layout}
         tone={props.tone}
+        anchor={props.anchor}
         primaryColor={props.primaryColor}
         headline={props.headline}
         motion={props.motion}
@@ -128,6 +130,7 @@ export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
       <PreviewPicture
         layout={props.layout}
         tone={props.tone}
+        anchor={props.anchor}
         primaryColor={props.primaryColor}
         headline={props.headline}
         motion={props.motion}

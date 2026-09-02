@@ -1,6 +1,7 @@
 import { describe, test, expect } from "vitest";
-import { formatDisplayName, ratioDisplayName, platformDisplayName } from "../display-names";
+import { formatDisplayName, ratioDisplayName, platformDisplayName, anchorDisplayName } from "../display-names";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import { ANCHOR_VALUES } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 
 describe("display names", () => {
   test("formats read as things a person makes, not enum values", () => {
@@ -25,6 +26,16 @@ describe("display names", () => {
   test("platforms use the profile's own label, never a second table", () => {
     expect(platformDisplayName("instagram-feed")).not.toBe("instagram-feed");
     expect(platformDisplayName("not-a-platform")).toBe("not-a-platform");
+  });
+
+  test("every anchor the domain knows has a plain-English name (T4)", () => {
+    for (const anchor of ANCHOR_VALUES) {
+      expect(anchorDisplayName(anchor)).not.toBe(anchor);
+    }
+    expect(anchorDisplayName("top")).toBe("Top");
+    expect(anchorDisplayName("middle")).toBe("Middle");
+    expect(anchorDisplayName("bottom")).toBe("Bottom");
+    expect(anchorDisplayName("sideways")).toBe("sideways");
   });
 });
 

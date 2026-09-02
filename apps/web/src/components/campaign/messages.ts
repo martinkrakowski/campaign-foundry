@@ -164,6 +164,8 @@ export function ratioExcludedNone(): string {
 export const layout = "No layout picked — tap at least one layout card; you can pick them all.";
 /** `tone` */
 export const tone = "No tone picked — tap at least one tone card; Bold and Subtle can both be on.";
+/** `anchor` */
+export const anchor = "No anchor picked — tap at least one anchor card; Top, Middle and Bottom can all be on.";
 /** `background` */
 export const background = "No background picked — tap at least one background card.";
 /** `paletteShift` */

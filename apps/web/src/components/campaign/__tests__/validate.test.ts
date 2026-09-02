@@ -63,6 +63,17 @@ describe("maxMinDistance", () => {
     // requesting motion without kinds draws nothing, so it adds nothing
     expect(maxMinDistance({ ...state, formats: ["static", "motion"], motion: [] })).toBe(6);
   });
+
+  test("the anchor axis adds one only while the saved brief will carry it (T4)", () => {
+    const state = valid();
+    // the derived top/bottom pair means the axis is absent — it adds nothing
+    expect(maxMinDistance(state)).toBe(6);
+    // an authored divergence makes the axis real
+    const anchored = editorReducer(state, { type: "toggleAnchor", value: "middle" });
+    expect(maxMinDistance(anchored)).toBe(7);
+    // a declared selection equal to the derived pair is still carried (anchorExplicit)
+    expect(maxMinDistance({ ...state, anchorExplicit: true })).toBe(7);
+  });
 });
 
 describe("motionUnavailableReason", () => {
@@ -330,6 +341,11 @@ describe("validatePolicy", () => {
     expect(validatePolicy(randomized({ minDistance: "-1" })).minDistance).toBe(messages.minDistance(6));
     expect(validatePolicy(randomized({ minDistance: "" })).minDistance).toBeUndefined();
     expect(validatePolicy(randomized({ headline: true, minDistance: "7" })).minDistance).toBeUndefined();
+  });
+
+  test("an empty anchor selection is an error, like the other value axes (T4)", () => {
+    expect(validatePolicy(randomized({ anchor: [] })).anchor).toBe(messages.anchor);
+    expect(validatePolicy(randomized()).anchor).toBeUndefined();
   });
 
   test("coverage fields are optional integers of at least zero", () => {

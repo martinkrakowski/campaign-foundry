@@ -15,6 +15,7 @@ import {
   DEFAULT_PALETTE_SHIFT,
   MAX_DURATION_SEC,
   MIN_DURATION_SEC,
+  type AnchorKind,
   type BackgroundAxisSource,
 } from "./variation-defaults.js";
 
@@ -28,6 +29,8 @@ export {
   HEADLINE_POOL_REF,
   MAX_DURATION_SEC,
   MIN_DURATION_SEC,
+  ANCHOR_VALUES,
+  type AnchorKind,
   type BackgroundAxisSource,
 } from "./variation-defaults.js";
 
@@ -46,6 +49,7 @@ export const DISTANCE_AXES = [
   "headline",
   "motion",
   "durationSec",
+  "anchor",
 ] as const;
 
 const UINT32_MAX = 0xffffffff;
@@ -91,6 +95,12 @@ export class VariationPolicy {
     readonly paletteShift: readonly number[],
     /** Approved pool texts; empty when the brief has no headline axis. */
     readonly headline: readonly string[],
+    /**
+     * The anchor axis when the brief carries it; empty when absent. An absent
+     * axis means the compositor derives the placement from `layout` — the
+     * pre-axis behaviour — so it must join nothing for such a brief (D57).
+     */
+    readonly anchor: readonly AnchorKind[],
     readonly productIds: readonly string[],
     readonly ratios: readonly AspectRatioValue[],
     readonly axisProductSize: number,
@@ -164,14 +174,20 @@ export class VariationPolicy {
     const headlineResult = resolveHeadline(brief, axes?.headline, input.headlines);
     if (!headlineResult.success) return headlineResult;
     const headline = headlineResult.value;
+    const anchor = unique(
+      axes?.anchor !== undefined ? [...(axes.anchor as readonly AnchorKind[])] : [],
+    );
 
     // A candidate can differ in at most the axes this brief activates: every
     // DISTANCE_AXES entry except the optional ones that are off. An optional axis
     // counts only while it has at least one drawable option: `headline` when the
     // pool resolved to at least one text, `motion` when the axis is enabled —
     // and `durationSec` is drawn only on motion slots, so it follows `motion`.
+    // `anchor` counts only when the brief carries the axis: without it the
+    // compositor derives the placement from `layout`, so it cannot differ.
     const activeAxes = DISTANCE_AXES.filter((axis) => {
       if (axis === "headline") return headline.length > 0;
+      if (axis === "anchor") return anchor.length > 0;
       if (axis === "motion" || axis === "durationSec") return motionEnabled;
       return true;
     }).length;
@@ -232,7 +248,9 @@ export class VariationPolicy {
       );
     }
     // A mixed plan adds exactly one still slot per base combination — the still
-    // carries no duration, so it is not multiplied by |duration|.
+    // carries no duration, so it is not multiplied by |duration|. The anchor
+    // axis multiplies only when the brief carries it (D57): absent means
+    // derived from `layout`, which adds no new combination.
     const axisProductSize =
       productIds.length *
       ratios.length *
@@ -241,6 +259,7 @@ export class VariationPolicy {
       backgroundSource.length *
       paletteShift.length *
       Math.max(1, headline.length) *
+      Math.max(1, anchor.length) *
       (motionEnabled ? motion.length * duration.length + (mixStatic ? 1 : 0) : 1);
 
     const policyHash = hashPolicy(
@@ -261,6 +280,9 @@ export class VariationPolicy {
         // Only briefs with the headline axis carry it in the hash, so every
         // pre-existing policyHash (and golden) is unchanged.
         ...(headline.length > 0 ? { headline } : {}),
+        // The anchor axis follows the same conditional-spread pattern (D57):
+        // a brief without it keeps the exact pre-axis policyHash.
+        ...(anchor.length > 0 ? { anchor } : {}),
       },
       hashFn,
     );
@@ -276,6 +298,7 @@ export class VariationPolicy {
         backgroundSource,
         paletteShift,
         headline,
+        anchor,
         productIds,
         ratios,
         axisProductSize,
@@ -405,6 +428,7 @@ function resolveHeadline(
 function hashPolicy(
   payload: {
     axisProductSize: number;
+    anchor?: readonly string[];
     backgroundSource: readonly string[];
     count: number;
     coverage: VariationCoverage;

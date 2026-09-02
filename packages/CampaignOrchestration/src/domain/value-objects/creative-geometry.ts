@@ -38,4 +38,16 @@ export const CREATIVE_GEOMETRY = {
    * `const shadeAlpha = subtle ? 0.4 : 0.7`.
    */
   shadeAlpha: { bold: 0.7, subtle: 0.4 },
+  /**
+   * Vertical placement of the headline BLOCK per anchor value, as fractions of
+   * the canvas HEIGHT (the anchor axis — plan 2026-09-01, T4). `top` puts the
+   * block's top edge at the fraction; `bottom` puts the block's bottom edge
+   * (the last baseline) that far above the bottom edge; `middle` centres the
+   * wrapped block at that fraction of the SAFE-area height, so insets shift
+   * it. The frozen legacy draw path keeps its own literals for the top/bottom
+   * edges (D10) — both values here are byte-identical to them — while the
+   * layout helpers (`layoutAt`/`settleLayout`) and the web's SVG preview read
+   * this object, so the two engines cannot drift.
+   */
+  headlineAnchor: { top: 0.1, bottom: 0.08, middle: 0.5 },
 } as const;

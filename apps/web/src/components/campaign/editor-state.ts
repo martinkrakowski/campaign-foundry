@@ -14,6 +14,7 @@ import {
   HEADLINE_POOL_REF,
   MAX_DURATION_SEC,
   MIN_DURATION_SEC,
+  ANCHOR_VALUES,
 } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import { MOTION_KINDS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import {
@@ -43,6 +44,18 @@ import { platformsToFormats, platformsToRatios } from "./derive";
 
 export const LAYOUT_OPTIONS = ["headline-top", "headline-bottom"] as const;
 export const TONE_OPTIONS = ["bold", "subtle"] as const;
+/** The anchor axis' vocabulary (T4) — the domain's ANCHOR_VALUES, in its order. */
+export const ANCHOR_OPTIONS: readonly string[] = ANCHOR_VALUES;
+/**
+ * What the ABSENT anchor axis already produces: the compositor derives the
+ * placement from `layout` (`headline-top` → `top`, else `bottom`), so the
+ * pre-axis behaviour spans exactly top and bottom. A selection equal to this
+ * says nothing the absent key does not, so `toBrief` omits the key and the
+ * brief's `policyHash` stays byte-identical (D57) — the same convention the
+ * `ratio` axis follows in the same `axes` object. Selecting Middle (or any
+ * other divergence) is what makes the axis real.
+ */
+export const DERIVED_ANCHOR_OPTIONS: readonly string[] = ["top", "bottom"];
 export const BACKGROUND_OPTIONS = ["procedural", "asset-pool", "genai"] as const;
 export const PALETTE_SHIFT_OPTIONS = [0, 0.1, 0.2] as const;
 /** The two campaign modes in panel order (D4) — `brief` (Classic) first. */
@@ -198,14 +211,22 @@ export interface EditorState {
    * only the serialisation is gated, so toggling back restores the work.
    */
   timeline: TimelineDraft;
-  /**
-   * True only when the loaded brief declared a `copy` block (D11). A declared-but-empty
+  /** True only when the loaded brief declared a `copy` block (D11). A declared-but-empty
    * block (`copy: {}`) is legal — the parser accepts it — and must survive a load→save
    * the same way `outputExplicit` preserves a declared `output`: saving must not strip
    * what a file already wrote. The editor never authors an empty block on its own;
-   * `toBrief` writes one only to keep such a file byte-identical.
-   */
+   * `toBrief` writes one only to keep such a file byte-identical. */
   copyExplicit: boolean;
+  /**
+   * True when the loaded brief declared `variation.axes.anchor` (T4). The absent axis
+   * and an authored top+bottom selection render identically but hash differently —
+   * the one case the selection data cannot distinguish — so the flag preserves a
+   * hand-authored derived selection through a save, exactly as `outputExplicit`
+   * preserves a declared default `output`. A toggle recomputes it (never latches):
+   * toggling a divergence back to the derived selection returns the brief to the
+   * absent-key form, the same on→off discipline `ratioOverridden` follows.
+   */
+  anchorExplicit: boolean;
   variation: {
     count: string;
     seed: string;
@@ -214,6 +235,8 @@ export interface EditorState {
     perRatio: string;
     layout: string[];
     tone: string[];
+    /** Where the headline block sits vertically (T4) — the same axis list the other axes keep. */
+    anchor: string[];
     ratio: string[];
     background: string[];
     paletteShift: number[];
@@ -283,6 +306,7 @@ export type EditorAction =
   | { type: "setVariation"; field: "count" | "seed" | "minDistance" | "perProduct" | "perRatio"; value: string }
   | { type: "toggleLayout"; value: string }
   | { type: "toggleTone"; value: string }
+  | { type: "toggleAnchor"; value: string }
   | { type: "toggleRatio"; value: string }
   | { type: "toggleBackground"; value: string }
   | { type: "togglePalette"; value: number }
@@ -331,6 +355,7 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
     treatments: [],
     timeline: { beats: [], transition: "fade", keyBeat: 1 },
     copyExplicit: false,
+    anchorExplicit: false,
     variation: {
       count: "12",
       seed: "",
@@ -339,6 +364,7 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
       perRatio: "1",
       layout: [...LAYOUT_OPTIONS],
       tone: [...TONE_OPTIONS],
+      anchor: [...DERIVED_ANCHOR_OPTIONS],
       ratio: [...RATIO_OPTIONS],
       background: [...DEFAULT_BACKGROUND_SOURCES],
       paletteShift: [...PALETTE_SHIFT_OPTIONS],
@@ -365,6 +391,24 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
 function toggleOrdered<T>(list: readonly T[], value: T, order: readonly T[]): T[] {
   const next = list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
   return order.filter((item) => next.includes(item));
+}
+
+/** True when the selection is exactly the derived pair the absent axis produces. */
+function isDerivedAnchorSelection(selection: readonly string[]): boolean {
+  return (
+    selection.length === DERIVED_ANCHOR_OPTIONS.length &&
+    DERIVED_ANCHOR_OPTIONS.every((value, index) => selection[index] === value)
+  );
+}
+
+/**
+ * Whether the draft's saved brief will carry the anchor axis — the editor's
+ * mirror of the domain's `anchor.length > 0`: everything downstream
+ * (`axisProductSize`, the minDistance bound, the dock's derivation) must read
+ * the axis exactly as `toBrief` writes it.
+ */
+export function anchorAxisActive(state: EditorState): boolean {
+  return state.anchorExplicit || !isDerivedAnchorSelection(state.variation.anchor);
 }
 
 
@@ -420,6 +464,9 @@ export function axisProductSize(state: EditorState): number {
     Math.max(1, state.variation.background.length) *
     Math.max(1, state.variation.paletteShift.length) *
     Math.max(1, state.variation.headline ? approvedHeadlines(state.pool) : 1) *
+    // The anchor axis (T4) multiplies only when the saved brief will carry it:
+    // the absent axis derives top/bottom from `layout`, adding no combination.
+    (anchorAxisActive(state) ? Math.max(1, state.variation.anchor.length) : 1) *
     (motionEnabled ? state.motion.length * Math.max(1, state.duration.length) + (mixStatic ? 1 : 0) : 1)
   );
 }
@@ -684,6 +731,20 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       const tone = toggleOrdered(state.variation.tone, action.value, TONE_OPTIONS);
       if (tone.length === 0) return state;
       return { ...state, variation: { ...state.variation, tone } };
+    }
+    case "toggleAnchor": {
+      // Min-one guard (D6): the last selected value cannot be deselected — the click
+      // is a no-op, which deletes the "select at least one" error by construction.
+      const anchor = toggleOrdered(state.variation.anchor, action.value, ANCHOR_OPTIONS);
+      if (anchor.length === 0) return state;
+      return {
+        ...state,
+        variation: { ...state.variation, anchor },
+        // Recomputed, not latched (the ratioOverridden discipline): a toggle that
+        // returns the selection to the derived pair puts the brief back on the
+        // absent-key form, so a toggle-on→off cycle serialises byte-identically.
+        anchorExplicit: !isDerivedAnchorSelection(anchor),
+      };
     }
     case "toggleRatio": {
       const nextRatioSelection = toggleOrdered(state.variation.ratio, action.value, RATIO_OPTIONS);
@@ -1029,6 +1090,13 @@ export function toBrief(state: EditorState): CampaignBrief {
   const axes = {
     layout: [...state.variation.layout],
     tone: [...state.variation.tone],
+    // The anchor axis (T4) is written only when it says something the absent key
+    // does not: the absent axis derives top/bottom from `layout`, so a selection
+    // equal to that derived pair round-trips an anchor-less brief key-free and
+    // hash-identical (D57) — the ratio axis' convention, not layout/tone's,
+    // because this axis' absence is NOT its full vocabulary. A declared
+    // `anchorExplicit` selection is preserved even when it equals the pair.
+    ...(anchorAxisActive(state) ? { anchor: [...state.variation.anchor] } : {}),
     // The ratio axis is written only when it constrains: absent means every
     // ratio, so a full selection round-trips a brief without the key
     // byte-identically instead of growing a redundant `ratio: [all]`.
@@ -1126,6 +1194,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
     treatments,
     timeline,
     copyExplicit: brief.copy !== undefined,
+    anchorExplicit: axes?.anchor !== undefined,
     variation: {
       count: variation ? String(variation.count) : "12",
       seed: num(variation?.seed),
@@ -1134,6 +1203,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
       perRatio: coverage ? num(coverage.perRatio) : variation ? "" : "1",
       layout: list(axes?.layout, [...LAYOUT_OPTIONS]),
       tone: list(axes?.tone, [...TONE_OPTIONS]),
+      anchor: list(axes?.anchor, [...DERIVED_ANCHOR_OPTIONS]),
       ratio: storedRatios,
       background: list((axes?.background as { source?: unknown } | undefined)?.source, [...DEFAULT_BACKGROUND_SOURCES]),
       paletteShift: list(axes?.paletteShift, [...PALETTE_SHIFT_OPTIONS]),
@@ -1352,6 +1422,7 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     perRatio: str(v.perRatio, initial.variation.perRatio),
     layout: list(v.layout, initial.variation.layout),
     tone: list(v.tone, initial.variation.tone),
+    anchor: list(v.anchor, initial.variation.anchor),
     ratio: list(v.ratio, initial.variation.ratio),
     background: list(v.background, initial.variation.background),
     paletteShift: list(v.paletteShift, initial.variation.paletteShift),
@@ -1394,6 +1465,13 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     // Keys are minted by position in normalizeTimelineDraft, so the counter starts past them.
     nextBeatKey: normalizedTimeline.beats.length + 1,
     copyExplicit: raw.copyExplicit === true,
+    // A pre-T4 draft wrote no anchor at all: inferred from the data like the
+    // sibling overrides — a selection that diverges from the derived pair was
+    // authored, whatever the flag says; a declared one is believed.
+    anchorExplicit:
+      raw.anchorExplicit === undefined
+        ? !isDerivedAnchorSelection(variation.anchor)
+        : raw.anchorExplicit === true,
     variation,
     motion,
     duration,

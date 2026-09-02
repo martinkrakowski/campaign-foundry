@@ -19,6 +19,24 @@ describe("previewDockProps", () => {
     expect(props.tone).toBe("subtle");
   });
 
+  test("the anchor is passed only while the saved brief will carry the axis (T4)", () => {
+    const state = initialEditorState("variation");
+    state.products = [emptyProduct(1, "#1473E6")];
+    // The derived top/bottom pair means the axis is ABSENT: the dock derives
+    // the placement from layout, exactly as the compositor does.
+    expect(previewDockProps(state, 0, 6)!.anchor).toBeUndefined();
+    // Selecting Middle makes the axis real, and the first value feeds the dock.
+    state.variation.anchor = ["middle", "top"];
+    state.anchorExplicit = true;
+    expect(previewDockProps(state, 0, 6)!.anchor).toBe("middle");
+    // A classic draft never reads the axis, whatever its treatments say.
+    const classic = initialEditorState("brief");
+    classic.products = [emptyProduct(1, "#1473E6")];
+    classic.variation.anchor = ["middle"];
+    classic.anchorExplicit = true;
+    expect(previewDockProps(classic, 0, 6)!.anchor).toBeUndefined();
+  });
+
   test("a classic draft takes the look from its treatment, never its leftover axes", () => {
     const state = initialEditorState("brief");
     state.products = [emptyProduct(1, "#1473E6")];

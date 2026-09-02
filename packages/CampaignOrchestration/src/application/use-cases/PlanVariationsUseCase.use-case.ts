@@ -168,6 +168,7 @@ function drawAxes(
     paletteShift: rng.pick(policy.paletteShift),
     // Optional axes draw last, each only when on, so briefs without them keep their goldens.
     ...drawHeadline(rng, policy),
+    ...drawAnchor(rng, policy),
     ...drawMotion(rng, policy, aspectRatio),
   };
 }
@@ -175,6 +176,11 @@ function drawAxes(
 /** Draw a pooled headline, so briefs without the axis leave the rng sequence untouched. */
 function drawHeadline(rng: SeededRandom, policy: VariationPolicy): Pick<Variant, "headline"> {
   return policy.headline.length === 0 ? {} : { headline: rng.pick(policy.headline) };
+}
+
+/** Draw the anchor axis the same way: briefs without it consume no draws (goldens unchanged). */
+function drawAnchor(rng: SeededRandom, policy: VariationPolicy): Pick<Variant, "anchor"> {
+  return policy.anchor.length === 0 ? {} : { anchor: rng.pick(policy.anchor) };
 }
 
 /**

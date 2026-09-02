@@ -10,6 +10,7 @@ import {
   type MotionKind,
   type ResolvedBeat,
   type SafeInsets,
+  type AnchorKind,
 } from "@campaignfoundry/CampaignOrchestration";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import { hexToRgb, wrapText } from "./canvas-util.js";
@@ -32,6 +33,14 @@ interface PreparedCreative {
   readonly width: number;
   readonly height: number;
   readonly top: boolean;
+  /**
+   * Where the headline block sits vertically (T4). Resolved in `prepare`:
+   * absent request anchor → derived from `layout` (`headline-top` → `top`,
+   * else `bottom`), so a request without the axis takes exactly today's path
+   * and numbers (D54). The shade/accent edge stays `top`'s — `layout`'s —
+   * and only the text block moves.
+   */
+  readonly anchor: AnchorKind;
   readonly shadeAlpha: number;
   readonly fontWeight: string;
   readonly fontFamily: string;
@@ -240,6 +249,9 @@ export class NodeCanvasCompositor implements CompositorPort {
   ): Promise<PreparedCreative> {
     const { width, height } = request.ratio;
     const top = request.layout === "headline-top";
+    // The anchor axis (T4): absent → derived from layout, the pre-axis
+    // behaviour bit for bit (D54 — the goldens pin both derived paths).
+    const anchor: AnchorKind = request.anchor ?? (top ? "top" : "bottom");
     const subtle = request.tone === "subtle";
     const shadeAlpha = subtle
       ? CREATIVE_GEOMETRY.shadeAlpha.subtle
@@ -287,6 +299,7 @@ export class NodeCanvasCompositor implements CompositorPort {
       width,
       height,
       top,
+      anchor,
       shadeAlpha,
       fontWeight,
       fontFamily,
@@ -389,12 +402,35 @@ interface HeadlineLayout {
 
 /**
  * The prepared-fields the layout math reads, so fitting works on the real blit
- * context and on the throwaway measure context alike.
+ * context and on the throwaway measure context alike — and so the timeline
+ * path (which measures on the 1×1 context, F5a) inherits the anchor the same
+ * way the still path does.
  */
 type LayoutSource = Pick<
   PreparedCreative,
-  "width" | "height" | "top" | "fontWeight" | "fontFamily" | "insets"
+  "width" | "height" | "top" | "anchor" | "fontWeight" | "fontFamily" | "insets"
 >;
+
+/**
+ * The block's first baseline for the anchor: `top` pins the block's top edge
+ * at the leaf's top fraction, `bottom` pins its last baseline at the bottom
+ * fraction, `middle` centres the wrapped block (span + type size) at the
+ * leaf's middle fraction of the SAFE-area height, so insets shift it. The
+ * top/bottom expressions are the frozen legacy arithmetic with its literals
+ * replaced by the leaf's byte-identical values — an absent axis (derived
+ * anchor) keeps today's numbers exactly (D54).
+ */
+function anchorFirstY(p: LayoutSource, span: number, fontSize: number): number {
+  if (p.anchor === "middle") {
+    const safeHeight = p.height - p.insets.top - p.insets.bottom;
+    return (
+      p.insets.top + safeHeight * CREATIVE_GEOMETRY.headlineAnchor.middle - (span + fontSize) / 2 + fontSize
+    );
+  }
+  return p.anchor === "top"
+    ? p.height * CREATIVE_GEOMETRY.headlineAnchor.top + fontSize + p.insets.top
+    : p.height - p.height * CREATIVE_GEOMETRY.headlineAnchor.bottom - span - p.insets.bottom;
+}
 
 /**
  * Lay a text out at its natural (autofit) type size — the legacy path's only
@@ -432,9 +468,7 @@ function layoutAt(ctx: SKRSContext2D, p: LayoutSource, text: string, fontSize: n
   const maxLast = p.height - p.insets.bottom;
   const span = (lines.length - 1) * lineHeight;
   const fits = minFirst + span <= maxLast;
-  let firstY = p.top
-    ? p.height * 0.1 + fontSize + p.insets.top
-    : p.height - p.height * 0.08 - span - p.insets.bottom;
+  let firstY = anchorFirstY(p, span, fontSize);
   if (fits) {
     firstY = Math.min(Math.max(firstY, minFirst), maxLast - span);
   }
@@ -462,9 +496,7 @@ function settleLayout(ctx: SKRSContext2D, p: LayoutSource, attempt: LayoutAttemp
       lines[lines.length - 1] = ellipsize(ctx, lines[lines.length - 1], attempt.wrapWidth);
     }
     const span = (lines.length - 1) * attempt.lineHeight;
-    let firstY = p.top
-      ? p.height * 0.1 + attempt.fontSize + p.insets.top
-      : p.height - p.height * 0.08 - span - p.insets.bottom;
+    let firstY = anchorFirstY(p, span, attempt.fontSize);
     firstY = Math.min(Math.max(firstY, attempt.minFirst), attempt.maxLast - span);
     attempt = { ...attempt, lines, firstY, span, fits: true };
   }

@@ -211,9 +211,25 @@ describe("PolicySection — axes", () => {
 
     await user.click(within(axis("Tone")).getByRole("button", { name: "subtle" }));
     expect(dispatch).toHaveBeenCalledWith({ type: "toggleTone", value: "subtle" });
-
     // the preview is decoration carried by the card
     expect(top.querySelector("svg[aria-hidden='true']")).toBeTruthy();
+  });
+
+  test("the anchor cards (T4) show their display names and answer to their raw value", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    render(<PolicySection state={state()} dispatch={dispatch} errors={{}} />);
+
+    // Display names on the face (the jargon gate), raw values as the names (D18):
+    const anchorFieldset = axis("Anchor");
+    const middle = within(anchorFieldset).getByRole("button", { name: "middle" }) as HTMLButtonElement;
+    expect(middle.textContent).toContain("Middle");
+    expect(middle.getAttribute("aria-pressed")).toBe("false");
+    await user.click(middle);
+    expect(dispatch).toHaveBeenCalledWith({ type: "toggleAnchor", value: "middle" });
+    // The derived pair starts selected: Top and Bottom pressed, Middle not.
+    expect(within(anchorFieldset).getByRole("button", { name: "top" }).getAttribute("aria-pressed")).toBe("true");
+    expect(within(anchorFieldset).getByRole("button", { name: "bottom" }).getAttribute("aria-pressed")).toBe("true");
   });
 
   test("every advanced axis shows what it does, and is still named by its raw value", () => {
@@ -540,8 +556,9 @@ describe("the lock-or-vary hint (T2 / F6)", () => {
   // nothing on the cards said so — the surface read as a style picker.
   test("a full selection speaks the draw pool", () => {
     render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
-    // layout and tone both start with every value selected
-    expect(screen.getAllByText(messages.axisVaries(2)).length).toBe(2);
+    // layout, tone and anchor (T4) all start with two values in play — the
+    // anchor's derived top/bottom pair varies exactly as the absent axis does.
+    expect(screen.getAllByText(messages.axisVaries(2)).length).toBe(3);
   });
 
   test("a malformed sole entry from a hand-edited draft does not crash the hint", () => {

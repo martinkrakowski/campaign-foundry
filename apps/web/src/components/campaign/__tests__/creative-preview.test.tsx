@@ -8,6 +8,9 @@ import {
   PREVIEW_MAX_LINES,
   PREVIEW_FONT_RATIO,
   PREVIEW_FONT_FLOOR_FRACTION,
+  PREVIEW_ANCHOR_TOP,
+  PREVIEW_ANCHOR_MIDDLE,
+  PREVIEW_ANCHOR_BOTTOM,
   CHAR_WIDTH_RATIO,
   fitHeadline,
   wrapHeadline,
@@ -250,6 +253,53 @@ describe("CreativePreview", () => {
     const bold = svgOf(<CreativePreview primaryColor="#1473E6" tone="bold" headline="Stay wild" />);
     expect(Number(subtle.querySelector("text")!.getAttribute("font-weight"))).toBe(400);
     expect(Number(bold.querySelector("text")!.getAttribute("font-weight"))).toBe(700);
+  });
+
+  describe("the anchor axis (T4)", () => {
+    const H = RATIO_DIMENSIONS["1:1"].height;
+    const W = RATIO_DIMENSIONS["1:1"].width;
+    const fontSize = Math.round(W * CREATIVE_GEOMETRY.headlineTypeWidthFraction);
+    const headlineOf = (svg: SVGSVGElement): SVGTextElement => svg.querySelector("text")!;
+    const baselineOf = (svg: SVGSVGElement): number => Number(headlineOf(svg).getAttribute("y"));
+
+    test("an absent anchor derives from layout — the pre-axis behaviour", () => {
+      // Bottom layout with no anchor: the block's last baseline sits at the
+      // bottom edge fraction — the compositor's own derived rule.
+      const bottom = svgOf(<CreativePreview primaryColor="#1473E6" layout="headline-bottom" headline="Stay wild" />);
+      expect(baselineOf(bottom)).toBe(H - H * CREATIVE_GEOMETRY.headlineAnchor.bottom);
+      // Top layout with no anchor: block top + the 0.75em ascent convention.
+      const top = svgOf(<CreativePreview primaryColor="#1473E6" layout="headline-top" headline="Stay wild" />);
+      expect(baselineOf(top)).toBe(H * CREATIVE_GEOMETRY.headlineAnchor.top + fontSize * 0.75);
+    });
+
+    test("anchor middle centres the wrapped block (rendered arithmetic, not a class assertion)", () => {
+      const svg = svgOf(
+        <CreativePreview primaryColor="#1473E6" layout="headline-bottom" anchor="middle" headline="Stay wild" />,
+      );
+      const text = headlineOf(svg);
+      expect(Number(text.getAttribute("y"))).toBe(
+        H * PREVIEW_ANCHOR_MIDDLE - fontSize / 2 + fontSize * 0.75,
+      );
+      // One line: the block's box midpoint is the canvas centre (zero insets here).
+      const span = 0;
+      const blockMidpoint = Number(text.getAttribute("y")) - fontSize * 0.75 + (span + fontSize) / 2;
+      expect(blockMidpoint).toBe(H * 0.5);
+    });
+
+    test("anchor top and bottom pin the block to the leaf's edge fractions", () => {
+      const top = svgOf(<CreativePreview primaryColor="#1473E6" anchor="top" headline="Stay wild" />);
+      expect(baselineOf(top)).toBe(H * PREVIEW_ANCHOR_TOP + fontSize * 0.75);
+      const bottom = svgOf(<CreativePreview primaryColor="#1473E6" anchor="bottom" headline="Stay wild" />);
+      expect(baselineOf(bottom)).toBe(H - H * PREVIEW_ANCHOR_BOTTOM);
+    });
+
+    test("the anchor moves the text but never the accent band (the band stays layout's)", () => {
+      const svg = svgOf(
+        <CreativePreview primaryColor="#1473E6" layout="headline-bottom" anchor="middle" />,
+      );
+      // headline-bottom: the solid band stays flush to the bottom edge.
+      expect(Number(bandRect(svg).getAttribute("y"))).toBe(H - H * CREATIVE_GEOMETRY.accentSolidHeightFraction);
+    });
   });
 
   test("draws the logo block at the compositor's geometry, opposite the headline (C4)", () => {

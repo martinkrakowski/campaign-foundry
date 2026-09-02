@@ -354,6 +354,19 @@ describe("GenerateCampaignUseCase — variation", () => {
     expect(result.value.assets[1].descriptor).not.toHaveProperty("headline");
   });
 
+  test("threads a drawn anchor into the composite request and descriptor, absent otherwise (T4)", async () => {
+    const variants = [fakeVariant({ anchor: "middle" }), fakeVariant({ index: 1, aspectRatio: "9:16" })];
+    const d = deps({ planner: fakePlanner(fakePlan(variants)) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief());
+    expect(result.success).toBe(true);
+    const requests = vi.mocked(d.compositor.compositeAsset).mock.calls.map((call) => call[0]);
+    expect(requests[0]).toMatchObject({ anchor: "middle" });
+    expect(requests[1]).not.toHaveProperty("anchor");
+    if (!result.success) return;
+    expect(result.value.assets[0].descriptor).toMatchObject({ anchor: "middle" });
+    expect(result.value.assets[1].descriptor).not.toHaveProperty("anchor");
+  });
+
   test("legal-gates every distinct pooled headline and halts like a prohibited campaign message", async () => {
     const compliance = {
       validateLegalCopy: vi.fn(async (text: string) =>

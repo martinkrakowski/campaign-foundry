@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
-import type { LayoutOption, ToneOption } from "./CreativePreview";
+import type { LayoutOption, ToneOption, AnchorOption } from "./CreativePreview";
 import { derivePreviewRatio, PreviewPicture } from "./PreviewDock";
 import { formatDisplayName, platformDisplayName, ratioDisplayName } from "./display-names";
 import { SECTION_TITLES, sectionOrder, type SectionId } from "./sections";
@@ -123,6 +123,9 @@ export function ReviewStep({
     treatment !== undefined ? treatment.layout : (firstOf(axes?.layout) as LayoutOption | undefined);
   const tone: ToneOption | undefined =
     treatment !== undefined ? treatment.tone : (firstOf(axes?.tone) as ToneOption | undefined);
+  // The anchor axis (T4) is a variation-axis value only — classic treatments do not carry one.
+  const anchor: AnchorOption | undefined =
+    treatment !== undefined ? undefined : (firstOf(axes?.anchor) as AnchorOption | undefined);
   const motion: MotionKind | undefined =
     wantsMotion && axes?.motion !== undefined ? (axes.motion[0] as MotionKind) : undefined;
 
@@ -164,6 +167,7 @@ export function ReviewStep({
           <PreviewPicture
             layout={layout}
             tone={tone}
+            anchor={anchor}
             primaryColor={product.primaryColor}
             headline={brief.campaignMessage}
             motion={motion}

@@ -29,7 +29,7 @@ const brief = (over: Partial<CampaignBrief> = {}): CampaignBrief => ({
 const planner = (): PlanVariationsUseCase => new PlanVariationsUseCase(nodeCryptoPolicyHasher);
 
 const hamming = (a: Variant, b: Variant): number => {
-  const axes = ["productId", "aspectRatio", "layout", "tone", "backgroundSource", "paletteShift", "headline", "motion", "durationSec"] as const;
+  const axes = ["productId", "aspectRatio", "layout", "tone", "backgroundSource", "paletteShift", "headline", "motion", "durationSec", "anchor"] as const;
   return axes.reduce((distance, axis) => distance + (a[axis] !== b[axis] ? 1 : 0), 0);
 };
 
@@ -277,6 +277,34 @@ describe("PlanVariationsUseCase.plan", () => {
       expect(variant.seed).toBe(seedFrom("golden", String(variant.index), "0"));
       expect(variant.index).toBe(result.value.variants.indexOf(variant));
     }
+  });
+});
+
+describe("PlanVariationsUseCase — anchor axis", () => {
+  test("draws the anchor only when the brief carries it, so axis-less plans stay golden", () => {
+    const plain = planner().plan(brief({ variation: { count: 12, seed: 7, minDistance: 1 } }));
+    const anchoredBrief = brief({
+      variation: { count: 12, seed: 7, minDistance: 1, axes: { anchor: ["middle"] } },
+    });
+    const anchored = planner().plan(anchoredBrief);
+    expect(plain.success && anchored.success).toBe(true);
+    if (!plain.success || !anchored.success) return;
+    // Without the axis no variant carries an anchor — the draw consumed nothing.
+    for (const variant of plain.value.variants) expect(variant.anchor).toBeUndefined();
+    // With the axis every slot drew it, and the estimate reflects the axis.
+    for (const variant of anchored.value.variants) expect(variant.anchor).toBe("middle");
+    expect(anchored.value.estimate.axisProductSize).toBe(plain.value.estimate.axisProductSize * 1);
+    expect(anchored.value.policyHash).not.toBe(plain.value.policyHash);
+  });
+
+  test("the anchor is a Hamming axis: minDistance 2 is satisfiable across a two-value draw", () => {
+    const result = planner().plan(
+      brief({
+        variation: { count: 6, seed: 7, minDistance: 2, axes: { anchor: ["top", "middle"] } },
+      }),
+    );
+    expect(result.success).toBe(true);
+    if (result.success) expectDistanceHeld(result.value);
   });
 });
 

@@ -101,7 +101,15 @@ const v2Brief = {
 
 describe("parseBrief v2 fields", () => {
   test("SUPPORTED_AXES and SUPPORTED_FORMATS lock the P0 allowlist; motion is a gated extension", () => {
-    expect(SUPPORTED_AXES).toEqual(["layout", "tone", "ratio", "background", "paletteShift", "headline"]);
+    expect(SUPPORTED_AXES).toEqual([
+      "layout",
+      "tone",
+      "ratio",
+      "background",
+      "paletteShift",
+      "headline",
+      "anchor",
+    ]);
     expect(SUPPORTED_FORMATS).toEqual(["static"]);
     expect(MOTION_AXES).toEqual(["motion", "duration"]);
     expect(MOTION_FORMAT).toBe("motion");
@@ -148,6 +156,12 @@ describe("parseBrief v2 fields", () => {
     expect(parsed.mode).toBe("variation");
     expect(parsed.variation).toEqual(v2Brief.variation);
     expect(parsed.output).toEqual(v2Brief.output);
+  });
+
+  test("accepts the anchor axis as a subset of its three values and preserves it (T4)", () => {
+    const parsed = parseBrief({ ...valid, variation: { count: 4, axes: { anchor: ["top", "middle", "bottom"] } } });
+    expect(parsed.variation?.axes?.anchor).toEqual(["top", "middle", "bottom"]);
+    expect(parseBrief({ ...valid, variation: { count: 4, axes: { anchor: ["bottom"] } } }).variation?.axes?.anchor).toEqual(["bottom"]);
   });
 
   test("accepts mode brief and sparse v2 objects", () => {
@@ -216,6 +230,9 @@ describe("parseBrief v2 fields", () => {
     ["a non-string layout value", { ...valid, variation: { axes: { layout: [1] } } }, /layout/],
     ["an invalid tone value", { ...valid, variation: { axes: { tone: ["loud"] } } }, /tone/],
     ["a non-array tone", { ...valid, variation: { axes: { tone: "bold" } } }, /tone/],
+    ["an invalid anchor value", { ...valid, variation: { axes: { anchor: ["sideways"] } } }, /anchor/],
+    ["a non-array anchor", { ...valid, variation: { axes: { anchor: "top" } } }, /anchor/],
+    ["a non-string anchor value", { ...valid, variation: { axes: { anchor: [1] } } }, /anchor/],
     ["a non-object background", { ...valid, variation: { axes: { background: [] } } }, /background/],
     ["a null background", { ...valid, variation: { axes: { background: null } } }, /background/],
     [

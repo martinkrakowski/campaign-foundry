@@ -1003,6 +1003,98 @@ describe("variation policy round-trip", () => {
   });
 });
 
+describe("the anchor axis (T4)", () => {
+  const randomized = (over: Partial<EditorState> = {}): EditorState => ({
+    ...initialEditorState("variation"),
+    briefId: "camp",
+    ...over,
+  });
+
+  test("a fresh draft sits on the derived top/bottom pair — the absent axis' own behaviour", () => {
+    expect(initialEditorState().variation.anchor).toEqual(["top", "bottom"]);
+    // The absent axis writes no key: a fresh draft round-trips anchor-free.
+    expect(toBrief(initialEditorState("variation")).variation?.axes).not.toHaveProperty("anchor");
+  });
+
+  test("toggleAnchor with the min-one guard: the last value cannot be deselected", () => {
+    const locked = reduce(initialEditorState("variation"), { type: "toggleAnchor", value: "bottom" });
+    expect(locked.variation.anchor).toEqual(["top"]);
+    // Dropping the guard would empty the selection here — the click is a no-op instead.
+    const blocked = reduce(locked, { type: "toggleAnchor", value: "top" });
+    expect(blocked).toBe(locked);
+    expect(blocked.variation.anchor).toEqual(["top"]);
+  });
+
+  test("selecting Middle activates the axis; toggling it back returns the absent-key form", () => {
+    const on = reduce(initialEditorState("variation"), { type: "toggleAnchor", value: "middle" });
+    expect(on.variation.anchor).toEqual(["top", "middle", "bottom"]);
+    expect(on.anchorExplicit).toBe(true);
+    expect(toBrief(on).variation?.axes?.anchor).toEqual(["top", "middle", "bottom"]);
+    // A lock also writes the key.
+    const locked = reduce(initialEditorState("variation"), { type: "toggleAnchor", value: "bottom" });
+    expect(locked.variation.anchor).toEqual(["top"]);
+    expect(toBrief(locked).variation?.axes?.anchor).toEqual(["top"]);
+    // Toggle-on → toggle-off: byte-identical to never having toggled (D57).
+    const off = reduce(on, { type: "toggleAnchor", value: "middle" });
+    expect(off.anchorExplicit).toBe(false);
+    expect(toBrief(off).variation?.axes).not.toHaveProperty("anchor");
+  });
+
+  test("a brief with the axis round-trips fromBrief → toBrief unchanged (D58)", () => {
+    const brief = savedBrief({
+      mode: "variation",
+      variation: { count: 4, axes: { anchor: ["middle", "bottom"] } },
+    } as Partial<CampaignBrief>);
+    const round = toBrief(fromBrief(brief, { file: "camp.yaml" }));
+    expect(round.variation?.axes?.anchor).toEqual(["middle", "bottom"]);
+  });
+
+  test("a hand-authored derived selection survives a save via anchorExplicit", () => {
+    const brief = savedBrief({
+      mode: "variation",
+      variation: { count: 4, axes: { anchor: ["top", "bottom"] } },
+    } as Partial<CampaignBrief>);
+    const state = fromBrief(brief, { file: "camp.yaml" });
+    expect(state.anchorExplicit).toBe(true);
+    expect(toBrief(state).variation?.axes?.anchor).toEqual(["top", "bottom"]);
+    // …while an absent axis loads as the derived pair with the flag off.
+    const absent = fromBrief(
+      savedBrief({ mode: "variation", variation: { count: 4 } }),
+      { file: "camp.yaml" },
+    );
+    expect(absent.variation.anchor).toEqual(["top", "bottom"]);
+    expect(absent.anchorExplicit).toBe(false);
+    expect(toBrief(absent).variation?.axes).not.toHaveProperty("anchor");
+  });
+
+  test("normalizeDraftState infers the flag from the data for pre-T4 drafts", () => {
+    const legacy = normalizeDraftState({ mode: "variation" } as Record<string, unknown>);
+    expect(legacy.variation.anchor).toEqual(["top", "bottom"]);
+    expect(legacy.anchorExplicit).toBe(false);
+    const authored = normalizeDraftState({
+      mode: "variation",
+      variation: { anchor: ["middle"] },
+    } as unknown as Record<string, unknown>);
+    expect(authored.anchorExplicit).toBe(true);
+  });
+
+  test("axisProductSize multiplies the anchor only while the saved brief carries it", () => {
+    // 1 product × 3 ratios × 2 layouts × 2 tones × 1 background × 3 shifts × 1 anchor
+    const absent = axisProductSize(randomized());
+    expect(absent).toBe(36);
+    // A one-value selection adds no combination — the axis is carried, not expanded.
+    const locked = axisProductSize(
+      randomized({ variation: { ...initialEditorState("variation").variation, anchor: ["top"] } }),
+    );
+    expect(locked).toBe(36);
+    // Three values triple the anchor factor.
+    const three = axisProductSize(
+      reduce(randomized(), { type: "toggleAnchor", value: "middle" }),
+    );
+    expect(three).toBe(108);
+  });
+});
+
 describe("restore", () => {
   test("reinstates a recovered draft", () => {
     const draft = { ...base(), briefId: "recovered", campaignMessage: "from storage" };

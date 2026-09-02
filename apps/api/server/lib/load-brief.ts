@@ -4,6 +4,7 @@ import { projectRoot } from "@campaignfoundry/shared";
 import { parse as parseYaml } from "yaml";
 import {
   HEADLINE_POOL_REF,
+  ANCHOR_VALUES,
   LAYOUT_VALUES,
   MAX_BEATS,
   MAX_WEIGHT,
@@ -41,7 +42,15 @@ export function assertSafeId(value: unknown, label: string): asserts value is st
 }
 
 /** Supported variation axes — always accepted (`headline` only as `pool://copy`). */
-export const SUPPORTED_AXES = ["layout", "tone", "ratio", "background", "paletteShift", "headline"] as const;
+export const SUPPORTED_AXES = [
+  "layout",
+  "tone",
+  "ratio",
+  "background",
+  "paletteShift",
+  "headline",
+  "anchor",
+] as const;
 
 /** Motion axes — accepted only while the ffmpeg capability is on (D8). */
 export const MOTION_AXES = ["motion", "duration"] as const;
@@ -234,6 +243,9 @@ function validateAxes(value: unknown, capabilities: Capabilities): void {
   }
   if (value.tone !== undefined) {
     assertAllowedStringArray(value.tone, "variation.axes.tone", TONE_VALUES);
+  }
+  if (value.anchor !== undefined) {
+    assertAllowedStringArray(value.anchor, "variation.axes.anchor", ANCHOR_VALUES);
   }
   if (value.ratio !== undefined) {
     validateRatioAxis(value.ratio);

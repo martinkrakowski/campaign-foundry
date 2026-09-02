@@ -1,7 +1,7 @@
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
-import type { LayoutOption, ToneOption } from "./CreativePreview";
+import type { AnchorOption, LayoutOption, ToneOption } from "./CreativePreview";
 import type { PreviewShowcaseProps } from "./PreviewDock";
-import { STATIC_PLATFORMS, type EditorState } from "./editor-state";
+import { STATIC_PLATFORMS, anchorAxisActive, type EditorState } from "./editor-state";
 
 /** The first entry of an optional list — undefined with the list, never a crash. */
 function firstOf<T>(list: readonly T[] | undefined): T | undefined {
@@ -62,6 +62,17 @@ export function previewDockProps(
       : state.mode === "variation"
         ? (firstOf(state.variation.tone) as ToneOption | undefined)
         : undefined;
+  // The anchor axis (T4): a variation-axis value, so the classic treatment look
+  // carries none. It is passed only while the saved brief will carry the axis —
+  // a selection still sitting on the derived top/bottom pair means the axis is
+  // absent and the preview must derive from `layout`, exactly as the render
+  // does. The dock must not disagree with the render (D45).
+  const anchor: AnchorOption | undefined =
+    treatment !== undefined
+      ? undefined
+      : state.mode === "variation" && anchorAxisActive(state)
+        ? (firstOf(state.variation.anchor) as AnchorOption | undefined)
+        : undefined;
   const wantsMotion = state.mode === "variation" && state.formats.includes("motion");
   const motion: MotionKind | undefined =
     wantsMotion && state.motion.length > 0 ? (state.motion[0] as MotionKind) : undefined;
@@ -71,6 +82,7 @@ export function previewDockProps(
     primaryColor: product.primaryColor,
     layout,
     tone,
+    anchor,
     motion,
     platformId: outputShown(state) ? firstOf(state.platforms) : undefined,
     // The wizard readout (M2): where the walk stands, not a position in the creative set.

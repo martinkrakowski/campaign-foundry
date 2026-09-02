@@ -2,7 +2,13 @@ import { describe, test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
-import { PREVIEW_FONT_RATIO, PREVIEW_FONT_FLOOR_FRACTION } from "../CreativePreview";
+import {
+  PREVIEW_FONT_RATIO,
+  PREVIEW_FONT_FLOOR_FRACTION,
+  PREVIEW_ANCHOR_TOP,
+  PREVIEW_ANCHOR_MIDDLE,
+  PREVIEW_ANCHOR_BOTTOM,
+} from "../CreativePreview";
 import { LAYERS } from "@/components/ui/preview-layers";
 
 /**
@@ -23,6 +29,12 @@ describe("preview and compositor share one creative-geometry source", () => {
     expect(LAYERS.shade.alpha).toBe(CREATIVE_GEOMETRY.shadeAlpha);
   });
 
+  test("the preview's anchor fractions are the domain leaf's — references, not copies (T4)", () => {
+    expect(PREVIEW_ANCHOR_TOP).toBe(CREATIVE_GEOMETRY.headlineAnchor.top);
+    expect(PREVIEW_ANCHOR_MIDDLE).toBe(CREATIVE_GEOMETRY.headlineAnchor.middle);
+    expect(PREVIEW_ANCHOR_BOTTOM).toBe(CREATIVE_GEOMETRY.headlineAnchor.bottom);
+  });
+
   test("the leaf holds the compositor's exact numbers", () => {
     expect(CREATIVE_GEOMETRY.headlineTypeWidthFraction).toBe(0.06);
     expect(CREATIVE_GEOMETRY.headlineTypeFloorFraction).toBe(0.4);
@@ -32,6 +44,11 @@ describe("preview and compositor share one creative-geometry source", () => {
     expect(CREATIVE_GEOMETRY.accentFadeHeightFraction).toBe(0.06);
     expect(CREATIVE_GEOMETRY.shadeAlpha.bold).toBe(0.7);
     expect(CREATIVE_GEOMETRY.shadeAlpha.subtle).toBe(0.4);
+    // The anchor axis' fractions (T4): the frozen top/bottom literals, and the
+    // safe-area centre the middle anchor centres the block on.
+    expect(CREATIVE_GEOMETRY.headlineAnchor.top).toBe(0.1);
+    expect(CREATIVE_GEOMETRY.headlineAnchor.bottom).toBe(0.08);
+    expect(CREATIVE_GEOMETRY.headlineAnchor.middle).toBe(0.5);
   });
 
   test("both engines import the leaf — forking the constants fails here", () => {

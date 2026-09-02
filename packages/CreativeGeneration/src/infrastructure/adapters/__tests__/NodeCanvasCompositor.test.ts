@@ -287,6 +287,57 @@ describe("NodeCanvasCompositor", () => {
     expect(captured.fillText[0]?.text).toBe("…");
   });
 
+  test("prepare derives the anchor from layout when the request omits it (T4)", async () => {
+    expect((await NodeCanvasCompositor.prepare(request({ layout: "headline-top" }))).anchor).toBe("top");
+    expect((await NodeCanvasCompositor.prepare(request({ layout: "headline-bottom" }))).anchor).toBe("bottom");
+    expect((await NodeCanvasCompositor.prepare(request({ anchor: "middle" }))).anchor).toBe("middle");
+  });
+
+  test("an absent anchor and its derived explicit anchor produce identical PNG bytes (D54)", async () => {
+    const absentTop = await compositor.compositeAsset(request({ layout: "headline-top" }));
+    const explicitTop = await compositor.compositeAsset(request({ layout: "headline-top", anchor: "top" }));
+    const absentBottom = await compositor.compositeAsset(request({ layout: "headline-bottom" }));
+    const explicitBottom = await compositor.compositeAsset(request({ layout: "headline-bottom", anchor: "bottom" }));
+    expect(Buffer.from(explicitTop.image).equals(Buffer.from(absentTop.image))).toBe(true);
+    expect(Buffer.from(explicitBottom.image).equals(Buffer.from(absentBottom.image))).toBe(true);
+  });
+
+  test("anchor middle centres the wrapped block on the safe-area centre (still path)", async () => {
+    const r = ratio("1:1");
+    const fontSize = Math.round(r.width * CREATIVE_GEOMETRY.headlineTypeWidthFraction);
+    expect(fontSize).toBe(65);
+    const captured = await blit(request({ anchor: "middle", ratio: r, message: "Stay wild" }));
+    expect(captured.fillText).toHaveLength(1);
+    // Zero insets: the safe area is the canvas, so the block's centre is H × 0.5
+    // (the leaf's middle fraction, pinned literally) and the first baseline is
+    // 540 − 65/2 + 65.
+    expect(captured.fillText[0]?.y).toBe(572.5);
+    // With insets the safe-area centre — not the canvas centre — anchors the block.
+    const insets: SafeInsets = { top: 100, right: 0, bottom: 60, left: 0 };
+    const inset = await blit(request({ anchor: "middle", ratio: r, message: "Stay wild", safeInsets: insets }));
+    expect(inset.fillText[0]?.y).toBe(100 + (1080 - 160) * 0.5 - fontSize / 2 + fontSize);
+  });
+
+  test("anchor middle centres a multi-line block by its full box, top edge to last baseline", async () => {
+    const r = ratio("16:9");
+    const fontSize = Math.round(r.width * CREATIVE_GEOMETRY.headlineTypeWidthFraction);
+    const lineHeight = fontSize * 1.25;
+    const insets: SafeInsets = { top: 100, right: 0, bottom: 100, left: 0 };
+    const captured = await blit(
+      request({ anchor: "middle", layout: "headline-top", ratio: r, message: THREE_LINE, safeInsets: insets }),
+    );
+    expect(captured.fillText).toHaveLength(3);
+    // Pinned literally: safeCentre = 100 + (1080 − 200) × 0.5 = 540; blockH =
+    // 2 × 143.75 + 115 = 402.5; first baseline = 540 − 402.5/2 + 115 = 453.75.
+    expect(fontSize).toBe(115);
+    expect(captured.fillText.map((line) => line.y)).toEqual([453.75, 597.5, 741.25]);
+    // The box's vertical midpoint — (first baseline − size) to (last baseline) —
+    // is exactly the safe-area centre.
+    const firstY = captured.fillText[0]?.y ?? 0;
+    const boxMidpoint = (firstY - fontSize + firstY + 2 * lineHeight) / 2;
+    expect(boxMidpoint).toBe(540);
+  });
+
   test("16:9 three-line copy with {top:200,bottom:200} snaps the logo to the opposite inset edge", async () => {
     const insets: SafeInsets = { top: 200, right: 0, bottom: 200, left: 0 };
     const r = ratio("16:9");
