@@ -725,7 +725,6 @@ function drawBeat(
   // control applied only at the still would silently drop from the video blit.
   ctx.textAlign = prepared.style.align;
   ctx.textBaseline = "alphabetic";
-  /* mutated */
   ctx.letterSpacing = `${prepared.style.letterSpacing * layout.fontSize}px`;
   ctx.font = `${prepared.fontWeight} ${layout.fontSize}px ${prepared.fontFamily}, sans-serif`;
   if (dy !== 0 || opacity !== 1) {
