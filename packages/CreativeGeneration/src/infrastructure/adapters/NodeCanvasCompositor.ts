@@ -130,6 +130,12 @@ export class NodeCanvasCompositor implements CompositorPort {
    * out and resolving happened once in `prepare` (D6/D9) — this method only
    * paints (M4). Without a timeline, `draw` delegates to the frozen legacy path
    * ([`drawLegacy`]) so stills and legacy motion bytes stay identical (D10).
+   *
+   * The text effect rides a third clock, `effectT` (same optional-param shape as
+   * `copyT`). Still and poster callers pass `1` so the still is the effect's
+   * completed state (H4) even when the pose clock is `restT = 0` (`ken-burns-out`).
+   * Clip frames omit it: the legacy path falls back to `t`, the timeline path
+   * keeps each beat's own local progress.
    */
   static draw(
     ctx: SKRSContext2D,
@@ -137,6 +143,7 @@ export class NodeCanvasCompositor implements CompositorPort {
     t: number,
     motion?: MotionKind,
     copyT?: number,
+    effectT?: number,
   ): void {
     if (
       prepared.timeline !== undefined &&
@@ -148,10 +155,10 @@ export class NodeCanvasCompositor implements CompositorPort {
         beats: prepared.beatLayouts,
         anchor: prepared.anchorLayout,
       };
-      drawTimeline(ctx, prepared, scenes, t, motion, copyT ?? t);
+      drawTimeline(ctx, prepared, scenes, t, motion, copyT ?? t, effectT);
       return;
     }
-    NodeCanvasCompositor.drawLegacy(ctx, prepared, t, motion);
+    NodeCanvasCompositor.drawLegacy(ctx, prepared, t, motion, effectT ?? t);
   }
 
   /**
@@ -170,9 +177,18 @@ export class NodeCanvasCompositor implements CompositorPort {
    * style fields still belongs in the timeline branch of
    * {@link NodeCanvasCompositor.draw}. The geometry literals below (band
    * heights) mirror the values in `CREATIVE_GEOMETRY` and must stay in
-   * lockstep with it; the goldens pin them.
+   * lockstep with it; the goldens pin them. **Amended 2026-09-02:** the
+   * signature gained an optional `effectT` (default the motion `t`) so the
+   * poster can settle the text effect independently of a `restT = 0` pose;
+   * a style-less brief is byte-identical either way (identity pose, D10).
    */
-  static drawLegacy(ctx: SKRSContext2D, prepared: PreparedCreative, t: number, motion?: MotionKind): void {
+  static drawLegacy(
+    ctx: SKRSContext2D,
+    prepared: PreparedCreative,
+    t: number,
+    motion?: MotionKind,
+    effectT: number = t,
+  ): void {
     const { width, height, top, shadeAlpha } = prepared;
     const eased = motion === undefined ? 1 : easeOutCubic(t);
 
@@ -233,11 +249,12 @@ export class NodeCanvasCompositor implements CompositorPort {
     const rise = motion === "headline-rise";
     const riseDy = rise ? (1 - eased) * 0.12 * height : 0;
     const riseAlpha = rise ? eased : 1;
-    // The text effect (T6) rides the same clock this path has — the whole
-    // clip — and COMPOSES with the motion kind: translations add, alphas
-    // multiply. Undefined effect → the identity pose → exactly the pre-effect
-    // bytes (D54; the goldens and the byte-identity suite prove the amendment).
-    const fx = textEffectPose(prepared.textEffect, t, width, height);
+    // The text effect (T6) rides the effect clock, not the motion pose clock,
+    // and COMPOSES with the motion kind: translations add, alphas multiply.
+    // Still/poster callers pass 1 (H4) so a ken-burns-out rest (t = 0) never
+    // samples the entrance; clip frames omit it and `t` is used. Undefined
+    // effect → the identity pose → exactly the pre-effect bytes (D54).
+    const fx = textEffectPose(prepared.textEffect, effectT, width, height);
     const dy = riseDy + fx.dy;
     const alpha = riseAlpha * fx.alpha;
     ctx.fillStyle = "#ffffff";
@@ -365,7 +382,9 @@ export class NodeCanvasCompositor implements CompositorPort {
     const prepared = await NodeCanvasCompositor.prepare(request, this.fontFamily);
     const canvas = createCanvas(prepared.width, prepared.height);
     const ctx = canvas.getContext("2d");
-    NodeCanvasCompositor.draw(ctx, prepared, 1);
+    // Still: pose at t = 1, effect clock settled (H4). The two clocks agree
+    // here; passing the effect clock explicitly matches the poster call-site.
+    NodeCanvasCompositor.draw(ctx, prepared, 1, undefined, undefined, 1);
     return { image: canvas.toBuffer("image/png"), logoApplied: prepared.logoApplied };
   }
 }
@@ -755,7 +774,9 @@ function resolveBeatLayouts(
  * each match the legacy blit for the same `motion` / `t`; the only differences
  * are that copy is chosen by `copyT` (passed by the caller — the poster passes
  * the key beat's mid-time, D7) and that `headline-rise` advances per beat on the
- * pose clock `t` (each beat rises on its own local progress).
+ * pose clock `t` (each beat rises on its own local progress). The text effect
+ * keeps that beat-local clock unless the caller passed `effectT` (the poster
+ * passes 1 — H4).
  */
 function drawTimeline(
   ctx: SKRSContext2D,
@@ -764,6 +785,7 @@ function drawTimeline(
   t: number,
   motion: MotionKind | undefined,
   copyT: number,
+  effectT?: number,
 ): void {
   const eased = motion === undefined ? 1 : easeOutCubic(t);
 
@@ -777,10 +799,10 @@ function drawTimeline(
   const pair = beatAt(scenes.resolved, copyT);
   const rise = motion === "headline-rise";
   if (pair.mix > 0 && pair.incoming !== undefined) {
-    drawBeat(ctx, prepared, scenes, pair.current, 1 - pair.mix, t, rise);
-    drawBeat(ctx, prepared, scenes, pair.incoming, pair.mix, t, rise);
+    drawBeat(ctx, prepared, scenes, pair.current, 1 - pair.mix, t, rise, effectT);
+    drawBeat(ctx, prepared, scenes, pair.incoming, pair.mix, t, rise, effectT);
   } else {
-    drawBeat(ctx, prepared, scenes, pair.current, 1, t, rise);
+    drawBeat(ctx, prepared, scenes, pair.current, 1, t, rise, effectT);
   }
 
   // Layer 5 — brand logo, anchored to the key beat's rest-pose box, so it neither
@@ -805,6 +827,7 @@ function drawBeat(
   layerAlpha: number,
   t: number,
   rise: boolean,
+  effectT?: number,
 ): void {
   const layout = scenes.beats.get(beat.text);
   if (layout === undefined) {
@@ -817,11 +840,11 @@ function drawBeat(
   const riseDy = rise ? (1 - eased) * 0.12 * prepared.height : 0;
   const riseAlpha = rise ? eased : 1;
   // The text effect (T6) plays on each beat's OWN local progress — the same
-  // clock the rise rides — and composes with it: translations add, alphas
-  // multiply. The beat's exit mix (`layerAlpha`) keeps its behaviour; the
-  // effect shapes entrances only. Undefined → the identity pose → the
-  // pre-effect bytes (D54).
-  const fx = textEffectPose(prepared.textEffect, local, prepared.width, prepared.height);
+  // clock the rise rides — unless the caller passed a settled effect clock
+  // (the poster: 1, H4). Clip frames omit it, so the beat-local entrance
+  // still plays. The beat's exit mix (`layerAlpha`) keeps its behaviour.
+  // Undefined effect → the identity pose → the pre-effect bytes (D54).
+  const fx = textEffectPose(prepared.textEffect, effectT ?? local, prepared.width, prepared.height);
   const dy = riseDy + fx.dy;
   const alpha = riseAlpha * fx.alpha;
   const opacity = alpha * layerAlpha;

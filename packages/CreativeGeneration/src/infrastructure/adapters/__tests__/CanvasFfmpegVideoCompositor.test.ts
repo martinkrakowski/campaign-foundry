@@ -613,23 +613,27 @@ describe("CanvasFfmpegVideoCompositor", () => {
       const req = videoRequest({ motion: kind, durationSec, fps, timeline });
       const result = await compositor.compositeVideo(req);
 
-      const calls = spy.mock.calls as Array<[unknown, unknown, number, MotionKind?, number?]>;
+      const calls = spy.mock.calls as Array<[unknown, unknown, number, MotionKind?, number?, number?]>;
       // frames, poster, and sampled frames — nothing else draws (D7).
       expect(calls).toHaveLength(durationSec * fps + 1 + req.sampleAt.length);
       const posterCall = calls[durationSec * fps];
       if (!posterCall) throw new Error("missing poster draw call");
 
-      // The poster: pose clock at restT(kind), copy clock on the key beat's mid-window.
+      // The poster: pose clock at restT(kind), copy clock on the key beat's mid-window,
+      // effect clock settled (1) so a restT = 0 kind never samples the entrance (H4).
       const key = resolveTimeline(timeline, durationSec)[1];
       expect(posterCall[2]).toBe(restT(kind));
       expect(posterCall[4]).toBe((key.startT + key.endT) / 2);
+      expect(posterCall[5]).toBe(1);
 
-      // Frames and samples drive copy by the pose clock alone — no copyT is passed.
+      // Frames and samples drive copy by the pose clock alone — no copyT, no effectT.
       for (const call of calls.slice(0, durationSec * fps)) {
         expect(call[4]).toBeUndefined();
+        expect(call[5]).toBeUndefined();
       }
       for (const call of calls.slice(durationSec * fps + 1)) {
         expect(call[4]).toBeUndefined();
+        expect(call[5]).toBeUndefined();
       }
       expect(result.poster.byteLength).toBeGreaterThan(0);
     }
@@ -642,10 +646,29 @@ describe("CanvasFfmpegVideoCompositor", () => {
     const fps = 12;
     await compositor.compositeVideo(videoRequest({ durationSec, fps }));
 
-    const calls = spy.mock.calls as Array<[unknown, unknown, number, MotionKind?, number?]>;
+    const calls = spy.mock.calls as Array<[unknown, unknown, number, MotionKind?, number?, number?]>;
     const posterCall = calls[durationSec * fps];
     if (!posterCall) throw new Error("missing poster draw call");
     expect(posterCall[4]).toBeUndefined();
+    expect(posterCall[5]).toBe(1);
+  });
+
+  test("ken-burns-out poster settles the effect clock: each kind matches the effect-less poster, a mid-clip sample does not", async () => {
+    // Mutation: pass the motion t (restT = 0) as the poster's effect clock
+    // instead of 1 → the poster pins fail; the mid-clip sample stays green.
+    const compositor = new CanvasFfmpegVideoCompositor({ spawn: fakeFfmpeg({}), ffmpegPath: "/opt/ffmpeg" });
+    const base = {
+      motion: "ken-burns-out" as MotionKind,
+      durationSec: 2,
+      fps: 12,
+      sampleAt: [0.05],
+    };
+    const plain = await compositor.compositeVideo(videoRequest(base));
+    for (const kind of TEXT_EFFECT_VALUES) {
+      const out = await compositor.compositeVideo(videoRequest({ ...base, style: { textEffect: kind } }));
+      expect(Buffer.from(out.poster).equals(Buffer.from(plain.poster))).toBe(true);
+      expect(Buffer.from(out.sampledFrames[0]).equals(Buffer.from(plain.sampledFrames[0]))).toBe(false);
+    }
   });
 
   test.skipIf(!ffmpegOk)(

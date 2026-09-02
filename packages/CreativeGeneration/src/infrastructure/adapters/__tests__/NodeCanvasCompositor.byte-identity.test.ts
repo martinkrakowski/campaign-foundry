@@ -155,7 +155,10 @@ describe("NodeCanvasCompositor D10 — the legacy path is byte-identical after t
           const canvas = createCanvas(prepared.width, prepared.height);
           NodeCanvasCompositor.draw(canvas.getContext("2d"), prepared, t, kind);
           expect(spy).toHaveBeenCalledTimes(1);
-          expect(spy.mock.calls[0].slice(1)).toEqual([prepared, t, kind]);
+          // D10: drawLegacy gained the effect clock (5th arg, defaulting to the
+          // motion t). Timeline-free draw always forwards it so still bytes stay
+          // on one path; a style-less brief is the identity pose either way.
+          expect(spy.mock.calls[0].slice(1)).toEqual([prepared, t, kind, t]);
           spy.mockRestore();
         }
       }
