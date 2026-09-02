@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-01
 **Status:** for review
-**Decision ids introduced:** D51 – D58 (D43–D50 are claimed by `2026-09-01_r7-preview-panel.md`)
+**Decision ids introduced:** D51 – D60 (D43–D50 are claimed by `2026-09-01_r7-preview-panel.md`, PR #165)
 **Relates to:** D26 (the preview shows only what the compositor draws), D10 (`drawLegacy` freeze)
 
 ---
@@ -35,9 +35,9 @@ two features with very different costs, only one of which (2) needs.
 |---|---|---|
 | **D51** | **Two features, named separately and priced separately.** *Template authoring* is **pre-generation**: it edits the layout every variant inherits. *Per-creative finishing* is **post-generation**: it edits one rendered asset. This plan builds the first and explicitly defers the second. | The Flow reference edits one asset and re-renders it. Every real run here produces **6 or 12** creatives. Only per-creative finishing needs a per-creative record, a re-render verb and a policy-hash story; template authoring needs none of them. Conflating them prices a tractable feature as an intractable one. |
 | **D52** | **The preview renders a real frame from the real compositor**, at the requested ratio, and is never a hand-maintained lookalike. It is fed by **`ProceduralBackgroundGenerator`** — offline, deterministic, and already the default background source — so the preview costs no credits and makes no network call. **When the brief's background source is `genai` or `asset-pool`, the preview must say the background is a stand-in**, or it implies an image it will not deliver, which is the exact D26 failure this plan exists to avoid. | The requirement is that the preview reflect the layout *exactly*. The browser SVG and the compositor are **two unrelated layout engines**: headline type size disagrees by **0.85×–2.15×**, and the sign flips with ratio because the compositor scales off canvas **width** and the preview off **height**. No amount of patching a twin makes "exactly" true. |
-| **D53** | **D26 is an ordering rule and this plan obeys it: the compositor honours a setting before any UI offers it.** No control ships that the delivered creative ignores. | No decision in this repo ever rejected controls on the preview — but D26 forbids the UI-first build outright. Today the compositor's whole request vocabulary is eight fields and honours **none** of the ten requested controls. |
+| **D53** | **A NEW control ships compositor-first: the renderer honours a setting before any UI offers it.** This is this plan's own rule; it applies to T4–T6 and does not gate chrome or existing controls. | D26 is a *fabrication* guard — the preview shows only what the compositor paints — and no decision ever rejected controls on the preview. v1 conflated the two; the ordering rule earns its own id. Today the compositor's request vocabulary is eight fields and honours none of the ten requested controls, which is why the rule matters for T4–T6. |
 | **D54** | **Every new control is additive with today's value as its default**, and no default changes in the same lane. | Verified: the golden images are **byte-identical** under a defaults-preserving change. Golden churn is therefore not a cost of this proposal — unless someone alters a default "while we're in there", which would force re-recording both platform maps. |
-| **D55** | **Type is stored as a ratio-relative scale, not an absolute pixel value.** The editor may *display* px for the ratio being previewed. | The compositor is fraction-of-canvas throughout (`fitText` at `width * 0.06`, logo `width * 0.16`, margins `width * 0.04`). An absolute size tuned on the square is ~44 % wrong on a story. This is the same call the domain already made twice: `CopyTimeline` stores *beats, not seconds*, and `Treatment.layout` is a relative anchor, not coordinates. |
+| **D55** | **Type is stored as a fraction of canvas *width* — `fitText`'s own model — displayed as px for the previewed ratio.** If open question 1 pins a single ratio, absolute px is equivalent and acceptable. | The compositor is width-fraction throughout (`fitText` at `width * 0.06`, logo `width * 0.16`, margins `width * 0.04`). Square and story share width 1080, so both type at 65 px; **16:9** (width 1920) is where an absolute value diverges, by ~44 %. *(v1 said "wrong on a story" — false arithmetic, corrected by review.)* Same call the domain made twice already: beats not seconds; anchors not coordinates. |
 | **D56** | **Richer creative vocabulary is the deliverable, not more sliders.** Grow layouts, tones, font choices and text-effect kinds in the compositor; the editor exposes that vocabulary. | "One layout across six creatives" is only worth having if there are layouts worth choosing. Today there are **two** (`headline-top`, `headline-bottom`) and **two** tones. A Flow-grade control panel over a two-value enum is a beautiful switch. |
 | **D57** | **Position arrives as a NEW optional axis, never by widening `LAYOUT_VALUES`.** | `VariationPolicy` puts `layout` **unconditionally** into the hashed payload, while `motion`/`duration`/`headline` are conditionally spread. Widening the enum changes `policyHash` for every existing variation brief, and the re-roll path pins the persisted hash — so it would silently re-plan and un-pin live campaigns. |
 | **D58** | **A control that the wizard cannot round-trip does not ship.** Every new field lands in the server validator **and** the editor's state model in the same lane. | The wizard reconstructs the brief from a whitelisted state model, so any field it does not know is **deleted on the next save**. Hand-authored YAML plus one UI save equals silent data loss. |
@@ -64,7 +64,7 @@ two features with very different costs, only one of which (2) needs.
 
 | id | Finding |
 |---|---|
-| **F6** | **`layout` and `tone` are already `DISTANCE_AXES` the planner honours.** Pin an axis to one value → locked across all N. Leave it open → varies, with `minDistance` guaranteeing variants differ. **"Same layout for all 6" is one missing editor control, not a feature.** Neither `axes.layout` nor `axes.tone` appears anywhere in `apps/web`. |
+| **F6** | **`layout` and `tone` are already `DISTANCE_AXES` the planner honours — and the editor already authors them.** `PolicySection.tsx:300-311` renders Layout and Tone `AxisCards`; the reducer's min-one guard means *one value selected = locked across all N*; `toBrief` always emits `axes.layout`/`axes.tone`. **"Same layout for all 6" is SHIPPED**, not one control away. *(v1 of this plan claimed the control was missing — a grep for the literal `axes.layout`, a key assembled only in `toBrief`. Both reviewers were told the survey's claims might be wrong; grok found this one.)* |
 | **F7** | **The copy pool exists end to end.** `HEADLINE_POOL_REF = "pool://copy"`, an approved/rejected `CopyPool`, `HeadlinePoolDrawer` in the editor, and the use case gates every pooled text through compliance before rendering. "Ingest 6 copy variants" is built. |
 | **F8** | **`variation.count` is authorable today** (defaults to `12`, validated ≥ 1, shown on Review). There is even a planner test named *"count 6 perRatio 2"*. "Exactly 6" is expressible now. |
 | **F9** | **Video is off by default** — `output.formats` defaults to `["static"]`. `ffmpeg-static` is bundled and present. A video campaign is a brief-level opt-in that already works. |
@@ -117,14 +117,19 @@ One lane per PR. Ownership is exclusive.
 
 | Lane | Task | Buys |
 |---|---|---|
-| **T1** | **Server-rendered preview frame** (**D52**). An API route renders one cell through the real compositor at a requested ratio and returns it; the editor shows that image. **`prepare` requires a real background buffer** (`loadImage(Buffer.from(request.background))`), so the route supplies one from `ProceduralBackgroundGenerator` — no credits, no network, deterministic. Cache by brief-hash + ratio + treatment, and **debounce the editor's requests** so a dragged slider does not flood the route. | "Reflect the layout exactly" becomes true, permanently. Retires C1–C5 as a class rather than one at a time. |
-| **T2** | **Expose the axes that already work** (**F6**): `axes.layout` and `axes.tone` in the editor, as lock-or-vary controls, next to the existing count and copy pool. | **The user's campaign feature, minus new vocabulary.** Cheapest real value in the plan. |
-| **T3** | **Preview chrome**: header and footer bar on the preview surface — what is being previewed, which ratio, which variant, and the way out. | Answers "it needs a proper menu header and footer bar" without pretending to be an editor yet. |
+| **T1a** | **Patch the SVG preview to the compositor's numbers**: type off *width* (`0.06`), `textAlign` centre, `#ffffff` headline, fade at `height * 0.06`, draw the logo block. The gap is a **constant** mismatch (re-derived by review: 0.845 / 1.495 / 2.153 per ratio), so a patch retires it cheaply. | Most of the fidelity win, this week, no new infrastructure. |
+| **T1b** | **Server-rendered preview frame** (**D52**) — introduced **when T5 lands**, because that is when layout starts depending on Skia's `measureText` and no SVG twin can follow. A proper inbound use case (hexagonal — not a route calling the adapter), fed by `ProceduralBackgroundGenerator` (`prepare` requires a real background buffer; procedural is offline, deterministic, credit-free). **Cache key = every `CompositeRequest` field**, and the editor debounces. | "Reflect the layout exactly" becomes true, permanently. Retires C1–C5 as a class rather than one at a time. |
+| **T2** | **Name what is already shipped** (**F6**): the Layout/Tone AxisCards *are* the lock-or-vary control. Optional copy pass only — e.g. "one selected = locked across every variant" — so the semantics are discoverable. | Nothing to build. The campaign feature's authoring surface exists; what it lacks is vocabulary (**T4**) and a preview that shows the locked template (**T3**). |
+| **T3** | **Preview chrome = the R7 plan** (PR #165): mount `PreviewDock`/`PreviewStrip` per D43–D50 and add the header/footer chrome there. The file is `campaign/PreviewDock.tsx`; this plan assigns no new surface and must reconcile with R7's lanes rather than duplicate them. | Answers "a proper menu header and footer bar" using the component that already exists, unmounted. |
 | **T4** | **Vocabulary: layouts and tones** (**D56**). Grow `LAYOUT_VALUES` beyond two — as a new optional axis where position is concerned (**D57**) — with goldens for defaults only and structural tests per control. | Makes T2 worth using. |
-| **T5** | **Vocabulary: type** (**D55**, **D58**). Font family from the bundled set (**H2**), weight, size *scale*, line height, letter spacing (**F1**), alignment (**C2**). Compositor first, then editor, round-tripped through the wizard's state model. | The typography half of the request, honestly. |
+| **T5** | **Vocabulary: type** (**D55**, **D58**, **D59**, **D60**). Font family from the bundled set, weight-with-faces only, size fraction, line height, letter spacing (**F1**), alignment (**C2**). **Schema home: a brief-level `style` block — NOT a variation axis** (a new axis is rejected at parse, and a hashed one trips **D57**) **and not a `Treatment` widening** (classic-only). Defaults equal today's literals; hashed nowhere, so `policyHash` is untouched. **Mandatory same-lane files:** `CampaignBrief.ts`, `load-brief.ts`, `brief-files.ts`, `editor-state.ts` (`toBrief`/`fromBrief`/normalize), `CompositorPort.ts`, `NodeCanvasCompositor.prepare` + `layoutAt` + both blit paths (**F5a**), and the wizard round-trip tests. This lane triggers **T1b**. | The typography half of the request, honestly, in the one home that does not re-plan existing campaigns. |
 | **T6** | **Text effects** (**H3**, **H4**). A new effect vocabulary with a designed rest pose per kind, drawn per frame (**F2**, **F4**). | The animated half. Largest lane; do it last, when the surface is trustworthy. |
 
-**Order.** T1 → T2 ‖ T3 → T4 → T5 → T6. T1 gates everything after it (**D53**).
+**Order.** T1a ‖ T2 ‖ T3 now, independently — none gates another. Then T4 → T5 (+ T1b) → T6.
+**D53 gates only the NEW controls** (T4–T6): the compositor honours a setting before the UI offers
+it. It does not gate mounting chrome or naming what exists — v1 of this plan over-applied it, and
+mis-attributed it to D26, which is a fabrication guard ("show only what the compositor paints"),
+not an ordering rule.
 
 ---
 
@@ -150,19 +155,30 @@ One lane per PR. Ownership is exclusive.
 
 ---
 
-## 5. Open questions
+## 5. Open questions — answered by review
 
-1. **Which ratios does a template target?** Classic mode always renders all three
-   (`AspectRatio.all()`, no ratio selection). For a social video campaign the user may want one.
-   Should template authoring pin the ratio axis, and if so is that a brief field or a UI default?
-2. **What is the bundled font set?** Two families today. Adding fonts is an asset-pipeline and
-   licensing decision before it is an engineering one.
-3. **Per-element locking.** "Swap only the copy and the elements the user marks" is finer than the
-   axis model, which locks whole dimensions. Is axis-level locking enough for the first release?
-4. **Does the estimate stay honest?** The deliverables readout is derived from products × ratios ×
-   treatments; a template feature that pins axes changes that arithmetic.
+Both reviewers answered all four; they agree on all but the shape of one.
 
----
+1. **Which ratios does a template target?** → **Pin with the existing `variation.axes.ratio`
+   control** — `RatioPanel` already authors it; do not add a parallel template field (a UI default
+   that does not persist would lie on Generate). Classic mode stays `AspectRatio.all()`. *(Both
+   reviewers agree.)*
+2. **Bundled font set?** → **Inter and Lora only** (the OFL faces already registered). More
+   families is a licensing + asset-pipeline decision, not a T5 subtask. `MESSAGE_FONT` validates
+   against the same allowlist (**D59**). *(Both agree.)*
+3. **Per-element locking?** → **Axis-level locking is enough for v1.** Copy is already the one
+   swappable layer (the pool). "User-marked elements" is per-creative finishing and stays behind
+   **D51**'s deferral. *(Both agree.)*
+4. **Does the estimate stay honest?** → **Variation mode already is** — `EstimatePanel` asks the
+   planner, which sees pinned axes. The products × ratios × treatments formula is **classic only**.
+   A style block (T5) changes neither. *(grok, derived; agy concurs in substance.)*
+
+**The one disagreement — the preview's first step.** agy endorsed T1-first ("D52 is justified; the
+SVG is fundamentally disjoint"). grok argued the gap is a *constant* mismatch an SVG patch can
+retire now, with the server frame introduced when T5 makes layout depend on Skia metrics. **grok's
+sequencing is adopted (T1a now, T1b with T5)** because it was the better-evidenced position — it
+re-derived the per-ratio constants (0.845 / 1.495 / 2.153) and identified that nothing before T5
+needs `measureText`. D52 stays as the destination; the disagreement is recorded rather than erased.
 
 ## 6. Explicitly deferred
 
@@ -188,4 +204,41 @@ wanted. Nothing in the described campaign feature requires it.
 
 ## 8. Review record
 
-*To be completed — two independent reviews, by models different from each other and from the author.*
+Two independent reviews of this plan (v2, `3483d01`), in isolated read-only worktrees, by models
+different from each other and from the author. Neither wrote a file (verified).
+
+| Reviewer | Model | Verdict | Findings |
+|---|---|---|---|
+| agy | Gemini 3.1 Pro | generally safe, one major hole | 4 major (3 confirming), 6 minor |
+| grok | grok-4.6 (high) | **not safe as written** | 2 blocker, 5 major, 13 minor, 1 nit |
+
+**What the reviews changed:**
+
+- **grok, blocker — F6/T2 was false.** The Layout/Tone lock-or-vary control already ships
+  (`PolicySection.tsx:300-311`, min-one guard in the reducer, `toBrief` always emitting the axes).
+  The survey grepped the literal `axes.layout`, a key assembled only in `toBrief`. The plan had
+  priced already-shipped work as "the cheapest real value in the plan" — an implementer would have
+  rebuilt a working control. T2 is now a copy pass.
+- **grok, blocker — the sequencing gated done work behind new infrastructure.** T1 no longer gates
+  T2/T3; **D53** applies to new controls only and is decoupled from D26, which is a fabrication
+  guard, not an ordering rule.
+- **agy, major — D52 would have crashed on first call.** `prepare` requires a real background
+  buffer; a pre-generation preview has none. Resolved better than the suggested placeholder:
+  `ProceduralBackgroundGenerator` is offline, deterministic, credit-free, and the *default* source
+  — plus a stand-in label for `genai`/`asset-pool` briefs.
+- **grok, major — D55's arithmetic was false.** Square and story share width 1080 (both 65 px);
+  the ~44 % divergence is 16:9. The conclusion (width-fraction) survives; the example did not.
+- **grok, major — T5 had no schema home.** Now explicit: a brief-level `style` block, not an axis
+  (parse-rejected) and not a `Treatment` widening (classic-only), hashed nowhere, with the
+  mandatory same-lane file list written out.
+- **grok, major — T3 would have duplicated R7.** Now named as R7's mount (PR #165) plus footer.
+
+**Claims marked unproven by both** (worktrees have no installed deps): the runtime `letterSpacing`
+raster proof and the byte-identical goldens. Both were verified at runtime by the investigation
+phase on the main checkout; grok independently confirmed `letterSpacing`/`wordSpacing` exist in the
+published typings of the exact pinned version. Treat T4–T6's first lane as re-verifying them
+in-repo before building on them.
+
+**The author's own errors, kept visible:** F6 (claimed a shipped control was missing), the D55
+story arithmetic, gating done work behind T1, and citing D26 for an ordering rule it does not
+state.
