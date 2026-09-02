@@ -5,23 +5,15 @@ import { parse as parseYaml } from "yaml";
 import {
   HEADLINE_POOL_REF,
   ANCHOR_VALUES,
-  ALIGN_VALUES,
-  FONT_FAMILY_VALUES,
-  FONT_WEIGHT_VALUES,
   LAYOUT_VALUES,
   MAX_BEATS,
-  MAX_LETTER_SPACING,
-  MAX_LINE_HEIGHT,
-  MAX_SIZE_SCALE,
   MAX_WEIGHT,
-  MIN_LETTER_SPACING,
-  MIN_LINE_HEIGHT,
-  MIN_SIZE_SCALE,
   MOTION_KINDS,
   RATIO_VALUES,
   SAFE_ID_PATTERN,
   TONE_VALUES,
   isPaletteShift,
+  styleProblem,
   timelineProblem,
   type CampaignBrief,
   type CopyTimeline,
@@ -520,56 +512,13 @@ function validateCopy(record: Record<string, unknown>, enforceCapabilities: bool
  * The brief-level `style` block (T5): strict, not tolerated. Unknown top-level
  * keys round-trip silently, so `style` must reject its own unknown fields
  * here — a typo (`famiy`) would otherwise save cleanly and never render.
- * Every value is checked against the domain leaf's vocabulary and bounds.
+ * Every value is checked against the domain leaf's vocabulary and bounds —
+ * by the leaf's OWN validator, shared with the use case's defense-in-depth
+ * check so the two boundaries cannot drift (T5).
  */
 function validateStyle(value: unknown): void {
-  if (value === undefined) return;
-  if (!isPlainObject(value)) {
-    throw new Error('Campaign brief field "style" must be an object.');
-  }
-  const STYLE_FIELDS = [
-    "fontFamily",
-    "fontWeight",
-    "sizeScale",
-    "lineHeight",
-    "letterSpacing",
-    "align",
-  ] as const;
-  for (const key of Object.keys(value)) {
-    if (!(STYLE_FIELDS as readonly string[]).includes(key)) {
-      throw new Error(`Unsupported style field "${key}" (allowed: ${STYLE_FIELDS.join(", ")}).`);
-    }
-  }
-  if (value.fontFamily !== undefined && !(FONT_FAMILY_VALUES as readonly string[]).includes(value.fontFamily as string)) {
-    throw new Error(
-      `Campaign brief field "style.fontFamily" must be one of ${FONT_FAMILY_VALUES.join(", ")}.`,
-    );
-  }
-  if (value.fontWeight !== undefined && !(FONT_WEIGHT_VALUES as readonly number[]).includes(value.fontWeight as number)) {
-    throw new Error(
-      `Campaign brief field "style.fontWeight" must be one of ${FONT_WEIGHT_VALUES.join(", ")} (D60: only the weights that have faces).`,
-    );
-  }
-  if (value.sizeScale !== undefined && (!isFiniteNumber(value.sizeScale) || value.sizeScale < MIN_SIZE_SCALE || value.sizeScale > MAX_SIZE_SCALE)) {
-    throw new Error(
-      `Campaign brief field "style.sizeScale" must be a finite number in [${MIN_SIZE_SCALE}, ${MAX_SIZE_SCALE}] (a fraction of the canvas width, D55).`,
-    );
-  }
-  if (value.lineHeight !== undefined && (!isFiniteNumber(value.lineHeight) || value.lineHeight < MIN_LINE_HEIGHT || value.lineHeight > MAX_LINE_HEIGHT)) {
-    throw new Error(
-      `Campaign brief field "style.lineHeight" must be a finite number in [${MIN_LINE_HEIGHT}, ${MAX_LINE_HEIGHT}] (a multiple of the font size).`,
-    );
-  }
-  if (value.letterSpacing !== undefined && (!isFiniteNumber(value.letterSpacing) || value.letterSpacing < MIN_LETTER_SPACING || value.letterSpacing > MAX_LETTER_SPACING)) {
-    throw new Error(
-      `Campaign brief field "style.letterSpacing" must be a finite number in [${MIN_LETTER_SPACING}, ${MAX_LETTER_SPACING}] (an em fraction).`,
-    );
-  }
-  if (value.align !== undefined && !(ALIGN_VALUES as readonly string[]).includes(value.align as string)) {
-    throw new Error(
-      `Campaign brief field "style.align" must be one of ${ALIGN_VALUES.join(", ")}.`,
-    );
-  }
+  const problem = styleProblem(value);
+  if (problem !== undefined) throw new Error(problem);
 }
 
 /**

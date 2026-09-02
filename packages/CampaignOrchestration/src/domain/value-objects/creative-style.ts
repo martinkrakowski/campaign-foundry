@@ -118,6 +118,62 @@ export function resolveStyle(
   };
 }
 
+/**
+ * The style block's structural validation — the ONE validator both boundaries
+ * that accept a brief call (T5): `load-brief`'s parser and
+ * `GenerateCampaignUseCase.validateBrief` (defense-in-depth for callers that
+ * bypass parsing, exactly the `Treatment.vo` SAFE_ID precedent). Numeric style
+ * fields arrive as unbounded numbers from such callers, so the use case must
+ * reject what the parser rejects — and sharing this function is what keeps the
+ * two boundaries from drifting. The messages are the parser's own, verbatim
+ * (its tests pin them). The `timelineProblem` shape: the problem sentence, or
+ * undefined when the block is legal.
+ */
+export function styleProblem(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  // The same narrowing every neighbouring validator in `load-brief` spells
+  // (`isPlainObject`): an object, not null, not an array.
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return 'Campaign brief field "style" must be an object.';
+  }
+  const record = value as Record<string, unknown>;
+  const STYLE_FIELDS = [
+    "fontFamily",
+    "fontWeight",
+    "sizeScale",
+    "lineHeight",
+    "letterSpacing",
+    "align",
+  ] as const;
+  for (const key of Object.keys(record)) {
+    if (!(STYLE_FIELDS as readonly string[]).includes(key)) {
+      return `Unsupported style field "${key}" (allowed: ${STYLE_FIELDS.join(", ")}).`;
+    }
+  }
+  const finiteIn = (field: string, v: unknown, min: number, max: number, why: string): string | undefined =>
+    v === undefined
+      ? undefined
+      : typeof v !== "number" || !Number.isFinite(v) || v < min || v > max
+        ? `Campaign brief field "style.${field}" must be a finite number in [${min}, ${max}] (${why}).`
+        : undefined;
+  if (record.fontFamily !== undefined && !(FONT_FAMILY_VALUES as readonly string[]).includes(record.fontFamily as string)) {
+    return `Campaign brief field "style.fontFamily" must be one of ${FONT_FAMILY_VALUES.join(", ")}.`;
+  }
+  if (record.fontWeight !== undefined && !(FONT_WEIGHT_VALUES as readonly number[]).includes(record.fontWeight as number)) {
+    return `Campaign brief field "style.fontWeight" must be one of ${FONT_WEIGHT_VALUES.join(", ")} (D60: only the weights that have faces).`;
+  }
+  const size = finiteIn("sizeScale", record.sizeScale, MIN_SIZE_SCALE, MAX_SIZE_SCALE, "a fraction of the canvas width, D55");
+  if (size !== undefined) return size;
+  const line = finiteIn("lineHeight", record.lineHeight, MIN_LINE_HEIGHT, MAX_LINE_HEIGHT, "a multiple of the font size");
+  if (line !== undefined) return line;
+  const spacing = finiteIn("letterSpacing", record.letterSpacing, MIN_LETTER_SPACING, MAX_LETTER_SPACING, "an em fraction");
+  if (spacing !== undefined) return spacing;
+  if (record.align !== undefined && !(ALIGN_VALUES as readonly string[]).includes(record.align as string)) {
+    return `Campaign brief field "style.align" must be one of ${ALIGN_VALUES.join(", ")}.`;
+  }
+  return undefined;
+}
+
 /** True when any field diverges from the defaults — what makes the block worth writing. */
 export function styleDiverges(style: Style | undefined): boolean {
   return (

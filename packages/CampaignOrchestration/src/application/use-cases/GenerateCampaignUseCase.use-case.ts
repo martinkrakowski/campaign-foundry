@@ -7,6 +7,7 @@ import { AspectRatio } from "../../domain/value-objects/AspectRatio.vo.js";
 import type { AspectRatioValue } from "../../domain/value-objects/aspect-ratios.js";
 import type { MotionKind } from "../../domain/value-objects/MotionKind.vo.js";
 import { DEFAULT_TREATMENT, SAFE_ID_PATTERN } from "../../domain/value-objects/Treatment.vo.js";
+import { styleProblem } from "../../domain/value-objects/creative-style.js";
 import { PipelineExecutionLog } from "../../domain/value-objects/PipelineExecutionLog.vo.js";
 import type { PipelineResult } from "../../domain/value-objects/PipelineResult.vo.js";
 import type { VariationPlan } from "../../domain/value-objects/VariationPlan.vo.js";
@@ -712,6 +713,14 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         return err(new Error("A campaign brief requires unique treatment ids."));
       }
     }
+    // The brief's style (T5) is parse-validated at the brief boundary; enforce
+    // it here too through the SAME validator the parser calls — one function,
+    // so the two boundaries cannot drift — because a programmatic caller that
+    // bypasses parsing hands the numeric fields over unbounded, and an
+    // out-of-range sizeScale would render type the fitter never planned for.
+    // Defense-in-depth, exactly the SAFE_ID reasoning above.
+    const styleProblemText = styleProblem(brief.style);
+    if (styleProblemText !== undefined) return err(new Error(styleProblemText));
     return ok(true);
   }
 

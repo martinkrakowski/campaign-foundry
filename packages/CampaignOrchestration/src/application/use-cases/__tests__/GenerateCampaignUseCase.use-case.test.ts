@@ -76,6 +76,11 @@ describe("GenerateCampaignUseCase — validation", () => {
       }),
       /unique treatment ids/,
     ],
+    [
+      "an out-of-range style.sizeScale (a programmatic brief the parser never saw, T5)",
+      baseBrief({ style: { sizeScale: 9 } }),
+      /"style\.sizeScale" must be a finite number in \[0\.02, 0\.12\]/,
+    ],
   ])("rejects %s before touching any port", async (_label, brief, message) => {
     const d = deps();
     const result = await new GenerateCampaignUseCase(d).execute(brief);

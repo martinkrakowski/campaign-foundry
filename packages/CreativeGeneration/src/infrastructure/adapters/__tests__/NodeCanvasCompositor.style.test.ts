@@ -6,9 +6,12 @@ import {
   type CompositeRequest,
   type CopyTimeline,
 } from "@campaignfoundry/CampaignOrchestration";
-import { DEFAULT_STYLE } from "@campaignfoundry/CampaignOrchestration/creative-style";
+import {
+  DEFAULT_STYLE,
+  type ResolvedStyle,
+} from "@campaignfoundry/CampaignOrchestration/creative-style";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
-import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
+import { NodeCanvasCompositor, headlineBoxX } from "../NodeCanvasCompositor.js";
 import { registerBundledFonts } from "../../fonts.js";
 
 registerBundledFonts();
@@ -55,22 +58,31 @@ interface TextOp {
   textAlign: string;
 }
 
+interface ImageOp {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 interface Blit {
   fillText: TextOp[];
+  drawImage: ImageOp[];
   raster: Buffer;
 }
 
 /**
  * Paint one prepared request through the real draw path and record every text
- * op WITH the ctx state it painted under, plus the frame's raster bytes — the
- * state controls (letterSpacing, align) are asserted on what was actually
- * drawn, never on configuration.
+ * op WITH the ctx state it painted under, every image blit, plus the frame's
+ * raster bytes — the state controls (letterSpacing, align) are asserted on what
+ * was actually drawn, never on configuration.
  */
 async function blit(req: CompositeRequest, t = 1, motion?: Parameters<typeof NodeCanvasCompositor.draw>[3], copyT?: number): Promise<Blit> {
   const prepared = await NodeCanvasCompositor.prepare(req);
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
   const fillText: TextOp[] = [];
+  const drawImage: ImageOp[] = [];
   const origFill = ctx.fillText.bind(ctx);
   ctx.fillText = ((text: string, x: number, y: number, maxWidth?: number) => {
     fillText.push({
@@ -83,8 +95,17 @@ async function blit(req: CompositeRequest, t = 1, motion?: Parameters<typeof Nod
     });
     return origFill(text, x, y, maxWidth);
   }) as typeof ctx.fillText;
+  const origBlit = ctx.drawImage.bind(ctx);
+  ctx.drawImage = ((...args: Parameters<typeof origBlit>) => {
+    // The five-arg form (image, x, y, w, h) is the layer blit; the logo is the
+    // last image drawn on every frame.
+    if (args.length >= 5 && typeof args[1] === "number") {
+      drawImage.push({ x: args[1], y: args[2], width: args[3] as number, height: args[4] as number });
+    }
+    return origBlit(...args);
+  }) as typeof ctx.drawImage;
   NodeCanvasCompositor.draw(ctx, prepared, t, motion, copyT);
-  return { fillText, raster: canvas.toBuffer("image/png") };
+  return { fillText, drawImage, raster: canvas.toBuffer("image/png") };
 }
 
 const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
@@ -237,5 +258,86 @@ describe("NodeCanvasCompositor style block (T5) — the timeline path (F5a)", ()
       expect(op.font).toMatch(/^700 /);
       expect(op.font).toContain("Lora");
     }
+  });
+});
+
+describe("the overlap-snap box is align-aware (T5 finding 1)", () => {
+  // The box the logo's snap reads must sit where the block DRAWS — the box form
+  // of `headlineTextX` — not where a centred one would. The snap scenarios reuse
+  // the proven geometry of the main suite: 16:9, a three-line block, headline-top
+  // (logo rests bottom-left), deep top/bottom insets pulling the block down onto
+  // the logo's line.
+  const r = ratio("16:9");
+  const long = "Stay wild, stay hydrated, and never stop exploring the trail ahead of you today";
+  const margin = r.width * CREATIVE_GEOMETRY.logoMarginFraction;
+  const insets = { top: 200, right: 0, bottom: 200, left: 0 };
+  const logoOf = (captured: Awaited<ReturnType<typeof blit>>): ImageOp => {
+    const logo = captured.drawImage.at(-1);
+    if (!logo) throw new Error("missing logo blit");
+    return logo;
+  };
+
+  test("the box's x derives from headlineTextX's rule, per alignment", () => {
+    // The pure rule, pinned: this is the seam the behavioural snap cannot
+    // discriminate (the wrap box is wide enough to x-overlap the logo for every
+    // align under the pinned geometry), so the rule itself carries the mutation
+    // evidence — in both directions (left and right collapsing to centred).
+    const base = {
+      width: 1920,
+      insets: { top: 0, right: 60, bottom: 0, left: 40 },
+    };
+    const asLayout = (align: ResolvedStyle["align"]): Parameters<typeof headlineBoxX>[0] =>
+      ({ ...base, style: { ...DEFAULT_STYLE, align } }) as unknown as Parameters<typeof headlineBoxX>[0];
+    const centerX = 960;
+    const boxWidth = 100;
+    expect(headlineBoxX(asLayout("left"), centerX, boxWidth)).toBe(40);
+    expect(headlineBoxX(asLayout("right"), centerX, boxWidth)).toBe(1920 - 60 - 100);
+    expect(headlineBoxX(asLayout("center"), centerX, boxWidth)).toBe(centerX - boxWidth / 2);
+  });
+
+  test("a left-aligned headline overlapping the logo's rest zone snaps (still)", async () => {
+    const captured = await blit(
+      request({ layout: "headline-top", ratio: r, message: long, safeInsets: insets, style: { align: "left" } }),
+    );
+    const logo = logoOf(captured);
+    expect(captured.fillText[0]?.textAlign).toBe("left");
+    expect(logo.y).toBe(r.height - insets.bottom - logo.height);
+  });
+
+  test("the mirrored right-aligned headline snaps too (still)", async () => {
+    const captured = await blit(
+      request({ layout: "headline-top", ratio: r, message: long, safeInsets: insets, style: { align: "right" } }),
+    );
+    const logo = logoOf(captured);
+    expect(logo.y).toBe(r.height - insets.bottom - logo.height);
+  });
+
+  test("a left-aligned headline clear of the rest zone never moves the logo (still)", async () => {
+    // The mirror case: a one-line block pinned to the TOP (anchor axis) is
+    // nowhere near the bottom-left logo, whatever the alignment — the logo
+    // rests margined.
+    const captured = await blit(
+      request({
+        layout: "headline-top",
+        ratio: r,
+        message: "Stay wild",
+        anchor: "top",
+        safeInsets: insets,
+        style: { align: "left" },
+      }),
+    );
+    const logo = logoOf(captured);
+    expect(logo.y).toBe(r.height - logo.height - margin - insets.bottom);
+  });
+
+  test("the aligned box reaches the snap on a drawn timeline frame too", async () => {
+    const timelineRequest: TimelineRequest = {
+      ...request({ layout: "headline-top", ratio: r, message: long, safeInsets: insets, style: { align: "left" } }),
+      durationSec: 8,
+      timeline: { beats: [{ text: long, weight: 1 }], transition: "cut", keyBeat: 1 },
+    };
+    const captured = await blit(timelineRequest, 0.5, undefined, 0.5);
+    const logo = logoOf(captured);
+    expect(logo.y).toBe(r.height - insets.bottom - logo.height);
   });
 });

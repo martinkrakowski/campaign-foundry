@@ -536,6 +536,28 @@ interface LayoutAttempt {
   readonly wrapWidth: number;
 }
 
+/**
+ * The x the headline BLOCK's wrap box occupies, per the prepared style's
+ * alignment (T5 finding 1) — the box form of {@link headlineTextX}: `left`
+ * flush to the left inset edge, `right` ending at the right inset edge,
+ * `center` the pre-style centred box (byte-identical, goldens-pinned). The
+ * logo's overlap snap must see the block where it actually draws — a
+ * left-aligned headline occupies [insets.left, insets.left + width], not the
+ * centred range — so the box's x derives from the same rule the draw x does.
+ * Exported pure (the `resolveOverlappingLogoY` mould on the preview) so the
+ * rule is unit-testable without a canvas.
+ */
+export function headlineBoxX(p: LayoutSource, centerX: number, boxWidth: number): number {
+  switch (p.style.align) {
+    case "left":
+      return p.insets.left;
+    case "right":
+      return p.width - p.insets.right - boxWidth;
+    default:
+      return centerX - boxWidth / 2;
+  }
+}
+
 function settleLayout(ctx: SKRSContext2D, p: LayoutSource, attempt: LayoutAttempt): HeadlineLayout {
   if (!attempt.fits) {
     const maxLines = Math.max(1, Math.floor((attempt.maxLast - attempt.minFirst) / attempt.lineHeight) + 1);
@@ -557,7 +579,7 @@ function settleLayout(ctx: SKRSContext2D, p: LayoutSource, attempt: LayoutAttemp
     firstY: attempt.firstY,
     centerX,
     box: {
-      x: centerX - attempt.wrapWidth / 2,
+      x: headlineBoxX(p, centerX, attempt.wrapWidth),
       y: attempt.firstY - attempt.fontSize,
       width: attempt.wrapWidth,
       height: attempt.span + attempt.fontSize,

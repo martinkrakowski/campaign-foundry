@@ -206,6 +206,14 @@ export function CreativePreview({
   // The style block (T5): every absent field resolves to the leaf's default —
   // the same DEFAULT_STYLE the compositor's `resolveStyle` falls back to — so
   // a style-less brief previews exactly as it renders.
+  //
+  // Family divergence, stated honestly (T5 finding 4): the compositor's default
+  // is the deployment's validated MESSAGE_FONT (pipeline config — possibly
+  // Lora), which a browser preview cannot read; this fallback mirrors the
+  // leaf's Inter instead. Tolerated because a deployment default is not brief
+  // style: an EXPLICIT style.fontFamily is authoritative here (asserted in
+  // creative-preview.test.tsx), and the server frame (T1b, in flight) shows
+  // the deployment's truth. No env plumb is invented for an SVG mirror.
   const fontFamily = style?.fontFamily ?? DEFAULT_STYLE.fontFamily;
   const sizeScale = style?.sizeScale ?? DEFAULT_STYLE.sizeScale;
   const lineHeightRatio = style?.lineHeight ?? DEFAULT_STYLE.lineHeight;
@@ -257,14 +265,21 @@ export function CreativePreview({
   const logoX = top ? logoMargin : W - logoW - logoMargin;
 
   // The compositor's logo overlap snap, mirrored with this SVG's own line
-  // metrics: the headline box is the wrapped block (centred, wrap-budget wide —
-  // the same shape the compositor's rule uses, not glyph-measured). Glyph-
-  // accurate snap parity is T1b's (plan D52) — real text measurement is
-  // explicitly not this lane's bar.
+  // metrics: the headline box is the wrapped block (wrap-budget wide — the
+  // same shape the compositor's rule uses, not glyph-measured) at the block's
+  // ALIGNED x — the box form of this SVG's own textX rule below (T5 finding
+  // 1, the compositor's `headlineBoxX`): left → textEdge, right →
+  // W − textEdge − width, centre unchanged. Glyph-accurate snap parity is
+  // T1b's (plan D52) — real text measurement is explicitly not this lane's bar.
   const headlineBox: Box | undefined =
     lines.length > 0
       ? {
-          x: W / 2 - textWidth / 2,
+          x:
+            align === "left"
+              ? textEdge
+              : align === "right"
+                ? W - textEdge - textWidth
+                : W / 2 - textWidth / 2,
           y: firstBaseline - fontSize,
           width: textWidth,
           height: (lines.length - 1) * lineHeight + fontSize,
