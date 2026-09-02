@@ -109,6 +109,8 @@ describe('divide-border-control (the ModelSelector row boundary)', () => {
     const css = await generateCss(['divide-border-control']);
     expect(css).toContain('--color-border-control');
     expect(css).toMatch(/divide-border-control[^{]*>[^{]*\{/);
+  });
+});
 
 // R7 §6 question 1: the preview rail's visibility is a CONTAINER query on the editor
 // row, not a viewport breakpoint. Tailwind 3.4 has no container-query variants built

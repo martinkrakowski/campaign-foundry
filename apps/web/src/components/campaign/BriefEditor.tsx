@@ -200,7 +200,14 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     initialFocusRef: saveAsFieldRef,
   });
   // D61 — the rail remembers its last view, the way the presentation remembers itself.
-  const [railView, setRailView] = useState<RailView>(() => readRailView());
+  // "preview" on the FIRST render, always: the server has no storage, so reading it
+  // in the initializer renders one view there and the other here, and hydration
+  // mismatches — the trap Disclosure documents. The remembered view applies on mount.
+  const [railView, setRailView] = useState<RailView>("preview");
+  useEffect(() => {
+    const stored = readRailView();
+    if (stored !== "preview") setRailView(stored);
+  }, []);
   const chooseRailView = useCallback((next: RailView) => {
     setRailView(next);
     persistRailView(next);
