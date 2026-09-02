@@ -240,6 +240,24 @@ export const statusLeavePrompt = "You have changes that are not saved yet — le
 export const confirmDialogTitle = "Unsaved edits";
 export const confirmDialogStay = "Stay";
 export const confirmDialogLeave = "Leave";
+/**
+ * `status.replacePrompt` — the editor's own replace confirmation (D14). Revert and
+ * the blank route's New brief both throw away unsaved work; the question is the
+ * shell guard's, asked where the gesture stands rather than at a navigation.
+ */
+export const statusReplacePrompt = "You have changes that are not saved yet — discard them?";
+/** The replace confirmation's confirm verb: the draft is thrown away. */
+export const confirmDialogDiscard = "Discard changes";
+/**
+ * `saveAs.overwrite` — Save as… found the id taken (the listing knew, or the API's
+ * 409 backstop said so). The overwrite is the user's decision, asked here, never
+ * re-sent automatically.
+ */
+export const saveAsOverwriteTitle = "Overwrite brief?";
+export function saveAsOverwritePrompt(id: string): string {
+  return `A brief called ${id} already exists — overwrite it with this copy?`;
+}
+export const saveAsOverwriteConfirm = "Overwrite";
 /** `status.saveFailed` */
 export const statusSaveFailed = "Could not save — try Save again.";
 /**

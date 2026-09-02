@@ -91,12 +91,11 @@ export function OverflowMenu({ label, items }: OverflowMenuProps): ReactNode {
    *
    * Two reasons the ordinary batched `setOpen(false)` is not enough. An action may
    * mount a dialog, whose focus trap reads `document.activeElement` to learn where
-   * to send focus back — it must not read a menu item about to unmount. And an
-   * action may hand control away synchronously: `handleRevert` calls
-   * `window.confirm`, which blocks the thread, so with React's normal batching the
-   * panel is still painted behind that native dialog until the user answers it.
-   * `flushSync` is the supported way to get the DOM updated before code that does
-   * not go through React takes over.
+   * to send focus back — it must not read a menu item about to unmount. And the
+   * dialog opens from the click's own handler while the panel would still be
+   * painted behind it: committing the close first means the panel is already gone
+   * when the dialog's open handler runs. `flushSync` is the supported way to get
+   * the DOM updated before the action takes over.
    */
   const choose = (action: () => void) => {
     flushSync(close);

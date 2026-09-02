@@ -145,7 +145,6 @@ describe("BriefPage — data flow", () => {
     // describes (stacked sections, sidebar policy) is the Everything presentation —
     // so seed it, and let the Guided tests below override per-test.
     localStorage.setItem("cf:presentation", "everything");
-    globalThis.confirm = vi.fn(() => true);
   });
 
   test("loads the brief list on mount and again when the window regains focus", async () => {
@@ -327,8 +326,16 @@ describe("BriefPage — data flow", () => {
     await user.type(screen.getByLabelText("New brief id"), "copy");
     await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
 
+    // The collision (a 409 the listing did not foresee) asks first (D9); the
+    // overwrite itself is the retry.
+    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
+    await user.click(within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm }));
+
+    // The retry failed too: the error is on screen and the Save-as dialog is still
+    // open, exactly the answer any save failure gives.
     expect(await screen.findByText(/already exists/)).toBeTruthy();
     expect(screen.getByLabelText("New brief id")).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: messages.saveAsOverwriteTitle })).toBeNull();
   });
 
   test("the Save as... field is the kit input, so it has the focus halo it lacked", async () => {
@@ -397,9 +404,18 @@ describe("BriefPage — data flow", () => {
     const pushesBefore = nextMock().router.push.mock.calls.length;
     await user.click(screen.getAllByText("New brief...")[0]);
     await user.click(screen.getAllByText("New brief...").slice(-1)[0]);
+
+    // The dirty draft is asked through the editor's replace dialog (the shell's
+    // "Unsaved edits" pattern, two-phase since window.confirm retired): exactly one
+    // prompt, and Discard is the consent that throws the draft away.
+    const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    expect(screen.getAllByRole("dialog", { name: "Unsaved edits" })).toHaveLength(1);
+    await user.click(within(prompt).getByRole("button", { name: messages.confirmDialogDiscard }));
+
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
     expect((screen.getByLabelText("Target Region") as HTMLInputElement).value).toBe("");
     expect(nextMock().router.push.mock.calls.length).toBe(pushesBefore);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull());
 
     // H6: the blank route's draft key is stable, so the reset had to purge the
     // discarded draft — otherwise a reload at this route would resurrect it.
@@ -409,9 +425,20 @@ describe("BriefPage — data flow", () => {
     });
   });
 
+  test("a clean editor's New brief resets in place without asking", async () => {
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+
+    // A pristine draft has nothing to lose: the replace confirmation never opens.
+    await user.click(screen.getAllByText("New brief...")[0]);
+    await user.click(screen.getAllByText("New brief...").slice(-1)[0]);
+    expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
+  });
+
   test("declining the prompt keeps what was typed on the blank route", async () => {
     const user = userEvent.setup();
-    globalThis.confirm = vi.fn(() => false);
     routes({});
     renderWithRun(<NewEditor />);
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
@@ -420,7 +447,11 @@ describe("BriefPage — data flow", () => {
     await user.click(screen.getAllByText("New brief...")[0]);
     await user.click(screen.getAllByText("New brief...").slice(-1)[0]);
 
-    expect(globalThis.confirm).toHaveBeenCalled();
+    // The refusal (Stay) is inert: no navigation, and the draft keeps the edits
+    // the user declined to throw away.
+    const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    await user.click(within(prompt).getByRole("button", { name: messages.confirmDialogStay }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull());
     expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("typed");
   });
 
@@ -495,8 +526,12 @@ describe("BriefPage — data flow", () => {
     await user.type(screen.getByLabelText("New brief id"), "camp");
     await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
 
-    // the overwrite was confirmed (the listing already holds camp)...
+    // the id is taken (the listing knows it): the overwrite dialog asks, and the
+    // user's accept is what retries with ?replace=1 (D9)
+    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
+    await user.click(within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm }));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.url.includes("replace=1"))).toBe(true));
+
     // ...and the stored copy was adopted in place: the dialog closes, the shell
     // follows it, and the URL never needed to move.
     await waitFor(() => expect(screen.queryByLabelText("New brief id")).toBeNull());
@@ -934,18 +969,32 @@ describe("BriefPage — data flow", () => {
     expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("Hi edited");
 
     // D40: Revert is the destructive half of the old Discard, so it confirms first —
-    // M5: the old Discard never confirmed (with `confirm` stubbed false it still
-    // wiped the field and the stub was never called). A fresh stub, because the
-    // adoption above already consumed one confirmation.
-    globalThis.confirm = vi.fn(() => true);
+    // through the editor's replace dialog (the shell's "Unsaved edits" pattern) since
+    // window.confirm retired. Exactly one prompt.
     await user.click(screen.getByText("⋯"));
     await user.click(screen.getByText(messages.editorRevert));
-    expect(globalThis.confirm).toHaveBeenCalledTimes(1);
+    const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    expect(screen.getAllByRole("dialog", { name: "Unsaved edits" })).toHaveLength(1);
+    await user.click(within(prompt).getByRole("button", { name: messages.confirmDialogDiscard }));
 
     // The edit is thrown away and the saved state is back on screen.
     await waitFor(() =>
       expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("Hi"),
     );
+  });
+
+  test("a clean editor's Revert acts without asking", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor id="camp" />);
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    // Nothing unsaved (loaded, unedited): the replace confirmation never opens, and
+    // the saved state is what was on screen anyway.
+    await user.click(screen.getByText("⋯"));
+    await user.click(screen.getByText(messages.editorRevert));
+    expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull();
+    expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("Hi");
   });
 
   test("a refused Revert changes nothing", async () => {
@@ -954,15 +1003,41 @@ describe("BriefPage — data flow", () => {
     renderWithRun(<Editor id="camp" />);
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
 
-    // the refusal is pointed at the REVERT's confirmation, not the adoption's
-    globalThis.confirm = vi.fn(() => false);
     await user.type(screen.getByLabelText("Headline"), " edited");
     await user.click(screen.getByText("⋯"));
     await user.click(screen.getByText(messages.editorRevert));
 
-    expect(globalThis.confirm).toHaveBeenCalled();
+    // the refusal (Stay) is pointed at the REVERT's confirmation, and it is inert
+    const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    await user.click(within(prompt).getByRole("button", { name: messages.confirmDialogStay }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull());
     // The refusal held: the draft keeps the edit the user declined to throw away.
     expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("Hi edited");
+  });
+
+  test("a second replace gesture while the question stands never stacks a second prompt", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    renderWithRun(<Editor id="camp" />);
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    await user.type(screen.getByLabelText("Headline"), " edited");
+
+    await user.click(screen.getByText("⋯"));
+    await user.click(screen.getByText(messages.editorRevert));
+    const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    expect(screen.getAllByRole("dialog", { name: "Unsaved edits" })).toHaveLength(1);
+
+    // Triggering again while one question stands asks nothing more (DESIGN.md §5):
+    // the same prompt remains, and the one answer runs the action.
+    await user.click(screen.getByText("⋯"));
+    await user.click(screen.getByText(messages.editorRevert));
+    expect(screen.getAllByRole("dialog", { name: "Unsaved edits" })).toHaveLength(1);
+
+    await user.click(within(prompt).getByRole("button", { name: messages.confirmDialogDiscard }));
+    await waitFor(() =>
+      expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("Hi"),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull());
   });
 
   test("the recovery draft is not resurrected by autosave after a Revert (L1)", async () => {
@@ -979,6 +1054,8 @@ describe("BriefPage — data flow", () => {
 
     await user.click(screen.getByText("⋯"));
     await user.click(screen.getByText(messages.editorRevert));
+    const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    await user.click(within(prompt).getByRole("button", { name: messages.confirmDialogDiscard }));
     await waitFor(() =>
       expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("Hi"),
     );
@@ -1009,6 +1086,8 @@ describe("BriefPage — data flow", () => {
 
     await user.click(screen.getByText("⋯"));
     await user.click(screen.getByText(messages.editorRevert));
+    const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    await user.click(within(prompt).getByRole("button", { name: messages.confirmDialogDiscard }));
 
     // Reverting a new source mints a fresh temp id and leaves the editor pristine, so
     // autosave will not rewrite anything: the purge is what keeps the discarded edits
@@ -1161,7 +1240,6 @@ describe("BriefPage — data flow", () => {
 
   test("declining the prompt keeps the current draft when selecting another brief", async () => {
     const user = userEvent.setup();
-    globalThis.confirm = vi.fn(() => false);
     routes({ list: () => json({ briefs: [entry("camp", "r1"), entry("other", "r1")] }) });
     renderWithRun(<Editor id="camp" />);
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
@@ -1170,6 +1248,10 @@ describe("BriefPage — data flow", () => {
 
     await user.click(screen.getAllByText("camp")[0]);
     await user.click(await screen.findByText("other"));
+
+    // The guard's question is the shell's own dialog; Stay refuses it.
+    const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    await user.click(within(prompt).getByRole("button", { name: messages.confirmDialogStay }));
 
     // The refused navigation went nowhere: the push never happened, so the route
     // still names camp and the draft (with its edit) is untouched on screen.
@@ -1241,13 +1323,20 @@ describe("BriefPage — data flow", () => {
     await user.type(screen.getByLabelText("New brief id"), "taken");
     await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
 
-    expect(globalThis.confirm).toHaveBeenCalled();
+    // The pre-flight check knows the id is taken: the attempt writes nothing and
+    // the overwrite dialog asks (D9 — the visible decision, never an auto-resend).
+    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
+    await user.click(within(prompt).getByRole("button", { name: messages.confirmCancel }));
+
+    // The refusal held: no write left the page, and the Save-as dialog stands
+    // ready to answer differently.
     expect(calls.some((c) => c.method === "POST")).toBe(false);
+    expect(screen.getByLabelText("New brief id")).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: messages.saveAsOverwriteTitle })).toBeNull();
   });
 
   test("accepting the overwrite retries with ?replace=1", async () => {
     const user = userEvent.setup();
-    globalThis.confirm = vi.fn(() => true);
     const calls = routes({ list: () => json({ briefs: [entry("taken", "r1")] }) });
     renderWithRun(<NewEditor />);
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
@@ -1258,12 +1347,15 @@ describe("BriefPage — data flow", () => {
     await user.type(screen.getByLabelText("New brief id"), "taken");
     await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
 
+    // the dialog is the decision point; the confirm is what sends the overwrite
+    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
+    await user.click(within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm }));
+
     await waitFor(() => expect(calls.find((c) => c.method === "POST")?.url).toContain("replace=1"));
   });
 
   test("a 409 from a brief that appeared since the list was fetched offers the same overwrite", async () => {
     const user = userEvent.setup();
-    globalThis.confirm = vi.fn(() => true);
     let posts = 0;
     const calls = routes({
       post: () => {
@@ -1280,15 +1372,21 @@ describe("BriefPage — data flow", () => {
     await user.type(screen.getByLabelText("New brief id"), "copy");
     await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
 
+    // the first attempt posted WITHOUT replace; its 409 opens the same dialog the
+    // pre-flight check uses — one decision point, whichever way the collision was found
+    await waitFor(() => expect(posts).toBe(1));
+    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
+    expect(calls.filter((c) => c.method === "POST")[0].url).not.toContain("replace=1");
+
+    await user.click(within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm }));
     await waitFor(() => expect(posts).toBe(2));
     expect(calls.filter((c) => c.method === "POST")[1].url).toContain("replace=1");
   });
 
   test("refusing the 409 overwrite leaves the copy unwritten", async () => {
     const user = userEvent.setup();
-    globalThis.confirm = vi.fn(() => false);
     let posts = 0;
-    routes({
+    const calls = routes({
       post: () => {
         posts += 1;
         return json({ error: "already exists" }, 409);
@@ -1303,13 +1401,43 @@ describe("BriefPage — data flow", () => {
     await user.type(screen.getByLabelText("New brief id"), "copy");
     await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
 
+    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
+    await user.click(within(prompt).getByRole("button", { name: messages.confirmCancel }));
+
     await waitFor(() => expect(posts).toBe(1));
+    expect(calls.some((c) => c.method === "POST" && c.url.includes("replace=1"))).toBe(false);
     expect(screen.getByLabelText("New brief id")).toBeTruthy();
+  });
+
+  test("neither Escape nor Cancel dismisses the overwrite dialog while the retry write is in flight", async () => {
+    const user = userEvent.setup();
+    // The listing knows the id is taken, so the dialog opens without a write; the
+    // confirm's retry POST never answers.
+    routes({
+      list: () => json({ briefs: [entry("taken", "r1")] }),
+      post: () => new Promise<Response>(() => {}),
+    });
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+
+    await fillValidDraft(user);
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), "taken");
+    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
+
+    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
+    await user.click(within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm }));
+    expect(screen.getByRole("dialog", { name: messages.saveAsOverwriteTitle })).toBeTruthy();
+
+    // #163's saving guard: a dismissal mid-write would hand the user an editable
+    // page whose pending adoption is about to discard their edits.
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: messages.saveAsOverwriteTitle })).toBeTruthy();
   });
 
   test("a non-409 Save as… failure is reported", async () => {
     const user = userEvent.setup();
-    globalThis.confirm = vi.fn(() => true);
     routes({ post: () => json({ error: "disk full" }, 500) });
     renderWithRun(<NewEditor />);
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
@@ -1449,7 +1577,6 @@ describe("BriefPage — capabilities and motion", () => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
     localStorage.setItem("cf:presentation", "everything");
-    globalThis.confirm = vi.fn(() => true);
   });
 
   const motionToggle = () => screen.getByRole("button", { name: "motion" }) as HTMLButtonElement;
@@ -1783,7 +1910,6 @@ describe("BriefPage — guided presentation (W6)", () => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
     localStorage.setItem("cf:presentation", "guided");
-    globalThis.confirm = vi.fn(() => true);
   });
 
   // A classic brief that meets every step, so Next can walk all the way to Review.
@@ -2009,6 +2135,73 @@ describe("BriefPage — guided presentation (W6)", () => {
     await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
   });
 
+  test("the Asset Bin drawer is hoisted out of the step card (M7)", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    // Identity -> Copy -> Products, where the bin is one click away per product.
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
+
+    await user.click(screen.getAllByRole("button", { name: messages.logoChooseFromBin })[0]);
+    const drawer = await screen.findByRole("dialog", { name: "Asset Bin" });
+
+    // M7's structural fact: the step card carries a permanent non-`none` transform
+    // (the walk's animation container), which makes it the CONTAINING BLOCK for
+    // `fixed` descendants — a drawer nested inside it would be trapped in the card.
+    // The drawer's node therefore lives outside it, at the editor's root.
+    const stepCard = document.querySelector('[data-testid="step-card"]');
+    expect(stepCard).toBeTruthy();
+    expect(stepCard!.contains(drawer)).toBe(false);
+    // happy-dom applies no layout, so "the scrim covers the viewport" is not
+    // provable here — the visual half of M7 is verified in a browser. This test
+    // pins the structural half the fix consists of.
+  });
+
+  test("picking an asset in the hoisted bin still fills the product's logo", async () => {
+    const user = userEvent.setup();
+    // The same fetch mock routes() installs, plus the bin's listing endpoint — the
+    // hoisted drawer fetches against the brief's id exactly as it did in the section.
+    vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+      const u = String(url);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (u.includes("/campaigns/assets")) {
+        return Promise.resolve(json({ assets: [{ name: "brand-logo.png", size: 4096, type: "image/png" }] }));
+      }
+      if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
+        return Promise.resolve(json({ briefs: [entry("ok", "r1")] }));
+      }
+      if (method === "GET" && u.includes("/campaigns/capabilities")) {
+        return Promise.resolve(json({ motion: true }));
+      }
+      return Promise.resolve(json({}, 404));
+    });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
+
+    await user.click(screen.getAllByRole("button", { name: messages.logoChooseFromBin })[0]);
+    await screen.findByRole("dialog", { name: "Asset Bin" });
+    await user.click(await screen.findByRole("button", { name: "Choose brand-logo.png" }));
+
+    // the selection rode the hoisted drawer: the product's logo is the bin asset…
+    const logos = () =>
+      screen
+        .getAllByLabelText("Logo Path")
+        .filter((el) => el.tagName === "INPUT" && el.getAttribute("type") !== "file");
+    await waitFor(() => expect((logos()[0] as HTMLInputElement).value).toBe("assets/inputs/ok/brand-logo.png"));
+    // …and the drawer closed with the choice, the way the in-section drawer did.
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Asset Bin" })).toBeNull());
+  });
+
   test("the presentation toggle stays reachable from Everything", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });
@@ -2172,7 +2365,6 @@ describe("BriefPage — the walk's chrome and gestures (W7)", () => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
     localStorage.setItem("cf:presentation", "guided");
-    globalThis.confirm = vi.fn(() => true);
   });
 
   // D37: adopting a brief IS arriving at its route — wait for the route's brief to land.
@@ -2391,7 +2583,6 @@ describe("BriefPage — the review step (W8)", () => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
     localStorage.setItem("cf:presentation", "guided");
-    globalThis.confirm = vi.fn(() => true);
   });
 
   // D37: adopting a brief IS arriving at its route — wait for the route's brief to land.
@@ -2642,7 +2833,6 @@ describe("BriefPage — the preview rail (R7)", () => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
     localStorage.setItem("cf:presentation", "guided");
-    globalThis.confirm = vi.fn(() => true);
   });
 
   // D37: adopting a brief IS arriving at its route — and the first step's validation
@@ -2828,7 +3018,6 @@ describe("BriefPage — the Layout step (T7)", () => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
     localStorage.setItem("cf:presentation", "guided");
-    globalThis.confirm = vi.fn(() => true);
   });
 
   // D37: adopting a brief IS arriving at its route — and the first step's validation
@@ -2946,7 +3135,6 @@ describe("BriefPage — Generate's three-way question (D35)", () => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
     localStorage.setItem("cf:presentation", "everything");
-    globalThis.confirm = vi.fn(() => true);
   });
 
   /**
@@ -3136,7 +3324,6 @@ describe("the route is the source of truth (D37)", () => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
     localStorage.setItem("cf:presentation", "everything");
-    globalThis.confirm = vi.fn(() => true);
   });
 
   test("/brief/{id} loads that brief, and the shell follows what the URL named", async () => {
