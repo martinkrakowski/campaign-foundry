@@ -115,7 +115,11 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   // brief's own route always answers: a real brief opens, and an id the store does
   // not know gets the M3 empty state with its way out, which is honest where the
   // loop was mute.
-  const editHref = `/brief/${brief.id}`;
+  // Encoded, because `cf:brief` restores any non-empty string a hand-edited store
+  // holds — a delimiter in it must identify the brief, not reshape the route. And a
+  // BLANK brief (id "") means the shell released its campaign on /brief/new, so the
+  // honest target is the new-brief route, never the bare redirector (the loop).
+  const editHref = brief.id ? `/brief/${encodeURIComponent(brief.id)}` : "/brief/new";
   const handleEditClick = (e: React.MouseEvent) => {
     e.preventDefault();
     onNavigate?.();

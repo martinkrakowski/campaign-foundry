@@ -8,6 +8,7 @@ import { Accordion } from "../Accordion";
 import { Sidebar, BrowseBriefsButton, SidebarContent } from "../Sidebar";
 import { useEditorPanels } from "@/lib/editor-panels-context";
 import { useRun } from "@/lib/run-context";
+import { blankBrief } from "@/components/campaign/editor-state";
 import { Header } from "../Header";
 import { MobileMenu } from "../MobileMenu";
 import { DialogShell } from "@/components/ui";
@@ -414,16 +415,29 @@ describe("guarded navigation when the editor is dirty", () => {
     expect(onNavigate).toHaveBeenCalled();
     // D37: Edit names the active brief's own route — bare "/brief" redirected a
     // fresh profile (no cf:brief) straight back to the grid, a silent loop.
-    expect(nextMock().router.push).toHaveBeenCalledWith(expect.stringMatching(/^\/brief\/.+/));
+    expect(nextMock().router.push).toHaveBeenCalledWith("/brief/seed");
   });
 
   test("the Edit link names the active brief's route, never the bare redirector", () => {
     seedPersistedRun([makeAsset()]);
     renderDirty(createElement(SidebarContent, { onNavigate: vi.fn() }));
-    const href = screen.getByText("Edit").getAttribute("href") ?? "";
     // Bare "/brief" redirects by cf:brief, which a fresh profile lacks — the link
     // looped to the grid. The brief's own route always answers (M3 covers unknowns).
-    expect(href).toMatch(/^\/brief\/.+/);
+    // Exact, not a pattern: /brief/undefined would have matched the loose regex.
+    expect(screen.getByText("Edit").getAttribute("href")).toBe("/brief/seed");
+  });
+
+  test("a released shell (blank brief) sends Edit to /brief/new, never the redirector", async () => {
+    // Arriving at /brief/new releases the campaign: the shell's brief id is "".
+    // Interpolating that gives "/brief/" and the suggested fallback of bare
+    // "/brief" restores the redirect loop — the honest target is the new-brief route.
+    const ReleaseBrief = () => {
+      const { setBrief } = useRun();
+      useEffect(() => setBrief(blankBrief()), [setBrief]);
+      return null;
+    };
+    render(createElement(ShellProviders, null, createElement(ReleaseBrief), createElement(SidebarContent, { onNavigate: vi.fn() })));
+    await waitFor(() => expect(screen.getByText("Edit").getAttribute("href")).toBe("/brief/new"));
   });
 
   test("a header tab click is intercepted and routed through the guard", async () => {
