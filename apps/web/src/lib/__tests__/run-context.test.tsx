@@ -549,7 +549,7 @@ describe("RunProvider — brief picker & persistence", () => {
     expect(result.current.decisions).toEqual({});
   });
 
-  test("setBrief drops the stored brief when it is cleared", async () => {
+  test("the blank brief releases the shell but keeps the last-opened record (D37/H5)", async () => {
     const { result } = setup();
     await act(async () => {
       result.current.setBrief({
@@ -562,8 +562,10 @@ describe("RunProvider — brief picker & persistence", () => {
     });
     expect(localStorage.getItem("cf:brief")).not.toBeNull();
 
-    // the blank brief is not a campaign to come back to: leaving it in storage is how a
-    // reload after "New brief" used to put the previous one back on screen
+    // D37: cf:brief is the "last opened" convenience, never an address — the URL
+    // names the open brief. Releasing the shell's campaign (visiting /brief/new
+    // opens no brief) must not destroy the pointer to the one the user opened
+    // last: the bare /brief redirect and the grid's restore read it (H5).
     await act(async () => {
       result.current.setBrief({
         id: "",
@@ -573,7 +575,8 @@ describe("RunProvider — brief picker & persistence", () => {
         products: [],
       } as never);
     });
-    expect(localStorage.getItem("cf:brief")).toBeNull();
+    expect(result.current.brief.id).toBe("");
+    expect(JSON.parse(localStorage.getItem("cf:brief") ?? "null")?.id).toBe("keeper");
   });
 
   test("setBrief keeps the current run when the id already matches", async () => {

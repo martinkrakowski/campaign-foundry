@@ -303,9 +303,15 @@ export type EditorAction =
   | { type: "discard" }
   | { type: "setCapabilities"; capabilities: { motion: boolean; reason?: string } };
 
+/**
+ * H6/D37: the one draft key an unnamed draft uses. It was a per-mount temp id, which
+ * keyed the autosaved recovery copy to a value that died with the page — a reload
+ * orphaned the draft it had just written. Under the route model every unnamed editor
+ * is `/brief/new`, so the key is one stable string: a reload at the same route finds
+ * the draft it left.
+ */
 function generateTempId(): string {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
-  return `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  return "new";
 }
 
 export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
@@ -1270,7 +1276,7 @@ export function loadDraftFromStorage(state: EditorState): EditorState | null {
  * even when that value is wrong, which is exactly how the first cut of this
  * function let an invalid `mode` through.
  *
- * `initialEditorState` mints a temp id and two product keys that are usually
+ * `initialEditorState` mints the stable draft key and two product keys that are usually
  * discarded here. `fromBrief` does the same on every load; a fresh identity is
  * the only correct fallback for a draft that lost its own, and a burnt counter
  * value costs nothing — product keys need only be unique.

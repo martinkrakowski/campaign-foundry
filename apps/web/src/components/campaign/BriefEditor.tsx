@@ -5,6 +5,7 @@ import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { Button, Input, SegBar, OverflowMenu, useDialogFocusTrap } from "@/components/ui";
 import { useRun } from "@/lib/run-context";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 import {
   listBriefs,
@@ -122,13 +123,16 @@ function stepTitle(step: StepId): string {
 }
 
 /**
- * The campaign editor. Two routes render it: `/brief` edits whatever brief the shell
- * has active, and `/brief/new` starts a blank one. The difference is `blank`, which is
- * a statement about the route rather than a moment in a click handler — that is what
- * keeps "the user asked for an empty brief" true for the whole life of the page,
- * rather than for the one render before an effect adopts the active brief again.
+ * The campaign editor. Two routes render it: `/brief/{id}` edits that brief — the
+ * route is the single source of truth for which brief is open (D37), so a reload or
+ * a shared link lands on exactly it — and `/brief/new` starts a blank one. The
+ * difference is the `briefId` prop, which is a statement about the URL rather than a
+ * moment in a click handler: absent means the blank route, and that holds for the
+ * whole life of the page, rather than for the one render before something adopts a
+ * brief behind the route's back.
  */
-export function BriefEditor({ blank = false }: { blank?: boolean }) {
+export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
+  const blank = routeId === undefined;
   const { brief: runBrief, setBrief: setRunBrief } = useRun();
   const router = useRouter();
   const { guardedPush } = useGuardedNavigation();
@@ -263,10 +267,17 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
 
   // D11 recovery: reinstate an auto-saved draft, once per draft key and only when it
   // actually differs from what is on screen. Keying on the draft rather than on mount
-  // matters — a new draft's key contains a temp id minted at mount, so an unsaved edit
-  // is only ever recoverable once the editor has settled on the brief it belongs to.
+  // matters — on a named route the draft key only becomes the brief's own once the
+  // route's brief has loaded, so an unsaved edit is only ever recoverable once the
+  // editor has settled on the brief it belongs to (H6: `/brief/new`'s key is stable,
+  // so a reload there finds its draft immediately).
   const draftKey = getDraftKey(state);
+  const routeLoadedId = state.source.kind === "file" ? state.source.loadedId : undefined;
   useEffect(() => {
+    // On a named route, wait for the route's brief: before it lands the draft key is
+    // not yet the route's, and restoring against it would seed the editor with a
+    // draft the URL says nothing about.
+    if (routeId !== undefined && routeLoadedId !== routeId) return;
     const draft = loadDraftFromStorage(state);
     // The same `valuesEqual` the dirty checks use, not a second stringified
     // comparison: a key-order-sensitive stringify here would restore a draft
@@ -275,29 +286,47 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     if (draft && !valuesEqual(draft, state)) {
       dispatch({ type: "restore", state: draft });
     }
-  }, [draftKey]);
+  }, [draftKey, routeId, routeLoadedId]);
 
-  // The shell's picker and the sidebar's Edit both set the run-context brief. Follow it
-  // so the editor never sits on stale content while /brief is mounted; never over a
-  // dirty draft, and re-attach the file identity from the listing when we have it.
+  // D37 — the route drives the load, and nothing else does. `routeId` is the URL's
+  // word for which brief is open, and it is the only source of truth: the editor
+  // loads that brief from the listing (carrying its file identity and revision —
+  // the conditional-write guard for the next save), and the shell follows *after*
+  // the load succeeds, so Generate runs what the URL shows. One direction only:
+  // the editor never follows `runBrief`, or the two would be two sources of truth
+  // for the same question — the bug this fixes.
+  const [unknownId, setUnknownId] = useState<string | null>(null);
   useEffect(() => {
-    // `/brief/new` is a standing instruction, not a moment: never adopt the active
-    // brief here, or the blank draft the user asked for is replaced by the campaign
-    // they just left — a pristine draft passes the dirty guard below, so this is the
-    // only thing stopping it.
-    if (blank) return;
-    // Wait for the listing: syncing before it arrives would adopt the brief without its
-    // file identity, and the editor would then be too dirty to re-attach it.
+    if (routeId === undefined) return;
+    // SAFE_ID_PATTERN is the one rule a brief id answers to (the same one the
+    // Save-as backstop enforces): a malformed id cannot name a brief, so it is
+    // refused here — before any match attempt, and before anything reaches the API.
+    if (!SAFE_ID_PATTERN.test(routeId)) {
+      setUnknownId(routeId);
+      return;
+    }
+    // Wait for the listing: loading before it arrives would miss the entry, and the
+    // entry is where the file identity and revision come from.
     if (!briefsLoaded) return;
-    const loadedId = state.source.kind === "file" ? state.source.loadedId : undefined;
-    if (loadedId === runBrief.id || (!isPristine(state) && isDirtySinceSave(state))) return;
-    const match = briefs.find((entry) => entry.brief.id === runBrief.id);
-    dispatch({
-      type: "load",
-      brief: match ? match.brief : runBrief,
-      ...(match ? { entry: { file: match.file, revision: match.revision } } : {}),
-    });
-  }, [runBrief, briefs, briefsLoaded, blank]);
+    if (routeLoadedId === routeId) return;
+    const match = briefs.find((entry) => entry.brief.id === routeId);
+    // M3: an id the listing does not know is answered where the user landed — the
+    // empty state below — never a silent new unsaved draft.
+    if (!match) {
+      setUnknownId(routeId);
+      return;
+    }
+    setUnknownId(null);
+    dispatch({ type: "load", brief: match.brief, entry: { file: match.file, revision: match.revision } });
+    // The file identity rides the load, so the canonical projection is what `apply`
+    // snapshots — and committing the shell here (never before) is what makes
+    // Generate run the brief the URL named.
+    dispatch({ type: "apply" });
+    setRunBrief(match.brief);
+    // A loaded brief shows its real errors at once: they are the file's, not the
+    // user's, and the user asked for this brief by opening the route.
+    setAttempted(true);
+  }, [routeId, routeLoadedId, briefs, briefsLoaded, setRunBrief]);
 
   // Arriving here means the last campaign is no longer the one being worked on. Let go
   // of it in the shell too: while it stayed active the selector kept advertising it and
@@ -318,22 +347,6 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     // and comes back if its brief is opened again.
     setRunBrief(blankBrief());
   }, [blank, setRunBrief]);
-
-  // …and the moment there is a campaign again, this page has stopped describing a new
-  // brief, so the URL must stop saying so. Applying, saving, saving-as and choosing one
-  // in the shell all arrive here as the same transition — no campaign, then one — which
-  // is why none of those handlers navigates for itself.
-  //
-  // The transition is what matters, not the value: on the first commit `runBrief` is
-  // still whatever the release above is in the middle of clearing, and reacting to that
-  // would bounce straight back off this route.
-  const previousBriefId = useRef(runBrief.id);
-  useEffect(() => {
-    const previous = previousBriefId.current;
-    previousBriefId.current = runBrief.id;
-    if (!blank || !releasedRef.current) return;
-    if (previous === "" && runBrief.id !== "") router.replace("/brief");
-  }, [blank, runBrief.id, router]);
 
   // Validate on state change
   useEffect(() => {
@@ -362,7 +375,11 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   // Update dirty state. The provider outlives this route, so clear the flag on unmount —
   // otherwise every later navigation in the shell keeps prompting.
   useEffect(() => {
-    setDirty(isDirtySinceSave(state));
+    // The flag answers "is there unsaved work?". `isDirtySinceSave` alone would count
+    // every unnamed draft as dirty by definition — which would make the guard prompt
+    // "unsaved changes" on a pristine form, e.g. when the user picks a brief from the
+    // blank route. A pristine editor has nothing to lose, so it never prompts.
+    setDirty(!isPristine(state) && isDirtySinceSave(state));
     return () => setDirty(false);
   }, [state, setDirty]);
 
@@ -557,6 +574,12 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   // The Sections outline (D25) sits directly below the pair: below the mode, but
   // before the read-only brief, so mode stays the first decision (GB-D4).
   useEffect(() => {
+    // M3: while the route's id names no brief there is no editor to publish for —
+    // the shell's panels would be controls mutating a draft nobody can see.
+    if (unknownId !== null) {
+      setTopPanels(null);
+      return;
+    }
     setTopPanels(
       <>
         <ModePanel mode={state.mode} onSetMode={(mode: CampaignMode) => dispatch({ type: "setMode", mode })} />
@@ -564,7 +587,7 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
       </>,
     );
     return () => setTopPanels(null);
-  }, [state.mode, visibleErrors, setTopPanels, outlineActivate]);
+  }, [state.mode, visibleErrors, setTopPanels, outlineActivate, unknownId]);
 
   // Publish the sections that live in the left bar while this editor is mounted. The
   // page keeps the state, dispatch and validation and republishes on every change; the
@@ -573,6 +596,11 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
   // is published for both modes, randomized through the planner and classic derived.
   const policyErrors = Object.keys(sectionErrorsVisible("policy")).length;
   useEffect(() => {
+    // Same M3 gate as the top panels: no editor, nothing published.
+    if (unknownId !== null) {
+      setPanels(null);
+      return;
+    }
     setPanels(
       <>
         {state.mode === "variation" && presentation === "everything" ? (
@@ -602,29 +630,22 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     );
     return () => setPanels(null);
     // sectionErrors only reads what `errors` already covers.
-  }, [state, errors, policyErrors, setPanels, touchSectionFromEvent, presentation]);
+  }, [state, errors, policyErrors, setPanels, touchSectionFromEvent, presentation, unknownId]);
 
   /** Every path that replaces the draft goes through the same D14 confirmation. */
   const confirmReplace = (): boolean =>
     isPristine(state) || !isDirtySinceSave(state) || window.confirm(LEAVE_PROMPT);
 
+  /**
+   * D37: picking a brief is navigating to it — the same act the shell's picker
+   * performs. The route drives the load (with the entry's file identity and
+   * revision, so the next save guards its write), and the shell follows after the
+   * load succeeds. The guarded push carries the unsaved-changes prompt — asking
+   * `confirmReplace` here too would be the same question twice — and a refused
+   * prompt does not navigate.
+   */
   const loadBrief = (entry: BriefEntry) => {
-    if (!confirmReplace()) return;
-    // Carry the revision through: handleSave sends it back as the conditional-write
-    // guard, so dropping it here would silently downgrade every save to last-write-wins.
-    dispatch({ type: "load", brief: entry.brief, entry: { file: entry.file, revision: entry.revision } });
-    // Picking a brief is choosing which campaign to work on, so it becomes the active
-    // one — the same thing the shell's picker does with `setBrief`. Without this the
-    // editor and the pipeline disagree: Generate would run whatever was active before,
-    // so choosing a motion brief here and running it produced the previous brief's
-    // output. Typed edits still need Apply; only the choice of brief is immediate.
-    // No `applied` here: the reducer processes this after the load, so it snapshots the
-    // canonical `toBrief` of the loaded draft. Passing the file's brief instead would
-    // differ by key order alone and read as dirty the moment it was applied.
-    dispatch({ type: "apply" });
-    setRunBrief(entry.brief);
-    // L1.1: Loaded brief shows real errors at once
-    setAttempted(true);
+    guardedPush(`/brief/${entry.brief.id}`);
   };
 
   const createNew = () => {
@@ -632,6 +653,10 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
     // place. `guardedPush` would be a no-op on the same URL and nothing would reset.
     if (blank) {
       if (!confirmReplace()) return;
+      // H6: the blank route's draft key is stable, so the discarded draft occupies
+      // the very key a reload would restore from — purge it here, where the reset
+      // makes the editor pristine and autosave will not refill it (the L1 rule).
+      purgeDraftFromStorage(state);
       // No entry means `fromBrief` produces a "new" source, which is what a blank draft is.
       dispatch({ type: "load", brief: blankBrief() });
       // L1.1: New brief resets touched/attempted
@@ -698,6 +723,11 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
       setRunBrief(stored.brief);
       purgeDraftFromStorage(state);
       await loadBriefs();
+      // D37: the URL is the source of truth for which brief is open. A first save
+      // turned "new" into a named brief, so the route must stop calling it new —
+      // otherwise a reload would blank the brief that was just saved. (A save of a
+      // file-backed brief is already at its own route; nothing to move.)
+      if (state.source.kind === "new") router.replace(`/brief/${stored.brief.id}`);
       return stored.brief;
     } catch (error) {
       // A 409 carries the store's fresh revision (API E1.0). Adopt it — through the
@@ -768,23 +798,25 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
         }
         created = await createBrief(newBrief, { replace: true });
       }
-      // Dispatch the brief the SERVER stored, not the one this page constructed: the
-      // copy rewrites brief-scoped asset paths during the copy, and dispatching
-      // newBrief made the editor revert to the pre-copy paths while the file on disk
-      // carried the rewritten ones. The copy's revision is the conditional-write guard
-      // for the *next* save of it — dropping it downgraded that save to
-      // last-write-wins, the same trap `loadBrief` carries the revision to avoid.
-      dispatch({
-        type: "load",
-        brief: created.brief,
-        entry: { file: created.file, ...(created.revision === undefined ? {} : { revision: created.revision }) },
-      });
-      // The editor is on the copy now, so the shell must be too — otherwise Generate
-      // runs the brief this one was copied from, which is the trap `loadBrief` documents.
-      setRunBrief(created.brief);
       purgeDraftFromStorage(state);
+      if (created.brief.id === routeId) {
+        // The copy took the id this route already names: no navigation will answer,
+        // so adopt the brief the SERVER stored — its asset paths were rewritten
+        // during the copy, and its revision is the guard for the next save (an
+        // absent revision leaves the guard untouched, the `save` action's rule).
+        dispatch({ type: "load", brief: created.brief, entry: { file: created.file, revision: created.revision } });
+        setRunBrief(created.brief);
+        setSaveAsId(null);
+        return;
+      }
+      // D37: the route drives the load, so the copy is adopted by navigating to it —
+      // one direction only. Dispatching the load here as well would have the effect
+      // (still seeing the old id in the URL for the frames before the navigation
+      // commits) load the old brief right back. The listing is refreshed first, so
+      // the route's load finds the copy the moment the URL changes.
       await loadBriefs();
       setSaveAsId(null);
+      router.replace(`/brief/${created.brief.id}`);
     } catch (error) {
       setPersistError(unknownErrorMessage(error, "Save as failed"));
     } finally {
@@ -1072,6 +1104,28 @@ export function BriefEditor({ blank = false }: { blank?: boolean }) {
       </div>
     </FloatingBar>
   );
+
+  // M3 — the route's id names no brief. The empty state answers where the user
+  // landed, naming the id the URL carried (that is the fact being reported) and
+  // giving the two ways out. No draft is created, nothing is released in the shell,
+  // and nothing is published into the sidebar: this page is not an editor.
+  if (unknownId !== null) {
+    return (
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 pb-24 sm:p-8">
+        <div role="alert" className="rounded-xl border border-border bg-surface p-6">
+          <p className="text-[13px] text-text-primary">{messages.briefNotFound(unknownId)}</p>
+          <div className="mt-4 flex gap-4 text-[13px] font-medium text-brand-primary">
+            <Link href="/grid" className="underline hover:text-text-emphasis">
+              {messages.briefNotFoundGrid}
+            </Link>
+            <Link href="/brief/new" className="underline hover:text-text-emphasis">
+              {messages.briefNotFoundNew}
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     // No h-full / inner overflow: like every other view, this one flows and the
