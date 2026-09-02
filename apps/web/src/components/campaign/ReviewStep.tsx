@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
-import { CreativePreview, type LayoutOption, type ToneOption } from "./CreativePreview";
-import { derivePreviewRatio } from "./PreviewDock";
+import type { LayoutOption, ToneOption } from "./CreativePreview";
+import { derivePreviewRatio, PreviewPicture } from "./PreviewDock";
 import { formatDisplayName, platformDisplayName, ratioDisplayName } from "./display-names";
 import { SECTION_TITLES, sectionOrder, type SectionId } from "./sections";
 import * as messages from "./messages";
@@ -159,17 +159,17 @@ export function ReviewStep({
       </dl>
       {hasProduct ? (
         <figure className="flex flex-col gap-2">
-          <div className="overflow-hidden rounded-lg border border-border bg-text-muted">
-            <CreativePreview
-              layout={layout}
-              tone={tone}
-              primaryColor={product.primaryColor}
-              headline={brief.campaignMessage}
-              motion={motion}
-              ratio={ratio}
-              className="block h-auto w-full"
-            />
-          </div>
+          {/* The shared picture (§6 question 4): `ratio` was derived once above, so
+              the figure and the dock cannot disagree by deriving twice (C1's trap). */}
+          <PreviewPicture
+            layout={layout}
+            tone={tone}
+            primaryColor={product.primaryColor}
+            headline={brief.campaignMessage}
+            motion={motion}
+            ratio={ratio}
+            className="block h-auto w-full"
+          />
           <figcaption className="font-mono text-[11px] text-text-muted">
             {messages.previewCaption(
               ratioDisplayName(ratio),
