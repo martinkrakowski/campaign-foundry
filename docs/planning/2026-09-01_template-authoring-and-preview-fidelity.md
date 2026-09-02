@@ -42,6 +42,9 @@ two features with very different costs, only one of which (2) needs.
 | **D57** | **Position arrives as a NEW optional axis, never by widening `LAYOUT_VALUES`.** | `VariationPolicy` puts `layout` **unconditionally** into the hashed payload, while `motion`/`duration`/`headline` are conditionally spread. Widening the enum changes `policyHash` for every existing variation brief, and the re-roll path pins the persisted hash — so it would silently re-plan and un-pin live campaigns. |
 | **D58** | **A control that the wizard cannot round-trip does not ship.** Every new field lands in the server validator **and** the editor's state model in the same lane. | The wizard reconstructs the brief from a whitelisted state model, so any field it does not know is **deleted on the next save**. Hand-authored YAML plus one UI save equals silent data loss. |
 
+| **D59** | **The font control is a server-validated allowlist of bundled families — and `MESSAGE_FONT` is validated the same way, in the same lane.** | The renderer can see **312 system font families**; `has("Helvetica")` and `has("Georgia")` are both true and they render differently from Inter, with distinct hashes and an unknown family falling back to a fourth. `pipeline.ts` passes `process.env.MESSAGE_FONT` into the constructor **unvalidated**, so the determinism hole is already open at deployment scope. A per-brief control widens it to per-creative; validating one and not the other leaves the identical bug reachable. |
+| **D60** | **Weight exposes only the weights that have faces**, or the asset decision is made explicitly first. | Only Inter/Lora **Regular (400) and Bold (700)** are registered. Measured: 13 CSS weight tokens collapse to **3 distinct rasters** — 100–500 render Regular, 600–800 render Bold, and 900 is synthetic emboldening (same metrics as bold, 11 454 lit pixels vs 9 164). A 100–900 slider is decorative over four faces. Today's `subtle` tone already asks for `"500"` and silently renders Regular. |
+
 ---
 
 ## 1. Verified findings
@@ -54,7 +57,8 @@ two features with very different costs, only one of which (2) needs.
 | **F2** | **One draw path serves static and video.** `writeFrames` calls `NodeCanvasCompositor.draw()` **once per frame**, and ffmpeg only encodes (rawvideo → libx264; no filters, no `drawtext`). Every static control lands in the video for free, and text animation is architecturally reachable today. |
 | **F3** | **The golden images survive.** Checked byte-identical with neutral setters. Under **D54** the goldens are not a cost. |
 | **F4** | **Per-frame text measurement is already in production.** `drawLegacy` calls `layoutHeadline → fitText → layoutAt → wrapText` on **every frame** — full autofit, ~180× per clip, today. Per-frame text work is not a new cost class. |
-| **F5** | **The `drawLegacy` freeze is narrower than it reads.** The frozen body delegates layout to `layoutHeadline`/`fitText`/`layoutAt`, so a meaningful subset of controls — anything that changes *layout* — is implementable **outside** the frozen body. |
+| **F5** | **The `drawLegacy` freeze is narrower than it reads — but only for some controls.** `layoutAt` already reads `fontWeight`/`fontFamily` off `PreparedCreative` to build `ctx.font`, so **family, weight, size and line height** can be honoured with the frozen body untouched. **Colour, alignment, baseline and media opacity are literals *inside* that body** and do require the edit. Changing what the frozen path renders is a **D10 amendment in substance** either way. |
+| **F5a** | **The ctx-state route does not generalise to the timeline path — this is the concrete trap.** `resolveBeatLayouts` measures on a throwaway **1×1 context**, and `drawBeat` re-sets `ctx.font`. Any context-state control (`letterSpacing`, `wordSpacing`) must be set **again** there, or the video blit silently drops it while the static still honours it. |
 
 ### The new campaign feature is largely built
 
@@ -80,12 +84,13 @@ two features with very different costs, only one of which (2) needs.
 | id | Finding |
 |---|---|
 | **H1** | **The compositor honours none of the ten requested controls.** `CompositorPort`'s request carries eight fields. Every control is a port change + both draw paths + tests, not a UI feature. |
-| **H2** | **Font choice is deployment config, not content.** `process.env.MESSAGE_FONT` is read once at pipeline construction; `fonts.ts` registers exactly **Inter Regular/Bold and Lora Regular/Bold**. "Choose a font" means moving font to a per-request field and deciding what the bundled set is. |
+| **H2** | **Font choice is deployment config, not content — and it is unvalidated.** `process.env.MESSAGE_FONT` is read once at pipeline construction and passed straight through; `fonts.ts` registers exactly **Inter Regular/Bold and Lora Regular/Bold**, while the renderer can see **312 system families**. "Choose a font" means a per-request field, an allowlist, and an asset-pipeline decision about what is bundled (**D59**, **D60**). |
 | **H3** | **Text effects are not the existing motion vocabulary.** `MOTION_KINDS` are camera/ground effects; only one of four touches the copy. A text-effect control is a **new axis** or a mixed vocabulary — and motion is a plan-time axis inside the policy hash, not a per-creative setting. |
 | **H4** | **A static creative cannot carry an animation** — it is a sample of the motion curve, so every new effect needs a **designed rest pose**, and the editor must say what the still will look like. |
 | **H5** | **Colour and opacity controls reach into a pixel-measured compliance gate.** `validateBrandColorDensity` decodes the delivered PNG and fails below a 0.02 density of pixels within ±10 per channel of the brand hex. There is no contrast check at all. |
 | **M1** | **Per-creative finishing has no home — but there is a precedent.** `CampaignExecutionOptions` carries only `regenerateOnly` (identity, nothing else), and no layer has a "re-render this one, changed" verb. The home-shaped precedent is the **per-brief sidecar** (`pools.json`, resolved under the brief id and invisible to the lister). Deferred by **D51**. |
 | **M2** | **Batch-wide pinning can make a randomized brief unplannable.** Pinning a layout or tone from an editor deletes a variation axis, and both of the user's own briefs are variation-mode. |
+| **M3** | **The goldens pin one point in a nine-dimensional space** — 12 cells per platform, for `darwin-arm64` and `linux-x64`. The cost of this proposal is not re-recording them (**D54** avoids that); it is **redesigning the pinning strategy**: goldens for defaults only, plus structural/property tests per control. The goldens file itself already points at this. |
 | **L1** | **The inset golden silently skips on CI** — its fixture holds only `darwin-arm64`, so on linux it renames to a passing test rather than failing. Any newly pinned cell needs both platform maps or it is decorative. |
 | **L2** | **D-ids collide across planning documents.** "D27" is the loop-budget rule in one doc and something else in another; the four motion kinds live at `MotionKind.vo.ts:5`. Cite the file, not the id. |
 
@@ -135,6 +140,10 @@ One lane per PR. Ownership is exclusive.
 - **`policyHash` is unchanged for every existing brief** (**D57**), asserted against the tracked samples.
 - A new pinned golden carries **both** platform maps, or it is not added (**L1**).
 - Brand-density compliance still passes for the default palette after any colour work (**H5**).
+- **Any context-state control is asserted on a *video* frame, not only a still** (**F5a**) — the
+  timeline path re-sets `ctx.font` and would otherwise drop it silently.
+- **The font allowlist is enforced server-side and `MESSAGE_FONT` is validated by the same code**
+  (**D59**); a request naming an unregistered family is refused, not silently fallen back.
 
 ---
 
