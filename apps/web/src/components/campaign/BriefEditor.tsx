@@ -1405,7 +1405,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               </button>
             </div>
             {railView === "preview" ? (
-              <PreviewDock {...railProps} />
+              <PreviewDock {...railProps} brief={draftBrief} />
             ) : (
               <pre className="overflow-auto text-[11px] text-text-primary">
                 {/* Real YAML, because that is what the label promises and what the

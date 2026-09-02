@@ -774,3 +774,15 @@ export const modelReuseNoteAria =
   "Reuse brief: a product sets inputAsset, so the selected image model may be skipped for it. A missing or unreadable asset falls back to model generation.";
 export const modelReuseNoteTitle =
   "This brief sets inputAsset on a product. When that image resolves, it's reused and the selected model is skipped for that product; a missing or unreadable asset falls back to model generation.";
+
+// --- Real-frame preview (T1b) ---
+
+/**
+ * The preview caption's stand-in suffix (D52): while the brief's background axis
+ * asks for a generated or pooled source, the frame the compositor draws here
+ * carries a procedural stand-in background, and the caption must say so — the
+ * preview can never imply an image the run will not deliver. Axis ids stay out
+ * of the copy (D18); a procedural brief gets no suffix, because its frame IS the
+ * real background.
+ */
+export const previewFrameStandInBackground = "background is a stand-in until the run";

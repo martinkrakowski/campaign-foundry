@@ -2,8 +2,10 @@ import type { ReactNode } from "react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import type { LayoutOption, ToneOption, AnchorOption } from "./CreativePreview";
-import { derivePreviewRatio, PreviewPicture } from "./PreviewDock";
+import { derivePreviewRatio } from "./PreviewDock";
+import { PreviewFrame } from "./PreviewFrame";
 import { formatDisplayName, platformDisplayName, ratioDisplayName } from "./display-names";
+import { briefBackgroundIsStandIn } from "@/lib/preview-frame";
 import { SECTION_TITLES, sectionOrder, type SectionId } from "./sections";
 import * as messages from "./messages";
 
@@ -128,6 +130,15 @@ export function ReviewStep({
     treatment !== undefined ? undefined : (firstOf(axes?.anchor) as AnchorOption | undefined);
   const motion: MotionKind | undefined =
     wantsMotion && axes?.motion !== undefined ? (axes.motion[0] as MotionKind) : undefined;
+  // D52: a non-procedural background axis names the frame's background a stand-in —
+  // the caption says so, in words, never a raw axis id.
+  const caption = messages.previewCaption(
+    ratioDisplayName(ratio),
+    platformId !== undefined ? platformDisplayName(platformId) : messages.previewNoPlatform,
+  );
+  const figcaptionText = briefBackgroundIsStandIn(brief)
+    ? `${caption} · ${messages.previewFrameStandInBackground}`
+    : caption;
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)] lg:items-start">
@@ -163,23 +174,21 @@ export function ReviewStep({
       {hasProduct ? (
         <figure className="flex flex-col gap-2">
           {/* The shared picture (§6 question 4): `ratio` was derived once above, so
-              the figure and the dock cannot disagree by deriving twice (C1's trap). */}
-          <PreviewPicture
+              the figure and the dock cannot disagree by deriving twice (C1's trap).
+              T1b: the frame is the REAL composited creative, the SVG until it arrives. */}
+          <PreviewFrame
+            brief={brief}
             layout={layout}
             tone={tone}
             anchor={anchor}
+            style={brief.style}
             primaryColor={product.primaryColor}
             headline={brief.campaignMessage}
             motion={motion}
             ratio={ratio}
             className="block h-auto w-full"
           />
-          <figcaption className="font-mono text-[11px] text-text-muted">
-            {messages.previewCaption(
-              ratioDisplayName(ratio),
-              platformId !== undefined ? platformDisplayName(platformId) : messages.previewNoPlatform,
-            )}
-          </figcaption>
+          <figcaption className="font-mono text-[11px] text-text-muted">{figcaptionText}</figcaption>
         </figure>
       ) : null}
     </div>
