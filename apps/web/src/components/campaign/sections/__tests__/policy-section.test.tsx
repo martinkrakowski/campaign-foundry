@@ -534,3 +534,21 @@ describe("PolicySection — the headline axis and its pool", () => {
     expect(headlineToggle().getAttribute("aria-checked")).toBe("false");
   });
 });
+
+describe("the lock-or-vary hint (T2 / F6)", () => {
+  // The min-one guard makes a single selected value a lock the planner obeys, but
+  // nothing on the cards said so — the surface read as a style picker.
+  test("a full selection speaks the draw pool", () => {
+    render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    // layout and tone both start with every value selected
+    expect(screen.getAllByText(messages.axisVaries(2)).length).toBe(2);
+  });
+
+  test("a single selected value is spoken as the lock, named", () => {
+    const locked = state();
+    locked.variation.layout = ["headline-bottom"];
+    render(<PolicySection state={locked} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.getByText(messages.axisLocked("headline-bottom"))).toBeTruthy();
+    expect(screen.getByText(messages.axisLocked("headline-bottom")).textContent).toContain("headline bottom");
+  });
+});

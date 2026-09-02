@@ -65,6 +65,12 @@ function AxisCards<T extends string>({
   return (
     <fieldset className="space-y-2">
       <legend className="text-[11px] text-text-muted">{legend}</legend>
+      {/* T2 (F6): the min-one guard makes one selected value a LOCK — the planner
+          draws only it for every variant — and more than one a draw pool. The cards
+          alone read as a mere style picker, so the semantics are spoken here. */}
+      <FieldLine tone="muted">
+        {selected.length === 1 ? messages.axisLocked(selected[0] as string) : messages.axisVaries(selected.length)}
+      </FieldLine>
       <div
         className={cn(
           "grid gap-2",
