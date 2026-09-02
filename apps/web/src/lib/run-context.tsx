@@ -488,6 +488,11 @@ export function RunProvider({ children }: { children: ReactNode }) {
   // Tracks the latest brief id asked for, so an in-flight persisted-run fetch from an
   // earlier switch can't land on the grid after the user has moved to another brief.
   const briefIdRef = useRef(brief.id);
+  // Set the moment anything commits a brief — the editor's route load, its Save, the
+  // picker, or the blank route *releasing* one. The restore below reads it: provider
+  // effects run after their children's, so without this the last-opened record would
+  // overwrite a release that has already happened.
+  const briefDecidedRef = useRef(false);
 
   // Monotonic run token. Bumped when a run actually starts (beginRun, after the POST
   // answers with a job to poll) and when a brief switch invalidates any in-flight run;
@@ -532,6 +537,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
   const setBrief = useCallback(
     (next: CampaignBrief) => {
       briefIdRef.current = next.id;
+      briefDecidedRef.current = true;
       setBriefState(next);
       setError(null);
       // Record the last-opened brief so a reload restores it (and its run) instead of
@@ -607,6 +613,11 @@ export function RunProvider({ children }: { children: ReactNode }) {
   // The brief lives in localStorage (the report alone can't reconstruct messages/colours/logos).
   useEffect(() => {
     let active = true;
+    // Something has already decided which brief is active — the blank route releasing
+    // the campaign, most importantly. `cf:brief` is a *last-opened* pointer, not an
+    // application (D37), so restoring it here would put a released brief back on the
+    // shell and let Generate spend image-generation credits on it.
+    if (briefDecidedRef.current) return;
     let startBrief = DEFAULT_BRIEF;
     try {
       const parsed: unknown = JSON.parse(localStorage.getItem(BRIEF_KEY) ?? "null");

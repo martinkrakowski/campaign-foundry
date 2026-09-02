@@ -2711,6 +2711,29 @@ describe("BriefPage — Generate's three-way question (D35)", () => {
     expect(nextMock().router.push).toHaveBeenCalledWith("/grid");
   });
 
+  test("a reload at /brief/new applies no brief — Generate must not run the last one", async () => {
+    // D37 keeps `cf:brief` as a *last-opened* record so the bare /brief route can hand
+    // the visitor back. It is a pointer, not an application: arriving at the blank
+    // route released the campaign. The provider restores that record on mount, and
+    // provider effects run AFTER their children's — so the release must still win, or
+    // Generate here would spend image-generation credits on the previous brief.
+    const user = userEvent.setup();
+    localStorage.setItem("cf:brief", JSON.stringify(brief("camp")));
+    const calls = routes({});
+    renderWithRun(
+      <>
+        <Header />
+        <NewEditor />
+      </>,
+    );
+    await waitFor(() => expect(screen.getByLabelText("Campaign Name")).toBeTruthy());
+
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    expect(screen.getByText(messages.generateNoBrief)).toBeTruthy();
+    expect(calls.filter((c) => c.url.includes("/campaigns/generate"))).toEqual([]);
+  });
+
   test("'Save and run' writes, then runs what was written", async () => {
     const user = userEvent.setup();
     const calls = routes({
