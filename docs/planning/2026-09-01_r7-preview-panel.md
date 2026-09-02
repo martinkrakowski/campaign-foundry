@@ -3,7 +3,7 @@
 **Date:** 2026-09-01
 **Status:** for review
 **Supersedes:** lanes **R1.3** and **R7.1** of `docs/planning/2026-08-31_brief-flow-remediation.md`
-**Decision ids introduced:** D43 – D50
+**Decision ids introduced:** D43 – D50, D61
 
 ---
 
@@ -36,13 +36,14 @@ It answers three questions the one-line row does not:
 
 | id | Decision | Why |
 |---|---|---|
-| **D43** | **Exactly one composed preview is rendered at any time — dock, strip and figure counted together.** The dock mounts in Guided only and is **suppressed on the Review step**, where the figure owns the preview. This constrains `PreviewStrip` too: below `xl`, Review would otherwise show the figure *and* the strip, and under happy-dom both rails render at once, so two surfaces named "Preview" make R7.3's `getByRole` throw. **§6 question 3 therefore gates R7.4** — see §3. | D42 as written mandates two. `ReviewStep.tsx:162` carries the same wrapper class as `PreviewDock.tsx:76` and the same `className="block h-auto w-full"` reaches `CreativePreview` at both call sites — so at ≥`xl` the Review step would carry both pictures of the same brief, side by side. (The calls differ in how `ratio` is derived; see **C1**.) |
+| **D43** | **Exactly one composed preview is rendered at any time — dock, strip and figure counted together.** The dock mounts in Guided only and is **suppressed on the Review step**, where the figure owns the preview. `PreviewStrip` is **deleted** (owner decision, §6 question 3), so the dock and the figure are the only two surfaces and this decision fully constrains them. | D42 as written mandates two. `ReviewStep.tsx:162` carries the same wrapper class as `PreviewDock.tsx:76` and the same `className="block h-auto w-full"` reaches `CreativePreview` at both call sites — so at ≥`xl` the Review step would carry both pictures of the same brief, side by side. (The calls differ in how `ratio` is derived; see **C1**.) |
 | **D44** | **The dock is `sticky top-0 self-start`, mounted as a sibling of the main column, never `fixed` and never inside `renderStepCard`.** | D26 always specified a *sticky* dock; the component W9 built has no positioning at all, so mounting it as-is does not implement the decision. `sticky` also resolves against the nearest scrollport and is therefore immune to the step card's `transform` — which is what keeps R7 clear of **M7**. And `renderStepCard` renders **two** live copies during a step change, so a dock inside it would briefly animate twice. |
 | **D45** | **The host's prop derivation is product code, exported, and the fabrication test imports it.** No test fixture may be the only definition of how a component is wired. | `previewFrom` (`creative-preview.fabrication.test.tsx:35-47`) claims to map state "exactly as the host wires them" while `MP7` proves there is no host. It is mode-blind, so it would draw the wrong creative for a classic brief, and it disagrees with `ReviewStep`'s real derivation — shipping it would make the dock and the figure show *different looks for the same brief*. |
 | **D46** | **The cap goes on the inline axis, as `minmax(0,20rem)`, never a bare length and never `max-h` alone.** | A percentage cap cannot clamp an intrinsic contribution; only a definite length can. A bare `20rem` track and `minmax(0,20rem)` measure identically at full width but diverge once the YAML split view is open, where the content row falls to ~624/464/208 px. |
 | **D47** | **The bounding half is verified in a browser. A class-string assertion is never accepted as proof of a layout fix.** | The suite runs under happy-dom, which performs no layout: `review-step.test.tsx:54` clicks every Edit button and passes *today*, while in a real browser the creative paints over those buttons. A green assertion about a class that does nothing is the exact failure mode this lane exists to end. |
 | **D48** | **`PreviewStrip` gains an accessible name, and every mount assertion queries by role or landmark from a render of the editor** — never by bare text, never by DOM index. | Both rails render simultaneously under happy-dom (`hidden xl:flex` / `flex xl:hidden` are pure CSS), so a bare-text assertion cannot tell the dock from the strip and therefore cannot prove which surface a user sees. `PreviewStrip` is a plain `<div>` reachable in its own test only via `container.firstElementChild`, a handle that evaporates at editor level. |
 | **D49** | **R7 absorbs R1.3 and names every file it takes**, superseding the 2026-08-31 lane table. | R7 must edit `ReviewStep.tsx` to do the H1 half — a file the table assigns to R1.3 — and may edit `CreativePreview.tsx`, which it assigns to R1.1. Carrying that implicitly is how the plan's own exclusive-ownership rule gets broken. |
+| **D61** | **The right rail is one slot with a segmented switcher: an eye glyph for the preview, `</>` for the YAML view. The two are exclusive — never side by side.** The `w-96` YAML split sidebar and the ⋯ menu's "YAML split" item are retired; YAML becomes the rail's second view. | Owner decision. It also *dissolves* §6 question 2 rather than answering it: the 208 px collapse existed only because the YAML split and the content column shared the row. One slot, two views — no contention, no suppression rule, no container-query fallback for that case. |
 | **D50** | **The preview names its motion kind in the caption, and the preview's one-shot gains `forwards`** — on the animation class in `CreativePreview.tsx`, never on the shared keyframes. | `DESIGN.md`'s rule that *a loop is never the only carrier of meaning* is honoured by the glyph and not by the preview. `kf-ken-burns-in` ends at `scale(1.15)` and, without a fill-mode, the creative snaps back to `scale(1)`. `MOTION_KIND_META` is already the display-name vocabulary, so the caption costs one lookup. |
 
 ---
@@ -134,7 +135,8 @@ plus `app/(shell)/brief/__tests__/**`, and `DESIGN.md`.
 | **R7.1** | Cap the Review figure: `lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)]` (**D46**). Leave `CreativePreview`'s `shrink-0` alone — it is inert at every production call site, but keep `w-full`/`max-w-full` if the wrapper ever becomes a flex container. | Verified in a browser at the **six** widths of §4, not by a class assertion. The summary column is non-zero and every Edit button is clickable at all six. |
 | **R7.2** | Write the prop derivation in product code and export it (**D45**): mode-aware `layout`/`tone` (treatment first, axes second, as `ReviewStep` does), a real `motion`, an explicit zero-product answer, and `step`/`stepCount` passed as `stepIndex + 1` / `steps.length` with the JSDoc corrected (**M2**). | `creative-preview.fabrication.test.tsx` **imports** the derivation instead of defining its own. A classic brief and a randomized brief each produce the same look in the dock as in the Review figure. |
 | **R7.3** | Mount `PreviewDock` as a sibling of the main column inside the `flex items-start` row, `sticky top-0 self-start`, **Guided only**, **suppressed when `steps[stepIndex] === "review"`** (**D43/D44**). Never inside `renderStepCard`. | A test rendering the **editor** finds the dock by `getByRole("complementary", { name: "Preview" })` — `getByRole`, never `getAllByRole(...)[0]`. It is absent on Review, and absent in Everything. |
-| **R7.4** | **Gated on §6 question 3, which must be answered before this lane starts.** If the strip is kept: mount it, give it an accessible name **distinct from the dock's** (**D48**), and suppress it on Review and in Everything so **D43** still holds. If it is dropped: delete `PreviewStrip` and its tests, and D43/R7.3 need no further work. *Both independent reviews recommend dropping it (§8).* | Either the strip is reachable by its own role and never co-renders with the figure, or it no longer exists. |
+| **R7.4** | **Delete `PreviewStrip`** and its tests (owner decision, concurring with both reviews). `PreviewDock` keeps its `xl:` classes until R7.6 rehomes visibility. Below the rail's breakpoint the preview lives in the wizard's layout-editor step (the template plan's T7), not in a bottom bar. | `PreviewStrip` no longer exists; no test references it; D43/R7.3 need no strip suppression. |
+| **R7.6** | **The rail switcher** (**D61**): one right-rail slot headed by a segmented control — eye = `PreviewDock`, `</>` = the YAML view. Remove the `w-96` split sidebar (`BriefEditor.tsx:1230`) and the ⋯ menu's "YAML split" item; the rail remembers its last view. | Exactly one of preview/YAML is rendered at a time; the side-by-side layout and its width-collapse case no longer exist. |
 | **R7.5** | Repair the query surface (**H4**): scope every affected assertion in `brief-editor.test.tsx` with `within(...)`, a role, or the `Preview` landmark. Tighten the review-row assertion to a **count** of headline-bearing SVGs — turning a silent degradation into an explicit statement of how many creatives Review draws. | No test passes by resolving to a node in the wrong rail. |
 | **R7.6** | Motion honesty (**D50**): name the kind in `PreviewCaption` via `MOTION_KIND_META`, and add `forwards` to the preview's animation class in `CreativePreview.tsx` — never to `globals.css`. | The kind is readable without watching the animation; the creative does not snap back. No new `infinite` — `globals-motion.test.ts` still counts four. |
 | **R7.7** | Amend `DESIGN.md` (**L2**): add the dock and strip to §4, and amend §7 so `lg` is the sidebar line and `xl` the preview line. | The contract describes what shipped. |
@@ -146,7 +148,7 @@ user-visible defect and it depends on nothing in the routing model — `ReviewSt
 `CreativePreview.tsx`, `messages.ts`, `DESIGN.md` and `review-step.test.tsx` are untouched by R5.
 Blocking the covering fix behind a branch that has no PR yet would be the wrong trade.
 
-**PR B (after R5 merges): R7.2 + R7.3 + R7.4 + R7.5.** These edit `BriefEditor.tsx` and
+**PR B (after R5 merges): R7.2 + R7.3 + R7.4 + R7.5 + R7.6.** These edit `BriefEditor.tsx` and
 `app/(shell)/brief/__tests__/**`, which R5 rewrites.
 
 **M8 corrected:** R5 is a **local branch (`feat/r5-brief-route`) with no PR open** — it is not an
@@ -219,38 +221,21 @@ question 2 records the two reviewers' disagreement about the remedy.
 
 ---
 
-## 6. Open questions for review
+## 6. Open questions — settled by the owner (2026-09-01)
 
-Two independent reviews (§8) answered all four. They agree on three; the disagreement on
-question 2 is recorded rather than resolved.
-
-1. **The `xl` breakpoint is viewport-based**, so the dock appears at 1280 px into a content row of
-   only ~912 px — and once a 256 px rail joins the row, wide content pushes the column rather than
-   scrolling inside it. H1 and the dock's breakpoint are coupled.
-   → **Both reviewers: a container query on the editor row, not a higher viewport breakpoint.** A
-   viewport bump still lies once the YAML split is open. *Recommended.*
-
-2. **At 1024 px with the YAML split open the summary is 208 px and collapses regardless of the cap.**
-   → **The reviewers disagree.** agy: *suppress the YAML split while the preview is on* — the
-   product preview outranks a developer-facing data view. grok: *neither* — 1024 px **closed** is a
-   healthy 592 px, so moving the two-column line to `xl:` would stack a working case, and a
-   developer tool should not be suppressed; instead drive the Review grid to one column by
-   container query below ~36 rem. **grok's reading is the better-evidenced one** (it is the only
-   one consistent with the corrected matrix), but this is a product call and is left open.
-
-3. **Is `PreviewStrip` worth mounting at all?** — **this now gates R7.4.**
-   → **Both reviewers: no — drop it.** At `h-16` a 9:16 picture is ~36 px wide; `headline-rise`'s
-   `translateY(3px)` is ~0.1 CSS px on this canvas. It costs a second live `CreativePreview` (a
-   second `fitHeadline` per keystroke), collides with `FloatingBar` (**M9**), and breaks **D43**
-   unless extra suppression and a distinct accessible name are added. *Recommended: delete.*
-
-4. **Should the Review figure become `PreviewDock`'s `PreviewPicture`?**
-   → **Both reviewers: yes, share it.** The two copies have already drifted — same `ratio` prop
-   name, two meanings (**C1**). Sharing removes the drift; Review keeps its own layout by passing a
-   different `className`. Mind the double-derivation trap when doing it.
-
-5. **Is an untouched default product previewable?** `blankBrief` seeds one default-blue product, so
-   `products.length === 0` (the **M3** guard) is not the same state as "nothing worth drawing yet".
+1. **Dock visibility** → **container query on the editor row**, as both reviewers recommended,
+   ratified by the owner. A viewport breakpoint lies once the rail changes the row's real width.
+2. **The 1024 px YAML-split collapse** → **dissolved by D61**, a third answer superseding both
+   reviewers': the YAML view and the preview become exclusive views of one rail slot behind a
+   segmented switcher (eye / `</>`), never side by side — so the width contention the reviewers
+   were arbitrating no longer exists. Until R7.6 lands, the §4 matrix's split-open column remains
+   the truth of the interim code and PR A still verifies against it.
+3. **`PreviewStrip`** → **deleted** (owner, concurring with both reviewers). Below the rail's
+   breakpoint the preview belongs to the wizard's layout-editor step (see the template plan, T7).
+4. **Share `PreviewPicture`?** → **yes** (owner ratifies both reviewers), minding the recorded
+   trap: `ReviewStep` pre-derives `ratio` while `PreviewDock` derives internally — unify on one
+   derivation before sharing, or it double-derives.
+5. **Untouched default product** → still open; low stakes, decided in implementation.
 
 ---
 
