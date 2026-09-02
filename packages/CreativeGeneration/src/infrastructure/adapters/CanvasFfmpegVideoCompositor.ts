@@ -107,12 +107,15 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
     // Poster = the key beat at rest (D7): the pose clock settles at restT(kind)
     // while the copy clock sits on the key beat's own mid-window, so the poster
     // shows exactly what buyers see when the campaign middle beat is prominent.
+    // The effect clock is settled independently (1, H4): ken-burns-out rests
+    // at t = 0, which is the effect's full entrance — not the still we deliver.
     NodeCanvasCompositor.draw(
       ctx,
       prepared,
       restT(request.motion),
       request.motion,
       posterCopyTAt(request.timeline, prepared.timeline),
+      1,
     );
     const poster = new Uint8Array(canvas.toBuffer("image/png"));
 

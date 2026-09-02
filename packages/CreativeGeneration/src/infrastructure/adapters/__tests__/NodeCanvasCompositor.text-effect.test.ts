@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import {
   AspectRatio,
   TEXT_EFFECT_VALUES,
+  restT,
   type CompositeRequest,
   type CopyTimeline,
   type MotionKind,
@@ -73,6 +74,7 @@ async function blit(
   t = 1,
   motion?: MotionKind,
   copyT?: number,
+  effectT?: number,
 ): Promise<Blit> {
   const prepared = await NodeCanvasCompositor.prepare(req);
   const canvas = createCanvas(prepared.width, prepared.height);
@@ -128,7 +130,7 @@ async function blit(
     dy = dyStack.pop() ?? 0;
     return origRestore();
   }) as typeof ctx.restore;
-  NodeCanvasCompositor.draw(ctx, prepared, t, motion, copyT);
+  NodeCanvasCompositor.draw(ctx, prepared, t, motion, copyT, effectT);
   return { prepared, fillText, scales, raster: canvas.toBuffer("image/png") };
 }
 
@@ -196,6 +198,45 @@ describe("the rest pose is the still's truth (H4/D54)", () => {
     const plain = await blit(request(), 1, "headline-rise");
     const withEffect = await blit(request({ style: { textEffect: "rise-in" } }), 1, "headline-rise");
     expect(sha256(withEffect.raster)).toBe(sha256(plain.raster));
+  });
+
+  // ken-burns-out is the restT = 0 kind: the pose clock at the poster is the
+  // effect's full entrance. The poster therefore passes effect clock = 1 (H4).
+  // Mutation: pass the motion t here instead of 1 → these pins fail; the
+  // mid-clip test below stays green (the entrance is not killed in clips).
+  test.each(TEXT_EFFECT_VALUES)(
+    "at restT(ken-burns-out) the %s poster is byte-identical to no effect",
+    async (kind) => {
+      const t = restT("ken-burns-out");
+      const plain = await blit(request(), t, "ken-burns-out", undefined, 1);
+      const withEffect = await blit(request({ style: { textEffect: kind } }), t, "ken-burns-out", undefined, 1);
+      expect(sha256(withEffect.raster)).toBe(sha256(plain.raster));
+    },
+  );
+
+  test.each(TEXT_EFFECT_VALUES)(
+    "at restT(ken-burns-out) the %s timeline poster is byte-identical to no effect",
+    async (kind) => {
+      const t = restT("ken-burns-out");
+      const plain = await blit(timelineRequest(), t, "ken-burns-out", 0.5, 1);
+      const withEffect = await blit(
+        timelineRequest({ style: { textEffect: kind } }),
+        t,
+        "ken-burns-out",
+        0.5,
+        1,
+      );
+      expect(sha256(withEffect.raster)).toBe(sha256(plain.raster));
+    },
+  );
+
+  test("a ken-burns-out + fade-in video frame mid-clip still differs from plain", async () => {
+    const plain = await blit(request(), MID_T, "ken-burns-out");
+    const withEffect = await blit(request({ style: { textEffect: "fade-in" } }), MID_T, "ken-burns-out");
+    expect(sha256(withEffect.raster)).not.toBe(sha256(plain.raster));
+    for (const op of withEffect.fillText) {
+      expect(op.alpha).toBe(SETTLED_AT_MID);
+    }
   });
 });
 
