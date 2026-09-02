@@ -109,10 +109,17 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     };
   }, [brief.id]);
 
+  // D37: a brief is addressed by its route. The bare `/brief` redirector reads
+  // `cf:brief` — which a fresh profile does not have — so linking there sent a
+  // first-time visitor straight back to the grid: a silent loop. Naming the active
+  // brief's own route always answers: a real brief opens, and an id the store does
+  // not know gets the M3 empty state with its way out, which is honest where the
+  // loop was mute.
+  const editHref = `/brief/${brief.id}`;
   const handleEditClick = (e: React.MouseEvent) => {
     e.preventDefault();
     onNavigate?.();
-    guardedPush("/brief");
+    guardedPush(editHref);
   };
 
   return (
@@ -122,7 +129,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           title="Campaign Brief"
           aside={
             <a
-              href="/brief"
+              href={editHref}
               onClick={handleEditClick}
               className="text-[11px] font-medium text-text-muted transition-colors hover:text-text-emphasis"
             >

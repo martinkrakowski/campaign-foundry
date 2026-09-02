@@ -412,7 +412,18 @@ describe("guarded navigation when the editor is dirty", () => {
 
     await user.click(within(dialog).getByRole("button", { name: "Leave" }));
     expect(onNavigate).toHaveBeenCalled();
-    expect(nextMock().router.push).toHaveBeenCalledWith("/brief");
+    // D37: Edit names the active brief's own route — bare "/brief" redirected a
+    // fresh profile (no cf:brief) straight back to the grid, a silent loop.
+    expect(nextMock().router.push).toHaveBeenCalledWith(expect.stringMatching(/^\/brief\/.+/));
+  });
+
+  test("the Edit link names the active brief's route, never the bare redirector", () => {
+    seedPersistedRun([makeAsset()]);
+    renderDirty(createElement(SidebarContent, { onNavigate: vi.fn() }));
+    const href = screen.getByText("Edit").getAttribute("href") ?? "";
+    // Bare "/brief" redirects by cf:brief, which a fresh profile lacks — the link
+    // looped to the grid. The brief's own route always answers (M3 covers unknowns).
+    expect(href).toMatch(/^\/brief\/.+/);
   });
 
   test("a header tab click is intercepted and routed through the guard", async () => {
