@@ -115,17 +115,6 @@ const routes = (handlers: {
 const writes = (calls: readonly { url: string; method: string }[]) =>
   calls.filter((c) => c.method !== "GET" && !c.url.includes("/campaigns/plan"));
 
-/** The editor adopts the shell's active brief only after the listing arrives. */
-/**
- * The developer affordances live behind the action bar's ⋯ menu, which unmounts its
- * items when closed. Before #163 they sat in a `<details>` that left them in the DOM
- * while hidden, so these tests used to click a control no user could see.
- */
-const chooseFromOverflow = async (user: ReturnType<typeof userEvent.setup>, item: string) => {
-  await user.click(screen.getByRole("button", { name: "More actions" }));
-  await user.click(screen.getByRole("menuitem", { name: item }));
-};
-
 const waitForEditorReady = async () =>
   waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).not.toBe(""));
 
@@ -1031,18 +1020,6 @@ describe("BriefPage — data flow", () => {
     expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("");
   });
 
-  test("the YAML split shows the serialized brief and hides the contents list", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<Editor id="camp" />);
-    await waitForEditorReady();
-
-    await chooseFromOverflow(user, "YAML split on");
-    expect(screen.getByText(/"targetRegion"/)).toBeTruthy();
-    await chooseFromOverflow(user, "YAML split off");
-    expect(screen.queryByText(/"targetRegion"/)).toBeNull();
-  });
-
   test("touching the same field twice does not churn the touched set", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
@@ -1404,18 +1381,6 @@ describe("BriefPage — data flow", () => {
     expect(bar.className).not.toMatch(/\babsolute\b/);
     expect(bar.className).not.toMatch(/\bfixed\b/);
     expect(root.contains(bar)).toBe(true);
-  });
-
-  test("the YAML split panel pins beside the form and scrolls on its own", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<Editor id="camp" />);
-    await waitForEditorReady();
-    await chooseFromOverflow(user, "YAML split on");
-    const pre = screen.getByText(/"targetRegion"/);
-    const panel = pre.closest(".sticky") as HTMLElement;
-    expect(panel).toBeTruthy();
-    expect(panel.className).toMatch(/overflow-y-auto/);
   });
 
   test("the policy accordion counts its issues, singular and plural", async () => {
@@ -2473,12 +2438,14 @@ describe("BriefPage — the review step (W8)", () => {
     expect(outputRow.textContent).toContain("Still images");
     expect(outputRow.textContent).toContain("LinkedIn");
     expect(outputRow.textContent).not.toContain("linkedin");
-    // The preview beside the rows draws the brief's own headline (D26). The page
-    // carries other svg chrome, so pick the preview by what it draws.
-    const preview = Array.from(document.querySelectorAll("svg")).find((el) =>
+    // Exactly ONE composed preview on screen at Review (D43): the figure's. The count
+    // is the assertion — a dock that failed to stay suppressed on Review would make
+    // it two, and this test would catch it. The page carries other svg chrome, so the
+    // creatives are picked by what they draw: the brief's own headline.
+    const headlineCreatives = Array.from(document.querySelectorAll("svg")).filter((el) =>
       el.textContent?.includes("Hi"),
     );
-    expect(preview).toBeTruthy();
+    expect(headlineCreatives).toHaveLength(1);
 
     // Each Edit hands its section to W6's reveal: the step switches, and the
     // deferred scroll finds the section once it has mounted.
@@ -2659,6 +2626,191 @@ describe("BriefPage — the review step (W8)", () => {
     // Everything mounts the same bar back at the foot of the whole stack.
     await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
     await waitFor(() => expect(screen.getByTestId("action-bar")).toBeTruthy());
+  });
+});
+
+describe("BriefPage — the preview rail (R7)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:presentation", "guided");
+    globalThis.confirm = vi.fn(() => true);
+  });
+
+  // D37: adopting a brief IS arriving at its route — and the first step's validation
+  // must have settled before the walk is driven (the same gate the guided suite uses).
+  const adopt = async (_user: ReturnType<typeof userEvent.setup>, id: string) => {
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(id));
+    await waitFor(() => expect(document.querySelector(".animate-ready-ring")).toBeTruthy());
+  };
+
+  const stepHeading = () => screen.getByRole("heading", { level: 1 });
+  const segments = () =>
+    within(screen.getByRole("navigation", { name: messages.segBarLabel })).getAllByRole("button");
+  const reviewIndex = sectionOrder("brief").length;
+  const preview = () => screen.getByRole("complementary", { name: messages.previewLegend });
+  // The rail describe's brief carries an output block, so the caption names a platform.
+  const okEntry = {
+    file: "ok.yaml",
+    revision: "r1",
+    brief: { ...brief("ok"), output: { formats: ["static"], platforms: ["linkedin"] } },
+  };
+
+  test("the rail mounts beside the column on a guided step, found by its landmark (R7.3)", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    // getByRole — never getAllByRole(...)[0] (D48): the landmark is the one named slot.
+    const rail = preview();
+    // The dock's own words live inside the landmark: the caption names the platform
+    // as a display label, and the step readout is the walk's cursor.
+    expect(within(rail).getByText("Square · LinkedIn")).toBeTruthy();
+    expect(within(rail).getByText(messages.previewStep(1, 6))).toBeTruthy();
+    // D44: the rail is a sibling of the walk's card — never a copy inside it, where a
+    // step change would render two live copies and the card's transform would trap it.
+    expect(screen.getByTestId("step-card").contains(rail)).toBe(false);
+  });
+
+  test("the rail is suppressed on Review — exactly one composed preview is on screen (D43)", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+    await user.click(segments()[reviewIndex]);
+    await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
+
+    expect(screen.queryByRole("complementary", { name: messages.previewLegend })).toBeNull();
+    // The figure owns Review: the brief's headline is drawn by exactly one creative.
+    const headlineCreatives = Array.from(document.querySelectorAll("svg")).filter((el) =>
+      el.textContent?.includes("Hi"),
+    );
+    expect(headlineCreatives).toHaveLength(1);
+  });
+
+  test("the rail is absent in Everything — Guided only (D43)", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
+    await waitFor(() => expect(document.getElementById("products")).toBeTruthy());
+    expect(screen.queryByRole("complementary", { name: messages.previewLegend })).toBeNull();
+  });
+
+  test("a brief with nothing to draw renders no rail (D26, M3)", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+    expect(preview()).toBeTruthy();
+
+    // The zero-product state is reached the way a user reaches it — removing every
+    // product on the Products step. (A loaded file without products is seeded with one
+    // placeholder, so a product-less brief fixture would never reach the null branch.)
+    await user.click(segments()[2]);
+    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
+    await user.click(screen.getAllByRole("button", { name: messages.productRemove })[0]);
+    await user.click(screen.getAllByRole("button", { name: messages.productRemove })[0]);
+
+    // No product, no preview — the dock never invents a creative to fill the slot.
+    await waitFor(() =>
+      expect(screen.queryByRole("complementary", { name: messages.previewLegend })).toBeNull(),
+    );
+  });
+
+  test("the two views are exclusive: the eye shows the preview, the code glyph shows the YAML (D61)", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+    const rail = preview();
+    const eye = () => within(rail).getByRole("button", { name: messages.previewRailPreviewView });
+    const code = () => within(rail).getByRole("button", { name: messages.previewRailYamlView });
+    expect(eye().getAttribute("aria-pressed")).toBe("true");
+    expect(code().getAttribute("aria-pressed")).toBe("false");
+
+    await user.click(code());
+    // One slot, one view: the YAML replaced the preview — never side by side.
+    expect(within(rail).getByText(/"targetRegion"/)).toBeTruthy();
+    expect(within(rail).queryByText(messages.previewLegend)).toBeNull();
+    expect(eye().getAttribute("aria-pressed")).toBe("false");
+    expect(code().getAttribute("aria-pressed")).toBe("true");
+
+    await user.click(eye());
+    expect(within(rail).getByText(messages.previewLegend)).toBeTruthy();
+    expect(within(rail).queryByText(/"targetRegion"/)).toBeNull();
+  });
+
+  test("the rail remembers its last view across a remount", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    const first = renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+    await user.click(within(preview()).getByRole("button", { name: messages.previewRailYamlView }));
+    expect(within(preview()).getByText(/"targetRegion"/)).toBeTruthy();
+    first.unmount();
+
+    // A fresh editor reads the last choice before anything renders.
+    renderWithRun(<Editor id="ok" />);
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok"));
+    expect(within(preview()).getByText(/"targetRegion"/)).toBeTruthy();
+  });
+
+  test("broken rail-view storage falls back to the preview view", async () => {
+    const realGet = globalThis.localStorage.getItem.bind(globalThis.localStorage);
+    const spy = vi.spyOn(globalThis.localStorage, "getItem").mockImplementation((key: string) => {
+      if (key === "cf:preview-rail-view") throw new Error("storage gone");
+      return realGet(key);
+    });
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    // A blocked store reads as the preview view, the same fallback as an absent key.
+    expect(within(preview()).getByText(messages.previewLegend)).toBeTruthy();
+    spy.mockRestore();
+  });
+
+  test("a rail choice that cannot reach storage does not break the switcher", async () => {
+    const realSet = globalThis.localStorage.setItem.bind(globalThis.localStorage);
+    const spy = vi.spyOn(globalThis.localStorage, "setItem").mockImplementation((key: string, value: string) => {
+      if (key === "cf:preview-rail-view") throw new Error("storage gone");
+      return realSet(key, value);
+    });
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    await user.click(within(preview()).getByRole("button", { name: messages.previewRailYamlView }));
+    expect(within(preview()).getByText(/"targetRegion"/)).toBeTruthy();
+    spy.mockRestore();
+  });
+
+  test("the rail pins inside the shell's scrollport and never leaves the page (D44)", async () => {
+    const user = userEvent.setup();
+    routes({ list: () => json({ briefs: [okEntry] }) });
+    const { container } = renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    const rail = preview();
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.contains(rail)).toBe(true);
+    // Pinning the D44 decision the way the action bar's test pins its own: happy-dom
+    // performs no layout, but `sticky` against the shell's scroller is the decision,
+    // and `fixed` — the viewport pin that covers the sidebar — is the regression.
+    expect(rail.className).toMatch(/\bsticky\b/);
+    expect(rail.className).not.toMatch(/\bfixed\b/);
+    // §6 question 1, wiring half: the rail reads the editor ROW's width, not the
+    // viewport's, and the row is the query container. The compile test in
+    // tailwind-alpha.test.ts proves the variant emits a real @container rule; the
+    // browser matrix in the R7 plan §4 records the layout half the suite cannot.
+    expect(root.querySelector('[class*="container-type"]')).not.toBeNull();
+    expect(rail.className).toContain("[@container(min-width:56rem)]:flex");
   });
 });
 

@@ -70,6 +70,8 @@ import { StepHeader } from "@/components/campaign/StepHeader";
 import { StepFooter } from "@/components/campaign/StepFooter";
 import { SECTION_TITLES, sectionOrder, type SectionId } from "./sections";
 import { ReviewStep } from "./ReviewStep";
+import { PreviewDock } from "./PreviewDock";
+import { previewDockProps } from "./preview-props";
 import * as messages from "./messages";
 import type { CampaignMode } from "@/components/campaign/editor-state";
 
@@ -105,6 +107,34 @@ function persistPresentation(next: Presentation): void {
     window.localStorage.setItem(PRESENTATION_KEY, next);
   } catch {
     // Storage unavailable in this context; the toggle still works for the tab.
+  }
+}
+
+/** The two views the preview rail switches between (D61) — exclusive, never side by side. */
+type RailView = "preview" | "yaml";
+
+const RAIL_VIEW_KEY = "cf:preview-rail-view";
+
+/**
+ * The one rail view the editor reads or writes, closed over two values — the same
+ * guarded pair the presentation reads, so a private-mode store can neither throw
+ * nor leave the two controls disagreeing about the last choice.
+ */
+function readRailView(): RailView {
+  try {
+    const stored = window.localStorage.getItem(RAIL_VIEW_KEY);
+    if (stored === "preview" || stored === "yaml") return stored;
+    return "preview";
+  } catch {
+    return "preview";
+  }
+}
+
+function persistRailView(next: RailView): void {
+  try {
+    window.localStorage.setItem(RAIL_VIEW_KEY, next);
+  } catch {
+    // Storage unavailable in this context; the switch still works for the tab.
   }
 }
 
@@ -169,7 +199,12 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     dialogRef: saveAsDialogRef,
     initialFocusRef: saveAsFieldRef,
   });
-  const [showYamlSplit, setShowYamlSplit] = useState(false);
+  // D61 — the rail remembers its last view, the way the presentation remembers itself.
+  const [railView, setRailView] = useState<RailView>(() => readRailView());
+  const chooseRailView = useCallback((next: RailView) => {
+    setRailView(next);
+    persistRailView(next);
+  }, []);
   const [poolDrawerOpen, setPoolDrawerOpen] = useState(false);
   // L1.1: Touched/attempted state for error display gating
   const [touched, setTouched] = useState<Set<string>>(new Set());
@@ -397,6 +432,13 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // about what the brief contains. Declared here (not beside the review step) because
   // the D35 handoff below reads it on every render.
   const draftBrief = useMemo(() => toBrief(state), [state]);
+  // R7.2/D45 — the dock's props come from the one exported derivation, fed by the live
+  // draft and the walk's cursor. Null (nothing to draw) means no rail at all: the
+  // house rule is `hasProduct`, and the dock never invents a creative (D26).
+  const railProps = useMemo(
+    () => previewDockProps(state, stepIndex, steps.length),
+    [state, stepIndex, steps.length],
+  );
   /**
    * D35 — whether Generate's default target (the shell's brief) and the screen
    * disagree. A pristine editor holds the blank template, not a draft anybody is
@@ -1089,7 +1131,6 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
         label="More actions"
         items={[
           { label: messages.editorSaveAs, onSelect: () => setSaveAsId("") },
-          { label: `YAML split ${showYamlSplit ? "off" : "on"}`, onSelect: () => setShowYamlSplit(!showYamlSplit) },
           { label: messages.editorRevert, onSelect: handleRevert },
         ]}
       />
@@ -1136,10 +1177,12 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
 
   return (
     // No h-full / inner overflow: like every other view, this one flows and the
-    // shell's main container is the scroller. The action bar and the YAML panel stay
-    // put with `sticky`, which is scoped to that container — never the viewport.
+    // shell's main container is the scroller. The action bar and the preview rail
+    // stay put with `sticky`, which is scoped to that container — never the viewport.
     <div className="flex flex-col">
-      <div className="flex items-start">
+      {/* §6 question 1 — the row is the query container the rail's visibility reads,
+          so the rail's own width can never lie to a viewport breakpoint. */}
+      <div className="flex items-start [container-type:inline-size]">
        <SectionModeContext.Provider value={state.mode}>
            {/* Main content */}
             <div
@@ -1286,14 +1329,82 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
 
         </div>
 
-        {/* YAML split view */}
-        {showYamlSplit && (
-          <div className="sticky top-0 max-h-screen w-96 shrink-0 self-start overflow-y-auto border-l border-border bg-surface p-4">
-            <pre className="overflow-auto text-[11px] text-text-primary">
-              {JSON.stringify(toBrief(state), null, 2)}
-            </pre>
-          </div>
-         )}
+        {/* D43/D44/D61 — the preview rail: one right-hand slot, a sibling of the main
+            column — never inside `renderStepCard`, which renders two live copies during
+            a step change and whose `transform` traps overlays (M7). `sticky top-0
+            self-start` resolves against the shell's own scrollport; never `fixed`.
+            Guided only, and suppressed on Review — the figure owns that step, so
+            exactly one composed preview is on screen (D43). Visibility is the row's
+            container query (§6 question 1): the rail shows when the row has room for it. */}
+          {presentation === "guided" && steps[stepIndex] !== "review" && railProps !== null ? (
+          <aside
+            role="complementary"
+            aria-label={messages.previewLegend}
+            className="sticky top-0 hidden max-h-screen w-64 shrink-0 self-start flex-col gap-3 overflow-y-auto border-l border-border bg-surface p-4 [@container(min-width:56rem)]:flex"
+          >
+            {/* The segmented switcher (D61): an eye for the preview, code for the
+                YAML view — exclusive, never side by side. The glyphs are decoration;
+                the names are on the buttons. */}
+            <div
+              role="group"
+              aria-label={messages.previewRailViews}
+              className="flex shrink-0 items-center gap-1"
+            >
+              <button
+                type="button"
+                aria-pressed={railView === "preview"}
+                aria-label={messages.previewRailPreviewView}
+                onClick={() => chooseRailView("preview")}
+                className={cn(
+                  "rounded-md p-1.5 transition-colors",
+                  railView === "preview"
+                    ? "bg-surface-2 text-text-emphasis"
+                    : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
+                )}
+              >
+                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-4">
+                  <path
+                    d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12Z"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  />
+                  <circle cx="12" cy="12" r="2.75" fill="none" stroke="currentColor" strokeWidth={2} />
+                </svg>
+              </button>
+              <button
+                type="button"
+                aria-pressed={railView === "yaml"}
+                aria-label={messages.previewRailYamlView}
+                onClick={() => chooseRailView("yaml")}
+                className={cn(
+                  "rounded-md p-1.5 transition-colors",
+                  railView === "yaml"
+                    ? "bg-surface-2 text-text-emphasis"
+                    : "text-text-muted hover:bg-surface-2 hover:text-text-primary",
+                )}
+              >
+                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-4">
+                  <path
+                    d="m8 7-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+            {railView === "preview" ? (
+              <PreviewDock {...railProps} />
+            ) : (
+              <pre className="overflow-auto text-[11px] text-text-primary">
+                {JSON.stringify(draftBrief, null, 2)}
+              </pre>
+            )}
+          </aside>
+        ) : null}
         </SectionModeContext.Provider>
       </div>
 
