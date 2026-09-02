@@ -1909,6 +1909,51 @@ describe("BriefPage — guided presentation (W6)", () => {
     expect(label?.className).toContain("animate-nudge");
   });
 
+  test("the wizard stays on Review across the route change a save causes (H5)", async () => {
+    // The user's original report: "Clicking on the last wizard screen takes user back
+    // to the first slide, with no indication as to why." R6 retired the verb they
+    // pressed; the bounce survived on the SUCCESS path. A save that renames the route
+    // (a first save, or Save as…) moves /brief/new or /brief/{id} to a different
+    // segment, so Next unmounts one page component and mounts another — and the step
+    // cursor, plain useState, is rebuilt from zero.
+    const user = userEvent.setup();
+    let listed: BriefEntry[] = [entry("ok", "r1")];
+    routes({
+      list: () => json({ briefs: listed }),
+      post: (_url, body) => {
+        const stored = { file: "copy.yaml", brief: body as never, revision: "rev-copy" };
+        listed = [...listed, stored];
+        return json(stored, 201);
+      },
+    });
+    const view = renderWithRun(<Editor id="ok" />);
+    await adopt(user, "ok");
+
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Treatments"));
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
+    await user.click(screen.getByRole("button", { name: messages.stepNextReview }));
+    await waitFor(() => expect(stepHeading().textContent).toBe("Review"));
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), "copy");
+    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief/copy"));
+
+    // Next answers that replace by swapping the segment: the old page unmounts and the
+    // new one mounts in its place. Simulated here, because the test renders pages.
+    view.unmount();
+    renderWithRun(<Editor id="copy" />);
+
+    // They pressed Save on the last screen; they should still be looking at it.
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Review"));
+  });
+
   test("walk to Review: each Next lands on the next step and hands the step heading focus", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("ok", "r1")] }) });

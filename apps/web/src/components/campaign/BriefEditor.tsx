@@ -54,6 +54,7 @@ import { Accordion } from "@/components/shell/Accordion";
 import { revealSection } from "@/lib/scroll-to-section";
 import {
   useStepNavigation,
+  stashStep,
   useStepKeys,
   useStepSwipe,
   useBecameTrue,
@@ -727,7 +728,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       // turned "new" into a named brief, so the route must stop calling it new —
       // otherwise a reload would blank the brief that was just saved. (A save of a
       // file-backed brief is already at its own route; nothing to move.)
-      if (state.source.kind === "new") router.replace(`/brief/${stored.brief.id}`);
+      if (state.source.kind === "new") {
+        // H5: carry the step across the segment change this navigation causes.
+        stashStep(steps[stepIndex] as string);
+        router.replace(`/brief/${stored.brief.id}`);
+      }
       return stored.brief;
     } catch (error) {
       // A 409 carries the store's fresh revision (API E1.0). Adopt it — through the
@@ -816,6 +821,8 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       // the route's load finds the copy the moment the URL changes.
       await loadBriefs();
       setSaveAsId(null);
+      // H5: as above — Save as… also moves the route out from under the wizard.
+      stashStep(steps[stepIndex] as string);
       router.replace(`/brief/${created.brief.id}`);
     } catch (error) {
       setPersistError(unknownErrorMessage(error, "Save as failed"));

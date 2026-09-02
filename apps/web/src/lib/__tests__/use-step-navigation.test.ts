@@ -5,6 +5,7 @@ import { createElement } from "react";
 import { renderHook, act, render, fireEvent, screen } from "@testing-library/react";
 import {
   useStepNavigation,
+  stashStep,
   useStepSwipe,
   useStepKeys,
   useBecameTrue,
@@ -427,5 +428,43 @@ describe("STEP_TRANSITION_MS", () => {
   test("is one --duration-normal, the token the exit animation it waits for reads", () => {
     const tokens = readFileSync(resolve(__dirname, "../../styles/tokens.css"), "utf-8");
     expect(tokens).toContain(`--duration-normal: ${STEP_TRANSITION_MS}ms;`);
+  });
+});
+
+describe("the step baton (H5)", () => {
+  // A save that renames the route swaps one page segment for another, so the cursor
+  // is rebuilt from zero and the user is thrown back to step 1. The baton carries the
+  // step across that one navigation, and is spent by the read.
+  test("a stashed step is where the next mount lands, and it is consumed", () => {
+    stashStep("output");
+    expect(hook().result.current.index).toBe(steps.indexOf("output"));
+    // Spent: a second mount starts from the beginning again.
+    expect(hook().result.current.index).toBe(0);
+  });
+
+  test("maxVisited grows to the restored step, so the stepper does not claw it back", () => {
+    stashStep("review");
+    expect(hook().result.current.maxVisited).toBe(steps.indexOf("review"));
+  });
+
+  test("a stashed step this list does not contain is ignored", () => {
+    stashStep("policy");
+    expect(hook().result.current.index).toBe(0);
+  });
+
+  test("a storage that throws on write does not break the save that was stashing", () => {
+    vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    expect(() => stashStep("output")).not.toThrow();
+    vi.restoreAllMocks();
+  });
+
+  test("a storage that throws on read leaves the wizard at the first step", () => {
+    vi.spyOn(localStorage, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    expect(hook().result.current.index).toBe(0);
+    vi.restoreAllMocks();
   });
 });
