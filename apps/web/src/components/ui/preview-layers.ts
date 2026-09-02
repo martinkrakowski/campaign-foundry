@@ -1,21 +1,16 @@
 /**
- * The compositor's layer geometry, as fractions of a drawing box, shared by
- * the two components that paint it at screen scale: `CreativeGlyph` (the 46 px
- * axis-card miniature) and `CreativePreview` (a real canvas per ratio). Both
- * resolve the same fractions against their own box, so the two cannot drift
- * from each other — and the shape they both draw is the one
- * `NodeCanvasCompositor.draw` paints, of which these are the proportions:
+ * Layer geometry for the two web components that paint the compositor's look:
+ * `CreativeGlyph` (the 46 px axis-card miniature) and, through the domain leaf,
+ * `CreativePreview` (a real canvas per ratio).
  *
- *   - layer 2  the contrast shade, darkest at the headline edge (start 0.55 h
- *              on a top headline, 0.45 h on a bottom one; alpha per tone)
- *   - layer 3  the solid brand accent band, exactly height × 0.05, flush to
- *              the headline edge, plus a soft fade into the image
- *   - layer 4  the headline block, its edge inset ≈ height × 0.1
- *
- * The miniature's geometry is quirky (an 8/46 text edge that only approximates
- * the compositor's 0.1 anchor, a 26 px long bar); those quirks live here, in
- * shared form, so a change lands in miniature and preview at once and always
- * against the same source numbers.
+ * The real fractions of `NodeCanvasCompositor.draw` live in the domain's
+ * browser-safe leaf (`@campaignfoundry/CampaignOrchestration/creative-geometry`);
+ * `CreativePreview` reads them from there, so preview and render cannot drift.
+ * What remains here is the miniature's own proportions — several are deliberate
+ * quirks of the 46 px box (an 8/46 text edge that only approximates the
+ * compositor's 0.1 anchor, a 14/46 fade that is nothing like the real 0.06,
+ * message bars the real preview does not draw), and their output is pinned
+ * byte-for-byte by `creative-glyph.byte-identity.test.tsx`.
  *
  * Fractions are held as numerators/denominators (`{ n, d }`) rather than
  * decimals because the miniature's output is pinned byte-for-byte by
@@ -23,6 +18,7 @@
  * the same double as the literal `2.3`, while `(46 × 1) / 20` does. `times`
  * multiplies numerator-first for exactly that reason.
  */
+import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 
 /** The unit box the miniature draws in — a 46 px square. */
 export const PREVIEW_BOX = 46;
@@ -65,10 +61,11 @@ export const LAYERS = {
   weight: { bold: { n: 4, d: 46 }, subtle: { n: 5, d: 92 } },
   shade: {
     /**
-     * Layer 2 — tone → shade alpha, mirroring `NodeCanvasCompositor.prepare`:
-     * `const shadeAlpha = subtle ? 0.4 : 0.7`.
+     * Layer 2 — tone → shade alpha, the exact object the domain leaf exports,
+     * mirroring `NodeCanvasCompositor.prepare`'s `subtle ? 0.4 : 0.7`. Kept as
+     * a reference (not a copy) so the miniature cannot drift from the render.
      */
-    alpha: { bold: 0.7, subtle: 0.4 },
+    alpha: CREATIVE_GEOMETRY.shadeAlpha,
     /** Layer 2 — where the contrast gradient starts: 0.55 h top / 0.45 h bottom. */
     start: { top: 0.55, bottom: 0.45 },
   },
