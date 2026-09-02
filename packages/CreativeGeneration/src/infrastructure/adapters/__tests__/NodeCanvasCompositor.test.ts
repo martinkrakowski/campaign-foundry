@@ -3,6 +3,7 @@ import { writeFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { AspectRatio, type CompositeRequest, type SafeInsets } from "@campaignfoundry/CampaignOrchestration";
+import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import { projectRoot } from "@campaignfoundry/shared";
 import * as CreativeGeneration from "@campaignfoundry/CreativeGeneration";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
@@ -88,6 +89,18 @@ describe("NodeCanvasCompositor", () => {
     expect(out.logoApplied).toBe(true);
   });
 
+  test("logo geometry derives from the domain's creative-geometry leaf", async () => {
+    const r = ratio("1:1");
+    const captured = await blit(request({ ratio: r }));
+    const logo = captured.drawImage[1];
+    if (!logo) throw new Error("missing logo blit");
+    const margin = r.width * CREATIVE_GEOMETRY.logoMarginFraction;
+    expect(logo.width).toBe(r.width * CREATIVE_GEOMETRY.logoWidthFraction);
+    // Bottom headline → the logo rests top-right, inset by the margin.
+    expect(logo.x).toBe(r.width - logo.width - margin);
+    expect(logo.y).toBe(margin);
+  });
+
   test("covers both layout edges and tones deterministically", async () => {
     const top = request({ layout: "headline-top", tone: "subtle" });
     const bottom = request({ layout: "headline-bottom", tone: "bold" });
@@ -171,7 +184,7 @@ describe("NodeCanvasCompositor", () => {
     const captured = await blit(
       request({ layout: "headline-top", ratio: r, message: THREE_LINE, safeInsets: insets }),
     );
-    const fontSize = Math.round(r.width * 0.06);
+    const fontSize = Math.round(r.width * CREATIVE_GEOMETRY.headlineTypeWidthFraction);
     const lineHeight = fontSize * 1.25;
     const span = 2 * lineHeight;
     const maxLast = r.height - insets.bottom;
@@ -186,7 +199,7 @@ describe("NodeCanvasCompositor", () => {
     const captured = await blit(
       request({ layout: "headline-bottom", ratio: r, message: THREE_LINE, safeInsets: insets }),
     );
-    const fontSize = Math.round(r.width * 0.06);
+    const fontSize = Math.round(r.width * CREATIVE_GEOMETRY.headlineTypeWidthFraction);
     const minFirst = insets.top + fontSize;
     expect(captured.fillText).toHaveLength(3);
     expect(captured.fillText[0]?.y).toBe(minFirst);
@@ -212,7 +225,10 @@ describe("NodeCanvasCompositor", () => {
       const captured = await blit(request({ layout, ratio: r, message: THREE_LINE, safeInsets: insets }));
       expect(captured.fillText).toHaveLength(1);
       expect(captured.fillText[0]?.text).toMatch(/…$/);
-      const floor = Math.round(Math.round(r.width * 0.06) * 0.4);
+      const floor = Math.round(
+      Math.round(r.width * CREATIVE_GEOMETRY.headlineTypeWidthFraction) *
+        CREATIVE_GEOMETRY.headlineTypeFloorFraction,
+    );
       expect(captured.fillText[0]?.y).toBeGreaterThanOrEqual(insets.top + floor);
       expect(captured.fillText[0]?.y).toBeLessThanOrEqual(r.height - insets.bottom);
     }
@@ -278,7 +294,7 @@ describe("NodeCanvasCompositor", () => {
       request({ layout: "headline-top", ratio: r, message: THREE_LINE, safeInsets: insets }),
     );
     expect(captured.fillText).toHaveLength(3);
-    const fontSize = Math.round(r.width * 0.06);
+    const fontSize = Math.round(r.width * CREATIVE_GEOMETRY.headlineTypeWidthFraction);
     expect(captured.fillText[0]?.y).toBeGreaterThanOrEqual(insets.top + fontSize);
     expect(captured.fillText[2]?.y).toBeLessThanOrEqual(r.height - insets.bottom);
     const logo = captured.drawImage[1];

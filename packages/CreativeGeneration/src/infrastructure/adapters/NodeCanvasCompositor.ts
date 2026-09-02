@@ -11,6 +11,7 @@ import {
   type ResolvedBeat,
   type SafeInsets,
 } from "@campaignfoundry/CampaignOrchestration";
+import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import { hexToRgb, wrapText } from "./canvas-util.js";
 import { registerBundledFonts } from "../fonts.js";
 import { resolveAssetPath } from "../safe-path.js";
@@ -131,7 +132,9 @@ export class NodeCanvasCompositor implements CompositorPort {
    * before copy timelines. Its output is byte-pinned by the platform goldens
    * (darwin-arm64 and linux-x64 fixture keys) and by a diff against `draw` for
    * timeline-free requests. Do not modify this body — new behaviour belongs in
-   * the timeline branch of {@link NodeCanvasCompositor.draw}.
+   * the timeline branch of {@link NodeCanvasCompositor.draw}. The geometry
+   * literals below (band heights, type fractions) mirror the values in
+   * `CREATIVE_GEOMETRY` and must stay in lockstep with it; the goldens pin them.
    */
   static drawLegacy(ctx: SKRSContext2D, prepared: PreparedCreative, t: number, motion?: MotionKind): void {
     const { width, height, top, shadeAlpha } = prepared;
@@ -238,7 +241,9 @@ export class NodeCanvasCompositor implements CompositorPort {
     const { width, height } = request.ratio;
     const top = request.layout === "headline-top";
     const subtle = request.tone === "subtle";
-    const shadeAlpha = subtle ? 0.4 : 0.7;
+    const shadeAlpha = subtle
+      ? CREATIVE_GEOMETRY.shadeAlpha.subtle
+      : CREATIVE_GEOMETRY.shadeAlpha.bold;
     const fontWeight = subtle ? "500" : "bold";
     const insets = normalizeSafeInsets(request.safeInsets, width, height);
 
@@ -253,10 +258,10 @@ export class NodeCanvasCompositor implements CompositorPort {
     if (logoPath) {
       try {
         const image = await loadImage(await readFile(logoPath));
-        const target = width * 0.16;
+        const target = width * CREATIVE_GEOMETRY.logoWidthFraction;
         const scale = target / image.width;
         const logoH = image.height * scale;
-        const margin = width * 0.04;
+        const margin = width * CREATIVE_GEOMETRY.logoMarginFraction;
         // Inset offset lives here so every still — and later every motion frame —
         // reuses the same logo geometry (`t` does not move the logo). Same additive
         // form as the pre-inset anchors so a no-op clamp stays bit-identical.
@@ -396,8 +401,8 @@ type LayoutSource = Pick<
  * layout, and the per-beat first pass behind the D6 common size.
  */
 function fitText(ctx: SKRSContext2D, p: LayoutSource, text: string): HeadlineLayout {
-  const originalFontSize = Math.round(p.width * 0.06);
-  const floor = Math.round(originalFontSize * 0.4);
+  const originalFontSize = Math.round(p.width * CREATIVE_GEOMETRY.headlineTypeWidthFraction);
+  const floor = Math.round(originalFontSize * CREATIVE_GEOMETRY.headlineTypeFloorFraction);
 
   let fontSize = originalFontSize;
   let attempt = layoutAt(ctx, p, text, fontSize);
@@ -698,8 +703,8 @@ function paintAccent(
 ): void {
   const { width, height, top } = prepared;
   const [ar, ag, ab] = hexToRgb(prepared.brandColor);
-  const solidH = height * 0.05;
-  const fadeH = height * 0.06;
+  const solidH = height * CREATIVE_GEOMETRY.accentSolidHeightFraction;
+  const fadeH = height * CREATIVE_GEOMETRY.accentFadeHeightFraction;
   const wipe = motion === "accent-wipe" ? eased : 1;
   ctx.fillStyle = `rgb(${ar}, ${ag}, ${ab})`;
   if (top) {
