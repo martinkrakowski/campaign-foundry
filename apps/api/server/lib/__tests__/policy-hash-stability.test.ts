@@ -72,3 +72,38 @@ describe("policyHash is unchanged for every pre-anchor sample brief (D57)", () =
     ]);
   });
 });
+
+describe("the style block is hashed nowhere (T5/D57)", () => {
+  // Injected as text, not written to briefs/ — the corpus stays read-only.
+  const styledTwinOf = (file: string, styleBlock: string): string => {
+    const text = readFileSync(join(BRIEFS_DIR, file), "utf8");
+    // Insert the style block right after the required campaignMessage line.
+    const anchor = /^campaignMessage:.*$/m;
+    if (!anchor.test(text)) throw new Error(`fixture ${file} has no campaignMessage line to anchor on`);
+    return text.replace(anchor, (line) => `${line}\n${styleBlock}`);
+  };
+
+  test("a styled brief resolves to the exact hash of its style-less twin", () => {
+    const file = "sample-randomized.yaml";
+    const path = join(BRIEFS_DIR, file);
+    const plain = parseBriefText(path, readFileSync(path, "utf8"));
+    const styled = parseBriefText(
+      path,
+      styledTwinOf(
+        file,
+        ["style:", "  fontFamily: Lora", "  fontWeight: 700", "  sizeScale: 0.08", "  lineHeight: 1.4", "  letterSpacing: 0.05", "  align: left"].join("\n"),
+      ),
+    );
+    expect(styled.style).toBeDefined();
+    const pooled = approvedPoolTexts(plain.id);
+    const plainPolicy = VariationPolicy.fromBrief(plain, { headlines: pooled }, nodeCryptoPolicyHasher);
+    const styledPolicy = VariationPolicy.fromBrief(styled, { headlines: pooled }, nodeCryptoPolicyHasher);
+    expect(plainPolicy.success).toBe(true);
+    expect(styledPolicy.success).toBe(true);
+    if (!plainPolicy.success || !styledPolicy.success) return;
+    expect(styledPolicy.value.policyHash).toBe(plainPolicy.value.policyHash);
+    // And the styled twin keeps the pre-style golden hash too — the block is
+    // invisible to the policy by construction, not by luck.
+    expect(styledPolicy.value.policyHash).toBe(GOLDEN_HASHES[file]);
+  });
+});

@@ -10,6 +10,7 @@ import {
   type RegenerationTarget,
 } from "@campaignfoundry/CampaignOrchestration";
 import {
+  ALLOWED_FONT_FAMILIES,
   AssetReusingImageGenerator,
   CanvasFfmpegVideoCompositor,
   FileSystemBackgroundCache,
@@ -113,6 +114,25 @@ function imageGenerator(selected?: string): ImageGeneratorPort {
 }
 
 /**
+ * The deployment headline font (D59), validated against the same allowlist the
+ * brief parser applies to `style.fontFamily` (both name the bundled faces
+ * `fonts.ts` registers). `MESSAGE_FONT` used to pass through unvalidated while
+ * the renderer can see 312 system families — a determinism hole at deployment
+ * scope. An invalid value falls back to Inter with a logged warning; it is
+ * never passed through. Exported for the composition test — buildPipeline reads
+ * it at both compositor constructions.
+ */
+export function messageFont(): string {
+  const raw = process.env.MESSAGE_FONT;
+  if (raw === undefined || raw === "") return "Inter";
+  if ((ALLOWED_FONT_FAMILIES as readonly string[]).includes(raw)) return raw;
+  console.warn(
+    `[pipeline] MESSAGE_FONT "${raw}" is not a bundled font family (allowed: ${ALLOWED_FONT_FAMILIES.join(", ")}); falling back to "Inter".`,
+  );
+  return "Inter";
+}
+
+/**
  * Composition root — the one place that knows concrete adapters. Wires them into
  * the use case via constructor injection; everything above depends only on ports.
  * `planInput` carries the brief's approved copy pool and the ratios its motion
@@ -123,9 +143,9 @@ export function buildPipeline(imageModel?: string, planInput: PlanInput = {}): G
     imageGenerator: imageGenerator(imageModel),
     proceduralGenerator: new ProceduralBackgroundGenerator(),
     planner: pooledPlanner(planInput),
-    compositor: new NodeCanvasCompositor(process.env.MESSAGE_FONT),
+    compositor: new NodeCanvasCompositor(messageFont()),
     // Motion variants only; the parser has already gated them on the ffmpeg probe.
-    videoCompositor: new CanvasFfmpegVideoCompositor({ fontFamily: process.env.MESSAGE_FONT }),
+    videoCompositor: new CanvasFfmpegVideoCompositor({ fontFamily: messageFont() }),
     compliance: new BrandComplianceChecker(),
     exporter: new FileSystemExporter(outputRoot()),
     now: () => new Date(),

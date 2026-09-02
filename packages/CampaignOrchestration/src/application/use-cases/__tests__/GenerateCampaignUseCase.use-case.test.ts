@@ -367,6 +367,32 @@ describe("GenerateCampaignUseCase — variation", () => {
     expect(result.value.assets[1].descriptor).not.toHaveProperty("anchor");
   });
 
+  test("threads the brief's style into every composite request, classic and variation (T5)", async () => {
+    const style = { fontFamily: "Lora" as const, align: "left" as const };
+    // Classic: every treatment cell renders with the brief's style.
+    const classicD = deps();
+    await new GenerateCampaignUseCase(classicD).execute(baseBrief({ style }));
+    const classicRequests = vi.mocked(classicD.compositor.compositeAsset).mock.calls.map((call) => call[0]);
+    expect(classicRequests.length).toBeGreaterThan(0);
+    for (const request of classicRequests) {
+      expect(request.style).toEqual(style);
+    }
+    // Variation: every variant cell renders with the brief's style.
+    const variationD = deps({ planner: fakePlanner(fakePlan([fakeVariant(), fakeVariant({ index: 1 })])) });
+    await new GenerateCampaignUseCase(variationD).execute(variationBrief({ style }));
+    const variationRequests = vi.mocked(variationD.compositor.compositeAsset).mock.calls.map((call) => call[0]);
+    expect(variationRequests.length).toBeGreaterThan(0);
+    for (const request of variationRequests) {
+      expect(request.style).toEqual(style);
+    }
+    // A style-less brief requests nothing — the renderer's defaults stand (D54).
+    const plainD = deps();
+    await new GenerateCampaignUseCase(plainD).execute(baseBrief());
+    for (const request of vi.mocked(plainD.compositor.compositeAsset).mock.calls.map((call) => call[0])) {
+      expect(request.style).toBeUndefined();
+    }
+  });
+
   test("legal-gates every distinct pooled headline and halts like a prohibited campaign message", async () => {
     const compliance = {
       validateLegalCopy: vi.fn(async (text: string) =>

@@ -1,7 +1,7 @@
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import type { AnchorOption, LayoutOption, ToneOption } from "./CreativePreview";
 import type { PreviewShowcaseProps } from "./PreviewDock";
-import { STATIC_PLATFORMS, anchorAxisActive, type EditorState } from "./editor-state";
+import { STATIC_PLATFORMS, anchorAxisActive, briefStyle, type EditorState } from "./editor-state";
 
 /** The first entry of an optional list — undefined with the list, never a crash. */
 function firstOf<T>(list: readonly T[] | undefined): T | undefined {
@@ -84,6 +84,9 @@ export function previewDockProps(
     tone,
     anchor,
     motion,
+    // The brief's style (T5) — exactly what toBrief will emit (D45: the dock
+    // and the saved brief cannot disagree about the typography it shows).
+    style: briefStyle(state),
     platformId: outputShown(state) ? firstOf(state.platforms) : undefined,
     // The wizard readout (M2): where the walk stands, not a position in the creative set.
     step: stepIndex + 1,

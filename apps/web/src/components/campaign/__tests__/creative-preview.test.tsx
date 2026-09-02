@@ -3,6 +3,7 @@ import { render } from "@testing-library/react";
 import type { AspectRatioValue } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { RATIO_DIMENSIONS } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
+import { DEFAULT_STYLE, type Style } from "@campaignfoundry/CampaignOrchestration/creative-style";
 import {
   CreativePreview,
   PREVIEW_MAX_LINES,
@@ -434,4 +435,71 @@ describe("CreativePreview", () => {
       }
     },
   );
+
+  describe("the style block (T5)", () => {
+    const styled = (style: Style, headline = "Stay wild"): SVGSVGElement =>
+      svgOf(<CreativePreview primaryColor="#1473E6" headline={headline} style={style} />);
+    const textOf = (svg: SVGSVGElement): SVGTextElement => svg.querySelector("text")!;
+
+    test("a style-less brief mirrors the leaf's defaults — the same ones the compositor resolves", () => {
+      const svg = svgOf(<CreativePreview primaryColor="#1473E6" headline="Stay wild" />);
+      const text = textOf(svg);
+      const { width: W } = RATIO_DIMENSIONS["1:1"];
+      expect(text.getAttribute("font-family")).toBe(DEFAULT_STYLE.fontFamily);
+      expect(text.getAttribute("letter-spacing")).toBe(`${DEFAULT_STYLE.letterSpacing * Number(text.getAttribute("font-size"))}px`);
+      expect(text.getAttribute("text-anchor")).toBe("middle");
+      expect(Number(text.getAttribute("x"))).toBe(W / 2);
+    });
+
+    test("sizeScale sets the starting type size as a fraction of the canvas width (D55)", () => {
+      const { width: W } = RATIO_DIMENSIONS["1:1"];
+      const text = textOf(styled({ sizeScale: 0.1 }));
+      expect(Number(text.getAttribute("font-size"))).toBe(Math.round(W * 0.1));
+    });
+
+    test("a styled weight overrides the tone-derived rendered weight (D60 faces only)", () => {
+      expect(Number(textOf(styled({ fontWeight: 400 }, "Stay wild")).getAttribute("font-weight"))).toBe(400);
+      // And it composes with the tone: subtle asks 500/renders 400, the style pins 700.
+      const svg = svgOf(
+        <CreativePreview primaryColor="#1473E6" headline="Stay wild" tone="subtle" style={{ fontWeight: 700 }} />,
+      );
+      expect(Number(textOf(svg).getAttribute("font-weight"))).toBe(700);
+    });
+
+    test("a styled line multiple spaces the drawn blocks and feeds the fit budget", () => {
+      const headline = "Stay wild, stay hydrated, and never stop exploring";
+      const svg = svgOf(
+        <CreativePreview primaryColor="#1473E6" headline={headline} style={{ lineHeight: 2 }} />,
+      );
+      const text = textOf(svg);
+      const tspans = Array.from(text.querySelectorAll("tspan"));
+      expect(tspans.length).toBeGreaterThan(0);
+      const fontSize = Number(text.getAttribute("font-size"));
+      for (const tspan of tspans) {
+        expect(Number(tspan.getAttribute("dy"))).toBe(fontSize * 2);
+      }
+    });
+
+    test("align left and right anchor the block against the text block edges (C2)", () => {
+      const { width: W } = RATIO_DIMENSIONS["1:1"];
+      const { textWidth } = fitArgs("1:1");
+      const textEdge = (W - textWidth) / 2;
+      const left = textOf(styled({ align: "left" }));
+      expect(left.getAttribute("text-anchor")).toBe("start");
+      expect(Number(left.getAttribute("x"))).toBe(textEdge);
+      const multiline = "Stay wild, stay hydrated, and never stop exploring";
+      const right = textOf(styled({ align: "right" }, multiline));
+      expect(right.getAttribute("text-anchor")).toBe("end");
+      expect(Number(right.getAttribute("x"))).toBe(W - textEdge);
+      // tspans follow the block's x, not the centre.
+      expect(Number(right.querySelector("tspan")!.getAttribute("x"))).toBe(W - textEdge);
+    });
+
+    test("the family and letter spacing are best-effort mirrors — glyph parity is T1b's", () => {
+      const text = textOf(styled({ fontFamily: "Lora", letterSpacing: 0.1 }));
+      expect(text.getAttribute("font-family")).toBe("Lora");
+      const fontSize = Number(text.getAttribute("font-size"));
+      expect(text.getAttribute("letter-spacing")).toBe(`${0.1 * fontSize}px`);
+    });
+  });
 });

@@ -24,6 +24,19 @@ import {
   timelineProblem,
   type CopyTimeline,
 } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
+import {
+  ALIGN_VALUES,
+  FONT_FAMILY_VALUES,
+  FONT_WEIGHT_VALUES,
+  MAX_LETTER_SPACING,
+  MAX_LINE_HEIGHT,
+  MAX_SIZE_SCALE,
+  MIN_LETTER_SPACING,
+  MIN_LINE_HEIGHT,
+  MIN_SIZE_SCALE,
+  styleDiverges,
+  type Style,
+} from "@campaignfoundry/CampaignOrchestration/creative-style";
 
 // Re-exported, not restated: every one of these is the domain's own value, and the
 // editor's copies of them were exactly the drift the leaf exists to prevent (D18).
@@ -230,6 +243,24 @@ export interface EditorState {
    * round-trips the absent-key form byte-identically (D57).
    */
   anchorExplicit: boolean;
+  /**
+   * The brief-level creative style (T5), held verbatim. The wizard exposes no
+   * controls for it in this lane — the authoring surface is T7's Layout step —
+   * so the draft's only jobs are preservation and honesty: a hand-authored
+   * YAML `style` must survive load → save byte-identically (D58), and the
+   * preview must read exactly what the saved brief will carry.
+   */
+  style: Style;
+  /**
+   * True only when the loaded brief declared a `style` block — the D11
+   * preservation rule, the `anchorExplicit`/`copyExplicit` lesson: an
+   * explicit-but-default style (`fontFamily: Inter` spelled out) says "I wrote
+   * this key" and must round-trip verbatim, while the absent key serialises as
+   * absent. A draft that diverges from the defaults without the flag (a
+   * hand-edited restored draft) is emitted too — the divergence makes the
+   * block real. The wizard itself never authors a style this session.
+   */
+  styleExplicit: boolean;
   variation: {
     count: string;
     seed: string;
@@ -359,6 +390,8 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
     timeline: { beats: [], transition: "fade", keyBeat: 1 },
     copyExplicit: false,
     anchorExplicit: false,
+    style: {},
+    styleExplicit: false,
     variation: {
       count: "12",
       seed: "",
@@ -1032,6 +1065,18 @@ export function canSerializeTimeline(state: EditorState): boolean {
   return state.mode === "variation" && state.formats.includes("motion") && !state.variation.headline;
 }
 
+/**
+ * The style block the saved brief will carry (T5): verbatim when the loaded
+ * brief declared one (styleExplicit — an explicit-but-default block still says
+ * "I wrote this key") or when the draft diverges from the leaf's defaults;
+ * undefined otherwise, so a style-less brief never grows one. The one
+ * derivation `toBrief` and the preview props share, so the dock can never show
+ * a style the brief would not save (D45).
+ */
+export function briefStyle(state: EditorState): Style | undefined {
+  return state.styleExplicit || styleDiverges(state.style) ? { ...state.style } : undefined;
+}
+
 export function toBrief(state: EditorState): CampaignBrief {
   // `mode` and `output` are optional in CampaignBrief — absent means the classic
   // static pipeline, which is exactly what a fresh draft holds. Writing them
@@ -1046,12 +1091,16 @@ export function toBrief(state: EditorState): CampaignBrief {
     state.formats[0] === "static" &&
     state.platforms.length === STATIC_PLATFORMS.length &&
     STATIC_PLATFORMS.every((platform) => state.platforms.includes(platform));
+  const style = briefStyle(state);
   const brief: CampaignBrief = {
     id: state.briefId,
     targetRegion: state.targetRegion,
     targetAudience: state.targetAudience,
     campaignMessage: state.campaignMessage,
     products: state.products.map(toProduct),
+    // The brief's style (T5) applies in both modes; emitted only when it says
+    // something the absent key does not (see briefStyle).
+    ...(style !== undefined ? { style } : {}),
     ...(state.mode === "variation" || state.modeExplicit ? { mode: state.mode } : {}),
     ...(state.outputExplicit || !isDefaultOutput
       ? { output: { formats: [...state.formats], platforms: [...state.platforms] } }
@@ -1204,6 +1253,10 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
     timeline,
     copyExplicit: brief.copy !== undefined,
     anchorExplicit: axes?.anchor !== undefined,
+    // A declared style block is kept verbatim (D58 — a save never strips what
+    // a file wrote); its absence is the absence of the key.
+    style: brief.style ?? {},
+    styleExplicit: brief.style !== undefined,
     variation: {
       count: variation ? String(variation.count) : "12",
       seed: num(variation?.seed),
@@ -1408,6 +1461,56 @@ function normalizeTimelineDraft(value: unknown): TimelineDraft {
   return { beats, transition, keyBeat };
 }
 
+/**
+ * Rebuild a persisted `style` block over the shape this build expects, with the
+ * same repair-first, discard-only-when-unusable rigor as the sibling
+ * normalizers: each element is checked against the domain leaf's vocabulary and
+ * bounds, and an out-of-vocabulary or out-of-bounds value is dropped rather
+ * than dereferenced or serialised — a hand-edited draft cannot smuggle a style
+ * the parser would refuse.
+ */
+function normalizeStyleDraft(value: unknown): Style {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  const raw = value as Record<string, unknown>;
+  const style: {
+    -readonly [K in keyof Style]: Style[K];
+  } = {};
+  if (typeof raw.fontFamily === "string" && (FONT_FAMILY_VALUES as readonly string[]).includes(raw.fontFamily)) {
+    style.fontFamily = raw.fontFamily as Style["fontFamily"];
+  }
+  if (typeof raw.fontWeight === "number" && (FONT_WEIGHT_VALUES as readonly number[]).includes(raw.fontWeight)) {
+    style.fontWeight = raw.fontWeight as Style["fontWeight"];
+  }
+  if (
+    typeof raw.sizeScale === "number" &&
+    Number.isFinite(raw.sizeScale) &&
+    raw.sizeScale >= MIN_SIZE_SCALE &&
+    raw.sizeScale <= MAX_SIZE_SCALE
+  ) {
+    style.sizeScale = raw.sizeScale;
+  }
+  if (
+    typeof raw.lineHeight === "number" &&
+    Number.isFinite(raw.lineHeight) &&
+    raw.lineHeight >= MIN_LINE_HEIGHT &&
+    raw.lineHeight <= MAX_LINE_HEIGHT
+  ) {
+    style.lineHeight = raw.lineHeight;
+  }
+  if (
+    typeof raw.letterSpacing === "number" &&
+    Number.isFinite(raw.letterSpacing) &&
+    raw.letterSpacing >= MIN_LETTER_SPACING &&
+    raw.letterSpacing <= MAX_LETTER_SPACING
+  ) {
+    style.letterSpacing = raw.letterSpacing;
+  }
+  if (typeof raw.align === "string" && (ALIGN_VALUES as readonly string[]).includes(raw.align)) {
+    style.align = raw.align as Style["align"];
+  }
+  return style;
+}
+
 export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   const mode: CampaignMode = raw.mode === "variation" ? "variation" : "brief";
   const initial = initialEditorState(mode);
@@ -1468,6 +1571,7 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   const formats = list(raw.formats, initial.formats);
   const platforms = list(raw.platforms, initial.platforms);
   const normalizedTimeline = normalizeTimelineDraft(raw.timeline);
+  const style = normalizeStyleDraft(raw.style);
 
   return {
     ...initial,
@@ -1490,6 +1594,11 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
       raw.anchorExplicit === undefined
         ? !isDerivedAnchorSelection(variation.anchor)
         : raw.anchorExplicit === true,
+    style,
+    // A pre-T5 draft wrote neither key: inferred from the data like the sibling
+    // overrides — a block that diverges from the defaults was authored, a
+    // declared flag is believed.
+    styleExplicit: raw.styleExplicit === undefined ? styleDiverges(style) : raw.styleExplicit === true,
     variation,
     motion,
     duration,

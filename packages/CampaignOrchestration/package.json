@@ -18,6 +18,10 @@
       "types": "./src/domain/value-objects/creative-geometry.ts",
       "default": "./src/domain/value-objects/creative-geometry.ts"
     },
+    "./creative-style": {
+      "types": "./src/domain/value-objects/creative-style.ts",
+      "default": "./src/domain/value-objects/creative-style.ts"
+    },
     "./copy-timeline": {
       "types": "./src/domain/value-objects/CopyTimeline.vo.ts",
       "default": "./src/domain/value-objects/CopyTimeline.vo.ts"

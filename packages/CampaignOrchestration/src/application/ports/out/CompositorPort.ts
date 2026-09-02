@@ -1,6 +1,7 @@
 import type { AspectRatio } from "../../../domain/value-objects/AspectRatio.vo.js";
 import type { LayoutKind, ToneKind } from "../../../domain/value-objects/Treatment.vo.js";
 import type { AnchorKind } from "../../../domain/value-objects/variation-defaults.js";
+import type { Style } from "../../../domain/value-objects/creative-style.js";
 
 /**
  * Platform safe-zone insets in px. All four sides are required when the
@@ -37,6 +38,13 @@ export interface CompositeRequest {
    * Absent or all-zero keeps today's geometry (classic callers omit the field).
    */
   readonly safeInsets?: SafeInsets;
+  /**
+   * The brief's optional creative style (T5): typography every creative of the
+   * brief renders with. Absent → the renderer's defaults, byte-identical to
+   * the pre-style behaviour (D54). Hashed nowhere — this rides the render
+   * request, never the variation policy.
+   */
+  readonly style?: Style;
 }
 
 /** The rendered creative plus the compositing signals the use case reports. */

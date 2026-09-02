@@ -2,7 +2,9 @@ import { describe, test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
+import { DEFAULT_STYLE } from "@campaignfoundry/CampaignOrchestration/creative-style";
 import {
+  LINE_HEIGHT_RATIO,
   PREVIEW_FONT_RATIO,
   PREVIEW_FONT_FLOOR_FRACTION,
   PREVIEW_ANCHOR_TOP,
@@ -34,6 +36,18 @@ describe("preview and compositor share one creative-geometry source", () => {
     expect(PREVIEW_ANCHOR_TOP).toBe(CREATIVE_GEOMETRY.headlineAnchor.top);
     expect(PREVIEW_ANCHOR_MIDDLE).toBe(CREATIVE_GEOMETRY.headlineAnchor.middle);
     expect(PREVIEW_ANCHOR_BOTTOM).toBe(CREATIVE_GEOMETRY.headlineAnchor.bottom);
+  });
+
+  test("the preview's style defaults are the style leaf's — the compositor's own defaults (T5)", () => {
+    // The line multiple is the compositor's 1.25, moved from its layoutAt
+    // literal into the leaf (T5); the preview reads it, not a private copy.
+    expect(LINE_HEIGHT_RATIO).toBe(DEFAULT_STYLE.lineHeight);
+    expect(DEFAULT_STYLE.lineHeight).toBe(1.25);
+    // The size default IS the geometry leaf's width fraction — one source.
+    expect(DEFAULT_STYLE.sizeScale).toBe(CREATIVE_GEOMETRY.headlineTypeWidthFraction);
+    expect(DEFAULT_STYLE.letterSpacing).toBe(0);
+    expect(DEFAULT_STYLE.align).toBe("center");
+    expect(DEFAULT_STYLE.fontFamily).toBe("Inter");
   });
 
   test("the fit budget is the leaf's edge-to-edge envelope — one source for fit and placement (T4)", () => {

@@ -255,6 +255,9 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
             ratio,
             layout: treatment.layout,
             tone: treatment.tone,
+            // The brief's style (T5) rides every creative it renders, classic
+            // included; absent → the renderer's defaults, byte-identical (D54).
+            ...(brief.style !== undefined ? { style: brief.style } : {}),
           });
 
           // ExecuteVisualComplianceCheck — brand-colour density.
@@ -430,6 +433,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         pinnedProofIndex.get(cell.product.id) === cell.variant.index,
         insetsByRatio.get(cell.ratio.value),
         timeline,
+        brief.style,
       ),
     );
 
@@ -468,6 +472,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     writeProof: boolean,
     safeInsets: SafeInsets | undefined,
     timeline: CopyTimeline | undefined,
+    style: CampaignBrief["style"],
   ): Promise<{ asset: GeneratedAsset; heroImage?: Uint8Array }> {
     const cellContext: BackgroundContext = {
       ...context,
@@ -497,6 +502,9 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       // compositor derives from layout, byte-identical to the pre-axis path.
       ...(variant.anchor !== undefined ? { anchor: variant.anchor } : {}),
       ...(safeInsets !== undefined ? { safeInsets } : {}),
+      // The brief's style (T5) applies to every variant; absent → the
+      // renderer's defaults, byte-identical to the pre-style path (D54).
+      ...(style !== undefined ? { style } : {}),
     };
 
     const treatment = variantTreatmentId(variant);

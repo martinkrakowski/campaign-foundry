@@ -1,5 +1,6 @@
 import type { Treatment } from "../value-objects/Treatment.vo.js";
 import type { CopyTimeline } from "../value-objects/CopyTimeline.vo.js";
+import type { Style } from "../value-objects/creative-style.js";
 import type { Product } from "./Product.js";
 
 /**
@@ -32,6 +33,16 @@ export interface CampaignBrief {
    * are unchanged.
    */
   readonly treatments?: readonly Treatment[];
+  /**
+   * Optional brief-level creative style (T5): typography applied to every
+   * creative this brief renders, classic and variation alike. NOT a variation
+   * axis (a new axis is parse-rejected) and NOT a `Treatment` widening
+   * (classic-only) — a block beside them. It is hashed nowhere: `policyHash`
+   * never reads it, so a styled brief and its style-less twin resolve to the
+   * same plan. Every field is optional; absent → today's rendering, bit for
+   * bit (D54).
+   */
+  readonly style?: Style;
   /**
    * Optional run mode. Absent means classic brief behaviour so existing
    * briefs are unchanged.
