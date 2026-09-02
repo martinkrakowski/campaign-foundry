@@ -2,7 +2,14 @@ import { describe, test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
-import { PREVIEW_FONT_RATIO, PREVIEW_FONT_FLOOR_FRACTION } from "../CreativePreview";
+import {
+  PREVIEW_FONT_RATIO,
+  PREVIEW_FONT_FLOOR_FRACTION,
+  PREVIEW_ANCHOR_TOP,
+  PREVIEW_ANCHOR_MIDDLE,
+  PREVIEW_ANCHOR_BOTTOM,
+  previewFitMaxHeight,
+} from "../CreativePreview";
 import { LAYERS } from "@/components/ui/preview-layers";
 
 /**
@@ -23,6 +30,23 @@ describe("preview and compositor share one creative-geometry source", () => {
     expect(LAYERS.shade.alpha).toBe(CREATIVE_GEOMETRY.shadeAlpha);
   });
 
+  test("the preview's anchor fractions are the domain leaf's — references, not copies (T4)", () => {
+    expect(PREVIEW_ANCHOR_TOP).toBe(CREATIVE_GEOMETRY.headlineAnchor.top);
+    expect(PREVIEW_ANCHOR_MIDDLE).toBe(CREATIVE_GEOMETRY.headlineAnchor.middle);
+    expect(PREVIEW_ANCHOR_BOTTOM).toBe(CREATIVE_GEOMETRY.headlineAnchor.bottom);
+  });
+
+  test("the fit budget is the leaf's edge-to-edge envelope — one source for fit and placement (T4)", () => {
+    // The block's maxHeight used to read the miniature's 1/10 while placement
+    // read the leaf's 0.1/0.08 edges; the computed fit could then disagree with
+    // the drawn position. Pin the budget to the same leaf fractions, by
+    // reference like the constants above.
+    const H = 2000;
+    expect(previewFitMaxHeight(H)).toBe(
+      H - H * CREATIVE_GEOMETRY.headlineAnchor.top - H * CREATIVE_GEOMETRY.headlineAnchor.bottom,
+    );
+  });
+
   test("the leaf holds the compositor's exact numbers", () => {
     expect(CREATIVE_GEOMETRY.headlineTypeWidthFraction).toBe(0.06);
     expect(CREATIVE_GEOMETRY.headlineTypeFloorFraction).toBe(0.4);
@@ -32,6 +56,11 @@ describe("preview and compositor share one creative-geometry source", () => {
     expect(CREATIVE_GEOMETRY.accentFadeHeightFraction).toBe(0.06);
     expect(CREATIVE_GEOMETRY.shadeAlpha.bold).toBe(0.7);
     expect(CREATIVE_GEOMETRY.shadeAlpha.subtle).toBe(0.4);
+    // The anchor axis' fractions (T4): the frozen top/bottom literals, and the
+    // safe-area centre the middle anchor centres the block on.
+    expect(CREATIVE_GEOMETRY.headlineAnchor.top).toBe(0.1);
+    expect(CREATIVE_GEOMETRY.headlineAnchor.bottom).toBe(0.08);
+    expect(CREATIVE_GEOMETRY.headlineAnchor.middle).toBe(0.5);
   });
 
   test("both engines import the leaf — forking the constants fails here", () => {

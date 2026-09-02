@@ -2,6 +2,7 @@ import type { AspectRatioValue } from "../value-objects/aspect-ratios.js";
 import type { BackgroundSource } from "../value-objects/BackgroundSource.vo.js";
 import type { LayoutKind, ToneKind } from "../value-objects/Treatment.vo.js";
 import type { MotionKind } from "../value-objects/MotionKind.vo.js";
+import type { AnchorKind } from "../value-objects/variation-defaults.js";
 import type { BackgroundAxisSource } from "../value-objects/VariationPolicy.vo.js";
 
 /**
@@ -31,6 +32,8 @@ export interface VariantDescriptor {
   readonly paletteShift: number;
   /** The pooled headline this slot drew (`headline: pool://copy`); omitted otherwise. */
   readonly headline?: string;
+  /** The drawn anchor (`top`/`middle`/`bottom`) when the brief carried the axis; omitted otherwise. */
+  readonly anchor?: AnchorKind;
   /** Motion kind — motion variants only. */
   readonly motion?: MotionKind;
   /** Clip length in seconds — motion variants only. */

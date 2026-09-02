@@ -6,6 +6,7 @@ import {
   MAX_BEATS,
   MAX_WEIGHT,
   MIN_DWELL_SEC,
+  anchorAxisActive,
   drawableRatios,
   motionPackagedRatios,
   timelineDurations,
@@ -49,6 +50,10 @@ const BASE_DISTANCE_AXES = 6;
 export function maxMinDistance(state: EditorState): number {
   let axes = BASE_DISTANCE_AXES;
   if (state.variation.headline) axes += 1;
+  // The anchor axis counts only while the saved brief will carry it — exactly
+  // the domain's `anchor.length > 0` condition, so the editor never offers a
+  // minDistance the planner refuses.
+  if (anchorAxisActive(state)) axes += 1;
   // Mirror VariationPolicy.vo's `motionEnabled = wantsMotion && motion.length > 0`.
   // Counting retained kinds while `motion` is not a requested format would let a
   // static draft pass with a minDistance the planner then rejects — `durationSec`
@@ -268,6 +273,7 @@ export function validatePolicy(state: EditorState): FieldErrors {
   }
   if (state.variation.layout.length === 0) errors.layout = messages.layout;
   if (state.variation.tone.length === 0) errors.tone = messages.tone;
+  if (state.variation.anchor.length === 0) errors.anchor = messages.anchor;
   if (state.variation.background.length === 0) {
     errors.background = messages.background;
   }

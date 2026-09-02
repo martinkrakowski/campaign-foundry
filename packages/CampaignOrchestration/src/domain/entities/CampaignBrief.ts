@@ -65,6 +65,12 @@ export interface CampaignBrief {
       readonly headline?: string;
       readonly motion?: readonly string[];
       readonly duration?: readonly number[];
+      /**
+       * Where the headline block sits vertically (T4). Absent → derived from
+       * `layout`, so briefs written before this axis existed are unchanged —
+       * including their `policyHash` (D57's conditional-spread pattern).
+       */
+      readonly anchor?: readonly string[];
     };
   };
   /**

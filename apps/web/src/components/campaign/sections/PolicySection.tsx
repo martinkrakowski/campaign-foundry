@@ -21,7 +21,7 @@ import * as messages from "@/components/campaign/messages";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import { RATIO_OPTIONS } from "@/components/campaign/editor-state";
 import { RatioPanel } from "@/components/campaign/RatioPanel";
-import { ratioDisplayName } from "@/components/campaign/display-names";
+import { ratioDisplayName, anchorDisplayName } from "@/components/campaign/display-names";
 import {
   axisProductSize,
   drawableRatios,
@@ -33,6 +33,7 @@ import { SectionShell, Field } from "./IdentitySection";
 import {
   LAYOUT_OPTIONS,
   TONE_OPTIONS,
+  ANCHOR_OPTIONS,
   BACKGROUND_OPTIONS,
   PALETTE_SHIFT_OPTIONS,
   HEADLINE_POOL_REF,
@@ -53,6 +54,7 @@ function AxisCards<T extends string>({
   error,
   compact,
   render,
+  label,
 }: {
   legend: string;
   options: readonly T[];
@@ -61,6 +63,8 @@ function AxisCards<T extends string>({
   error?: string;
   compact: boolean;
   render: (option: T) => ReactNode;
+  /** The visible face when it differs from the raw value (e.g. "Top" for "top"). */
+  label?: (option: T) => string;
 }) {
   return (
     <fieldset className="space-y-2">
@@ -85,7 +89,13 @@ function AxisCards<T extends string>({
         )}
       >
         {options.map((option) => (
-          <AxisCard key={option} value={option} selected={selected.includes(option)} onToggle={onToggle}>
+          <AxisCard
+            key={option}
+            value={option}
+            selected={selected.includes(option)}
+            onToggle={onToggle}
+            {...(label !== undefined ? { label: label(option) } : {})}
+          >
             {render(option)}
           </AxisCard>
         ))}
@@ -327,6 +337,31 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
           error={errors.tone}
           compact={compact}
           render={(option) => <CreativeGlyph tone={option} />}
+        />
+        {/* T4: the anchor axis — where the headline block sits vertically.
+            CreativeGlyph has no anchor visual, so each card shows a simple
+            labelled position indicator; the accessible name stays the raw
+            value the YAML carries. */}
+        <AxisCards
+          legend="Anchor"
+          options={ANCHOR_OPTIONS}
+          selected={state.variation.anchor}
+          onToggle={(value) => dispatch({ type: "toggleAnchor", value })}
+          error={errors.anchor}
+          compact={compact}
+          label={anchorDisplayName}
+          render={(option) => (
+            <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true" className="size-6">
+              <rect
+                x="4"
+                y={option === "top" ? 4 : option === "middle" ? 10 : 16}
+                width="16"
+                height="4"
+                rx="2"
+                className="fill-current"
+              />
+            </svg>
+          )}
         />
         {/* D6: five things up front, the rest behind one door that remembers it was
             opened. Nothing here is required to plan a campaign. */}

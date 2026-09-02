@@ -70,6 +70,7 @@ describe("L1.1 error key coverage", () => {
         ratio: [],
         layout: [],
         tone: [],
+        anchor: [],
         background: [],
         paletteShift: [],
         headline: false,

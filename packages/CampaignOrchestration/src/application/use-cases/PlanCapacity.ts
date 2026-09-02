@@ -1,5 +1,6 @@
 import { SeededRandom, seedFrom } from "@campaignfoundry/shared";
 import { DISTANCE_AXES, type VariationPolicy } from "../../domain/value-objects/VariationPolicy.vo.js";
+import type { AnchorKind } from "../../domain/value-objects/variation-defaults.js";
 import type { Variant } from "../../domain/entities/Variant.js";
 
 /** Spaces up to this size are searched exhaustively when the random draw falls short. */
@@ -22,6 +23,7 @@ export interface AxisNeed {
 export function enumerateAxes(policy: VariationPolicy): Axes[] {
   const out: Axes[] = [];
   const headlines: ReadonlyArray<string | undefined> = policy.headline.length > 0 ? policy.headline : [undefined];
+  const anchors: ReadonlyArray<AnchorKind | undefined> = policy.anchor.length > 0 ? policy.anchor : [undefined];
   for (const productId of policy.productIds) {
     for (const aspectRatio of policy.ratios) {
       const canMotion = policy.motionEnabled && policy.motionRatios.includes(aspectRatio);
@@ -30,20 +32,23 @@ export function enumerateAxes(policy: VariationPolicy): Axes[] {
           for (const backgroundSource of policy.backgroundSource) {
             for (const paletteShift of policy.paletteShift) {
               for (const headline of headlines) {
-                const base: Axes = {
-                  productId,
-                  aspectRatio,
-                  layout,
-                  tone,
-                  backgroundSource,
-                  paletteShift,
-                  ...(headline !== undefined ? { headline } : {}),
-                };
-                // A still slot: always at a non-motion ratio, and once per base in a mixed plan.
-                if (!canMotion || policy.mixStatic) out.push(base);
-                if (!canMotion) continue;
-                for (const motion of policy.motion) {
-                  for (const durationSec of policy.duration) out.push({ ...base, motion, durationSec });
+                for (const anchor of anchors) {
+                  const base: Axes = {
+                    productId,
+                    aspectRatio,
+                    layout,
+                    tone,
+                    backgroundSource,
+                    paletteShift,
+                    ...(headline !== undefined ? { headline } : {}),
+                    ...(anchor !== undefined ? { anchor } : {}),
+                  };
+                  // A still slot: always at a non-motion ratio, and once per base in a mixed plan.
+                  if (!canMotion || policy.mixStatic) out.push(base);
+                  if (!canMotion) continue;
+                  for (const motion of policy.motion) {
+                    for (const durationSec of policy.duration) out.push({ ...base, motion, durationSec });
+                  }
                 }
               }
             }
@@ -73,6 +78,7 @@ export function lineBound(space: readonly Axes[], policy: VariationPolicy): numb
     policy.backgroundSource.length,
     policy.paletteShift.length,
     Math.max(1, policy.headline.length),
+    Math.max(1, policy.anchor.length),
     policy.motionEnabled ? policy.motion.length * policy.duration.length + (policy.mixStatic ? 1 : 0) : 1,
   );
   return Math.floor(space.length / largestAxis);

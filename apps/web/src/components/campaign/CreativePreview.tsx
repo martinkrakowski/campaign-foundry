@@ -1,6 +1,7 @@
 import { useId, type CSSProperties, type ReactNode } from "react";
 import type { LayoutKind, ToneKind } from "@campaignfoundry/CampaignOrchestration";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
+import type { AnchorKind } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import { RATIO_DIMENSIONS, type AspectRatioValue } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import { LAYERS, times } from "@/components/ui/preview-layers";
@@ -8,10 +9,13 @@ import { cn } from "@/lib/cn";
 
 export type LayoutOption = LayoutKind;
 export type ToneOption = ToneKind;
+export type AnchorOption = AnchorKind;
 
 export interface CreativePreviewProps {
   readonly layout?: LayoutOption;
   readonly tone?: ToneOption;
+  /** Where the headline block sits vertically; absent → derived from `layout` (the pre-axis behaviour). */
+  readonly anchor?: AnchorOption;
   readonly primaryColor: string;
   readonly headline?: string;
   readonly motion?: MotionKind;
@@ -30,6 +34,24 @@ export const PREVIEW_MAX_LINES = 3;
 export const PREVIEW_FONT_RATIO = CREATIVE_GEOMETRY.headlineTypeWidthFraction;
 /** The headline never shrinks below this fraction of its starting size (`fitText`'s floor). */
 export const PREVIEW_FONT_FLOOR_FRACTION = CREATIVE_GEOMETRY.headlineTypeFloorFraction;
+/**
+ * The anchor axis' vertical fractions (T4) — references, not copies, exactly
+ * like the type fractions above: the compositor's `anchorFirstY` and this SVG
+ * must resolve every anchor from the same leaf values.
+ */
+export const PREVIEW_ANCHOR_TOP = CREATIVE_GEOMETRY.headlineAnchor.top;
+export const PREVIEW_ANCHOR_MIDDLE = CREATIVE_GEOMETRY.headlineAnchor.middle;
+export const PREVIEW_ANCHOR_BOTTOM = CREATIVE_GEOMETRY.headlineAnchor.bottom;
+/**
+ * The headline block's vertical fit budget: the canvas minus the leaf's own top
+ * and bottom anchor fractions — the same values that place the block — so the
+ * computed fit cannot disagree with the drawn position (T4). One source: the
+ * budget used to read the miniature's 1/10 for both edges while placement read
+ * the leaf's 0.1/0.08, and the two engines' diverged envelopes are exactly the
+ * C1 class of drift.
+ */
+export const previewFitMaxHeight = (height: number): number =>
+  height - height * PREVIEW_ANCHOR_TOP - height * PREVIEW_ANCHOR_BOTTOM;
 /** Line-to-line spacing as a multiple of the font size. */
 export const LINE_HEIGHT_RATIO = 1.08;
 /** Rough per-glyph advance, in ems, used to plan line breaks without measuring text. */
@@ -153,6 +175,7 @@ export function fitHeadline(
 export function CreativePreview({
   layout,
   tone,
+  anchor,
   primaryColor,
   headline,
   motion,
@@ -161,6 +184,9 @@ export function CreativePreview({
 }: CreativePreviewProps): ReactNode {
   const top = (layout ?? "headline-top") === "headline-top";
   const bold = (tone ?? "bold") === "bold";
+  // The anchor axis (T4): absent → derived from `layout`, the compositor's own
+  // rule in `prepare` — so an axis-less brief previews exactly as it renders.
+  const anchorKind: AnchorKind = anchor ?? (top ? "top" : "bottom");
   const { width: W, height: H } = RATIO_DIMENSIONS[ratio];
   const shadeAlpha = bold ? CREATIVE_GEOMETRY.shadeAlpha.bold : CREATIVE_GEOMETRY.shadeAlpha.subtle;
   const shadeId = `creative-preview-shade-${useId()}`;
@@ -168,17 +194,28 @@ export function CreativePreview({
 
   const band = H * CREATIVE_GEOMETRY.accentSolidHeightFraction;
   const fadeH = H * CREATIVE_GEOMETRY.accentFadeHeightFraction;
-  const anchor = times(LAYERS.headlineAnchor, H);
   const textEdge = times(LAYERS.textEdge, W);
   const textWidth = W - 2 * textEdge;
-  const maxHeight = H - 2 * anchor;
+  // The fit budget is the leaf's edge-to-edge envelope (previewFitMaxHeight) —
+  // the same fractions that place the block — so the anchor changes where the
+  // fitted block sits, never its planned size.
+  const maxHeight = previewFitMaxHeight(H);
   const startFontSize = Math.round(W * PREVIEW_FONT_RATIO);
   const minFontSize = Math.round(startFontSize * PREVIEW_FONT_FLOOR_FRACTION);
   const { fontSize, lines } = fitHeadline(headline ?? "", textWidth, maxHeight, startFontSize, minFontSize);
   const lineHeight = fontSize * LINE_HEIGHT_RATIO;
-  const firstBaseline = top
-    ? anchor + fontSize * 0.75
-    : H - anchor - (lines.length - 1) * lineHeight;
+  const span = (lines.length - 1) * lineHeight;
+  // The block's first baseline per anchor, with this SVG's ascent convention
+  // (baseline ≈ block top + 0.75 em — the same approximation the top edge has
+  // always used). `top`/`bottom` read the leaf's edge fractions; `middle`
+  // centres the wrapped block (span + type size) at the leaf's middle fraction
+  // of the canvas — the zero-insets form of the compositor's safe-area centre.
+  const firstBaseline =
+    anchorKind === "top"
+      ? H * PREVIEW_ANCHOR_TOP + fontSize * 0.75
+      : anchorKind === "middle"
+        ? H * PREVIEW_ANCHOR_MIDDLE - (span + fontSize) / 2 + fontSize * 0.75
+        : H - H * PREVIEW_ANCHOR_BOTTOM - span;
 
   // Layer 5 — the brand logo's geometry, opposite corner to the headline by
   // layout (prepare: top headline → bottom-left, bottom headline → top-right).

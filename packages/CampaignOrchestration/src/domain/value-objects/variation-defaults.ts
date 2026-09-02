@@ -19,6 +19,17 @@ export type BackgroundAxisSource = (typeof BACKGROUND_AXIS_SOURCES)[number];
 /** The only supported pool reference for the `headline` axis. */
 export const HEADLINE_POOL_REF = "pool://copy";
 
+/**
+ * The `anchor` axis: where the headline block sits vertically (plan
+ * 2026-09-01, T4). The axis is optional — a brief without it derives the
+ * placement from `layout` (`headline-top` → `top`, else `bottom`), which is
+ * byte-identical to the pre-axis behaviour, so it must never join the hash,
+ * the axis product or the draw for such a brief (D57's conditional-spread
+ * pattern). The horizontal edge itself stays `layout`'s.
+ */
+export const ANCHOR_VALUES = ["top", "middle", "bottom"] as const;
+export type AnchorKind = (typeof ANCHOR_VALUES)[number];
+
 export const DEFAULT_BACKGROUND_SOURCES: readonly BackgroundAxisSource[] = ["procedural"];
 export const DEFAULT_PALETTE_SHIFT: readonly number[] = [0];
 /**

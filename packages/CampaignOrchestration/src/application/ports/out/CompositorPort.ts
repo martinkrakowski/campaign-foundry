@@ -1,5 +1,6 @@
 import type { AspectRatio } from "../../../domain/value-objects/AspectRatio.vo.js";
 import type { LayoutKind, ToneKind } from "../../../domain/value-objects/Treatment.vo.js";
+import type { AnchorKind } from "../../../domain/value-objects/variation-defaults.js";
 
 /**
  * Platform safe-zone insets in px. All four sides are required when the
@@ -25,6 +26,12 @@ export interface CompositeRequest {
   readonly layout: LayoutKind;
   /** Treatment: visual intensity of the overlay. */
   readonly tone: ToneKind;
+  /**
+   * Vertical placement of the headline block (T4). Absent → derived from
+   * `layout` (`headline-top` → `top`, else `bottom`), which is byte-identical
+   * to the pre-axis behaviour. The horizontal edge stays `layout`'s.
+   */
+  readonly anchor?: AnchorKind;
   /**
    * Platform safe-zone insets in px. All four sides required when present.
    * Absent or all-zero keeps today's geometry (classic callers omit the field).

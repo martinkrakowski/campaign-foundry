@@ -55,6 +55,7 @@ function must<T>(value: T | undefined, label: string): T {
 
 interface TextOp {
   text: string;
+  y: number;
   alpha: number;
   dy: number;
   font: string;
@@ -77,7 +78,7 @@ async function timelineSpy(req: TimelineRequest, t: number, motion?: MotionKind,
   const origSave = ctx.save.bind(ctx);
   const origRestore = ctx.restore.bind(ctx);
   ctx.fillText = ((text: string, x: number, y: number, maxWidth?: number) => {
-    texts.push({ text, alpha: ctx.globalAlpha, dy, font: ctx.font });
+    texts.push({ text, y, alpha: ctx.globalAlpha, dy, font: ctx.font });
     return origFill(text, x, y, maxWidth);
   }) as typeof ctx.fillText;
   ctx.translate = ((x: number, y: number) => {
@@ -380,6 +381,26 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
     const painted = await timelineSpy(req, 0.3, undefined, 0.3);
     expect(painted.prepared.logo).toBeUndefined();
     expect(painted.texts).toEqual([expect.objectContaining({ text: "Alpha" })]);
+  });
+
+  test("anchor middle places the beat's block on the timeline path too (F5a: not a still-only control)", async () => {
+    // The timeline path measures on a throwaway 1×1 context and drawBeat re-sets
+    // ctx.font — a placement that only rode the still path would silently drop
+    // here. The anchor rides PreparedCreative, so every frame inherits it; this
+    // asserts the painted y positions on a real drawn frame.
+    const r = ratio("1:1");
+    const durationSec = 8;
+    const req: TimelineRequest = {
+      ...request({ anchor: "middle", message: "Stay wild" }),
+      durationSec,
+      timeline: copyTimeline([{ text: "Stay wild" }], { keyBeat: 1 }),
+    };
+    const painted = await timelineSpy(req, 0.5, undefined, 0.5);
+    const fontSize = Math.round(r.width * CREATIVE_GEOMETRY.headlineTypeWidthFraction);
+    expect(fontSize).toBe(65);
+    expect(painted.texts).toHaveLength(1);
+    // Pinned literally: 540 (the leaf's 0.5 × 1080) − 65/2 + 65.
+    expect(painted.texts[0]?.y).toBe(572.5);
   });
 
   test("accent-wipe starts from a clean solid band at t=0: the fade rect is withheld", async () => {

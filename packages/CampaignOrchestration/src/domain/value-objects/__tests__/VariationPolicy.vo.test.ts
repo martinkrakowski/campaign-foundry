@@ -5,6 +5,7 @@ import type { Product } from "../../entities/Product.js";
 import { LAYOUT_VALUES, TONE_VALUES } from "../Treatment.vo.js";
 import { MOTION_KINDS } from "../MotionKind.vo.js";
 import {
+  ANCHOR_VALUES,
   BACKGROUND_AXIS_SOURCES,
   canonicalHeadlines,
   DISTANCE_AXES,
@@ -371,6 +372,88 @@ describe("VariationPolicy.fromBrief", () => {
     if (!result.success) return;
     expect(result.value.productIds).toEqual(["alpha", "beta"]);
     expect(result.value.axisProductSize).toBe(2 * 3 * 1 * 1 * 1 * 1);
+  });
+});
+
+describe("VariationPolicy anchor axis", () => {
+  // The golden hash every pre-anchor brief must keep (D57 — the re-roll path
+  // pins the persisted hash, so an absent axis must join nothing).
+  const GOLDEN_HASH = "7181107a6ce42df96357800416bf26bf89007fd3dbd2b9792aab83323adefcf9";
+
+  test("anchor is a Hamming axis and the vocabulary is the parser's", () => {
+    expect(DISTANCE_AXES).toContain("anchor");
+    expect(ANCHOR_VALUES).toEqual(["top", "middle", "bottom"]);
+  });
+
+  test("an absent axis keeps an empty list, the golden hash and the golden axisProductSize", () => {
+    const result = fromBrief(brief({ variation: { count: 12, seed: 7, minDistance: 1 } }));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.anchor).toEqual([]);
+    expect(result.value.axisProductSize).toBe(24);
+    expect(result.value.policyHash).toBe(GOLDEN_HASH);
+  });
+
+  test("a present axis multiplies axisProductSize, joins the hash, and counts as an active axis", () => {
+    const anchored = brief({
+      variation: { count: 12, seed: 7, minDistance: 1, axes: { anchor: ["middle"] } },
+    });
+    const result = fromBrief(anchored);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.anchor).toEqual(["middle"]);
+    // One anchor value adds no combination to the base 24 — but the axis is in the hash.
+    expect(result.value.axisProductSize).toBe(24);
+    expect(result.value.policyHash).not.toBe(GOLDEN_HASH);
+
+    // Three values triple the base: 24 × 3.
+    const three = fromBrief(
+      brief({ variation: { count: 12, seed: 7, axes: { anchor: ["top", "middle", "bottom"] } } }),
+    );
+    expect(three.success).toBe(true);
+    if (three.success) expect(three.value.axisProductSize).toBe(72);
+
+    // minDistance may reach the eighth axis only when the anchor axis is active
+    const seven = fromBrief(brief({ variation: { count: 1, minDistance: 7 } }));
+    expect(seven.success).toBe(false);
+    const withAnchor = fromBrief(
+      brief({ variation: { count: 1, minDistance: 7, axes: { anchor: ["top", "middle", "bottom"] } } }),
+    );
+    expect(withAnchor.success).toBe(true);
+    const eight = fromBrief(
+      brief({ variation: { count: 1, minDistance: 8, axes: { anchor: ["top", "middle", "bottom"] } } }),
+    );
+    expect(eight.success).toBe(false);
+  });
+
+  test("de-duplicates the axis before hashing and sizing", () => {
+    const duplicated = fromBrief(
+      brief({ variation: { count: 1, seed: 7, axes: { anchor: ["middle", "middle"] } } }),
+    );
+    const once = fromBrief(brief({ variation: { count: 1, seed: 7, axes: { anchor: ["middle"] } } }));
+    expect(duplicated.success && once.success).toBe(true);
+    if (!duplicated.success || !once.success) return;
+    expect(duplicated.value.anchor).toEqual(["middle"]);
+    expect(duplicated.value.axisProductSize).toBe(once.value.axisProductSize);
+    expect(duplicated.value.policyHash).toBe(once.value.policyHash);
+  });
+
+  test("absent and an explicit top+bottom pair are different variant spaces", () => {
+    // Absent: each variant's anchor derives from its own layout, so the axis
+    // joins nothing — the golden 24. An explicit pair makes the planner draw
+    // the anchor INDEPENDENTLY of layout: twice the space the absent axis
+    // spans, which is exactly why the editor must not collapse the pair back
+    // to the absent key on save.
+    const absent = fromBrief(brief({ variation: { count: 12, seed: 7 } }));
+    const paired = fromBrief(
+      brief({ variation: { count: 12, seed: 7, axes: { anchor: ["top", "bottom"] } } }),
+    );
+    expect(absent.success && paired.success).toBe(true);
+    if (!absent.success || !paired.success) return;
+    expect(absent.value.anchor).toEqual([]);
+    expect(paired.value.anchor).toEqual(["top", "bottom"]);
+    expect(paired.value.axisProductSize).toBe(absent.value.axisProductSize * 2);
+    expect(paired.value.policyHash).not.toBe(absent.value.policyHash);
   });
 });
 

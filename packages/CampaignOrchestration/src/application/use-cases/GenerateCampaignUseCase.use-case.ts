@@ -493,6 +493,9 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       ratio,
       layout: variant.layout,
       tone: variant.tone,
+      // The anchor axis draws only when the brief carries it; absent → the
+      // compositor derives from layout, byte-identical to the pre-axis path.
+      ...(variant.anchor !== undefined ? { anchor: variant.anchor } : {}),
       ...(safeInsets !== undefined ? { safeInsets } : {}),
     };
 
@@ -520,6 +523,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       paletteShift: variant.paletteShift,
       // Provenance: which pool text this slot rendered (report + grid chip).
       ...(variant.headline === undefined ? {} : { headline: variant.headline }),
+      ...(variant.anchor === undefined ? {} : { anchor: variant.anchor }),
     };
 
     if (variant.motion !== undefined) {

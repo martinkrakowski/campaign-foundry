@@ -82,6 +82,20 @@ describe("enumerateAxes", () => {
     expect(space.every((a) => a.headline !== undefined)).toBe(true);
     expect(new Set(space.map((a) => a.headline)).size).toBe(2);
   });
+
+  test("an anchored brief enumerates the anchor axis; an axis-less one carries none (T4)", () => {
+    const anchored = policyOf(
+      { variation: { count: 2, axes: { anchor: ["top", "middle", "bottom"] } }, output: { formats: ["static"] } },
+    );
+    const space = enumerateAxes(anchored);
+    // 2 products × 3 ratios × 2 layouts × 2 tones × 1 bg × 1 palette × 3 anchors
+    expect(space).toHaveLength(72);
+    expect(space.every((a) => a.anchor !== undefined)).toBe(true);
+    expect(new Set(space.map((a) => a.anchor)).size).toBe(3);
+
+    const plain = policyOf({ variation: { count: 2 }, output: { formats: ["static"] } });
+    expect(enumerateAxes(plain).every((a) => a.anchor === undefined)).toBe(true);
+  });
 });
 
 describe("conflicts / lineBound", () => {
