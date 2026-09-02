@@ -34,5 +34,15 @@ SYNC-MIGRATION-REPORT.md
 /output/
 /apps/api/output/
 
+# Operator data: real campaign briefs and the assets they point at. These are the
+# user's own files, they are not reproducible from the repo, and publishing a client's
+# briefs is a decision rather than a side effect of `git add`. Narrow on purpose — the
+# `sample-*` fixtures stay tracked and a new one needs no `-f`, and only *directories*
+# under assets/inputs are ignored, so the tracked top-level logos are unaffected.
+# (An ignore rule never untracks a file, so nothing already committed is affected.)
+/briefs/*
+!/briefs/sample-*
+/assets/inputs/*/
+
 # Keep per-template env examples tracked
 !.env.*.example
