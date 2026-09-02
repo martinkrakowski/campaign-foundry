@@ -532,9 +532,13 @@ describe("BriefPage — data flow", () => {
     await user.click(within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm }));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.url.includes("replace=1"))).toBe(true));
 
-    // ...and the stored copy was adopted in place: the dialog closes, the shell
-    // follows it, and the URL never needed to move.
+    // ...and the stored copy was adopted in place: both dialogs close, the shell
+    // follows it, and the URL never needed to move. Same-id overwrite does not
+    // unmount the editor, so the overwrite dialog has to clear on the success path.
     await waitFor(() => expect(screen.queryByLabelText("New brief id")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: messages.saveAsOverwriteTitle })).toBeNull(),
+    );
     await waitFor(() => expect(screen.getByTestId("run-brief").textContent).toBe("camp"));
     expect(nextMock().router.replace).not.toHaveBeenCalled();
   });

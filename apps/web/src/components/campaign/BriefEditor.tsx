@@ -703,17 +703,16 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * family the kit's ConfirmDialog exists for: a dirty draft parks the action in
    * `pendingReplace` and the dialog asks (the shell's own "Unsaved edits" pattern —
    * one prompt, a refusal changes nothing, and re-triggering never stacks a second
-   * question, DESIGN.md §5). A clean draft acts at once, exactly as the old boolean
-   * gate did. The boolean answered "did it proceed?"; a prompt is a "not yet".
+   * question, DESIGN.md §5). A clean draft acts at once. Callers fire-and-forget —
+   * the parked action is the contract; the old boolean "did it proceed?" is gone.
    */
-  const requestReplace = (action: () => void): boolean => {
+  const requestReplace = (action: () => void): void => {
     if (isPristine(state) || !isDirtySinceSave(state)) {
       action();
-      return true;
+      return;
     }
     // Never stack: a second trigger while one question stands changes nothing.
     setPendingReplace((prev) => prev ?? action);
-    return false;
   };
 
   /**
@@ -859,12 +858,10 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       dispatch({ type: "load", brief: created.brief, entry: { file: created.file, revision: created.revision } });
       setRunBrief(created.brief);
       setSaveAsId(null);
-      setPendingOverwrite(null);
       return;
     }
     await loadBriefs();
     setSaveAsId(null);
-    setPendingOverwrite(null);
     stashStep(steps[stepIndex] as string);
     router.replace(`/brief/${created.brief.id}`);
   };
@@ -925,6 +922,10 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     try {
       const brief = toBrief(state);
       await adoptSavedCopy(await createBrief({ ...brief, id: newId }, { replace: true }));
+      // Same-id overwrite adopts in place (no navigation unmounts this editor), so
+      // the dialog must clear here too. After adoptSavedCopy, while `saving` still
+      // holds #163's gate — a dismissal window must not open mid-adoption.
+      setPendingOverwrite(null);
     } catch (error) {
       setPersistError(unknownErrorMessage(error, "Save as failed"));
       setPendingOverwrite(null);
