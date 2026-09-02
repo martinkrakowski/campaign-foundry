@@ -700,6 +700,18 @@ export function reviewEditLabel(section: string): string {
   return `Edit ${section}`;
 }
 /** The variation policy row's value: what the count will make. */
+/**
+ * T2 (template plan, F6): the lock-or-vary semantics of a variation axis, spoken.
+ * The min-one guard means a single selected value IS the lock — the planner draws
+ * only that value for every variant — but nothing on the cards said so.
+ */
+export function axisLocked(value: string): string {
+  return `Locked — every creative uses ${value.replace(/-/g, " ").trim()}.`;
+}
+export function axisVaries(count: number): string {
+  return `Varies — each creative gets one of the ${count} selected.`;
+}
+
 export function reviewPolicyValue(count: number): string {
   return `${count} ad${count === 1 ? "" : "s"}`;
 }
