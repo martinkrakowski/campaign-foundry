@@ -2370,6 +2370,44 @@ describe("the brief style block round-trips (T5/D58)", () => {
     expect(state.styleExplicit).toBe(true);
     expect(toBrief(state).style).toEqual({ fontFamily: "Inter" });
   });
+
+  test("a text effect rides the load → save round-trip verbatim (T6/D58)", () => {
+    // YAML → wizard → save byte-stable: the whole block, effect included.
+    const style: Style = {
+      fontFamily: "Lora",
+      fontWeight: 700,
+      sizeScale: 0.08,
+      lineHeight: 1.4,
+      letterSpacing: 0.05,
+      align: "left",
+      textEffect: "rise-in",
+    };
+    const state = fromBrief(styledBrief(style));
+    expect(state.styleExplicit).toBe(true);
+    expect(state.style).toEqual(style);
+    expect(toBrief(state).style).toEqual(style);
+  });
+
+  test("an effect alone is a real block: emitted without the flag, None unwrites the key", () => {
+    const state = { ...base(), style: { textEffect: "scale-in" as const }, styleExplicit: false };
+    expect(toBrief(state).style).toEqual({ textEffect: "scale-in" });
+    // A draft whose only content is a parked undefined key serialises as the
+    // empty explicit block (the latch keeps the block, the key is gone).
+    const none = { ...base(), style: { textEffect: undefined }, styleExplicit: true };
+    expect(toBrief(none).style).toEqual({});
+  });
+
+  test("a restored draft's text effect is validated against the vocabulary — repair, never smuggle", () => {
+    const raw = {
+      ...base(),
+      style: { textEffect: "spin", fontFamily: "Lora" }, // not a kind → dropped
+    };
+    delete (raw as { styleExplicit?: boolean }).styleExplicit;
+    const state = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    expect(state.style).toEqual({ fontFamily: "Lora" });
+    const valid = normalizeDraftState({ ...base(), style: { textEffect: "slide-in" } } as unknown as Record<string, unknown>);
+    expect(valid.style).toEqual({ textEffect: "slide-in" });
+  });
 });
 
 describe("the Layout step's setStyle action (T7)", () => {
@@ -2395,6 +2433,28 @@ describe("the Layout step's setStyle action (T7)", () => {
     // A legal field cannot smuggle an illegal sibling through either.
     const mixed = editorReducer(state, { type: "setStyle", patch: { lineHeight: 9, fontFamily: "Lora" } });
     expect(mixed).toBe(state);
+  });
+
+  test("an Effect chip's dispatch latches the flag, and None unwrites the key (T6)", () => {
+    const picked = editorReducer(base(), { type: "setStyle", patch: { textEffect: "fade-in" } });
+    expect(picked.style).toEqual({ textEffect: "fade-in" });
+    expect(picked.styleExplicit).toBe(true);
+    expect(toBrief(picked).style).toEqual({ textEffect: "fade-in" });
+    // None is the absent field: the reducer deletes the key outright — the
+    // draft's shape matches a loaded brief's — and the touched block stays
+    // authored (the latch).
+    const none = editorReducer(picked, { type: "setStyle", patch: { textEffect: undefined } });
+    expect(none.styleExplicit).toBe(true);
+    expect(none.style).toEqual({});
+  });
+
+  test("a raw kind id outside the vocabulary cannot ride setStyle", () => {
+    const state = base();
+    const next = editorReducer(state, {
+      type: "setStyle",
+      patch: { textEffect: "spin" as Style["textEffect"] },
+    });
+    expect(next).toBe(state);
   });
 
   test("the untouched draft still serialises style-free (D54/D57)", () => {

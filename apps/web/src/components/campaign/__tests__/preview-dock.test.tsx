@@ -78,6 +78,32 @@ describe("PreviewDock", () => {
     expect(container.textContent).not.toContain("ken-burns-in");
   });
 
+  test("a template with a text effect names it in the caption, in words (T6/D50)", () => {
+    // The frame is the effect's rest pose — the name in words is what says the
+    // delivered video animates; the raw kind id never renders (D18).
+    const { container } = render(
+      <PreviewDock {...showcase} platformId="instagram-story" style={{ textEffect: "rise-in" }} />,
+    );
+    expect(container.textContent).toContain(
+      messages.previewCaptionMotion("Tall", "Instagram Story", "Rise in"),
+    );
+    expect(container.textContent).not.toContain("rise-in");
+  });
+
+  test("a moving creative whose template carries an effect names both styles (T6)", () => {
+    const { container } = render(
+      <PreviewDock
+        {...showcase}
+        platformId="instagram-story"
+        motion="ken-burns-in"
+        style={{ textEffect: "fade-in" }}
+      />,
+    );
+    expect(container.textContent).toContain(
+      messages.previewCaptionMotion("Tall", "Instagram Story", "slow zoom in · Fade in"),
+    );
+  });
+
   test("shows the campaign name, headline and step readout", () => {
     const { container } = render(<PreviewDock {...showcase} platformId="linkedin" />);
     expect(container.textContent).toContain("Summer Launch");

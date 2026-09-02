@@ -4,6 +4,7 @@ import {
   resolveStyle,
   styleDiverges,
   styleProblem,
+  TEXT_EFFECT_VALUES,
   type Style,
 } from "../creative-style.js";
 
@@ -28,6 +29,7 @@ describe("resolveStyle", () => {
       lineHeight: 1.25,
       letterSpacing: 0,
       align: "center",
+      textEffect: undefined,
     });
   });
 
@@ -51,7 +53,14 @@ describe("resolveStyle", () => {
       lineHeight: 1.4,
       letterSpacing: 0.05,
       align: "left",
+      textEffect: undefined,
     });
+  });
+
+  test("a named text effect resolves; absence resolves to undefined, not a 'none' member (T6)", () => {
+    expect(resolveStyle({ textEffect: "scale-in" }, "bold").textEffect).toBe("scale-in");
+    expect(resolveStyle({}, "bold").textEffect).toBeUndefined();
+    expect(resolveStyle(undefined, "bold").textEffect).toBeUndefined();
   });
 });
 
@@ -81,6 +90,12 @@ describe("styleDiverges", () => {
     expect(styleDiverges({ letterSpacing: 0.05 })).toBe(true);
     expect(styleDiverges({ align: "left" })).toBe(true);
   });
+
+  test("any named text effect diverges — absence is the default (T6)", () => {
+    for (const effect of TEXT_EFFECT_VALUES) {
+      expect(styleDiverges({ textEffect: effect })).toBe(true);
+    }
+  });
 });
 
 describe("styleProblem — the validator both brief boundaries share (T5)", () => {
@@ -97,9 +112,13 @@ describe("styleProblem — the validator both brief boundaries share (T5)", () =
         lineHeight: 1.8,
         letterSpacing: 0.2,
         align: "right",
+        textEffect: "fade-in",
       }),
     ).toBeUndefined();
     expect(styleProblem({ sizeScale: 0.02, lineHeight: 1, letterSpacing: -0.05, align: "left" })).toBeUndefined();
+    for (const effect of TEXT_EFFECT_VALUES) {
+      expect(styleProblem({ textEffect: effect })).toBeUndefined();
+    }
   });
 
   test("a non-object block is rejected", () => {
@@ -110,7 +129,7 @@ describe("styleProblem — the validator both brief boundaries share (T5)", () =
 
   test("an unknown field is rejected — style is validated, not tolerated", () => {
     expect(styleProblem({ famiy: "Lora" })).toBe(
-      'Unsupported style field "famiy" (allowed: fontFamily, fontWeight, sizeScale, lineHeight, letterSpacing, align).',
+      'Unsupported style field "famiy" (allowed: fontFamily, fontWeight, sizeScale, lineHeight, letterSpacing, align, textEffect).',
     );
   });
 
@@ -127,6 +146,8 @@ describe("styleProblem — the validator both brief boundaries share (T5)", () =
     ["letterSpacing", 0.5, /"style\.letterSpacing" must be a finite number in \[-0\.05, 0\.2\]/],
     ["letterSpacing", -0.5, /"style\.letterSpacing" must be a finite number in \[-0\.05, 0\.2\]/],
     ["align", "justified", /"style\.align" must be one of left, center, right/],
+    ["textEffect", "spin", /"style\.textEffect" must be one of fade-in, rise-in, slide-in, scale-in/],
+    ["textEffect", 3, /"style\.textEffect" must be one of fade-in, rise-in, slide-in, scale-in/],
   ])("rejects style.%s = %p", (field, value, message) => {
     expect(styleProblem({ [field]: value })).toMatch(message);
   });

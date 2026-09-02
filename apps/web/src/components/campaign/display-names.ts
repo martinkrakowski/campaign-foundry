@@ -2,7 +2,7 @@
 // infrastructure adapters, which pull node:fs/path/crypto into the browser bundle.
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { ANCHOR_VALUES } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
-import { ALIGN_VALUES, FONT_WEIGHT_VALUES } from "@campaignfoundry/CampaignOrchestration/creative-style";
+import { ALIGN_VALUES, FONT_WEIGHT_VALUES, type TextEffectKind } from "@campaignfoundry/CampaignOrchestration/creative-style";
 import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
 
 /** Display name for a format key. */
@@ -66,6 +66,24 @@ const ALIGN_LABELS: Record<(typeof ALIGN_VALUES)[number], string> = {
 
 export function alignDisplayName(align: string): string {
   return ALIGN_LABELS[align as (typeof ALIGN_VALUES)[number]] ?? align;
+}
+
+/**
+ * Display labels for the style text effects (T6) — the MOTION_KIND_META
+ * pattern, as its own map: keyed by the domain's own vocabulary, so a new kind
+ * is a compile error rather than a raw kind id on screen (D18/D50). The still
+ * shows each effect's rest pose, so the name in words is what tells the user
+ * the still moves.
+ */
+export const TEXT_EFFECT_META: Record<TextEffectKind, string> = {
+  "fade-in": "Fade in",
+  "rise-in": "Rise in",
+  "slide-in": "Slide in",
+  "scale-in": "Scale in",
+};
+
+export function textEffectDisplayName(effect: string): string {
+  return TEXT_EFFECT_META[effect as TextEffectKind] ?? effect;
 }
 
 /** Display name for a platform id (from PlatformProfile.label). */

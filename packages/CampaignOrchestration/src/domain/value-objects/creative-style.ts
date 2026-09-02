@@ -38,6 +38,22 @@ export type FontWeightKind = (typeof FONT_WEIGHT_VALUES)[number];
 export const ALIGN_VALUES = ["left", "center", "right"] as const;
 export type AlignKind = (typeof ALIGN_VALUES)[number];
 
+/**
+ * The text effects a brief may request (T6): whole-block entrance animations on
+ * the COPY layer only — per-frame alpha/translate/scale on the text group, no
+ * per-glyph work. NOT a variation axis beside `motion` (H3: two motion
+ * selectors and a combinatorial planner explosion) and hashed nowhere — a
+ * styled brief and its style-less twin resolve to the same plan. Every kind's
+ * rest pose is the fully-settled state (H4): at `t = 1` — and on the
+ * still/poster path — the frame is byte-identical to the same brief with no
+ * effect (D54). Where `headline-rise` also moves copy the two COMPOSE
+ * deterministically: translations add, alphas multiply (pinned at the draw
+ * site); the motion kinds keep their layers and the effect drives only the
+ * copy layer's entrance, on each beat's own beat-local progress.
+ */
+export const TEXT_EFFECT_VALUES = ["fade-in", "rise-in", "slide-in", "scale-in"] as const;
+export type TextEffectKind = (typeof TEXT_EFFECT_VALUES)[number];
+
 /** `sizeScale` bounds: a fraction of the canvas WIDTH (D55), like `fitText`. */
 export const MIN_SIZE_SCALE = 0.02;
 export const MAX_SIZE_SCALE = 0.12;
@@ -61,6 +77,7 @@ export interface Style {
   readonly lineHeight?: number;
   readonly letterSpacing?: number;
   readonly align?: AlignKind;
+  readonly textEffect?: TextEffectKind;
 }
 
 /**
@@ -96,6 +113,13 @@ export interface ResolvedStyle {
   readonly lineHeight: number;
   readonly letterSpacing: number;
   readonly align: AlignKind;
+  /**
+   * The text effect (T6), resolved in `prepare` alongside the other fields:
+   * undefined = no effect, the pre-effect draw path bit for bit (D54). There is
+   * deliberately no "none" member — absence is the default, so the vocabulary
+   * stays four kinds and the resolved field carries none of them.
+   */
+  readonly textEffect: TextEffectKind | undefined;
 }
 
 /**
@@ -115,6 +139,7 @@ export function resolveStyle(
     lineHeight: style?.lineHeight ?? DEFAULT_STYLE.lineHeight,
     letterSpacing: style?.letterSpacing ?? DEFAULT_STYLE.letterSpacing,
     align: style?.align ?? DEFAULT_STYLE.align,
+    textEffect: style?.textEffect,
   };
 }
 
@@ -144,6 +169,7 @@ export function styleProblem(value: unknown): string | undefined {
     "lineHeight",
     "letterSpacing",
     "align",
+    "textEffect",
   ] as const;
   for (const key of Object.keys(record)) {
     if (!(STYLE_FIELDS as readonly string[]).includes(key)) {
@@ -171,6 +197,9 @@ export function styleProblem(value: unknown): string | undefined {
   if (record.align !== undefined && !(ALIGN_VALUES as readonly string[]).includes(record.align as string)) {
     return `Campaign brief field "style.align" must be one of ${ALIGN_VALUES.join(", ")}.`;
   }
+  if (record.textEffect !== undefined && !(TEXT_EFFECT_VALUES as readonly string[]).includes(record.textEffect as string)) {
+    return `Campaign brief field "style.textEffect" must be one of ${TEXT_EFFECT_VALUES.join(", ")}.`;
+  }
   return undefined;
 }
 
@@ -183,6 +212,9 @@ export function styleDiverges(style: Style | undefined): boolean {
       (style.sizeScale !== undefined && style.sizeScale !== DEFAULT_STYLE.sizeScale) ||
       (style.lineHeight !== undefined && style.lineHeight !== DEFAULT_STYLE.lineHeight) ||
       (style.letterSpacing !== undefined && style.letterSpacing !== DEFAULT_STYLE.letterSpacing) ||
-      (style.align !== undefined && style.align !== DEFAULT_STYLE.align))
+      (style.align !== undefined && style.align !== DEFAULT_STYLE.align) ||
+      // Any named text effect says something the absent key does not (T6):
+      // absence is the default, so every member diverges, like fontWeight.
+      style.textEffect !== undefined)
   );
 }

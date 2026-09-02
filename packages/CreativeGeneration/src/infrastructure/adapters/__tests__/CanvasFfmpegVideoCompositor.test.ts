@@ -11,6 +11,7 @@ import {
   MOTION_KINDS,
   resolveTimeline,
   restT,
+  TEXT_EFFECT_VALUES,
   type CopyTimeline,
   type MotionKind,
   type VideoCompositeRequest,
@@ -677,6 +678,32 @@ describe("CanvasFfmpegVideoCompositor", () => {
       );
       // The poster rides the same prepared style through the timeline draw.
       expect(Buffer.from(spaced.poster).equals(Buffer.from(plain.poster))).toBe(false);
+    },
+  );
+
+  test.skipIf(!ffmpegOk)(
+    skipReason ??
+      "each text effect reaches a REAL encode: mid-entrance frames differ from the plain brief, the rest pose does not (T6/F2)",
+    async () => {
+      // One draw path serves static and video (F2), so the effect rides the
+      // shared draw — but it is PROVEN here on real encoded output: the
+      // sampled mid-entrance frame must differ from the plain brief's, and the
+      // poster (drawn at restT = 1) must be byte-identical to it (H4/D54) —
+      // a brief with no effect IS today's bytes.
+      const compositor = new CanvasFfmpegVideoCompositor();
+      const base = {
+        durationSec: 2,
+        fps: 12,
+        motion: "ken-burns-in" as MotionKind,
+        sampleAt: [0.05],
+      };
+      const plain = await compositor.compositeVideo(videoRequest({ ...base }));
+      for (const kind of TEXT_EFFECT_VALUES) {
+        const out = await compositor.compositeVideo(videoRequest({ ...base, style: { textEffect: kind } }));
+        expect(out.sampledFrames).toHaveLength(1);
+        expect(Buffer.from(out.sampledFrames[0]).equals(Buffer.from(plain.sampledFrames[0]))).toBe(false);
+        expect(Buffer.from(out.poster).equals(Buffer.from(plain.poster))).toBe(true);
+      }
     },
   );
 });

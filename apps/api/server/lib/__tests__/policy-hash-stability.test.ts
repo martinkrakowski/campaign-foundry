@@ -91,7 +91,7 @@ describe("the style block is hashed nowhere (T5/D57)", () => {
       path,
       styledTwinOf(
         file,
-        ["style:", "  fontFamily: Lora", "  fontWeight: 700", "  sizeScale: 0.08", "  lineHeight: 1.4", "  letterSpacing: 0.05", "  align: left"].join("\n"),
+        ["style:", "  fontFamily: Lora", "  fontWeight: 700", "  sizeScale: 0.08", "  lineHeight: 1.4", "  letterSpacing: 0.05", "  align: left", "  textEffect: fade-in"].join("\n"),
       ),
     );
     expect(styled.style).toBeDefined();

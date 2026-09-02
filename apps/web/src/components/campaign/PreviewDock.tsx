@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import type { AspectRatioValue } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
-import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import type { CampaignBrief, Style } from "@campaignfoundry/CampaignOrchestration";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
@@ -8,7 +8,11 @@ import { CreativePreview, type CreativePreviewProps } from "@/components/campaig
 import { PreviewFrame } from "@/components/campaign/PreviewFrame";
 import { Eyebrow } from "@/components/ui";
 import { MOTION_KIND_META } from "@/components/campaign/MotionKindPanel";
-import { platformDisplayName, ratioDisplayName } from "@/components/campaign/display-names";
+import {
+  platformDisplayName,
+  ratioDisplayName,
+  TEXT_EFFECT_META,
+} from "@/components/campaign/display-names";
 import { briefBackgroundIsStandIn } from "@/lib/preview-frame";
 import * as messages from "@/components/campaign/messages";
 
@@ -56,23 +60,30 @@ function PreviewSwatch({ primaryColor }: { primaryColor: string }): ReactNode {
   );
 }
 
-/** `<ratio display name> · <platform label>`, joined by the video style's own name in words when the creative moves (D50) — display labels, never raw kind ids (D18). A non-procedural background axis adds the stand-in suffix (D52). */
+/** `<ratio display name> · <platform label>`, joined by each motion style's own name in words when the creative moves or the template carries a text effect (D50/T6) — display labels, never raw kind ids (D18). A non-procedural background axis adds the stand-in suffix (D52). */
 function PreviewCaption({
   platformId,
   ratio,
   motion,
+  textEffect,
   standIn,
 }: {
   platformId?: string;
   ratio: AspectRatioValue;
   motion?: MotionKind;
+  textEffect?: Style["textEffect"];
   standIn: boolean;
 }): ReactNode {
   const platformLabel =
     platformId !== undefined ? platformDisplayName(platformId) : messages.previewNoPlatform;
-  const caption = motion !== undefined
-    ? messages.previewCaptionMotion(ratioDisplayName(ratio), platformLabel, MOTION_KIND_META[motion])
-    : messages.previewCaption(ratioDisplayName(ratio), platformLabel);
+  const styleLabels = [
+    motion !== undefined ? MOTION_KIND_META[motion] : undefined,
+    textEffect !== undefined ? TEXT_EFFECT_META[textEffect] : undefined,
+  ].filter((label): label is string => label !== undefined);
+  const caption =
+    styleLabels.length > 0
+      ? messages.previewCaptionMotion(ratioDisplayName(ratio), platformLabel, styleLabels.join(" · "))
+      : messages.previewCaption(ratioDisplayName(ratio), platformLabel);
   return (
     <p className="truncate font-mono text-[11px] text-text-muted">
       {standIn ? `${caption} · ${messages.previewFrameStandInBackground}` : caption}
@@ -159,6 +170,7 @@ export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
           platformId={props.platformId}
           ratio={ratio}
           motion={props.motion}
+          textEffect={props.style?.textEffect}
           standIn={props.brief !== undefined && briefBackgroundIsStandIn(props.brief)}
         />
       </div>
