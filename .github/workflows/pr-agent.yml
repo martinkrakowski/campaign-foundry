@@ -141,7 +141,7 @@ jobs:
           # .agents/PR_REVIEW_RUBRIC.md and best_practices.md; neither exists here. A
           # missing entry is skipped rather than fatal, but listing one is a silent way to
           # ship a reviewer with less context than intended.
-          config.repo_context_files: '["DESIGN.md", "AGENTS.md", ".agents/testing.md"]'
+          config.repo_context_files: '["DESIGN.md", "AGENTS.md", ".agents/testing.md", "best_practices.md"]'
           config.repo_context_max_lines: "3000"
           # Bound the LLM call INSIDE the container so a slow model aborts and
           # fallback_models can engage. Without it the only deadline is timeout-minutes,

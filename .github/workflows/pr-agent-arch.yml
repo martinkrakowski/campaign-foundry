@@ -34,7 +34,11 @@ name: "PR-Agent Architecture Review"
 
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review, synchronize]
+    # `synchronize` removed (2026-09-03): re-reviewing every push produced the
+    # finding-decay loop — round one found real defects, round three posted style
+    # opinions and re-raised already-refuted findings verbatim. One review per PR
+    # lifecycle; a human can still summon a fresh pass with /improve via pr-agent.yml.
+    types: [opened, reopened, ready_for_review]
     # D4. `packages/*/src/**` is one level deep on purpose: it is where the layers live.
     paths:
       - "packages/*/src/**"
@@ -111,14 +115,14 @@ jobs:
           # rule it has not read. Both invariant files are verified to exist; a missing
           # entry is skipped, not fatal, so a stale list would silently remove the very
           # context that makes the prohibition below enforceable.
-          config.repo_context_files: '[".agents/architecture.md", ".architecture/invariants/layer-rules.yaml", ".architecture/invariants/linter-config.yaml"]'
+          config.repo_context_files: '[".agents/architecture.md", ".architecture/invariants/layer-rules.yaml", ".architecture/invariants/linter-config.yaml", "best_practices.md"]'
           config.repo_context_max_lines: "3000"
           config.ai_timeout: "600"
           pr_reviewer.require_ticket_analysis_review: "false"
           github_action_config.auto_review: "false"
           github_action_config.auto_describe: "false"
           github_action_config.auto_improve: "true"
-          github_action_config.pr_actions: '["opened", "reopened", "ready_for_review", "synchronize"]'
+          github_action_config.pr_actions: '["opened", "reopened", "ready_for_review"]'
           # The instructions OPEN WITH THE PROHIBITION, not the mandate (P2.3). What this
           # reviewer must not say is the part that makes it worth running at all.
           pr_code_suggestions.extra_instructions: |

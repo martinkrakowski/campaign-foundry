@@ -20,7 +20,11 @@ name: "PR-Agent API Review"
 
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review, synchronize]
+    # `synchronize` removed (2026-09-03): re-reviewing every push produced the
+    # finding-decay loop — round one found real defects, round three posted style
+    # opinions and re-raised already-refuted findings verbatim. One review per PR
+    # lifecycle; a human can still summon a fresh pass with /improve via pr-agent.yml.
+    types: [opened, reopened, ready_for_review]
     # D4: a CSS-only PR must not pay for three LLM reviews.
     paths:
       - "apps/api/**"
@@ -86,14 +90,14 @@ jobs:
           # list is a silent way to ship a reviewer with less context than intended.
           # DESIGN.md is deliberately absent: it is the UI reviewer's context, and handing
           # it to this one invites UI findings on an API diff.
-          config.repo_context_files: '[".agents/architecture.md", "AGENTS.md", ".agents/testing.md"]'
+          config.repo_context_files: '[".agents/architecture.md", "AGENTS.md", ".agents/testing.md", "best_practices.md"]'
           config.repo_context_max_lines: "3000"
           config.ai_timeout: "600"
           pr_reviewer.require_ticket_analysis_review: "false"
           github_action_config.auto_review: "false"
           github_action_config.auto_describe: "false"
           github_action_config.auto_improve: "true"
-          github_action_config.pr_actions: '["opened", "reopened", "ready_for_review", "synchronize"]'
+          github_action_config.pr_actions: '["opened", "reopened", "ready_for_review"]'
           pr_code_suggestions.extra_instructions: |
             You are the adversarial API reviewer for campaign-foundry. The API is Nitro/H3:
             file-routed handlers under apps/api/server/routes, helpers under
