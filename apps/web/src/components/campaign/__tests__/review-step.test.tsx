@@ -118,6 +118,11 @@ describe("ReviewStep — summary rows", () => {
     expect(template?.textContent).not.toContain("letter spacing");
   });
 
+  test("an empty style block draws no template row rather than a blank one", () => {
+    renderRows({ ...classic, style: {} });
+    expect(row("layout")).toBeNull();
+  });
+
   test("an empty formats or platforms list draws no output row rather than a blank one", () => {
     const emptyFormats = renderRows({ ...classic, output: { formats: [], platforms: ["linkedin"] } });
     expect(row("output")).toBeNull();

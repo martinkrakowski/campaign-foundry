@@ -1,7 +1,7 @@
 import { describe, test, expect, vi, afterEach } from "vitest";
 import { render, screen, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { initialEditorState, type EditorState } from "@/components/campaign/editor-state";
+import { emptyProduct, initialEditorState, type EditorState } from "@/components/campaign/editor-state";
 import { LayoutSection } from "../LayoutSection";
 import { PREVIEW_FRAME_DEBOUNCE_MS } from "@/lib/preview-frame";
 import * as messages from "../../messages";
@@ -52,10 +52,49 @@ describe("LayoutSection — the type controls (T5/T7)", () => {
 
   test("the controls show the leaf's defaults for an absent field, never a blank", () => {
     render(<LayoutSection state={state()} dispatch={vi.fn()} errors={{}} />);
-    // An untouched style is `{}`: the chips wear the defaults the compositor resolves.
+    // An untouched style is `{}`: family and align wear the leaf defaults; weight
+    // follows the tone-derived rendered face (D60) — a treatment-less classic is
+    // the compositor's non-subtle path, so Bold, not Regular.
     expect(screen.getByRole("button", { name: "Inter" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "Regular" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Bold" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "Center" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  test("an absent weight chip follows the tone-derived rendered face (D60)", () => {
+    const subtle = render(
+      <LayoutSection
+        state={state({ treatments: [{ id: "t", layout: "headline-bottom", tone: "subtle" }] })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Regular" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Bold" }).getAttribute("aria-pressed")).toBe("false");
+    subtle.unmount();
+    render(
+      <LayoutSection
+        state={state({ treatments: [{ id: "t", layout: "headline-bottom", tone: "bold" }] })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Bold" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Regular" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  test("an explicit weight overrides the tone-derived default", () => {
+    render(
+      <LayoutSection
+        state={state({
+          treatments: [{ id: "t", layout: "headline-bottom", tone: "bold" }],
+          style: { fontWeight: 400 },
+        })}
+        dispatch={vi.fn()}
+        errors={{}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Regular" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Bold" }).getAttribute("aria-pressed")).toBe("false");
   });
 
   test("the size readout shows the derived pixels at the previewed ratio, never the stored fraction (D55)", () => {
@@ -137,6 +176,23 @@ describe("LayoutSection — the frame follows the controls (T1b/D63)", () => {
       (vi.mocked(globalThis.fetch).mock.calls[1][1] as RequestInit).body as string,
     ) as { brief: { style?: { lineHeight?: number } } };
     expect(body.brief.style?.lineHeight).toBe(1.4);
+  });
+
+  test("a blank draft's placeholder product never fires a frame fetch; naming the product does", async () => {
+    vi.useFakeTimers();
+    vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+    const blank = variationState({ products: [emptyProduct(1)] });
+    const view = render(<LayoutSection state={blank} dispatch={vi.fn()} errors={{}} preview />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
+    });
+    expect(vi.mocked(globalThis.fetch).mock.calls.length).toBe(0);
+
+    view.rerender(<LayoutSection state={variationState()} dispatch={vi.fn()} errors={{}} preview />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
+    });
+    expect(vi.mocked(globalThis.fetch).mock.calls.length).toBe(1);
   });
 
   test("with the preview flag the real frame arrives: an img where the placeholder stood", async () => {

@@ -17,7 +17,7 @@ import {
   type FontWeightKind,
 } from "@campaignfoundry/CampaignOrchestration/creative-style";
 import { ChipGroup, Slider } from "@/components/ui";
-import { toBrief } from "@/components/campaign/editor-state";
+import { toBrief, type EditorState } from "@/components/campaign/editor-state";
 import { derivePreviewRatio } from "@/components/campaign/PreviewDock";
 import { PreviewFrame } from "@/components/campaign/PreviewFrame";
 import { previewLook } from "@/components/campaign/preview-props";
@@ -48,6 +48,17 @@ const WEIGHT_LABELS: Record<FontWeightKind, string> = { 400: "Regular", 700: "Bo
 const WEIGHT_CHOICES = choices(FONT_WEIGHT_VALUES, (weight) => WEIGHT_LABELS[weight]);
 const ALIGN_LABELS: Record<AlignKind, string> = { left: "Left", center: "Center", right: "Right" };
 const ALIGN_CHOICES = choices(ALIGN_VALUES, (align) => ALIGN_LABELS[align]);
+
+/**
+ * D60: absent `fontWeight` follows the tone-derived RENDERED face — `subtle`
+ * asks "500" and renders Regular (400); `bold` renders 700. The treatment's
+ * tone lives in the same state (classic: first treatment; randomized: first
+ * axis value); anything that is not `subtle` is the compositor's bold path.
+ */
+function toneRenderedWeight(state: EditorState): FontWeightKind {
+  const tone = state.mode === "brief" ? state.treatments[0]?.tone : state.variation.tone[0];
+  return tone === "subtle" ? 400 : 700;
+}
 
 /** The readout span the sliders wear — one style, three sliders. */
 function Readout({ children }: { children: ReactNode }): ReactNode {
@@ -142,7 +153,7 @@ export function LayoutSection({ state, dispatch, errors, preview = false }: Sect
                 <ChipGroup
                   label="Weight"
                   options={WEIGHT_CHOICES.options}
-                  value={WEIGHT_LABELS[style.fontWeight ?? 400]}
+                  value={WEIGHT_LABELS[style.fontWeight ?? toneRenderedWeight(state)]}
                   onChange={(value) => dispatch({ type: "setStyle", patch: { fontWeight: WEIGHT_CHOICES.parse(value) } })}
                 />
               </Field>

@@ -15,9 +15,10 @@ import { usePreviewFrame } from "@/lib/preview-frame";
  * on every edit while a frame is in flight, and on error — the SVG placeholder
  * shows, synchronously: never a broken-image state, never an empty box.
  *
- * The frame is fetched only when the look is fully specified (a product, a layout
- * and a tone); an unspecified look has nothing to render a frame of, so the
- * placeholder stands. The SVG remains the fabrication-test surface.
+ * The frame is fetched only when the look is fully specified (a product with a
+ * non-empty id, a layout and a tone); an unspecified look — including the blank
+ * draft's placeholder product (id "") — has nothing to render a frame of, so the
+ * placeholder stands and the hook idles. The SVG remains the fabrication-test surface.
  */
 export function PreviewFrame({
   brief,
@@ -44,7 +45,14 @@ export function PreviewFrame({
 }): ReactNode {
   const cell = useMemo<PreviewCellSelection | undefined>(() => {
     const product = brief?.products[0];
-    if (product === undefined || layout === undefined || tone === undefined) return undefined;
+    if (
+      product === undefined ||
+      product.id.length === 0 ||
+      layout === undefined ||
+      tone === undefined
+    ) {
+      return undefined;
+    }
     return {
       productId: product.id,
       ratio,

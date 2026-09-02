@@ -39,8 +39,9 @@ function outputShown(state: EditorState): boolean {
  * for video. The ratio is left to the caller, which derives it once with
  * `derivePreviewRatio` (§6 question 4: never derive twice).
  *
- * A draft with nothing to draw answers explicitly: no product, `null` —
- * `hasProduct` is the house rule, and a fabricated colour would be exactly the
+ * A draft with nothing to draw answers explicitly: no product, or a product
+ * whose id is still the blank placeholder, `null` — `hasProduct` is the house
+ * rule (`product.id.length > 0`), and a fabricated colour would be exactly the
  * invention D26 forbids.
  */
 export interface PreviewLook {
@@ -56,7 +57,7 @@ export interface PreviewLook {
 
 export function previewLook(state: EditorState): PreviewLook | null {
   const product = state.products[0];
-  if (product === undefined) return null;
+  if (product === undefined || product.id.length === 0) return null;
   const treatment = state.mode === "brief" ? state.treatments[0] : undefined;
   const layout: LayoutOption | undefined =
     treatment !== undefined

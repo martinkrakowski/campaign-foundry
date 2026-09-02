@@ -2,6 +2,12 @@ import { describe, test, expect } from "vitest";
 import { previewDockProps } from "../preview-props";
 import { initialEditorState, emptyProduct, STATIC_PLATFORMS } from "../editor-state";
 
+/** A product the preview can actually draw — emptyProduct's id is the blank draft's placeholder. */
+const namedProduct = (key = 1, primaryColor = "#1473E6") => ({
+  ...emptyProduct(key, primaryColor),
+  id: `p${key}`,
+});
+
 /**
  * The state→dock mapping's own contract (D45): mode-aware look, real motion, the
  * projection's output rule for the platform, and the wizard step readout. The
@@ -11,7 +17,7 @@ import { initialEditorState, emptyProduct, STATIC_PLATFORMS } from "../editor-st
 describe("previewDockProps", () => {
   test("a randomized draft takes the look from the first value of each axis", () => {
     const state = initialEditorState("variation");
-    state.products = [emptyProduct(1, "#1473E6")];
+    state.products = [namedProduct()];
     state.variation.layout = ["headline-bottom", "headline-top"];
     state.variation.tone = ["subtle", "bold"];
     const props = previewDockProps(state, 2, 6)!;
@@ -21,7 +27,7 @@ describe("previewDockProps", () => {
 
   test("the anchor is passed only while the saved brief will carry the axis (T4)", () => {
     const state = initialEditorState("variation");
-    state.products = [emptyProduct(1, "#1473E6")];
+    state.products = [namedProduct()];
     // The derived top/bottom pair means the axis is ABSENT: the dock derives
     // the placement from layout, exactly as the compositor does.
     expect(previewDockProps(state, 0, 6)!.anchor).toBeUndefined();
@@ -31,7 +37,7 @@ describe("previewDockProps", () => {
     expect(previewDockProps(state, 0, 6)!.anchor).toBe("middle");
     // A classic draft never reads the axis, whatever its treatments say.
     const classic = initialEditorState("brief");
-    classic.products = [emptyProduct(1, "#1473E6")];
+    classic.products = [namedProduct()];
     classic.variation.anchor = ["middle"];
     classic.anchorExplicit = true;
     expect(previewDockProps(classic, 0, 6)!.anchor).toBeUndefined();
@@ -39,7 +45,7 @@ describe("previewDockProps", () => {
 
   test("a classic draft takes the look from its treatment, never its leftover axes", () => {
     const state = initialEditorState("brief");
-    state.products = [emptyProduct(1, "#1473E6")];
+    state.products = [namedProduct()];
     state.treatments = [{ id: "bold-hero", layout: "headline-bottom", tone: "subtle" }];
     // A visit to Randomized leaves axes behind; the projection drops them, so the dock must too.
     state.variation.layout = ["headline-top"];
@@ -51,7 +57,7 @@ describe("previewDockProps", () => {
 
   test("a classic draft with no treatment draws the renderer's default, axes or not", () => {
     const state = initialEditorState("brief");
-    state.products = [emptyProduct(1, "#1473E6")];
+    state.products = [namedProduct()];
     state.variation.layout = ["headline-bottom"];
     state.variation.tone = ["subtle"];
     const props = previewDockProps(state, 0, 6)!;
@@ -61,7 +67,7 @@ describe("previewDockProps", () => {
 
   test("motion is real: the first picked kind, only for video in a randomized draft", () => {
     const state = initialEditorState("variation");
-    state.products = [emptyProduct(1, "#1473E6")];
+    state.products = [namedProduct()];
     state.formats = ["static", "motion"];
     state.motion = ["ken-burns-in", "headline-rise"];
     expect(previewDockProps(state, 0, 6)!.motion).toBe("ken-burns-in");
@@ -70,7 +76,7 @@ describe("previewDockProps", () => {
     expect(previewDockProps(state, 0, 6)!.motion).toBeUndefined();
     // A classic draft never reads the motion axis, whatever it still carries.
     const classic = initialEditorState("brief");
-    classic.products = [emptyProduct(1, "#1473E6")];
+    classic.products = [namedProduct()];
     classic.formats = ["static", "motion"];
     classic.motion = ["ken-burns-in"];
     expect(previewDockProps(classic, 0, 6)!.motion).toBeUndefined();
@@ -78,7 +84,7 @@ describe("previewDockProps", () => {
 
   test("the platform comes from the draft's own output, as the projection emits it", () => {
     const state = initialEditorState("variation");
-    state.products = [emptyProduct(1, "#1473E6")];
+    state.products = [namedProduct()];
     // The default static output is the absent-key case: the projection omits it, so
     // the caption reads "no platform yet" exactly as the Review figure's does.
     expect(previewDockProps(state, 0, 6)!.platformId).toBeUndefined();
@@ -93,7 +99,7 @@ describe("previewDockProps", () => {
 
   test("the step readout is the walk's cursor, one-based, and the count is the walk's length", () => {
     const state = initialEditorState("brief");
-    state.products = [emptyProduct(1, "#1473E6")];
+    state.products = [namedProduct()];
     const props = previewDockProps(state, 4, 6)!;
     expect(props.step).toBe(5);
     expect(props.stepCount).toBe(6);
@@ -105,9 +111,16 @@ describe("previewDockProps", () => {
     expect(previewDockProps(state, 0, 6)).toBeNull();
   });
 
+  test("a blank draft's placeholder product derives no dock until it is named", () => {
+    const state = initialEditorState("variation");
+    expect(previewDockProps(state, 0, 6)).toBeNull();
+    state.products = [namedProduct()];
+    expect(previewDockProps(state, 0, 6)).not.toBeNull();
+  });
+
   test("the style is carried exactly as toBrief will emit it (T5/D45)", () => {
     const state = initialEditorState("variation");
-    state.products = [emptyProduct(1, "#1473E6")];
+    state.products = [namedProduct()];
     // A style-less draft: the absent key — the dock resolves the defaults itself.
     expect(previewDockProps(state, 0, 6)!.style).toBeUndefined();
     // A declared style rides to the dock, so it cannot show a typography the

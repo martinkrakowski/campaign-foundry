@@ -120,7 +120,11 @@ function summaryRows(brief: CampaignBrief, ratio: AspectRatioValue): SummaryRow[
               : []),
             ...(style.align !== undefined ? [messages.reviewStyleAlign(alignDisplayName(style.align))] : []),
           ];
-          rows.push({ section, lines });
+          // Content, not presence: `style: {}` is a declared-but-empty block
+          // and would yield a blank row — the same wrongness as a missing one.
+          if (lines.length > 0) {
+            rows.push({ section, lines });
+          }
         }
         break;
       }
