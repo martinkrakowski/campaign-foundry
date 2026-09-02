@@ -16,6 +16,9 @@ const setup = (items?: { label: string; onSelect: () => void }[]) => {
           { label: "Revert", onSelect: onRevert },
         ]}
       />
+      {/* Something for Tab to land on after the trigger, so the tests can prove
+          the menu lets the browser move focus on rather than trapping it. */}
+      <button type="button">after</button>
     </div>,
   );
   return { onSaveAs, onRevert, user: userEvent.setup() };
@@ -39,6 +42,12 @@ describe("OverflowMenu", () => {
 
   // The regression #162 shipped: a bare <details> closed ONLY on its own summary, so
   // every one of these paths left the panel hanging open over the content.
+  test("a menu with no items renders no trigger", () => {
+    setup([]);
+    expect(screen.queryByRole("button", { name: "More actions" })).toBeNull();
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
   test("Escape closes it", async () => {
     const { user } = setup();
     await user.click(trigger());
@@ -124,5 +133,102 @@ describe("OverflowMenu", () => {
     expect(removed).toContain("pointerdown");
     expect(removed).toContain("keydown");
     remove.mockRestore();
+  });
+
+  // Keyboard contract (APG menu button). The mouse path — open with focus staying
+  // on the trigger — is today's behaviour and stays that way.
+  test("opening with the mouse leaves focus on the trigger", async () => {
+    const { user } = setup();
+    await user.click(trigger());
+    expect(document.activeElement).toBe(trigger());
+  });
+
+  test("ArrowDown on the trigger opens onto the first item, which is out of the tab order", async () => {
+    const { user } = setup();
+    trigger().focus();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menu")).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getAllByRole("menuitem")[0]);
+    // Roving focus: Tab is reserved for leaving the menu, so the items are only
+    // reachable through the arrow keys.
+    expect(screen.getAllByRole("menuitem").map((i) => i.getAttribute("tabindex"))).toEqual(["-1", "-1"]);
+  });
+
+  test("ArrowUp on the trigger opens onto the last item", async () => {
+    const { user } = setup();
+    trigger().focus();
+    await user.keyboard("{ArrowUp}");
+    expect(document.activeElement).toBe(screen.getAllByRole("menuitem")[1]);
+  });
+
+  test("Enter and Space on the trigger open onto the first item", async () => {
+    const { user } = setup();
+    trigger().focus();
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(screen.getAllByRole("menuitem")[0]);
+
+    await user.keyboard("{Escape}");
+    trigger().focus();
+    await user.keyboard("[Space]");
+    expect(document.activeElement).toBe(screen.getAllByRole("menuitem")[0]);
+  });
+
+  test("Enter or Space on the trigger of an open menu closes it back onto the trigger", async () => {
+    const { user } = setup();
+    await user.click(trigger());
+    await user.keyboard("{Enter}");
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(trigger());
+
+    await user.click(trigger());
+    await user.keyboard("[Space]");
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(trigger());
+  });
+
+  test("ArrowDown moves through the items and wraps from the last back to the first", async () => {
+    const { user } = setup();
+    trigger().focus();
+    await user.keyboard("{ArrowDown}");
+    const [first, second] = screen.getAllByRole("menuitem");
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(second);
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(first);
+  });
+
+  test("ArrowUp moves back through the items and wraps from the first to the last", async () => {
+    const { user } = setup();
+    trigger().focus();
+    await user.keyboard("{ArrowDown}");
+    const last = screen.getAllByRole("menuitem")[1];
+    await user.keyboard("{ArrowUp}");
+    expect(document.activeElement).toBe(last);
+  });
+
+  test("Home and End jump to the first and last item", async () => {
+    const { user } = setup();
+    trigger().focus();
+    await user.keyboard("{ArrowUp}"); // opens onto the last item
+    const [first, last] = screen.getAllByRole("menuitem");
+    expect(document.activeElement).toBe(last);
+    await user.keyboard("{Home}");
+    expect(document.activeElement).toBe(first);
+    await user.keyboard("{End}");
+    expect(document.activeElement).toBe(last);
+  });
+
+  test("Tab closes the menu and lets the browser move focus on", async () => {
+    const { user } = setup();
+    trigger().focus();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.queryByRole("menu")).toBeTruthy();
+    await user.keyboard("{Tab}");
+    expect(screen.queryByRole("menu")).toBeNull();
+    // Focus must leave the vanishing item. user-event computes the Tab destination
+    // from the (now unmounted) item and lands on body; a real browser's default
+    // action walks on from the restored trigger to the next control.
+    const landed = document.activeElement;
+    expect(landed === document.body || landed === screen.getByText("after")).toBe(true);
   });
 });
