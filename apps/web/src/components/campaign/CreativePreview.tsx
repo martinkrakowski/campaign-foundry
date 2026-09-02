@@ -1,6 +1,7 @@
 import { useId, type CSSProperties, type ReactNode } from "react";
 import type { LayoutKind, ToneKind } from "@campaignfoundry/CampaignOrchestration";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
+import { DEFAULT_STYLE, type Style } from "@campaignfoundry/CampaignOrchestration/creative-style";
 import type { AnchorKind } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import { RATIO_DIMENSIONS, type AspectRatioValue } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
@@ -19,6 +20,12 @@ export interface CreativePreviewProps {
   readonly primaryColor: string;
   readonly headline?: string;
   readonly motion?: MotionKind;
+  /**
+   * The brief's creative style (T5). Absent fields → the leaf's defaults, the
+   * same `DEFAULT_STYLE` the compositor resolves against — the preview cannot
+   * drift from the render on the constants it mirrors.
+   */
+  readonly style?: Style;
   readonly ratio?: AspectRatioValue;
   readonly className?: string;
 }
@@ -52,8 +59,13 @@ export const PREVIEW_ANCHOR_BOTTOM = CREATIVE_GEOMETRY.headlineAnchor.bottom;
  */
 export const previewFitMaxHeight = (height: number): number =>
   height - height * PREVIEW_ANCHOR_TOP - height * PREVIEW_ANCHOR_BOTTOM;
-/** Line-to-line spacing as a multiple of the font size. */
-export const LINE_HEIGHT_RATIO = 1.08;
+/**
+ * Line-to-line spacing as a multiple of the font size — the leaf's default
+ * (the compositor's own 1.25, moved there from its literal), not the miniature
+ * constant this used to hold. The styled value, when a brief carries one, is
+ * resolved per render below; the fit budget and the drawn blocks always agree.
+ */
+export const LINE_HEIGHT_RATIO = DEFAULT_STYLE.lineHeight;
 /** Rough per-glyph advance, in ems, used to plan line breaks without measuring text. */
 export const CHAR_WIDTH_RATIO = 0.5;
 const SHRINK = 0.9;
@@ -135,6 +147,8 @@ export function wrapHeadline(text: string, maxChars: number, breakWords = false)
  * wraps into at most `PREVIEW_MAX_LINES` lines that fit `maxHeight` and `textWidth`,
  * hitting a floor at `minFontSize`. When nothing fits at or above the floor, falls back
  * to `minFontSize` and breaks over-long words so copy never overflows the text block.
+ * `lineHeightRatio` is the multiple the fit budget is measured with — the styled
+ * value when the brief carries one, the leaf default otherwise.
  */
 export function fitHeadline(
   text: string,
@@ -142,6 +156,7 @@ export function fitHeadline(
   maxHeight: number,
   startFontSize: number,
   minFontSize: number = startFontSize * PREVIEW_FONT_FLOOR_FRACTION,
+  lineHeightRatio: number = LINE_HEIGHT_RATIO,
 ): FittedHeadline {
   const trim = text.trim().replace(/\s+/g, " ");
   if (trim.length === 0) return { fontSize: startFontSize, lines: [] };
@@ -149,7 +164,7 @@ export function fitHeadline(
   while (fontSize >= minFontSize) {
     const maxChars = Math.max(1, Math.floor(textWidth / (CHAR_WIDTH_RATIO * fontSize)));
     const lines = wrapHeadline(trim, maxChars);
-    const height = lines.length * fontSize * LINE_HEIGHT_RATIO;
+    const height = lines.length * fontSize * lineHeightRatio;
     const widestLine = Math.max(...lines.map((l) => l.length), 0);
     if (lines.length <= PREVIEW_MAX_LINES && height <= maxHeight && widestLine <= maxChars) {
       return { fontSize, lines };
@@ -179,6 +194,7 @@ export function CreativePreview({
   primaryColor,
   headline,
   motion,
+  style,
   ratio = "1:1",
   className,
 }: CreativePreviewProps): ReactNode {
@@ -187,6 +203,22 @@ export function CreativePreview({
   // The anchor axis (T4): absent → derived from `layout`, the compositor's own
   // rule in `prepare` — so an axis-less brief previews exactly as it renders.
   const anchorKind: AnchorKind = anchor ?? (top ? "top" : "bottom");
+  // The style block (T5): every absent field resolves to the leaf's default —
+  // the same DEFAULT_STYLE the compositor's `resolveStyle` falls back to — so
+  // a style-less brief previews exactly as it renders.
+  //
+  // Family divergence, stated honestly (T5 finding 4): the compositor's default
+  // is the deployment's validated MESSAGE_FONT (pipeline config — possibly
+  // Lora), which a browser preview cannot read; this fallback mirrors the
+  // leaf's Inter instead. Tolerated because a deployment default is not brief
+  // style: an EXPLICIT style.fontFamily is authoritative here (asserted in
+  // creative-preview.test.tsx), and the server frame (T1b, in flight) shows
+  // the deployment's truth. No env plumb is invented for an SVG mirror.
+  const fontFamily = style?.fontFamily ?? DEFAULT_STYLE.fontFamily;
+  const sizeScale = style?.sizeScale ?? DEFAULT_STYLE.sizeScale;
+  const lineHeightRatio = style?.lineHeight ?? DEFAULT_STYLE.lineHeight;
+  const letterSpacingEm = style?.letterSpacing ?? DEFAULT_STYLE.letterSpacing;
+  const align = style?.align ?? DEFAULT_STYLE.align;
   const { width: W, height: H } = RATIO_DIMENSIONS[ratio];
   const shadeAlpha = bold ? CREATIVE_GEOMETRY.shadeAlpha.bold : CREATIVE_GEOMETRY.shadeAlpha.subtle;
   const shadeId = `creative-preview-shade-${useId()}`;
@@ -200,10 +232,17 @@ export function CreativePreview({
   // the same fractions that place the block — so the anchor changes where the
   // fitted block sits, never its planned size.
   const maxHeight = previewFitMaxHeight(H);
-  const startFontSize = Math.round(W * PREVIEW_FONT_RATIO);
+  const startFontSize = Math.round(W * sizeScale);
   const minFontSize = Math.round(startFontSize * PREVIEW_FONT_FLOOR_FRACTION);
-  const { fontSize, lines } = fitHeadline(headline ?? "", textWidth, maxHeight, startFontSize, minFontSize);
-  const lineHeight = fontSize * LINE_HEIGHT_RATIO;
+  const { fontSize, lines } = fitHeadline(
+    headline ?? "",
+    textWidth,
+    maxHeight,
+    startFontSize,
+    minFontSize,
+    lineHeightRatio,
+  );
+  const lineHeight = fontSize * lineHeightRatio;
   const span = (lines.length - 1) * lineHeight;
   // The block's first baseline per anchor, with this SVG's ascent convention
   // (baseline ≈ block top + 0.75 em — the same approximation the top edge has
@@ -226,14 +265,21 @@ export function CreativePreview({
   const logoX = top ? logoMargin : W - logoW - logoMargin;
 
   // The compositor's logo overlap snap, mirrored with this SVG's own line
-  // metrics: the headline box is the wrapped block (centred, wrap-budget wide —
-  // the same shape the compositor's rule uses, not glyph-measured). Glyph-
-  // accurate snap parity is T1b's (plan D52) — real text measurement is
-  // explicitly not this lane's bar.
+  // metrics: the headline box is the wrapped block (wrap-budget wide — the
+  // same shape the compositor's rule uses, not glyph-measured) at the block's
+  // ALIGNED x — the box form of this SVG's own textX rule below (T5 finding
+  // 1, the compositor's `headlineBoxX`): left → textEdge, right →
+  // W − textEdge − width, centre unchanged. Glyph-accurate snap parity is
+  // T1b's (plan D52) — real text measurement is explicitly not this lane's bar.
   const headlineBox: Box | undefined =
     lines.length > 0
       ? {
-          x: W / 2 - textWidth / 2,
+          x:
+            align === "left"
+              ? textEdge
+              : align === "right"
+                ? W - textEdge - textWidth
+                : W / 2 - textWidth / 2,
           y: firstBaseline - fontSize,
           width: textWidth,
           height: (lines.length - 1) * lineHeight + fontSize,
@@ -250,6 +296,12 @@ export function CreativePreview({
     motion === "ken-burns-in" || motion === "ken-burns-out" ? MOTION_ANIMATION[motion] : undefined;
   const textAnim = motion === "headline-rise" ? MOTION_ANIMATION[motion] : undefined;
   const fadeAnim = motion === "accent-wipe" ? MOTION_ANIMATION[motion] : undefined;
+  // Alignment (C2), mirrored the way SVG spells it: `textAnchor` + the x the
+  // block draws from. Left/right anchor against the text block's own edge —
+  // the preview's stand-in for the compositor's safe-area edge (its insets are
+  // zero here), so the copy stays inside the drawn budget.
+  const textAnchor = align === "left" ? "start" : align === "right" ? "end" : "middle";
+  const textX = align === "left" ? textEdge : align === "right" ? W - textEdge : W / 2;
 
   return (
     <svg
@@ -300,17 +352,25 @@ export function CreativePreview({
       <g className={textAnim}>
         {lines.length > 0 ? (
           <text
-            x={W / 2}
+            x={textX}
             y={firstBaseline}
-            textAnchor="middle"
+            textAnchor={textAnchor}
             fontSize={fontSize}
-            fontFamily="var(--font-sans)"
-            fontWeight={RENDERED_FONT_WEIGHT[tone ?? "bold"]}
+            // Family and letter spacing are best-effort mirrors: the SVG names
+            // the bundled family and applies the em offset, but glyph-accurate
+            // parity for both is the server frame's job (T1b, in flight) — no
+            // SVG twin can follow Skia's metrics.
+            fontFamily={fontFamily}
+            letterSpacing={`${letterSpacingEm * fontSize}px`}
+            // The weight the compositor renders: an explicitly styled weight
+            // (400|700 — the faces that exist, D60) overrides the tone-derived
+            // rendered weight.
+            fontWeight={style?.fontWeight ?? RENDERED_FONT_WEIGHT[tone ?? "bold"]}
             fill="#ffffff"
           >
             {lines[0]}
             {lines.slice(1).map((line, index) => (
-              <tspan key={index} x={W / 2} dy={lineHeight}>
+              <tspan key={index} x={textX} dy={lineHeight}>
                 {line}
               </tspan>
             ))}

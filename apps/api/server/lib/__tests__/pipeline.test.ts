@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GenerateCampaignUseCase, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { ALLOWED_IMAGE_MODELS, buildPipeline, copyGenerator, platformZones, runCampaign } from "../pipeline.js";
+import { ALLOWED_IMAGE_MODELS, buildPipeline, copyGenerator, messageFont, platformZones, runCampaign } from "../pipeline.js";
 
 const brief: CampaignBrief = {
   id: "camp",
@@ -285,5 +285,39 @@ describe("pipeline composition root", () => {
     expect(typeof generator?.suggestHeadlines).toBe("function");
     process.env.OPENROUTER_COPY_MODEL = "anthropic/claude-3.5-haiku";
     expect(copyGenerator()?.model).toBe("anthropic/claude-3.5-haiku");
+  });
+
+  describe("MESSAGE_FONT is validated against the bundled allowlist (D59)", () => {
+    const orig = process.env.MESSAGE_FONT;
+    afterEach(() => {
+      if (orig === undefined) delete process.env.MESSAGE_FONT;
+      else process.env.MESSAGE_FONT = orig;
+    });
+
+    test("an unset or empty MESSAGE_FONT resolves to Inter", () => {
+      delete process.env.MESSAGE_FONT;
+      expect(messageFont()).toBe("Inter");
+      process.env.MESSAGE_FONT = "";
+      expect(messageFont()).toBe("Inter");
+    });
+
+    test("a bundled family passes through", () => {
+      for (const family of ["Inter", "Lora"]) {
+        process.env.MESSAGE_FONT = family;
+        expect(messageFont()).toBe(family);
+      }
+    });
+
+    test("an arbitrary system family falls back to Inter with a logged warning", () => {
+      // The renderer can see 312 system families (Helvetica and Georgia both
+      // resolve); an unvalidated MESSAGE_FONT was a determinism hole at
+      // deployment scope. Never passed through.
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      process.env.MESSAGE_FONT = "Comic Sans";
+      expect(messageFont()).toBe("Inter");
+      expect(warn).toHaveBeenCalledOnce();
+      expect(warn.mock.calls[0]?.[0]).toContain("Comic Sans");
+      expect(warn.mock.calls[0]?.[0]).toContain("Inter");
+    });
   });
 });

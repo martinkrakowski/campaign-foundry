@@ -104,4 +104,20 @@ describe("previewDockProps", () => {
     state.products = [];
     expect(previewDockProps(state, 0, 6)).toBeNull();
   });
+
+  test("the style is carried exactly as toBrief will emit it (T5/D45)", () => {
+    const state = initialEditorState("variation");
+    state.products = [emptyProduct(1, "#1473E6")];
+    // A style-less draft: the absent key — the dock resolves the defaults itself.
+    expect(previewDockProps(state, 0, 6)!.style).toBeUndefined();
+    // A declared style rides to the dock, so it cannot show a typography the
+    // saved brief would not carry.
+    state.style = { fontFamily: "Lora", align: "left" };
+    state.styleExplicit = true;
+    expect(previewDockProps(state, 0, 6)!.style).toEqual({ fontFamily: "Lora", align: "left" });
+    // The same derivation toBrief uses decides — a diverging draft without the
+    // flag is emitted here too.
+    state.styleExplicit = false;
+    expect(previewDockProps(state, 0, 6)!.style).toEqual({ fontFamily: "Lora", align: "left" });
+  });
 });

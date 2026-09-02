@@ -522,6 +522,67 @@ const validMotionTimelineBrief = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+describe("parseBrief style block (T5)", () => {
+  test("accepts a full style block with every vocabulary value at its bounds", () => {
+    const brief = parseBrief({
+      ...valid,
+      style: {
+        fontFamily: "Lora",
+        fontWeight: 700,
+        sizeScale: 0.12,
+        lineHeight: 1.8,
+        letterSpacing: 0.2,
+        align: "right",
+      },
+    });
+    expect(brief.style).toEqual({
+      fontFamily: "Lora",
+      fontWeight: 700,
+      sizeScale: 0.12,
+      lineHeight: 1.8,
+      letterSpacing: 0.2,
+      align: "right",
+    });
+  });
+
+  test("accepts a partial style block and passes it through verbatim", () => {
+    const brief = parseBrief({ ...valid, style: { align: "left" } });
+    expect(brief.style).toEqual({ align: "left" });
+  });
+
+  test("a brief with no style block parses exactly as before", () => {
+    expect(parseBrief(valid).style).toBeUndefined();
+  });
+
+  test("an empty style block is legal (every field defaults renderer-side)", () => {
+    expect(parseBrief({ ...valid, style: {} }).style).toEqual({});
+  });
+
+  test("unknown style fields are rejected — style is validated, not tolerated", () => {
+    expect(() => parseBrief({ ...valid, style: { famiy: "Lora" } })).toThrow(/Unsupported style field "famiy"/);
+  });
+
+  test("a non-object style block is rejected", () => {
+    expect(() => parseBrief({ ...valid, style: "Lora" })).toThrow(/"style" must be an object/);
+  });
+
+  test.each([
+    ["fontFamily", "Comic Sans", /"style\.fontFamily" must be one of Inter, Lora/],
+    ["fontWeight", 500, /"style\.fontWeight" must be one of 400, 700/],
+    ["fontWeight", "bold", /"style\.fontWeight" must be one of 400, 700/],
+    ["sizeScale", 0.01, /"style\.sizeScale" must be a finite number in \[0\.02, 0\.12\]/],
+    ["sizeScale", 0.5, /"style\.sizeScale" must be a finite number in \[0\.02, 0\.12\]/],
+    ["sizeScale", "big", /"style\.sizeScale" must be a finite number in \[0\.02, 0\.12\]/],
+    ["lineHeight", 0.9, /"style\.lineHeight" must be a finite number in \[1, 1\.8\]/],
+    ["lineHeight", 2.5, /"style\.lineHeight" must be a finite number in \[1, 1\.8\]/],
+    ["letterSpacing", 0.5, /"style\.letterSpacing" must be a finite number in \[-0\.05, 0\.2\]/],
+    ["letterSpacing", -0.5, /"style\.letterSpacing" must be a finite number in \[-0\.05, 0\.2\]/],
+    ["align", "justified", /"style\.align" must be one of left, center, right/],
+  ])("rejects style.%s = %p", (field, value, message) => {
+    expect(() => parseBrief({ ...valid, style: { [field]: value } })).toThrow(message);
+  });
+});
+
 describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
   test("TIMELINE_TRANSITIONS locks the supported transition allowlist", () => {
     expect(TIMELINE_TRANSITIONS).toEqual(["cut", "fade"]);

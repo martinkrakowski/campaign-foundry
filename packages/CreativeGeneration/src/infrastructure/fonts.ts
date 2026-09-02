@@ -1,6 +1,15 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { GlobalFonts } from "@napi-rs/canvas";
+import { FONT_FAMILY_VALUES } from "@campaignfoundry/CampaignOrchestration/creative-style";
+
+/**
+ * The font allowlist (D59): exactly the bundled families below — the faces this
+ * module registers — re-exported from the domain leaf so the parser (brief
+ * `style.fontFamily`) and the pipeline (`MESSAGE_FONT`) validate against the
+ * same vocabulary the renderer can actually raster. Nothing else reaches ctx.font.
+ */
+export const ALLOWED_FONT_FAMILIES = FONT_FAMILY_VALUES;
 
 /**
  * Bundled, OFL-licensed fonts shipped under <repo>/assets/fonts so campaign copy

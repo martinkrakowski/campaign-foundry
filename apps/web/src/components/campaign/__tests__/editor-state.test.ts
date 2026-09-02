@@ -37,6 +37,7 @@ import {
   type EditorAction,
 } from "../editor-state";
 import { dumpBrief } from "@campaignfoundry/shared";
+import { type Style } from "@campaignfoundry/CampaignOrchestration/creative-style";
 import { load } from "js-yaml";
 import fs from "node:fs";
 import path from "node:path";
@@ -2266,6 +2267,108 @@ describe("copy timeline (E5.1)", () => {
       expect(missingWeight.timeline.transition).toBe("fade");
       expect(missingWeight.timeline.keyBeat).toBe(1);
     });
+  });
+});
+
+describe("the brief style block round-trips (T5/D58)", () => {
+  const styledBrief = (style: Style): CampaignBrief =>
+    savedBrief({ style }) as CampaignBrief;
+
+  test("a hand-authored YAML style survives load → save verbatim", () => {
+    const style: Style = { fontFamily: "Lora", fontWeight: 700, sizeScale: 0.08, lineHeight: 1.4, letterSpacing: 0.05, align: "left" };
+    const state = fromBrief(styledBrief(style));
+    expect(state.styleExplicit).toBe(true);
+    expect(state.style).toEqual(style);
+    expect(toBrief(state).style).toEqual(style);
+  });
+
+  test("a style-less brief never grows a style block", () => {
+    const state = fromBrief(savedBrief());
+    expect(state.styleExplicit).toBe(false);
+    expect(state.style).toEqual({});
+    expect(toBrief(state).style).toBeUndefined();
+  });
+
+  test("an explicit-but-default style still round-trips (the anchorExplicit lesson)", () => {
+    // `fontFamily: Inter` spelled out says "I wrote this key" — a save must not
+    // strip it just because it equals the default.
+    const style: Style = { fontFamily: "Inter", align: "center" };
+    const state = fromBrief(styledBrief(style));
+    expect(state.styleExplicit).toBe(true);
+    expect(toBrief(state).style).toEqual(style);
+  });
+
+  test("a draft diverging from the defaults is emitted even without the flag", () => {
+    const diverging: Style = { fontFamily: "Lora" };
+    const state = { ...base(), style: diverging, styleExplicit: false };
+    expect(toBrief(state).style).toEqual({ fontFamily: "Lora" });
+    // Equal to the defaults and never declared → the absent key.
+    const onDefaults: Style = { fontFamily: "Inter" };
+    const defaults = { ...base(), style: onDefaults, styleExplicit: false };
+    expect(toBrief(defaults).style).toBeUndefined();
+  });
+
+  test("dirty tracking sees the style: an edited style is dirty against a style-less snapshot", () => {
+    const state = fromBrief(savedBrief(), { file: "camp.yaml" });
+    expect(isDirtySinceSave(state)).toBe(false);
+    const editedStyle: Style = { align: "left" };
+    const edited = { ...state, style: editedStyle };
+    expect(isDirtySinceSave(edited)).toBe(true);
+  });
+
+  test("a saved snapshot carrying the style stays clean (values compare by value)", () => {
+    const brief = styledBrief({ fontFamily: "Lora" });
+    const state = fromBrief(brief, { file: "camp.yaml" });
+    expect(isDirtySinceSave(state)).toBe(false);
+  });
+
+  test("a restored draft's style is validated element-by-element — repair, never smuggle", () => {
+    const raw = {
+      ...base(),
+      style: {
+        fontFamily: "Comic Sans", // not on the allowlist → dropped
+        fontWeight: 500, // no face → dropped
+        sizeScale: 0.5, // out of bounds → dropped
+        lineHeight: 3, // out of bounds → dropped
+        letterSpacing: 9, // out of bounds → dropped
+        align: "diagonal", // not in the vocabulary → dropped
+      },
+    };
+    const state = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    expect(state.style).toEqual({});
+    expect(state.styleExplicit).toBe(false);
+  });
+
+  test("a restored draft keeps valid style elements and infers the flag from divergence", () => {
+    // A pre-T5 draft carries no styleExplicit key at all — strip it, the way an
+    // older build's persisted draft looks.
+    const raw = { ...base(), style: { fontFamily: "Lora", sizeScale: 0.08, bogus: true } };
+    delete (raw as { styleExplicit?: boolean }).styleExplicit;
+    const state = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    expect(state.style).toEqual({ fontFamily: "Lora", sizeScale: 0.08 });
+    expect(state.styleExplicit).toBe(true); // diverges → authored
+  });
+
+  test("a restored draft keeps every valid style element, bounds included", () => {
+    const raw = {
+      ...base(),
+      style: { lineHeight: 1.6, letterSpacing: -0.02, align: "right", fontWeight: 400 },
+    };
+    const state = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    expect(state.style).toEqual({ lineHeight: 1.6, letterSpacing: -0.02, align: "right", fontWeight: 400 });
+  });
+
+  test("a non-object style in a restored draft repairs to empty", () => {
+    const raw = { ...base(), style: "Lora" };
+    const state = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    expect(state.style).toEqual({});
+  });
+
+  test("a declared flag is believed even when the values equal the defaults", () => {
+    const raw = { ...base(), style: { fontFamily: "Inter" }, styleExplicit: true };
+    const state = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    expect(state.styleExplicit).toBe(true);
+    expect(toBrief(state).style).toEqual({ fontFamily: "Inter" });
   });
 });
 

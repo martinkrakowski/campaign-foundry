@@ -646,4 +646,37 @@ describe("CanvasFfmpegVideoCompositor", () => {
     if (!posterCall) throw new Error("missing poster draw call");
     expect(posterCall[4]).toBeUndefined();
   });
+
+  test.skipIf(!ffmpegOk)(
+    skipReason ??
+      "a styled letterSpacing reaches the sampled frames of a TIMELINE clip — the ctx-state control cannot drop on the video path (F5a/T5)",
+    async () => {
+      // The timeline path measures on a throwaway 1×1 context and drawBeat
+      // re-sets ctx.font per frame; a spacing applied only on the still would
+      // render identical video bytes. Real encode, real sampled frames.
+      const compositor = new CanvasFfmpegVideoCompositor();
+      const timeline: CopyTimeline = {
+        beats: [{ text: "Stay wild", weight: 1 }],
+        transition: "cut",
+        keyBeat: 1,
+      };
+      const base = {
+        durationSec: 2,
+        fps: 12,
+        motion: "headline-rise" as MotionKind,
+        sampleAt: [0.5],
+        timeline,
+      };
+      const spaced = await compositor.compositeVideo(
+        videoRequest({ ...base, style: { letterSpacing: 0.2 } }),
+      );
+      const plain = await compositor.compositeVideo(videoRequest({ ...base }));
+      expect(spaced.sampledFrames).toHaveLength(1);
+      expect(Buffer.from(spaced.sampledFrames[0]).equals(Buffer.from(plain.sampledFrames[0]))).toBe(
+        false,
+      );
+      // The poster rides the same prepared style through the timeline draw.
+      expect(Buffer.from(spaced.poster).equals(Buffer.from(plain.poster))).toBe(false);
+    },
+  );
 });

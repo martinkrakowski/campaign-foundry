@@ -13,6 +13,7 @@ import {
   SAFE_ID_PATTERN,
   TONE_VALUES,
   isPaletteShift,
+  styleProblem,
   timelineProblem,
   type CampaignBrief,
   type CopyTimeline,
@@ -508,6 +509,19 @@ function validateCopy(record: Record<string, unknown>, enforceCapabilities: bool
 }
 
 /**
+ * The brief-level `style` block (T5): strict, not tolerated. Unknown top-level
+ * keys round-trip silently, so `style` must reject its own unknown fields
+ * here — a typo (`famiy`) would otherwise save cleanly and never render.
+ * Every value is checked against the domain leaf's vocabulary and bounds —
+ * by the leaf's OWN validator, shared with the use case's defense-in-depth
+ * check so the two boundaries cannot drift (T5).
+ */
+function validateStyle(value: unknown): void {
+  const problem = styleProblem(value);
+  if (problem !== undefined) throw new Error(problem);
+}
+
+/**
  * Structurally validate an untrusted value into a CampaignBrief. Business rules
  * live in the use case. `capabilities` gates the motion allowlist (D8); it defaults
  * to the boot probe's snapshot and is injectable so tests can flip it.
@@ -555,6 +569,7 @@ export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): Campaig
     assertSafeId((p as Record<string, unknown>)?.id, "Product id");
   }
   validateTreatments(record.treatments);
+  validateStyle(record.style);
   validateMode(record.mode);
   validateVariation(record.variation, effectiveCapabilities);
   validateOutput(record.output, effectiveCapabilities);

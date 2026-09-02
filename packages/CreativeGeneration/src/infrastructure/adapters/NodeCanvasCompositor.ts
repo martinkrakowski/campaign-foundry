@@ -3,12 +3,14 @@ import { createCanvas, loadImage, type Image, type SKRSContext2D } from "@napi-r
 import {
   beatAt,
   resolveTimeline,
+  resolveStyle,
   type CompositeRequest,
   type CompositeResult,
   type CompositorPort,
   type CopyTimeline,
   type MotionKind,
   type ResolvedBeat,
+  type ResolvedStyle,
   type SafeInsets,
   type AnchorKind,
 } from "@campaignfoundry/CampaignOrchestration";
@@ -44,6 +46,13 @@ interface PreparedCreative {
   readonly shadeAlpha: number;
   readonly fontWeight: string;
   readonly fontFamily: string;
+  /**
+   * The resolved creative style (T5): every field concrete, absent request
+   * fields → today's literals (D54). `fontWeight`/`fontFamily` above are the
+   * same values, kept as flat fields because the ctx.font shorthand reads them
+   * at every layout and blit.
+   */
+  readonly style: ResolvedStyle;
   readonly message: string;
   readonly brandColor: string;
   readonly background: Image;
@@ -137,13 +146,22 @@ export class NodeCanvasCompositor implements CompositorPort {
   }
 
   /**
-   * The frozen legacy path (D10): the single-message render exactly as it existed
-   * before copy timelines. Its output is byte-pinned by the platform goldens
-   * (darwin-arm64 and linux-x64 fixture keys) and by a diff against `draw` for
-   * timeline-free requests. Do not modify this body — new behaviour belongs in
-   * the timeline branch of {@link NodeCanvasCompositor.draw}. The geometry
-   * literals below (band heights, type fractions) mirror the values in
-   * `CREATIVE_GEOMETRY` and must stay in lockstep with it; the goldens pin them.
+   * The legacy single-message path (D10). **Amended 2026-09-01 (T5, recorded
+   * here explicitly per the plan's D10 discussion):** the body now reads the
+   * creative style off `PreparedCreative` — `textAlign` and `letterSpacing`
+   * (plus the left/right x-position math against the safe area) come from the
+   * prepared style instead of the literals `center` / unset. The freeze's real
+   * invariant was never "this exact source"; it is **byte-identity for
+   * style-less briefs**: a `PreparedCreative` whose resolved style is the
+   * defaults object must render the exact bytes this body rendered before the
+   * amendment. That invariant is proven by the platform goldens and the
+   * byte-identity suite, which MUST pass unchanged — the defaults flow through
+   * the same expressions with the same values (align `center` → the same
+   * `centerX`; letterSpacing `0` → a no-op `"0px"`). New behaviour beyond the
+   * style fields still belongs in the timeline branch of
+   * {@link NodeCanvasCompositor.draw}. The geometry literals below (band
+   * heights) mirror the values in `CREATIVE_GEOMETRY` and must stay in
+   * lockstep with it; the goldens pin them.
    */
   static drawLegacy(ctx: SKRSContext2D, prepared: PreparedCreative, t: number, motion?: MotionKind): void {
     const { width, height, top, shadeAlpha } = prepared;
@@ -199,15 +217,19 @@ export class NodeCanvasCompositor implements CompositorPort {
       }
     }
 
-    // Layer 4 — campaign copy, wrapped to the inset-reduced width and centred
-    // in the inset rectangle. wrapText uses this ctx so metrics match the blit.
+    // Layer 4 — campaign copy, wrapped to the inset-reduced width and placed
+    // in the inset rectangle per the prepared style's alignment (D10 amendment,
+    // T5). wrapText uses this ctx so metrics match the blit.
     const headline = layoutHeadline(ctx, prepared);
     const rise = motion === "headline-rise";
     const dy = rise ? (1 - eased) * 0.12 * height : 0;
     const alpha = rise ? eased : 1;
     ctx.fillStyle = "#ffffff";
-    ctx.textAlign = "center";
+    ctx.textAlign = prepared.style.align;
     ctx.textBaseline = "alphabetic";
+    // A ctx-state control (F5a): re-stated at the blit, not inherited from the
+    // layout pass — the default 0px is a no-op, the goldens pin it.
+    ctx.letterSpacing = `${prepared.style.letterSpacing * headline.fontSize}px`;
     if (dy !== 0 || alpha !== 1) {
       ctx.save();
       ctx.globalAlpha = alpha;
@@ -215,7 +237,7 @@ export class NodeCanvasCompositor implements CompositorPort {
     }
     let y = headline.firstY;
     for (const line of headline.lines) {
-      ctx.fillText(line, headline.centerX, y);
+      ctx.fillText(line, headlineTextX(prepared, headline.centerX), y);
       y += headline.lineHeight;
     }
     if (dy !== 0 || alpha !== 1) {
@@ -257,6 +279,11 @@ export class NodeCanvasCompositor implements CompositorPort {
       ? CREATIVE_GEOMETRY.shadeAlpha.subtle
       : CREATIVE_GEOMETRY.shadeAlpha.bold;
     const fontWeight = subtle ? "500" : "bold";
+    // The style block (T5): resolved once here, every absent field falling to
+    // today's literal (D54) and the weight to the tone-derived one (D60). The
+    // brief's family — a parse-validated allowlist member — overrides the
+    // deployment default; with no style block the deployment default stands.
+    const style = resolveStyle(request.style, fontWeight, fontFamily);
     const insets = normalizeSafeInsets(request.safeInsets, width, height);
 
     const background = await loadImage(Buffer.from(request.background));
@@ -301,8 +328,9 @@ export class NodeCanvasCompositor implements CompositorPort {
       top,
       anchor,
       shadeAlpha,
-      fontWeight,
-      fontFamily,
+      fontWeight: style.fontWeight,
+      fontFamily: style.fontFamily,
+      style,
       message: request.message,
       brandColor: request.brandColor,
       background,
@@ -408,7 +436,7 @@ interface HeadlineLayout {
  */
 type LayoutSource = Pick<
   PreparedCreative,
-  "width" | "height" | "top" | "anchor" | "fontWeight" | "fontFamily" | "insets"
+  "width" | "height" | "top" | "anchor" | "fontWeight" | "fontFamily" | "style" | "insets"
 >;
 
 /**
@@ -433,11 +461,28 @@ function anchorFirstY(p: LayoutSource, span: number, fontSize: number): number {
 }
 
 /**
+ * The x the text layer draws at, per the prepared style's alignment (T5/C2),
+ * against the safe area: `left` flush to the left inset edge, `right` flush to
+ * the right inset edge, `center` the layout's centre — which for the default
+ * style is exactly the pre-style literal (D54, goldens-pinned).
+ */
+function headlineTextX(p: LayoutSource, centerX: number): number {
+  switch (p.style.align) {
+    case "left":
+      return p.insets.left;
+    case "right":
+      return p.width - p.insets.right;
+    default:
+      return centerX;
+  }
+}
+
+/**
  * Lay a text out at its natural (autofit) type size — the legacy path's only
  * layout, and the per-beat first pass behind the D6 common size.
  */
 function fitText(ctx: SKRSContext2D, p: LayoutSource, text: string): HeadlineLayout {
-  const originalFontSize = Math.round(p.width * CREATIVE_GEOMETRY.headlineTypeWidthFraction);
+  const originalFontSize = Math.round(p.width * p.style.sizeScale);
   const floor = Math.round(originalFontSize * CREATIVE_GEOMETRY.headlineTypeFloorFraction);
 
   let fontSize = originalFontSize;
@@ -462,8 +507,12 @@ function layoutAt(ctx: SKRSContext2D, p: LayoutSource, text: string, fontSize: n
   const innerWidth = p.width - p.insets.left - p.insets.right;
   const wrapWidth = innerWidth * 0.85;
   ctx.font = `${p.fontWeight} ${fontSize}px ${p.fontFamily}, sans-serif`;
+  // Letter spacing (T5) is a ctx-state control: wrapText must measure with it,
+  // or the fit math and the blit disagree. px = em × fontSize; the default is
+  // 0px, a no-op Skia accepts (the goldens pin it).
+  ctx.letterSpacing = `${p.style.letterSpacing * fontSize}px`;
   const lines = wrapText(ctx, text, wrapWidth);
-  const lineHeight = fontSize * 1.25;
+  const lineHeight = fontSize * p.style.lineHeight;
   const minFirst = p.insets.top + fontSize;
   const maxLast = p.height - p.insets.bottom;
   const span = (lines.length - 1) * lineHeight;
@@ -487,6 +536,28 @@ interface LayoutAttempt {
   readonly wrapWidth: number;
 }
 
+/**
+ * The x the headline BLOCK's wrap box occupies, per the prepared style's
+ * alignment (T5 finding 1) — the box form of {@link headlineTextX}: `left`
+ * flush to the left inset edge, `right` ending at the right inset edge,
+ * `center` the pre-style centred box (byte-identical, goldens-pinned). The
+ * logo's overlap snap must see the block where it actually draws — a
+ * left-aligned headline occupies [insets.left, insets.left + width], not the
+ * centred range — so the box's x derives from the same rule the draw x does.
+ * Exported pure (the `resolveOverlappingLogoY` mould on the preview) so the
+ * rule is unit-testable without a canvas.
+ */
+export function headlineBoxX(p: LayoutSource, centerX: number, boxWidth: number): number {
+  switch (p.style.align) {
+    case "left":
+      return p.insets.left;
+    case "right":
+      return p.width - p.insets.right - boxWidth;
+    default:
+      return centerX - boxWidth / 2;
+  }
+}
+
 function settleLayout(ctx: SKRSContext2D, p: LayoutSource, attempt: LayoutAttempt): HeadlineLayout {
   if (!attempt.fits) {
     const maxLines = Math.max(1, Math.floor((attempt.maxLast - attempt.minFirst) / attempt.lineHeight) + 1);
@@ -508,7 +579,7 @@ function settleLayout(ctx: SKRSContext2D, p: LayoutSource, attempt: LayoutAttemp
     firstY: attempt.firstY,
     centerX,
     box: {
-      x: centerX - attempt.wrapWidth / 2,
+      x: headlineBoxX(p, centerX, attempt.wrapWidth),
       y: attempt.firstY - attempt.fontSize,
       width: attempt.wrapWidth,
       height: attempt.span + attempt.fontSize,
@@ -671,8 +742,12 @@ function drawBeat(
   const alpha = rise ? eased : 1;
   const opacity = alpha * layerAlpha;
   ctx.fillStyle = "#ffffff";
-  ctx.textAlign = "center";
+  // F5a: this path measures on a throwaway 1×1 context and re-sets ctx.font
+  // below, so every ctx-state control is (re-)stated HERE, not inherited — a
+  // control applied only at the still would silently drop from the video blit.
+  ctx.textAlign = prepared.style.align;
   ctx.textBaseline = "alphabetic";
+  ctx.letterSpacing = `${prepared.style.letterSpacing * layout.fontSize}px`;
   ctx.font = `${prepared.fontWeight} ${layout.fontSize}px ${prepared.fontFamily}, sans-serif`;
   if (dy !== 0 || opacity !== 1) {
     ctx.save();
@@ -681,7 +756,7 @@ function drawBeat(
   }
   let y = layout.firstY;
   for (const line of layout.lines) {
-    ctx.fillText(line, layout.centerX, y);
+    ctx.fillText(line, headlineTextX(prepared, layout.centerX), y);
     y += layout.lineHeight;
   }
   if (dy !== 0 || opacity !== 1) {
