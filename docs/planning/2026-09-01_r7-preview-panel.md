@@ -136,19 +136,19 @@ plus `app/(shell)/brief/__tests__/**`, and `DESIGN.md`.
 | **R7.2** | Write the prop derivation in product code and export it (**D45**): mode-aware `layout`/`tone` (treatment first, axes second, as `ReviewStep` does), a real `motion`, an explicit zero-product answer, and `step`/`stepCount` passed as `stepIndex + 1` / `steps.length` with the JSDoc corrected (**M2**). | `creative-preview.fabrication.test.tsx` **imports** the derivation instead of defining its own. A classic brief and a randomized brief each produce the same look in the dock as in the Review figure. |
 | **R7.3** | Mount `PreviewDock` as a sibling of the main column inside the `flex items-start` row, `sticky top-0 self-start`, **Guided only**, **suppressed when `steps[stepIndex] === "review"`** (**D43/D44**). Never inside `renderStepCard`. | A test rendering the **editor** finds the dock by `getByRole("complementary", { name: "Preview" })` — `getByRole`, never `getAllByRole(...)[0]`. It is absent on Review, and absent in Everything. |
 | **R7.4** | **Delete `PreviewStrip`** and its tests (owner decision, concurring with both reviews). `PreviewDock` keeps its `xl:` classes until R7.6 rehomes visibility. Below the rail's breakpoint the preview lives in the wizard's layout-editor step (the template plan's T7), not in a bottom bar. | `PreviewStrip` no longer exists; no test references it; D43/R7.3 need no strip suppression. |
-| **R7.6** | **The rail switcher** (**D61**): one right-rail slot headed by a segmented control — eye = `PreviewDock`, `</>` = the YAML view. Remove the `w-96` split sidebar (`BriefEditor.tsx:1230`) and the ⋯ menu's "YAML split" item; the rail remembers its last view. | Exactly one of preview/YAML is rendered at a time; the side-by-side layout and its width-collapse case no longer exist. |
 | **R7.5** | Repair the query surface (**H4**): scope every affected assertion in `brief-editor.test.tsx` with `within(...)`, a role, or the `Preview` landmark. Tighten the review-row assertion to a **count** of headline-bearing SVGs — turning a silent degradation into an explicit statement of how many creatives Review draws. | No test passes by resolving to a node in the wrong rail. |
-| **R7.6** | Motion honesty (**D50**): name the kind in `PreviewCaption` via `MOTION_KIND_META`, and add `forwards` to the preview's animation class in `CreativePreview.tsx` — never to `globals.css`. | The kind is readable without watching the animation; the creative does not snap back. No new `infinite` — `globals-motion.test.ts` still counts four. |
-| **R7.7** | Amend `DESIGN.md` (**L2**): add the dock and strip to §4, and amend §7 so `lg` is the sidebar line and `xl` the preview line. | The contract describes what shipped. |
+| **R7.6** | Motion honesty (**D50**) — **delivered by the template plan's T1a**, which owns `CreativePreview.tsx` (the `forwards` fill-mode); the `PreviewCaption` motion name lands with PR B, which owns `PreviewDock.tsx`. Listed here so D50 is not lost, executed there so two parallel lanes never share a file. | The kind is readable without watching the animation; the creative does not snap back. No new `infinite` — `globals-motion.test.ts` still counts four. |
+| **R7.7** | Amend `DESIGN.md` (**L2**): add the dock and the rail switcher to §4 (the strip is deleted, R7.4), and amend §7 so `lg` is the sidebar line and `xl` the preview line. | The contract describes what shipped. |
+| **R7.8** | **The rail switcher** (**D61**): one right-rail slot headed by a segmented control — eye = `PreviewDock`, `</>` = the YAML view. Remove the `w-96` split sidebar (`BriefEditor.tsx:1230`) and the ⋯ menu's "YAML split" item; the rail remembers its last view. | Exactly one of preview/YAML is rendered at a time; the side-by-side layout and its width-collapse case no longer exist. |
 
 **Order — split into two PRs.**
 
-**PR A (now, against current `main`): R7.1 + R7.6 + R7.7.** Capping the Review figure is the
+**PR A (now, against current `main`): R7.1 alone.** Capping the Review figure is the
 user-visible defect and it depends on nothing in the routing model — `ReviewStep.tsx`,
 `CreativePreview.tsx`, `messages.ts`, `DESIGN.md` and `review-step.test.tsx` are untouched by R5.
 Blocking the covering fix behind a branch that has no PR yet would be the wrong trade.
 
-**PR B (after R5 merges): R7.2 + R7.3 + R7.4 + R7.5 + R7.6.** These edit `BriefEditor.tsx` and
+**PR B: R7.2 + R7.3 + R7.4 + R7.5 + R7.7 + R7.8**, plus PR B's half of R7.6 (the caption). These edit `BriefEditor.tsx` and
 `app/(shell)/brief/__tests__/**`, which R5 rewrites.
 
 **M8 corrected:** R5 is a **local branch (`feat/r5-brief-route`) with no PR open** — it is not an
