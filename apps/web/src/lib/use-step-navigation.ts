@@ -48,6 +48,38 @@ export interface StepNavigation {
  * guided mode exists to remove (D21). The Next refusal is the sections' own
  * voice, decided in the editor, not here.
  */
+const STEP_HANDOFF_KEY = "cf:step-handoff";
+
+/**
+ * Remember which step to land on across a route change this app initiates itself.
+ *
+ * H5: a first save moves `/brief/new` to `/brief/{id}`. Those are different route
+ * segments, so Next unmounts one page component and mounts another — the cursor below
+ * is rebuilt from scratch and the user is thrown back to the first step with nothing
+ * said, which is exactly what they reported. This is a one-shot baton, consumed on
+ * read, not a persisted preference: it exists only to survive a navigation we caused.
+ * `localStorage`, like every other `cf:` key here — the read deletes it, so nothing is
+ * kept, and it is the store this app's test harness stands in for.
+ */
+export function stashStep(id: string): void {
+  try {
+    localStorage.setItem(STEP_HANDOFF_KEY, id);
+  } catch {
+    /* storage blocked — the step resets, which is the behaviour without this at all */
+  }
+}
+
+/** Read and clear the baton. Reading it is what spends it. */
+function takeStashedStep(): string | null {
+  try {
+    const id = localStorage.getItem(STEP_HANDOFF_KEY);
+    localStorage.removeItem(STEP_HANDOFF_KEY);
+    return id;
+  } catch {
+    return null;
+  }
+}
+
 export function useStepNavigation(steps: readonly string[]): StepNavigation {
   // A list that is never empty keeps the clamp sane; the editor's is never empty
   // (both modes produce five sections plus the review step), so this is a guard,
@@ -71,6 +103,18 @@ export function useStepNavigation(steps: readonly string[]): StepNavigation {
   const byId = steps.indexOf(cursor.id);
   const [rawMaxVisited, setRawMaxVisited] = useState(0);
   const [direction, setDirection] = useState<1 | -1>(1);
+
+  // Applied on mount, not in the `useState` initializer: the server has no
+  // sessionStorage, so reading it during render would make the first client render
+  // disagree with the server's and trip hydration — the rule `Disclosure` documents.
+  useEffect(() => {
+    const id = takeStashedStep();
+    if (id === null) return;
+    const at = steps.indexOf(id);
+    if (at === -1) return;
+    setCursor({ id, index: at });
+    setRawMaxVisited((seen) => Math.max(seen, at));
+  }, [steps]);
 
   const index = byId === -1 ? clamp(cursor.index) : byId;
 

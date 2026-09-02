@@ -19,7 +19,7 @@ const BRIEF_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
  */
 export function BriefPicker() {
   const router = useRouter();
-  const { briefPickerOpen, closeBriefPicker, setBrief, brief: current } = useRun();
+  const { briefPickerOpen, closeBriefPicker, brief: current } = useRun();
   const { guardedAction } = useGuardedNavigation();
   const [entries, setEntries] = useState<BriefEntry[] | null>(null);
   const [error, setError] = useState(false);
@@ -52,9 +52,15 @@ export function BriefPicker() {
     };
   }, [briefPickerOpen]);
 
+  /**
+   * D37: picking a brief is navigating to it — `/brief/{id}` is the single source of
+   * truth for which brief is open, and the editor loads it from there. The guarded
+   * action carries the unsaved-changes prompt, exactly once, and a refused prompt
+   * does not navigate (or close the picker the user is still choosing from).
+   */
   const select = (entry: BriefEntry) => {
     guardedAction(() => {
-      setBrief(entry.brief);
+      router.push(`/brief/${entry.brief.id}`);
       closeBriefPicker();
     });
   };
@@ -76,14 +82,19 @@ export function BriefPicker() {
     setDuplicating(true);
     setActionError(undefined);
     try {
-      const result = await duplicateBrief(duplicateTarget.brief.id, duplicateId);
+      await duplicateBrief(duplicateTarget.brief.id, duplicateId);
       try {
         setEntries(await listBriefs());
       } catch {
         /* list refresh is best-effort; the copy still exists */
       }
-      setBrief(result.brief);
-      closeBriefPicker();
+      // D37: the copy is opened by navigating to it, through the same guard —
+      // setting the shell's brief from here would leave the URL describing
+      // whichever brief was open before.
+      guardedAction(() => {
+        router.push(`/brief/${duplicateId}`);
+        closeBriefPicker();
+      });
     } catch (err) {
       setActionError(unknownErrorMessage(err, "Duplicate failed"));
     } finally {

@@ -280,11 +280,17 @@ const DECISIONS_KEY = "cf:decisions";
 /** localStorage flag: the brief picker has been shown/dismissed once (don't auto-open again). */
 const BRIEF_PICKED_KEY = "cf:brief-picked";
 
-/** localStorage key for the active brief, so a reload restores it (and its run) not DEFAULT. */
-const BRIEF_KEY = "cf:brief";
+/**
+ * localStorage key for the last-opened brief (D37). The URL is the single source of
+ * truth for *which brief is open* — `/brief/{id}` — so this key no longer addresses
+ * anything: it survives as a "last opened" convenience, read by the bare `/brief`
+ * redirect and by the grid's restore below, and written whenever a brief is opened
+ * or committed.
+ */
+export const BRIEF_KEY = "cf:brief";
 
 /** Minimal shape guard for a brief restored from storage (don't trust hand-edited JSON). */
-function isStoredBrief(value: unknown): value is CampaignBrief {
+export function isStoredBrief(value: unknown): value is CampaignBrief {
   if (typeof value !== "object" || value === null) return false;
   const b = value as Partial<CampaignBrief>;
   return (
@@ -482,6 +488,11 @@ export function RunProvider({ children }: { children: ReactNode }) {
   // Tracks the latest brief id asked for, so an in-flight persisted-run fetch from an
   // earlier switch can't land on the grid after the user has moved to another brief.
   const briefIdRef = useRef(brief.id);
+  // Set the moment anything commits a brief — the editor's route load, its Save, the
+  // picker, or the blank route *releasing* one. The restore below reads it: provider
+  // effects run after their children's, so without this the last-opened record would
+  // overwrite a release that has already happened.
+  const briefDecidedRef = useRef(false);
 
   // Monotonic run token. Bumped when a run actually starts (beginRun, after the POST
   // answers with a job to poll) and when a brief switch invalidates any in-flight run;
@@ -526,15 +537,17 @@ export function RunProvider({ children }: { children: ReactNode }) {
   const setBrief = useCallback(
     (next: CampaignBrief) => {
       briefIdRef.current = next.id;
+      briefDecidedRef.current = true;
       setBriefState(next);
       setError(null);
-      // Remember the active brief so a reload restores it (and its run) instead of DEFAULT.
-      // The blank brief clears the key instead: there is no campaign to come back to, and
-      // leaving the previous one in storage is how a reload after "New brief" used to put
-      // it back on screen.
+      // Record the last-opened brief so a reload restores it (and its run) instead of
+      // DEFAULT, and so the bare /brief route can hand the visitor back to it. D37:
+      // this is a convenience record, never an address — the blank brief releases the
+      // shell's active campaign but deliberately does NOT erase it (H5): visiting
+      // /brief/new opens no brief, so it must not destroy the pointer to the one the
+      // user opened last.
       try {
         if (next.id) localStorage.setItem(BRIEF_KEY, JSON.stringify(next));
-        else localStorage.removeItem(BRIEF_KEY);
       } catch {
         /* storage unavailable — brief just won't persist across reloads */
       }
@@ -594,10 +607,17 @@ export function RunProvider({ children }: { children: ReactNode }) {
 
   // On first load, restore the brief the user last had (DEFAULT if none) and hydrate
   // that brief's own persisted run — so a reload after a previous session brings back
-  // the right brief and its creatives, not DEFAULT with an empty grid. The brief lives
-  // in localStorage (the report alone can't reconstruct messages/colours/logos).
+  // the right brief and its creatives, not DEFAULT with an empty grid. D37: this is
+  // the last-opened convenience at work on the grid, never an address — the editor
+  // loads whichever brief its route names, and follows with setBrief after it lands.
+  // The brief lives in localStorage (the report alone can't reconstruct messages/colours/logos).
   useEffect(() => {
     let active = true;
+    // Something has already decided which brief is active — the blank route releasing
+    // the campaign, most importantly. `cf:brief` is a *last-opened* pointer, not an
+    // application (D37), so restoring it here would put a released brief back on the
+    // shell and let Generate spend image-generation credits on it.
+    if (briefDecidedRef.current) return;
     let startBrief = DEFAULT_BRIEF;
     try {
       const parsed: unknown = JSON.parse(localStorage.getItem(BRIEF_KEY) ?? "null");

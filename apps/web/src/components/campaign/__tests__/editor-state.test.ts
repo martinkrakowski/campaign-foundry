@@ -913,17 +913,13 @@ describe("canPlan", () => {
   });
 });
 
-describe("temp ids", () => {
-  test("falls back to a time-and-random id where crypto.randomUUID is unavailable", () => {
-    const original = globalThis.crypto;
-    vi.stubGlobal("crypto", undefined);
-    try {
-      const a = initialEditorState();
-      expect(a.source.kind === "new" && a.source.tempId).toMatch(/^temp-\d+-[a-z0-9]+$/);
-    } finally {
-      vi.stubGlobal("crypto", original);
-      vi.unstubAllGlobals();
-    }
+describe("the unnamed draft's key (H6/D37)", () => {
+  test("is one stable key, so a reload at /brief/new finds the draft it left", () => {
+    // The key was a per-mount temp id, which orphaned every autosaved recovery copy
+    // the moment the page reloaded. Every unnamed editor is /brief/new now, so one
+    // stable key is what makes the draft survivable.
+    expect(getDraftKey(initialEditorState())).toBe("cf:draft:new");
+    expect(getDraftKey(initialEditorState("variation"))).toBe("cf:draft:new");
   });
 });
 

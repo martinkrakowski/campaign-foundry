@@ -562,6 +562,19 @@ export function generateDraftBlocked(sectionLabel: string): string {
   return `${sectionLabel} still needs attention before this draft can run — fix what is marked there.`;
 }
 
+/* ── The brief routes (D37) ── */
+
+/**
+ * `brief.notFound` — a route id that names no brief (M3): the empty state names the
+ * id the URL carried, never a silent new draft, and the two links below are the ways
+ * out (the grid, or a new brief).
+ */
+export function briefNotFound(id: string): string {
+  return `There is no brief called ${id} — it may have been deleted, or the link is wrong.`;
+}
+export const briefNotFoundGrid = "Back to the grid";
+export const briefNotFoundNew = "Start a new brief";
+
 /* ── The editor's action-bar verbs (D35/D40) ── */
 
 /** The bar's primary verb: one press writes the file, and the shell runs what was written (D35 — every persist path applies). */

@@ -1,18 +1,20 @@
 import { describe, test, expect, beforeEach, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderWithRun } from "@/__tests__/helpers";
+import { renderWithRun, nextMock } from "@/__tests__/helpers";
 import * as messages from "@/components/campaign/messages";
-import BriefPage from "../page";
+import BriefIndexPage from "../page";
+import BriefIdPage from "../[id]/page";
+import NewBriefPage from "../new/page";
 
 /**
- * The page as a user meets it. `renderWithRun` supplies the outlet that stands in for
- * the sidebar, so the panels the page publishes are placed exactly once — placing them
- * here as well would make every published control exist twice.
+ * The blank route, as a user meets it. `renderWithRun` supplies the outlet that stands
+ * in for the sidebar, so the panels the page publishes are placed exactly once —
+ * placing them here as well would make every published control exist twice.
  */
 const Editor = () => (
   <>
-    <BriefPage />
+    <NewBriefPage />
   </>
 );
 
@@ -27,6 +29,14 @@ const saveVia = async (user: ReturnType<typeof userEvent.setup>, item: "Save" | 
   await user.click(await screen.findByText(messages.editorSaveAs));
 };
 
+const storedBrief = (id: string) => ({
+  id,
+  targetRegion: "DE",
+  targetAudience: "a",
+  campaignMessage: "Hi",
+  products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+});
+
 beforeEach(() => {
   localStorage.clear();
   localStorage.setItem("cf:brief-picked", "1");
@@ -37,10 +47,51 @@ beforeEach(() => {
   globalThis.confirm = vi.fn(() => true);
 });
 
-describe("BriefPage E1 Features", () => {
-  // Corrected for D41, twice over: the chip has two states (written-or-not) and
-  // "Draft not applied" no longer exists — and a pristine editor holds a blank form,
-  // so the chip says nothing at all until the draft has content.
+describe("the bare /brief route (D37)", () => {
+  test("redirects to the brief last opened", async () => {
+    localStorage.setItem("cf:brief", JSON.stringify(storedBrief("camp")));
+    renderWithRun(<BriefIndexPage />);
+    await vi.waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief/camp"));
+  });
+
+  test("redirects to the grid when no last-opened brief is recorded", async () => {
+    renderWithRun(<BriefIndexPage />);
+    await vi.waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/grid"));
+  });
+
+  test("redirects to the grid when the record is unreadable", async () => {
+    localStorage.setItem("cf:brief", "{ not json");
+    renderWithRun(<BriefIndexPage />);
+    await vi.waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/grid"));
+  });
+
+  test("redirects to the grid when the record is not a brief", async () => {
+    localStorage.setItem("cf:brief", JSON.stringify(["not", "a", "brief"]));
+    renderWithRun(<BriefIndexPage />);
+    await vi.waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/grid"));
+  });
+
+  test("redirects to the grid when the last-opened id is malformed", async () => {
+    localStorage.setItem("cf:brief", JSON.stringify(storedBrief("Not Safe")));
+    renderWithRun(<BriefIndexPage />);
+    await vi.waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/grid"));
+  });
+
+  test("never renders an editor itself", () => {
+    localStorage.setItem("cf:brief", JSON.stringify(storedBrief("camp")));
+    renderWithRun(<BriefIndexPage />);
+    expect(screen.queryByLabelText("Campaign Name")).toBeNull();
+  });
+});
+
+describe("the /brief/{id} route (D37)", () => {
+  test("hands the route's id to the editor", async () => {
+    const page = await BriefIdPage({ params: Promise.resolve({ id: "camp" }) });
+    expect((page as React.ReactElement<{ briefId?: string }>).props.briefId).toBe("camp");
+  });
+});
+
+describe("the blank editor route (/brief/new)", () => {
   test("renders the editor with status chip", async () => {
     const user = userEvent.setup();
     renderWithRun(<Editor />);
