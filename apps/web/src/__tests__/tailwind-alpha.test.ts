@@ -99,3 +99,15 @@ describe('Tailwind letterSpacing token', () => {
     expect(css).toContain('letter-spacing: 0.08em');
   });
 });
+
+// #173: ModelSelector's row boundary moved to `divide-border-control`. `divide-*`
+// colours inherit from `borderColor` → `colors`, where border-control is defined —
+// but this repo's founding lesson is that a class which compiles to nothing looks
+// identical to one that works, so the inheritance is proven, not assumed.
+describe('divide-border-control (the ModelSelector row boundary)', () => {
+  it('emits a real rule with the border-control token', async () => {
+    const css = await generateCss(['divide-border-control']);
+    expect(css).toContain('--color-border-control');
+    expect(css).toMatch(/divide-border-control[^{]*>[^{]*\{/);
+  });
+});

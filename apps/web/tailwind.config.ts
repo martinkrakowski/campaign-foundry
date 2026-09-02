@@ -38,6 +38,7 @@ const config: Config = {
         success: "color-mix(in srgb, var(--color-success) calc(<alpha-value> * 100%), transparent)",
         warning: "color-mix(in srgb, var(--color-warning) calc(<alpha-value> * 100%), transparent)",
         error: "color-mix(in srgb, var(--color-error) calc(<alpha-value> * 100%), transparent)",
+        "on-error": "color-mix(in srgb, var(--color-on-error) calc(<alpha-value> * 100%), transparent)",
         info: "color-mix(in srgb, var(--color-info) calc(<alpha-value> * 100%), transparent)",
         modified: "color-mix(in srgb, var(--color-modified) calc(<alpha-value> * 100%), transparent)",
         scrim: "color-mix(in srgb, var(--color-scrim) calc(<alpha-value> * 100%), transparent)",

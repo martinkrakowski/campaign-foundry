@@ -1,9 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useRun } from "@/lib/run-context";
 import { MODELS, labelFor } from "@/lib/models";
 import { cn } from "@/lib/cn";
+import {
+  modelSelectorClose,
+  modelSelectorDialogLabel,
+  modelSelectorFallbackNote,
+  modelSelectorHeading,
+  modelSelectorTriggerTitle,
+  modelReuseNote,
+  modelReuseNoteAria,
+  modelReuseNoteTitle,
+} from "@/components/campaign/messages";
 
 export interface ModelSelectorProps {
   /**
@@ -18,6 +28,7 @@ export interface ModelSelectorProps {
 export function ModelSelector({ onModelChange }: ModelSelectorProps) {
   const { selectedModel, setSelectedModel, brief } = useRun();
   const [open, setOpen] = useState(false);
+  const dialogId = `model-selector-${useId()}`;
 
   // A product with `inputAsset` reuses that image and skips the selected model for
   // that product — but only when the asset resolves and is readable server-side;
@@ -32,7 +43,11 @@ export function ModelSelector({ onModelChange }: ModelSelectorProps) {
         type="button"
         onClick={() => setOpen(true)}
         aria-haspopup="dialog"
-        title="Change image model"
+        aria-expanded={open}
+        // Only while the dialog exists — a relationship pointing at nothing is a
+        // broken one (the rule Disclosure and OverflowMenu already follow).
+        {...(open ? { "aria-controls": dialogId } : {})}
+        title={modelSelectorTriggerTitle}
         className="flex min-w-0 max-w-[9rem] items-center gap-1.5 truncate whitespace-nowrap rounded-full border border-border-control bg-surface-2 px-3 py-1 font-mono text-[11px] text-text-primary transition-colors hover:border-border-control-hover sm:max-w-none"
       >
         <span className="text-brand-primary" aria-hidden>◆</span>
@@ -42,15 +57,16 @@ export function ModelSelector({ onModelChange }: ModelSelectorProps) {
         <span
           tabIndex={0}
           role="note"
-          aria-label="Reuse brief: a product sets inputAsset, so the selected image model may be skipped for it. A missing or unreadable asset falls back to model generation."
-          title="This brief sets inputAsset on a product. When that image resolves, it's reused and the selected model is skipped for that product; a missing or unreadable asset falls back to model generation."
+          aria-label={modelReuseNoteAria}
+          title={modelReuseNoteTitle}
           className="hidden cursor-default items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-1 font-mono text-[10px] text-warning outline-none focus-visible:ring-2 focus-visible:ring-warning sm:inline-flex"
         >
-          <span aria-hidden>↻</span> reuse brief · model may be skipped
+          <span aria-hidden>↻</span> {modelReuseNote}
         </span>
       )}
       {open && (
         <ModelModal
+          dialogId={dialogId}
           selected={selectedModel}
           onSelect={(id) => {
             setSelectedModel(id);
@@ -66,10 +82,12 @@ export function ModelSelector({ onModelChange }: ModelSelectorProps) {
 
 /** Model picker. Closes on backdrop click, the × button, or Escape; traps focus. */
 function ModelModal({
+  dialogId,
   selected,
   onSelect,
   onClose,
 }: {
+  dialogId: string;
   selected: string | null;
   onSelect: (id: string | null) => void;
   onClose: () => void;
@@ -113,20 +131,21 @@ function ModelModal({
       ref={dialogRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/80 p-8 backdrop-blur-sm"
       onClick={onClose}
+      id={dialogId}
       role="dialog"
       aria-modal="true"
-      aria-label="Select image model"
+      aria-label={modelSelectorDialogLabel}
     >
       <div
         className="w-full max-w-md overflow-hidden rounded-xl border border-border bg-surface shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <h2 className="text-sm font-semibold text-text-emphasis">Image model</h2>
+          <h2 className="text-sm font-semibold text-text-emphasis">{modelSelectorHeading}</h2>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={modelSelectorClose}
             className="text-text-muted transition-colors hover:text-text-emphasis"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
@@ -135,7 +154,11 @@ function ModelModal({
           </button>
         </div>
 
-        <div className="max-h-[60vh] divide-y divide-border overflow-y-auto">
+        {/* The row buttons' fill is this modal's own `surface` — a 1:1 match — so the
+            rule between rows is the only edge a row has. That is a control boundary
+            (WCAG 1.4.11), so it takes the control token, not `border` (1.35:1 dark,
+            1.18:1 light against the surface). See DESIGN.md §2, the boundary rule. */}
+        <div className="max-h-[60vh] divide-y divide-border-control overflow-y-auto">
           {MODELS.map((model, i) => {
             const active = model.id === selected;
             return (
@@ -165,7 +188,7 @@ function ModelModal({
         </div>
 
         <p className="border-t border-border px-4 py-2 font-mono text-[10px] text-text-muted">
-          Selected model is the primary; the pipeline falls back automatically if it's unavailable.
+          {modelSelectorFallbackNote}
         </p>
       </div>
     </div>
