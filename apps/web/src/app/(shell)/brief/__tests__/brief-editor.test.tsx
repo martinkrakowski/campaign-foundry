@@ -1358,6 +1358,30 @@ describe("BriefPage — data flow", () => {
     await waitFor(() => expect(calls.find((c) => c.method === "POST")?.url).toContain("replace=1"));
   });
 
+  test("a double activation of the overwrite confirm posts once", async () => {
+    const user = userEvent.setup();
+    const calls = routes({ list: () => json({ briefs: [entry("taken", "r1")] }) });
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+
+    await fillValidDraft(user);
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), "taken");
+    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
+
+    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
+    const confirm = within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm });
+    // Two activations in the same frame: `saving` has not flushed, so a state
+    // check would still let both through. The synchronous ref is what collapses
+    // them to one write.
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(writes(calls).length).toBe(1));
+    expect(writes(calls)[0].url).toContain("replace=1");
+  });
+
   test("a 409 from a brief that appeared since the list was fetched offers the same overwrite", async () => {
     const user = userEvent.setup();
     let posts = 0;

@@ -184,6 +184,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // the first write attempt finds the id taken (the listing knew, or the API's 409
   // said so); the dialog's confirm is what sends `{ replace: true }`.
   const [pendingOverwrite, setPendingOverwrite] = useState<string | null>(null);
+  // Synchronous latch for the overwrite retry. `saving` is React state, so a second
+  // confirm in the same frame still reads the pre-setSaving closure and would POST
+  // `{ replace: true }` twice and run `adoptSavedCopy` twice. The ref is set at
+  // entry and cleared in `finally` — a `saving` check is the stale-closure trap.
+  const overwriteInFlightRef = useRef(false);
   // The Save-as dialog's field: where the invalid-id guard hands focus back (D3).
   const saveAsFieldRef = useRef<HTMLInputElement | null>(null);
   const saveAsDialogRef = useRef<HTMLDivElement | null>(null);
@@ -917,6 +922,8 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * failure is: the error surfaces and the Save-as dialog stays open.
    */
   const retrySaveAsOverwrite = async (newId: string) => {
+    if (overwriteInFlightRef.current) return;
+    overwriteInFlightRef.current = true;
     setSaving(true);
     setPersistError(undefined);
     try {
@@ -930,6 +937,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       setPersistError(unknownErrorMessage(error, "Save as failed"));
       setPendingOverwrite(null);
     } finally {
+      overwriteInFlightRef.current = false;
       setSaving(false);
     }
   };
