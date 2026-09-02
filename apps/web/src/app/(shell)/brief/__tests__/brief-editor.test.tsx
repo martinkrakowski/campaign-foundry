@@ -2734,14 +2734,15 @@ describe("BriefPage — the preview rail (R7)", () => {
 
     await user.click(code());
     // One slot, one view: the YAML replaced the preview — never side by side.
-    expect(within(rail).getByText(/"targetRegion"/)).toBeTruthy();
+    expect(within(rail).getByText(/targetRegion: /)).toBeTruthy();
+    expect(within(rail).queryByText(/"targetRegion":/)).toBeNull();
     expect(within(rail).queryByText(messages.previewLegend)).toBeNull();
     expect(eye().getAttribute("aria-pressed")).toBe("false");
     expect(code().getAttribute("aria-pressed")).toBe("true");
 
     await user.click(eye());
     expect(within(rail).getByText(messages.previewLegend)).toBeTruthy();
-    expect(within(rail).queryByText(/"targetRegion"/)).toBeNull();
+    expect(within(rail).queryByText(/targetRegion: /)).toBeNull();
   });
 
   test("the rail remembers its last view across a remount", async () => {
@@ -2750,13 +2751,13 @@ describe("BriefPage — the preview rail (R7)", () => {
     const first = renderWithRun(<Editor id="ok" />);
     await adopt(user, "ok");
     await user.click(within(preview()).getByRole("button", { name: messages.previewRailYamlView }));
-    expect(within(preview()).getByText(/"targetRegion"/)).toBeTruthy();
+    expect(within(preview()).getByText(/targetRegion: /)).toBeTruthy();
     first.unmount();
 
     // A fresh editor reads the last choice before anything renders.
     renderWithRun(<Editor id="ok" />);
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok"));
-    expect(within(preview()).getByText(/"targetRegion"/)).toBeTruthy();
+    expect(within(preview()).getByText(/targetRegion: /)).toBeTruthy();
   });
 
   test("broken rail-view storage falls back to the preview view", async () => {
@@ -2787,7 +2788,7 @@ describe("BriefPage — the preview rail (R7)", () => {
     await adopt(user, "ok");
 
     await user.click(within(preview()).getByRole("button", { name: messages.previewRailYamlView }));
-    expect(within(preview()).getByText(/"targetRegion"/)).toBeTruthy();
+    expect(within(preview()).getByText(/targetRegion: /)).toBeTruthy();
     spy.mockRestore();
   });
 

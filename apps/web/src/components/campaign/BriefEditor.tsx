@@ -5,6 +5,7 @@ import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { Button, Input, SegBar, OverflowMenu, useDialogFocusTrap } from "@/components/ui";
 import { useRun } from "@/lib/run-context";
 import { useRouter } from "next/navigation";
+import { dump } from "js-yaml";
 import Link from "next/link";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 import {
@@ -1407,7 +1408,10 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               <PreviewDock {...railProps} />
             ) : (
               <pre className="overflow-auto text-[11px] text-text-primary">
-                {JSON.stringify(draftBrief, null, 2)}
+                {/* Real YAML, because that is what the label promises and what the
+                    save path writes — a JSON body under a `</>`-YAML name showed a
+                    format the pipeline never reads (CodeRabbit, PR #174). */}
+                {dump(draftBrief)}
               </pre>
             )}
           </aside>
