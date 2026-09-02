@@ -55,6 +55,10 @@ export function OverflowMenu({ label, items }: OverflowMenuProps): ReactNode {
   const trigger = useRef<HTMLButtonElement>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const menuId = `overflow-menu-${useId()}`;
+  // Bound the ref array to the current item count. React nulls a ref on unmount but
+  // leaves the array's length alone, so a shrinking list would keep `navigate`'s
+  // modulo reaching past the end and focus would land on nothing.
+  itemRefs.current.length = items.length;
 
   /** Close, then put focus back where it can be seen. */
   const close = () => {
@@ -172,6 +176,10 @@ export function OverflowMenu({ label, items }: OverflowMenuProps): ReactNode {
         break;
     }
   };
+
+  // A menu with nothing in it is not a control: rendering the trigger would offer a
+  // press that can only open an empty panel.
+  if (items.length === 0) return null;
 
   return (
     <div ref={root} className="relative" onKeyDown={onKeyDown}>

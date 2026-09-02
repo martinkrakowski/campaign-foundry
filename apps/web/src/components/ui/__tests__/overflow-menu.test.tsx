@@ -42,6 +42,12 @@ describe("OverflowMenu", () => {
 
   // The regression #162 shipped: a bare <details> closed ONLY on its own summary, so
   // every one of these paths left the panel hanging open over the content.
+  test("a menu with no items renders no trigger", () => {
+    setup([]);
+    expect(screen.queryByRole("button", { name: "More actions" })).toBeNull();
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
   test("Escape closes it", async () => {
     const { user } = setup();
     await user.click(trigger());
