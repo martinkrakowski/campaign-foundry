@@ -36,14 +36,14 @@ It answers three questions the one-line row does not:
 
 | id | Decision | Why |
 |---|---|---|
-| **D43** | **Exactly one composed preview is on screen at any time.** The dock mounts in Guided only, and is **suppressed on the Review step**, where the figure owns the preview. | D42 as written mandates two. `ReviewStep.tsx:162` is byte-identical to `PreviewDock.tsx:76` and wraps the same `CreativePreview` call with the same className — at ≥`xl` the Review step would carry both pictures of the same brief, side by side. |
+| **D43** | **Exactly one composed preview is rendered at any time — dock, strip and figure counted together.** The dock mounts in Guided only and is **suppressed on the Review step**, where the figure owns the preview. This constrains `PreviewStrip` too: below `xl`, Review would otherwise show the figure *and* the strip, and under happy-dom both rails render at once, so two surfaces named "Preview" make R7.3's `getByRole` throw. **§6 question 3 therefore gates R7.4** — see §3. | D42 as written mandates two. `ReviewStep.tsx:162` is byte-identical to `PreviewDock.tsx:76` and wraps the same `CreativePreview` call with the same className — at ≥`xl` the Review step would carry both pictures of the same brief, side by side. |
 | **D44** | **The dock is `sticky top-0 self-start`, mounted as a sibling of the main column, never `fixed` and never inside `renderStepCard`.** | D26 always specified a *sticky* dock; the component W9 built has no positioning at all, so mounting it as-is does not implement the decision. `sticky` also resolves against the nearest scrollport and is therefore immune to the step card's `transform` — which is what keeps R7 clear of **M7**. And `renderStepCard` renders **two** live copies during a step change, so a dock inside it would briefly animate twice. |
 | **D45** | **The host's prop derivation is product code, exported, and the fabrication test imports it.** No test fixture may be the only definition of how a component is wired. | `previewFrom` (`creative-preview.fabrication.test.tsx:35-47`) claims to map state "exactly as the host wires them" while `MP7` proves there is no host. It is mode-blind, so it would draw the wrong creative for a classic brief, and it disagrees with `ReviewStep`'s real derivation — shipping it would make the dock and the figure show *different looks for the same brief*. |
 | **D46** | **The cap goes on the inline axis, as `minmax(0,20rem)`, never a bare length and never `max-h` alone.** | A percentage cap cannot clamp an intrinsic contribution; only a definite length can. A bare `20rem` track and `minmax(0,20rem)` measure identically at full width but diverge once the YAML split view is open, where the content row falls to ~624/464/208 px. |
 | **D47** | **The bounding half is verified in a browser. A class-string assertion is never accepted as proof of a layout fix.** | The suite runs under happy-dom, which performs no layout: `review-step.test.tsx:54` clicks every Edit button and passes *today*, while in a real browser the creative paints over those buttons. A green assertion about a class that does nothing is the exact failure mode this lane exists to end. |
 | **D48** | **`PreviewStrip` gains an accessible name, and every mount assertion queries by role or landmark from a render of the editor** — never by bare text, never by DOM index. | Both rails render simultaneously under happy-dom (`hidden xl:flex` / `flex xl:hidden` are pure CSS), so a bare-text assertion cannot tell the dock from the strip and therefore cannot prove which surface a user sees. `PreviewStrip` is a plain `<div>` reachable in its own test only via `container.firstElementChild`, a handle that evaporates at editor level. |
 | **D49** | **R7 absorbs R1.3 and names every file it takes**, superseding the 2026-08-31 lane table. | R7 must edit `ReviewStep.tsx` to do the H1 half — a file the table assigns to R1.3 — and may edit `CreativePreview.tsx`, which it assigns to R1.1. Carrying that implicitly is how the plan's own exclusive-ownership rule gets broken. |
-| **D50** | **The preview names its motion kind in the caption, and `ken-burns-in` gains a fill-mode.** | `DESIGN.md`'s rule that *a loop is never the only carrier of meaning* is honoured by the glyph and not by the preview. `ken-burns-in` has no fill-mode, so it snaps back from `scale(1.15)` to `scale(1)` when it ends. `MOTION_KIND_META` is already the display-name vocabulary, so the caption costs one lookup. |
+| **D50** | **The preview names its motion kind in the caption, and the preview's one-shot gains `forwards`** — on the animation class in `CreativePreview.tsx`, never on the shared keyframes. | `DESIGN.md`'s rule that *a loop is never the only carrier of meaning* is honoured by the glyph and not by the preview. `kf-ken-burns-in` ends at `scale(1.15)` and, without a fill-mode, the creative snaps back to `scale(1)`. `MOTION_KIND_META` is already the display-name vocabulary, so the caption costs one lookup. |
 
 ---
 
@@ -53,7 +53,7 @@ It answers three questions the one-line row does not:
 
 | id | Finding | Consequence |
 |---|---|---|
-| **C1** | **D42 as written renders the same creative twice.** A dock mounted at the proven slot renders on every guided step; the Review step already draws its own `<figure>`. The wrapper `<div>` at `ReviewStep.tsx:162` is byte-identical to `PreviewDock.tsx:76`, both hand `CreativePreview` the same `className="block h-auto w-full"`, and `ReviewStep`'s figcaption inlines the same `messages.previewCaption(...)` expression as `PreviewCaption`. The calls themselves are **not** identical, and the difference is a trap for §6 question 4: `ReviewStep` pre-derives at `:121` (`derivePreviewRatio(platformId, undefined)`) and passes the **result** as `ratio`, while `PreviewDock` takes `ratio` as a **hint** and derives internally at `:83`. One prop name, two meanings — sharing the component naively double-derives. | Two pictures of one brief, side by side, at ≥1280 px. Resolved by **D43**. |
+| **C1** | **D42 as written renders the same creative twice.** A dock mounted at the proven slot renders on every guided step; the Review step already draws its own `<figure>`. The wrapper `<div>` carries the same class string at `ReviewStep.tsx:162` and `PreviewDock.tsx:76`, both hand `CreativePreview` the same `className="block h-auto w-full"`, and `ReviewStep`'s figcaption inlines the same `messages.previewCaption(...)` expression as `PreviewCaption`. The calls themselves are **not** identical, and the difference is a trap for §6 question 4: `ReviewStep` pre-derives at `:121` (`derivePreviewRatio(platformId, undefined)`) and passes the **result** as `ratio`, while `PreviewDock` takes `ratio` as a **hint** and derives internally at `:83`. One prop name, two meanings — sharing the component naively double-derives. | Two pictures of one brief, side by side, at ≥1280 px. Resolved by **D43**. |
 
 ### High
 
@@ -70,11 +70,11 @@ It answers three questions the one-line row does not:
 |---|---|
 | **M1** | **D26 specifies a sticky dock; neither component has any positioning.** `sticky`, `fixed`, `top-`, `bottom-` appear nowhere in `PreviewDock.tsx`. At the foot of a long flowing editor page the strip would simply scroll away. Resolved by **D44**. |
 | **M2** | **`PreviewShowcaseProps.step` is documented as *"1-based position in the campaign's creative set"*, not the wizard step.** Using it as a wizard readout is a wrong wiring the fabrication test cannot catch, and the readout is meaningless in Everything mode. |
-| **M3** | **The dock has no empty state.** `primaryColor` is required and there is no `hasProduct` branch; `ReviewStep` renders nothing without a product, the dock has no such guard. On `/brief/new` it would show a default-blue square captioned *"no platform yet"*. |
+| **M3** | **The dock has no empty state.** `primaryColor` is required and there is no `hasProduct` branch, while `ReviewStep` renders nothing without a product. The guard must key on **`products.length === 0`** — a real state via `blankBrief`. `/brief/new` is *not* that case: it seeds one default-blue product, which the figure and the dock would both draw. Whether an untouched default product is worth previewing is a separate call, and is listed in §6. |
 | **M4** | **`PreviewStrip` has no accessible name** — a plain `<div>`, reachable in its own test only as the render root. Resolved by **D48**. |
-| **M5** | **`ken-burns-in` snaps back.** The default-seeded kind animates `scale(1.15) → scale(1)` over 2.4 s with **no fill-mode**, so it reverts when it ends. The loop-budget guard tokenises the `animation:` shorthand and filters out `both`, so a fill-mode is free of that gate. |
+| **M5** | **`ken-burns-in` snaps back.** `kf-ken-burns-in` runs `scale(1) → scale(1.15)` (`globals.css:72-79`); with **no fill-mode** the preview's 2.4 s one-shot reverts from `1.15` to `1` the moment it ends. The fix belongs on the Tailwind animation class in **`CreativePreview.tsx`**, not in `globals.css` — those keyframes are shared with the glyph's `infinite` rules, which never end, so a fill-mode there implements nothing. |
 | **M6** | **An existing test pins the very sizing H1 blames.** `creative-preview.test.tsx:104-105` asserts the intrinsic `width`/`height` attributes. If R7 drops them in favour of `viewBox` alone, that test is in the diff — and rewriting it is the strongest available evidence the lane worked, because it is a test that was pinning the cause. |
-| **M7** | **`PreviewStrip` and `FloatingBar` both claim the bottom band.** Two elements at the same edge, not a layout to tune: either the strip absorbs the bar's row, or the two are made mutually exclusive, or the strip goes shell-level and pays for a new outlet. |
+| **M9** | **`PreviewStrip` and `FloatingBar` claim the same bottom band — but only in two places.** The bar renders at `BriefEditor.tsx:1199` (Guided, **Review only**) and `:1242` (Everything). So under **D43** the collision exists only in Everything and on Review below `xl`; a Guided non-Review step has no bar at all. Folded into §6 question 3. *(Renumbered from M7: the parent plan already uses **M7** for the Asset Bin drawer trapped by the step-card transform, and one id for two defects would let an implementer think they had settled both.)* |
 | **M8** | **Lane-ownership collision with R5, which is in flight.** R7 needs `app/(shell)/brief/__tests__/**`, which the 2026-08-31 table assigns to R5.1, and both lanes edit `BriefEditor.tsx`. |
 
 ### Low
@@ -110,34 +110,49 @@ and the fill-mode (D50); and the `DESIGN.md` amendment (L2).
   `sticky` (never `fixed`) neither fixes nor worsens it. Scope is now bounded — `AssetPickerDrawer`
   is the *only* trapped overlay in the guided column; `HeadlinePoolDrawer` is already hoisted to
   `BriefEditor`'s root.
-- **The five existing infinite loops.** D27's four-loop budget covers the `CreativeGlyph` motion
-  panels and is enforced by `globals-motion.test.ts`. `FormatPanel.tsx:94` runs a fifth on the
-  Video card unconditionally. Pre-existing; noted so a reviewer who counts does not attribute it to
-  this lane. **R7 must add no `infinite` animation** — `CreativePreview` is a 2.4 s one-shot, and
-  keeping it one-shot is what keeps R7 clear of both the budget and WCAG 2.2.2.
+- **The loop budget.** D27 locks **four looping *kinds***, and `globals-motion.test.ts` enforces
+  that by counting `infinite` **declarations** in `globals.css`. `FormatPanel.tsx:94` is an allowed
+  *instance* of `kf-ken-burns-in` on the Video card, not a fifth kind — stated here so nobody
+  "fixes" a GB-D8/D9 feature. Do **not** expand that test to count instances. **R7 must add no
+  `infinite` animation**: `CreativePreview` is a 2.4 s one-shot, and keeping it one-shot is what
+  keeps R7 clear of both the budget and WCAG 2.2.2.
 
 ---
 
 ## 3. Tasks
 
-One lane, one branch, one PR. R7 takes these files in full, superseding the earlier table (**D49**):
-`campaign/PreviewDock.tsx`, `campaign/ReviewStep.tsx`, `campaign/BriefEditor.tsx`,
-`campaign/CreativePreview.tsx` (only if M6's attributes change), the three `campaign/__tests__/`
-preview files, `app/(shell)/brief/__tests__/**`, `globals.css` (fill-mode only), and `DESIGN.md`.
+**Two PRs, not one** — see *Order* below. R7 takes these files, superseding the earlier table
+(**D49**): `campaign/PreviewDock.tsx`, `campaign/ReviewStep.tsx`, `campaign/BriefEditor.tsx`,
+`campaign/CreativePreview.tsx` (the `forwards` fill-mode lands here **unconditionally**, plus M6's
+attributes if they change), `campaign/messages.ts` (D48's strip name, D50's motion-kind caption),
+and the test files `campaign/__tests__/{preview-dock,review-step,creative-preview,creative-preview.fabrication}.test.tsx`
+plus `app/(shell)/brief/__tests__/**`, and `DESIGN.md`.
+**`globals.css` is not in the lane** — its keyframes are shared with the glyph's `infinite` rules.
 
 | Task | What | Acceptance |
 |---|---|---|
 | **R7.1** | Cap the Review figure: `lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)]` (**D46**). Leave `CreativePreview`'s `shrink-0` alone — it is inert at every production call site, but keep `w-full`/`max-w-full` if the wrapper ever becomes a flex container. | Verified in a browser at the **six** widths of §4, not by a class assertion. The summary column is non-zero and every Edit button is clickable at all six. |
 | **R7.2** | Write the prop derivation in product code and export it (**D45**): mode-aware `layout`/`tone` (treatment first, axes second, as `ReviewStep` does), a real `motion`, an explicit zero-product answer, and `step`/`stepCount` passed as `stepIndex + 1` / `steps.length` with the JSDoc corrected (**M2**). | `creative-preview.fabrication.test.tsx` **imports** the derivation instead of defining its own. A classic brief and a randomized brief each produce the same look in the dock as in the Review figure. |
 | **R7.3** | Mount `PreviewDock` as a sibling of the main column inside the `flex items-start` row, `sticky top-0 self-start`, **Guided only**, **suppressed when `steps[stepIndex] === "review"`** (**D43/D44**). Never inside `renderStepCard`. | A test rendering the **editor** finds the dock by `getByRole("complementary", { name: "Preview" })` — `getByRole`, never `getAllByRole(...)[0]`. It is absent on Review, and absent in Everything. |
-| **R7.4** | Mount `PreviewStrip` and settle its collision with `FloatingBar` (**M7**), and give it an accessible name (**D48**). | The strip is reachable by role from an editor render, and the two elements do not occupy the same band. |
+| **R7.4** | **Gated on §6 question 3, which must be answered before this lane starts.** If the strip is kept: mount it, give it an accessible name **distinct from the dock's** (**D48**), and suppress it on Review and in Everything so **D43** still holds. If it is dropped: delete `PreviewStrip` and its tests, and D43/R7.3 need no further work. *Both independent reviews recommend dropping it (§8).* | Either the strip is reachable by its own role and never co-renders with the figure, or it no longer exists. |
 | **R7.5** | Repair the query surface (**H4**): scope every affected assertion in `brief-editor.test.tsx` with `within(...)`, a role, or the `Preview` landmark. Tighten the review-row assertion to a **count** of headline-bearing SVGs — turning a silent degradation into an explicit statement of how many creatives Review draws. | No test passes by resolving to a node in the wrong rail. |
-| **R7.6** | Motion honesty (**D50**): name the kind in `PreviewCaption` via `MOTION_KIND_META`, add the fill-mode to `ken-burns-in`. | The kind is readable without watching the animation; the creative does not snap back. No new `infinite` — `globals-motion.test.ts` still counts four. |
+| **R7.6** | Motion honesty (**D50**): name the kind in `PreviewCaption` via `MOTION_KIND_META`, and add `forwards` to the preview's animation class in `CreativePreview.tsx` — never to `globals.css`. | The kind is readable without watching the animation; the creative does not snap back. No new `infinite` — `globals-motion.test.ts` still counts four. |
 | **R7.7** | Amend `DESIGN.md` (**L2**): add the dock and strip to §4, and amend §7 so `lg` is the sidebar line and `xl` the preview line. | The contract describes what shipped. |
 
-**Order.** R7.1 → R7.2 → R7.3 → R7.4 → R7.5 → R7.6 → R7.7, all in one PR. **R7 rebases onto R5**
-(**M8**) — R5 is in flight and rewrites the editor's mount; R7 must not start against a routing
-model about to change.
+**Order — split into two PRs.**
+
+**PR A (now, against current `main`): R7.1 + R7.6 + R7.7.** Capping the Review figure is the
+user-visible defect and it depends on nothing in the routing model — `ReviewStep.tsx`,
+`CreativePreview.tsx`, `messages.ts`, `DESIGN.md` and `review-step.test.tsx` are untouched by R5.
+Blocking the covering fix behind a branch that has no PR yet would be the wrong trade.
+
+**PR B (after R5 merges): R7.2 + R7.3 + R7.4 + R7.5.** These edit `BriefEditor.tsx` and
+`app/(shell)/brief/__tests__/**`, which R5 rewrites.
+
+**M8 corrected:** R5 is a **local branch (`feat/r5-brief-route`) with no PR open** — it is not an
+in-flight GitHub lane, and the parent plan's ordering rationale for R7 ("not against a verb model
+about to change") was satisfied by R6. The confirmed collision is the brief test directory; the
+`BriefEditor.tsx` dual-edit is likely but is not in the parent plan's owns-table.
 
 ---
 
@@ -148,8 +163,14 @@ model about to change.
 The content column width, and therefore whether the fix holds, depends on the YAML split view —
 a sibling of the main column, toggled from the ⋯ menu. **Six checks, not three:**
 
-These are **Review-step** widths, so the dock is absent (**D43**) and no rail width is
-subtracted. Derived from `(shell)/layout.tsx:31` (`gap-4`, `p-4`), `Sidebar.tsx:18` (`w-[320px]`
+**Preconditions, all six cells:** Guided presentation; a brief with **`products.length > 0`**;
+the **Review** step (so the dock is absent under **D43**); the default derived ratio, which is
+**1:1** — `ReviewStep.tsx:121` passes `undefined` as the explicit ratio, so 9:16 is *not* the
+common case (**L7**). Record the browser and version. For each cell record two numbers: the
+computed width of the `<dl>` summary column and of the `<figure>`, plus a yes/no that **every Edit
+button is clickable**. Open the YAML split from the ⋯ menu.
+
+These are Review-step widths, so no rail width is Derived from `(shell)/layout.tsx:31` (`gap-4`, `p-4`), `Sidebar.tsx:18` (`w-[320px]`
 at ≥`lg`), `BriefEditor.tsx:1085` (`max-w-5xl`, `sm:p-8`) and the YAML split at `:1230` (`w-96`).
 
 | Viewport | YAML split closed | YAML split open |
@@ -158,9 +179,9 @@ at ≥`lg`), `BriefEditor.tsx:1085` (`max-w-5xl`, `sm:p-8`) and the YAML split a
 | 1280 px | 848 px | 464 px |
 | 1024 px | 592 px | **208 px** |
 
-At 208 px every candidate cap still zeroes the summary while `lg:` forces two columns. That is an
-argument for moving the two-column split to `xl:`, or suppressing it while the split is open — a
-question §5 leaves open rather than settling here.
+**Only the 208 px cell fails** `minmax(0,20rem)`: at 1024 px with the split closed the summary is
+a healthy 592 px, so moving the two-column line to `xl:` would stack a case that works. §6
+question 2 records the two reviewers' disagreement about the remedy.
 
 **Repro conditions**, so a reviewer does not miss the defect: Guided presentation only
 (`renderStepCard` is called only in that branch), and a brief with **at least one product**
@@ -200,20 +221,36 @@ question §5 leaves open rather than settling here.
 
 ## 6. Open questions for review
 
-1. **The `xl` breakpoint is viewport-based, so the dock appears at 1280 px into a content row of
-   only ~912 px.** H1 and the dock's breakpoint are coupled: once a 256 px rail joins the row, wide
-   content inside the main column pushes the column rather than scrolling inside it. Should the
-   dock move to a container query, or to a higher breakpoint?
-2. **At 1024 px with the YAML split open the summary is 208 px and collapses regardless of the
-   cap.** Move the two-column split to `xl:`, or suppress the split while the preview is on?
-3. **Is `PreviewStrip` worth mounting at all?** At `h-16` the picture is ~36 px wide at 9:16; a 15 %
-   ken-burns excursion is ~5 px and `headline-rise` is 0.1 px. Below `xl` the motion carries no
-   information. Mounting it costs a second live `CreativePreview` in the DOM at all times — every
-   keystroke runs `fitHeadline` twice — and a collision with `FloatingBar` (**M7**). The honest
-   alternative is to ship the dock alone and delete the strip.
-4. **Should the Review figure become `PreviewDock`'s `PreviewPicture`?** D43 keeps them separate
-   surfaces, but they are byte-identical wrappers today. Sharing the component removes the drift
-   risk; keeping them apart keeps Review's layout independent.
+Two independent reviews (§8) answered all four. They agree on three; the disagreement on
+question 2 is recorded rather than resolved.
+
+1. **The `xl` breakpoint is viewport-based**, so the dock appears at 1280 px into a content row of
+   only ~912 px — and once a 256 px rail joins the row, wide content pushes the column rather than
+   scrolling inside it. H1 and the dock's breakpoint are coupled.
+   → **Both reviewers: a container query on the editor row, not a higher viewport breakpoint.** A
+   viewport bump still lies once the YAML split is open. *Recommended.*
+
+2. **At 1024 px with the YAML split open the summary is 208 px and collapses regardless of the cap.**
+   → **The reviewers disagree.** agy: *suppress the YAML split while the preview is on* — the
+   product preview outranks a developer-facing data view. grok: *neither* — 1024 px **closed** is a
+   healthy 592 px, so moving the two-column line to `xl:` would stack a working case, and a
+   developer tool should not be suppressed; instead drive the Review grid to one column by
+   container query below ~36 rem. **grok's reading is the better-evidenced one** (it is the only
+   one consistent with the corrected matrix), but this is a product call and is left open.
+
+3. **Is `PreviewStrip` worth mounting at all?** — **this now gates R7.4.**
+   → **Both reviewers: no — drop it.** At `h-16` a 9:16 picture is ~36 px wide; `headline-rise`'s
+   `translateY(3px)` is ~0.1 CSS px on this canvas. It costs a second live `CreativePreview` (a
+   second `fitHeadline` per keystroke), collides with `FloatingBar` (**M9**), and breaks **D43**
+   unless extra suppression and a distinct accessible name are added. *Recommended: delete.*
+
+4. **Should the Review figure become `PreviewDock`'s `PreviewPicture`?**
+   → **Both reviewers: yes, share it.** The two copies have already drifted — same `ratio` prop
+   name, two meanings (**C1**). Sharing removes the drift; Review keeps its own layout by passing a
+   different `className`. Mind the double-derivation trap when doing it.
+
+5. **Is an untouched default product previewable?** `blankBrief` seeds one default-blue product, so
+   `products.length === 0` (the **M3** guard) is not the same state as "nothing worth drawing yet".
 
 ---
 
@@ -225,3 +262,41 @@ question §5 leaves open rather than settling here.
 | Lane table (`:132`, `:145`) | R1.3 and R7.1 are one lane, not two (**D49**). R1.3 never landed; `ReviewStep.tsx` is byte-for-byte what W8 shipped in #144. |
 | Order (`:147`) | R7's stated rationale — *"so the dock is not mounted against a verb model about to change"* — was satisfied by R6. The real constraint is **R5**, which rewrites the editor's mount. |
 | §5 open question 2 | *"Should `cf:brief` survive D37"* is answered by D37's own wording and is settled in R5's brief, not here. |
+
+---
+
+## 8. Review record
+
+Two independent reviews of this plan at `2219ed5`, run in isolated read-only worktrees, by models
+different from each other and from the author.
+
+| Reviewer | Model | Verdict | Findings |
+|---|---|---|---|
+| agy | Gemini 3.1 Pro | not safe as written | 1 blocker, 1 minor, 2 nits |
+| grok | grok-4.6 (high) | not safe as written | 1 blocker, 6 major, 4 minor, 5 nits |
+
+**Both independently found the same blocker** — the §4 width matrix mixed dock-present and
+dock-absent states, giving 3 of 6 cells the wrong box. Both derived the same correction
+(960/848/592 closed). It is fixed above.
+
+What the reviews changed, beyond the matrix:
+
+- **D43 did not actually cover `PreviewStrip`**, so the plan simultaneously required "exactly one
+  composed preview" and mounted a second rail. Question 3 now gates R7.4.
+- **D50 aimed the fill-mode at the wrong file, and M5 had the keyframe backwards.**
+  `kf-ken-burns-in` runs `scale(1) → scale(1.15)`; the fix belongs on `CreativePreview.tsx`'s
+  animation class, because `globals.css`'s keyframes are shared with `infinite` rules that never end.
+- **`M7` named two different defects** (this plan's strip/bar collision and the parent plan's
+  transform trap). Renumbered to **M9**.
+- **The sequencing was wrong**: R5 has no PR, and R7.1 does not depend on the routing model, so the
+  user-visible cap no longer waits on it. Split into PR A and PR B.
+- **The `FormatPanel` loop was mis-framed** as a budget hole; it is an allowed *instance* of an
+  existing kind. Left alone, with a warning not to "fix" it.
+- **M3's `/brief/new` contrast was false** — that route seeds a default product. The guard keys on
+  `products.length === 0`.
+- **The DoD browser check was not reproducible**: no ratio, no platform, no browser, no recorded
+  measurement, and the dock's presence unstated. Now a six-cell checklist with preconditions.
+
+Corrections to the *author's own* errors are listed because they are the point of the exercise:
+`GB-D20` was a citation this plan invented and then "corrected", and "byte-identical" overstated a
+similarity that matters precisely because the two call sites differ.
