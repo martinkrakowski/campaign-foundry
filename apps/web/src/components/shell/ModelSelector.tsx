@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useRun } from "@/lib/run-context";
 import { MODELS, labelFor } from "@/lib/models";
 import { cn } from "@/lib/cn";
@@ -28,6 +28,7 @@ export interface ModelSelectorProps {
 export function ModelSelector({ onModelChange }: ModelSelectorProps) {
   const { selectedModel, setSelectedModel, brief } = useRun();
   const [open, setOpen] = useState(false);
+  const dialogId = `model-selector-${useId()}`;
 
   // A product with `inputAsset` reuses that image and skips the selected model for
   // that product — but only when the asset resolves and is readable server-side;
@@ -42,6 +43,10 @@ export function ModelSelector({ onModelChange }: ModelSelectorProps) {
         type="button"
         onClick={() => setOpen(true)}
         aria-haspopup="dialog"
+        aria-expanded={open}
+        // Only while the dialog exists — a relationship pointing at nothing is a
+        // broken one (the rule Disclosure and OverflowMenu already follow).
+        {...(open ? { "aria-controls": dialogId } : {})}
         title={modelSelectorTriggerTitle}
         className="flex min-w-0 max-w-[9rem] items-center gap-1.5 truncate whitespace-nowrap rounded-full border border-border-control bg-surface-2 px-3 py-1 font-mono text-[11px] text-text-primary transition-colors hover:border-border-control-hover sm:max-w-none"
       >
@@ -61,6 +66,7 @@ export function ModelSelector({ onModelChange }: ModelSelectorProps) {
       )}
       {open && (
         <ModelModal
+          dialogId={dialogId}
           selected={selectedModel}
           onSelect={(id) => {
             setSelectedModel(id);
@@ -76,10 +82,12 @@ export function ModelSelector({ onModelChange }: ModelSelectorProps) {
 
 /** Model picker. Closes on backdrop click, the × button, or Escape; traps focus. */
 function ModelModal({
+  dialogId,
   selected,
   onSelect,
   onClose,
 }: {
+  dialogId: string;
   selected: string | null;
   onSelect: (id: string | null) => void;
   onClose: () => void;
@@ -123,6 +131,7 @@ function ModelModal({
       ref={dialogRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/80 p-8 backdrop-blur-sm"
       onClick={onClose}
+      id={dialogId}
       role="dialog"
       aria-modal="true"
       aria-label={modelSelectorDialogLabel}

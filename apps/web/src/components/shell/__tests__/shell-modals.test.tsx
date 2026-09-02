@@ -330,3 +330,16 @@ describe("BriefPicker when the prompt is accepted", () => {
     await waitFor(() => expect(screen.queryByText("Create new")).toBeNull());
   });
 });
+
+describe("the model trigger names the dialog it controls (WCAG 4.1.2)", () => {
+  test("aria-controls exists only while the dialog does, and matches its id", async () => {
+    const user = userEvent.setup();
+    renderWithRun(<ModelSelector />);
+    const trigger = screen.getByRole("button", { name: /model/i });
+    expect(trigger.getAttribute("aria-controls")).toBeNull();
+    await user.click(trigger);
+    const dialog = screen.getByRole("dialog");
+    expect(trigger.getAttribute("aria-controls")).toBe(dialog.id);
+    expect(dialog.id).not.toBe("");
+  });
+});
