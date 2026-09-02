@@ -7,6 +7,7 @@ import {
   type CopyTimeline,
   type MotionKind,
 } from "@campaignfoundry/CampaignOrchestration";
+import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
 const ratio = (v = "1:1") => {
@@ -144,7 +145,9 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
     if (!shortAlone || !longAlone) throw new Error("missing natural layout");
 
     // SHORT fits at its natural size; LONG must shrink on this deep-inset cell.
-    expect(shortAlone.fontSize).toBe(Math.round(1080 * 0.06));
+    expect(shortAlone.fontSize).toBe(
+      Math.round(base.ratio.width * CREATIVE_GEOMETRY.headlineTypeWidthFraction),
+    );
     expect(longAlone.fontSize).toBeLessThan(shortAlone.fontSize);
 
     // D6: the sequence is laid at the LONG text's smaller natural size — SHORT
