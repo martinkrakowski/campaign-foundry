@@ -55,8 +55,11 @@ export function CreateCampaignDialog() {
     try {
       const result = await createCampaign({ name, targetRegion, targetAudience, mode });
       // A blocked store is not a create: stay open and say so. Do not throw — the
-      // typed answers must still be here for a retry.
+      // typed answers must still be here for a retry. Dismiss the two-way first:
+      // Start over calls this path while the overlay is up, and the status line
+      // lives on the form underneath it.
       if (result === null) {
+        setResumePrompt(false);
         setRefusal(messages.createCampaignBlocked);
         return;
       }

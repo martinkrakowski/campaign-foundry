@@ -264,6 +264,33 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     expect(screen.queryAllByRole("dialog", { name: messages.resumeDraftTitle })).toHaveLength(0);
   });
 
+  test("Start over with a blocked store shows the refusal on the form and publishes nothing", async () => {
+    stashAbandonedDraft();
+    const user = userEvent.setup();
+    renderDialog();
+    const prompt = await raiseTwoWay(user);
+
+    const setItem = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    try {
+      await user.click(within(prompt).getByRole("button", { name: messages.resumeDraftStartOver }));
+
+      expect(await screen.findByRole("status")).toBeTruthy();
+      expect(screen.getByRole("status").textContent).toBe(messages.createCampaignBlocked);
+      // The two-way must come down: the status line lives on the form it covers.
+      expect(screen.queryByRole("dialog", { name: messages.resumeDraftTitle })).toBeNull();
+      expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "Summer Spark",
+      );
+      expect(nextMock().router.push).not.toHaveBeenCalled();
+      expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    } finally {
+      setItem.mockRestore();
+    }
+  });
+
   test("a stored but pristine draft asks nothing — a pristine draft holds no work to lose", async () => {
     saveDraftToStorage(initialEditorState());
     const user = userEvent.setup();
