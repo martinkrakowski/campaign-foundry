@@ -4,12 +4,14 @@ import { type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { RunProvider, useRun } from "@/lib/run-context";
 import { EditorDirtyProvider } from "@/lib/editor-dirty-context";
+import { CreateCampaignProvider } from "@/lib/create-campaign-context";
 import { EditorPanelsProvider } from "@/lib/editor-panels-context";
 import { Header } from "@/components/shell/Header";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { CommandBar } from "@/components/shell/CommandBar";
 import { TelemetryDrawer } from "@/components/shell/TelemetryDrawer";
 import { BriefPicker } from "@/components/shell/BriefPicker";
+import { CreateCampaignDialog } from "@/components/shell/CreateCampaignDialog";
 
 /**
  * The primary application shell: persistent header, brief/asset sidebar, the
@@ -25,22 +27,30 @@ export default function ShellLayout({ children }: { children: ReactNode }) {
   return (
     <RunProvider>
       <EditorDirtyProvider>
-        <EditorPanelsProvider>
-        <div className="flex h-full flex-col">
-          <Header />
-          <div className="relative z-0 flex flex-1 gap-4 overflow-hidden bg-background p-4">
-            <Sidebar />
-            {/* min-w-0: let this flex child shrink below its content's intrinsic width,
-                so a wide child (e.g. the compliance table's min-width) scrolls inside
-                its own container instead of stretching the whole column past the viewport. */}
-            <main className="relative flex h-full min-w-0 flex-1 flex-col">
-              <div className="relative flex-1 overflow-auto rounded-xl">{children}</div>
-              <TelemetrySlot showOrchestrator={showOrchestrator} />
-            </main>
+        {/* W1 — the create moment's open state and seed channel, one provider under
+            the guard so every entry point can ask (D67) and then open the dialog. */}
+        <CreateCampaignProvider>
+          <EditorPanelsProvider>
+          <div className="flex h-full flex-col">
+            <Header />
+            <div className="relative z-0 flex flex-1 gap-4 overflow-hidden bg-background p-4">
+              <Sidebar />
+              {/* min-w-0: let this flex child shrink below its content's intrinsic width,
+                  so a wide child (e.g. the compliance table's min-width) scrolls inside
+                  its own container instead of stretching the whole column past the viewport. */}
+              <main className="relative flex h-full min-w-0 flex-1 flex-col">
+                <div className="relative flex-1 overflow-auto rounded-xl">{children}</div>
+                <TelemetrySlot showOrchestrator={showOrchestrator} />
+              </main>
+            </div>
           </div>
-        </div>
-        <BriefPicker />
-        </EditorPanelsProvider>
+          {/* The two shell overlays share this layer: the picker closes before the
+              create dialog opens (F22 — two DialogShells at one layer stack two
+              scrims and two key handlers). */}
+          <BriefPicker />
+          <CreateCampaignDialog />
+          </EditorPanelsProvider>
+        </CreateCampaignProvider>
       </EditorDirtyProvider>
     </RunProvider>
   );

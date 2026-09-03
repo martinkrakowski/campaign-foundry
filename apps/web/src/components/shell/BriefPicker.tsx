@@ -5,6 +5,7 @@ import { Button, Input, MiniChip, DialogShell, DialogHead, DialogBody, DialogFoo
 import { duplicateBrief, listBriefs, unknownErrorMessage, type BriefEntry } from "@/lib/briefs-api";
 import { useRouter } from "next/navigation";
 import { useRun } from "@/lib/run-context";
+import { useCreateCampaign } from "@/lib/create-campaign-context";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 
 // Mirrors CampaignOrchestration SAFE_ID_PATTERN. Value-importing the package
@@ -21,6 +22,7 @@ export function BriefPicker() {
   const router = useRouter();
   const { briefPickerOpen, closeBriefPicker, brief: current } = useRun();
   const { guardedAction } = useGuardedNavigation();
+  const { openCreateDialog } = useCreateCampaign();
   const [entries, setEntries] = useState<BriefEntry[] | null>(null);
   const [error, setError] = useState(false);
   const [actionError, setActionError] = useState<string | undefined>();
@@ -65,41 +67,58 @@ export function BriefPicker() {
     });
   };
 
+  /**
+   * W1 (D66/D67): the row opens the create dialog. The guard asks once, before the
+   * dialog opens, and the picker closes first (F22): two `DialogShell`s at the same
+   * layer stack two scrims and two Escape handlers.
+   */
   const createNew = () => {
     guardedAction(() => {
-      router.push("/brief/new");
       closeBriefPicker();
+      openCreateDialog();
     });
   };
 
-  const confirmDuplicate = async () => {
+  /**
+   * D67 — ask, then write, for Duplicate too: the whole async sequence lives inside
+   * ONE guarded action, so the write cannot precede the question. The callback owns
+   * its own `duplicating` flag and error line — a parked action runs after this
+   * handler has returned, so an outer `finally` would clear the flag before the
+   * user had even answered. And there is no nested guard on the navigation: the
+   * guard does not clear the dirty flag, so a second `guardedAction` here would
+   * park again and ask "Unsaved edits" a second time for one gesture.
+   */
+  const confirmDuplicate = () => {
     /* istanbul ignore next -- the form only renders while a target is selected */
     if (!duplicateTarget) return;
     if (!BRIEF_ID_PATTERN.test(duplicateId)) {
       setActionError("New id must be a path-safe slug (lowercase letters, digits, hyphens; max 64).");
       return;
     }
-    setDuplicating(true);
     setActionError(undefined);
-    try {
-      await duplicateBrief(duplicateTarget.brief.id, duplicateId);
-      try {
-        setEntries(await listBriefs());
-      } catch {
-        /* list refresh is best-effort; the copy still exists */
-      }
-      // D37: the copy is opened by navigating to it, through the same guard —
-      // setting the shell's brief from here would leave the URL describing
-      // whichever brief was open before.
-      guardedAction(() => {
-        router.push(`/brief/${duplicateId}`);
-        closeBriefPicker();
-      });
-    } catch (err) {
-      setActionError(unknownErrorMessage(err, "Duplicate failed"));
-    } finally {
-      setDuplicating(false);
-    }
+    guardedAction(() => {
+      void (async () => {
+        setDuplicating(true);
+        try {
+          await duplicateBrief(duplicateTarget.brief.id, duplicateId);
+          try {
+            setEntries(await listBriefs());
+          } catch {
+            /* list refresh is best-effort; the copy still exists */
+          }
+          // D37: the copy is opened by navigating to it — setting the shell's brief
+          // from here would leave the URL describing whichever brief was open before.
+          // No second guard here: `guardedAction` does not clear the dirty flag, so a
+          // nested one would park again and ask "Unsaved edits" a second time.
+          router.push(`/brief/${duplicateId}`);
+          closeBriefPicker();
+        } catch (err) {
+          setActionError(unknownErrorMessage(err, "Duplicate failed"));
+        } finally {
+          setDuplicating(false);
+        }
+      })();
+    });
   };
 
   return (

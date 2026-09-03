@@ -3,6 +3,9 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRun, exerciseFocusTrap, json, mockPipelineApi, EMPTY_REPORT } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
+import { CreateCampaignProvider } from "@/lib/create-campaign-context";
+import { CreateCampaignDialog } from "../CreateCampaignDialog";
+import * as messages from "@/components/campaign/messages";
 import { ModelSelector } from "../ModelSelector";
 import { createElement, useEffect } from "react";
 import { RunProvider } from "@/lib/run-context";
@@ -241,7 +244,13 @@ describe("BriefPicker with unsaved editor changes", () => {
       createElement(
         RunProvider,
         null,
-        createElement(EditorDirtyProvider, null, createElement(RaiseDirty), createElement(BriefPicker)),
+        createElement(
+          EditorDirtyProvider,
+          null,
+          createElement(RaiseDirty),
+          // W1: the create dialog is mounted beside the picker, as the layout does.
+          createElement(CreateCampaignProvider, null, createElement(BriefPicker), createElement(CreateCampaignDialog)),
+        ),
       ),
     );
   };
@@ -265,7 +274,7 @@ describe("BriefPicker with unsaved editor changes", () => {
     expect(screen.getByText("demo.yaml")).toBeTruthy();
   });
 
-  test("refusing the prompt on Start from scratch also leaves the picker open", async () => {
+  test("refusing the prompt on Create new also leaves the picker open (W1)", async () => {
     const user = userEvent.setup();
     routeBriefs({ briefs: [] });
     renderDirty();
@@ -276,6 +285,9 @@ describe("BriefPicker with unsaved editor changes", () => {
 
     await user.click(within(dialog).getByRole("button", { name: "Stay" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull());
+    // D67: a refusal opens nothing — the create dialog never appeared.
+    expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull();
+    expect(screen.getByText("Create new")).toBeTruthy();
   });
 });
 
@@ -292,7 +304,13 @@ describe("BriefPicker when the prompt is accepted", () => {
       createElement(
         RunProvider,
         null,
-        createElement(EditorDirtyProvider, null, createElement(RaiseDirty), createElement(BriefPicker)),
+        createElement(
+          EditorDirtyProvider,
+          null,
+          createElement(RaiseDirty),
+          // W1: the create dialog is mounted beside the picker, as the layout does.
+          createElement(CreateCampaignProvider, null, createElement(BriefPicker), createElement(CreateCampaignDialog)),
+        ),
       ),
     );
   };
@@ -315,7 +333,7 @@ describe("BriefPicker when the prompt is accepted", () => {
     await waitFor(() => expect(screen.queryByText("demo.yaml")).toBeNull());
   });
 
-  test("accepting on Create new closes the picker too", async () => {
+  test("accepting on Create new closes the picker and opens the create dialog (W1)", async () => {
     const user = userEvent.setup();
     mockPipelineApi({
       result: (url) => (url.includes("/campaigns/briefs") ? json({ briefs: [] }) : json(EMPTY_REPORT)),
@@ -327,7 +345,10 @@ describe("BriefPicker when the prompt is accepted", () => {
     expect(dialog).toBeTruthy();
 
     await user.click(within(dialog).getByRole("button", { name: "Leave" }));
+    // W1 (D66/D67): consent closes the picker and opens the create dialog — the
+    // navigation itself happens at the dialog's Create, with a plain push.
     await waitFor(() => expect(screen.queryByText("Create new")).toBeNull());
+    expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
   });
 });
 
