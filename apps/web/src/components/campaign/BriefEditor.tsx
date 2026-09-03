@@ -1282,6 +1282,9 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               href="/brief/new"
               className="underline hover:text-text-emphasis"
               onClick={(e) => {
+                // A modified or non-primary click is the browser's to handle — new tab, new
+                // window, download. Only a plain activation is ours to route through the guard.
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                 // W1 (D66/D67): the door is the create dialog, not a direct
                 // navigation — and the guard asks first. No editor is mounted here
                 // (M3), so the guard is silent and the dialog opens at once.

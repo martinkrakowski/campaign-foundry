@@ -3432,6 +3432,22 @@ describe("the route is the source of truth (D37)", () => {
     expect(nextMock().router.push).not.toHaveBeenCalled();
   });
 
+  test.each(["metaKey", "ctrlKey", "shiftKey", "altKey", "button"] as const)(
+    "a %s click on the unknown-id new-brief link is left to the browser",
+    async (modifier) => {
+      routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+      renderWithRun(<Editor id="ghost" />);
+      expect(await screen.findByText(messages.briefNotFound("ghost"))).toBeTruthy();
+      const link = screen.getByRole("link", { name: messages.briefNotFoundNew });
+      const allowed = fireEvent.click(link, {
+        [modifier]: modifier === "button" ? 1 : true,
+      });
+      // fireEvent returns false when preventDefault ran — a modified click must not.
+      expect(allowed).toBe(true);
+      expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull();
+    },
+  );
+
   test("a malformed id is refused by the same rule the Save-as backstop enforces", async () => {
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<Editor id="Not Safe" />);
