@@ -31,6 +31,7 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
+  vi.restoreAllMocks();
 });
 
 /** Copy a fixture into the temp briefs dir (optionally transformed) and return its path. */
@@ -301,5 +302,7 @@ describe("the brief boundary keeps the D15 authoring leniency in the listing (D6
     const listed = await store.listBriefs();
     expect(listed.map((entry) => entry.file)).not.toContain("list-region.yaml");
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("list-region.yaml"));
+    warn.mockRestore();
+    expect(vi.isMockFunction(console.warn)).toBe(false);
   });
 });
