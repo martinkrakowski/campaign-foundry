@@ -352,6 +352,22 @@ describe("authoring briefs", () => {
     expect(existsSync(campYaml())).toBe(false);
   });
 
+  // D68 — shape, not just presence. Without the parser's scalar check this route
+  // answers 201 and persists a brief that crashes the editor on reload, so the
+  // status alone is a real assertion; the message pins which check refused it.
+  test.each([
+    ["a list-typed targetRegion", { targetRegion: ["DE", "US"] }],
+    ["a numeric targetRegion", { targetRegion: 1 }],
+  ])("POST rejects %s with 400 (D68)", async (_label, over) => {
+    const { create } = await api();
+    const res = await create()(jsonReq("http://x/campaigns/briefs", "POST", brief(over)));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(
+      /"targetRegion" must be a string or null/,
+    );
+    expect(existsSync(campYaml())).toBe(false);
+  });
+
   test("POST surfaces an unexpected write error", async () => {
     const { create } = await api();
     const { getBriefStore } = await import("../../../lib/ports/index.js");

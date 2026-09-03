@@ -175,6 +175,21 @@ describe("POST /campaigns/plan", () => {
     expect(((await res.json()) as { error: string }).error).toMatch(/missing required field/);
   });
 
+  // D68 — the parser's scalar shape check, pinned on a VARIATION fixture: a classic
+  // brief 400s with "not a variation brief" immediately after the parse block, so a
+  // status-only assertion on a classic fixture could never go red. The message must
+  // name the parser's check — "not a variation brief" would mean the shape check never ran.
+  test.each([
+    ["a list-typed targetRegion", ["DE", "US"]],
+    ["a numeric targetRegion", 1],
+  ])("returns 400 with the parser's message for %s (D68)", async (_label, region) => {
+    const res = await call(variationBrief({ targetRegion: region }));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(
+      /"targetRegion" must be a string or null/,
+    );
+  });
+
   test("returns 400 with a default message when body parsing throws a non-Error", async () => {
     const g = globalThis as Record<string, unknown>;
     const original = g.readBody;
