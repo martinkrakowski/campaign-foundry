@@ -62,4 +62,18 @@ describe("takeSeed — the baton is spent by a read", () => {
     expect(takeSeed()).toBeNull();
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
   });
+
+  // A parse is not a check: syntactically valid JSON that is not a seed must
+  // still spend the key, so a bad baton cannot poison the next mount.
+  test.each([
+    ["a non-string field", { name: 42, targetRegion: "EU", targetAudience: "trail runners", mode: "brief" }],
+    ["a missing field", { name: "Summer Spark", targetRegion: "EU", mode: "brief" }],
+    ["an unknown mode", { name: "Summer Spark", targetRegion: "EU", targetAudience: "trail runners", mode: "classic" }],
+    ["a JSON array", ["Summer Spark", "EU"]],
+    ["a bare string", "Summer Spark"],
+  ] as const)("answers null on %s and still spends the key", (_label, value) => {
+    localStorage.setItem(CREATE_SEED_KEY, JSON.stringify(value));
+    expect(takeSeed()).toBeNull();
+    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+  });
 });

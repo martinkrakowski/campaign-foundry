@@ -3635,6 +3635,20 @@ describe("the create seed (W1)", () => {
     expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe("trail runners");
   });
 
+  test("a malformed seed leaves a working blank editor rather than throwing", async () => {
+    routes({});
+    // Syntactically valid, structurally not a seed — takeSeed must spend it as null.
+    localStorage.setItem(CREATE_SEED_KEY, JSON.stringify({ name: 42 }));
+    nextMock().nav.pathname = "/brief/new";
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect(screen.getByLabelText(messages.campaignNameLabel)).toBeTruthy());
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("");
+    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(messages.campaignNameLabel), "spark");
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("spark");
+  });
+
   test("a seed published while a named brief is open is not applied in place", async () => {
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<Editor id="camp" />);

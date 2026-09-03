@@ -1,6 +1,6 @@
 "use client";
 
-import type { CampaignMode } from "@/components/campaign/editor-state";
+import { MODE_OPTIONS, type CampaignMode } from "@/components/campaign/editor-state";
 
 /**
  * D65 — create is a seam, not a POST. The dialog hands the four Identity answers to
@@ -56,13 +56,27 @@ function publishSeed(input: CreateCampaignInput): boolean {
   return true;
 }
 
+/** Minimal shape guard for a seed restored from storage (don't trust hand-edited JSON). */
+function isStoredSeed(value: unknown): value is CreateCampaignInput {
+  if (typeof value !== "object" || value === null) return false;
+  const seed = value as Partial<CreateCampaignInput>;
+  return (
+    typeof seed.name === "string" &&
+    typeof seed.targetRegion === "string" &&
+    typeof seed.targetAudience === "string" &&
+    typeof seed.mode === "string" &&
+    (MODE_OPTIONS as readonly string[]).includes(seed.mode)
+  );
+}
+
 /** Read and clear the seed. Reading it is what spends it. */
 export function takeSeed(): CreateCampaignInput | null {
   try {
     const raw = localStorage.getItem(CREATE_SEED_KEY);
     localStorage.removeItem(CREATE_SEED_KEY);
     if (raw === null) return null;
-    return JSON.parse(raw) as CreateCampaignInput;
+    const parsed: unknown = JSON.parse(raw);
+    return isStoredSeed(parsed) ? parsed : null;
   } catch {
     return null;
   }
