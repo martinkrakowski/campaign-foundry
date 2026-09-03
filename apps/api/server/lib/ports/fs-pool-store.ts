@@ -88,6 +88,15 @@ export class FsPoolStore implements PoolStorePort {
     return copied;
   }
 
+  async deletePool(briefId: string): Promise<void> {
+    try {
+      await unlink(this.poolPath(briefId));
+    } catch (error) {
+      if (isErrno(error, "ENOENT")) return;
+      throw error;
+    }
+  }
+
   withPoolLock<T>(briefId: string, fn: () => Promise<T>): Promise<T> {
     const previous = this.lockChains.get(briefId) ?? Promise.resolve();
     const run = previous.then(fn, fn);

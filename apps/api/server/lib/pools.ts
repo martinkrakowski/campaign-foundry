@@ -30,6 +30,11 @@ export async function copyPool(fromBriefId: string, toBriefId: string): Promise<
   return getPoolStore().copyPool(fromBriefId, toBriefId);
 }
 
+/** Remove `briefs/<briefId>/pools.json` through the pool store port; a missing file is a no-op. */
+export async function deletePool(briefId: string): Promise<void> {
+  await getPoolStore().deletePool(briefId);
+}
+
 /** Serialise read→merge→write sections per brief within this process. */
 export function withPoolLock<T>(briefId: string, fn: () => Promise<T>): Promise<T> {
   return getPoolStore().withPoolLock(briefId, fn);

@@ -154,4 +154,17 @@ describe("FsPoolStore", () => {
     await expect(store.copyPool("camp", "copy")).rejects.toThrow("Refusing to write through a symlink.");
     expect(existsSync(join(elsewhere, "pools.json"))).toBe(false);
   });
+
+  test("deletePool removes pools.json and is a no-op when it is already absent", async () => {
+    await store.writePool(pool());
+    await store.deletePool("camp");
+    expect(await store.readPool("camp")).toBeUndefined();
+    expect(existsSync(join(dir, "camp", "pools.json"))).toBe(false);
+    await expect(store.deletePool("camp")).resolves.toBeUndefined();
+  });
+
+  test("deletePool rethrows a non-ENOENT filesystem error", async () => {
+    mkdirSync(join(dir, "camp", "pools.json"), { recursive: true });
+    await expect(store.deletePool("camp")).rejects.toThrow(/EPERM|EISDIR/);
+  });
 });

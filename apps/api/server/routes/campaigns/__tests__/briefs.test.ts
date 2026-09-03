@@ -731,6 +731,16 @@ describe("authoring briefs", () => {
   test("duplicate 409s without overwriting a pre-existing dest file", async () => {
     mkdirSync(join(dir, "briefs"), { recursive: true });
     writeFileSync(campYaml(), validBrief.replace("id: good", "id: camp"));
+    mkdirSync(yamlPath("camp"), { recursive: true });
+    writeFileSync(
+      yamlPath("camp", "pools.json"),
+      JSON.stringify({
+        briefId: "camp",
+        generatedAt: "2026-01-01T00:00:00.000Z",
+        model: "m",
+        entries: [{ id: "h1", text: "Stay wild", status: "approved" }],
+      }),
+    );
     const dest = yamlPath("copy.yaml");
     writeFileSync(dest, "UNPARSED");
     const { duplicate } = await api();
@@ -739,6 +749,8 @@ describe("authoring briefs", () => {
     );
     expect(res.status).toBe(409);
     expect(readFileSync(dest, "utf8")).toBe("UNPARSED");
+    // createBrief is wx; writing the dest pool first left an orphan here
+    expect(existsSync(yamlPath("copy", "pools.json"))).toBe(false);
   });
 
   test("duplicate surfaces an unexpected write error", async () => {
@@ -864,6 +876,26 @@ describe("authoring briefs", () => {
       expect(existsSync(yamlPath("camp-copy", "pools.json"))).toBe(false);
     });
 
+    test("duplicate of a brief without a pool removes a leftover dest pool", async () => {
+      const { create, duplicate } = await api();
+      await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+      mkdirSync(yamlPath("camp-copy"), { recursive: true });
+      writeFileSync(
+        yamlPath("camp-copy", "pools.json"),
+        JSON.stringify({
+          briefId: "camp-copy",
+          generatedAt: "2026-01-01T00:00:00.000Z",
+          model: "m",
+          entries: [{ id: "stale", text: "orphan", status: "approved" }],
+        }),
+      );
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "camp-copy" }),
+      );
+      expect(res.status).toBe(201);
+      expect(existsSync(yamlPath("camp-copy", "pools.json"))).toBe(false);
+    });
+
     test("duplicate of a brief whose source pool is malformed answers 422", async () => {
       const { create, duplicate } = await api();
       await create()(jsonReq("http://x/campaigns/briefs", "POST", pooledSource()));
@@ -877,6 +909,7 @@ describe("authoring briefs", () => {
         /^Copy pool briefs\/camp\/pools\.json is invalid: not JSON/,
       );
       expect(existsSync(yamlPath("dest.yaml"))).toBe(false);
+      expect(existsSync(yamlPath("dest", "pools.json"))).toBe(false);
     });
 
     test("overrides win over the source (D71)", async () => {
@@ -981,11 +1014,9 @@ describe("authoring briefs", () => {
       expect(existsSync(join(elsewhere, "copy.yaml"))).toBe(false);
     });
 
-    // The copy order is assets, then pool, then the brief LAST — a partial
-    // failure leaves inert prefixes and never a listed brief missing its pool.
-    // The orphaned pool it does leave is the documented gap (a fresh create
-    // under the same id would adopt it; a re-run of the duplicate self-heals).
-    test("a failure after the pool copy leaves no listed brief", async () => {
+    // The dest pool is written only after createBrief succeeds, so a failure
+    // at createBrief leaves no listed brief and no dest pool.
+    test("a failure at createBrief leaves no listed brief and no dest pool", async () => {
       const { create, duplicate, list } = await api();
       await create()(jsonReq("http://x/campaigns/briefs", "POST", pooledSource()));
       poolFile("camp");
@@ -999,9 +1030,8 @@ describe("authoring briefs", () => {
       spy.mockRestore();
       expect(res.status).toBe(500);
       expect(existsSync(yamlPath("camp-fail.yaml"))).toBe(false);
-      // the brief is written last, so the listed set never contains a brief
-      // missing its pool; the copied pool is the inert prefix (documented gap)
-      expect(await getPoolStore().readPool("camp-fail")).toBeDefined();
+      expect(await getPoolStore().readPool("camp-fail")).toBeUndefined();
+      expect(existsSync(yamlPath("camp-fail", "pools.json"))).toBe(false);
       const listed = await list()(new Request("http://x/campaigns/briefs"));
       const json = (await listed.json()) as { briefs: { brief: { id: string } }[] };
       expect(json.briefs.map((entry) => entry.brief.id)).toEqual(["camp"]);

@@ -85,6 +85,11 @@ export interface PoolStorePort {
   copyPool(fromBriefId: string, toBriefId: string): Promise<CopyPool | undefined>;
 
   /**
+   * Remove the pool stored under `briefId`. Idempotent: a missing file is a no-op.
+   */
+  deletePool(briefId: string): Promise<void>;
+
+  /**
    * Serialise read→merge→write sections per brief within this process, so a
    * concurrent POST/PATCH always merges into the latest file instead of
    * clobbering the other request's entries. Errors in `fn` do not poison the chain.

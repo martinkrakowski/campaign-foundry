@@ -6,7 +6,14 @@ import {
 } from "../../../../lib/asset-files.js";
 import { isExistsError, SYMLINK_WRITE_ERROR } from "../../../../lib/brief-files.js";
 import { assertSafeId, parseBrief } from "../../../../lib/load-brief.js";
-import { copyPool, InvalidCopyPoolError, isPoolDirSymlink, withPoolLock } from "../../../../lib/pools.js";
+import {
+  copyPool,
+  deletePool,
+  InvalidCopyPoolError,
+  isPoolDirSymlink,
+  readPool,
+  withPoolLock,
+} from "../../../../lib/pools.js";
 import { getAssetStore, getBriefStore } from "../../../../lib/ports/index.js";
 
 /** The duplicate contract's overrides: `targetRegion` and `targetAudience` only. */
@@ -99,6 +106,13 @@ export default defineEventHandler(async (event) => {
         throw existErr;
       }
 
+      // Resolve the source pool first so a malformed source throws
+      // InvalidCopyPoolError before any dest write (the 422 path must leave
+      // the destination brief absent). createBrief is exclusive (wx); writing
+      // the dest pool first left an orphan when the dest file existed but was
+      // unparseable — findBriefById skips those, then wx turns into a 409.
+      const sourcePool = await readPool(id);
+
       // Copy assets from source brief to new brief, and any referenced brief-scoped assets
       const sourceMap = await getAssetStore().copyAssets(id, newId);
       brief = rewriteAssetPaths(brief, id, newId, sourceMap);
@@ -108,15 +122,19 @@ export default defineEventHandler(async (event) => {
         brief = rewriteAssetPaths(brief, fromId, newId, addMap);
       }
 
-      // The pool copy runs under withPoolLock(newId) as well as the brief lock
-      // above: they are different maps (lib/pools vs the brief store), so without
-      // it a concurrent POST /campaigns/pools/:newId could interleave with the
-      // copy. The source pool needs no lock: writePool renames atomically.
-
-
-      await withPoolLock(newId, () => copyPool(id, newId));
-
-      return await getBriefStore().createBrief(brief);
+      const created = await getBriefStore().createBrief(brief);
+      // The dest pool write (or the stale-pool delete when the source has none)
+      // runs under withPoolLock(newId) as well as the brief lock: they are
+      // different maps, so without it a concurrent POST /campaigns/pools/:newId
+      // could interleave. The source pool needs no lock: writePool renames atomically.
+      await withPoolLock(newId, async () => {
+        if (sourcePool) {
+          await copyPool(id, newId);
+        } else {
+          await deletePool(newId);
+        }
+      });
+      return created;
     });
     setResponseStatus(event, 201);
     return { file: created.file, brief: created.brief };
