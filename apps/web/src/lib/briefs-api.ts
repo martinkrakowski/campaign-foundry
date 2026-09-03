@@ -211,11 +211,25 @@ export async function updateBrief(
   return asBriefEntry(await requestJson(`${API}/campaigns/briefs/${encodeURIComponent(id)}${query}`, jsonInit("PUT", brief)));
 }
 
-export async function duplicateBrief(id: string, newId: string): Promise<BriefEntry> {
+/**
+ * D71 — the duplicate contract's overrides, exactly the route's own: region and
+ * audience only. Anything else (notably `mode`) is a 400 — the copy inherits the
+ * source's mode.
+ */
+export interface DuplicateOverrides {
+  readonly targetRegion?: string;
+  readonly targetAudience?: string;
+}
+
+export async function duplicateBrief(
+  id: string,
+  newId: string,
+  overrides?: DuplicateOverrides,
+): Promise<BriefEntry> {
   return asBriefEntry(
     await requestJson(
       `${API}/campaigns/briefs/${encodeURIComponent(id)}/duplicate`,
-      jsonInit("POST", { newId }),
+      jsonInit("POST", { newId, overrides }),
     ),
   );
 }

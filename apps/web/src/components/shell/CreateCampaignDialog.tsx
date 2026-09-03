@@ -7,9 +7,11 @@ import { ModePanel } from "@/components/ui/mode-panel";
 import { Field, REGION_OPTIONS } from "@/components/campaign/sections/IdentitySection";
 import { stashStep } from "@/lib/use-step-navigation";
 import { createCampaign } from "@/lib/create-campaign";
+import { isBriefsApiError } from "@/lib/briefs-api";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
-import { hasRecoverableDraft, type CampaignMode } from "@/components/campaign/editor-state";
+import { hasRecoverableDraft, slugify, type CampaignMode } from "@/components/campaign/editor-state";
+import { StartFromExistingPicker, type StartFromSource } from "@/components/shell/StartFromExistingPicker";
 import * as messages from "@/components/campaign/messages";
 
 /** The step Create lands on (D66) — the baton's payload, spent by the editor's mount. */
@@ -34,6 +36,10 @@ export function CreateCampaignDialog() {
   const [targetRegion, setTargetRegion] = useState("");
   const [targetAudience, setTargetAudience] = useState("");
   const [mode, setMode] = useState<CampaignMode>("brief");
+  // W2 (D71) — the chosen start-from source, `null` (a blank create) being both the
+  // default and the resting state. The mode rides along for the readout only: the
+  // copy inherits the source's mode, so the dialog's own choice is not sent.
+  const [source, setSource] = useState<StartFromSource | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [resumePrompt, setResumePrompt] = useState(false);
@@ -45,6 +51,7 @@ export function CreateCampaignDialog() {
     setTargetRegion("");
     setTargetAudience("");
     setMode("brief");
+    setSource(null);
     setRefusal(null);
     setResumePrompt(false);
   };
@@ -53,11 +60,18 @@ export function CreateCampaignDialog() {
     setRefusal(null);
     setCreating(true);
     try {
-      const result = await createCampaign({ name, targetRegion, targetAudience, mode });
+      const result = await createCampaign({
+        name,
+        targetRegion,
+        targetAudience,
+        mode,
+        source: source?.id,
+      });
       // A blocked store is not a create: stay open and say so. Do not throw — the
       // typed answers must still be here for a retry. Dismiss the two-way first:
       // Start over calls this path while the overlay is up, and the status line
-      // lives on the form underneath it.
+      // lives on the form underneath it. (The storage refusal is the blank path's
+      // story alone — the source path rejects instead, into the catch below.)
       if (result === null) {
         setResumePrompt(false);
         setRefusal(messages.createCampaignBlocked);
@@ -68,9 +82,24 @@ export function CreateCampaignDialog() {
       // Anywhere else: the step baton crosses the navigation this push causes, and
       // the editor's mount effect spends it. Never both — the baton is spent by a
       // read, so an unspent one would move the next mount's cursor.
-      if (pathname !== "/brief/new") stashStep(COPY_STEP);
+      //
+      // W2: the baton is the blank create's landing branch only. A source create
+      // publishes no seed (so no seed effect) and opens the copy itself.
+      if (!source && pathname !== "/brief/new") stashStep(COPY_STEP);
       closeAndReset();
       router.push(result.route);
+    } catch (err) {
+      // W2 — the source path's refusals are the API's, not the storage's: the seam
+      // lets the BriefsApiError reach this catch (a 409 collision, a 500, a dropped
+      // connection) and never returns `null`, so the blank path's contract is not
+      // overloaded. A refused create keeps the dialog open, answers in the status
+      // line, and leaves the typed answers here for a retry.
+      setResumePrompt(false);
+      setRefusal(
+        isBriefsApiError(err) && err.status === 409
+          ? messages.createCampaignDuplicateConflict
+          : messages.createCampaignDuplicateFailed,
+      );
     } finally {
       setCreating(false);
     }
@@ -82,14 +111,21 @@ export function CreateCampaignDialog() {
     // land the user on Copy with a hole in the very step this dialog is. One
     // progressive sentence, first missing field wins; region and audience reuse the
     // Identity step's own strings, and the name's is this dialog's one new sentence.
+    //
+    // W2 adds a second name refusal, source-only: the copy's own name is derived
+    // from this one, and a name with no letters or numbers derives nothing — refused
+    // here, BEFORE the request. This is a derivability check, not a derivation: no
+    // slug is computed for display (D65); the seam derives the id itself.
     const missing =
       name.trim() === ""
         ? messages.campaignNameRequired
-        : targetRegion.trim() === ""
-          ? messages.targetRegion
-          : targetAudience.trim() === ""
-            ? messages.targetAudience
-            : null;
+        : source && slugify(name) === ""
+          ? messages.campaignNameNotSluggable
+          : targetRegion.trim() === ""
+            ? messages.targetRegion
+            : targetAudience.trim() === ""
+              ? messages.targetAudience
+              : null;
     if (missing !== null) {
       setRefusal(missing);
       return;
@@ -107,7 +143,12 @@ export function CreateCampaignDialog() {
     // No capture-before-the-guard is needed: `guardedAction` never clears the flag and
     // no navigation has happened, so the value at press time is the value at gesture
     // start — and the gesture starts at four call sites this dialog does not own.
-    if (hasRecoverableDraft() && !(isDirty && pathname === "/brief/new")) {
+    //
+    // W2 — source creates skip the two-way entirely: no seed is published, so the
+    // abandoned draft is not at risk, and the prompt would lie — "Start over" would
+    // duplicate the source and leave the draft untouched, while "Resume" would
+    // silently discard the chosen source.
+    if (!source && hasRecoverableDraft() && !(isDirty && pathname === "/brief/new")) {
       setResumePrompt(true);
       return;
     }
@@ -176,8 +217,31 @@ export function CreateCampaignDialog() {
               }}
             />
           </Field>
+          {/* W2 (D71) — the source list. Choosing is a selection, not a navigation,
+           *  and the blank row is where the dialog rests. */}
+          <Field fieldKey="startFrom" label={messages.startFromExistingLabel} as="div">
+            <StartFromExistingPicker
+              selectedId={source?.id ?? null}
+              onSelect={(next) => {
+                setSource(next);
+                setRefusal(null);
+              }}
+            />
+          </Field>
+          {/* W2 — the mode field is a readout while a source is chosen: the copy
+           *  inherits the source's mode (the route refuses a mode override, for a
+           *  reason it documents), and a sentence can say so. Never a disabled
+           *  control — DESIGN.md §5 lets only work in flight disable one; the raw
+           *  mode goes through the display label at the call site, as validate.ts
+           *  does. Deselecting the source restores the live toggle. */}
           <Field fieldKey="createMode" label={messages.createModeLabel} as="div">
-            <ModePanel mode={mode} onSetMode={setMode} />
+            {source ? (
+              <p className="text-[13px] text-text-muted">
+                {messages.createModeInherited(source.mode === "variation" ? "Randomized" : "Classic")}
+              </p>
+            ) : (
+              <ModePanel mode={mode} onSetMode={setMode} />
+            )}
           </Field>
         </DialogBody>
         <DialogFoot>

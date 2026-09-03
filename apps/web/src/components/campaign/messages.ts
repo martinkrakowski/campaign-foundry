@@ -888,3 +888,53 @@ export const resumeDraftQuestion =
 export const resumeDraftResume = "Resume draft";
 /** The two-way's proceed answer: the create the user originally asked for. */
 export const resumeDraftStartOver = "Start over";
+
+/* ── Start from an existing campaign (W2 / D71) ───────────────────────────── */
+
+/** The picker's label, over the source list and its blank default row. */
+export const startFromExistingLabel = "Start from an existing campaign";
+/**
+ * The default row — no source chosen. A blank create is the common case, so it is
+ * the selection the dialog opens with, not a choice the user must make.
+ */
+export const startFromExistingBlank = "Start from a blank campaign";
+/** While the source list is on its way. */
+export const startFromExistingLoading = "Loading campaigns…";
+/** An empty store is not an error: it means this create will be the first campaign. */
+export const startFromExistingEmpty = "No campaigns yet — this create will be the first one.";
+/** The list could not be read (M3: name the fact, offer the way out). */
+export const startFromExistingError =
+  "Could not load the campaign list — nothing can be started from right now. Close this window and try again.";
+/** One row's meta line: products, treatments and region, exactly as the brief picker derives them. */
+export function startFromRowMeta(
+  productCount: number,
+  treatmentCount: number,
+  region: string,
+): string {
+  return `${productCount} product${productCount === 1 ? "" : "s"} · ${treatmentCount} treatment${treatmentCount === 1 ? "" : "s"} · ${region}`;
+}
+/**
+ * The mode field becomes this sentence while a source is chosen: the copy inherits
+ * the source's mode (the duplicate route refuses a mode override, for a reason it
+ * documents), and the wizard can change it. A sentence, never a disabled toggle —
+ * DESIGN.md §5 lets only work in flight disable a control.
+ */
+export function createModeInherited(mode: string): string {
+  return `This copy starts as a ${mode} campaign — change it in the wizard.`;
+}
+/**
+ * The name refusal a source create adds: the copy's own name is derived from this
+ * one, and a name with no letters or numbers ("!!!") derives nothing — refused
+ * here, before the request, instead of failing at the route.
+ */
+export const campaignNameNotSluggable =
+  "That name has no letters or numbers in it, so it can't name a copy — use at least one letter or number.";
+/**
+ * `create.duplicate.conflict` — the derived name already names a campaign (a 409).
+ * Distinct from `createCampaignBlocked`, whose private-window story is false here.
+ */
+export const createCampaignDuplicateConflict =
+  "A campaign with that name already exists — change the campaign name and create again.";
+/** Any other refused duplicate (a server failure, a dropped connection): nothing was created. */
+export const createCampaignDuplicateFailed =
+  "Could not start from the chosen campaign — nothing was created. Try again.";
