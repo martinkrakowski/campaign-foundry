@@ -216,14 +216,16 @@ export function CreateCampaignDialog() {
           <p className="text-[13px] text-text-muted">{messages.resumeDraftQuestion}</p>
         </DialogBody>
         <DialogFoot className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={cancelResumePrompt}>
+          <Button type="button" variant="ghost" size="sm" disabled={creating} onClick={cancelResumePrompt}>
             {messages.confirmCancel}
           </Button>
-          <Button type="button" variant="secondary" size="sm" onClick={handleResume}>
+          <Button type="button" variant="secondary" size="sm" disabled={creating} onClick={handleResume}>
             {messages.resumeDraftResume}
           </Button>
-          {/* The user's original intent, confirmed once the risk is named. */}
-          <Button type="button" size="sm" onClick={runCreate}>
+          {/* The user's original intent, confirmed once the risk is named.
+           *  Same in-flight hold as the form's Create: a second press would
+           *  republish the seed, and under D64(b) mint a second campaign. */}
+          <Button type="button" size="sm" disabled={creating} isLoading={creating} onClick={runCreate}>
             {messages.resumeDraftStartOver}
           </Button>
         </DialogFoot>

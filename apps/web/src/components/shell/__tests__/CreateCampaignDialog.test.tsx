@@ -6,6 +6,7 @@ import { CREATE_SEED_KEY } from "@/lib/create-campaign";
 import { ShellProviders, nextMock } from "@/__tests__/helpers";
 import { editorReducer, initialEditorState, saveDraftToStorage } from "@/components/campaign/editor-state";
 import * as messages from "@/components/campaign/messages";
+import * as createCampaignLib from "@/lib/create-campaign";
 import { CreateCampaignDialog } from "../CreateCampaignDialog";
 
 /** Opens the dialog the way the shell's entry points do, so the closed state is real. */
@@ -262,6 +263,31 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     expect(localStorage.getItem("cf:step-handoff")).toBe("copy");
     // One gesture, one answer: the seed's publication must not re-ask.
     expect(screen.queryAllByRole("dialog", { name: messages.resumeDraftTitle })).toHaveLength(0);
+  });
+
+  test("two activations of Start over create once — the in-flight disable holds the second", async () => {
+    stashAbandonedDraft();
+    const user = userEvent.setup();
+    // Hold the seam so the second press lands while `creating` is still true.
+    // `setCreating(true)` runs in this click handler, so React flushes the
+    // disabled re-render before the next click; a same-frame pair is the
+    // overwrite-latch case, not this one.
+    let release!: (value: { id: string; route: string }) => void;
+    const held = new Promise<{ id: string; route: string }>((resolve) => {
+      release = resolve;
+    });
+    const create = vi.spyOn(createCampaignLib, "createCampaign").mockReturnValue(held);
+
+    renderDialog();
+    const prompt = await raiseTwoWay(user);
+    const startOver = within(prompt).getByRole("button", { name: messages.resumeDraftStartOver });
+    await user.click(startOver);
+    await user.click(startOver);
+
+    expect(create).toHaveBeenCalledTimes(1);
+    release({ id: "", route: "/brief/new" });
+    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledTimes(1));
+    expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new");
   });
 
   test("Start over with a blocked store shows the refusal on the form and publishes nothing", async () => {

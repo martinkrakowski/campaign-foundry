@@ -2357,3 +2357,11 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Test:** recoverable draft present, storage refusing, Start over pressed → sentence visible, two-way gone, form still open, no seed. Mutation: leave `resumePrompt` set → that test fails (two-way still on screen). Restored.
 - **Verification (gate order, committed tree):** build 7/7, typecheck 7/7, lint 0 problems, lint:arch compliant, `test:cov` **175 files, 3001 passed — 100% on all four counters (7684/7684 stmts, 5622/5622 branch, 1638/1638 funcs, 6897/6897 lines)**; `sync:check` on the committed tree; push. No new PR, no merge.
 
+### 2026-09-03 — PR #186: Start over can double-fire
+
+- **Mode:** Implementer. Branch `feat/w3-seed-draft-guard`, PR #186. `briefs/` and `assets/inputs/` untouched; no dev servers, no curl.
+- **Finding:** the two-way's Start over (`CreateCampaignDialog.tsx:226`) had no in-flight guard. The form's Create at `:196` binds `disabled={creating} isLoading={creating}`; Start over called `runCreate` without consuming `creating`, so a second press re-entered the same closure, republished the seed, and would mint two campaigns once the seam POSTs (D64(b)). No `useRef` latch: `setCreating(true)` is in a discrete click handler, so React flushes the disabled re-render before the next click (unlike the Save-as overwrite case, same-frame re-entry).
+- **Fix:** mirror `:196` on Start over; `disabled={creating}` on the two-way's Cancel and Resume so the prompt cannot be dismissed mid-write.
+- **Test:** two activations of Start over while the seam is held → one `createCampaign`, one `router.push`. Mutation: remove Start over's `disabled={creating} isLoading={creating}` → that test fails (`expected 1, received 2`). Restored.
+- **Verification (gate order, committed tree):** build 7/7, typecheck 7/7, lint 0 problems, lint:arch compliant, `test:cov` **175 files, 3002 passed — 100% on all four counters (7684/7684 stmts, 5622/5622 branch, 1638/1638 funcs, 6897/6897 lines)**; `sync:check` on the committed tree; push. No new PR, no merge.
+
