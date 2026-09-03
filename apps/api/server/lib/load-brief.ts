@@ -558,6 +558,20 @@ export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): Campaig
       throw new Error(`Campaign brief is missing required field: "${field}".`);
     }
   }
+  // Shape, not just presence (D68): a list or object where a scalar belongs would be
+  // persisted by the authoring routes and then crash the editor's `.trim()` and the
+  // copy route on reload, while the image adapters silently delimit it. `null` and ""
+  // stay legal: a YAML `targetAudience:` with no value parses to null, and listBriefs
+  // skips any file whose parse throws, so rejecting null would make an operator's
+  // half-written brief vanish from the picker (D15 leniency). Both parse modes.
+  for (const field of ["targetRegion", "targetAudience", "campaignMessage", "localizedMessage"] as const) {
+    const value = record[field];
+    if (typeof value !== "string" && value != null) {
+      throw new Error(
+        `Campaign brief field "${field}" must be a string or null; got ${JSON.stringify(value)}.`,
+      );
+    }
+  }
   // The brief id is the campaign's persisted-report filename (per-campaign reload), so
   // enforce the same path-safe slug as product/treatment ids — an unsafe id would run
   // but never persist/reload per-campaign.
@@ -565,8 +579,14 @@ export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): Campaig
   if (!Array.isArray(record.products)) {
     throw new Error('Campaign brief field "products" must be an array.');
   }
-  for (const p of record.products) {
-    assertSafeId((p as Record<string, unknown>)?.id, "Product id");
+  for (let i = 0; i < record.products.length; i += 1) {
+    const product = record.products[i];
+    if (!isPlainObject(product)) {
+      throw new Error(
+        `Campaign brief field "products[${i}]" must be an object; got ${JSON.stringify(product)}.`,
+      );
+    }
+    assertSafeId(product.id, "Product id");
   }
   validateTreatments(record.treatments);
   validateStyle(record.style);

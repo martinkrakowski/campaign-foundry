@@ -51,6 +51,55 @@ describe("parseBrief", () => {
     expect(() => parseBrief(input)).toThrow(message);
   });
 
+  describe("scalar shape checks (D68 — shape, not just presence)", () => {
+    test.each([
+      ["a list-typed targetRegion", { ...valid, targetRegion: ["DE", "US"] }, '"targetRegion" must be a string or null; got ["DE","US"]'],
+      ["a numeric targetRegion", { ...valid, targetRegion: 1 }, '"targetRegion" must be a string or null; got 1'],
+      ["a boolean targetRegion", { ...valid, targetRegion: true }, '"targetRegion" must be a string or null; got true'],
+      ["an object targetRegion", { ...valid, targetRegion: { code: "DE" } }, '"targetRegion" must be a string or null; got {"code":"DE"}'],
+      ["a numeric targetAudience", { ...valid, targetAudience: 7 }, '"targetAudience" must be a string or null; got 7'],
+      ["an array campaignMessage", { ...valid, campaignMessage: ["Hi"] }, '"campaignMessage" must be a string or null; got ["Hi"]'],
+      ["a numeric localizedMessage", { ...valid, localizedMessage: 3 }, '"localizedMessage" must be a string or null; got 3'],
+    ])("rejects %s in authoring mode", (_label, input, message) => {
+      expect(() => parseBrief(input)).toThrow(message);
+    });
+
+    test("rejects a list-typed targetRegion in enforcing mode too", () => {
+      expect(() =>
+        parseBrief({ ...valid, targetRegion: ["DE", "US"] }, { enforceCapabilities: true }),
+      ).toThrow('"targetRegion" must be a string or null; got ["DE","US"]');
+    });
+
+    test("a numeric targetRegion is refused in enforcing mode — array-only narrowing would leave the .trim() crash open", () => {
+      expect(() => parseBrief({ ...valid, targetRegion: 1 }, { enforceCapabilities: true })).toThrow(
+        '"targetRegion" must be a string or null; got 1',
+      );
+    });
+
+    test("null and empty string stay legal — the D15 authoring leniency", () => {
+      expect(parseBrief({ ...valid, targetAudience: null }).targetAudience).toBeNull();
+      expect(parseBrief({ ...valid, targetAudience: "" }).targetAudience).toBe("");
+      expect(parseBrief({ ...valid, localizedMessage: null }).localizedMessage).toBeNull();
+      // A brief with no localizedMessage key parses exactly as before.
+      expect(parseBrief(valid).localizedMessage).toBeUndefined();
+    });
+
+    test.each([
+      ["a string entry", ["hydra"], 'products[0]" must be an object; got "hydra"'],
+      ["a null entry", [null], 'products[0]" must be an object; got null'],
+      ["a numeric entry", [1], 'products[0]" must be an object; got 1'],
+      ["an array entry", [["hydra"]], 'products[0]" must be an object; got ["hydra"]'],
+      ["a later non-object entry", [{ id: "alpha" }, "hydra"], 'products[1]" must be an object; got "hydra"'],
+    ])("products with %s names the entry and its index, not the missing id", (_label, products, message) => {
+      expect(() => parseBrief({ ...valid, products })).toThrow(message);
+      expect(() => parseBrief({ ...valid, products })).toThrow(/products\[\d+\]" must be an object/);
+    });
+
+    test("an empty products array still parses — the run path refuses it at MINIMUM_PRODUCTS", () => {
+      expect(parseBrief({ ...valid, products: [] }).products).toEqual([]);
+    });
+  });
+
   test("validates optional treatments structurally", () => {
     expect(() => parseBrief({ ...valid, treatments: "x" })).toThrow(/"treatments" must be an array/);
     expect(() => parseBrief({ ...valid, treatments: [{ id: "Bad", layout: "headline-top", tone: "bold" }] })).toThrow(
