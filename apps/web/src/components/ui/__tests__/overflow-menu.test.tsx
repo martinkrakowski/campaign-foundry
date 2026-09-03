@@ -81,8 +81,8 @@ describe("OverflowMenu", () => {
   });
 
   test("the panel is already gone by the time the action runs", async () => {
-    // `handleRevert` calls window.confirm, which blocks the thread synchronously —
-    // under React's ordinary batching the panel would still be painted behind it.
+    // The action may mount a dialog from its own handler; under React's ordinary
+    // batching the panel would still be painted behind it when that runs.
     let menuWhileActing: HTMLElement | null = null;
     const { user } = setup([
       { label: "Revert", onSelect: () => { menuWhileActing = screen.queryByRole("menu"); } },

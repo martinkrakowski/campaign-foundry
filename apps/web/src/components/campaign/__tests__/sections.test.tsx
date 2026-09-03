@@ -555,7 +555,7 @@ describe("ProductsSection", () => {
     const dispatch = vi.fn();
     const s = state();
     const key = s.products[0].key;
-    render(<ProductsSection state={s} dispatch={dispatch} errors={{ products: "need two" }} />);
+    render(<ProductsSection state={s} dispatch={dispatch} errors={{ products: "need two" }} onChooseFromBin={vi.fn()} />);
 
     expect(screen.getByText("need two")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Add product" }));
@@ -578,7 +578,7 @@ describe("ProductsSection", () => {
     const user = userEvent.setup();
     const dispatch = vi.fn();
     const s = state({ products: [{ key: 1, id: "hydra", name: "Hydra", primaryColor: "#1473E6", logoPath: "", inputAsset: "", idTouched: false }] });
-    render(<ProductsSection state={s} dispatch={dispatch} errors={{}} />);
+    render(<ProductsSection state={s} dispatch={dispatch} errors={{}} onChooseFromBin={vi.fn()} />);
 
     const editBtn = screen.getByRole("button", { name: "Edit product ID" });
     expect(editBtn).toBeTruthy();
@@ -592,7 +592,7 @@ describe("ProductsSection", () => {
 
   test("a one-product classic campaign is not warned as incomplete", () => {
     const s = state({ mode: "brief", products: [emptyProduct(1)] });
-    render(<ProductsSection state={s} dispatch={vi.fn()} errors={{}} />);
+    render(<ProductsSection state={s} dispatch={vi.fn()} errors={{}} onChooseFromBin={vi.fn()} />);
     expect(screen.queryByText(/Classic mode needs/)).toBeNull();
   });
 
@@ -600,7 +600,7 @@ describe("ProductsSection", () => {
     const dispatch = vi.fn();
     mockFetch(() => json({ path: "assets/inputs/camp/alpha-logo.png" }, 201));
     const s = state();
-    render(<ProductsSection state={s} dispatch={dispatch} errors={{}} />);
+    render(<ProductsSection state={s} dispatch={dispatch} errors={{}} onChooseFromBin={vi.fn()} />);
 
     await uploadFile(logoInput());
 
@@ -617,7 +617,7 @@ describe("ProductsSection", () => {
     const dispatch = vi.fn();
     mockFetch(() => json({ error: "exists" }, 409));
     const s = state();
-    render(<ProductsSection state={s} dispatch={dispatch} errors={{}} />);
+    render(<ProductsSection state={s} dispatch={dispatch} errors={{}} onChooseFromBin={vi.fn()} />);
 
     await uploadFile(logoInput());
 
@@ -633,7 +633,7 @@ describe("ProductsSection", () => {
   test("any other upload failure is surfaced in the section", async () => {
     mockFetch(() => json({ error: "disk full" }, 500));
     const s = state();
-    render(<ProductsSection state={s} dispatch={vi.fn()} errors={{}} />);
+    render(<ProductsSection state={s} dispatch={vi.fn()} errors={{}} onChooseFromBin={vi.fn()} />);
 
     await uploadFile(logoInput());
 
@@ -643,7 +643,7 @@ describe("ProductsSection", () => {
   test("the Upload button opens the hidden file input", async () => {
     const user = userEvent.setup();
     const s = state();
-    render(<ProductsSection state={s} dispatch={vi.fn()} errors={{}} />);
+    render(<ProductsSection state={s} dispatch={vi.fn()} errors={{}} onChooseFromBin={vi.fn()} />);
     const input = logoInput();
     const click = vi.spyOn(input, "click");
     await user.click(screen.getAllByText("Upload")[0]);
@@ -652,7 +652,7 @@ describe("ProductsSection", () => {
 
   test("a change event with no file selected does nothing", () => {
     const s = state();
-    render(<ProductsSection state={s} dispatch={vi.fn()} errors={{}} />);
+    render(<ProductsSection state={s} dispatch={vi.fn()} errors={{}} onChooseFromBin={vi.fn()} />);
     const input = logoInput();
     const before = vi.mocked(globalThis.fetch).mock.calls.length;
     input.dispatchEvent(new Event("change", { bubbles: true }));
@@ -673,20 +673,20 @@ describe("ProductsSection", () => {
       Array.from(html.matchAll(/\s(?:id|data-[\w-]+)="([^"]*)"/g)).map((m) => m[1]);
     const first = initialEditorState();
     const second = initialEditorState();
-    const html1 = renderToString(<ProductsSection state={first} dispatch={vi.fn()} errors={{}} />);
-    const html2 = renderToString(<ProductsSection state={second} dispatch={vi.fn()} errors={{}} />);
+    const html1 = renderToString(<ProductsSection state={first} dispatch={vi.fn()} errors={{}} onChooseFromBin={vi.fn()} />);
+    const html2 = renderToString(<ProductsSection state={second} dispatch={vi.fn()} errors={{}} onChooseFromBin={vi.fn()} />);
     expect(ssrFileIds(html2)).toEqual(ssrFileIds(html1));
     expect(ssrFileIds(html1)).toHaveLength(first.products.length);
 
     // The same tree keyed differently (41) must render the same ids — if an
     // id embedded its product key, moving the keys would move the ids.
     const keyed: EditorState = { ...initialEditorState(), products: [emptyProduct(41)] };
-    const html3 = renderToString(<ProductsSection state={keyed} dispatch={vi.fn()} errors={{}} />);
+    const html3 = renderToString(<ProductsSection state={keyed} dispatch={vi.fn()} errors={{}} onChooseFromBin={vi.fn()} />);
     expect(ssrFileIds(html3)).toEqual(ssrFileIds(html1));
 
     const container = document.createElement("div");
     container.innerHTML = html1;
-    const { unmount } = render(<ProductsSection state={first} dispatch={vi.fn()} errors={{}} />, {
+    const { unmount } = render(<ProductsSection state={first} dispatch={vi.fn()} errors={{}} onChooseFromBin={vi.fn()} />, {
       hydrate: true,
       container,
     });

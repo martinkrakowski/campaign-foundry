@@ -8,7 +8,6 @@ import type { EditorState, EditorAction } from "@/components/campaign/editor-sta
 import type { FieldErrors } from "@/components/campaign/validate";
 import { SectionShell, Field } from "./IdentitySection";
 import { LogoField } from "@/components/campaign/LogoField";
-import { AssetPickerDrawer } from "@/components/campaign/AssetPickerDrawer";
 import { uploadAsset, isBriefsApiError, unknownErrorMessage } from "@/lib/briefs-api";
 import { assetFileName, fileToBase64 } from "@/components/campaign/editor-state";
 
@@ -144,14 +143,23 @@ export function ProductsSection({
   state,
   dispatch,
   errors,
+  onChooseFromBin,
 }: {
   state: EditorState;
   dispatch: Dispatch<EditorAction>;
   errors: FieldErrors;
+  /**
+   * M7 — the Asset Bin drawer is not rendered here. The guided step card carries a
+   * permanent transform (the walk's animation), which makes it the CONTAINING BLOCK
+   * for `fixed` descendants: a drawer mounted inside it would be trapped in the card
+   * instead of covering the viewport. The drawer lives at `BriefEditor`'s root (the
+   * same hoist `HeadlinePoolDrawer` has), so this section publishes only the request
+   * — the product key whose logo the bin would fill.
+   */
+  onChooseFromBin: (key: number) => void;
 }) {
   const [uploadError, setUploadError] = useState<string | undefined>();
   const [uploadingKeys, setUploadingKeys] = useState<ReadonlySet<number>>(new Set());
-  const [assetPickerKey, setAssetPickerKey] = useState<number | null>(null);
 
   const onLogoFile = async (key: number, productId: string, file: File) => {
     setUploadError(undefined);
@@ -208,27 +216,10 @@ export function ProductsSection({
           dispatch={dispatch}
           uploadingKeys={uploadingKeys}
           onLogoFile={onLogoFile}
-          onChooseFromBin={(key) => setAssetPickerKey(key)}
+          onChooseFromBin={() => onChooseFromBin(product.key)}
           errors={errors}
         />
       ))}
-
-      {assetPickerKey !== null ? (
-        <AssetPickerDrawer
-          briefId={state.briefId}
-          open={true}
-          onClose={() => setAssetPickerKey(null)}
-          selectedPath={state.products.find((p) => p.key === assetPickerKey)?.logoPath}
-          onSelect={(asset) => {
-            dispatch({
-              type: "setProduct",
-              key: assetPickerKey,
-              patch: { logoPath: `assets/inputs/${state.briefId}/${asset.name}` },
-            });
-            setAssetPickerKey(null);
-          }}
-        />
-      ) : null}
     </SectionShell>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useReducer, useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect, type ReactNode, type RefObject } from "react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { Button, Input, SegBar, OverflowMenu, useDialogFocusTrap } from "@/components/ui";
+import { Button, Input, SegBar, OverflowMenu, ConfirmDialog, useDialogFocusTrap } from "@/components/ui";
 import { useRun } from "@/lib/run-context";
 import { useRouter } from "next/navigation";
 import { dump } from "js-yaml";
@@ -64,6 +64,7 @@ import {
 import { cn } from "@/lib/cn";
 import { BriefSelector } from "@/components/campaign/BriefSelector";
 import { HeadlinePoolDrawer } from "@/components/campaign/HeadlinePoolDrawer";
+import { AssetPickerDrawer } from "@/components/campaign/AssetPickerDrawer";
 import { ModePanel } from "@/components/ui/mode-panel";
 import { SectionOutline } from "@/components/ui/section-outline";
 import { EstimatePanel } from "@/components/campaign/EstimatePanel";
@@ -75,8 +76,6 @@ import { PreviewDock } from "./PreviewDock";
 import { previewDockProps } from "./preview-props";
 import * as messages from "./messages";
 import type { CampaignMode } from "@/components/campaign/editor-state";
-
-const LEAVE_PROMPT = "You have unsaved changes. Are you sure you want to leave?";
 
 /* ── Guided presentation (W6) ─────────────────────────────────────────────── */
 
@@ -181,6 +180,15 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const [saving, setSaving] = useState(false);
   const [persistError, setPersistError] = useState<string | undefined>();
   const [saveAsId, setSaveAsId] = useState<string | null>(null);
+  // D9 — the Save-as overwrite decision, parked between attempt and answer. Set when
+  // the first write attempt finds the id taken (the listing knew, or the API's 409
+  // said so); the dialog's confirm is what sends `{ replace: true }`.
+  const [pendingOverwrite, setPendingOverwrite] = useState<string | null>(null);
+  // Synchronous latch for the overwrite retry. `saving` is React state, so a second
+  // confirm in the same frame still reads the pre-setSaving closure and would POST
+  // `{ replace: true }` twice and run `adoptSavedCopy` twice. The ref is set at
+  // entry and cleared in `finally` — a `saving` check is the stale-closure trap.
+  const overwriteInFlightRef = useRef(false);
   // The Save-as dialog's field: where the invalid-id guard hands focus back (D3).
   const saveAsFieldRef = useRef<HTMLInputElement | null>(null);
   const saveAsDialogRef = useRef<HTMLDivElement | null>(null);
@@ -215,6 +223,16 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     persistRailView(next);
   }, []);
   const [poolDrawerOpen, setPoolDrawerOpen] = useState(false);
+  // M7 — which product opened the Asset Bin. The drawer itself renders at this
+  // component's root, outside the transformed step card: the card is the containing
+  // block for `fixed` descendants, so a drawer mounted inside it (as ProductsSection
+  // once did) could never cover the viewport in Guided. Same hoist, same reason as
+  // the headline pool drawer above.
+  const [assetPickerKey, setAssetPickerKey] = useState<number | null>(null);
+  // D14 — the replace confirmation's parked action, the two-phase form of the old
+  // synchronous `window.confirm` gate: a dirty draft ends the gesture here, the
+  // ConfirmDialog asks, and the confirm (or the refusal) finishes the story.
+  const [pendingReplace, setPendingReplace] = useState<(() => void) | null>(null);
   // L1.1: Touched/attempted state for error display gating
   const [touched, setTouched] = useState<Set<string>>(new Set());
   // D1: a control that is not a `Field` (an axis card, a chip, a stepper) still means
@@ -684,9 +702,23 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     // sectionErrors only reads what `errors` already covers.
   }, [state, errors, policyErrors, setPanels, touchSectionFromEvent, presentation, unknownId]);
 
-  /** Every path that replaces the draft goes through the same D14 confirmation. */
-  const confirmReplace = (): boolean =>
-    isPristine(state) || !isDirtySinceSave(state) || window.confirm(LEAVE_PROMPT);
+  /**
+   * Every path that replaces the draft goes through the same D14 confirmation — now
+   * two-phase. `window.confirm` blocked the thread synchronously, which is the defect
+   * family the kit's ConfirmDialog exists for: a dirty draft parks the action in
+   * `pendingReplace` and the dialog asks (the shell's own "Unsaved edits" pattern —
+   * one prompt, a refusal changes nothing, and re-triggering never stacks a second
+   * question, DESIGN.md §5). A clean draft acts at once. Callers fire-and-forget —
+   * the parked action is the contract; the old boolean "did it proceed?" is gone.
+   */
+  const requestReplace = (action: () => void): void => {
+    if (isPristine(state) || !isDirtySinceSave(state)) {
+      action();
+      return;
+    }
+    // Never stack: a second trigger while one question stands changes nothing.
+    setPendingReplace((prev) => prev ?? action);
+  };
 
   /**
    * D37: picking a brief is navigating to it — the same act the shell's picker
@@ -704,20 +736,22 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     // Already on the blank route: there is nowhere to navigate to, so empty the form in
     // place. `guardedPush` would be a no-op on the same URL and nothing would reset.
     if (blank) {
-      if (!confirmReplace()) return;
       // H6: the blank route's draft key is stable, so the discarded draft occupies
       // the very key a reload would restore from — purge it here, where the reset
       // makes the editor pristine and autosave will not refill it (the L1 rule).
-      purgeDraftFromStorage(state);
-      // No entry means `fromBrief` produces a "new" source, which is what a blank draft is.
-      dispatch({ type: "load", brief: blankBrief() });
-      // L1.1: New brief resets touched/attempted
-      setAttempted(false);
-      setTouched(new Set());
-      setTouchedSections(new Set());
+      // No entry means `fromBrief` produces a "new" source, which is what a blank
+      // draft is.
+      requestReplace(() => {
+        purgeDraftFromStorage(state);
+        dispatch({ type: "load", brief: blankBrief() });
+        // L1.1: New brief resets touched/attempted
+        setAttempted(false);
+        setTouched(new Set());
+        setTouchedSections(new Set());
+      });
       return;
     }
-    // guardedPush carries the unsaved-changes prompt, so confirmReplace here would ask
+    // guardedPush carries the unsaved-changes prompt, so requestReplace here would ask
     // the same question twice.
     guardedPush("/brief/new");
   };
@@ -812,6 +846,31 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     }
   };
 
+  /**
+   * D37 — the copy is adopted once, for both Save-as attempts (the first, and the
+   * overwrite retry): a copy that took the id this route already names is loaded
+   * in place — the SERVER's stored brief, whose asset paths were rewritten during
+   * the copy and whose revision is the guard for the next save (an absent revision
+   * leaves the guard untouched, the `save` action's rule) — and any other copy is
+   * adopted by navigating to it, the route driving the load. The listing is
+   * refreshed first, so the route's load finds the copy the moment the URL changes.
+   * H5: Save as… also moves the route out from under the wizard, so the step is
+   * stashed across the segment change.
+   */
+  const adoptSavedCopy = async (created: BriefEntry) => {
+    purgeDraftFromStorage(state);
+    if (created.brief.id === routeId) {
+      dispatch({ type: "load", brief: created.brief, entry: { file: created.file, revision: created.revision } });
+      setRunBrief(created.brief);
+      setSaveAsId(null);
+      return;
+    }
+    await loadBriefs();
+    setSaveAsId(null);
+    stashStep(steps[stepIndex] as string);
+    router.replace(`/brief/${created.brief.id}`);
+  };
+
   const handleSaveAs = async (rawId: string) => {
     if (refuseInvalid()) return;
     // B1: the dialog asks for an id while the user is thinking of a name — "Trail
@@ -832,52 +891,53 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     try {
       const brief = toBrief(state);
       const newBrief = { ...brief, id: newId };
-      // D9: Save as… posts the *current draft* under the new id. A collision is offered
-      // as an explicit overwrite rather than silently failing; the API's 409 is the
-      // backstop for a brief that appeared since the list was fetched.
-      const taken = briefs.some((entry) => entry.brief.id === newId);
-      if (taken && !window.confirm(`A brief with id "${newId}" already exists. Overwrite it?`)) {
-        setSaving(false);
+      // D9: Save as… posts the *current draft* under the new id. A collision is
+      // never written and never silently failed: the attempt ends here and the
+      // overwrite dialog asks — whether the listing already knew the id, or the
+      // API's 409 backstop caught a brief that appeared since it was fetched. (The
+      // two `window.confirm` calls that used to gate this decision blocked the
+      // thread and fought the app's own overlays; the kit's ConfirmDialog is the
+      // house pattern.) The confirm retries with `{ replace: true }` — the
+      // overwrite is a visible user decision, never an automatic re-send.
+      if (briefs.some((entry) => entry.brief.id === newId)) {
+        setPendingOverwrite(newId);
         return;
       }
-      // Keep what the API returns: the copy's revision is the conditional-write guard
-      // for the *next* save of it. Dropping it here downgraded that save to
-      // last-write-wins, which is the same trap `loadBrief` carries the revision to avoid.
-      let created;
-      try {
-        created = await createBrief(newBrief, taken ? { replace: true } : {});
-      } catch (error) {
-        if (!isBriefsApiError(error) || error.status !== 409) throw error;
-        if (!window.confirm(`A brief with id "${newId}" already exists. Overwrite it?`)) {
-          setSaving(false);
-          return;
-        }
-        created = await createBrief(newBrief, { replace: true });
-      }
-      purgeDraftFromStorage(state);
-      if (created.brief.id === routeId) {
-        // The copy took the id this route already names: no navigation will answer,
-        // so adopt the brief the SERVER stored — its asset paths were rewritten
-        // during the copy, and its revision is the guard for the next save (an
-        // absent revision leaves the guard untouched, the `save` action's rule).
-        dispatch({ type: "load", brief: created.brief, entry: { file: created.file, revision: created.revision } });
-        setRunBrief(created.brief);
-        setSaveAsId(null);
+      await adoptSavedCopy(await createBrief(newBrief));
+    } catch (error) {
+      if (!isBriefsApiError(error) || error.status !== 409) {
+        setPersistError(unknownErrorMessage(error, "Save as failed"));
         return;
       }
-      // D37: the route drives the load, so the copy is adopted by navigating to it —
-      // one direction only. Dispatching the load here as well would have the effect
-      // (still seeing the old id in the URL for the frames before the navigation
-      // commits) load the old brief right back. The listing is refreshed first, so
-      // the route's load finds the copy the moment the URL changes.
-      await loadBriefs();
-      setSaveAsId(null);
-      // H5: as above — Save as… also moves the route out from under the wizard.
-      stashStep(steps[stepIndex] as string);
-      router.replace(`/brief/${created.brief.id}`);
+      setPendingOverwrite(newId);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /**
+   * D9 — the overwrite dialog's confirm. The retry is the user's own decision,
+   * posting with `{ replace: true }`, and it adopts what the server stored exactly
+   * as a first-attempt success does. A failed retry is answered the way any save
+   * failure is: the error surfaces and the Save-as dialog stays open.
+   */
+  const retrySaveAsOverwrite = async (newId: string) => {
+    if (overwriteInFlightRef.current) return;
+    overwriteInFlightRef.current = true;
+    setSaving(true);
+    setPersistError(undefined);
+    try {
+      const brief = toBrief(state);
+      await adoptSavedCopy(await createBrief({ ...brief, id: newId }, { replace: true }));
+      // Same-id overwrite adopts in place (no navigation unmounts this editor), so
+      // the dialog must clear here too. After adoptSavedCopy, while `saving` still
+      // holds #163's gate — a dismissal window must not open mid-adoption.
+      setPendingOverwrite(null);
     } catch (error) {
       setPersistError(unknownErrorMessage(error, "Save as failed"));
+      setPendingOverwrite(null);
     } finally {
+      overwriteInFlightRef.current = false;
       setSaving(false);
     }
   };
@@ -1014,23 +1074,24 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
 
   /**
    * D40 — the destructive verb, split out of Discard: Revert restores the last saved
-   * state, and asks first, through the same `confirmReplace` every other replace path
-   * uses. M5: the old Discard never confirmed — with `confirm` stubbed to return
+   * state, and asks first, through the same replace confirmation every other replace
+   * path uses. M5: the old Discard never confirmed — with `confirm` stubbed to return
    * false it still wiped the field, and the stub was never called.
    */
   const handleRevert = () => {
-    if (!confirmReplace()) return;
-    // L1 — purge only when the autosave effect will not rewrite the key. A
-    // revert-to-saved is not pristine, so autosave refills the key with the reverted
-    // (== saved) state in the same tick and a purge here would be a no-op fight;
-    // a discarded NEW source mints a fresh temp id, so nothing overwrites the old
-    // key and the purge is what keeps the discarded edits from lingering forever.
-    if (state.source.kind === "new") purgeDraftFromStorage(state);
-    dispatch({ type: "discard" });
-    // L1.1: Revert resets touched/attempted
-    setAttempted(false);
-    setTouched(new Set());
-    setTouchedSections(new Set());
+    requestReplace(() => {
+      // L1 — purge only when the autosave effect will not rewrite the key. A
+      // revert-to-saved is not pristine, so autosave refills the key with the reverted
+      // (== saved) state in the same tick and a purge here would be a no-op fight;
+      // a discarded NEW source mints a fresh temp id, so nothing overwrites the old
+      // key and the purge is what keeps the discarded edits from lingering forever.
+      if (state.source.kind === "new") purgeDraftFromStorage(state);
+      dispatch({ type: "discard" });
+      // L1.1: Revert resets touched/attempted
+      setAttempted(false);
+      setTouched(new Set());
+      setTouchedSections(new Set());
+    });
   };
 
   /**
@@ -1052,7 +1113,14 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
           />
         );
       case "products":
-        return <ProductsSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("products")} />;
+        return (
+          <ProductsSection
+            state={state}
+            dispatch={dispatch}
+            errors={sectionErrorsVisible("products")}
+            onChooseFromBin={setAssetPickerKey}
+          />
+        );
       case "treatments":
         return <TreatmentsSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("treatments")} />;
       case "layout":
@@ -1324,9 +1392,14 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
                <div>
                  <CopySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("copy")} onOpenPool={() => setPoolDrawerOpen(true)} />
                </div>
-               <div>
-                 <ProductsSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("products")} />
-               </div>
+                <div>
+                  <ProductsSection
+                    state={state}
+                    dispatch={dispatch}
+                    errors={sectionErrorsVisible("products")}
+                    onChooseFromBin={setAssetPickerKey}
+                  />
+                </div>
                <div>
                  {state.mode === "brief" ? (
                    <TreatmentsSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("treatments")} />
@@ -1444,6 +1517,64 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
          open={poolDrawerOpen}
          onClose={() => setPoolDrawerOpen(false)}
        />
+
+       {/* M7 — the Asset Bin drawer, hoisted to the editor's root beside the headline
+           pool drawer for the same reason: the guided step card's permanent transform
+           makes it the containing block for `fixed` descendants, so the drawer's
+           viewport-covering scrim is trapped inside the card if it mounts there.
+           ProductsSection keeps the trigger; this owns the drawer and the selection. */}
+       <AssetPickerDrawer
+         briefId={state.briefId}
+         open={assetPickerKey !== null}
+         onClose={() => setAssetPickerKey(null)}
+         selectedPath={state.products.find((p) => p.key === assetPickerKey)?.logoPath}
+         onSelect={(asset) => {
+           // The drawer renders only while a product opened it, so the key is set
+           // by construction — the cast restates it, like the step-heading handoff.
+           dispatch({
+             type: "setProduct",
+             key: assetPickerKey as number,
+             patch: { logoPath: `assets/inputs/${state.briefId}/${asset.name}` },
+           });
+           setAssetPickerKey(null);
+         }}
+       />
+
+       {/* D14 — the replace confirmation, the editor's own instance of the shell's
+           "Unsaved edits" pattern (DESIGN.md §5): one prompt, a refusal changes
+           nothing, and re-triggering never stacks a second question. Revert and the
+           blank route's New brief both throw away unsaved work, so both park their
+           action in `pendingReplace` and ask here. */}
+       <ConfirmDialog
+         open={pendingReplace !== null}
+         message={messages.statusReplacePrompt}
+         confirmLabel={messages.confirmDialogDiscard}
+         onConfirm={() => {
+           const action = pendingReplace;
+           setPendingReplace(null);
+           action?.();
+         }}
+         onClose={() => setPendingReplace(null)}
+       />
+
+       {/* D9 — the Save-as overwrite decision. The confirm is what sends
+           `{ replace: true }`; the cancel clears the pending id and returns to the
+           Save-as dialog. Escape and Cancel are held while the retry write is in
+           flight (the #163 `saving` guard) — a dismissal would hand the user an
+           editable page whose pending adoption is about to discard their edits. */}
+       {pendingOverwrite !== null && (
+         <ConfirmDialog
+           open
+           title={messages.saveAsOverwriteTitle}
+           message={messages.saveAsOverwritePrompt(pendingOverwrite)}
+           confirmLabel={messages.saveAsOverwriteConfirm}
+           cancelLabel={messages.confirmCancel}
+           onConfirm={() => void retrySaveAsOverwrite(pendingOverwrite)}
+           onClose={() => {
+             if (!saving) setPendingOverwrite(null);
+           }}
+         />
+       )}
 
        {/* Save as dialog */}
       {saveAsId !== null && (

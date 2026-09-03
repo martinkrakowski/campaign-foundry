@@ -1,5 +1,6 @@
 import { describe, test, expect, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { ProductsSection } from "../ProductsSection";
 import { initialEditorState } from "../../editor-state";
 import type { FieldErrors } from "../../validate";
@@ -7,7 +8,9 @@ import type { FieldErrors } from "../../validate";
 function renderWithErrors(errors: FieldErrors) {
   const state = initialEditorState();
   const dispatch = vi.fn();
-  return render(<ProductsSection state={state} dispatch={dispatch} errors={errors} />);
+  const onChooseFromBin = vi.fn();
+  render(<ProductsSection state={state} dispatch={dispatch} errors={errors} onChooseFromBin={onChooseFromBin} />);
+  return { dispatch, onChooseFromBin };
 }
 
 describe("ProductsSection", () => {
@@ -53,63 +56,21 @@ describe("ProductsSection", () => {
     expect(input.className).toContain("hidden");
   });
 
-  test("clicking Choose from bin opens AssetPickerDrawer and picking an asset sets logoPath", async () => {
+  test("choosing from the bin publishes the product key whose logo the bin would fill", async () => {
+    const user = userEvent.setup();
     const state = initialEditorState();
     const dispatch = vi.fn();
-    // mock listAssets
-    const jsonResponse = (body: unknown) =>
-      new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
-    vi.mocked(globalThis.fetch).mockImplementation(() =>
-      Promise.resolve(
-        jsonResponse({
-          assets: [{ name: "brand-logo.png", size: 4096, type: "image/png" }],
-        }),
-      ),
-    );
+    const onChooseFromBin = vi.fn();
 
-    render(<ProductsSection state={state} dispatch={dispatch} errors={{}} />);
+    // M7: the drawer itself is hoisted to BriefEditor's root (the transformed step
+    // card traps `fixed` descendants), so this section keeps the trigger only — its
+    // contract is the request it publishes, carrying the product's key.
+    render(<ProductsSection state={state} dispatch={dispatch} errors={{}} onChooseFromBin={onChooseFromBin} />);
 
     const chooseBtn = screen.getAllByRole("button", { name: "Choose from bin" })[0];
-    expect(chooseBtn).toBeTruthy();
-    chooseBtn.click();
-
-    const dialog = await screen.findByRole("dialog", { name: "Asset Bin" });
-    expect(dialog).toBeTruthy();
-
-    const pickBtn = await screen.findByRole("button", { name: "Choose brand-logo.png" });
-    pickBtn.click();
-
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "setProduct",
-      key: state.products[0].key,
-      patch: { logoPath: `assets/inputs/${state.briefId}/brand-logo.png` },
-    });
-  });
-
-  test("closing AssetPickerDrawer without picking leaves logoPath untouched", async () => {
-    const state = initialEditorState();
-    const dispatch = vi.fn();
-    const jsonResponse = (body: unknown) =>
-      new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
-    vi.mocked(globalThis.fetch).mockImplementation(() =>
-      Promise.resolve(
-        jsonResponse({
-          assets: [{ name: "brand-logo.png", size: 4096, type: "image/png" }],
-        }),
-      ),
-    );
-
-    render(<ProductsSection state={state} dispatch={dispatch} errors={{}} />);
-
-    const chooseBtn = screen.getAllByRole("button", { name: "Choose from bin" })[0];
-    chooseBtn.click();
-
-    const dialog = await screen.findByRole("dialog", { name: "Asset Bin" });
-    expect(dialog).toBeTruthy();
-
-    const closeBtn = screen.getByRole("button", { name: "Close drawer" });
-    fireEvent.click(closeBtn);
-
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Asset Bin" })).toBeNull());
+    await user.click(chooseBtn);
+    expect(onChooseFromBin).toHaveBeenCalledWith(state.products[0].key);
+    // No drawer inside the section: the bin is the editor's, not the card's.
+    expect(screen.queryByRole("dialog", { name: "Asset Bin" })).toBeNull();
   });
 });
