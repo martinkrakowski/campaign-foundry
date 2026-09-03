@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CopyPool } from "@campaignfoundry/CampaignOrchestration";
 import { FsPoolStore } from "../fs-pool-store.js";
-import { InvalidCopyPoolError } from "../pool-store.port.js";
+import { copyPoolProblem, InvalidCopyPoolError, isCopyPool } from "../pool-store.port.js";
 
 const pool = (over: Partial<CopyPool> = {}): CopyPool => ({
   briefId: "camp",
@@ -166,5 +166,18 @@ describe("FsPoolStore", () => {
   test("deletePool rethrows a non-ENOENT filesystem error", async () => {
     mkdirSync(join(dir, "camp", "pools.json"), { recursive: true });
     await expect(store.deletePool("camp")).rejects.toThrow(/EPERM|EISDIR/);
+  });
+
+  test("readPool refuses a well-formed pool whose briefId does not match its directory", async () => {
+    const mismatched = pool({ briefId: "other" });
+    expect(copyPoolProblem(mismatched)).toBeUndefined();
+    expect(isCopyPool(mismatched)).toBe(true);
+    mkdirSync(join(dir, "mine"), { recursive: true });
+    writeFileSync(join(dir, "mine", "pools.json"), JSON.stringify(mismatched));
+    await expect(store.readPool("mine")).rejects.toThrow(InvalidCopyPoolError);
+    await expect(store.readPool("mine")).rejects.toThrow(
+      'Copy pool briefs/mine/pools.json is invalid: briefId "other" does not match storage key "mine".',
+    );
+    expect(existsSync(join(dir, "other", "pools.json"))).toBe(false);
   });
 });

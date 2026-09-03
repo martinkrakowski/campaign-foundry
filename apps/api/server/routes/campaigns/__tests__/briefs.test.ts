@@ -912,6 +912,23 @@ describe("authoring briefs", () => {
       expect(existsSync(yamlPath("dest", "pools.json"))).toBe(false);
     });
 
+    test("duplicate of a source pool whose briefId does not match its directory answers 422", async () => {
+      const { create, duplicate } = await api();
+      await create()(jsonReq("http://x/campaigns/briefs", "POST", pooledSource()));
+      poolFile("camp", "other");
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "dest" }),
+      );
+      expect(res.status).toBe(422);
+      expect(await res.json()).toEqual({
+        error:
+          'Copy pool briefs/camp/pools.json is invalid: briefId "other" does not match storage key "camp".',
+      });
+      expect(existsSync(yamlPath("dest.yaml"))).toBe(false);
+      expect(existsSync(yamlPath("dest", "pools.json"))).toBe(false);
+      expect(existsSync(yamlPath("other", "pools.json"))).toBe(false);
+    });
+
     test("overrides win over the source (D71)", async () => {
       const { create, duplicate } = await api();
       await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));

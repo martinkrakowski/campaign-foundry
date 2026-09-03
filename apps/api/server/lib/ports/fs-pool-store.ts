@@ -55,7 +55,14 @@ export class FsPoolStore implements PoolStorePort {
     }
     const problem = copyPoolProblem(parsed);
     if (problem !== undefined) throw new InvalidCopyPoolError(briefId, problem);
-    return parsed as CopyPool;
+    const pool = parsed as CopyPool;
+    if (pool.briefId !== briefId) {
+      throw new InvalidCopyPoolError(
+        briefId,
+        `briefId "${pool.briefId}" does not match storage key "${briefId}"`,
+      );
+    }
+    return pool;
   }
 
   /**

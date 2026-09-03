@@ -297,6 +297,27 @@ describe("planInputFor / pooledPlanner", () => {
     await expect(planInputFor(brief())).rejects.toThrow(/EISDIR/);
   });
 
+  test("returns an err when the pool's briefId does not match its directory", async () => {
+    const { planInputFor, copyPoolProblem, InvalidCopyPoolError } = await filesFor(dir);
+    mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
+    const mismatched = {
+      briefId: "other",
+      generatedAt: "t",
+      model: "m",
+      entries: [{ id: "h1", text: "Stay wild", status: "approved" }],
+    };
+    writeFileSync(join(dir, "briefs", "camp", "pools.json"), JSON.stringify(mismatched));
+    expect(copyPoolProblem(mismatched)).toBeUndefined();
+    const result = await planInputFor(brief());
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toBeInstanceOf(InvalidCopyPoolError);
+      expect(result.error.message).toBe(
+        'Copy pool briefs/camp/pools.json is invalid: briefId "other" does not match storage key "camp".',
+      );
+    }
+  });
+
   test("pooledPlanner binds the input to plan and forwards replan", async () => {
     const { pooledPlanner } = await filesFor(dir);
     const planner = pooledPlanner({ headlines: ["Stay wild", "Go far"] });

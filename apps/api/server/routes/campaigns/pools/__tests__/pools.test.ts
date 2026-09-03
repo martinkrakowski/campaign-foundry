@@ -347,6 +347,37 @@ describe("copy pool routes", () => {
     expect(readFileSync(join(dir, "briefs", "camp", "pools.json"), "utf8")).toContain('"text":42');
   });
 
+  test("GET, PATCH and POST answer 422 when the pool's briefId does not match its directory, and never write through", async () => {
+    copyGeneratorMock.mockReturnValue(fakeGenerator(["New angle"]));
+    const { get, patch, generate } = await api();
+    mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
+    const mismatched = {
+      briefId: "other",
+      generatedAt: "t",
+      model: "m",
+      entries: [{ id: "h1", text: "Stay wild", status: "approved" }],
+    };
+    writeFileSync(join(dir, "briefs", "camp", "pools.json"), JSON.stringify(mismatched));
+    const error =
+      'Copy pool briefs/camp/pools.json is invalid: briefId "other" does not match storage key "camp".';
+
+    const fetched = await get()(new Request("http://x/campaigns/pools/camp"));
+    expect(fetched.status).toBe(422);
+    expect(await fetched.json()).toEqual({ error });
+
+    const patched = await patch()(
+      jsonReq("http://x/campaigns/pools/camp", "PATCH", { entries: [{ id: "h1", status: "approved" }] }),
+    );
+    expect(patched.status).toBe(422);
+    expect(await patched.json()).toEqual({ error });
+
+    const generated = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+    expect(generated.status).toBe(422);
+    expect(await generated.json()).toEqual({ error });
+    expect(JSON.parse(readFileSync(join(dir, "briefs", "camp", "pools.json"), "utf8"))).toEqual(mismatched);
+    expect(existsSync(join(dir, "briefs", "other", "pools.json"))).toBe(false);
+  });
+
   test("GET, PATCH and POST rethrow a non-shape read failure", async () => {
     copyGeneratorMock.mockReturnValue(fakeGenerator(["New angle"]));
     const { get, patch, generate } = await api();

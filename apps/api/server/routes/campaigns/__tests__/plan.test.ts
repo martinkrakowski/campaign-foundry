@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
@@ -287,6 +287,32 @@ describe("POST /campaigns/plan with headline: pool://copy", () => {
     expect(await res.json()).toEqual({
       error: "Copy pool briefs/camp/pools.json is invalid: entries[0].text must be a string.",
     });
+  });
+
+  test("returns 422 when the pool's briefId does not match its directory", async () => {
+    dir = mkdtempSync(join(tmpdir(), "cf-plan-pool-mismatch-"));
+    process.env.PROJECT_ROOT = dir;
+    mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
+    writeFileSync(
+      join(dir, "briefs", "camp", "pools.json"),
+      JSON.stringify({
+        briefId: "other",
+        generatedAt: "2026-01-01T00:00:00.000Z",
+        model: "m",
+        entries: [{ id: "h1", text: "Stay wild", status: "approved" }],
+      }),
+    );
+    vi.resetModules();
+    const capabilities = await import("../../../lib/capabilities.js");
+    capabilities.setCapabilities({ motion: true });
+    const handler = web((await import("../plan.post.js")).default as EventHandler);
+    const res = await post(handler, pooledBrief());
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({
+      error:
+        'Copy pool briefs/camp/pools.json is invalid: briefId "other" does not match storage key "camp".',
+    });
+    expect(existsSync(join(dir, "briefs", "other", "pools.json"))).toBe(false);
   });
 
   test("plans with approved headlines and reports them per variant", async () => {

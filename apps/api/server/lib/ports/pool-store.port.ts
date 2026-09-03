@@ -66,7 +66,10 @@ export interface PoolStorePort {
    * Read the pool stored under `briefId`; undefined when absent.
    * A file that is not a `CopyPool` (hand-edited) throws `InvalidCopyPoolError`
    * naming the problem, so a route answers 422 instead of a 500 from a bare
-   * `TypeError` downstream.
+   * `TypeError` downstream. A well-formed pool whose own `briefId` does not
+   * match the storage key is the same error, naming both — `copyPoolProblem`
+   * does not check this, because it also validates a pool that has not been
+   * read from a keyed location.
    */
   readPool(briefId: string): Promise<CopyPool | undefined>;
 
