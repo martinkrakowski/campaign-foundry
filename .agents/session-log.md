@@ -2304,3 +2304,20 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **One non-trivial correction found against the code:** the step-focus effect (`BriefEditor.tsx`, SHELL-55) assumed `go` is only reachable in Guided; the seed's cursor move reaches it in Everything too, where `stepHeadingRef` is null. Guarded on `presentation !== "guided"` (deps gained `presentation`).
 - **Mutation checks (mutate → named test red → restore), all run:** (a) `requestReplace` inside the seed apply → the guard-once/in-place test fails; (b) drop the `attempted` reset → the not-red-on-arrival test fails; (c) dialog stashes on the in-place path → the leftover-baton test fails; (d) Duplicate back to POST-then-guard → the no-POST-on-decline test fails; (e) re-nest an inner `guardedAction` → the accept-path test fails (push never happens; second park).
 - **Verification (gate order, final tree):** build 7/7, typecheck 7/7, lint clean, lint:arch compliant, `test:cov` **175 files, 2953 passed | 2 skipped — 100% on all four counters (7642/7642 stmts, 5584/5584 branch, 1633/1633 funcs, 6860/6860 lines)**. Explicit-path staging only.
+
+### 2026-09-03 — PR #185 findings: blocked seed write, vacuous on-mount seed test, M3 modified-click
+
+- **Mode:** Implementer. Branch `feat/w1-create-dialog`, PR #185. `briefs/` and `assets/inputs/` untouched; no dev servers, no curl.
+- **Finding 1:** `publishSeed` swallowed a throwing `setItem`, still notified, and `createCampaign` still returned `{ id: "", route: "/brief/new" }`. `publishSeed` now returns whether the write landed and does not notify on failure; `createCampaign` returns `null` (does not throw). The dialog stays open and speaks `createCampaignBlocked` in the existing `role="status"` line.
+- **Finding 2:** the on-mount seed test now asserts campaign name, region and audience after stepping back to Identity. Mutation: `return` after `takeSeed()` → this test fails (`''` vs `'Summer Spark'`). Restored.
+- **Finding 3:** M3 empty-state link mirrors the Header/MobileMenu modified-click guard before `preventDefault`.
+- **Refuted, not implemented:** `subscribeToSeed` leak (effect cleanup returns the unsubscribe); `go(-1)` (clamp); malformed seed (`takeSeed` catch → null); seed effect deps (mirrors recovery; exhaustive-deps green).
+- **Verification (gate order, committed tree):** build, typecheck, lint, lint:arch, `test:cov` **175 files, 2961 passed — 100% × 4 (7651/7651 stmts, 5595/5595 branch, 1633/1633 funcs, 6867/6867 lines)**; commits `8e56a4e`, `02f8014`, `e227e05`; `sync:check` 0 ops; push. No new PR, no merge.
+
+### 2026-09-03 — PR #185: takeSeed shape guard (the previously-refuted finding)
+
+- **Mode:** Implementer. Branch `feat/w1-create-dialog`, PR #185. `briefs/` and `assets/inputs/` untouched; no dev servers, no curl.
+- **Correction:** the prior session listed a malformed seed as refuted because `takeSeed` wraps the read in try/catch. That only covers parse failure. Structurally invalid but syntactically valid JSON was asserted through as `CreateCampaignInput`.
+- **Fix:** `isStoredSeed` — `name`/`targetRegion`/`targetAudience` are strings and `mode` is in `MODE_OPTIONS`; anything else is `null`. The key is still spent by the read.
+- **Mutation:** drop the `isStoredSeed` call → all five structural `takeSeed` cases and the `/brief/new` mount test go red (`slugify` throws `toLowerCase is not a function` on `{name: 42}`). Restored by reverting the string.
+- **Verification (gate order, committed tree):** build, typecheck, lint, lint:arch, `test:cov` **175 files, 2967 passed — 100% × 4 (7656/7656 stmts, 5606/5606 branch, 1634/1634 funcs, 6871/6871 lines)**; commit `9d4f78c`; `sync:check` 0 ops; push. No new PR, no merge.
