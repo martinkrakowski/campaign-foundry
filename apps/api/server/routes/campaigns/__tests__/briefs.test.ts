@@ -864,6 +864,21 @@ describe("authoring briefs", () => {
       expect(existsSync(yamlPath("camp-copy", "pools.json"))).toBe(false);
     });
 
+    test("duplicate of a brief whose source pool is malformed answers 422", async () => {
+      const { create, duplicate } = await api();
+      await create()(jsonReq("http://x/campaigns/briefs", "POST", pooledSource()));
+      mkdirSync(yamlPath("camp"), { recursive: true });
+      writeFileSync(yamlPath("camp", "pools.json"), "{not-json");
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "dest" }),
+      );
+      expect(res.status).toBe(422);
+      expect(((await res.json()) as { error: string }).error).toMatch(
+        /^Copy pool briefs\/camp\/pools\.json is invalid: not JSON/,
+      );
+      expect(existsSync(yamlPath("dest.yaml"))).toBe(false);
+    });
+
     test("overrides win over the source (D71)", async () => {
       const { create, duplicate } = await api();
       await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));

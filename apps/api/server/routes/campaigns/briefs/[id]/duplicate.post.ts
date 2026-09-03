@@ -6,7 +6,7 @@ import {
 } from "../../../../lib/asset-files.js";
 import { isExistsError, SYMLINK_WRITE_ERROR } from "../../../../lib/brief-files.js";
 import { assertSafeId, parseBrief } from "../../../../lib/load-brief.js";
-import { copyPool, isPoolDirSymlink, withPoolLock } from "../../../../lib/pools.js";
+import { copyPool, InvalidCopyPoolError, isPoolDirSymlink, withPoolLock } from "../../../../lib/pools.js";
 import { getAssetStore, getBriefStore } from "../../../../lib/ports/index.js";
 
 /** The duplicate contract's overrides: `targetRegion` and `targetAudience` only. */
@@ -125,6 +125,8 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, 409);
       return { error: `Brief "${newId}" already exists.` };
     }
-    throw error;
+    if (!(error instanceof InvalidCopyPoolError)) throw error;
+    setResponseStatus(event, 422);
+    return { error: error.message };
   }
 });
