@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from "vitest";
+import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -273,5 +273,33 @@ describe("one YAML schema for load and dump (R4.3)", () => {
       "payload: [*a2,*a2,*a2,*a2,*a2,*a2,*a2,*a2,*a2,*a2]",
     ].join("\n");
     expect(() => parseBriefText("bomb.yaml", bomb)).toThrow(/alias count/);
+  });
+});
+
+describe("the brief boundary keeps the D15 authoring leniency in the listing (D68)", () => {
+  // listBriefs skips any file whose parse throws — so the parser's shape checks
+  // decide whether a hand-edited brief stays in the picker or vanishes behind a warn.
+  test("a brief whose targetAudience is null still parses and still appears in listBriefs()", async () => {
+    // A YAML `targetAudience:` with no value parses to null; rejecting it would make
+    // an operator's half-written brief silently vanish from the picker.
+    writeFileSync(
+      join(dir, "null-audience.yaml"),
+      "id: null-audience\ntargetRegion: DE\ntargetAudience:\ncampaignMessage: Hi\nproducts:\n  - id: alpha\n",
+      "utf8",
+    );
+    const listed = await store.listBriefs();
+    expect(listed.map((entry) => entry.file)).toContain("null-audience.yaml");
+  });
+
+  test("a brief with a list-typed targetRegion is skipped with a warn naming the file (F2)", async () => {
+    writeFileSync(
+      join(dir, "list-region.yaml"),
+      "id: list-region\ntargetRegion: [DE, US]\ntargetAudience: a\ncampaignMessage: Hi\nproducts:\n  - id: alpha\n",
+      "utf8",
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const listed = await store.listBriefs();
+    expect(listed.map((entry) => entry.file)).not.toContain("list-region.yaml");
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("list-region.yaml"));
   });
 });

@@ -101,6 +101,9 @@ describe("POST /campaigns/generate", () => {
   // Tests simulate a post-boot server: the probe has landed (the boot-window race
   // itself is covered in routes/campaigns/__tests__/capability-race.test.ts).
   beforeEach(() => setCapabilities({ motion: true }));
+  // generate.post answers 503 with a retry-after header BEFORE reading the body while
+  // the probe is unsettled — restore so a later describe cannot inherit a settled snapshot.
+  afterEach(() => setCapabilities({ motion: false, reason: "not probed" }));
 
   const call = (body: unknown, query = "?model=procedural") =>
     web("post", "/campaigns/generate", generateHandler)(
@@ -171,6 +174,18 @@ describe("POST /campaigns/generate", () => {
     } finally {
       g.readBody = original;
     }
+  });
+
+  // D68 — the parse fails before any job starts, so nothing is run and no report written.
+  test.each([
+    ["a list-typed targetRegion", ["DE", "US"]],
+    ["a numeric targetRegion", 1],
+  ])("rejects %s with 400 before any run starts (D68)", async (_label, region) => {
+    const res = await call(brief({ targetRegion: region }));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(
+      /"targetRegion" must be a string or null/,
+    );
   });
 
   test("accepts a { brief, regenerateOnly } envelope and merges", async () => {
