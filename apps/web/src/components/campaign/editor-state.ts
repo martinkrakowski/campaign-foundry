@@ -1415,6 +1415,23 @@ export function loadDraftFromStorage(state: EditorState): EditorState | null {
 }
 
 /**
+ * W3 (F19): whether the blank route's stored draft holds real work. H6 gives every
+ * unnamed editor the one stable key, so `cf:draft:new` survives the unmount — and
+ * the autosave effect writes only non-pristine states there, so a draft still on
+ * disk while no editor is mounted is exactly the abandoned work the D11 recovery
+ * exists to keep. The create dialog reads this before publishing a seed, which
+ * would otherwise overwrite the draft silently.
+ *
+ * Read-only by contract: nothing is written, cleared or purged, and the
+ * normalisation happens on the in-memory read only, exactly as in
+ * `loadDraftFromStorage` — a malformed entry answers false, never throws.
+ */
+export function hasRecoverableDraft(): boolean {
+  const draft = loadDraftFromStorage(initialEditorState());
+  return draft !== null && !isPristine(draft);
+}
+
+/**
  * Rebuilds a persisted draft over the EditorState shape THIS build expects, so
  * a draft an older build wrote — missing a field this build reads
  * unconditionally — restores instead of crashing render. `restore`'s own
