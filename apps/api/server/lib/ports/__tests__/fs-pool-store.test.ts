@@ -148,11 +148,10 @@ describe("FsPoolStore", () => {
 
   test("copyPool refuses a symlinked briefs/<to> directory without writing through it", async () => {
     await store.writePool(pool());
-    const elsewhere = join(tmpdir(), "cf-fs-pool-outside");
+    const elsewhere = join(dir, "outside");
     mkdirSync(elsewhere, { recursive: true });
     symlinkSync(elsewhere, join(dir, "copy"));
     await expect(store.copyPool("camp", "copy")).rejects.toThrow("Refusing to write through a symlink.");
     expect(existsSync(join(elsewhere, "pools.json"))).toBe(false);
-    rmSync(elsewhere, { recursive: true, force: true });
   });
 });
