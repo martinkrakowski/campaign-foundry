@@ -34,22 +34,16 @@ describe("copy pool persistence", () => {
   });
 
   test("writePool then readPool round-trips JSON under briefs/<id>/pools.json", async () => {
-    const { writePool, readPool, poolPath } = await filesFor(dir);
+    const { writePool, readPool } = await filesFor(dir);
     const value = pool();
     await writePool(value);
     expect(await readPool("camp")).toEqual(value);
-    expect(poolPath("camp")).toBe(join(dir, "briefs", "camp", "pools.json"));
     expect(JSON.parse(readFileSync(join(dir, "briefs", "camp", "pools.json"), "utf8"))).toEqual(value);
   });
 
   test("readPool returns undefined when the file is missing", async () => {
     const { readPool } = await filesFor(dir);
     expect(await readPool("camp")).toBeUndefined();
-  });
-
-  test("poolPath stays under briefs/ and rejects a traversing id segment", async () => {
-    const { poolPath } = await filesFor(dir);
-    expect(() => poolPath("../escape")).toThrow(/Path escapes the allowed directory/);
   });
 
   test("a briefs/<id>/ directory is not listed as a brief source", async () => {

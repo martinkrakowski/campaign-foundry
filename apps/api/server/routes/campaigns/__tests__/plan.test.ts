@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
@@ -312,6 +312,80 @@ describe("POST /campaigns/plan with headline: pool://copy", () => {
       variationBrief({ variation: { count: 1, axes: { headline: "pool://other" } } }),
     );
     expect(res.status).toBe(400);
-    expect(((await res.json()) as { error: string }).error).toMatch(/variation.axes.headline.*"pool:\/\/other"/);
+    expect(((await res.json()) as { error: string }).error).toMatch(/variation\.axes\.headline.*"pool:\/\/other"/);
+  });
+
+  // D71/C9 — a duplicated randomized brief kept `headline: "pool://copy"` from
+  // the spread but, before the pool travelled with it, planned against a file
+  // that never existed. The duplicate route is the real producer of the brief
+  // that lands here, so this test runs both handlers against one fresh module
+  // registry and one temp store.
+  test("a duplicated pool://copy brief can plan, on the pool that names the copy", async () => {
+    dir = mkdtempSync(join(tmpdir(), "cf-plan-dup-pool-"));
+    process.env.PROJECT_ROOT = dir;
+    const { dumpBrief } = await import("../../../lib/brief-files.js");
+    const { parseBrief } = await import("../../../lib/load-brief.js");
+    mkdirSync(join(dir, "briefs"), { recursive: true });
+    writeFileSync(
+      join(dir, "briefs", "src.yaml"),
+      dumpBrief(parseBrief(variationBrief({
+        id: "src",
+        variation: {
+          count: 4,
+          seed: 42,
+          minDistance: 1,
+          axes: { layout: ["headline-top"], tone: ["bold"], headline: "pool://copy" },
+        },
+      }))),
+    );
+    mkdirSync(join(dir, "briefs", "src"), { recursive: true });
+    writeFileSync(
+      join(dir, "briefs", "src", "pools.json"),
+      JSON.stringify({
+        briefId: "src",
+        generatedAt: "2026-01-01T00:00:00.000Z",
+        model: "m",
+        entries: [{ id: "h1", text: "Stay wild", status: "approved" }],
+      }),
+    );
+    vi.resetModules();
+    const capabilities = await import("../../../lib/capabilities.js");
+    capabilities.setCapabilities({ motion: true });
+    const app = createApp();
+    const router = createRouter();
+    router.post(
+      "/campaigns/briefs/:id/duplicate",
+      (await import("../briefs/[id]/duplicate.post.js")).default as EventHandler,
+    );
+    router.post("/campaigns/plan", (await import("../plan.post.js")).default as EventHandler);
+    app.use(router);
+    const route = toWebHandler(app);
+
+    const dupRes = await route(
+      new Request("http://x/campaigns/briefs/src/duplicate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ newId: "dup-camp" }),
+      }),
+    );
+    expect(dupRes.status).toBe(201);
+    const dupBody = (await dupRes.json()) as { brief: Record<string, unknown> };
+    // the copied pool names the destination brief, not the source
+    expect(
+      (JSON.parse(readFileSync(join(dir, "briefs", "dup-camp", "pools.json"), "utf8")) as { briefId: string })
+        .briefId,
+    ).toBe("dup-camp");
+
+    const planRes = await route(
+      new Request("http://x/campaigns/plan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(dupBody.brief),
+      }),
+    );
+    expect(planRes.status).toBe(200);
+    const planBody = (await planRes.json()) as { variants: Array<{ headline?: string }> };
+    expect(planBody.variants).toHaveLength(4);
+    for (const variant of planBody.variants) expect(variant.headline).toBe("Stay wild");
   });
 });
