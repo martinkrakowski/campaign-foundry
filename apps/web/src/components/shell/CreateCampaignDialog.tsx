@@ -65,6 +65,12 @@ export function CreateCampaignDialog() {
     setCreating(true);
     try {
       const result = await createCampaign({ name, targetRegion, targetAudience, mode });
+      // A blocked store is not a create: stay open and say so. Do not throw — the
+      // typed answers must still be here for a retry.
+      if (result === null) {
+        setRefusal(messages.createCampaignBlocked);
+        return;
+      }
       // D66 — the landing branch belongs to the caller, not the editor. Already on
       // the blank route: the mounted editor's seed effect moves the cursor itself.
       // Anywhere else: the step baton crosses the navigation this push causes, and

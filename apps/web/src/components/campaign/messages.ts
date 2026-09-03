@@ -869,3 +869,9 @@ export const createCampaignConfirm = "Create campaign";
  * so the missing name gets its own sentence in the house voice.
  */
 export const campaignNameRequired = "No name yet — give the campaign a name.";
+/**
+ * `create.storageBlocked` — the seed write was refused (private window, quota,
+ * disabled store). The dialog stays open and says so; nothing was published.
+ */
+export const createCampaignBlocked =
+  "Could not create the campaign — this window cannot keep the answers. Try Create campaign again in a regular window.";

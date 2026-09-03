@@ -4,7 +4,8 @@ import type { CampaignMode } from "@/components/campaign/editor-state";
 
 /**
  * D65 — create is a seam, not a POST. The dialog hands the four Identity answers to
- * `createCampaign` and receives `{ id, route }`; it derives no id and shows no slug.
+ * `createCampaign` and receives `{ id, route }`, or `null` when the seed write is
+ * refused; it derives no id and shows no slug.
  * The wave-1 body publishes the seed the blank-route editor consumes (D66) and writes
  * nothing else — under D64(b) this one body becomes a POST that mints a draft row and
  * returns its route, and nothing else in the lane changes.
@@ -44,14 +45,15 @@ export function subscribeToSeed(listener: () => void): () => void {
   };
 }
 
-function publishSeed(input: CreateCampaignInput): void {
+/** Persist the seed. `true` only when the write landed; a blocked store is not a create. */
+function publishSeed(input: CreateCampaignInput): boolean {
   try {
     localStorage.setItem(CREATE_SEED_KEY, JSON.stringify(input));
   } catch {
-    // Storage blocked — the dialog still navigates and the editor starts blank,
-    // rather than the create throwing the whole gesture away.
+    return false;
   }
   for (const listener of seedListeners) listener();
+  return true;
 }
 
 /** Read and clear the seed. Reading it is what spends it. */
@@ -66,7 +68,7 @@ export function takeSeed(): CreateCampaignInput | null {
   }
 }
 
-export async function createCampaign(input: CreateCampaignInput): Promise<CreateCampaignResult> {
-  publishSeed(input);
+export async function createCampaign(input: CreateCampaignInput): Promise<CreateCampaignResult | null> {
+  if (!publishSeed(input)) return null;
   return { id: "", route: "/brief/new" };
 }

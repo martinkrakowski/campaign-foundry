@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach } from "vitest";
+import { describe, test, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CreateCampaignProvider, useCreateCampaign } from "@/lib/create-campaign-context";
@@ -150,6 +150,27 @@ describe("CreateCampaignDialog", () => {
 
     await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new"));
     expect(JSON.parse(localStorage.getItem(CREATE_SEED_KEY) as string).mode).toBe("variation");
+  });
+
+  test("a blocked store keeps the dialog open, says so, and neither navigates nor leaves a seed", async () => {
+    const setItem = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    const user = userEvent.setup();
+    try {
+      renderDialog();
+      await openDialog(user);
+      await fillValid(user);
+      await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
+
+      expect(await screen.findByRole("status")).toBeTruthy();
+      expect(screen.getByRole("status").textContent).toBe(messages.createCampaignBlocked);
+      expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
+      expect(nextMock().router.push).not.toHaveBeenCalled();
+      expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    } finally {
+      setItem.mockRestore();
+    }
   });
 
   test("Cancel leaves no seed behind and resets the fields", async () => {

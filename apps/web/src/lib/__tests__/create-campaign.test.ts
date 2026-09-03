@@ -28,16 +28,20 @@ describe("createCampaign (D65 — the seam)", () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
-  test("a blocked store still resolves and still notifies", async () => {
+  test("a blocked store still resolves, does not notify, and reports the failed write", async () => {
     const listener = vi.fn();
     const stop = subscribeToSeed(listener);
     const setItem = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
       throw new Error("blocked");
     });
-    await expect(createCampaign(seed)).resolves.toEqual({ id: "", route: "/brief/new" });
-    expect(listener).toHaveBeenCalledTimes(1);
-    setItem.mockRestore();
-    stop();
+    try {
+      await expect(createCampaign(seed)).resolves.toBeNull();
+      expect(listener).not.toHaveBeenCalled();
+      expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    } finally {
+      setItem.mockRestore();
+      stop();
+    }
   });
 });
 
