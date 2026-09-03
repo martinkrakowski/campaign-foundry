@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Accordion } from "./Accordion";
 import { useEditorPanels, usePanelSink } from "@/lib/editor-panels-context";
 import { useRun } from "@/lib/run-context";
+import { useCreateCampaign } from "@/lib/create-campaign-context";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 import { listAssets, formatBytes, type AssetEntry } from "@/lib/briefs-api";
@@ -28,16 +29,17 @@ export function Sidebar() {
  */
 export function BrowseBriefsButton({ onActivate }: { onActivate?: () => void }) {
   const { openBriefPicker } = useRun();
-  const { guardedPush } = useGuardedNavigation();
+  const { guardedAction } = useGuardedNavigation();
+  const { openCreateDialog } = useCreateCampaign();
   return (
     <div className="flex shrink-0 gap-2 border-t border-border p-3">
       <button
         type="button"
         onClick={() => {
           onActivate?.();
-          // guardedPush already prompts when the editor is dirty — confirming here too
-          // would show the same dialog twice.
-          guardedPush("/brief/new");
+          // W1 (D66/D67): the gesture asks the guard first — the create dialog opens
+          // only on consent, and Create itself then navigates with a plain push.
+          guardedAction(openCreateDialog);
         }}
         className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-primary px-3 py-2 text-[12px] font-medium text-white transition-colors hover:bg-brand-primary-hover"
       >

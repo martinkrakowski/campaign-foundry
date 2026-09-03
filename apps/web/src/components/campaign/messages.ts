@@ -851,3 +851,27 @@ export const modelReuseNoteTitle =
  * real background.
  */
 export const previewFrameStandInBackground = "background is a stand-in until the run";
+
+/* ── The create dialog (W1 / D65–D67) ─────────────────────────────────────── */
+
+/** The dialog's title — it is the Identity step in a door (D66). */
+export const createCampaignTitle = "Create a campaign";
+/** One sentence under the title: what the dialog collects, and where Create lands. */
+export const createCampaignDescription =
+  "Name the campaign, say who it is for, and pick a mode — Create opens the editor at Copy.";
+/** The mode field's label, over the two mode cards the editor opens with. */
+export const createModeLabel = "Campaign mode";
+/** The dialog's primary verb, in the foot beside Cancel. */
+export const createCampaignConfirm = "Create campaign";
+/**
+ * `campaignName.required` — the dialog's one new refusal: the Identity step's only
+ * name sentence is about the slug (a rule and a value this dialog never shows — D65),
+ * so the missing name gets its own sentence in the house voice.
+ */
+export const campaignNameRequired = "No name yet — give the campaign a name.";
+/**
+ * `create.storageBlocked` — the seed write was refused (private window, quota,
+ * disabled store). The dialog stays open and says so; nothing was published.
+ */
+export const createCampaignBlocked =
+  "Could not create the campaign — this window cannot keep the answers. Try Create campaign again in a regular window.";

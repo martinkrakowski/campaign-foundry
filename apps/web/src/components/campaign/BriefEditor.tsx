@@ -48,6 +48,8 @@ import { StatusLine } from "@/components/campaign/StatusLine";
 import { ErrorStrip, MOTION_ERROR_KEY, MOTION_HOST_SECTION, sectionForErrorBucket } from "@/components/campaign/ErrorStrip";
 import { ErrorPill } from "@/components/ui/error-pill";
 import { useEditorDirty, type DraftRunHandoff } from "@/lib/editor-dirty-context";
+import { useCreateCampaign } from "@/lib/create-campaign-context";
+import { takeSeed } from "@/lib/create-campaign";
 import { FloatingBar } from "@/components/shell/FloatingBar";
 import { SectionModeContext } from "@/components/campaign/SectionModeContext";
 import { useEditorPanels } from "@/lib/editor-panels-context";
@@ -167,8 +169,9 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const blank = routeId === undefined;
   const { brief: runBrief, setBrief: setRunBrief } = useRun();
   const router = useRouter();
-  const { guardedPush } = useGuardedNavigation();
+  const { guardedPush, guardedAction } = useGuardedNavigation();
   const { setDirty, setDraftRun } = useEditorDirty();
+  const { openCreateDialog, seedVersion } = useCreateCampaign();
   const { setPanels, setTopPanels } = useEditorPanels();
   const [state, dispatch] = useReducer(editorReducer, initialEditorState());
   const [errors, setErrors] = useState<Record<string, FieldErrors>>({});
@@ -453,6 +456,44 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     saveDraftToStorage(state);
   }, [state]);
 
+  // W1 — the create dialog's seed (D65/D66). The editor consumes it on mount on the
+  // blank route AND while already mounted there: the same-URL push resets nothing
+  // (F8), so an in-place create needs the watch, and the seed key is persisted
+  // exactly so a create that navigated here is still found on mount. The read
+  // happens in an effect, never a `useState` initializer — the server has no
+  // localStorage, and a read during render would make the first client render
+  // disagree with it (the trap `Disclosure` documents). The baton is spent by a
+  // read: `takeSeed()` is `takeStashedStep`'s pattern.
+  useEffect(() => {
+    // A seed arriving while a named brief is open must never load a blank draft in
+    // place — the gate is the route's own statement about what this editor is.
+    if (!blank) return;
+    const seed = takeSeed();
+    if (!seed) return;
+    // Never through `requestReplace`: the guard already asked before the dialog
+    // opened (D67) and does not clear the dirty flag, so asking again here would
+    // pop "Unsaved edits" a second time on a dirty blank route.
+    purgeDraftFromStorage(state);
+    dispatch({ type: "load", brief: blankBrief() });
+    // `patch` actions — not a hand-built state — so slug derivation stays in the
+    // reducer (F18), exactly as the Identity step's own controls dispatch.
+    dispatch({ type: "patch", patch: { campaignName: seed.name } });
+    dispatch({ type: "patch", patch: { targetRegion: seed.targetRegion } });
+    dispatch({ type: "patch", patch: { targetAudience: seed.targetAudience } });
+    dispatch({ type: "setMode", mode: seed.mode });
+    // The reset createNew performed (L1.1): an in-place seed after a refused Save
+    // would otherwise inherit `attempted` and paint Copy red on arrival.
+    setAttempted(false);
+    setTouched(new Set());
+    setTouchedSections(new Set());
+    // D66 — land on Copy. The dialog stashed the baton when it navigated here (the
+    // mount effect spent it); in place, the cursor move is ours. `go` takes a
+    // number, so the step id goes in as its position.
+    // `state`, `steps` and `go` are read from the render this effect runs in — the
+    // deps mirror the recovery effect above, which reads them the same way.
+    go(steps.indexOf("copy"));
+  }, [seedVersion, blank]);
+
   // W8.1 — the review step's projection: one `toBrief` call, passed into `ReviewStep`,
   // so its rows are generated from exactly what Save sends — a field the projection
   // drops loses its row too, and the review can never disagree with the submission
@@ -608,12 +649,16 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     const previous = lastFocusedStep.current;
     lastFocusedStep.current = stepIndex;
     if (previous === null || previous === stepIndex) return;
+    // W1: the create seed moves the cursor even in the everything presentation,
+    // where no step card — and no heading — is mounted. The handoff is the guided
+    // walk's; the stack has nothing to focus.
+    if (presentation !== "guided") return;
     if (suppressStepHeading.current) {
       suppressStepHeading.current = false;
       return;
     }
     (stepHeadingRef.current as HTMLHeadingElement).focus();
-  }, [stepIndex]);
+  }, [stepIndex, presentation]);
 
   // W7.2 — the card on its way out. Only the step it is and the way the user went;
   // the card itself is rendered from that, fresh, so nothing stale is held in state.
@@ -732,28 +777,14 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     guardedPush(`/brief/${entry.brief.id}`);
   };
 
+  /**
+   * W1 (D66/D67): the create gesture opens the dialog — the guard asks first, and
+   * the dialog opens on consent. The old blank-route in-place reset is the seed's
+   * job now: the dialog's Create hands this editor a seed and the effect above
+   * applies it in place, landed on Copy.
+   */
   const createNew = () => {
-    // Already on the blank route: there is nowhere to navigate to, so empty the form in
-    // place. `guardedPush` would be a no-op on the same URL and nothing would reset.
-    if (blank) {
-      // H6: the blank route's draft key is stable, so the discarded draft occupies
-      // the very key a reload would restore from — purge it here, where the reset
-      // makes the editor pristine and autosave will not refill it (the L1 rule).
-      // No entry means `fromBrief` produces a "new" source, which is what a blank
-      // draft is.
-      requestReplace(() => {
-        purgeDraftFromStorage(state);
-        dispatch({ type: "load", brief: blankBrief() });
-        // L1.1: New brief resets touched/attempted
-        setAttempted(false);
-        setTouched(new Set());
-        setTouchedSections(new Set());
-      });
-      return;
-    }
-    // guardedPush carries the unsaved-changes prompt, so requestReplace here would ask
-    // the same question twice.
-    guardedPush("/brief/new");
+    guardedAction(openCreateDialog);
   };
 
   // D3: the refusal lives in the handler, never in a `disabled` attribute. A dead
@@ -1247,7 +1278,20 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
             <Link href="/grid" className="underline hover:text-text-emphasis">
               {messages.briefNotFoundGrid}
             </Link>
-            <Link href="/brief/new" className="underline hover:text-text-emphasis">
+            <Link
+              href="/brief/new"
+              className="underline hover:text-text-emphasis"
+              onClick={(e) => {
+                // A modified or non-primary click is the browser's to handle — new tab, new
+                // window, download. Only a plain activation is ours to route through the guard.
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                // W1 (D66/D67): the door is the create dialog, not a direct
+                // navigation — and the guard asks first. No editor is mounted here
+                // (M3), so the guard is silent and the dialog opens at once.
+                e.preventDefault();
+                guardedAction(openCreateDialog);
+              }}
+            >
               {messages.briefNotFoundNew}
             </Link>
           </div>

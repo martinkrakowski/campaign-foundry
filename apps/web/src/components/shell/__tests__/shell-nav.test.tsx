@@ -2,10 +2,13 @@ import { describe, test, expect, beforeEach, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement, useEffect, type ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
-import { renderWithRun, seedPersistedRun, nextMock, exerciseFocusTrap, makeAsset, ShellProviders } from "@/__tests__/helpers";
+import { renderWithRun as renderWithShell, seedPersistedRun, nextMock, exerciseFocusTrap, makeAsset, ShellProviders } from "@/__tests__/helpers";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
+import { CreateCampaignProvider } from "@/lib/create-campaign-context";
+import * as messages from "@/components/campaign/messages";
 import { Accordion } from "../Accordion";
 import { Sidebar, BrowseBriefsButton, SidebarContent } from "../Sidebar";
+import { CreateCampaignDialog } from "../CreateCampaignDialog";
 import { useEditorPanels } from "@/lib/editor-panels-context";
 import { useRun } from "@/lib/run-context";
 import { blankBrief } from "@/components/campaign/editor-state";
@@ -13,6 +16,18 @@ import { Header } from "../Header";
 import { MobileMenu } from "../MobileMenu";
 import { DialogShell } from "@/components/ui";
 import * as briefsApi from "@/lib/briefs-api";
+
+/**
+ * W1: the create dialog and its provider are shell mounts beside the sidebar, as the
+ * layout builds them — so the Create new gesture is exercisable end to end.
+ */
+const renderWithRun = (ui: ReactElement) =>
+  renderWithShell(
+    <CreateCampaignProvider>
+      {ui}
+      <CreateCampaignDialog />
+    </CreateCampaignProvider>,
+  );
 
 beforeEach(() => {
   nextMock().nav.pathname = "/grid";
@@ -339,8 +354,13 @@ describe("MobileMenu", () => {
     await screen.findByRole("dialog", { name: "Menu" });
     nextMock().nav.pathname = "/export"; // navigate away
     rerender(
+      // W1: same tree shape the renderWithRun wrapper builds, so the menu instance
+      // survives the rerender and its route-change effect is what closes it.
       <ShellProviders>
-        <MobileMenu open onClose={onClose} tabs={tabs} />
+        <CreateCampaignProvider>
+          <MobileMenu open onClose={onClose} tabs={tabs} />
+          <CreateCampaignDialog />
+        </CreateCampaignProvider>
       </ShellProviders>,
     );
     await waitFor(() => expect(closed).toBe(true));
@@ -348,14 +368,16 @@ describe("MobileMenu", () => {
 });
 
 describe("Create new", () => {
-  test("the sidebar's Create new button navigates to /brief/new", async () => {
+  test("the sidebar's Create new button opens the create dialog, without navigating (W1)", async () => {
     const { BrowseBriefsButton } = await import("../Sidebar");
     const onActivate = vi.fn();
     renderWithRun(createElement(BrowseBriefsButton, { onActivate }));
     await userEvent.setup().click(screen.getByRole("button", { name: /create new/i }));
     expect(onActivate).toHaveBeenCalled();
-    // the blank editor is its own route: landing on /brief would adopt the active brief
-    expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new");
+    // W1 (D66): the gesture opens the dialog — the blank route is reached by the
+    // dialog's Create, so nothing navigates here.
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
   });
 });
 
@@ -367,27 +389,38 @@ describe("guarded navigation when the editor is dirty", () => {
       useEffect(() => setDirty(true), [setDirty]);
       return null;
     };
-    return render(createElement(ShellProviders, null, createElement(RaiseDirty), ui));
+    return render(
+      createElement(
+        ShellProviders,
+        null,
+        createElement(RaiseDirty),
+        // W1: the create dialog is mounted beside the sidebar, as the layout does.
+        createElement(CreateCampaignProvider, null, ui, createElement(CreateCampaignDialog)),
+      ),
+    );
   };
 
   beforeEach(() => {
     nextMock().router.push.mockClear();
   });
 
-  test("the sidebar's Create new button asks once before leaving, and stays put if refused", async () => {
+  test("the sidebar's Create new button asks once before the dialog opens, and a refusal opens nothing (W1)", async () => {
     const user = userEvent.setup();
     renderDirty(createElement(BrowseBriefsButton, {}));
 
     await user.click(screen.getByRole("button", { name: /Create new/ }));
     const dialog = await screen.findByRole("dialog", { name: "Unsaved edits" });
     expect(dialog).toBeTruthy();
+    // D67: the question comes first — the create dialog is not open yet.
+    expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull();
 
     await user.click(within(dialog).getByRole("button", { name: "Stay" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Unsaved edits" })).toBeNull());
     expect(nextMock().router.push).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull();
   });
 
-  test("accepting the prompt navigates", async () => {
+  test("accepting the prompt opens the create dialog (W1)", async () => {
     const user = userEvent.setup();
     const onActivate = vi.fn();
     renderDirty(createElement(BrowseBriefsButton, { onActivate }));
@@ -398,7 +431,10 @@ describe("guarded navigation when the editor is dirty", () => {
 
     await user.click(within(dialog).getByRole("button", { name: "Leave" }));
     expect(onActivate).toHaveBeenCalled();
-    expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new");
+    // W1 (D66/D67): consent opens the create dialog — Create navigates later, with
+    // a plain push, so the guard's answer is the only question of the gesture.
+    expect(await screen.findByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
+    expect(nextMock().router.push).not.toHaveBeenCalled();
   });
 
   test("the sidebar's Edit link routes through the guard and dismisses the overlay", async () => {
