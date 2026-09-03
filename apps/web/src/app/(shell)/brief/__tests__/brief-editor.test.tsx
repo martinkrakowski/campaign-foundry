@@ -10,7 +10,7 @@ import { stashStep } from "@/lib/use-step-navigation";
 import { CreateCampaignDialog } from "@/components/shell/CreateCampaignDialog";
 import { BrowseBriefsButton } from "@/components/shell/Sidebar";
 import type { BriefEntry } from "@/lib/briefs-api";
-import { fromBrief, saveDraftToStorage } from "@/components/campaign/editor-state";
+import { fromBrief, initialEditorState, saveDraftToStorage } from "@/components/campaign/editor-state";
 import { sectionOrder, SECTION_TITLES } from "@/components/campaign/sections";
 import { BriefEditor } from "@/components/campaign/BriefEditor";
 import NewBriefPage from "../new/page";
@@ -3661,5 +3661,111 @@ describe("the create seed (W1)", () => {
     // the store for a blank-route mount to spend it.
     expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("camp");
     expect(localStorage.getItem(CREATE_SEED_KEY)).not.toBeNull();
+  });
+});
+
+describe("the abandoned-draft two-way (W3 / F19)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.removeItem("cf:presentation");
+  });
+
+  const fillDialog = async (
+    user: ReturnType<typeof userEvent.setup>,
+    root: { getByLabelText: typeof screen.getByLabelText; getByRole: typeof screen.getByRole },
+  ) => {
+    await user.type(root.getByLabelText(messages.campaignNameLabel), "Summer Spark");
+    await user.click(root.getByRole("button", { name: "EU" }));
+    await user.type(root.getByLabelText(messages.targetAudienceLabel), "trail runners");
+    await user.click(root.getByRole("button", { name: messages.createCampaignConfirm }));
+  };
+
+  test("a dirty editor on a named route still asks about the abandoned blank draft (F19)", async () => {
+    // The stale blank draft from an earlier session, invisible from this route —
+    // the exact state a bare `isDirty` check would silently overwrite.
+    saveDraftToStorage({ ...initialEditorState(), campaignName: "Abandoned" });
+    nextMock().nav.pathname = "/brief/camp-1";
+    routes({ list: () => json({ briefs: [entry("camp-1", "r1")] }) });
+    const user = userEvent.setup();
+    renderWithRun(
+      <>
+        <BrowseBriefsButton />
+        <Editor id="camp-1" />
+      </>,
+    );
+    await waitForEditorReady();
+    // The name is the slug's echo here and locked (C23); the audience edit is what
+    // makes this editor dirty — about camp-1, never about the blank draft.
+    await user.type(screen.getByLabelText(messages.targetAudienceLabel), "more");
+
+    // The guard asks first, about camp-1's draft (D67)…
+    await user.click(screen.getByRole("button", { name: /Create new/ }));
+    const guard = await screen.findByRole("dialog", { name: messages.confirmDialogTitle });
+    await user.click(within(guard).getByRole("button", { name: messages.confirmDialogLeave }));
+
+    // …but the guard's dirty flag is about camp-1, not the blank draft, so the
+    // dialog's own two-way asks where the guard could not.
+    await fillDialog(user, within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })));
+    const prompt = await screen.findByRole("dialog", { name: messages.resumeDraftTitle });
+    // Start over proceeds exactly as the unguarded create.
+    await user.click(within(prompt).getByRole("button", { name: messages.resumeDraftStartOver }));
+    await waitFor(() => expect(localStorage.getItem(CREATE_SEED_KEY)).not.toBeNull());
+    // One gesture, one answer: the publication must not re-ask.
+    expect(screen.queryAllByRole("dialog", { name: messages.resumeDraftTitle })).toHaveLength(0);
+  });
+
+  test("a dirty editor on the blank route raises the guard once and never the two-way (D67)", async () => {
+    nextMock().nav.pathname = "/brief/new";
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(
+      <>
+        <BrowseBriefsButton />
+        <NewEditor />
+      </>,
+    );
+    await waitFor(() => expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(""));
+    await user.type(screen.getByLabelText(messages.campaignNameLabel), "typed");
+    // The autosave effect wrote the very draft the seed would overwrite.
+    await waitFor(() => expect(localStorage.getItem("cf:draft:new")).not.toBeNull());
+
+    await user.click(screen.getByRole("button", { name: /Create new/ }));
+    const prompt = await screen.findByRole("dialog", { name: messages.confirmDialogTitle });
+    await user.click(within(prompt).getByRole("button", { name: messages.confirmDialogLeave }));
+    await fillDialog(user, within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })));
+
+    // One question for the whole gesture (D67): the seed applies in place, and
+    // the two-way about the very draft the guard just discussed never opens.
+    await waitFor(() =>
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark"),
+    );
+    expect(screen.queryAllByRole("dialog", { name: messages.resumeDraftTitle })).toHaveLength(0);
+    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+  });
+
+  test("a pristine editor with no stored draft raises neither the guard nor the two-way", async () => {
+    nextMock().nav.pathname = "/brief/new";
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(
+      <>
+        <BrowseBriefsButton />
+        <NewEditor />
+      </>,
+    );
+    await waitFor(() => expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(""));
+
+    // A pristine editor has nothing to lose, so the guard does not ask…
+    await user.click(screen.getByRole("button", { name: /Create new/ }));
+    const dialog = await screen.findByRole("dialog", { name: messages.createCampaignTitle });
+    expect(screen.queryByRole("dialog", { name: messages.confirmDialogTitle })).toBeNull();
+    // …and with no stored draft there is nothing to recover, so neither does the
+    // dialog: the create proceeds exactly as it did before W3.
+    await fillDialog(user, within(dialog));
+    await waitFor(() =>
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark"),
+    );
+    expect(screen.queryAllByRole("dialog", { name: messages.resumeDraftTitle })).toHaveLength(0);
   });
 });

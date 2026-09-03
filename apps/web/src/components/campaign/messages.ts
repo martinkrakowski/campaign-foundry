@@ -875,3 +875,16 @@ export const campaignNameRequired = "No name yet — give the campaign a name.";
  */
 export const createCampaignBlocked =
   "Could not create the campaign — this window cannot keep the answers. Try Create campaign again in a regular window.";
+/**
+ * W3 (F19) — the two-way the create dialog asks before a seed overwrites an
+ * abandoned draft. Its own question inside its own dialog, never the navigation
+ * guard's: the guard speaks about the editor the user is leaving, this one about
+ * the draft the seed would replace.
+ */
+export const resumeDraftTitle = "Resume your draft?";
+export const resumeDraftQuestion =
+  "An earlier session left an unfinished brief behind. Resume it, or overwrite it with the new campaign?";
+/** The two-way's protective answer: open the abandoned draft, publish nothing. */
+export const resumeDraftResume = "Resume draft";
+/** The two-way's proceed answer: the create the user originally asked for. */
+export const resumeDraftStartOver = "Start over";

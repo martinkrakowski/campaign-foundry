@@ -1,10 +1,12 @@
 import { describe, test, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CreateCampaignProvider, useCreateCampaign } from "@/lib/create-campaign-context";
 import { CREATE_SEED_KEY } from "@/lib/create-campaign";
-import { nextMock } from "@/__tests__/helpers";
+import { ShellProviders, nextMock } from "@/__tests__/helpers";
+import { editorReducer, initialEditorState, saveDraftToStorage } from "@/components/campaign/editor-state";
 import * as messages from "@/components/campaign/messages";
+import * as createCampaignLib from "@/lib/create-campaign";
 import { CreateCampaignDialog } from "../CreateCampaignDialog";
 
 /** Opens the dialog the way the shell's entry points do, so the closed state is real. */
@@ -20,7 +22,16 @@ const Harness = () => {
   );
 };
 
-const renderDialog = () => render(<CreateCampaignProvider><Harness /></CreateCampaignProvider>);
+/** W3: the dialog reads `isDirty` from the guard's provider — the same tree the
+ *  shell layout builds (the shared helper supplies EditorDirtyProvider). */
+const renderDialog = () =>
+  render(
+    <ShellProviders>
+      <CreateCampaignProvider>
+        <Harness />
+      </CreateCampaignProvider>
+    </ShellProviders>,
+  );
 
 const openDialog = async (user: ReturnType<typeof userEvent.setup>) => {
   await user.click(screen.getByRole("button", { name: "open" }));
@@ -187,5 +198,169 @@ describe("CreateCampaignDialog", () => {
     // A fresh open starts fresh: a cancelled create left nothing behind.
     await user.click(screen.getByRole("button", { name: "open" }));
     expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("");
+  });
+});
+
+describe("the abandoned-draft two-way (W3 / F19)", () => {
+  /**
+   * The abandoned draft, written the way the editor's autosave effect does: a
+   * non-pristine editor state under the blank route's one stable key (H6).
+   */
+  const stashAbandonedDraft = () => {
+    saveDraftToStorage(
+      editorReducer(initialEditorState(), { type: "patch", patch: { campaignName: "Half-written" } }),
+    );
+  };
+
+  const raiseTwoWay = async (user: ReturnType<typeof userEvent.setup>) => {
+    await openDialog(user);
+    await fillValid(user);
+    await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
+    return screen.findByRole("dialog", { name: messages.resumeDraftTitle });
+  };
+
+  test("a stale blank draft with no editor mounted asks before the seed overwrites it", async () => {
+    stashAbandonedDraft();
+    const user = userEvent.setup();
+    renderDialog();
+    const prompt = await raiseTwoWay(user);
+
+    expect(within(prompt).getByText(messages.resumeDraftQuestion)).toBeTruthy();
+    // Asking publishes nothing — the create is held until the user answers.
+    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+  });
+
+  test("Resume publishes no seed, keeps the draft, and lands on the blank route without the baton", async () => {
+    stashAbandonedDraft();
+    const user = userEvent.setup();
+    renderDialog();
+    const prompt = await raiseTwoWay(user);
+    await user.click(within(prompt).getByRole("button", { name: messages.resumeDraftResume }));
+
+    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new"));
+    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    // F19's whole point: the abandoned draft is exactly where it was, so the
+    // recovery effect restores it untouched on the blank route.
+    expect(localStorage.getItem("cf:draft:new")).not.toBeNull();
+    // And never the step baton: the restored draft resumes where the user left
+    // off, not on Copy.
+    expect(localStorage.getItem("cf:step-handoff")).toBeNull();
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull(),
+    );
+  });
+
+  test("Start over publishes the seed and proceeds — one prompt for the whole gesture", async () => {
+    stashAbandonedDraft();
+    const user = userEvent.setup();
+    renderDialog();
+    const prompt = await raiseTwoWay(user);
+    await user.click(within(prompt).getByRole("button", { name: messages.resumeDraftStartOver }));
+
+    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new"));
+    expect(JSON.parse(localStorage.getItem(CREATE_SEED_KEY) as string).name).toBe("Summer Spark");
+    expect(localStorage.getItem("cf:step-handoff")).toBe("copy");
+    // One gesture, one answer: the seed's publication must not re-ask.
+    expect(screen.queryAllByRole("dialog", { name: messages.resumeDraftTitle })).toHaveLength(0);
+  });
+
+  test("two activations of Start over create once — the in-flight disable holds the second", async () => {
+    stashAbandonedDraft();
+    const user = userEvent.setup();
+    // Hold the seam so the second press lands while `creating` is still true.
+    // `setCreating(true)` runs in this click handler, so React flushes the
+    // disabled re-render before the next click; a same-frame pair is the
+    // overwrite-latch case, not this one.
+    let release!: (value: { id: string; route: string }) => void;
+    const held = new Promise<{ id: string; route: string }>((resolve) => {
+      release = resolve;
+    });
+    const create = vi.spyOn(createCampaignLib, "createCampaign").mockReturnValue(held);
+
+    renderDialog();
+    const prompt = await raiseTwoWay(user);
+    const startOver = within(prompt).getByRole("button", { name: messages.resumeDraftStartOver });
+    await user.click(startOver);
+    await user.click(startOver);
+
+    expect(create).toHaveBeenCalledTimes(1);
+    release({ id: "", route: "/brief/new" });
+    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledTimes(1));
+    expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new");
+  });
+
+  test("Start over with a blocked store shows the refusal on the form and publishes nothing", async () => {
+    stashAbandonedDraft();
+    const user = userEvent.setup();
+    renderDialog();
+    const prompt = await raiseTwoWay(user);
+
+    const setItem = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    try {
+      await user.click(within(prompt).getByRole("button", { name: messages.resumeDraftStartOver }));
+
+      expect(await screen.findByRole("status")).toBeTruthy();
+      expect(screen.getByRole("status").textContent).toBe(messages.createCampaignBlocked);
+      // The two-way must come down: the status line lives on the form it covers.
+      expect(screen.queryByRole("dialog", { name: messages.resumeDraftTitle })).toBeNull();
+      expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "Summer Spark",
+      );
+      expect(nextMock().router.push).not.toHaveBeenCalled();
+      expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    } finally {
+      setItem.mockRestore();
+    }
+  });
+
+  test("a stored but pristine draft asks nothing — a pristine draft holds no work to lose", async () => {
+    saveDraftToStorage(initialEditorState());
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    await fillValid(user);
+    await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
+
+    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new"));
+    expect(screen.queryAllByRole("dialog", { name: messages.resumeDraftTitle })).toHaveLength(0);
+  });
+
+  test("Escape and Cancel on the two-way return to the form and publish nothing; a reopened dialog starts at the form", async () => {
+    stashAbandonedDraft();
+    const user = userEvent.setup();
+    renderDialog();
+    await raiseTwoWay(user);
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    // Back to the form, answers intact; nothing was published, the draft untouched.
+    expect(screen.queryByRole("dialog", { name: messages.resumeDraftTitle })).toBeNull();
+    expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark");
+    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    expect(localStorage.getItem("cf:draft:new")).not.toBeNull();
+
+    // Cancel dismisses the same way — and the two-way raises again on a fresh
+    // press, because the dismissed prompt state was cleared, not left open.
+    await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
+    await user.click(
+      within(await screen.findByRole("dialog", { name: messages.resumeDraftTitle })).getByRole(
+        "button",
+        { name: messages.confirmCancel },
+      ),
+    );
+    expect(screen.queryByRole("dialog", { name: messages.resumeDraftTitle })).toBeNull();
+    // The form's own Cancel then closes everything; a reopened dialog starts at
+    // the form, never mid-prompt.
+    await user.click(screen.getByRole("button", { name: messages.confirmCancel }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull(),
+    );
+    await user.click(screen.getByRole("button", { name: "open" }));
+    expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: messages.resumeDraftTitle })).toBeNull();
   });
 });

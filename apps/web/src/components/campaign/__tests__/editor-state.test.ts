@@ -26,6 +26,7 @@ import {
   getDraftKey,
   saveDraftToStorage,
   loadDraftFromStorage,
+  hasRecoverableDraft,
   purgeDraftFromStorage,
   canPlan,
   normalizeDraftState,
@@ -892,6 +893,25 @@ describe("draft storage", () => {
     expect(() => saveDraftToStorage(state)).not.toThrow();
     expect(loadDraftFromStorage(state)).toBeNull();
     expect(() => purgeDraftFromStorage(state)).not.toThrow();
+    expect(hasRecoverableDraft()).toBe(false);
+  });
+
+  test("hasRecoverableDraft answers the blank route's stored draft and touches nothing", () => {
+    // No draft at all: nothing to recover.
+    expect(hasRecoverableDraft()).toBe(false);
+    // A pristine draft holds no work the seed would destroy.
+    saveDraftToStorage(base());
+    expect(hasRecoverableDraft()).toBe(false);
+    // A typed name is real work — the F19 case the create dialog asks about.
+    saveDraftToStorage(reduce(base(), { type: "patch", patch: { campaignName: "Half-written" } }));
+    expect(hasRecoverableDraft()).toBe(true);
+    // Read-only by contract: the draft that made it answer true is still on disk.
+    expect(loadDraftFromStorage(base())?.campaignName).toBe("Half-written");
+    // And a malformed entry answers false rather than throwing.
+    localStorage.setItem("cf:draft:new", "{ not json");
+    expect(hasRecoverableDraft()).toBe(false);
+    localStorage.setItem("cf:draft:new", JSON.stringify({ timestamp: 1 }));
+    expect(hasRecoverableDraft()).toBe(false);
   });
 });
 
