@@ -1,0 +1,36 @@
+# CodeRabbit configuration for campaign-foundry.
+#
+# CodeRabbit has been this repo's highest-precision reviewer (the reload-restore credit
+# regression, the poster effect clock, the vacuous tripwires). Two known failure modes
+# this file exists to trim:
+#  - knowledge-base bleed: a "coding guideline" citing a logger.ts that exists in some
+#    OTHER project, not here. When a guideline names a file, verify it exists in THIS
+#    repository before citing it.
+#  - rate-limiting out mid-PR on busy reviews, which costs the most because its precision
+#    is the highest. The path filters below keep it off pure-docs diffs to save budget.
+
+reviews:
+  profile: assertive
+  request_changes_workflow: false
+  high_level_summary: false
+  poem: false
+  # Re-review on every push is the finding-decay loop; incremental keeps it to new hunks.
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!docs/planning/**"
+    - "!.agents/session-log.md"
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        Read best_practices.md at the repository root first — it is the reviewer facts
+        file. Every class it lists has produced multiple refuted findings; do not post a
+        finding whose premise one of its facts disproves. In particular: this is Vitest
+        (two-argument expect is valid) and React 19 (ref is a prop); the web test env is
+        happy-dom with no layout; everything under packages/CreativeGeneration is
+        server-side Skia canvas where CSS variables are invalid paint; unreachable guards
+        are refused by house rule; the conditional-spread policy-hash pattern and the
+        append-only messages.ts are deliberate. Spend the effort on the always-worth-it
+        classes the facts file names — cache-key completeness, tests that cannot fail,
+        one-path-only features, clock/rest-pose sampling, double-fire races.

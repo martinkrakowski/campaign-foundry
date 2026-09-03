@@ -18,9 +18,13 @@
 
 [config]
 restricted_mode = true
-model = "openrouter/inception/mercury-2"
-fallback_models = ["openrouter/anthropic/claude-haiku-4.5"]
-# mercury-2's real window per OpenRouter: 128000 (completion cap 50000).
+# Primary swapped 2026-09-03 (owner): mercury-2's take-rate ran ~20-25% and it authored
+# every premise-false finding of the review record (the reviewer-facts file exists to trim
+# exactly that class). haiku-4.5 was already the wired-and-proven fallback id; hy4 and
+# Nemotron 3 Ultra are candidates once their exact OpenRouter slugs are verified — a wrong
+# id here fails with a misleading error, not "no such model".
+model = "openrouter/anthropic/claude-haiku-4.5"
+fallback_models = ["openrouter/inception/mercury-2"]
 custom_model_max_tokens = 128000
 # custom_model_max_tokens declares the model's capacity; max_model_tokens caps what
 # PR-Agent actually spends and defaults to 32000 regardless — which is what prunes diffs
@@ -29,11 +33,12 @@ max_model_tokens = 70000
 # Only files that exist in this repo. A missing entry is skipped rather than fatal, which
 # is precisely why a stale list is dangerous: the reviewer runs with less context than
 # intended and nothing says so. hexagen's list named .agents/PR_REVIEW_RUBRIC.md and
-# best_practices.md; neither exists here.
+# best_practices.md; the latter now exists (the reviewer-facts file, 2026-09-03).
 repo_context_files = [
   "DESIGN.md",
   "AGENTS.md",
   ".agents/testing.md",
+  "best_practices.md",
 ]
 repo_context_from_default_branch = true
 repo_context_max_lines = 3000
