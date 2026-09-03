@@ -3610,6 +3610,13 @@ describe("the create seed (W1)", () => {
     expect(screen.getByRole("button", { name: /: Copy, current step/ })).toBeTruthy();
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
     expect(localStorage.getItem("cf:step-handoff")).toBeNull();
+    // The applied fields, not only the spent key — a take-then-skip would keep this
+    // test green on Copy alone, because stashStep("copy") is what landed us here.
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /: Identity,/ }));
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark");
+    expect((screen.getByLabelText(messages.targetRegionLabel) as HTMLInputElement).value).toBe("EU");
+    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe("trail runners");
   });
 
   test("a seed published while a named brief is open is not applied in place", async () => {
