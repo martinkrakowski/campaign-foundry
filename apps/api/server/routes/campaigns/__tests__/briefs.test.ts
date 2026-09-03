@@ -731,6 +731,16 @@ describe("authoring briefs", () => {
   test("duplicate 409s without overwriting a pre-existing dest file", async () => {
     mkdirSync(join(dir, "briefs"), { recursive: true });
     writeFileSync(campYaml(), validBrief.replace("id: good", "id: camp"));
+    mkdirSync(yamlPath("camp"), { recursive: true });
+    writeFileSync(
+      yamlPath("camp", "pools.json"),
+      JSON.stringify({
+        briefId: "camp",
+        generatedAt: "2026-01-01T00:00:00.000Z",
+        model: "m",
+        entries: [{ id: "h1", text: "Stay wild", status: "approved" }],
+      }),
+    );
     const dest = yamlPath("copy.yaml");
     writeFileSync(dest, "UNPARSED");
     const { duplicate } = await api();
@@ -739,6 +749,8 @@ describe("authoring briefs", () => {
     );
     expect(res.status).toBe(409);
     expect(readFileSync(dest, "utf8")).toBe("UNPARSED");
+    // createBrief is wx; writing the dest pool first left an orphan here
+    expect(existsSync(yamlPath("copy", "pools.json"))).toBe(false);
   });
 
   test("duplicate surfaces an unexpected write error", async () => {
@@ -798,6 +810,249 @@ describe("authoring briefs", () => {
     } finally {
       g.readBody = original;
     }
+  });
+
+  // D71/C9 — Duplicate previously never touched briefs/<id>/pools.json, so a
+  // duplicated randomized brief kept `variation.axes.headline: "pool://copy"`
+  // from the spread while its pool was never copied, and planning failed naming
+  // a file that never existed.
+  describe("duplicate copies the copy pool (D71/C9)", () => {
+    const pooledSource = () =>
+      brief({
+        mode: "variation",
+        variation: {
+          count: 4,
+          seed: 42,
+          minDistance: 1,
+          axes: { layout: ["headline-top"], tone: ["bold"], headline: "pool://copy" },
+        },
+      });
+
+    const poolFile = (id: string, briefId = id) => {
+      mkdirSync(yamlPath(id), { recursive: true });
+      writeFileSync(
+        yamlPath(id, "pools.json"),
+        JSON.stringify({
+          briefId,
+          generatedAt: "2026-01-01T00:00:00.000Z",
+          model: "m",
+          entries: [
+            { id: "h1", text: "Stay wild", status: "approved" },
+            { id: "h2", text: "Go far", status: "approved" },
+          ],
+        }),
+      );
+    };
+
+    test("duplicate copies the pool, and the copied pool names the destination brief", async () => {
+      const { create, duplicate } = await api();
+      await create()(jsonReq("http://x/campaigns/briefs", "POST", pooledSource()));
+      poolFile("camp");
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "camp-copy" }),
+      );
+      expect(res.status).toBe(201);
+      // the copied pool carries the DESTINATION brief id — a byte copy would have
+      // handed the new brief a pool that still names the old one
+      expect(JSON.parse(readFileSync(yamlPath("camp-copy", "pools.json"), "utf8"))).toMatchObject({
+        briefId: "camp-copy",
+        entries: [
+          { id: "h1", text: "Stay wild", status: "approved" },
+          { id: "h2", text: "Go far", status: "approved" },
+        ],
+      });
+      const { getPoolStore } = await import("../../../lib/ports/index.js");
+      // the source pool is untouched
+      expect(await getPoolStore().readPool("camp")).toMatchObject({ briefId: "camp" });
+    });
+
+    test("duplicate of a brief without a pool still creates, and leaves no pool", async () => {
+      const { create, duplicate } = await api();
+      await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "camp-copy" }),
+      );
+      expect(res.status).toBe(201);
+      expect(existsSync(yamlPath("camp-copy", "pools.json"))).toBe(false);
+    });
+
+    test("duplicate of a brief without a pool removes a leftover dest pool", async () => {
+      const { create, duplicate } = await api();
+      await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+      mkdirSync(yamlPath("camp-copy"), { recursive: true });
+      writeFileSync(
+        yamlPath("camp-copy", "pools.json"),
+        JSON.stringify({
+          briefId: "camp-copy",
+          generatedAt: "2026-01-01T00:00:00.000Z",
+          model: "m",
+          entries: [{ id: "stale", text: "orphan", status: "approved" }],
+        }),
+      );
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "camp-copy" }),
+      );
+      expect(res.status).toBe(201);
+      expect(existsSync(yamlPath("camp-copy", "pools.json"))).toBe(false);
+    });
+
+    test("duplicate of a brief whose source pool is malformed answers 422", async () => {
+      const { create, duplicate } = await api();
+      await create()(jsonReq("http://x/campaigns/briefs", "POST", pooledSource()));
+      mkdirSync(yamlPath("camp"), { recursive: true });
+      writeFileSync(yamlPath("camp", "pools.json"), "{not-json");
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "dest" }),
+      );
+      expect(res.status).toBe(422);
+      expect(((await res.json()) as { error: string }).error).toMatch(
+        /^Copy pool briefs\/camp\/pools\.json is invalid: not JSON/,
+      );
+      expect(existsSync(yamlPath("dest.yaml"))).toBe(false);
+      expect(existsSync(yamlPath("dest", "pools.json"))).toBe(false);
+    });
+
+    test("duplicate of a source pool whose briefId does not match its directory answers 422", async () => {
+      const { create, duplicate } = await api();
+      await create()(jsonReq("http://x/campaigns/briefs", "POST", pooledSource()));
+      poolFile("camp", "other");
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "dest" }),
+      );
+      expect(res.status).toBe(422);
+      expect(await res.json()).toEqual({
+        error:
+          'Copy pool briefs/camp/pools.json is invalid: briefId "other" does not match storage key "camp".',
+      });
+      expect(existsSync(yamlPath("dest.yaml"))).toBe(false);
+      expect(existsSync(yamlPath("dest", "pools.json"))).toBe(false);
+      expect(existsSync(yamlPath("other", "pools.json"))).toBe(false);
+    });
+
+    test("overrides win over the source (D71)", async () => {
+      const { create, duplicate } = await api();
+      await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", {
+          newId: "tuned",
+          overrides: { targetRegion: "FR", targetAudience: "paris" },
+        }),
+      );
+      expect(res.status).toBe(201);
+      const json = (await res.json()) as { brief: { targetRegion: string; targetAudience: string } };
+      expect(json.brief.targetRegion).toBe("FR");
+      expect(json.brief.targetAudience).toBe("paris");
+      expect(await loadBrief(yamlPath("tuned.yaml"))).toMatchObject({
+        targetRegion: "FR",
+        targetAudience: "paris",
+      });
+    });
+
+    test("duplicate treats a null overrides body as none", async () => {
+      const { create, duplicate } = await api();
+      await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "copied", overrides: null }),
+      );
+      expect(res.status).toBe(201);
+      expect(((await res.json()) as { brief: { targetRegion: string } }).brief.targetRegion).toBe("DE");
+    });
+
+    test.each([
+      ["a non-object overrides body", 42],
+      ["an array overrides body", []],
+    ])("duplicate rejects %s with 400", async (_label, overrides) => {
+      const { create, duplicate } = await api();
+      await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "copy", overrides }),
+      );
+      expect(res.status).toBe(400);
+      expect(existsSync(yamlPath("copy.yaml"))).toBe(false);
+    });
+
+    // `mode` is deliberately NOT an override: a classic source flipped to
+    // "variation" needs a variation.count the route must not invent, and the
+    // reverse would leave an inert variation block. The copy inherits the
+    // source's mode (the create dialog reads it back, W2).
+    test("mode is not an override — the route refuses the key", async () => {
+      const { create, duplicate } = await api();
+      await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", {
+          newId: "copy",
+          overrides: { mode: "variation" },
+        }),
+      );
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe(
+        '"overrides" accepts "targetRegion" and "targetAudience" only.',
+      );
+      expect(existsSync(yamlPath("copy.yaml"))).toBe(false);
+    });
+
+    // D68 — P1's scalar shape check reaches the merged brief, so an override
+    // cannot persist what a POST of the same field would be refused.
+    test.each([
+      ["a list-typed targetRegion", { targetRegion: ["DE", "US"] }],
+      ["a numeric targetRegion", { targetRegion: 1 }],
+    ])("duplicate rejects %s as an override with 400", async (_label, over) => {
+      const { create, duplicate } = await api();
+      await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+      const original = readFileSync(campYaml());
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", {
+          newId: "tuned",
+          overrides: over,
+        }),
+      );
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toMatch(
+        /"targetRegion" must be a string or null/,
+      );
+      expect(existsSync(yamlPath("tuned.yaml"))).toBe(false);
+      expect(readFileSync(campYaml())).toEqual(original);
+    });
+
+    test("duplicate refuses a symlinked briefs/<newId> directory with 400", async () => {
+      const { create, duplicate } = await api();
+      await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+      poolFile("camp");
+      const elsewhere = join(dir, "elsewhere");
+      mkdirSync(elsewhere, { recursive: true });
+      symlinkSync(elsewhere, join(dir, "briefs", "copy"));
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "copy" }),
+      );
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "Refusing to write through a symlink." });
+      // nothing was copied through the link
+      expect(existsSync(join(elsewhere, "pools.json"))).toBe(false);
+      expect(existsSync(join(elsewhere, "copy.yaml"))).toBe(false);
+    });
+
+    // The dest pool is written only after createBrief succeeds, so a failure
+    // at createBrief leaves no listed brief and no dest pool.
+    test("a failure at createBrief leaves no listed brief and no dest pool", async () => {
+      const { create, duplicate, list } = await api();
+      await create()(jsonReq("http://x/campaigns/briefs", "POST", pooledSource()));
+      poolFile("camp");
+      const { getBriefStore, getPoolStore } = await import("../../../lib/ports/index.js");
+      const spy = vi
+        .spyOn(getBriefStore(), "createBrief")
+        .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "camp-fail" }),
+      );
+      spy.mockRestore();
+      expect(res.status).toBe(500);
+      expect(existsSync(yamlPath("camp-fail.yaml"))).toBe(false);
+      expect(await getPoolStore().readPool("camp-fail")).toBeUndefined();
+      expect(existsSync(yamlPath("camp-fail", "pools.json"))).toBe(false);
+      const listed = await list()(new Request("http://x/campaigns/briefs"));
+      const json = (await listed.json()) as { briefs: { brief: { id: string } }[] };
+      expect(json.briefs.map((entry) => entry.brief.id)).toEqual(["camp"]);
+    });
   });
 
   test("POST with concurrent delete in replace mode falls through to create", async () => {

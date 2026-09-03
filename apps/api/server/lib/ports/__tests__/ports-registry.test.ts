@@ -6,16 +6,22 @@ import {
   getAssetStore,
   setAssetStore,
   resetAssetStore,
+  getPoolStore,
+  setPoolStore,
+  resetPoolStore,
   FsBriefStore,
   FsAssetStore,
+  FsPoolStore,
 } from "../index.js";
 import type { BriefStorePort } from "../brief-store.port.js";
 import type { AssetStorePort } from "../asset-store.port.js";
+import type { PoolStorePort } from "../pool-store.port.js";
 
 describe("ports registry", () => {
   afterEach(() => {
     resetBriefStore();
     resetAssetStore();
+    resetPoolStore();
   });
 
   test("getBriefStore returns default FsBriefStore and allows override", () => {
@@ -40,5 +46,17 @@ describe("ports registry", () => {
 
     resetAssetStore();
     expect(getAssetStore()).toBeInstanceOf(FsAssetStore);
+  });
+
+  test("getPoolStore returns default FsPoolStore and allows override", () => {
+    const initial = getPoolStore();
+    expect(initial).toBeInstanceOf(FsPoolStore);
+
+    const mockStore = {} as PoolStorePort;
+    setPoolStore(mockStore);
+    expect(getPoolStore()).toBe(mockStore);
+
+    resetPoolStore();
+    expect(getPoolStore()).toBeInstanceOf(FsPoolStore);
   });
 });
