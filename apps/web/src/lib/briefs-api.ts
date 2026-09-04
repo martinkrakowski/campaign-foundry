@@ -191,7 +191,10 @@ export async function listBriefs(): Promise<BriefEntry[]> {
   const data = await requestJson(`${API}/campaigns/briefs`);
   if (typeof data !== "object" || data === null) return [];
   const briefs = (data as { briefs?: unknown }).briefs;
-  return Array.isArray(briefs) ? (briefs as BriefEntry[]) : [];
+  if (!Array.isArray(briefs)) return [];
+  // Same per-entry shape check the single-entry callers use: a malformed 200 body
+  // must throw into the picker's error path, not reach a field access in render.
+  return briefs.map(asBriefEntry);
 }
 
 export async function createBrief(

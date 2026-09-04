@@ -1508,13 +1508,15 @@ describe("authoring briefs", () => {
     });
   });
 
-  test("GET /campaigns/briefs returns empty array when brief store throws", async () => {
+  test("GET /campaigns/briefs answers 500 when the brief store throws", async () => {
     const { list } = await api();
     const { getBriefStore } = await import("../../../lib/ports/index.js");
     const spy = vi.spyOn(getBriefStore(), "listBriefs").mockRejectedValueOnce(new Error("Disk failure"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const res = await list()(new Request("http://x/campaigns/briefs"));
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ briefs: [] });
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "Could not read briefs: Disk failure" });
+    expect(warn).toHaveBeenCalled();
     spy.mockRestore();
   });
 });

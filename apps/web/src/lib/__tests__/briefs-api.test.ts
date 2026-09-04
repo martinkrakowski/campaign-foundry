@@ -111,6 +111,11 @@ describe("listBriefs", () => {
     await expect(listBriefs()).resolves.toEqual([]);
   });
 
+  test("throws on a malformed entry rather than handing it to render", async () => {
+    mockFetch(() => json({ briefs: [{ file: "camp.yaml" }] }));
+    await expect(listBriefs()).rejects.toMatchObject({ message: "Invalid response", status: 200 });
+  });
+
   test("throws the API error message", async () => {
     mockFetch(() => json({ error: "nope" }, 500));
     await expect(listBriefs()).rejects.toMatchObject({ message: "nope", status: 500 });
