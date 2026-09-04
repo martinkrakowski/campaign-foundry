@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
@@ -34,6 +34,15 @@ describe("FsBriefStore", () => {
   test("listBriefs returns empty array when directory does not exist", async () => {
     const nonExistentStore = new FsBriefStore(join(dir, "non-existent"));
     expect(await nonExistentStore.listBriefs()).toEqual([]);
+  });
+
+  test("listBriefs rethrows when readdir fails with a non-ENOENT errno", async () => {
+    chmodSync(dir, 0o000);
+    try {
+      await expect(store.listBriefs()).rejects.toMatchObject({ code: "EACCES" });
+    } finally {
+      chmodSync(dir, 0o755);
+    }
   });
 
   test("listBriefs lists, sorts, and parses valid briefs while skipping invalid files", async () => {

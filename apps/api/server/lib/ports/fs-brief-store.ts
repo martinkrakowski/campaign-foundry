@@ -44,8 +44,11 @@ export class FsBriefStore implements BriefStorePort {
         .map((e) => e.name)
         .sort();
     } catch (error) {
+      // A missing briefs/ directory is "no campaigns yet". Any other errno
+      // (EACCES, EIO, ENOTDIR) is a store read failure the route maps to 500.
       console.warn(`[briefs] could not read ${this.dir}: ${errorMessage(error)}`);
-      return [];
+      if (isErrno(error, "ENOENT")) return [];
+      throw error;
     }
 
     const briefs: StoredBrief[] = [];
