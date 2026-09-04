@@ -29,9 +29,14 @@ export interface OpenRouterCopyGeneratorOptions {
 const OPEN = "<<<";
 const CLOSE = ">>>";
 
-/** One line, delimiter-free, so brief content can't break out of its slot. */
-function delimit(value: string): string {
-  const flat = value.replace(/\s+/g, " ").replaceAll(OPEN, "").replaceAll(CLOSE, "").trim();
+/**
+ * One line, delimiter-free, so brief content can't break out of its slot.
+ * D68 keeps the brief scalars null-legal at parse time, so a null renders as an
+ * empty slot — the labelled line keeps its place in the prompt instead of the
+ * whole field vanishing.
+ */
+function delimit(value: string | null | undefined): string {
+  const flat = (value ?? "").replace(/\s+/g, " ").replaceAll(OPEN, "").replaceAll(CLOSE, "").trim();
   return `${OPEN}${flat}${CLOSE}`;
 }
 
