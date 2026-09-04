@@ -1,0 +1,52 @@
+#!/usr/bin/env zsh
+# Dispatch one or more lanes detached, staggered, and wait for their EXIT markers.
+#
+#   dispatch-lane.sh <logdir> <lane>:<worktree>:<brief> [<lane>:<worktree>:<brief> ...]
+#
+# Why staggered: two `opencode run` invocations started in the same instant contend on
+# opencode's SQLite store and the second dies instantly with "database is locked" + EXIT 1.
+# 45s apart is enough; both then run concurrently.
+#
+# Why the marker: a lane that dies at startup writes EXIT immediately, so a marker-only
+# wait returns at once. This script prints each log's failure lines at the end — always
+# read the body, never just the marker.
+set -u
+MODEL="${MODEL:-openrouter/z-ai/glm-5.3-flash}"
+VARIANT="${VARIANT:-high}"
+STAGGER="${STAGGER:-45}"
+
+[ $# -ge 2 ] || { print -u2 "usage: $0 <logdir> <lane>:<worktree>:<brief> ..."; exit 2; }
+LOGDIR="$1"; shift; mkdir -p "$LOGDIR"
+
+lanes=()
+first=1
+for spec in "$@"; do
+  lane="${spec%%:*}"; rest="${spec#*:}"; wt="${rest%%:*}"; brief="${rest#*:}"
+  [ -d "$wt" ]    || { print -u2 "no worktree: $wt";   exit 2; }
+  [ -f "$brief" ] || { print -u2 "no brief: $brief";   exit 2; }
+  [ -d "$wt/node_modules" ] || print -u2 "warning: $wt has no node_modules — run yarn install first"
+  log="$LOGDIR/$lane.log"; : > "$log"; lanes+=("$lane")
+  [ $first -eq 1 ] || sleep "$STAGGER"
+  first=0
+  nohup zsh -c "cd ${(q)wt} && opencode run --auto --model ${(q)MODEL} --variant ${(q)VARIANT} \"\$(cat ${(q)brief})\" > ${(q)log} 2>&1; echo \"EXIT \$?\" >> ${(q)log}" >/dev/null 2>&1 & disown
+  print "dispatched $lane -> $log"
+done
+
+print "waiting for ${#lanes[@]} lane(s)…"
+while :; do
+  done_count=0
+  for lane in "${lanes[@]}"; do
+    grep -qE '^EXIT [0-9]+$' "$LOGDIR/$lane.log" 2>/dev/null && (( done_count++ ))
+  done
+  (( done_count == ${#lanes[@]} )) && break
+  sleep 30
+done
+
+print "\n=== derived outcome (read the body, not just the marker) ==="
+for lane in "${lanes[@]}"; do
+  log="$LOGDIR/$lane.log"
+  marker=$(grep -E '^EXIT [0-9]+$' "$log" | tail -1)
+  print "$lane: $marker, $(wc -c < "$log" | tr -d ' ') bytes"
+  sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -iE 'insufficient balance|database is locked|^Error:' | head -3 | sed 's/^/    /'
+done
+print "\nNow derive each lane's real status: gh pr list --head <branch>; the gate in the worktree; git diff --stat (read deletions)."
