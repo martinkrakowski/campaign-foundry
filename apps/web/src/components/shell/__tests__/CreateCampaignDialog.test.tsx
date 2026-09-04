@@ -481,7 +481,7 @@ describe("start from an existing campaign (W2 / D71)", () => {
   });
 
   test("a colliding name (a 409) keeps the dialog open with the duplicate-specific refusal", async () => {
-    routeBriefs([classic], (url, init) => json({ error: 'Brief "summer-spark" already exists.' }, 409));
+    routeBriefs([classic], () => json({ error: 'Brief "summer-spark" already exists.' }, 409));
     const user = userEvent.setup();
     renderDialog();
     await openDialog(user);
@@ -500,7 +500,7 @@ describe("start from an existing campaign (W2 / D71)", () => {
   });
 
   test("any other refused duplicate (a 500) answers with the retry sentence, not the storage one", async () => {
-    routeBriefs([classic], (url, init) => json({ error: "fail" }, 500));
+    routeBriefs([classic], () => json({ error: "fail" }, 500));
     const user = userEvent.setup();
     renderDialog();
     await openDialog(user);
