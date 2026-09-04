@@ -36,7 +36,12 @@ describe("FsBriefStore", () => {
     expect(await nonExistentStore.listBriefs()).toEqual([]);
   });
 
-  test("listBriefs rethrows when readdir fails with a non-ENOENT errno", async () => {
+  // `chmod 000` does not block reads for root, and does nothing at all on Windows,
+  // so the EACCES this test induces is unavailable in those environments. Skip rather
+  // than fail: the branch it covers is exercised by the route-level test, which mocks
+  // the store instead of relying on filesystem permissions.
+  const canDenyRead = process.platform !== "win32" && process.getuid?.() !== 0;
+  test.skipIf(!canDenyRead)("listBriefs rethrows when readdir fails with a non-ENOENT errno", async () => {
     chmodSync(dir, 0o000);
     try {
       await expect(store.listBriefs()).rejects.toMatchObject({ code: "EACCES" });
