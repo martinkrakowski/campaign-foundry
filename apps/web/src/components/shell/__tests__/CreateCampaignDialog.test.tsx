@@ -80,6 +80,9 @@ describe("CreateCampaignDialog", () => {
     await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
 
     expect(screen.getByRole("status").textContent).toBe(messages.campaignNameRequired);
+    expect(screen.getByLabelText(messages.campaignNameLabel).getAttribute("aria-invalid")).toBe(
+      "true",
+    );
     expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
     // A refused create is not a create: nothing was published.
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
@@ -527,6 +530,10 @@ describe("start from an existing campaign (W2 / D71)", () => {
 
     expect(await screen.findByRole("status")).toBeTruthy();
     expect(screen.getByRole("status").textContent).toBe(messages.campaignNameNotSluggable);
+    // Same field, same treatment as the empty-name refusal: error border + aria-invalid.
+    expect(screen.getByLabelText(messages.campaignNameLabel).getAttribute("aria-invalid")).toBe(
+      "true",
+    );
     expect(post).not.toHaveBeenCalled();
     expect(nextMock().router.push).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();

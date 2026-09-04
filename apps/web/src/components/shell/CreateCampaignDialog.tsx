@@ -182,7 +182,10 @@ export function CreateCampaignDialog() {
               aria-label={messages.campaignNameLabel}
               value={name}
               placeholder={messages.campaignNamePlaceholder}
-              invalid={refusal === messages.campaignNameRequired}
+              invalid={
+                refusal === messages.campaignNameRequired ||
+                refusal === messages.campaignNameNotSluggable
+              }
               onChange={(e) => {
                 setName(e.target.value);
                 setRefusal(null);
