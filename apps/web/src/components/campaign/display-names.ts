@@ -5,6 +5,8 @@ import { ANCHOR_VALUES } from "@campaignfoundry/CampaignOrchestration/variation-
 import { ALIGN_VALUES, FONT_WEIGHT_VALUES, type TextEffectKind } from "@campaignfoundry/CampaignOrchestration/creative-style";
 import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
 
+import type { CampaignMode } from "./editor-state";
+
 /** Display name for a format key. */
 export function formatDisplayName(format: string): string {
   switch (format) {
@@ -91,4 +93,19 @@ export function platformDisplayName(id: string): string {
   // `?? id` after a cast never fires: the cast dereferences undefined first and
   // throws. An id we do not know passes through unchanged instead.
   return PLATFORM_PROFILES[id]?.label ?? id;
+}
+
+/**
+ * Display labels for the campaign modes (D4) — keyed by the mode union itself,
+ * so a new mode is a compile error rather than a raw value on screen (D18).
+ * The two words every mode surface reads: the cards' captions, the products
+ * error and the create dialog's inherited-mode readout.
+ */
+const MODE_LABELS: Record<CampaignMode, string> = {
+  brief: "Classic",
+  variation: "Randomized",
+};
+
+export function modeDisplayName(mode: CampaignMode): string {
+  return MODE_LABELS[mode];
 }

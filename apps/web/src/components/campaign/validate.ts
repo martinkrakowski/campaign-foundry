@@ -27,7 +27,7 @@ import { DWELL_TOLERANCE } from "@campaignfoundry/CampaignOrchestration/copy-tim
 export { axisProductSize, drawableRatios, motionPackagedRatios } from "./editor-state";
 import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
 import * as messages from "./messages";
-import { formatDisplayName, platformDisplayName, ratioDisplayName } from "./display-names";
+import { formatDisplayName, modeDisplayName, platformDisplayName, ratioDisplayName } from "./display-names";
 
 export const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
@@ -184,7 +184,7 @@ export function validateProducts(state: EditorState): FieldErrors {
   const ids = state.products.map((product) => product.id);
   const unique = new Set(ids.filter((id) => id.length > 0));
   if (unique.size < min) {
-    errors.products = messages.products(min, state.mode === "variation" ? "Randomized" : "Classic");
+    errors.products = messages.products(min, modeDisplayName(state.mode));
   }
   const seen = new Set<string>();
   state.products.forEach((product, index) => {

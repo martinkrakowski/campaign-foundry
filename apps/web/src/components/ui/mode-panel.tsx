@@ -1,12 +1,7 @@
 import type { ReactNode } from "react";
 import { AxisCard } from "./axis-card";
+import { modeDisplayName } from "@/components/campaign/display-names";
 import { MODE_OPTIONS, type CampaignMode } from "@/components/campaign/editor-state";
-
-/** The caption under the raw value — the wording D4 fixes for the two modes. */
-const MODE_CAPTIONS: Record<CampaignMode, string> = {
-  brief: "Classic",
-  variation: "Randomized",
-};
 
 /** One miniature of the grid: the CreativeGlyph layer idiom at cell scale. */
 interface CellSpec {
@@ -115,7 +110,7 @@ export function ModePanel({
           value={option}
           selected={mode === option}
           onToggle={(value) => onSetMode(value as CampaignMode)}
-          meta={MODE_CAPTIONS[option]}
+          meta={modeDisplayName(option)}
         >
           <ModeGlyph scattered={option === "variation"} />
         </AxisCard>
