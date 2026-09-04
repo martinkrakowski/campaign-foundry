@@ -59,10 +59,16 @@ while :; do
 done
 
 print "\n=== derived outcome (read the body, not just the marker) ==="
+failed=0
 for lane in "${lanes[@]}"; do
   log="$LOGDIR/$lane.log"
   marker=$(grep -E '^EXIT [0-9]+$' "$log" | tail -1)
-  print "$lane: $marker, $(wc -c < "$log" | tr -d ' ') bytes"
+  [[ "$marker" == "EXIT 0" ]] || (( failed++ ))
+  print "$lane: ${marker:-<no marker>}, $(wc -c < "$log" | tr -d ' ') bytes"
   sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -iE 'insufficient balance|database is locked|^Error:' | head -3 | sed 's/^/    /'
 done
 print "\nNow derive each lane's real status: gh pr list --head <branch>; the gate in the worktree; git diff --stat (read deletions)."
+# Exit non-zero when any lane failed or never reported, so a caller can gate on it.
+# A zero exit here still means only "every lane reported EXIT 0" — never that a lane
+# produced a usable PR. That remains a derived question, not this script's to answer.
+(( failed == 0 )) || { print -u2 "$failed lane(s) did not report EXIT 0"; exit 1; }
