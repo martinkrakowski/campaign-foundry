@@ -480,6 +480,18 @@ describe("start from an existing campaign (W2 / D71)", () => {
     expect(screen.getByRole("button", { name: "variation" })).toBeTruthy();
   });
 
+  test("a Classic source reads Classic in the inherited-mode readout", async () => {
+    routeBriefs([classic]);
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+
+    // A source with no mode of its own defaults to brief — the readout says so
+    // through the one display-name map, not a second ternary here.
+    await chooseSource(user, "summer-spark");
+    expect(screen.getByText(messages.createModeInherited("Classic"))).toBeTruthy();
+  });
+
   test("a colliding name (a 409) keeps the dialog open with the duplicate-specific refusal", async () => {
     routeBriefs([classic], () => json({ error: 'Brief "summer-spark" already exists.' }, 409));
     const user = userEvent.setup();

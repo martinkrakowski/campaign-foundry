@@ -11,6 +11,7 @@ import { isBriefsApiError } from "@/lib/briefs-api";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 import { hasRecoverableDraft, slugify, type CampaignMode } from "@/components/campaign/editor-state";
+import { modeDisplayName } from "@/components/campaign/display-names";
 import { StartFromExistingPicker, type StartFromSource } from "@/components/shell/StartFromExistingPicker";
 import * as messages from "@/components/campaign/messages";
 
@@ -240,7 +241,7 @@ export function CreateCampaignDialog() {
           <Field fieldKey="createMode" label={messages.createModeLabel} as="div">
             {source ? (
               <p className="text-[13px] text-text-muted">
-                {messages.createModeInherited(source.mode === "variation" ? "Randomized" : "Classic")}
+                {messages.createModeInherited(modeDisplayName(source.mode))}
               </p>
             ) : (
               <ModePanel mode={mode} onSetMode={setMode} />

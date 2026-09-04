@@ -3,6 +3,7 @@ import {
   alignDisplayName,
   anchorDisplayName,
   formatDisplayName,
+  modeDisplayName,
   platformDisplayName,
   ratioDisplayName,
   textEffectDisplayName,
@@ -69,6 +70,11 @@ describe("display names", () => {
     expect(textEffectDisplayName("scale-in")).toBe("Scale in");
     // an out-of-set value passes through rather than rendering "undefined"
     expect(textEffectDisplayName("spin")).toBe("spin");
+  });
+
+  test("both modes the editor knows read Classic and Randomized (D4)", () => {
+    expect(modeDisplayName("brief")).toBe("Classic");
+    expect(modeDisplayName("variation")).toBe("Randomized");
   });
 });
 
