@@ -2417,3 +2417,11 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Mutation checks (mutate → red → restore), all run:** `variation: "Randomized"` → `"Shuffled"` in `MODE_LABELS` → 4 failures across the 4 files: the helper test, the mode-panel caption test, `validateProducts`'s "zero is refused" test, and the dialog's inherited-mode readout test — the proof all three sites render from the one map. Restored; suite green.
 - **Verification (gate order, final tree):** build 7/7, typecheck 7/7, lint 0 problems, lint:arch compliant, `test:cov` **178 files, 3068 passed | 2 skipped — 100% on all four counters (7786/7786 stmts, 5689/5689 branch, 1664/1664 funcs, 6994/6994 lines)**. Commit, `sync:check`, push, PR against `main` — NOT merged.
 - **Deviations:** none from the lane brief.
+
+### 2026-09-03 — PR #191: mode-panel caption test was vacuous
+
+- **Mode:** Implementer. Branch `refactor/c-mode-display-name`, PR #191. `briefs/` and `assets/inputs/` untouched; no dev servers, no curl; staged paths explicit.
+- **Finding:** `mode-panel.test.tsx` asserted both caption strings existed *somewhere* in the panel. Swap the captions onto the wrong cards and both buttons are still named by their raw values, both texts are still in the tree, and the test stays green — a vacuous tripwire against the defect this lane named.
+- **Fix:** query each button by its accessible name and assert its own `textContent` contains the caption (the format-panel / policy-section idiom).
+- **Mutation:** swap `modeDisplayName(option)` so each card shows the other mode's label → `each mode card captions itself with its display name (D4)` fails (`expected 'briefRandomized' to contain 'Classic'`). Restored.
+- **Verification (gate order, committed tree):** build 7/7, typecheck 7/7, lint 12/12, lint:arch compliant, `test:cov` **178 files, 3070 passed — 100% on all four counters (7786/7786 stmts, 5689/5689 branch, 1664/1664 funcs, 6994/6994 lines)**; commit `162180a`; `sync:check` on the committed tree; push. No new PR, no merge.
