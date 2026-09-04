@@ -143,6 +143,17 @@ describe("createBrief / duplicateBrief / uploadAsset", () => {
     expect(result.brief.id).toBe("copy");
   });
 
+  test("POSTs the route's overrides body when the caller hands overrides over (D71)", async () => {
+    mockFetch((_url, init) => {
+      expect(JSON.parse(String(init.body))).toEqual({
+        newId: "copy",
+        overrides: { targetRegion: "EU", targetAudience: "b" },
+      });
+      return json({ file: "copy.yaml", brief: { ...brief, id: "copy" } }, 201);
+    });
+    await duplicateBrief("camp", "copy", { targetRegion: "EU", targetAudience: "b" });
+  });
+
   test("uploads an asset", async () => {
     mockFetch((url, init) => {
       expect(url).toBe(`${API}/campaigns/assets`);

@@ -1,14 +1,17 @@
 "use client";
 
-import { MODE_OPTIONS, type CampaignMode } from "@/components/campaign/editor-state";
+import { MODE_OPTIONS, slugify, type CampaignMode } from "@/components/campaign/editor-state";
+import { duplicateBrief } from "./briefs-api";
 
 /**
- * D65 — create is a seam, not a POST. The dialog hands the four Identity answers to
- * `createCampaign` and receives `{ id, route }`, or `null` when the seed write is
- * refused; it derives no id and shows no slug.
- * The wave-1 body publishes the seed the blank-route editor consumes (D66) and writes
- * nothing else — under D64(b) this one body becomes a POST that mints a draft row and
- * returns its route, and nothing else in the lane changes.
+ * D65 — create is a seam, not a POST. The dialog hands the four Identity answers
+ * (plus, from W2, an optional source) to `createCampaign` and receives
+ * `{ id, route }`, or `null` when the seed write is refused; it derives no id and
+ * shows no slug.
+ * The wave-1 body publishes the seed the blank-route editor consumes (D66) and
+ * writes nothing else; the W2 body duplicates the chosen source with the dialog's
+ * overrides (D71). Under D64(b) both bodies become a POST that mints a draft row
+ * and returns its route, and nothing else in the lane changes.
  */
 
 export interface CreateCampaignInput {
@@ -16,6 +19,11 @@ export interface CreateCampaignInput {
   readonly targetRegion: string;
   readonly targetAudience: string;
   readonly mode: CampaignMode;
+  /**
+   * W2 (D71) — the chosen source brief's id. Absent means a blank create: the seed
+   * is published and nothing else is written.
+   */
+  readonly source?: string;
 }
 
 export interface CreateCampaignResult {
@@ -83,6 +91,26 @@ export function takeSeed(): CreateCampaignInput | null {
 }
 
 export async function createCampaign(input: CreateCampaignInput): Promise<CreateCampaignResult | null> {
+  // W2 (D71) — with a source the create is a duplicate-with-overrides: the copy's
+  // id is derived HERE, by importing the Identity step's own rule (F18 — never
+  // reproduced), the dialog's region and audience override the source's, and no
+  // seed is published. The seed is spent only by a mounted editor on the blank
+  // route; a source create lands on /brief/<newId> and would leave the key alive
+  // for the next /brief/new visit to load blank over and purge — the bug W3 (#186)
+  // closed. The step baton belongs to the dialog's blank path alone.
+  //
+  // Failure contract, stated plainly: a refused duplicate REJECTS — the
+  // BriefsApiError (a 409 collision, a 500, a dropped connection) reaches the
+  // caller's catch. `null` stays the blank path's storage-refusal contract alone;
+  // this branch never returns it.
+  if (input.source !== undefined) {
+    const newId = slugify(input.name);
+    await duplicateBrief(input.source, newId, {
+      targetRegion: input.targetRegion,
+      targetAudience: input.targetAudience,
+    });
+    return { id: newId, route: `/brief/${newId}` };
+  }
   if (!publishSeed(input)) return null;
   return { id: "", route: "/brief/new" };
 }

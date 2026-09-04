@@ -1,5 +1,8 @@
 import { describe, test, expect, vi, afterEach } from "vitest";
 import { CREATE_SEED_KEY, createCampaign, subscribeToSeed, takeSeed } from "../create-campaign";
+import { BriefsApiError } from "../briefs-api";
+import { API } from "@/lib/run-context";
+import { EMPTY_REPORT, json, mockPipelineApi } from "@/__tests__/helpers";
 
 const seed = { name: "Summer Spark", targetRegion: "EU", targetAudience: "trail runners", mode: "brief" as const };
 
@@ -42,6 +45,53 @@ describe("createCampaign (D65 — the seam)", () => {
       setItem.mockRestore();
       stop();
     }
+  });
+});
+
+describe("createCampaign with a source (W2 / D71 — the duplicate path)", () => {
+  const fromSource = { ...seed, source: "winter-wild" };
+
+  test("duplicates the source with the dialog's overrides and returns the copy's route", async () => {
+    mockPipelineApi({
+      result: () => json(EMPTY_REPORT),
+      post: (url, init) => {
+        expect(url).toBe(`${API}/campaigns/briefs/winter-wild/duplicate`);
+        // The copy's id is derived here from the name; the dialog's region and
+        // audience ride as the route's overrides.
+        expect(JSON.parse(String(init.body))).toEqual({
+          newId: "summer-spark",
+          overrides: { targetRegion: "EU", targetAudience: "trail runners" },
+        });
+        return json({ file: "summer-spark.yaml", brief: { id: "summer-spark" } }, 201);
+      },
+    });
+    await expect(createCampaign(fromSource)).resolves.toEqual({
+      id: "summer-spark",
+      route: "/brief/summer-spark",
+    });
+  });
+
+  test("publishes no seed on the source path — the seed is the blank route's alone", async () => {
+    mockPipelineApi({ post: () => json({ file: "x.yaml", brief: { id: "x" } }, 201) });
+    const listener = vi.fn();
+    const stop = subscribeToSeed(listener);
+    await createCampaign(fromSource);
+    // A source create lands on /brief/<newId>, where no editor spends the seed —
+    // a key left alive would let the next /brief/new visit load blank over and
+    // purge the draft there (the bug W3 / #186 closed).
+    expect(listener).not.toHaveBeenCalled();
+    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    stop();
+  });
+
+  test("a refused duplicate rejects with the API's error — never the null contract", async () => {
+    mockPipelineApi({ post: () => json({ error: 'Brief "summer-spark" already exists.' }, 409) });
+    const err: unknown = await createCampaign(fromSource).then(
+      () => null,
+      (e) => e,
+    );
+    expect(err).toBeInstanceOf(BriefsApiError);
+    expect((err as BriefsApiError).status).toBe(409);
   });
 });
 

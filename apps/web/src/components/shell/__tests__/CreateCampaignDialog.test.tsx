@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { CreateCampaignProvider, useCreateCampaign } from "@/lib/create-campaign-context";
 import { CREATE_SEED_KEY } from "@/lib/create-campaign";
-import { ShellProviders, nextMock } from "@/__tests__/helpers";
+import { ShellProviders, EMPTY_REPORT, json, mockPipelineApi, nextMock } from "@/__tests__/helpers";
 import { editorReducer, initialEditorState, saveDraftToStorage } from "@/components/campaign/editor-state";
 import * as messages from "@/components/campaign/messages";
 import * as createCampaignLib from "@/lib/create-campaign";
@@ -80,6 +80,9 @@ describe("CreateCampaignDialog", () => {
     await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
 
     expect(screen.getByRole("status").textContent).toBe(messages.campaignNameRequired);
+    expect(screen.getByLabelText(messages.campaignNameLabel).getAttribute("aria-invalid")).toBe(
+      "true",
+    );
     expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
     // A refused create is not a create: nothing was published.
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
@@ -362,5 +365,199 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     await user.click(screen.getByRole("button", { name: "open" }));
     expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
     expect(screen.queryByRole("dialog", { name: messages.resumeDraftTitle })).toBeNull();
+  });
+});
+
+describe("start from an existing campaign (W2 / D71)", () => {
+  /** The classic and randomized rows the source list offers, in listBriefs' shape. */
+  const classic = { file: "summer-spark.yaml", brief: { id: "summer-spark", targetRegion: "EU", products: [{ id: "a" }] } };
+  const randomized = {
+    file: "winter-wild.yaml",
+    brief: { id: "winter-wild", mode: "variation", targetRegion: "DE", products: [{ id: "a" }] },
+  };
+  const copy = { id: "summer-spark", targetRegion: "EU", products: [{ id: "a" }] };
+
+  const routeBriefs = (
+    briefs: unknown[],
+    post?: (url: string, init: RequestInit) => Response,
+  ) =>
+    mockPipelineApi({
+      post: (url, init) => (post ? post(url, init) : json({ jobId: "job-1" }, 202)),
+      result: (url) => (url.includes("/campaigns/briefs") ? json({ briefs }) : json(EMPTY_REPORT)),
+    });
+
+  const chooseSource = async (user: ReturnType<typeof userEvent.setup>, id = "summer-spark") => {
+    await user.click(await screen.findByText(id));
+  };
+
+  test("the source list renders the store's briefs inside the dialog, with the picker's row shape", async () => {
+    routeBriefs([classic, randomized]);
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+
+    expect(await screen.findByText("winter-wild")).toBeTruthy();
+    expect(
+      screen.getByText(messages.startFromRowMeta(1, 1, "EU")),
+    ).toBeTruthy();
+    // The blank default row rests selected: a blank create is the common case.
+    expect(
+      screen
+        .getByRole("button", { name: messages.startFromExistingBlank })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+  });
+
+  test("an empty store shows the empty state — this create will be the first", async () => {
+    routeBriefs([]);
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+
+    expect(await screen.findByText(messages.startFromExistingEmpty)).toBeTruthy();
+  });
+
+  test("a failed list shows the error state, not a misleading empty one", async () => {
+    mockPipelineApi({
+      result: (url) => (url.includes("/campaigns/briefs") ? json({ error: "fail" }, 500) : json(EMPTY_REPORT)),
+    });
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+
+    expect(await screen.findByText(messages.startFromExistingError)).toBeTruthy();
+  });
+
+  test("creating from a source duplicates with the dialog's overrides and lands on the copy — no seed, no baton", async () => {
+    routeBriefs([classic], (url, init) => {
+      expect(url).toBe("/api/pipeline/campaigns/briefs/summer-spark/duplicate");
+      // The dialog's region and audience win over the source's; mode is not sent.
+      expect(JSON.parse(String(init.body))).toEqual({
+        newId: "summer-spark",
+        overrides: { targetRegion: "EU", targetAudience: "trail runners" },
+      });
+      return json({ file: "summer-spark.yaml", brief: copy }, 201);
+    });
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    await fillValid(user);
+    await chooseSource(user);
+    await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
+
+    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/summer-spark"));
+    // The dialog never builds a URL itself — the seam's route is what it pushes.
+    expect(nextMock().router.push).toHaveBeenCalledTimes(1);
+    // The source path publishes no seed and stashes no baton: the seed is spent
+    // only by a mounted editor on the blank route, and /brief/summer-spark has none.
+    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    expect(localStorage.getItem("cf:step-handoff")).toBeNull();
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull(),
+    );
+  });
+
+  test("the mode field reads the inherited mode while a source is chosen, and deselecting restores the toggle", async () => {
+    routeBriefs([randomized]);
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+
+    // Without a source: the live mode cards.
+    expect(screen.getByRole("button", { name: "brief" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "variation" })).toBeTruthy();
+
+    await chooseSource(user, "winter-wild");
+    // Not a disabled control — a sentence: the copy inherits the source's mode and
+    // the wizard can change it. The dead cards are gone entirely.
+    expect(screen.getByText(messages.createModeInherited("Randomized"))).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "brief" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "variation" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: messages.startFromExistingBlank }));
+    expect(screen.queryByText(messages.createModeInherited("Randomized"))).toBeNull();
+    expect(screen.getByRole("button", { name: "brief" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "variation" })).toBeTruthy();
+  });
+
+  test("a colliding name (a 409) keeps the dialog open with the duplicate-specific refusal", async () => {
+    routeBriefs([classic], () => json({ error: 'Brief "summer-spark" already exists.' }, 409));
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    await fillValid(user);
+    await chooseSource(user);
+    await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
+
+    // Not the storage story: a 409 is the API's answer, so it gets its own sentence.
+    expect(await screen.findByRole("status")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe(messages.createCampaignDuplicateConflict);
+    expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    // The typed answers survive for a retry.
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark");
+  });
+
+  test("any other refused duplicate (a 500) answers with the retry sentence, not the storage one", async () => {
+    routeBriefs([classic], () => json({ error: "fail" }, 500));
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    await fillValid(user);
+    await chooseSource(user);
+    await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
+
+    expect(await screen.findByRole("status")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe(messages.createCampaignDuplicateFailed);
+    expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+  });
+
+  test("a name with no letters or numbers is refused before the request when a source is chosen", async () => {
+    const post = vi.fn((_url: string, _init: RequestInit) => json({ file: "summer-spark.yaml", brief: copy }, 201));
+    routeBriefs([classic], (url, init) => post(url, init));
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    // The form's empty-name refusal passes ("!!!" is not empty), and the copy's
+    // own name would derive to nothing — refused here, before the request.
+    await user.type(screen.getByLabelText(messages.campaignNameLabel), "!!!");
+    await user.click(screen.getByRole("button", { name: "EU" }));
+    await user.type(screen.getByLabelText(messages.targetAudienceLabel), "trail runners");
+    await chooseSource(user);
+    await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
+
+    expect(await screen.findByRole("status")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe(messages.campaignNameNotSluggable);
+    // Same field, same treatment as the empty-name refusal: error border + aria-invalid.
+    expect(screen.getByLabelText(messages.campaignNameLabel).getAttribute("aria-invalid")).toBe(
+      "true",
+    );
+    expect(post).not.toHaveBeenCalled();
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
+  });
+
+  test("the W3 two-way does not fire when a source is chosen — the draft is not at risk", async () => {
+    saveDraftToStorage(
+      editorReducer(initialEditorState(), { type: "patch", patch: { campaignName: "Half-written" } }),
+    );
+    const post = vi.fn((_url: string, _init: RequestInit) => json({ file: "summer-spark.yaml", brief: copy }, 201));
+    routeBriefs([classic], (url, init) => post(url, init));
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    await fillValid(user);
+    await chooseSource(user);
+    await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
+
+    // No prompt, straight through: the source path publishes no seed, so the
+    // abandoned draft is not at risk — and the prompt's two answers would both lie.
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    expect(screen.queryByRole("dialog", { name: messages.resumeDraftTitle })).toBeNull();
+    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/summer-spark"));
+    // The draft the blank path would have asked about is exactly where it was.
+    expect(localStorage.getItem("cf:draft:new")).not.toBeNull();
   });
 });
