@@ -7,11 +7,10 @@ describe("ModePanel", () => {
   test("each mode card captions itself with its display name (D4)", () => {
     render(<ModePanel mode="brief" onSetMode={() => {}} />);
     // The cards keep the raw value as the accessible name; the words under it
-    // come from display-names, one map for every mode surface.
-    expect(screen.getByRole("button", { name: "brief" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "variation" })).toBeTruthy();
-    expect(screen.getByText("Classic")).toBeTruthy();
-    expect(screen.getByText("Randomized")).toBeTruthy();
+    // come from display-names, one map for every mode surface. Bound per card:
+    // a swapped caption must fail here, not hide in a tree-wide getByText.
+    expect(screen.getByRole("button", { name: "brief" }).textContent).toContain("Classic");
+    expect(screen.getByRole("button", { name: "variation" }).textContent).toContain("Randomized");
   });
 
   test("the pressed card is the editor's current mode, and pressing dispatches setMode", async () => {
