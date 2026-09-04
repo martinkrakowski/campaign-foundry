@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import {
+  chmodSync,
   mkdtempSync,
   mkdirSync,
   writeFileSync,
@@ -116,6 +117,23 @@ describe("GET /campaigns/briefs", () => {
     const res = await web(await handlerFor(dir))(new Request("http://x/campaigns/briefs")); // no briefs/ dir
     expect((await res.json()) as { briefs: unknown[] }).toEqual({ briefs: [] });
     expect(warn).toHaveBeenCalled();
+  });
+
+  test("answers 500 when readdir rejects with EACCES", async () => {
+    const briefs = join(dir, "briefs");
+    mkdirSync(briefs, { recursive: true });
+    chmodSync(briefs, 0o000);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const res = await web(await handlerFor(dir))(new Request("http://x/campaigns/briefs"));
+      expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({
+        error: expect.stringMatching(/^Could not read briefs:.*EACCES/),
+      });
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      chmodSync(briefs, 0o755);
+    }
   });
 
   test("includes revision (content hash) on every entry", async () => {
@@ -474,6 +492,19 @@ describe("authoring briefs", () => {
     expect(existsSync(campYaml())).toBe(false);
   });
 
+  test("PUT returns 500 when the briefs directory is unreadable", async () => {
+    const briefs = join(dir, "briefs");
+    mkdirSync(briefs, { recursive: true });
+    chmodSync(briefs, 0o000);
+    try {
+      const { update } = await api();
+      const res = await update()(jsonReq("http://x/campaigns/briefs/camp", "PUT", brief()));
+      expect(res.status).toBe(500);
+    } finally {
+      chmodSync(briefs, 0o755);
+    }
+  });
+
   test("PUT rejects an unsafe path id with 400", async () => {
     const { update } = await api();
     const res = await update()(jsonReq("http://x/campaigns/briefs/Bad", "PUT", brief()));
@@ -686,6 +717,21 @@ describe("authoring briefs", () => {
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: 'Brief "camp" not found.' });
     expect(existsSync(yamlPath("copy.yaml"))).toBe(false);
+  });
+
+  test("duplicate returns 500 when the briefs directory is unreadable", async () => {
+    const briefs = join(dir, "briefs");
+    mkdirSync(briefs, { recursive: true });
+    chmodSync(briefs, 0o000);
+    try {
+      const { duplicate } = await api();
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "copy" }),
+      );
+      expect(res.status).toBe(500);
+    } finally {
+      chmodSync(briefs, 0o755);
+    }
   });
 
   test("duplicate returns 404 when the source file is malformed", async () => {
@@ -1508,13 +1554,15 @@ describe("authoring briefs", () => {
     });
   });
 
-  test("GET /campaigns/briefs returns empty array when brief store throws", async () => {
+  test("GET /campaigns/briefs answers 500 when the brief store throws", async () => {
     const { list } = await api();
     const { getBriefStore } = await import("../../../lib/ports/index.js");
     const spy = vi.spyOn(getBriefStore(), "listBriefs").mockRejectedValueOnce(new Error("Disk failure"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const res = await list()(new Request("http://x/campaigns/briefs"));
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ briefs: [] });
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "Could not read briefs: Disk failure" });
+    expect(warn).toHaveBeenCalled();
     spy.mockRestore();
   });
 });

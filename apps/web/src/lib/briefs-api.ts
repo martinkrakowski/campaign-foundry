@@ -180,7 +180,16 @@ function asBriefEntry(data: unknown): BriefEntry {
     throw new BriefsApiError("Invalid response", 200);
   }
   const rec = data as { file?: unknown; brief?: unknown; revision?: unknown };
-  if (typeof rec.file !== "string" || typeof rec.brief !== "object" || rec.brief === null) {
+  // `typeof [] === "object"`, and listing consumers read `brief.products.length`.
+  if (
+    typeof rec.file !== "string" ||
+    typeof rec.brief !== "object" ||
+    rec.brief === null ||
+    Array.isArray(rec.brief)
+  ) {
+    throw new BriefsApiError("Invalid response", 200);
+  }
+  if (!Array.isArray((rec.brief as { products?: unknown }).products)) {
     throw new BriefsApiError("Invalid response", 200);
   }
   const entry: BriefEntry = { file: rec.file, brief: rec.brief as CampaignBrief };
@@ -191,7 +200,10 @@ export async function listBriefs(): Promise<BriefEntry[]> {
   const data = await requestJson(`${API}/campaigns/briefs`);
   if (typeof data !== "object" || data === null) return [];
   const briefs = (data as { briefs?: unknown }).briefs;
-  return Array.isArray(briefs) ? (briefs as BriefEntry[]) : [];
+  if (!Array.isArray(briefs)) return [];
+  // Same per-entry shape check the single-entry callers use: a malformed 200 body
+  // must throw into the picker's error path, not reach a field access in render.
+  return briefs.map(asBriefEntry);
 }
 
 export async function createBrief(

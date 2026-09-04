@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
@@ -34,6 +34,20 @@ describe("FsBriefStore", () => {
   test("listBriefs returns empty array when directory does not exist", async () => {
     const nonExistentStore = new FsBriefStore(join(dir, "non-existent"));
     expect(await nonExistentStore.listBriefs()).toEqual([]);
+  });
+
+  // `chmod 000` does not block reads for root, and does nothing at all on Windows,
+  // so the EACCES this test induces is unavailable in those environments. Skip rather
+  // than fail: the branch it covers is exercised by the route-level test, which mocks
+  // the store instead of relying on filesystem permissions.
+  const canDenyRead = process.platform !== "win32" && process.getuid?.() !== 0;
+  test.skipIf(!canDenyRead)("listBriefs rethrows when readdir fails with a non-ENOENT errno", async () => {
+    chmodSync(dir, 0o000);
+    try {
+      await expect(store.listBriefs()).rejects.toMatchObject({ code: "EACCES" });
+    } finally {
+      chmodSync(dir, 0o755);
+    }
   });
 
   test("listBriefs lists, sorts, and parses valid briefs while skipping invalid files", async () => {
