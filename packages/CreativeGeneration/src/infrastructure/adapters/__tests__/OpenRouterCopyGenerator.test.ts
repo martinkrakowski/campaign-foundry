@@ -133,6 +133,29 @@ describe("OpenRouterCopyGenerator", () => {
     expect(user).not.toContain("\n");
   });
 
+  test("renders a null region and audience as empty slots instead of crashing (D68)", async () => {
+    // parseBrief (D68) keeps these scalars null-legal despite the string types.
+    const nullScalars = {
+      ...brief,
+      targetRegion: null,
+      targetAudience: null,
+      campaignMessage: null,
+      localizedMessage: null,
+    } as unknown as CampaignBrief;
+    const fetchFn = vi.fn<typeof fetch>(async () => res({ json: messageWith({ headlines: ["Hallo"] }) }));
+    const out = await new OpenRouterCopyGenerator({ apiKey: "k", fetch: fetchFn }).suggestHeadlines({
+      brief: nullScalars,
+      count: 2,
+    });
+    expect(out).toEqual(["Hallo"]);
+    const user = (requestOf(fetchFn).body.messages as Array<{ content: string }>)[1].content;
+    expect(user).toContain("Subject(s): <<<Hydra Bottle>>>.");
+    expect(user).toContain("Audience: <<<>>>.");
+    expect(user).toContain("Market/region: <<<>>>.");
+    expect(user).toContain("Campaign message: <<<>>>.");
+    expect(user).not.toContain("Locale:");
+  });
+
   const failure = async (fetchFn: FetchFn): Promise<CopyGeneratorError> => {
     try {
       await new OpenRouterCopyGenerator({ apiKey: "super-secret", fetch: fetchFn }).suggestHeadlines(input);
