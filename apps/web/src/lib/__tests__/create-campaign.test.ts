@@ -62,7 +62,7 @@ describe("createCampaign with a source (W2 / D71 — the duplicate path)", () =>
           newId: "summer-spark",
           overrides: { targetRegion: "EU", targetAudience: "trail runners" },
         });
-        return json({ file: "summer-spark.yaml", brief: { id: "summer-spark" } }, 201);
+        return json({ file: "summer-spark.yaml", brief: { id: "summer-spark", products: [] } }, 201);
       },
     });
     await expect(createCampaign(fromSource)).resolves.toEqual({
@@ -72,7 +72,7 @@ describe("createCampaign with a source (W2 / D71 — the duplicate path)", () =>
   });
 
   test("publishes no seed on the source path — the seed is the blank route's alone", async () => {
-    mockPipelineApi({ post: () => json({ file: "x.yaml", brief: { id: "x" } }, 201) });
+    mockPipelineApi({ post: () => json({ file: "x.yaml", brief: { id: "x", products: [] } }, 201) });
     const listener = vi.fn();
     const stop = subscribeToSeed(listener);
     await createCampaign(fromSource);

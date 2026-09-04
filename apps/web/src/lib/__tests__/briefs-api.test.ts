@@ -116,6 +116,13 @@ describe("listBriefs", () => {
     await expect(listBriefs()).rejects.toMatchObject({ message: "Invalid response", status: 200 });
   });
 
+  test("rejects an array-valued brief and a brief without products", async () => {
+    mockFetch(() => json({ briefs: [{ file: "camp.yaml", brief: [] }] }));
+    await expect(listBriefs()).rejects.toMatchObject({ message: "Invalid response", status: 200 });
+    mockFetch(() => json({ briefs: [{ file: "camp.yaml", brief: {} }] }));
+    await expect(listBriefs()).rejects.toMatchObject({ message: "Invalid response", status: 200 });
+  });
+
   test("throws the API error message", async () => {
     mockFetch(() => json({ error: "nope" }, 500));
     await expect(listBriefs()).rejects.toMatchObject({ message: "nope", status: 500 });
