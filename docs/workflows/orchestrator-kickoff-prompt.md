@@ -63,13 +63,15 @@ tool name silently denies nothing.
 | CLI | Get the list | Trap |
 |---|---|---|
 | grok | `grok models` | The id is **`grok-4.6`**, not `grok-4.6-high` — effort is a separate `--reasoning-effort` / `--effort` flag. Passing a fused id errors with *"unknown model id"*. Quota exhausts (HTTP 402) and later resets. |
-| opencode | `opencode models` | `--model` is **required** and takes `provider/model`. The **`openrouter/` prefix is broken in this install**: `openrouter/z-ai/glm-5.3-flash` answers **"User not found."** Use the bare provider path (`opencode-go/glm-5.3-flash`). Same trap as `openrouter/inception/mercury-2`. |
+| opencode | `opencode models` | `--model` is **required** and takes `provider/model`. **`"User not found."` means a stale stored credential, not a bad model id** (corrected 2026-09-04): opencode keeps its own key in `~/.local/share/opencode/auth.json` under `<provider>.key`, an `OPENROUTER_API_KEY` in the environment does **not** override a stored key (verified 2026-09-04; whether it is consulted when no key is stored was **not** tested), and the prefix was never broken. Prove the key independently with `curl -H "Authorization: Bearer $KEY" https://openrouter.ai/api/v1/key`. Also: two `opencode run` invocations started in the same instant collide on its SQLite store and the second dies with `database is locked` — stagger by 30-45s. |
 | agy | `agy models` | `gemini-3.7-flash-*` and `gemini-3.1-pro-{high,low}`; effort is `--effort`. Detached runs need `--dangerously-skip-permissions` — the denial is the permission prompt failing with no TTY, not the detachment. |
 
 **Choosing the cast — what a full wave actually showed (2026-08-31, one repo, briefs by one
 orchestrator, so indicative rather than definitive):**
 
-- `opencode-go/glm-5.3-flash --variant high` — the strongest observed implementer. Reported
+- `openrouter/z-ai/glm-5.3-flash --variant high` — the strongest observed implementer. (Routed via
+  OpenRouter since 2026-09-04: the `opencode-go` seat ran out of balance mid-wave and took every
+  model on that account down with it, `hy4-preview` included.) Reported
   honestly every time, ran real mutation checks, and once **discarded its own verification when
   it noticed the check passed vacuously, and said so**. Fastest by a wide margin.
 - `agy/gemini-3.1-pro-high` — excellent on a **narrow, fully specified remediation brief**;
