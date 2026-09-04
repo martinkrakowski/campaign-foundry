@@ -22,6 +22,9 @@ lanes=()
 first=1
 for spec in "$@"; do
   lane="${spec%%:*}"; rest="${spec#*:}"; wt="${rest%%:*}"; brief="${rest#*:}"
+  # Two lanes sharing a name would truncate and interleave one log, and the wait
+  # below would count one marker as two.
+  if (( ${lanes[(Ie)$lane]} )); then print -u2 "duplicate lane name: $lane"; exit 2; fi
   [ -d "$wt" ]    || { print -u2 "no worktree: $wt";   exit 2; }
   [ -f "$brief" ] || { print -u2 "no brief: $brief";   exit 2; }
   [ -d "$wt/node_modules" ] || print -u2 "warning: $wt has no node_modules — run yarn install first"
@@ -32,13 +35,26 @@ for spec in "$@"; do
   print "dispatched $lane -> $log"
 done
 
-print "waiting for ${#lanes[@]} lane(s)…"
+# A lane killed by the OS (or a harness) never writes its marker, so an unbounded
+# wait hangs the orchestrator forever. Bound it, and say which lanes are missing.
+: ${WAIT_TIMEOUT:=5400}
+print "waiting for ${#lanes[@]} lane(s), up to ${WAIT_TIMEOUT}s…"
+started=$SECONDS
 while :; do
-  done_count=0
+  done_count=0; pending=()
   for lane in "${lanes[@]}"; do
-    grep -qE '^EXIT [0-9]+$' "$LOGDIR/$lane.log" 2>/dev/null && (( done_count++ ))
+    if grep -qE '^EXIT [0-9]+$' "$LOGDIR/$lane.log" 2>/dev/null; then
+      (( done_count++ ))
+    else
+      pending+=("$lane")
+    fi
   done
   (( done_count == ${#lanes[@]} )) && break
+  if (( SECONDS - started > WAIT_TIMEOUT )); then
+    print -u2 "TIMEOUT after ${WAIT_TIMEOUT}s — still pending: ${pending[*]}"
+    print -u2 "Derive their real state before believing anything: gh pr list --head <branch>."
+    break
+  fi
   sleep 30
 done
 

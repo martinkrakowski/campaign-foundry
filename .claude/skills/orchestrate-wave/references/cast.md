@@ -41,6 +41,12 @@ while ! grep -qE '^EXIT [0-9]+$' /tmp/<lane>.log 2>/dev/null; do sleep 30; done
 - **grok can take 80+ minutes and look dead**: 0 bytes written, seconds of CPU, no error, then it
   delivers. Report a silent reviewer as **unknown**, never as failed, and keep the blocking wait
   armed.
+- **grok invocation:** this file prescribes `grok -p "$(cat FILE.md)"`, which every run in the wave
+  that produced this skill used successfully, with briefs of several thousand words.
+  `docs/workflows/orchestrator-kickoff-prompt.md` prescribes `--prompt-file FILE.md` instead. Both
+  work; `--prompt-file` keeps the brief off the command line entirely, so prefer it for a very large
+  brief. **The two documents disagreeing is itself worth fixing** — noted rather than silently
+  diverged from.
 - **grok model id is `grok-4.6`**, not `grok-4.6-high`; effort is a separate flag. Quota exhausts
   with HTTP 402 and later resets.
 - **agy needs `--dangerously-skip-permissions` when detached** — the denial is the permission

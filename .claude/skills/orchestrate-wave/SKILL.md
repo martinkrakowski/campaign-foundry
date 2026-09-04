@@ -33,7 +33,7 @@ the status:
 
 ```bash
 gh pr list --head "<branch>" --json number,url --jq '.[] | "#\(.number) \(.url)"'   # empty ⇒ stuck
-(cd "<worktree>" && yarn build && yarn typecheck && yarn lint && yarn lint:arch && yarn test:cov)
+(cd "<worktree>" && yarn build && yarn typecheck && yarn lint && yarn lint:arch && yarn sync:check && yarn test:cov)
 git -C "<worktree>" status --porcelain=v1 -b && git -C "<worktree>" diff --stat origin/main...HEAD
 ```
 
