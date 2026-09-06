@@ -560,7 +560,12 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       // never presented as an empty result.
       setBriefsFailed(true);
     } finally {
-      setBriefsLoaded(true);
+      // Only the current generation may declare the listing settled. A stale answer that
+      // returned above still reaches this block, and marking it loaded there would hand the
+      // route effect an empty `briefs` with `briefsFailed` still false — which is the false
+      // not-found this lane exists to remove, reintroduced by its own retry path. Found by
+      // three reviewers on PR #197.
+      if (generation === briefsGeneration.current) setBriefsLoaded(true);
     }
   };
 

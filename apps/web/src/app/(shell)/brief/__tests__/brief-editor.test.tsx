@@ -3874,6 +3874,34 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
     expect(screen.queryByText(messages.briefListFailed("camp"))).toBeNull();
   });
 
+  test("a stale answer that lands first does not settle the listing into a false not-found", async () => {
+    const pending: Array<(r: Response) => void> = [];
+    routes({ list: () => new Promise<Response>((resolve) => pending.push(resolve)) });
+    renderWithRun(<Editor id="camp" />);
+    await waitFor(() => expect(pending.length).toBe(1));
+
+    // A second listing starts before the first answers — the mount load is now stale.
+    fireEvent.focus(window);
+    await waitFor(() => expect(pending.length).toBe(2));
+
+    // The stale one answers first, and empty. It must not mark the listing settled:
+    // that hands the route effect an empty listing with no failure recorded, and the
+    // effect would then call setUnknownId on a brief that exists.
+    pending[0](json({ briefs: [] }));
+    // Flush the stale answer's state updates before asserting. A `waitFor` on a condition
+    // that is already true returns without yielding, so the assertion would run before
+    // React committed the false not-found — passing against the very bug it pins.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByText(messages.briefNotFound("camp"))).toBeNull();
+
+    // The current answer decides.
+    pending[1](json({ briefs: [entry("camp", "r1")] }));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    expect(screen.queryByText(messages.briefNotFound("camp"))).toBeNull();
+  });
+
   test("a slow failed answer cannot replace a newer successful one", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const user = userEvent.setup();
