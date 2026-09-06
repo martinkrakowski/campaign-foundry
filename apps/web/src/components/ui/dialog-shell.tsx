@@ -44,6 +44,23 @@ export function dialogHoldsFocus(dialog: HTMLElement | null): boolean {
 }
 
 /**
+ * Open-order registry of mounted traps, local to the Tab handler. Every mounted trap
+ * registers its own `window` keydown listener, so with two overlays open both handlers
+ * run on the same keypress — and if each one pulled stray focus into itself, the lower
+ * would claim it for one synchronous tick before the topmost reclaims it: several
+ * `preventDefault`s per keypress, focus ending up in the topmost's first control either
+ * way, and no way for a test on final focus position to tell that apart. The
+ * containment branch therefore fires only when this trap is the last entry — the most
+ * recently *opened* overlay. Open order, never DOM order: paint order is set by callers
+ * hand-raising `z` (`CreateCampaignDialog` passes `containerClassName="z-[80]"`), so
+ * the last `[role=dialog]` in the document is not authoritative for which overlay is
+ * on top. This is scoped to the Tab handler and is NOT the overlay-depth counter
+ * (D84): no `inert`, no `aria-modal` change, no paint order — F-B's counter may later
+ * absorb this registry.
+ */
+const openTraps: HTMLElement[] = [];
+
+/**
  * Focus trap and Escape key hook for dialogs and drawers (W10.5 / SHELL-41).
  * Captures previous active element on open, manages Tab wrapping, closes on Escape,
  * and restores focus on unmount.
@@ -68,6 +85,8 @@ export function useDialogFocusTrap({
     const dialogElement = dialogRef.current;
     const previouslyFocused = document.activeElement as HTMLElement | null;
 
+    if (dialogElement) openTraps.push(dialogElement);
+
     if (initialFocusRef?.current) {
       initialFocusRef.current.focus();
     } else {
@@ -87,8 +106,24 @@ export function useDialogFocusTrap({
       const focusables = getFocusableDialogElements(dialogElement);
       if (focusables.length === 0) return;
 
+      // Only the most recently opened overlay claims a Tab (see `openTraps`): a lower
+      // overlay must not touch the keystroke at all, so the upper keeps both the
+      // containment decision and the cycle below.
+      if (openTraps[openTraps.length - 1] !== dialogElement) return;
+
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
+
+      // Containment (F5): a click on non-focusable panel content puts activeElement on
+      // `document.body`, where `dialogHoldsFocus` answers false for *every* overlay at
+      // once — so the registry rule above decides *which* trap handles it, and this
+      // branch decides what it does: put focus back inside the dialog instead of
+      // letting the browser's native Tab walk into the page behind the modal.
+      if (!dialogHoldsFocus(dialogElement)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+        return;
+      }
 
       if (e.shiftKey && document.activeElement === first) {
         e.preventDefault();
@@ -102,6 +137,8 @@ export function useDialogFocusTrap({
     window.addEventListener("keydown", handleKeyDown);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
+      // Mirrors the guarded push above: a trap with no element registered nothing.
+      if (dialogElement) openTraps.splice(openTraps.indexOf(dialogElement), 1);
       previouslyFocused?.focus?.();
     };
   }, [open, dialogRef, initialFocusRef, onCloseRef]);

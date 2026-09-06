@@ -281,6 +281,147 @@ describe("DialogShell and DrawerShell anatomy", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Fresh Callback" })).toBeNull();
   });
+
+  test("a Tab whose focus is on document.body is contained back into the dialog's first control", () => {
+    render(
+      <DialogShell open onClose={vi.fn()} ariaLabel="Stray Focus">
+        <DialogBody>
+          <p>Body text the user may click</p>
+        </DialogBody>
+        <DialogFoot>
+          <button type="button">Solo first</button>
+          <button type="button">Solo last</button>
+        </DialogFoot>
+      </DialogShell>,
+    );
+
+    // A click on the panel's non-focusable body text leaves activeElement here.
+    (document.activeElement as HTMLElement).blur();
+    expect(document.activeElement).toBe(document.body);
+
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Solo first" }));
+  });
+
+  test("a Shift-Tab whose focus is on document.body is contained back into the dialog's last control", () => {
+    render(
+      <DialogShell open onClose={vi.fn()} ariaLabel="Stray Shift Focus">
+        <button type="button">Solo first</button>
+        <button type="button">Solo last</button>
+      </DialogShell>,
+    );
+
+    (document.activeElement as HTMLElement).blur();
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Solo last" }));
+  });
+
+  test("with two overlays open, a stray Tab lands in the topmost and the lower's first control never receives focus", () => {
+    render(
+      <div>
+        <DialogShell open onClose={vi.fn()} ariaLabel="Lower Overlay">
+          <button type="button">Lower first</button>
+          <button type="button">Lower last</button>
+        </DialogShell>
+        <DialogShell open onClose={vi.fn()} ariaLabel="Upper Overlay">
+          <button type="button">Upper first</button>
+          <button type="button">Upper last</button>
+        </DialogShell>
+      </div>,
+    );
+
+    (document.activeElement as HTMLElement).blur();
+    const lowerFirst = screen.getByRole("button", { name: "Lower first" });
+    const lowerFocus = vi.spyOn(lowerFirst, "focus");
+
+    fireEvent.keyDown(window, { key: "Tab" });
+
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Upper first" }));
+    // Final position alone cannot discriminate the naive "every trap pulls stray
+    // focus into itself" rule — both handlers run, the lower claims for one tick,
+    // the upper reclaims. The lower must not claim at all.
+    expect(lowerFocus).not.toHaveBeenCalled();
+  });
+
+  test("with focus already inside the topmost overlay, the lower does not claim the Tab keystroke", () => {
+    render(
+      <div>
+        <DialogShell open onClose={vi.fn()} ariaLabel="Lower Overlay">
+          <button type="button">Lower first</button>
+        </DialogShell>
+        <DialogShell open onClose={vi.fn()} ariaLabel="Upper Overlay">
+          <button type="button">Upper first</button>
+          <button type="button">Upper middle</button>
+          <button type="button">Upper last</button>
+        </DialogShell>
+      </div>,
+    );
+
+    // Park focus on a middle control of the upper: no boundary cycle applies, so the
+    // only handler that could preventDefault this event is the lower's — and with
+    // the open-order registry rule, none does.
+    const middle = screen.getByRole("button", { name: "Upper middle" });
+    middle.focus();
+
+    const event = new KeyboardEvent("keydown", { key: "Tab" });
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(middle);
+  });
+
+  test("open order, not DOM order, decides which overlay claims a stray Tab", () => {
+    const Stacked = ({ upperOpen }: { upperOpen: boolean }) => (
+      <div>
+        <DialogShell open={upperOpen} onClose={vi.fn()} ariaLabel="Upper Overlay">
+          <button type="button">Upper first</button>
+          <button type="button">Upper last</button>
+        </DialogShell>
+        <DialogShell open onClose={vi.fn()} ariaLabel="Lower Overlay">
+          <button type="button">Lower first</button>
+          <button type="button">Lower last</button>
+        </DialogShell>
+      </div>
+    );
+
+    // The lower opened first; flipping the upper open makes it the most recently
+    // opened overlay — while its dialog element sits BEFORE the lower's in the
+    // document, so a DOM-order rule would hand the stray Tab to the lower.
+    const { rerender } = render(<Stacked upperOpen={false} />);
+    rerender(<Stacked upperOpen={true} />);
+
+    (document.activeElement as HTMLElement).blur();
+    const lowerFirst = screen.getByRole("button", { name: "Lower first" });
+    const lowerFocus = vi.spyOn(lowerFirst, "focus");
+
+    fireEvent.keyDown(window, { key: "Tab" });
+
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Upper first" }));
+    expect(lowerFocus).not.toHaveBeenCalled();
+  });
+
+  test("a trap whose dialog element never mounts registers nothing and leaves earlier overlays in charge", () => {
+    render(
+      <DialogShell open onClose={vi.fn()} ariaLabel="Real Overlay">
+        <button type="button">Real first</button>
+        <button type="button">Real last</button>
+      </DialogShell>,
+    );
+
+    // Opened after the real overlay — it would be the registry's last entry (and so
+    // the one claiming stray Tabs) if the hook registered a trap with no element.
+    const Phantom = () => {
+      const dialogRef = useRef<HTMLDivElement>(null);
+      useDialogFocusTrap({ open: true, onClose: vi.fn(), dialogRef });
+      return null;
+    };
+    render(<Phantom />);
+
+    (document.activeElement as HTMLElement).blur();
+    fireEvent.keyDown(window, { key: "Tab" });
+
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Real first" }));
+  });
 });
 
 describe("getFocusableDialogElements", () => {
