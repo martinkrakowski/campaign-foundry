@@ -138,6 +138,12 @@ export function useDialogFocusTrap({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       // Mirrors the guarded push above: a trap with no element registered nothing.
+      // `indexOf` is never -1 here, so the splice needs no found-check: this closure
+      // and the push share one `dialogElement` const, React runs a cleanup exactly once
+      // per effect invocation, and two mounted traps never share a DOM node — so every
+      // push is balanced by this one removal of that same reference. A `!== -1` guard
+      // would read as prudence, but its false arm is unreachable and this repo holds
+      // 100 % branch coverage without `istanbul ignore`.
       if (dialogElement) openTraps.splice(openTraps.indexOf(dialogElement), 1);
       previouslyFocused?.focus?.();
     };
