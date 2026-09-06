@@ -3,7 +3,7 @@
 **Date:** 2026-09-06
 **Author:** orchestrator
 **Status:** draft — for the owner's review, then the grok + agy two-reviewer pass
-**Verified against:** `main` at `f454d46` (CI green, including the `hexagen sync --check` drift gate)
+**Verified against:** `main` at `f454d46` (CI green, including the `hexagen sync --check` drift gate at `.github/workflows/ci.yml:78`)
 **Decision ids introduced:** D82 – D85
 **Relates to:** **D64** (identity model — OPEN, the owner's call), D73 – D81 (the lock plan), D11
 (draft recovery), D15 (a storage port before the S3 move), D68 (null-legal brief scalars), F19 (the
@@ -47,9 +47,9 @@ that "remaining work" is not read as "everything".
 
 | id | Decision | Rationale |
 |---|---|---|
-| **D82** | **OPEN — the owner's call: what a second tab may do to a first tab's draft.** The editor autosaves to `cf:draft:<id>` and restores from it, but never observes a change written by anyone else. Two windows on the same campaign is therefore last-write-wins with no notice. Three candidate policies: *(a)* **leave it** — document the single-window assumption and add no mechanism; *(b)* **restore only when the local tab is clean** — a `storage` listener re-runs recovery, but only when the local editor is not dirty, so a typing tab is never yanked. **Harder than it looks (review, agy):** the recovery effect's deps are `[draftKey, routeId, routeLoadedId]`, so a listener registered there closes over a *stale* `state` and its "is the tab clean" test is answered by a snapshot, not by the editor; and `saveDraftToStorage` stamps `Date.now()` on every write (`editor-state.ts:1399`), so the listener fires on every autosave whether or not the content changed. Choosing (b) means solving both; *(c)* **notice, never restore** — a `storage` listener raises a passive line ("this campaign changed in another window") and the user chooses. The plan recommends **(c)**, with **(a)** a defensible answer today. | The recorded fix for this — "give recovery the subscribe/notify watch the seed effect has" — is **wrong**, and the plan says so in §1 F2. Applied literally it is a no-op, and the mechanism that would actually work introduces a worse bug than the one it fixes: two active tabs each restoring the other's draft means neither can type. That is a product decision about a multi-window story that has never been stated, not an implementation detail a lane may take. |
+| **D82** | **OPEN — the owner's call: what a second tab may do to a first tab's draft.** The editor autosaves to `cf:draft:<id>` and restores from it, but never observes a change written by anyone else. Two windows on the same campaign is therefore last-write-wins with no notice. Three candidate policies: *(a)* **leave it** — document the single-window assumption and add no mechanism; ~~*(b)* **restore only when the local tab is clean**~~ — **WITHDRAWN after review**, by two reviewers from different angles. agy: the recovery effect's deps are `[draftKey, routeId, routeLoadedId]`, so a listener registered there closes over a *stale* `state`, and `saveDraftToStorage` stamps `Date.now()` on every write (`editor-state.ts:1399`), so it fires on every autosave regardless of content. grok traced it further and showed (b) does not even buy what it promises: a clean tab B restores A's draft, is thereby made dirty (`isPristine`, `editor-state.ts:1323-1329`), **autosaves the restored state back over A's newer draft**, and from then on both tabs are dirty so neither restores — i.e. it degenerates into (a) after one exchange, having clobbered a write on the way. It also still yanks a *focused-but-clean* tab with the caret in a field. **Do not implement (b) as written.** *(d)* **an exclusive editor lock** (Web Locks API) — one tab owns the campaign, others open read-only; *(e)* **restore-and-notice** — (c)'s banner plus an explicit "load it" action; *(c)* **notice, never restore** — a `storage` listener raises a passive line ("this campaign changed in another window") and the user chooses. The plan recommends **(c)**, with **(a)** defensible today and **(d)** the honest answer if the cloud migration makes multi-window a supported story rather than an accident. **(c) is the only listed option that never writes another tab's state.** | The recorded fix for this — "give recovery the subscribe/notify watch the seed effect has" — is **wrong**, and the plan says so in §1 F2. Applied literally it is a no-op, and the mechanism that would actually work introduces a worse bug than the one it fixes: two active tabs each restoring the other's draft means neither can type. That is a product decision about a multi-window story that has never been stated, not an implementation detail a lane may take. **The reviewers then killed the plan's own middle option**, which is the strongest argument that this belongs to the owner and not to a lane. |
 | **D83** | **A listing that failed is a different state from a listing that is empty, in the editor as well as in the picker.** `BriefEditor` treats them as one, and the consequence is that a valid campaign is reported to its owner as not existing. The distinction W2 already required of `StartFromExistingPicker` becomes the rule for every surface that reads `listBriefs()`. | The API was made honest about this in **#189** — a store read failure is a 500, not `{briefs: []}`. The web client then discards that honesty. Shipping a truthful API behind a lying UI is the worse of the two states, because the operator now has a false negative that looks authoritative. |
-| **D84** | **Modality belongs to the kit, not to each stacking site.** `DialogShell` gains an overlay-depth counter; every shell but the topmost is marked `inert`, and only the topmost carries `aria-modal="true"`. The **F22 close-first workaround retires** — a caller may open a second overlay over a first without first closing the first. | Three sites stack overlays today and each solves it, or does not, by hand. A counter in the kit is one implementation with one test surface; the alternative is the same judgment repeated at every future call site, which is how F22 arose. |
+| **D84** | **Modality belongs to the kit, and the kit is BOTH shells.** *(widened after review, grok.)* A shared overlay-depth counter serves `DialogShell` **and `DrawerShell`** — both render `aria-modal="true"` today. Every overlay but the topmost is marked `inert`, only the topmost carries `aria-modal`, and the counter is **authoritative for paint order**, so mount-order topmost and visual topmost cannot diverge (`z-50` drawer under a `z-[70]` dialog). The **F22 close-first workaround retires** for kit overlays. **Two overlays are outside the kit and D84 does not silently cover them**: Save-as (`BriefEditor.tsx:1624-1631`) and `CommandBar`'s confirm (`CommandBar.tsx:373-437`) are hand-rolled `aria-modal` regions. They are either converted to the kit or carry a written exemption; what they may not do is sit outside a decision that claims to own modality. | Three sites stack overlays today and each solves it, or does not, by hand. A counter in the kit is one implementation with one test surface; the alternative is the same judgment repeated at every future call site, which is how F22 arose. |
 | **D85** | **The inset pixel golden is recorded for `linux-x64`, or the claim it backs is withdrawn.** `compositor-goldens-insets.json` exists for `darwin-arm64` only, so the inset path has no pixel evidence on the platform CI actually runs. Either record the map from CI, or state in the test that inset fidelity is unproven off darwin. | A golden that silently skips on the only platform that runs it unattended is a vacuous tripwire — the documented class this repo already refuses elsewhere. Both answers are honest; the present state is the one that is not. |
 
 ---
@@ -188,18 +188,23 @@ resume two-way at `:275`, both mounted at once by design.
 
 **What is already fine, verified — so the lane does not "fix" it:**
 
-- **Pointer, for the stack that exists.** The dialog scrim is `fixed inset-0 z-[70]` with
-  `onClick={onClose}` (`dialog-shell.tsx:239-242`). The only reachable stack today is **two
-  `DialogShell`s** (`CreateCampaignDialog.tsx:170` and `:275`), which sit at equal `z`, so the later
-  one in DOM order paints above and a click aimed at the lower one lands on the upper scrim.
-  **Scoped after review (agy):** this is not a general rule. `DrawerShell` renders at `z-50`
-  (`dialog-shell.tsx:287`) against the dialog's `z-[70]`, so a drawer opened *over* a dialog would
-  paint underneath it. No such site exists — the two drawers (`AssetPickerDrawer`,
-  `HeadlinePoolDrawer`) open from the editor, and no dialog contains a control that opens one — so
-  this is a latent ordering hazard, not a live defect. **F-B owns it:** the depth counter must be
-  authoritative for paint order too, so the hazard cannot become real silently.
-- **Escape.** Guarded by `dialogHoldsFocus` (`:79`), so the lower shell's listener returns and only
-  the focused dialog closes. This one stands.
+- **Pointer — and the mechanism is NOT the one v1 named.** *(retracted twice; the second reviewer
+  found what the first and the author both missed.)* v1 said the two shells "sit at equal `z`, so the
+  later one in DOM order paints above." **False at the very site it cited.** The resume two-way
+  passes `containerClassName="z-[80]"` (`CreateCampaignDialog.tsx:279`), and `cn`/`twMerge`
+  (`lib/cn.ts:11-12`) lets that override the shell's default `z-[70]`. `ConfirmDialog` uses the same
+  override (`confirm-dialog.tsx:37`). **Stacking works today because callers hand-raise `z`, not
+  because DOM order is sufficient.** This matters concretely: F-B owns `CreateCampaignDialog.tsx`,
+  and a lane told that DOM order suffices is one tidy-up away from deleting the override that is
+  actually doing the work.
+  The drawer/dialog hazard is also real — `DrawerShell` is `z-50` (`dialog-shell.tsx:287`) against
+  the dialog's `z-[70]`, so mount-order "topmost" and paint order diverge the moment a drawer mounts
+  over a dialog. **F-B owns paint order** and must make the counter authoritative for it.
+- **Escape — correct for the kit, not for the product.** `dialogHoldsFocus` (`:41-44`, `:79`) does
+  guard two `DialogShell`s, and the suite pins it (`dialog-shell.test.tsx:187-210`). But
+  `CommandBar`'s own confirm closes on Escape unconditionally with no such guard
+  (`CommandBar.tsx:395-397`), so "Escape is correct" is a statement about the kit and v1 stated it
+  about the product.
 
 **What is actually wrong:** two simultaneous `aria-modal="true"` regions is undefined for a screen
 reader, and a virtual cursor — which does not travel by Tab — reads straight through the lower
@@ -209,9 +214,22 @@ dialog's content. The user hears a form they cannot operate.
 v1 of this plan told a future lane that Tab containment was already correct and out of scope. It is
 not, and a lane briefed on that would have shipped the escape hatch intact.
 
-**Blast radius:** the counter lands in `ui/dialog-shell.tsx`; the three existing stacking sites
-(`CreateCampaignDialog`, `BriefPicker`, `Header`) come along, and `BriefPicker`'s F22 close-first
-comment (`:72`) is deleted with the workaround it describes.
+**Blast radius — v1 said "three sites" and that was wrong** *(review, grok)*. The overlay estate is
+larger than the kit, and a counter on `DialogShell` alone cannot deliver what §4 promised. The
+inventory:
+
+| Overlay | Implementation | `z` |
+|---|---|---|
+| `DialogShell` (`CreateCampaignDialog`, `BriefPicker`, `Header`, `ConfirmDialog`) | the kit | `z-[70]`, callers raise to `z-[80]` |
+| `DrawerShell` (`AssetPickerDrawer`, `HeadlinePoolDrawer`) | the kit, **second shell** — also `aria-modal` | `z-50` |
+| **Save-as** (`BriefEditor.tsx:1624-1631`) | **hand-rolled** `role="dialog" aria-modal="true"`, own `useDialogFocusTrap` (`:202-214`) | `z-[70]` |
+| **`CommandBar`'s confirm** (`CommandBar.tsx:373-437`) | **hand-rolled**, no `dialogHoldsFocus` | `z-50` |
+| `EditorDirtyProvider`'s confirm (`editor-dirty-context.tsx:104-108`), `MobileMenu` (`:102`), the grid lightbox (`grid/page.tsx:719`) | mixed | `z-[60]` and others |
+
+Save-as is stacked **by design** — the overwrite `ConfirmDialog` mounts on top of it and returns to
+it (`BriefEditor.tsx:1604-1620`) — and it is not a `DialogShell`, so a kit counter does not see it.
+That is why **D84 is widened and §4's claim is rewritten** below: a kit change fixes the kit, and the
+two hand-rolled overlays need either conversion or an explicit exemption.
 
 ---
 
@@ -315,6 +333,20 @@ cost or schedule:
 | `StatusChip`'s fourth-state token; white primary buttons under a light theme (W3.2) | `.agents/session-log.md:1162` |
 | `TURBO_TOKEN` / `TURBO_TEAM` never configured, so remote cache is off | `.github/workflows/ci.yml:109` |
 
+**Two more F1-class swallows, and one unowned decision** *(review, grok — accepted, and they belong
+in scope, not in this straggler list)*:
+
+| Item | Where | Disposition |
+|---|---|---|
+| `getPool` rejection swallowed — a down API looks like *no headlines* | `components/campaign/sections/CopySection.tsx:35-36` | **Named in D83.** Not folded into F-A: different file, different surface. A follow-on lane, or F-A's brief may take it if the owner prefers one sweep. |
+| `listAssets` catch sets `[]` — a down API looks like an *empty asset bin*. `AssetPickerDrawer.tsx:39-40` is the honest counterpart in the same product | `components/shell/Sidebar.tsx:105-107` | **Named in D83**, same disposition. |
+| **D78, the fence** — *"a lease is a liveness hint, not mutual exclusion, until the commit is conditional on still holding it."* **No R-lane owns it** (zero mentions across the lock plan's §3 rows); it is scheduled to land with the backend binding (`2026-09-04:96-98`). | `2026-09-04_run-exclusion-and-the-distributed-lock.md:45`, `:156` | **Real remaining pipeline work outside R1–R6.** This plan's "six specified lanes plus four defects" was therefore not the whole pipeline picture, and now says so. |
+
+D83 is stated as "every surface that reads `listBriefs()`", which is too narrow for what it is
+actually about. **Read it as: a failed read is never presented as an empty result.** F-A proves the
+pattern on the two surfaces it owns; the two above are named so nobody reads this plan as having
+cleared them.
+
 **Refuted, with evidence (review, agy).** The review also cited `.agents/session-log.md:1147` and
 `:1118` — the W0b bracket-alpha sweep and the `text-white` migration — as open work. They are not:
 the lane that closed them is four lines below, `## 2026-08-30 — W0b lane: the sweep W0 enabled
@@ -353,20 +385,29 @@ section claimed R1 – R6 are *fork-independent*, and that is too strong. **Corr
 | **F2 / D82** | **None.** A draft key is `cf:draft:<whatever the route calls the brief>` either way. |
 | **R1, R3, R5** | **None.** Eviction, a temp-file name and a run deadline touch no identity. |
 | **R4** | **None.** A pool revision is a SHA of stored bytes. |
-| **R2** | **Exposed in its key, not its need.** Campaigns overwriting each other is a live bug under either fork, so the lane is wanted either way — but the segment it writes takes *today's* identity value, which is the slug. Under D64(b) those directories are renamed, so R2 lands a second migration on top of the one it already carries for existing output. |
-| **R6** | **Exposed in its key.** `claim(campaignId, jobId)` keys exclusion on whatever `campaignId` means. The seam survives the fork; the values in it do not. |
+| **R2** | **Exposed, and it writes the exposure to disk.** Output paths carry no campaign segment today (`GenerateCampaignUseCase.use-case.ts:271-273`); R2's job is to add one, and `campaignId` *is* `brief.id`, the slug (`generate.post.ts:73-82`). Reports are already slug-files (`report.ts:21-23`) and the grid serves whatever the report stored (`grid/page.tsx:17-18`). So R2 stamps today's slug onto **durable bytes**, not just a runtime key. Under (b) that string is wrong; under (a) a rename orphans the new tree — which is what D74 already warned. The *want* is fork-independent; the *implementation* is not. |
+| **R6** | **Exposed — and the lock plan already said so, in words this plan first dropped.** That plan reads: *"Nothing here needs D64 answered; **R6's key shape does**, which is why D81 makes the key a parameter"* (`2026-09-04:127-128`), and its §5 opens with *"D64. Still open, and R6's key shape waits on it"* (`:153`). D81 lets R6 **start** without D64; it does not let it **bind** the key. v1 of this plan quoted the first half of that sentence and dropped the second. |
 
-So the accurate claim is: **eleven of thirteen pieces of work are fork-independent and ready, and the
-two that are exposed are exposed in the value of a key, not in whether the work is wanted.** Neither
-R2 nor R6 should wait for D64 — a campaign that overwrites another's renders is a live defect today
-— but both must be dispatched knowing they carry a rename if D64 lands on (b), and R2's brief must
-say so where it already discusses migrating existing output. D64 still gates *server-side drafts,
-server-minted ids, ownership, and the template library*. "We are blocked on the identity decision"
-remains the wrong summary of this repo; "nothing we do now touches it" was the wrong correction.
+So the accurate claim is: **eleven of thirteen pieces are fork-independent; R2 and R6 are not, and R2
+is the serious one because its exposure is written to disk.** Neither should wait for D64 — a
+campaign that overwrites another's renders is a live defect today — but R2's brief must carry the
+rename risk where it already discusses migrating existing output, and R6 must ship as an
+opaque-key seam with the binding deferred, exactly as D81 intends. D64 still gates *server-side
+drafts, server-minted ids, ownership, and the template library*.
 
-**Sequencing.** F1 → F-D(F2) are sequential (both own `BriefEditor.tsx`). F3 is independent. The
-R-lanes live in `apps/api` and `packages/`; the F-lanes live in `apps/web`. That package boundary is
-what makes one web lane safe beside one api lane, and it is the only parallelism this plan claims.
+**"We are blocked on the identity decision" remains the wrong summary of this repo. "Nothing we do
+now touches it" was the wrong correction, and this is the third time in this arc a plan of mine has
+reached for it** — the create-moment plan's §3 was corrected the same way on 2026-09-03. The pattern
+is worth naming: fork-independence of a *need* keeps getting written down as fork-independence of an
+*implementation*. A future plan should state the two separately by default.
+
+**Sequencing.** F1 → F-D(F2) are sequential (both own `BriefEditor.tsx`). F3 is independent.
+
+**The package-boundary rationale v1 gave for parallelism is false** *(review, grok)*. R-lanes do not
+stay out of `apps/web`: R2 owns `apps/web/src/app/(shell)/grid/page.tsx` and R4 owns
+`apps/web/src/lib/briefs-api.ts` — both are in the lock plan's own ownership rows. Parallelism has to
+be argued from **file** disjointness, which is what §3 now does, not from a package line that does
+not hold.
 
 ---
 
@@ -376,9 +417,9 @@ One lane = one worktree = one branch = one PR.
 
 | Lane | Task | Owns | Gate |
 |---|---|---|---|
-| **F-A** | **A failed listing is its own state** (**D83**, F1 **and F6**). `loadBriefs` records the failure; the route-load effect distinguishes *listing failed* from *id unknown* and must not call `setUnknownId` on a failure. New copy in the campaign `messages.ts` in the M3 voice — name the fact, offer the way out (retry), and do **not** offer "start a new brief", which is the remedy that invites a duplicate. `StartFromExistingPicker.tsx:56-63` is the in-repo model. **F6 rides with it:** `fetchPersistedRun` (`run-context.tsx:200-209`) must distinguish *no persisted run* from *could not ask*; its `catch` currently answers the first for both. **Tests:** a rejected `listBriefs` on a named route shows the failure state and **not** the not-found state; an empty listing on a named route still shows not-found; the focus retry recovers to the loaded brief; a rejected `fetchPersistedRun` is not reported as an absent run. **Mutation:** make each catch swallow again → the matching test goes red. | `apps/web/src/components/campaign/BriefEditor.tsx`, `components/campaign/messages.ts` (append only), `lib/run-context.tsx`, their `__tests__` | none |
-| **F-B** | **An overlay-depth counter in the kit, and a trap that actually contains** (**D84**, F3 **and F5**). *(1)* `DialogShell` tracks mounted depth; every shell but the topmost gets `inert` and drops `aria-modal`, and the counter is authoritative for **paint order** too, so a drawer (`z-50`) can never sit under a dialog (`z-[70]`) it was opened over. Retire F22's close-first workaround and delete its comment at `BriefPicker.tsx:72`. *(2)* **F5:** the Tab handler gains a containment branch — when `activeElement` is outside the dialog, Tab redirects into it. **Do not** touch the Escape guard; §1 verifies it is correct. **Tests:** with two shells open the lower is `inert` and carries no `aria-modal`, the upper carries it; closing the upper restores the lower; a single shell is unchanged; **with `activeElement` on `document.body`, Tab lands focus inside the dialog** (red today). **Mutation:** mark all shells inert → the restore test goes red; delete the containment branch → the body-focus test goes red. | `apps/web/src/components/ui/dialog-shell.tsx`, `components/shell/BriefPicker.tsx`, `components/shell/CreateCampaignDialog.tsx`, `components/shell/Header.tsx`, their `__tests__` | none |
-| **F-C** | **The inset golden, settled** (**D85**, F4). Either record `compositor-goldens-insets.json` for `linux-x64` from a CI run, or state in the test that the non-zero inset path is proven on `darwin-arm64` only. **Recording is preferred**; the withdrawal is acceptable and must be explicit, never a silent skip. | `packages/CreativeGeneration/.../compositor-goldens-insets.json`, the compositor golden test | none |
+| **F-A** | **A failed listing is its own state** (**D83**, F1 **and F6**). `loadBriefs` records the failure; the route-load effect distinguishes *listing failed* from *id unknown* and must not call `setUnknownId` on a failure. New copy in the campaign `messages.ts` in the M3 voice — name the fact, offer the way out (retry), and do **not** offer "start a new brief", which is the remedy that invites a duplicate. `StartFromExistingPicker.tsx:56-63` is the in-repo model. **F6 rides with it:** `fetchPersistedRun` (`run-context.tsx:200-209`) must distinguish *no persisted run* from *could not ask*; its `catch` currently answers the first for both. **Tests:** a rejected `listBriefs` on a named route shows the failure state and **not** the not-found state; an empty listing on a named route still shows not-found; a rejected `fetchPersistedRun` is not reported as an absent run. **On the retry test — v1's was vacuous** *(review, grok)*: "the focus retry recovers" passes while the defect that actually lies is untouched, because `window` `focus` never fires for a user who stays on the page, and `loadBriefs` has no generation counter of its own (the capabilities effect at `:300-325` has one; this does not). The test that earns its place asserts **in-page recovery** — a retry affordance in the failure copy, exercised without a focus event. **Mutation:** make each catch swallow again → the matching test goes red; remove the in-page retry → the recovery test goes red. | `apps/web/src/components/campaign/BriefEditor.tsx`, `components/campaign/messages.ts` (append only), `lib/run-context.tsx`, their `__tests__` | none |
+| **F-B** | **An overlay-depth counter in the kit, and a trap that actually contains** (**D84**, F3 **and F5**). *(1)* `DialogShell` tracks mounted depth; every shell but the topmost gets `inert` and drops `aria-modal`, and the counter is authoritative for **paint order** too, so a drawer (`z-50`) can never sit under a dialog (`z-[70]`) it was opened over. Retire F22's close-first workaround and delete its comment at `BriefPicker.tsx:72`. *(2)* **F5:** the Tab handler gains a containment branch — when `activeElement` is outside the dialog, Tab redirects into it. *(3)* **Preserve the `z-[80]` overrides** at `CreateCampaignDialog.tsx:279` and `confirm-dialog.tsx:37` unless the counter replaces what they do — they, not DOM order, are what stacks those dialogs today. The `dialogHoldsFocus` Escape guard is correct **for the kit** and needs no change; it is the hand-rolled overlays that lack it. **Tests:** with two shells open the lower is `inert` and carries no `aria-modal`, the upper carries it; closing the upper restores the lower; a single shell is unchanged; **with `activeElement` on `document.body`, Tab lands focus inside the dialog** (red today). **Mutation:** mark all shells inert → the restore test goes red; delete the containment branch → the body-focus test goes red. | `apps/web/src/components/ui/dialog-shell.tsx` (**both shells**), `components/shell/BriefPicker.tsx`, `components/shell/CreateCampaignDialog.tsx`, `components/shell/Header.tsx`, `components/ui/confirm-dialog.tsx`, their `__tests__`. **Not owned, and that is the point:** Save-as (`BriefEditor.tsx`) and `CommandBar`'s confirm are hand-rolled `aria-modal` regions this lane cannot reach — see the DoD. | none |
+| **F-C** | **The inset golden, settled** (**D85**, F4). Either record `compositor-goldens-insets.json` for `linux-x64` from a CI run, or state in the test that the non-zero inset path is proven on `darwin-arm64` only. **Recording is preferred**; the withdrawal is acceptable and must be explicit, never a silent skip. | `packages/CreativeGeneration/src/infrastructure/adapters/__tests__/fixtures/compositor-goldens-insets.json`, `NodeCanvasCompositor.goldens.test.ts` (the inset `describe` and its `skipReasons`, `:133-149`) | none |
 | **F-D** | **The multi-window draft policy** (**D82**, F2), *shape decided by the owner's answer*. Under (a) the lane is a comment and a test naming the assumption. Under (b) or (c) it is a `storage` listener plus the chosen guard. **Whichever lands, the plan's §1 F2 correction goes in the code comment**: a same-window subscriber set is not the mechanism here. | `apps/web/src/components/campaign/BriefEditor.tsx`, `components/campaign/editor-state.ts`, their `__tests__` | **D82**, and **F-A** (same file) |
 | **R1 – R6** | **Not re-specified.** See `2026-09-04_run-exclusion-and-the-distributed-lock.md` §3. | as that plan states | the owner's go-ahead |
 
@@ -411,16 +452,24 @@ Per lane, and the gate is the repo's, not a lane's:
    start a dev server and never request `localhost:3000` / `:3001`** — those are the owner's live
    servers and a request there spends their GenAI credits.
 
-For the plan as a whole: F1's false not-found state is unreachable; two stacked overlays expose
-exactly one modal region; the inset golden's platform coverage is either recorded or stated; and
-D82 is answered in writing before F-D is dispatched.
+For the plan as a whole: F1's false not-found state is unreachable and recoverable without leaving
+the page; the focus trap contains a body-focused Tab; the inset golden's platform coverage is either
+recorded or stated; and D82 is answered in writing before F-D is dispatched.
+
+**On modality, stated so it is achievable** *(rewritten after review, grok)*. v1 promised "two
+stacked overlays expose exactly one modal region", which a kit-only lane cannot deliver — Save-as
+and `CommandBar`'s confirm are hand-rolled `aria-modal` regions outside `DialogShell`. The honest
+DoD: **every overlay in the kit — both shells — participates in one depth counter, and each
+overlay outside the kit is either converted or carries a written exemption naming why.** A plan
+whose DoD cannot be met by the lane it defines is worse than one that admits the estate is bigger.
 
 ---
 
 ## 5. Open questions — for the owner and the reviewers
 
-1. **D82.** (a) leave and document, (b) restore only when clean, or (c) notice and let the user
-   choose? The plan recommends (c) and holds (a) to be defensible today.
+1. **D82.** **(b) is withdrawn** — both reviewers killed it independently (§0.1). The live options
+   are (a) leave and document, (c) notice and let the user choose, (d) an exclusive editor lock, or
+   (e) restore-and-notice. Both reviewers land on **(c) or (a)**; the plan recommends (c).
 2. ~~**F1's grade.**~~ **Settled (agy):** **H** stands. The `focus` retry is a real heal path but
    requires the user to blur and refocus the window; a user who sits on the false "not found" screen
    never triggers it, so the heal is neither automatic nor guaranteed.
@@ -430,8 +479,12 @@ D82 is answered in writing before F-D is dispatched.
    not in whether the work is wanted. Neither should wait, and both briefs must carry the rename
    risk. The owner is asked whether that is an acceptable bet, or whether D64 should be answered
    before R2 writes paths that may need renaming.
-5. Should F-C be folded into an R-lane's PR rather than run as its own? It is a fixture change with
-   no product surface, and a separate PR for it may cost more review than it earns.
+5. ~~Should F-C be folded into an R-lane's PR?~~ **Settled (grok):** keep it small and separate, or
+   attach it to a compositor-only change — **not** to R5, which already shares
+   `GenerateCampaignUseCase` with R2. And it must not be a reason to slow F-A.
+6. **New, for the owner:** the two hand-rolled `aria-modal` overlays (Save-as, `CommandBar`'s
+   confirm). Convert them to the kit, or grant a written exemption? D84 refuses to cover them
+   silently, so one of the two has to be chosen.
 
 ---
 
@@ -459,9 +512,9 @@ the stale claims can be corrected.
 
 | Claim, as recorded | What the code shows |
 |---|---|
-| *"The arch-linter 0.8.0 → 0.12.1 decision is open, in the owner's `wt-sync` worktree."* | **Closed.** `package.json:30-31` on `main` pins `@hexagen-monaco/arch-linter` and `@hexagen-monaco/sync` at `^0.12.1`. The five empty-barrel deletions landed, CI runs `yarn sync:check` (`.github/workflows/ci.yml:77`) and `main` is green, so there is no drift. The `wt-sync` worktree is a stale checkout whose three-dot diff against `main` only *looks* like a pending upgrade because its merge base predates the one that shipped. |
+| *"The arch-linter 0.8.0 → 0.12.1 decision is open, in the owner's `wt-sync` worktree."* | **Closed.** `package.json:30-31` on `main` pins `@hexagen-monaco/arch-linter` and `@hexagen-monaco/sync` at `^0.12.1`. The five empty-barrel deletions landed, CI runs `yarn sync:check` (`.github/workflows/ci.yml:78`, under the step named at `:76`) and `main` is green, so there is no drift. The `wt-sync` worktree is a stale checkout whose three-dot diff against `main` only *looks* like a pending upgrade because its merge base predates the one that shipped. |
 | *"A `null` scalar reaches `delimit` at `OpenRouterCopyGenerator.ts:33` and throws — recorded for a follow-up lane."* | **Fixed.** `delimit` now reads `const flat = (value ?? "")…` (`OpenRouterCopyGenerator.ts:38-41`) and the doc comment above it cites D68 for why a null renders as an empty slot. No follow-up lane is needed. |
-| *"`yarn lint:arch` does not check what a lane's DoD claimed (layer rules cover `packages/*/src` only)."* | **Superseded, with a caveat worth keeping.** 0.12.1 enforces the layer check for relative imports and bans node builtins in `domain` *and* `application`; the upgraded gate was proved to bite on a deliberate cross-layer relative import. The caveat that survives: `node:crypto` remains legitimately present in `infrastructure` (`FileSystemBackgroundCache.ts:3`, `NodeCryptoPolicyHasher.ts:1`) — that is the hash seam at the composition root, not a violation. |
+| *"`yarn lint:arch` does not check what a lane's DoD claimed (layer rules cover `packages/*/src` only)."* | **NOT superseded — this plan's own correction was wrong, and it is withdrawn** *(review, grok)*. Two different claims were conflated. **Closed:** 0.12.1 enforces the layer check for *relative* imports, proved on a deliberate cross-layer import. **Still true:** the *scope* claim. `.architecture/layout.yaml` names only `domain` / `application` / `infrastructure`, and the arch reviewer path-filters on `packages/*/src/**` (`pr-agent-arch.yml:42-46`), so `apps/api` and `apps/web` — both composition roots — remain outside the graph. **A lane's DoD that cites `lint:arch` for an `apps/` claim is still citing a gate that cannot see it.** A wrong "closed" here is worse than the stale note it replaced, because it tells the next session to stop looking. Separately and unchanged: `node:crypto` in `infrastructure` (`FileSystemBackgroundCache.ts:3`, `NodeCryptoPolicyHasher.ts:1`) is the hash seam at the composition root, not a violation. |
 
 A fourth correction, to this plan's own lineage: the wave-1 note recording F2 prescribed a fix that
 does not work. §1 F2 states why, and **D82** replaces it. A recorded remedy is not evidence; the
@@ -489,8 +542,29 @@ accepted or refuted; the disposition is below, and the plan above already carrie
 **Net effect:** two new findings (F5, F6), one refutation retracted and one scoped, the headline
 claim corrected, and the plan's scope stated honestly. Three of the four blockers were real.
 
-### grok-4.6 (high) — pending
+### grok-4.6 (high) — verdict **rework**, folded in
 
-Dispatched with the same brief at the same time. Reported as **unknown, not failed**: on the
-create-moment plan this reviewer wrote nothing for 78 minutes and then delivered the most valuable
-of three reviews at 84. Its findings will be folded in a second pass, and §8 updated in place.
+Two blockers, four majors, three minors — and the deeper of the two reviews. It overturned findings
+the first review had *accepted*, which is the case for running both. Every claim below was verified
+against the code before disposition.
+
+| Finding | Disposition |
+|---|---|
+| **B1. §2's claim is false: R2 writes today's slug into durable output, and the lock plan already said R6's key shape waits on D64.** | **Accepted in full, and it is the worst error in the plan.** The lock plan reads *"Nothing here needs D64 answered; **R6's key shape does**"* (`2026-09-04:127-128`) and its §5 opens *"D64. Still open, and R6's key shape waits on it"* (`:153`). v1 quoted the first half of that sentence and dropped the second — a misrepresentation of the document it was citing. R2 is worse than a key: it stamps the slug onto **durable bytes** (`GenerateCampaignUseCase.use-case.ts:271-273`, `report.ts:21-23`, `grid/page.tsx:17-18`). The first review reached the same conclusion about R2 from a weaker angle; grok found the citation that settles it. |
+| **B1(b). The package-boundary parallelism rationale is false.** R2 owns `apps/web/.../grid/page.tsx`; R4 owns `apps/web/src/lib/briefs-api.ts`. | **Accepted.** Both are in the lock plan's own ownership rows, which were in front of the author. Parallelism is now argued from file disjointness. |
+| **B2. F-B cannot meet §4's DoD**, because Save-as (`BriefEditor.tsx:1624-1631`) and `CommandBar`'s confirm (`:373-437`) are hand-rolled `aria-modal` regions outside `DialogShell`, and `DrawerShell` is a second kit shell the counter was not specified to cover. | **Accepted.** D84 now covers both kit shells and refuses to cover the hand-rolled two silently; §4's DoD is rewritten to something the lane can actually deliver. A DoD a lane cannot meet is worse than an honest admission that the estate is bigger. |
+| **M1. The pointer refutation names the wrong mechanism.** The stack works because the caller passes `containerClassName="z-[80]"` (`CreateCampaignDialog.tsx:279`), not because of equal `z` and DOM order. | **Accepted, and this is the sharpest catch.** Both the author and the first reviewer reasoned from an equal-`z` premise that is false at the cited site. F-B owns that file, so a lane briefed on v1 was one tidy-up away from deleting the override doing the work. F-B now has an explicit instruction to preserve it. |
+| **M1(b). The Escape refutation is a kit fact stated as a product fact** — `CommandBar.tsx:395-397` closes unconditionally with no `dialogHoldsFocus`. | **Accepted**; §1 F3 now says which claim is about the kit and which about the product. |
+| **M2. D82's option (b) does not avoid the livelock** — a clean tab restores, is made dirty by restoring, autosaves the restored state back over the newer draft, and thereafter both tabs are dirty so neither restores: it degenerates into (a) having clobbered a write. The option space is also incomplete. | **Accepted.** (b) is **withdrawn**; (d) an exclusive editor lock and (e) restore-and-notice are added. Two reviewers killing the plan's own middle option from different angles is the strongest evidence that D82 belongs to the owner. |
+| **M3. §7 row 3's correction is itself wrong.** 0.12.1 closed *relative cross-layer imports*; the *scope* claim is a different one and still true — `pr-agent-arch.yml:42-46` path-filters to `packages/*/src/**`, so `apps/` stays outside the graph. | **Accepted and withdrawn.** Verified. A wrong "closed" is worse than the stale note, because it tells the next session to stop looking — the exact failure mode §7 exists to prevent, committed inside §7 itself. |
+| **M4. Missed work:** two more F1-class swallows (`CopySection.tsx:35-36`, `Sidebar.tsx:105-107`) and **D78, the fence, which no R-lane owns**. | **Accepted.** All three named in §1.3. D78 means "six specified lanes plus four defects" was not the whole pipeline picture. D83's wording is also widened: *a failed read is never presented as an empty result*, not "every surface that reads `listBriefs()`". |
+| **m1. F1 is H, and F-A's focus-retry test is vacuous** — `window` `focus` never fires for a user who stays on the page, and `loadBriefs` has no generation counter. | **Accepted.** The grade was already H; the test was the real finding. F-A now requires an **in-page** retry affordance and a test that exercises recovery without a focus event. A test that goes green while the lying path is untouched is the vacuous-tripwire class this repo already refuses. |
+| **m2. F4/D85 is accurate.** | Noted; no change. |
+| **m3.** `ci.yml:77` is the step name, `:78` is the run; F-C's path omits `__tests__/fixtures/`. | **Accepted**; both corrected. |
+
+### Where the two reviewers disagreed, and what it bought
+
+On F3's pointer refutation agy said the equal-`z` premise held for two `DialogShell`s and objected
+only to drawer-over-dialog. grok showed the premise was false **at the cited site** — the `z-[80]`
+override is what stacks it. Folding only the first review would have left a wrong mechanism in a
+lane brief that owns the file. **Both reviews returned `rework`; the second changed more.**
