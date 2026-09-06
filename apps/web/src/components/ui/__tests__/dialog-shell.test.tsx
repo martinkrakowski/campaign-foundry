@@ -312,6 +312,11 @@ describe("DialogShell and DrawerShell anatomy", () => {
     );
 
     (document.activeElement as HTMLElement).blur();
+    // Pin the precondition this test exists for: if the blur failed to land on the body,
+    // focus would still be on "Solo first" and Shift-Tab there is the pre-existing boundary
+    // wrap — green with no containment branch at all.
+    expect(document.activeElement).toBe(document.body);
+
     fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Solo last" }));
   });
@@ -363,7 +368,13 @@ describe("DialogShell and DrawerShell anatomy", () => {
     const middle = screen.getByRole("button", { name: "Upper middle" });
     middle.focus();
 
-    const event = new KeyboardEvent("keydown", { key: "Tab" });
+    // `cancelable: true` is load-bearing, not decoration. happy-dom's Event constructor
+    // defaults `cancelable` to false and `preventDefault()` is a no-op on a non-cancelable
+    // event, so without this flag `defaultPrevented` reads false even when a handler DID
+    // claim the keystroke — the assertion below could never go red. Verified directly:
+    // a handler calling preventDefault on a non-cancelable KeyboardEvent still leaves
+    // defaultPrevented false.
+    const event = new KeyboardEvent("keydown", { key: "Tab", cancelable: true });
     window.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(false);
