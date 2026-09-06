@@ -554,6 +554,14 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       setBriefs(entries);
       setBriefsFailed(false);
     } catch (error) {
+      // Symmetry with the `try` guard above. Unlike that one, this branch has NO
+      // UI-observable pin and none was contrived for it: every ordering in which a stale
+      // FAILURE lands is already answered by something that renders first — after the
+      // route has loaded `routeLoadedId === routeId` nulls `failedRouteId`, and after an
+      // empty success `unknownId` renders at the not-found branch before the failure one.
+      // It is kept because a later navigation would make a stale failure observable, and
+      // removing it would leave that to be rediscovered. Verified on PR #197 by mutation:
+      // deleting this line alone turns no test red.
       if (generation !== briefsGeneration.current) return;
       console.error("Failed to load briefs:", error);
       // D83/F-A: record the failure as well as logging it — a failed read is

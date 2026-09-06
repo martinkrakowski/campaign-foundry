@@ -3816,11 +3816,15 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
     routes({ list: () => json({ error: "boom" }, 500) });
     renderWithRun(<NewEditor />);
 
-    // The blank route never needs the listing: the failure state must not take it over.
-    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""));
+    // Wait for the listing to have actually FAILED before asserting anything about the
+    // editor. Campaign Name is "" on first paint and /brief/new never awaits the listing,
+    // so asserting first would pass before the 500 settled — green even with the render
+    // scope dropped. The failure must be on the record, and the blank editor must have
+    // survived it.
+    await waitFor(() => expect(error).toHaveBeenCalledWith("Failed to load briefs:", expect.anything()));
+    expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("");
     expect(screen.getByRole("button", { name: /^Save$/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: messages.briefListFailedRetry })).toBeNull();
-    await waitFor(() => expect(error).toHaveBeenCalledWith("Failed to load briefs:", expect.anything()));
     error.mockRestore();
   });
 
@@ -3874,6 +3878,32 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
     expect(screen.queryByText(messages.briefListFailed("camp"))).toBeNull();
   });
 
+  test("a stale success does not clear the failure recorded by a newer listing", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const pending: Array<(r: Response) => void> = [];
+    routes({ list: () => new Promise<Response>((resolve) => pending.push(resolve)) });
+    renderWithRun(<Editor id="camp" />);
+    await waitFor(() => expect(pending.length).toBe(1));
+
+    // A second listing overtakes the first, and fails.
+    fireEvent.focus(window);
+    await waitFor(() => expect(pending.length).toBe(2));
+    pending[1](json({ error: "boom" }, 500));
+    expect(await screen.findByText(messages.briefListFailed("camp"))).toBeTruthy();
+
+    // The older request now succeeds. Its data is stale: the newest thing we know is that
+    // the store could not be read, so this answer must not quietly load the editor and
+    // erase the failure. This is what the `try` generation guard is for — without it the
+    // editor appears and this test goes red.
+    pending[0](json({ briefs: [entry("camp", "r1")] }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText(messages.briefListFailed("camp"))).toBeTruthy();
+    expect(screen.queryByLabelText("Campaign Name")).toBeNull();
+    error.mockRestore();
+  });
+
   test("a stale answer that lands first does not settle the listing into a false not-found", async () => {
     const pending: Array<(r: Response) => void> = [];
     routes({ list: () => new Promise<Response>((resolve) => pending.push(resolve)) });
@@ -3921,6 +3951,11 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
     await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
 
     // The older, failed answer lands last — it must not take the page back.
+    // NB what actually guarantees this: the route has loaded, so `routeLoadedId ===
+    // routeId` short-circuits the effect and nulls `failedRouteId` regardless of the
+    // generation stamp. This test pins the short-circuit, NOT the stamp — deleting the
+    // stamp leaves it green (verified by mutation on PR #197). The stamp's real pins are
+    // the two overlap tests, which act before the route has loaded.
     pending[1](json({ error: "boom" }, 500));
     await waitFor(() => expect(screen.queryByText(messages.briefListFailed("camp"))).toBeNull());
     expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp");
@@ -3946,6 +3981,11 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
 
     // The older answer succeeds with an empty listing — it must not replace the
     // newer one, or the route-load effect would re-decide the id it just loaded
+    // NB what actually guarantees this: the route has loaded, so `routeLoadedId ===
+    // routeId` short-circuits the effect and nulls `failedRouteId` regardless of the
+    // generation stamp. This test pins the short-circuit, NOT the stamp — deleting the
+    // stamp leaves it green (verified by mutation on PR #197). The stamp's real pins are
+    // the two overlap tests, which act before the route has loaded.
     // and answer a false not-found.
     pending[1](json({ briefs: [] }));
     await new Promise((r) => setTimeout(r, 50));

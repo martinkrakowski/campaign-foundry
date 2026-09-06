@@ -2462,3 +2462,30 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Mutation checks (mutate → red → restore), all run and reported:** (a) swallow restored in `loadBriefs` → 6 F-A tests red; (b) `setUnknownId` on the failure path → the failure-state test red; (c) render scope dropped → `/brief/new` **and** post-save tests red (exactly the two predicted); (d) retry deleted → retry test red; (e) `fetchPersistedRun` silent `null` per limb — full swallow: reject + 5xx tests red; `!res.ok` check removed alone: only the 5xx test red (limbs separately pinned); (f) panel gates left on `unknownId` alone → the no-panels test red.
 - **Verification (gate order, committed tree):** build 7/7, typecheck 7/7, lint clean, lint:arch compliant, `test:cov` **178 files, 3088 passed | 2 skipped — 100% on all four counters (7812/7812 stmts, 5715/5715 branch, 1669/1669 funcs, 7013/7013 lines)**; `sync:check` on the committed tree; push; PR against `main` — NOT merged.
 - **Deviations:** none from the lane brief. One addition: the brief's "noticed" item (a stale listing in `adoptSavedCopy` reaching `setUnknownId` on a just-created brief) is pinned by the Save-as test above — deliverable 2 makes it answer a retryable failure state instead of a false not-found.
+
+### 2026-09-06 — F-A follow-up (orchestrator sweep of PR #197)
+
+- **Mode:** Sweeper. Branch `fix/fa-failed-listing-state`, commits after the lane's own.
+- **The lane reintroduced F1 on its own retry path.** `loadBriefs` generation-checked its result but
+  the `finally` ran unconditionally, so a stale answer still set `briefsLoaded`. With a mount load
+  and a focus load overlapping and the stale one landing first, the route effect saw a settled
+  listing with an empty `briefs` and `briefsFailed` still false, and called `setUnknownId` on a
+  brief that exists. Found independently by three review bots; agy's full review missed it. Fixed by
+  letting only the current generation declare the listing settled.
+- **Two tests written for this were vacuous and had to be re-cut.** The first pin asserted
+  immediately after resolving the stale answer, and `waitFor` on an already-true condition returns
+  without yielding, so it ran before React committed the false not-found — green against the bug it
+  pinned. It now flushes with `act`.
+- **The `try`/`catch` generation guards had NO pin at all.** Verified by mutation: deleting both left
+  the entire 10-test F-A describe green. Added "a stale success does not clear the failure recorded
+  by a newer listing", which goes red when the `try` guard alone is removed.
+- **The `catch` guard remains unpinned, deliberately and in writing.** Every ordering in which a
+  stale failure lands is already answered by something that renders first. Annotated at the line
+  rather than covered by a contrived test.
+- **`/brief/new`'s pin was order-dependent.** It asserted the blank editor before awaiting the
+  failure, so it could pass before the 500 settled. Reordered; now red on three consecutive runs
+  under the scope-dropped mutant.
+- **Two older stale-answer tests pin the route-loaded short-circuit, not the stamp**, and now say so
+  at the line — removing the stamp leaves them green.
+- **Gate:** build, typecheck, lint, lint:arch, test:cov all green; 100 % on all four counters.
+
