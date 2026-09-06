@@ -197,15 +197,19 @@ export function normalizeRunResult(result: RunResult): RunResult {
   };
 }
 
-async function fetchPersistedRun(campaignId: string): Promise<RunResult | null> {
-  try {
-    const res = await fetch(`${API}/campaigns/result?campaignId=${encodeURIComponent(campaignId)}`);
-    const d = (await res.json()) as RunResult;
-    // The one place persisted JSON becomes a RunResult, so the one place to narrow it.
-    if (d?.log?.campaignId === campaignId && (d.assets?.length || d.log)) return normalizeRunResult(d);
-  } catch {
-    /* non-JSON / network — treat as "no persisted run" */
-  }
+/**
+ * Read the persisted run for a campaign — saying honestly which of two different
+ * facts came back (D83/F6): the promise resolves `null` ONLY for a real absence
+ * (a 200 whose body carries no run for this campaign) and throws when the read
+ * itself failed — a rejected fetch, a non-JSON answer, a non-OK status. "Could
+ * not ask" is never answered as "there is nothing".
+ */
+export async function fetchPersistedRun(campaignId: string): Promise<RunResult | null> {
+  const res = await fetch(`${API}/campaigns/result?campaignId=${encodeURIComponent(campaignId)}`);
+  if (!res.ok) throw pipelineUnreachable(res.status);
+  const d = (await res.json()) as RunResult;
+  // The one place persisted JSON becomes a RunResult, so the one place to narrow it.
+  if (d?.log?.campaignId === campaignId && (d.assets?.length || d.log)) return normalizeRunResult(d);
   return null;
 }
 
@@ -578,11 +582,16 @@ export function RunProvider({ children }: { children: ReactNode }) {
       // loaded: it is the only producer we can honestly name for it.
       setRun(null);
       setDecisions({});
-      void fetchPersistedRun(next.id).then((d) => {
-        if (briefIdRef.current !== next.id || !d) return; // superseded, or no run on disk
-        setRun({ result: d, target: next });
-        if (d.assets?.length) setAssetVersion((v) => v + 1);
-      });
+      void fetchPersistedRun(next.id)
+        .then((d) => {
+          if (briefIdRef.current !== next.id || !d) return; // superseded, or no run on disk
+          setRun({ result: d, target: next });
+          if (d.assets?.length) setAssetVersion((v) => v + 1);
+        })
+        .catch(() => {
+          /* F6: could-not-ask is not absence — restore nothing, claim nothing. A
+             later successful fetch (a run, a re-roll, a brief switch) heals it. */
+        });
     },
     [run],
   );
@@ -632,11 +641,15 @@ export function RunProvider({ children }: { children: ReactNode }) {
     // Restore any real persisted run for the starting brief (fetchPersistedRun applies
     // the shared "real run for this campaign" rule). Guard against a brief switch racing
     // this initial fetch. The restored run's target is the brief it is restored under.
-    void fetchPersistedRun(startBrief.id).then((d) => {
-      if (!active || briefIdRef.current !== startBrief.id || !d) return;
-      setRun({ result: d, target: startBrief });
-      if (d.assets?.length) setAssetVersion((v) => v + 1);
-    });
+    void fetchPersistedRun(startBrief.id)
+      .then((d) => {
+        if (!active || briefIdRef.current !== startBrief.id || !d) return;
+        setRun({ result: d, target: startBrief });
+        if (d.assets?.length) setAssetVersion((v) => v + 1);
+      })
+      .catch(() => {
+        /* F6: could-not-ask is not absence — restore nothing, claim nothing. */
+      });
     return () => {
       active = false;
       pollAbort.current?.abort(); // unmount: no poller may outlive the provider
@@ -738,7 +751,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
         // The job vanished mid-run. Whatever is on disk is the *previous* run, so show
         // it without pretending it is new: no cache-bust, review decisions kept. It
         // shares the target's campaign id, so the target is recorded unchanged.
-        const persisted = await fetchPersistedRun(target.id);
+        // F6: a failed re-read is not "nothing was saved" either — and the
+        // interruption notice below already names the fact and the remedy, so a
+        // failed read keeps that notice instead of being conflated with absence.
+        const persisted = await fetchPersistedRun(target.id).catch(() => null);
         if (runSeq.current !== owned) return;
         if (persisted) setRun({ result: persisted, target });
         setError(LOST_JOB_MESSAGE);

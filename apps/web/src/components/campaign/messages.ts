@@ -938,3 +938,18 @@ export const createCampaignDuplicateConflict =
 /** Any other refused duplicate (a server failure, a dropped connection): nothing was created. */
 export const createCampaignDuplicateFailed =
   "Could not start from the chosen campaign — nothing was created. Try again.";
+
+/* ── A campaign listing that failed (D83 / F-A) ──────────────────────────── */
+
+/**
+ * `brief.listFailed` — the campaign list could not be read, which says nothing
+ * about whether the route's brief exists (D83: a failed read is never presented
+ * as an empty result, and never answered with "start a new brief" — that remedy
+ * invites a duplicate of a campaign that may be fine). The way out is the retry
+ * beside it, in the same voice the not-found state names its id.
+ */
+export function briefListFailed(id: string): string {
+  return `The campaign list could not be read, so it is not known whether a brief called ${id} exists — nothing has been changed.`;
+}
+/** The failed listing's way out: re-read the store where the user is standing. */
+export const briefListFailedRetry = "Try again";

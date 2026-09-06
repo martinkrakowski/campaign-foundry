@@ -180,6 +180,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const [blockedAt, setBlockedAt] = useState<string | null>(null);
   const [briefs, setBriefs] = useState<BriefEntry[]>([]);
   const [briefsLoaded, setBriefsLoaded] = useState(false);
+  // D83/F-A — a listing that failed is a different fact from one that came back
+  // empty: recorded here so the route can tell "the store said nothing" from "we
+  // could not ask the store". The console.error in loadBriefs stays (a failing
+  // list is logged); this is the recorded state *as well as* the log.
+  const [briefsFailed, setBriefsFailed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [persistError, setPersistError] = useState<string | undefined>();
   const [saveAsId, setSaveAsId] = useState<string | null>(null);
@@ -375,6 +380,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     // entry is where the file identity and revision come from.
     if (!briefsLoaded) return;
     if (routeLoadedId === routeId) return;
+    // D83/F-A: a listing that failed says nothing about which ids exist — an id is
+    // unknown only when a listing that *succeeded* does not contain it. Leave the
+    // editor's state alone: the failure state below answers instead, with a retry,
+    // and a later successful listing re-runs this effect and decides then.
+    if (briefsFailed) return;
     const match = briefs.find((entry) => entry.brief.id === routeId);
     // M3: an id the listing does not know is answered where the user landed — the
     // empty state below — never a silent new unsaved draft.
@@ -392,7 +402,17 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     // A loaded brief shows its real errors at once: they are the file's, not the
     // user's, and the user asked for this brief by opening the route.
     setAttempted(true);
-  }, [routeId, routeLoadedId, briefs, briefsLoaded, setRunBrief]);
+  }, [routeId, routeLoadedId, briefs, briefsLoaded, briefsFailed, setRunBrief]);
+
+  /**
+   * D83/F-A — where a failed listing is allowed to speak: exactly where the
+   * not-found alert would otherwise render (a named route whose brief has not
+   * loaded). A failed refresh on a loaded editor — the window-focus refetch, the
+   * listing handleSave issues after a successful write — changes nothing on
+   * screen, and `/brief/new` never needs the listing at all.
+   */
+  const failedRouteId =
+    briefsFailed && routeId !== undefined && routeLoadedId !== routeId ? routeId : null;
 
   // Arriving here means the last campaign is no longer the one being worked on. Let go
   // of it in the shell too: while it stayed active the selector kept advertising it and
@@ -519,12 +539,26 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     [state, draftBrief, runBrief],
   );
 
+  // Mount, window focus, the post-save refresh and the failure state's retry all
+  // funnel through loadBriefs, and their answers can land out of order. Stamp each
+  // call so a slow older answer cannot replace a newer one. A ref, not a `let`:
+  // the capabilities effect's generation works only because it lives inside a
+  // `useEffect(…, [])`, while this function is re-created every render.
+  const briefsGeneration = useRef(0);
+
   const loadBriefs = async () => {
+    const generation = ++briefsGeneration.current;
     try {
       const entries = await listBriefs();
+      if (generation !== briefsGeneration.current) return;
       setBriefs(entries);
+      setBriefsFailed(false);
     } catch (error) {
+      if (generation !== briefsGeneration.current) return;
       console.error("Failed to load briefs:", error);
+      // D83/F-A: record the failure as well as logging it — a failed read is
+      // never presented as an empty result.
+      setBriefsFailed(true);
     } finally {
       setBriefsLoaded(true);
     }
@@ -691,7 +725,9 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   useEffect(() => {
     // M3: while the route's id names no brief there is no editor to publish for —
     // the shell's panels would be controls mutating a draft nobody can see.
-    if (unknownId !== null) {
+    // D83/F-A: the same silence while a failed listing stands in for a route the
+    // editor could not load — this page is not an editor in that state either.
+    if (unknownId !== null || failedRouteId !== null) {
       setTopPanels(null);
       return;
     }
@@ -702,7 +738,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       </>,
     );
     return () => setTopPanels(null);
-  }, [state.mode, visibleErrors, setTopPanels, outlineActivate, unknownId]);
+  }, [state.mode, visibleErrors, setTopPanels, outlineActivate, unknownId, failedRouteId]);
 
   // Publish the sections that live in the left bar while this editor is mounted. The
   // page keeps the state, dispatch and validation and republishes on every change; the
@@ -711,8 +747,9 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // is published for both modes, randomized through the planner and classic derived.
   const policyErrors = Object.keys(sectionErrorsVisible("policy")).length;
   useEffect(() => {
-    // Same M3 gate as the top panels: no editor, nothing published.
-    if (unknownId !== null) {
+    // The M3 gate, plus the failed-listing silence (D83/F-A): no editor, nothing
+    // published.
+    if (unknownId !== null || failedRouteId !== null) {
       setPanels(null);
       return;
     }
@@ -745,7 +782,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     );
     return () => setPanels(null);
     // sectionErrors only reads what `errors` already covers.
-  }, [state, errors, policyErrors, setPanels, touchSectionFromEvent, presentation, unknownId]);
+  }, [state, errors, policyErrors, setPanels, touchSectionFromEvent, presentation, unknownId, failedRouteId]);
 
   /**
    * Every path that replaces the draft goes through the same D14 confirmation — now
@@ -1293,6 +1330,34 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               }}
             >
               {messages.briefNotFoundNew}
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // D83/F-A — the listing failed, not the campaign. Same chrome as the not-found
+  // state (`role="alert"`, no sidebar panels — the gates above), but the copy
+  // names the real fact and the way out is the truth: the read failed, so retry
+  // it here. Never "start a new brief" — that remedy invites a duplicate of a
+  // campaign that may be fine. The in-page retry is the way out that works
+  // without leaving the page: window focus re-runs the listing, but never fires
+  // for a user sitting on this screen reading the last answer.
+  if (failedRouteId !== null) {
+    return (
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 pb-24 sm:p-8">
+        <div role="alert" className="rounded-xl border border-border bg-surface p-6">
+          <p className="text-[13px] text-text-primary">{messages.briefListFailed(failedRouteId)}</p>
+          <div className="mt-4 flex items-center gap-4">
+            <Button variant="secondary" onClick={() => void loadBriefs()}>
+              {messages.briefListFailedRetry}
+            </Button>
+            <Link
+              href="/grid"
+              className="text-[13px] font-medium text-brand-primary underline hover:text-text-emphasis"
+            >
+              {messages.briefNotFoundGrid}
             </Link>
           </div>
         </div>
