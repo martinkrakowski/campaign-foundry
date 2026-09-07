@@ -24,6 +24,16 @@ export {
   type DurationStripProps,
 } from "./duration-strip";
 export { ConfirmDialog, type ConfirmDialogProps } from "./confirm-dialog";
+export { ErrorPill } from "./error-pill";
+export { OptionTile, type OptionTileProps } from "./option-tile";
+export { SectionBlock, type SectionBlockProps } from "./section-block";
+export { JumpStrip, type JumpStripItem, type JumpStripProps } from "./jump-strip";
+export { GuardBar, type GuardBarAction, type GuardBarActionVariant, type GuardBarProps } from "./guard-bar";
+// SectionOutline is deliberately not exported: it imports campaign/sections,
+// campaign/editor-state, campaign/validate and campaign/messages, so barrelling it
+// would pull four campaign modules into every consumer of this barrel (D87).
+// PreviewFrame is deliberately not exported: two different components share the name
+// (ui/PreviewFrame.tsx and campaign/PreviewFrame.tsx) — a rename decision, not a reflex.
 export { OverflowMenu, type OverflowMenuProps, type OverflowMenuItem } from "./overflow-menu";
 export { MiniChip, type MiniChipProps, type MiniChipTone } from "./mini-chip";
 export { EmptyNote, type EmptyNoteProps } from "./empty-note";

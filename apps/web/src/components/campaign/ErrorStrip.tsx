@@ -2,6 +2,7 @@
 
 import type { FieldErrors } from "./validate";
 import { SECTION_TITLES, type SectionId } from "./sections";
+import { JumpStrip } from "@/components/ui";
 
 interface ErrorStripProps {
   errors: Record<string, FieldErrors>;
@@ -54,28 +55,20 @@ export function ErrorStrip({ errors, onErrorClick }: ErrorStripProps) {
 
   if (sectionsWithErrors.length === 0) return null;
 
+  // The chips themselves are the kit's `JumpStrip` (F6); this component keeps only
+  // the bucket→label mapping — the one `SECTION_TITLES` vocabulary, with motion
+  // spelled by its own label, never a `||` fallback.
   return (
-    <div className="flex flex-wrap gap-2">
-      {sectionsWithErrors.map(([section, sectionErrors]) => {
-        const errorCount = Object.keys(sectionErrors).length;
-        const label =
+    <JumpStrip
+      onJump={onErrorClick}
+      items={sectionsWithErrors.map(([section, sectionErrors]) => ({
+        key: section,
+        label:
           section === MOTION_ERROR_KEY
             ? MOTION_LABEL
-            : SECTION_TITLES[SECTION_BY_ERROR_KEY[section as SectionId]];
-        return (
-          <button
-            key={section}
-            type="button"
-            onClick={() => onErrorClick?.(section)}
-            className="inline-flex items-center gap-1.5 rounded-full border border-error/50 bg-error/10 px-3 py-1 text-[11px] font-medium text-error transition-colors hover:bg-error/20"
-          >
-            <span>{label}</span>
-            <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-error/30 px-1 text-[10px]">
-              {errorCount}
-            </span>
-          </button>
-        );
-      })}
-    </div>
+            : SECTION_TITLES[SECTION_BY_ERROR_KEY[section as SectionId]],
+        count: Object.keys(sectionErrors).length,
+      }))}
+    />
   );
 }

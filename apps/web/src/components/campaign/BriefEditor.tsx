@@ -46,7 +46,7 @@ import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, Outpu
 import { StatusChip } from "@/components/campaign/StatusChip";
 import { StatusLine } from "@/components/campaign/StatusLine";
 import { ErrorStrip, MOTION_ERROR_KEY, MOTION_HOST_SECTION, sectionForErrorBucket } from "@/components/campaign/ErrorStrip";
-import { ErrorPill } from "@/components/ui/error-pill";
+import { ErrorPill } from "@/components/ui";
 import { useEditorDirty, type DraftRunHandoff } from "@/lib/editor-dirty-context";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
 import { takeSeed } from "@/lib/create-campaign";
@@ -67,7 +67,7 @@ import { cn } from "@/lib/cn";
 import { BriefSelector } from "@/components/campaign/BriefSelector";
 import { HeadlinePoolDrawer } from "@/components/campaign/HeadlinePoolDrawer";
 import { AssetPickerDrawer } from "@/components/campaign/AssetPickerDrawer";
-import { ModePanel } from "@/components/ui/mode-panel";
+import { ModePanel } from "@/components/campaign/ModePanel";
 import { SectionOutline } from "@/components/ui/section-outline";
 import { EstimatePanel } from "@/components/campaign/EstimatePanel";
 import { StepHeader } from "@/components/campaign/StepHeader";

@@ -1,7 +1,7 @@
 import { describe, test, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ModePanel } from "../mode-panel";
+import { ModePanel } from "../ModePanel";
 
 describe("ModePanel", () => {
   test("each mode card captions itself with its display name (D4)", () => {
@@ -11,6 +11,16 @@ describe("ModePanel", () => {
     // a swapped caption must fail here, not hide in a tree-wide getByText.
     expect(screen.getByRole("button", { name: "brief" }).textContent).toContain("Classic");
     expect(screen.getByRole("button", { name: "variation" }).textContent).toContain("Randomized");
+  });
+
+  test("each card shows the raw value as its name and the display name as its caption", () => {
+    render(<ModePanel mode="brief" onSetMode={() => {}} />);
+    const brief = screen.getByRole("button", { name: "brief" });
+    const variation = screen.getByRole("button", { name: "variation" });
+    expect(brief.textContent).toContain("brief");
+    expect(brief.textContent).toContain("Classic");
+    expect(variation.textContent).toContain("variation");
+    expect(variation.textContent).toContain("Randomized");
   });
 
   test("the pressed card is the editor's current mode, and pressing dispatches setMode", async () => {

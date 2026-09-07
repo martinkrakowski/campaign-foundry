@@ -2529,3 +2529,43 @@ assert it is a separately-labelled dialog, which is a modality claim and therefo
 
 **Left open:** D90 and D89(b) are the owner's; five further questions in §6, including a real
 contradiction between DESIGN.md's `p-6` dialog padding and the kit's `px-4 py-3`.
+
+## 2026-09-06 — K1: the kit primitives (wave 1)
+
+**Mode:** Implementer.
+
+**Changes:** PR #199 (`feat/k1-kit-primitives`, five commits against `627f8dc`). Added
+`ui/option-tile.tsx`, `ui/section-block.tsx`, `ui/jump-strip.tsx`, `ui/guard-bar.tsx` with house-style
+tests; extracted `JumpStrip` from `ErrorStrip` (behaviour-preserving — its three exercising suites
+pass unedited); moved `ui/mode-panel.tsx` → `campaign/ModePanel.tsx` onto `OptionTile`, its test with
+it (both pinned assertions unedited); barreled the four primitives plus `ErrorPill` and re-pointed
+its two deep imports; added `ui/__tests__/kit-boundaries.test.ts` with a four-entry shrink-only
+allowlist.
+
+**Decisions:** followed D87/D88/F5/F6/F7 as written. `blurb` and `description` shipped as two slots
+(neutral copy vs warning-toned `aria-describedby`); `SectionBlock.headingLevel` defaults to 3;
+`GuardBar` takes an actions array (three-slot two-way) and renders no modality of its own.
+
+**Verification:** full gate green (`build`/`typecheck`/`lint`/`lint:arch`/`sync:check`/`test:cov`),
+coverage 100 % on all four counters, four mutation checks each proven to fail (drop `aria-pressed`;
+drop `aria-label`; add a campaign import to a kit file; drop an allowlist entry). `CreateCampaignDialog.test.tsx`
+green untouched.
+
+**Left open:** W1 builds on these exports (three `SectionBlock`s in the dialog); W2's inline guard
+consumes `GuardBar`; D90 and D89(b) remain the owner's; the barrel-padding contradiction from the
+plan's §6.5 is still unanswered.
+
+## 2026-09-06 — K1 review remediation (PR #199)
+
+- **Mode:** Implementer.
+- **Changes:** Eight mutation-proven items in `feat/k1-kit-primitives`. Restored ModePanel to
+  `name={option} meta={modeDisplayName(option)}` (raw value bold, display name caption). GuardBar
+  actions now `type="button"` and keyed by array index. Kit-boundary scan matches import statements
+  (not comments) and walks nested kit files, skipping `__tests__`. OptionTile tests pin D88 on the
+  button's own className and the blurb/description tone split; dropped the vacuous `✓` assertion.
+  JumpStrip's no-handler test now asserts the click does not throw and the chip remains.
+- **Decisions:** Keyed GuardBar actions by index rather than adding a required `id` to the public
+  type. Did not default `Button`'s `type` (refuted #5 — 29 call sites, not this lane's file).
+  Withdrew the PR body's claim that putting the display name on `name` was required for the tile
+  contract.
+- **Left open:** W1 / W2 still consume these primitives; D90 and D89(b) remain the owner's.
