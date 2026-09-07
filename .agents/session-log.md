@@ -2569,3 +2569,58 @@ plan's §6.5 is still unanswered.
   Withdrew the PR body's claim that putting the display name on `name` was required for the tile
   contract.
 - **Left open:** W1 / W2 still consume these primitives; D90 and D89(b) remain the owner's.
+
+## 2026-09-06 — Wave 1 of the create-dialog recomposition, orchestrated (PR #199 merged)
+
+- **Mode:** Orchestrator. Plan `docs/planning/2026-09-06_create-dialog-recomposition.md`, wave 1
+  (lane K1). Cast: implementer `glm-5.3-flash` (opencode), reviewer and remediator `grok-4.6`
+  (different model from the implementer — tier A), sweep and merge by the orchestrator.
+- **Merged:** `7dbe57f` — the four domain-free kit primitives (`OptionTile`, `SectionBlock`,
+  `JumpStrip`, `GuardBar`), `ModePanel` moved out of the kit to the campaign feature, `ErrorStrip`
+  re-pointed at `JumpStrip`, `ErrorPill` barrelled, and `kit-boundaries.test.ts` policing D87.
+  Preceded by `627f8dc`, the plan itself (PR #198).
+
+- **What review bought, stated plainly.** Ten findings fixed, five refuted. Three were worth the
+  whole exercise:
+  1. **`GuardBar` actions omitted `type="button"`.** `Button` declares no default, so inside a
+     `<form>` they are submit buttons — and W2 mounts `GuardBar` inside `<form id="nc-form">`, where
+     *Discard* would also have fired the create. Found by Qodo and independently by the reviewer.
+  2. **The kit-boundary test did not enforce its own guarantee.** It scanned raw file text, so a
+     *comment* naming the path counted as an import — the reviewer proved it by replacing a real
+     import with a comment and watching the suite stay green.
+  3. **The same test missed multiline imports.** The orchestrator's round-1 fix brief prescribed
+     `/^\s*import\b[^\n]*…/m`; `[^\n]*` confines the match to one line, so a multiline
+     `import {\n … \n} from "@/components/campaign/…"` walked past D87's guard. **CodeRabbit caught
+     the orchestrator's own error**, not the reviewer and not the orchestrator.
+- **Refuted, with mechanisms** (each answered in its thread): `animate-check-pop` "may loop" — it is
+  a one-shot with no iteration count and `globals-motion.test.ts` asserts it is never `infinite`;
+  two suggestions to add live regions — barred by **D91** and DESIGN.md §6.5, and one of them would
+  have broken `sections.test.tsx:715`, a consumer suite K1 may not edit; an explicit `aria-label` on
+  the jump chips — the name already reads "Identity 1"; and removing class-string assertions —
+  the kit's own idiom, with the two claims that genuinely could not fail pinned instead.
+
+- **A plan defect the pre-dispatch red-team caught.** The plan's first draft had K1 barrel
+  `SectionOutline`. That would have pulled `campaign/sections`, `campaign/editor-state`,
+  `campaign/validate` and `campaign/messages` into every consumer of `@/components/ui` — the exact
+  coupling D87 exists to prevent, introduced by the edit meant to improve reusability. Corrected in
+  the plan before the lane was dispatched; the barrel now records both refusals in comments.
+
+- **A lane report that was wrong.** The remediator reported the gate green; the orchestrator's own
+  run came back `EXIT 1`. It proved to be a flake, but the rule held: derived status wins.
+
+- **Recorded, not silenced — carry into wave 2:**
+  - **`apps/web/src/components/ui/button.tsx` has no default `type`.** Harmless today (one `<form>`
+    in the app, `BriefPicker.tsx`), but W1/W2 introduce the dialog's first real `<form>`. Either
+    every `Button` inside it sets `type="button"`, or the default is fixed deliberately in a lane
+    that owns the file — 29 call sites, so not as a side effect.
+  - **A flaky test.** `brief-editor.test.tsx`'s `waitForEditorReady` is a 1 s `waitFor` in a file
+    containing 298 of them; it timed out once under full-suite parallel load and passes alone
+    (162/162). Not a K1 regression. W1 edits that file's helpers, so whoever takes it should know.
+    Raising `asyncUtilTimeout` in `apps/web/vitest.setup.ts` is the obvious fix; nobody has decided.
+
+- **Owner decisions taken this session:** the plan's recommended disposition on every open row —
+  D86–D92 adopted, **D90 taken** (wave 3 = W2(a)), **D89(b) deferred** pending D84, and C1–C7 all
+  declined (no map, no template rail, no create-time assets, no campaign-ID readout, no format
+  tiles, `packages/ui` deferred). To be revisited after a UI review of the shipped kit.
+- **Left open:** wave 2 (W1, the dialog) and wave 3 (W2(a), the discard guard) are specified and
+  undispatched. Neither has been started; both need a fresh go-ahead.
