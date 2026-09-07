@@ -8,9 +8,18 @@ export interface OptionTileProps {
   readonly onToggle: (value: string) => void;
   /**
    * The picture, sized by the caller — a slot, not a well. Rendered aria-hidden
-   * by the tile; unselected it dims (a transition, never a loop — D88).
+   * by the tile; unselected it dims (a transition, never a loop — D88). For a
+   * caller that wants a glyph, not a panel — a full-bleed panel goes in
+   * `preview` below.
    */
   readonly children: ReactNode;
+  /**
+   * A full-bleed preview panel rendered edge to edge above the body, outside
+   * the padding — the mockup's `.pvbox` (F3). The tile applies the unselected
+   * dim to its own wrapper around this node, so a `PreviewPanel` placed here
+   * must leave its own `dimmed` prop unset; the caller does not pass it.
+   */
+  readonly preview?: ReactNode;
   /** The visible name under the picture; the accessible name stays `value`. */
   readonly name: string;
   /** A small classification pill beside the name; decorative. */
@@ -35,17 +44,22 @@ export interface OptionTileProps {
  * caller-sized slot — the fixed well is why `PlatformCard` can only ever show a
  * `RatioFrame` — and every word is a prop; no literals, no `messages` import.
  *
+ * An optional `preview` panel runs edge to edge above the body (F3): the
+ * padding lives on the body wrapper, not the button, so the panel touches the
+ * tile's own edges like the mockup's `.pvbox`.
+ *
  * The accessible-name contract is `AxisCard`'s, copied not reinvented: the name
  * is exactly `value` (an explicit aria-label, which overrides content), and the
- * picture, tag, blurb, meta line and check badge are all aria-hidden so none of
- * them can concatenate into it. `blurb` and `description` are two different
- * slots and must not be merged — see the prop docs.
+ * picture, preview, tag, blurb, meta line and check badge are all aria-hidden
+ * so none of them can concatenate into it. `blurb` and `description` are two
+ * different slots and must not be merged — see the prop docs.
  */
 export function OptionTile({
   value,
   selected,
   onToggle,
   children,
+  preview,
   name,
   tag,
   blurb,
@@ -54,6 +68,7 @@ export function OptionTile({
   disabled = false,
 }: OptionTileProps): ReactNode {
   const descriptionId = `option-tile-description-${useId()}`;
+  const dim = selected ? "opacity-100 saturate-100" : "opacity-[0.55] saturate-[0.45]";
   return (
     <button
       type="button"
@@ -63,7 +78,9 @@ export function OptionTile({
       disabled={disabled}
       onClick={() => onToggle(value)}
       className={cn(
-        "relative flex flex-col items-start gap-2 rounded-md border-[1.5px] p-3.5 text-left transition-all",
+        // The padding is on the body wrapper, not here: the preview panel runs
+        // edge to edge above the body (F3).
+        "relative flex flex-col items-stretch rounded-md border-[1.5px] text-left transition-all",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2",
         "motion-safe:hover:-translate-y-px motion-safe:active:scale-[0.97]",
         "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:active:scale-100",
@@ -91,43 +108,42 @@ export function OptionTile({
           </svg>
         </span>
       ) : null}
-      <span
-        aria-hidden="true"
-        className={cn(
-          "block transition-[opacity,filter]",
-          // The mockup's dim: unselected previews sit back and return to full on
-          // selection — a transition on an interaction, never a loop (D88).
-          selected ? "opacity-100 saturate-100" : "opacity-[0.55] saturate-[0.45]",
-        )}
-      >
-        {children}
-      </span>
-      <span className="flex w-full items-baseline justify-between gap-2">
-        <span className="text-[15px] font-bold leading-tight text-text-primary">{name}</span>
-        {tag ? (
-          <span
-            aria-hidden="true"
-            className="shrink-0 rounded-full border border-border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-text-muted"
-          >
-            {tag}
-          </span>
-        ) : null}
-      </span>
-      {blurb ? (
-        <span aria-hidden="true" className="text-[12px] leading-snug text-text-secondary">
-          {blurb}
-        </span>
-      ) : null}
-      {meta ? (
-        <span aria-hidden="true" className="text-[11px] leading-snug text-text-muted">
-          {meta}
-        </span>
-      ) : null}
-      {description === undefined ? null : (
-        <span id={descriptionId} className="text-[11px] leading-snug text-warning">
-          {description}
+      {preview === undefined ? null : (
+        <span aria-hidden="true" className={cn("block transition-[opacity,filter]", dim)}>
+          {preview}
         </span>
       )}
+      <span className="flex flex-col items-start gap-2 p-3.5">
+        <span aria-hidden="true" className={cn("block transition-[opacity,filter]", dim)}>
+          {children}
+        </span>
+        <span className="flex w-full items-baseline justify-between gap-2">
+          <span className="text-[15px] font-bold leading-tight text-text-primary">{name}</span>
+          {tag ? (
+            <span
+              aria-hidden="true"
+              className="shrink-0 rounded-full border border-border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-text-muted"
+            >
+              {tag}
+            </span>
+          ) : null}
+        </span>
+        {blurb ? (
+          <span aria-hidden="true" className="text-[12px] leading-snug text-text-secondary">
+            {blurb}
+          </span>
+        ) : null}
+        {meta ? (
+          <span aria-hidden="true" className="text-[11px] leading-snug text-text-muted">
+            {meta}
+          </span>
+        ) : null}
+        {description === undefined ? null : (
+          <span id={descriptionId} className="text-[11px] leading-snug text-warning">
+            {description}
+          </span>
+        )}
+      </span>
     </button>
   );
 }
