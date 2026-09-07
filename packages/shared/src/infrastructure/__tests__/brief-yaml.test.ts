@@ -29,6 +29,7 @@ const brief = {
     },
   ],
   mode: "variation",
+  type: "short-video",
   variation: {
     count: 12,
     seed: 42,
@@ -50,7 +51,14 @@ describe("dumpBrief", () => {
     expect(yaml.indexOf("id:")).toBeLessThan(yaml.indexOf("targetRegion:"));
     expect(yaml.indexOf("products:")).toBeLessThan(yaml.indexOf("mode:"));
     expect(yaml.indexOf("mode:")).toBeLessThan(yaml.indexOf("variation:"));
+    // The campaign type (D108–D112) sits in canonical position between its
+    // neighbours — the key still serialises if dropped from BRIEF_KEY_ORDER
+    // (at the end, in remaining-keys order), so only a positional assertion
+    // catches that mutation.
+    expect(yaml.indexOf("mode:")).toBeLessThan(yaml.indexOf("type:"));
+    expect(yaml.indexOf("type:")).toBeLessThan(yaml.indexOf("variation:"));
     expect(yaml).toContain("id: camp");
+    expect(yaml).toContain("type: short-video");
     expect(yaml).toContain("campaignMessage: Stay wild. Stay hydrated.");
     expect(yaml).toContain('primaryColor: "#1473E6"');
     expect(yaml).toContain("- headline-top");
@@ -95,5 +103,13 @@ describe("dumpBrief", () => {
     // is pinned to the same default the loader parses with.
     const dumped = dumpBrief(brief);
     expect(parse(dumped)).toEqual(brief);
+  });
+
+  test("a brief without type emits no type: line (D112 — existing briefs dump byte-for-byte as before)", () => {
+    const withoutType: Record<string, unknown> = { ...brief };
+    delete withoutType.type;
+    const yaml = dumpBrief(withoutType);
+    expect(yaml).not.toContain("type:");
+    expect(yaml.indexOf("mode:")).toBeLessThan(yaml.indexOf("variation:"));
   });
 });

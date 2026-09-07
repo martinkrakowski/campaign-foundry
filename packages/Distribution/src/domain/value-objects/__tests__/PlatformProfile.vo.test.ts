@@ -1,5 +1,6 @@
 import { describe, test, expect, expectTypeOf } from "vitest";
 import type { SafeInsets as PortSafeInsets } from "@campaignfoundry/CampaignOrchestration";
+import { CAMPAIGN_TYPE_PRESETS } from "@campaignfoundry/CampaignOrchestration";
 import {
   PLATFORM_PROFILES,
   formatsFor,
@@ -96,6 +97,50 @@ describe("PlatformProfile", () => {
     expect(motionPackagedRatios(["unknown-platform"])).toEqual(new Set());
     expect(motionPackagedRatios(["instagram-story"])).toEqual(new Set(["9:16"]));
     expect(motionPackagedRatios(["instagram-feed", "tiktok", "youtube-short"])).toEqual(new Set(["9:16"]));
+  });
+
+  // The campaign-type presets (D108–D112) live in CampaignOrchestration as plain
+  // string platform ids, because the domain layer must not import this package.
+  // This guard is the other half of the contract: a renamed or removed profile
+  // fails here, in the package that owns the ids — so a preset can never name a
+  // placement the compositor cannot render.
+  describe("campaign-type preset coverage (D108–D112)", () => {
+    test("every preset platform id is a PLATFORM_PROFILES id", () => {
+      for (const [type, preset] of Object.entries(CAMPAIGN_TYPE_PRESETS)) {
+        for (const id of preset.platforms) {
+          expect(PLATFORM_PROFILES[id], `${type} names unknown platform "${id}"`).toBeDefined();
+        }
+      }
+    });
+
+    test("every preset's formats agree with the profiles it lists", () => {
+      for (const [type, preset] of Object.entries(CAMPAIGN_TYPE_PRESETS)) {
+        const motionOnly = !preset.formats.includes("static");
+        const staticOnly = !preset.formats.includes("motion");
+        for (const id of preset.platforms) {
+          const profile = PLATFORM_PROFILES[id]!;
+          for (const format of profile.formats) {
+            expect(
+              preset.formats,
+              `${type} lists "${id}", which packages "${format}" the preset does not offer`,
+            ).toContain(format);
+          }
+          // A preset's format choice is also its ratio family: a motion-only
+          // preset lists only the 9:16 motion profiles, a static-only one only
+          // the still surfaces — read off the profile's own fields, not a
+          // hard-coded id list.
+          if (motionOnly) {
+            expect(profile.ratio, `${type} is motion-only but "${id}" is not a 9:16 motion profile`).toBe("9:16");
+          }
+          if (staticOnly) {
+            expect(
+              profile.formats.includes("motion"),
+              `${type} is static-only but "${id}" is a motion profile`,
+            ).toBe(false);
+          }
+        }
+      }
+    });
   });
 });
 

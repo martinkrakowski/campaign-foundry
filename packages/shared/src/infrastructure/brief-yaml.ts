@@ -19,6 +19,7 @@ export const BRIEF_KEY_ORDER = [
   "products",
   "treatments",
   "mode",
+  "type",
   "variation",
   "output",
 ] as const;

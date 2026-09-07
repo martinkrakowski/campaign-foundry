@@ -1,6 +1,7 @@
 import type { Treatment } from "../value-objects/Treatment.vo.js";
 import type { CopyTimeline } from "../value-objects/CopyTimeline.vo.js";
 import type { Style } from "../value-objects/creative-style.js";
+import type { CampaignType } from "../value-objects/campaign-types.js";
 import type { Product } from "./Product.js";
 
 /**
@@ -48,6 +49,14 @@ export interface CampaignBrief {
    * briefs are unchanged.
    */
   readonly mode?: "brief" | "variation";
+  /**
+   * Optional campaign type (D108–D112). Absent means "social-post" so existing
+   * briefs are unchanged. It records which preset seeded the brief so surfaces
+   * can read it; nothing enforces it — the user may change platforms, formats
+   * and mode afterwards and the type does not fight back (D109). Validated at
+   * the API boundary by `validateType` in load-brief.ts.
+   */
+  readonly type?: CampaignType;
   /**
    * Optional variation policy. Unsupported values are rejected at parse
    * time, not here: `headline` accepts only the pool reference `pool://copy`
