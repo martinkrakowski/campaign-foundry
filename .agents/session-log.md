@@ -3106,3 +3106,64 @@ skill now warns about: asserting an effect from intent rather than observation.
 **D95** — what more than one region means for generation — remains the owner's, and is why the map
 ships single-select. `OptionTile` still mounts its children wrapper when `children` is nullish
 (8 px per card); declined twice as a kit change no lane owned at the time.
+
+## 2026-09-07 — Wave C in flight, and the lesson the GLOBAL trap taught
+
+**Mode:** Orchestrator. Record opened at merge time per the stage-6 rule; the merge line is filled
+when #214 lands.
+
+### The defect worth remembering
+
+`WorldMap` shipped in #207 with a review that found and fixed a real bug: unselected footprints
+painted over selected ones, so choosing `GLOBAL` made the whole map read *unselected*. The fix —
+paint the selected footprint **last** — was correct.
+
+`GLOBAL`'s footprint is **every landmass**. Painted last, its paths sit on top of every other
+footprint and receive every pointer event. So once `GLOBAL` is selected, clicking Germany
+re-selects `GLOBAL`: the map becomes a one-way door whose only escape is the chips. `EU` over `DE`
+has the same shape. Found by Qodo on #214, two PRs after the fix that caused it.
+
+**Why nothing caught it, and this is the transferable part.** Every other defect this arc produced
+was a test that could not fail against a defect it *named* — fourteen of them. This one is
+different: **no test named the property at all.** `WorldMap`'s suite drove it with a `value` prop
+and asserted the right footprint was selected for each value. That shape of test cannot express
+"you can always change your selection", because the bug does not exist in any single state — it
+exists only across a **sequence**: select A, then try to select B. And the sequence does not exist
+until the component is wired to a real control, by which point the component's own review is two
+PRs behind.
+
+**The rule that falls out:** a component reviewed in isolation needs at least one test that drives a
+*sequence* of interactions, not a set of states. A state-per-assertion suite is blind to
+transitions by construction, and "blind by construction" is exactly what 100 % coverage cannot see —
+this file was at 100 % on all four counters throughout.
+
+*Proposed for `DESIGN.md` §8 (Testing the UI) — **not applied**, because DESIGN.md requires design
+review (AGENTS.md, Files Never Edit):*
+
+> - A component's suite must drive at least one **sequence** — select A, then select B — not only a
+>   set of states. A state-per-assertion suite cannot express "you can always change your
+>   selection", and coverage cannot see the gap: the `WorldMap` file was at 100 % on all four
+>   counters while `GLOBAL` trapped the control.
+
+### The other three findings on #214
+
+- **`ChipGroup` let internal state outlive a value change it did not cause** (grok and CodeRabbit,
+  independently): with `Other…` open, a map press updated `targetRegion` while no chip rendered
+  selected and the custom input stayed open — so the dialog's claim that map and chips are one
+  control was false in that state. Fixed in the kit; a controlled component reconciles on `value`.
+- The eyebrow's count called `listBriefs()` independently of the picker's own call — two fetches
+  that can disagree, and a doubled request per open.
+- `campaignCount` survived a close, so a reopen briefly showed the previous number.
+
+### Tooling, concluded
+
+The CI-registration race took **three** attempts. #211 diagnosed it correctly and fixed it at the
+wrong granularity (PR-level, satisfied by a bot check registering instantly); it aborted #208 and
+#209 before that was noticed, and was reported as working before it had run. #212 scoped the poll to
+`commits/<head>/check-runs`, then re-read the head each pass after Qodo pointed out that pinning it
+once reintroduced the same guard-and-watch-disagree shape. It merged first try afterwards.
+
+**A third mutation misfire, and the sharper rule.** #211 added "confirm the mutation applied". That
+is not enough: an `onSelect` mutant this session broke the file syntactically and vitest reported
+`no tests` — neither a pass nor a fail, and indistinguishable from a weak test at a glance. The rule
+should read **confirm the mutation produced a valid mutant that actually ran**.
