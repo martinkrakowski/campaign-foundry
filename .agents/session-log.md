@@ -2742,3 +2742,28 @@ green.
 
 **Left open:** D95; the tag word per mode; whether `EU = EUR + SCAN` is acceptable at picker grain;
 whether the brief editor's Identity step gets the map too.
+## 2026-09-07 — wave A, lane M1: the world map in the kit (PR #207)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `ui/geo/` (new): the mockup's map geometry ported verbatim — `chaikin.ts`
+    (`chaikin`, `polyPath`, `Pt`), `pip.ts`, `polygons.ts` (all constants + the three
+    hubs), `footprints.ts` (`REGION_FOOTPRINTS` in `REGION_OPTIONS` order, `dotMatrix`,
+    graticule, `centroid`), unit-tested against the ported numbers.
+  - `ui/world-map.tsx` (new): single-select `WorldMap`, `aria-hidden` SVG with no
+    focusable descendant (D94), dot-matrix reveal as a one-shot transition (D96), no
+    ping/loops/arcs. `ui/region-chip.tsx` (new): chip with state dot, name = label.
+  - `ui/index.ts`: one `// M1 — the world map` block appended; nothing else touched.
+  - PR #207 → `main` (feat/m1 @ 82931ea); not merged. Full gate green; 100 % on all
+    four coverage counters; six mutations applied and each caught.
+- **Decisions:**
+  - F5's Germany and contiguous-US polygons drawn as 9- and 10-anchor lists on the
+    mockup's 960×500 grid; every anchor `pip`-verified against its parent by test.
+  - `DE`/`UK` hubs derived by `centroid()` (mean of anchors) rather than hardcoded.
+  - Polygon constants stay internal to `geo/` — the barrel exports the footprint
+    table and the geo functions, not the 24 landmasses.
+  - Dots computed in one `useMemo` per `footprints` prop so hover re-renders are cheap.
+- **Left open:**
+  - D95 (multi-select semantics) — `multiple`/arcs land with it, per the plan.
+  - M2 wires the map + chips into `01 · Targeting`; `Other…` clears the map.
+  - §6's open questions (EU grain; the brief editor's Identity step) untouched.
