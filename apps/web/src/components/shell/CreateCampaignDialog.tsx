@@ -238,7 +238,8 @@ export function CreateCampaignDialog() {
     try {
       const result = await createCampaign({
         name,
-        mode,
+        // T2 bridge — T3 replaces the mode panel with the campaign-type field (D108).
+        type: mode === "variation" ? "paid-social" : "social-post",
         source: source?.id,
       });
       // A blocked store is not a create: stay open and say so. Do not throw — the
