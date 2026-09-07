@@ -1,7 +1,7 @@
 "use client";
 
-import { useId, useState, useRef, useEffect, type Dispatch } from "react";
-import { Input, ChipGroup } from "@/components/ui";
+import { useId, useState, useRef, useEffect, useCallback, useMemo, type Dispatch } from "react";
+import { Input, ChipGroup, WorldMap, REGION_FOOTPRINTS } from "@/components/ui";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import type { FieldErrors } from "@/components/campaign/validate";
 import { keyForLabel } from "@/components/campaign/error-sections";
@@ -111,7 +111,12 @@ export function Field({
   );
 }
 
-export function IdentitySection({ state, dispatch, errors }: SectionProps) {
+export function IdentitySection({
+  state,
+  dispatch,
+  errors,
+  compact = false,
+}: SectionProps & { compact?: boolean }) {
   const readOnly = state.source.kind === "file";
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -140,8 +145,32 @@ export function IdentitySection({ state, dispatch, errors }: SectionProps) {
       ? state.briefId
       : state.campaignName || state.briefId;
 
+  const onSelectRegion = useCallback(
+    (value: string) => dispatch({ type: "patch", patch: { targetRegion: value } }),
+    [dispatch],
+  );
+
+  // The map's SVG is hundreds of nodes. An inline `onSelect` rebuilds the
+  // element on every editor update (keystroke, save-flow step) and happy-dom
+  // repaints the whole matrix. Memoize on the value it displays.
+  const mapValue = (REGION_OPTIONS as readonly string[]).includes(state.targetRegion)
+    ? state.targetRegion
+    : null;
+  const worldMap = useMemo(
+    () => (
+      <WorldMap
+        footprints={REGION_FOOTPRINTS}
+        value={mapValue}
+        onSelect={onSelectRegion}
+        labelFor={messages.regionDisplayName}
+        fallbackHint={messages.worldMapFallbackHint}
+      />
+    ),
+    [mapValue, onSelectRegion, REGION_FOOTPRINTS, messages.regionDisplayName, messages.worldMapFallbackHint],
+  );
+
   return (
-    <SectionShell id="identity" title="1 · Identity" errorCount={countErrors(errors)}>
+    <SectionShell id="identity" title="1 · Identity" errorCount={countErrors(errors)} compact={compact}>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field fieldKey="briefId" label={messages.campaignNameLabel} error={errors.briefId}>
           <Input
@@ -175,17 +204,31 @@ export function IdentitySection({ state, dispatch, errors }: SectionProps) {
           </div>
         </Field>
         <Field fieldKey="targetRegion" label={messages.targetRegionLabel} error={errors.targetRegion} as="div">
-          <ChipGroup
-            label={messages.targetRegionLabel}
-            otherInputLabel={messages.targetRegionOtherInputLabel}
-            options={REGION_OPTIONS}
-            value={state.targetRegion}
-            onChange={(value) => dispatch({ type: "patch", patch: { targetRegion: value } })}
-            allowOther
-            otherLabel={messages.targetRegionOther}
-            otherPlaceholder={messages.targetRegionOtherPlaceholder}
-            invalid={Boolean(errors.targetRegion)}
-          />
+          {/* F4/D94 — the map and the chips are two views of one value, both bound
+           * to `targetRegion`. The wiring is M2's, carried over from the dialog:
+           * the SVG is aria-hidden and adds no focusable element, so the chips
+           * stay the accessible and keyboard control, and a free-text region
+           * (Other…) paints no footprint. The compact form (the 320 px sidebar)
+           * renders the chips alone — a 960×500 map cannot go there. */}
+          <div className={compact ? undefined : "space-y-2"}>
+            {!compact ? (
+              <>
+                {worldMap}
+                <p className="text-[12px] text-text-muted">{messages.worldMapRegionHint}</p>
+              </>
+            ) : null}
+            <ChipGroup
+              label={messages.targetRegionLabel}
+              otherInputLabel={messages.targetRegionOtherInputLabel}
+              options={REGION_OPTIONS}
+              value={state.targetRegion}
+              onChange={(value) => dispatch({ type: "patch", patch: { targetRegion: value } })}
+              allowOther
+              otherLabel={messages.targetRegionOther}
+              otherPlaceholder={messages.targetRegionOtherPlaceholder}
+              invalid={Boolean(errors.targetRegion)}
+            />
+          </div>
         </Field>
       </div>
       <Field fieldKey="targetAudience" label={messages.targetAudienceLabel} error={errors.targetAudience}>
