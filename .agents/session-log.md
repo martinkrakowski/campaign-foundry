@@ -3568,3 +3568,52 @@ impossible on `16:9`, which would need the owner's decision before any display s
 - **Round 2:** formats-agree is bidirectional — union of `profile.formats` over listed platforms must contain every `preset.formats` entry. Mutation: add `"static"` to `short-video.formats`. Failed `every preset's formats agree with the profiles it lists` (`AssertionError: short-video offers "static" but none of its listed profiles package it`). D110 intact (static+motion under variation is legal). Reverted.
 - **Left open:**
   - Gate sequence unchanged: `sync:check` after commit if it refuses a dirty tree.
+
+---
+
+## 2026-09-07 — Lane T2: the create seam carries the campaign type (D108–D112, PR #228)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `create-campaign.ts`: seam is `{ name, type, source? }`; `mode` gone; `isStoredSeed` checks
+    `type` against `CAMPAIGN_TYPES` and refuses the #217 `{name, mode}` shape whole (same baton
+    spend as the four-field seed).
+  - `editor-state.ts`: `type` + `typeExplicit` on the state (the `modeExplicit` pattern);
+    `applyPreset` action — preset's platforms/formats verbatim, the mode routed through the
+    `setMode` branch (`reduceEditor(state, { type: "setMode", mode: preset.mode })`), idempotent;
+    `toBrief`/`fromBrief` under D112 (absent = `social-post`); `normalizeDraftState` checks the
+    vocabulary and defaults a pre-T2 draft.
+  - `BriefEditor.tsx` seed effect: `applyPreset` replaces `setMode`; everything else in the effect
+    (name patch, attempted/touched reset, Identity landing) untouched.
+  - `display-names.ts`: `typeDisplayName` + `TYPE_LABELS` beside `MODE_LABELS`.
+  - `CreateCampaignDialog.tsx`: 3 lines — the T2 bridge (`variation` → `paid-social`).
+  - `packages/CampaignOrchestration/package.json`: added the `./campaign-types` leaf subpath export
+    (**outside the lane's file list, flagged in the PR**). The barrel cannot serve the web client —
+    it reaches `@campaignfoundry/shared`'s root and pulls `node:fs`/`node:path` into the browser
+    bundle (`yarn build` failed with UnhandledSchemeError until the subpath existed) — and T1 shipped
+    no subpath despite the type file's own header promising "pull it like `./aspect-ratios`".
+  - Tests: create-campaign, editor-state (new preset describe), brief-editor (acceptance 1, 2, 5),
+    dialog (two assertions), display-names, plus one compile-forced seed-shape fix in
+    `create-campaign-context.test.tsx` (not on the brief's caller list).
+- **Findings:**
+  - **D9 in the preset path:** a motion preset must seed the motion defaults (kinds + default
+    duration), the same rule `toggleFormat`/`togglePlatform` already run twice — otherwise a
+    paid-social seed (reachable through the T2 bridge!) opens an editor whose Save is blocked by an
+    empty motion axis. Recorded as the third instance of that branch; a factoring was declined to
+    keep the lane's diff inside its file list.
+  - **M4's blind spot:** the explicit `social-post` round-trip cannot fail under the fromBrief-drops-
+    type mutant — `typeExplicit` derives from `brief.type === DEFAULT_CAMPAIGN_TYPE`, which the
+    mutant preserves, so an explicit and an absent default are indistinguishable in the state. The
+    paid-social round-trip/not-dirty test is M4's discriminator.
+  - **M5's blind spot:** the plain absent-type draft is inherently defaulted by the `...initial`
+    spread; the vocabulary check is what the mutation kills (unknown values rode the spread).
+  - `briefs-api.ts` needed nothing, as the brief predicted.
+- **Mutation results** (all compiled, ran, and failed the named test; reverted):
+  M1 → editor-level `{name, mode}` discard test; M2 → the D109 applied-once test (remount restored
+  tiktok); M3 → D110 (`'brief'` ≠ `'variation'`); M4 → paid-social round-trip/not-dirty; M5 → the
+  out-of-vocabulary fallback test; M6 → the dialog bridge assertion.
+- **Left open:**
+  - T3 replaces the mode panel with the type field and deletes the bridge.
+  - The D9 seeding branch now exists three times in the reducer; a factoring lane could collapse it.
+  - Gate sequence as T1 recorded it: pre-commit lint/typecheck/test:cov; `sync:check` after commit
+    (it refuses a dirty tree).
