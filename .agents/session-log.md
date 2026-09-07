@@ -2739,3 +2739,35 @@ plan's §6.5 is still unanswered.
   - The W3 two-way test's dirty-Cancel tail was a required edit (D90), previously described as "untouched"; declared in Deviations.
 - **Verification:** Full gate green. Six mutations, each red then restored.
 - **Left open:** PR #204 against `main`, **not merged**.
+## 2026-09-07 — Graphics and the world map (plan)
+
+**Mode:** Architect.
+
+**Changes:** Added `docs/planning/2026-09-07_graphics-and-the-world-map.md`. No code changed.
+Prompted by the owner's screenshot comparison of the shipped dialog (PR #203) against the
+inspiration: the styling did not land.
+
+**The diagnosis, owned:** DESIGN.md did not constrain the styling — it forbade three loops, and the
+previous plan's §2.2 replaced them with static pictures that no lane was ever briefed to draw.
+`OptionTile` shipped with `tag`, `blurb` and a caller-sized picture slot; `ModePanel` filled none of
+them and kept the old 46 px glyph. The container was reviewed three times and passed; nobody asked
+whether it had contents.
+
+**The finding that reshaped C2:** `targetRegion` reaches generation as prompt text and nothing else
+— four `Market/region: ${…}` lines in the generators; no axis, no capacity, no branch on any value.
+"Multi-region" therefore has no defined meaning to implement, and the mockup's "runs dispatch per
+region" is false here. The map ships **single-select over the existing six values with no domain
+change** (D94); what a second region *means* is the owner's open call (D95).
+
+**Decisions proposed:** D93 (a preview panel is operational, not a §1.3 hero), D94 (single-select
+map, no domain change), D95 (OPEN — multi-region semantics), D96 (D88 forbids loops, not
+transitions: dot-reveal stays, ping goes; arcs deferred with D95 as dead code otherwise).
+
+**Corrected by the advisor before the PR:** `multiple`/arcs dropped from M1 (unreachable under the
+100 % branch gate); the map's a11y model decided as `aria-hidden` with chips as the sole keyboard
+path, rather than handed to the lane; `4:5` dropped from `PosterFrame` (D26 — the compositor never
+renders it); `ModePanel` gains `compact` for the 320 px sidebar; G3 pinned to keep the dialog suite
+green.
+
+**Left open:** D95; the tag word per mode; whether `EU = EUR + SCAN` is acceptable at picker grain;
+whether the brief editor's Identity step gets the map too.
