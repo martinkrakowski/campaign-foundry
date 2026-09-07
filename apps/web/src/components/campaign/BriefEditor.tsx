@@ -754,12 +754,17 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     }
     setTopPanels(
       <>
-        <ModePanel mode={state.mode} onSetMode={(mode: CampaignMode) => dispatch({ type: "setMode", mode })} compact />
+        <ModePanel
+          mode={state.mode}
+          onSetMode={(mode: CampaignMode) => dispatch({ type: "setMode", mode })}
+          compact
+          formatDropped={state.mode === "brief" && state.formats.includes("motion")}
+        />
         <SectionOutline mode={state.mode} visibleErrors={visibleErrors} onActivate={outlineActivate} />
       </>,
     );
     return () => setTopPanels(null);
-  }, [state.mode, visibleErrors, setTopPanels, outlineActivate, unknownId, failedRouteId]);
+  }, [state.mode, state.formats, visibleErrors, setTopPanels, outlineActivate, unknownId, failedRouteId]);
 
   // Publish the sections that live in the left bar while this editor is mounted. The
   // page keeps the state, dispatch and validation and republishes on every change; the

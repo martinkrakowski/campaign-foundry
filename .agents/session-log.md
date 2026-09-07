@@ -3314,3 +3314,62 @@ blocked-store paths pass unedited; the seed's deep-equal test was rewritten deli
   neither unit sees alone.
 
 **Left open:** none.
+## 2026-09-07 — S4: the setMode leak, closed without touching a shipped test
+
+**Mode:** Implementer (lane S4 of wave A, worktree `wt-s4`, branch `feat/s4` off `2341401`). PR
+#218, not merged. Gate green: build, typecheck, lint, lint:arch, sync:check (on the committed
+tree), test:cov at 100 % × 4 (194 files, 3267 tests).
+
+**The plan's two readings of "drops" were in conflict, and the regression surface decided.** Read
+as the reducer's `formats` array, the drop reds the shipped D5 round-trip test (a switch to classic
+and back must restore a serialisable timeline — the draft's formats have to survive the flip), and
+the lane's own mutation ("make it clear formats in both directions") forbids a flip-back restore.
+Read as the brief's `output.formats`, a whole-classic gate reds the shipped `toBrief` pin at
+`editor-state.test.ts:558` — whose motion assertion builds a **classic** state (`filled()` without
+a mode override) and pins exactly the serialisation `load-brief.ts:603` refuses, i.e. the defect
+itself, written before the defect was understood (#95). Both reds verified empirically before
+choosing. The shipped design: `setMode` latches `formatDroppedByMode`; `toBrief` honours the latch
+for the flip's brief only; the draft keeps the user's formats and the remedy copy is literally
+true. D99's own wording ("leaves `output.formats` intact") is what the fix answers.
+
+**Two lessons worth keeping.** First: a regression-surface red is not always a contract break —
+one of the two reds was a genuine contract (D5), the other a defect pin; reading the test's intent
+(the D7 write/omit rule) against its accidental construction (classic + motion) told them apart.
+Second: the empty-formats answer was already in `toBrief` — an explicit output block, refused by
+the parser on every path, flagged by the editor's own validate — and the discipline was to not
+invent a fallback (`addPhotoOutput`'s static-restore was the tempting invention).
+
+**Findings left for other lanes** (in the PR body): the format vocabulary is the one axis with no
+shared domain export (`MOTION_FORMAT` is API-app; the web repeats the literal); `togglePlatform`
+can still derive motion into a classic draft with no flip involved — same class, likely wants the
+gate keyed off mode rather than the flip; and the latched state's preview reads the draft's
+formats, not the gated brief's (D45's rule, eventually).
+
+## 2026-09-07 — S4 remediation: the latch was extra, the gate is mode
+
+**Mode:** Implementer (remediation). Worktree `wt-s4`, branch `feat/s4`, PR #218.
+
+**Changes:**
+- Deleted `formatDroppedByMode` from the state, the reducer, `normalizeDraftState`, and
+  serialisation. `toBrief` omits motion whenever `state.mode === "brief"`, via a shared
+  `serialisedFormats` helper that `preview-props` now answers through too (`isDefaultOutput`).
+- When dropping motion would empty the list, the projection is `["static"]` — the classic
+  pipeline renders stills, and the API refuses an empty `output.formats`.
+- The `role="status"` line is derived from `mode === "brief" && formats.includes("motion")`.
+- Changed the shipped assertion at `editor-state.test.ts:554` (it specified the defect).
+  Rewrote the S4 suite: save-and-reload vs draft autosave, the run-path test now exercises
+  the gate, the only-motion case parses with `enforceCapabilities: true`, and the Video
+  card is pinned as visibly gated in Classic.
+
+**Decisions:**
+- The reviewer's third reading was right: a whole-classic gate in `toBrief` keeps D5 green
+  without a latch. A gate has no lifetime to get wrong, which dissolves the preview
+  disagreement and the latch-restore questions by construction.
+- Save-and-reload (`fromBrief(toBrief(flipped))`) loses Video permanently; draft autosave
+  keeps it. That asymmetry is the contract, not a bug.
+- Platforms are not remapped. A motion-only platform list paired with the `["static"]`
+  projection can still fail format/platform compatibility — a different refusal, not this
+  lane's empty-formats bug.
+
+**Left open:** Qodo's motion-only-platforms pairing; the format vocabulary still has no
+shared domain export.
