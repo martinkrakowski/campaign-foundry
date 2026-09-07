@@ -38,8 +38,13 @@ function listKitSources(dir: string): string[] {
 }
 
 const kitFiles = listKitSources(kitDir);
-// An import statement, not a mention: a comment that names the path is not an import.
-const CAMPAIGN_IMPORT = /^\s*import\b[^\n]*["']@\/components\/campaign/m;
+// The specifier always sits on the same line as `from` (named/default/namespace,
+// including multiline `import {\n … \n} from "…"`) or as `import` (side-effect
+// `import "…"`). Matching those two forms is enough. A `//` comment that names
+// the path is not an import — in either direction: it must not fail a clean kit
+// file, and it must not keep a stale allowlist entry alive.
+const CAMPAIGN_IMPORT =
+  /(?:^\s*import\s+["']@\/components\/campaign|(?<!\/\/[^\n]*)\bfrom\s+["']@\/components\/campaign)/m;
 
 describe("the kit does not import the campaign feature (D87)", () => {
   test("every kit file outside the allowlist is free of @/components/campaign imports", () => {
