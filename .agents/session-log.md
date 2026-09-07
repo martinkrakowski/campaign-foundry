@@ -3267,3 +3267,32 @@ shared domain export (`MOTION_FORMAT` is API-app; the web repeats the literal); 
 can still derive motion into a classic draft with no flip involved — same class, likely wants the
 gate keyed off mode rather than the flip; and the latched state's preview reads the draft's
 formats, not the gated brief's (D45's rule, eventually).
+
+## 2026-09-07 — S4 remediation: the latch was extra, the gate is mode
+
+**Mode:** Implementer (remediation). Worktree `wt-s4`, branch `feat/s4`, PR #218.
+
+**Changes:**
+- Deleted `formatDroppedByMode` from the state, the reducer, `normalizeDraftState`, and
+  serialisation. `toBrief` omits motion whenever `state.mode === "brief"`, via a shared
+  `serialisedFormats` helper that `preview-props` now answers through too (`isDefaultOutput`).
+- When dropping motion would empty the list, the projection is `["static"]` — the classic
+  pipeline renders stills, and the API refuses an empty `output.formats`.
+- The `role="status"` line is derived from `mode === "brief" && formats.includes("motion")`.
+- Changed the shipped assertion at `editor-state.test.ts:554` (it specified the defect).
+  Rewrote the S4 suite: save-and-reload vs draft autosave, the run-path test now exercises
+  the gate, the only-motion case parses with `enforceCapabilities: true`, and the Video
+  card is pinned as visibly gated in Classic.
+
+**Decisions:**
+- The reviewer's third reading was right: a whole-classic gate in `toBrief` keeps D5 green
+  without a latch. A gate has no lifetime to get wrong, which dissolves the preview
+  disagreement and the latch-restore questions by construction.
+- Save-and-reload (`fromBrief(toBrief(flipped))`) loses Video permanently; draft autosave
+  keeps it. That asymmetry is the contract, not a bug.
+- Platforms are not remapped. A motion-only platform list paired with the `["static"]`
+  projection can still fail format/platform compatibility — a different refusal, not this
+  lane's empty-formats bug.
+
+**Left open:** Qodo's motion-only-platforms pairing; the format vocabulary still has no
+shared domain export.
