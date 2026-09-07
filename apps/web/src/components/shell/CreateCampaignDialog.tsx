@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Button,
@@ -9,6 +9,7 @@ import {
   DialogFoot,
   DialogHead,
   DialogShell,
+  GuardBar,
   Input,
   JumpStrip,
   SectionBlock,
@@ -91,6 +92,13 @@ export function CreateCampaignDialog() {
   const [marks, setMarks] = useState<readonly CreateMark[]>([]);
   const [creating, setCreating] = useState(false);
   const [resumePrompt, setResumePrompt] = useState(false);
+  // W2(a) (D90) — the footer's third state: the inline discard guard. Raised by
+  // any close gesture on a draft with work in it; taken down by Keep editing,
+  // a second close gesture, or spent by Discard and close.
+  const [guardOpen, setGuardOpen] = useState(false);
+  const guardRef = useRef<HTMLDivElement>(null);
+  // The control that raised the guard — focus returns there when it comes down.
+  const guardReturnFocusRef = useRef<HTMLElement | null>(null);
   // The sections a chip jumps to. Both always render while the dialog is open, so
   // a chip can only be clicked when both refs are attached.
   const identityRef = useRef<HTMLDivElement>(null);
@@ -121,6 +129,9 @@ export function CreateCampaignDialog() {
     });
   };
 
+  /** Keep editing: the guard comes down; the focus effect returns to the raiser. */
+  const dismissGuard = () => setGuardOpen(false);
+
   /** A cancelled or completed create leaves nothing behind — the typed fields included. */
   const closeAndReset = () => {
     closeCreateDialog();
@@ -131,7 +142,61 @@ export function CreateCampaignDialog() {
     setSource(null);
     clearRefusal();
     setResumePrompt(false);
+    setGuardOpen(false);
   };
+
+  /**
+   * D90 — the dialog's own notion of a draft with work in it: a name, a region,
+   * an audience, or a chosen source. The mode toggle is deliberately absent: it
+   * has a default the user may never have touched, so a pristine dialog whose
+   * mode is untouched still closes on the first Cancel.
+   */
+  const draftHasWork =
+    name.trim() !== "" ||
+    targetRegion.trim() !== "" ||
+    targetAudience.trim() !== "" ||
+    source !== null;
+
+  /**
+   * D90 — every close gesture funnels here (Cancel, Escape, the scrim, the
+   * head's close — `DialogShell` owns Escape, so the guard is consulted in the
+   * close handler and the shell's own Escape path is untouched). An empty draft
+   * closes exactly as it always did — a confirmation step on nothing would be
+   * friction without a purpose. A draft with work asks first: the first ask
+   * raises the guard, and while the guard shows the same gesture takes it down
+   * — so a second Escape is Keep editing, never Discard, and no keystroke
+   * sequence can destroy a filled-in form. Only the guard's Discard and close
+   * button does that.
+   */
+  const requestClose = () => {
+    if (!draftHasWork) {
+      closeAndReset();
+      return;
+    }
+    if (guardOpen) {
+      dismissGuard();
+      return;
+    }
+    guardReturnFocusRef.current = document.activeElement as HTMLElement | null;
+    setGuardOpen(true);
+  };
+
+  // D90 — the guard is reachable by keyboard or it is not a guard: opening it
+  // moves focus to its first control (its first answer), and taking it down
+  // returns focus to the control that raised it. An effect, because the answer
+  // the button row is restored under — or the guard replacing the row — only
+  // exists in the DOM after the commit; a full close skips the restore (the
+  // shell's own trap hands focus back) and clears the stale raiser.
+  useEffect(() => {
+    if (guardOpen) {
+      guardRef.current?.querySelector("button")?.focus();
+      return;
+    }
+    if (createDialogOpen && guardReturnFocusRef.current) {
+      guardReturnFocusRef.current.focus();
+    }
+    guardReturnFocusRef.current = null;
+  }, [guardOpen, createDialogOpen]);
 
   const runCreate = async () => {
     setRefusal(null);
@@ -252,14 +317,14 @@ export function CreateCampaignDialog() {
     <>
       <DialogShell
         open={createDialogOpen}
-        onClose={closeAndReset}
+        onClose={requestClose}
         ariaLabel={messages.createCampaignTitle}
         className="max-w-[820px]"
       >
         <DialogHead
           title={messages.createCampaignTitle}
           description={messages.createCampaignDescription}
-          onClose={closeAndReset}
+          onClose={requestClose}
         />
         <DialogBody className="space-y-6">
           {/* The identity strip: the name alone, above the numbered sections —
@@ -387,9 +452,20 @@ export function CreateCampaignDialog() {
                 {refusal}
               </p>
             ) : null}
-            <div className="flex justify-end gap-2">
-              {/* D67: a cancelled create leaves nothing behind — the reset runs here too. */}
-              <Button variant="ghost" onClick={closeAndReset}>
+            {/* D90 — the footer's third state. On a close ask with work in the
+             *  draft the row is replaced in place by the guard: one overlay, one
+             *  scrim, the form stays mounted, the answers survive. The detail
+             *  names what is actually filled in — never a generic sentence. Both
+             *  rows stay mounted and the `[hidden]` attribute does the swapping:
+             *  the row's own nodes survive the swap (so focus can return to the
+             *  control that raised the guard), the hidden row is out of the
+             *  trap's focusables and out of the accessibility tree, and a
+             *  display:none class would be neither — happy-dom computes no
+             *  stylesheet, so the attribute is the only honest hidden. */}
+            <div hidden={guardOpen} className="flex justify-end gap-2">
+              {/* D67: a cancelled create leaves nothing behind — the reset runs
+               *  here too, now once the guard's Discard and close confirms it. */}
+              <Button variant="ghost" onClick={requestClose}>
                 {messages.confirmCancel}
               </Button>
               {/* D3: never a dead primary button — only the write in flight holds it. */}
@@ -397,6 +473,27 @@ export function CreateCampaignDialog() {
                 {messages.createCampaignConfirm}
               </Button>
             </div>
+            {guardOpen ? (
+              <div ref={guardRef}>
+                <GuardBar
+                  title={messages.discardGuardTitle}
+                  detail={messages.discardGuardDetail(
+                    name.trim() !== "",
+                    targetRegion.trim() !== "",
+                    targetAudience.trim() !== "",
+                    source !== null,
+                  )}
+                  actions={[
+                    { label: messages.discardGuardKeepEditing, onAct: dismissGuard },
+                    {
+                      label: messages.discardGuardDiscardClose,
+                      variant: "destructive",
+                      onAct: closeAndReset,
+                    },
+                  ]}
+                />
+              </div>
+            ) : null}
           </div>
         </DialogFoot>
       </DialogShell>
