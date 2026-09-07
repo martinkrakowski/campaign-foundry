@@ -91,9 +91,10 @@ function ModeGlyph({ scattered }: { scattered: boolean }): ReactNode {
 
 /**
  * The mode switch as two pictures at the top of the sidebar (D4/U1): an OptionTile per
- * mode, its raw value (`brief` / `variation`) the whole accessible name and its visible
- * name reading Classic / Randomized. Switching mode stays non-destructive (D10) — the
- * tiles only dispatch `setMode`, exactly as the header buttons they replace did.
+ * mode, its raw value (`brief` / `variation`) the visible name and the whole accessible
+ * name, and its muted caption (`meta`) reading Classic / Randomized. Switching mode
+ * stays non-destructive (D10) — the tiles only dispatch `setMode`, exactly as the
+ * header buttons they replace did.
  */
 export function ModePanel({
   mode,
@@ -108,7 +109,8 @@ export function ModePanel({
         <OptionTile
           key={option}
           value={option}
-          name={modeDisplayName(option)}
+          name={option}
+          meta={modeDisplayName(option)}
           selected={mode === option}
           onToggle={(value) => onSetMode(value as CampaignMode)}
         >
