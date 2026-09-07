@@ -50,7 +50,7 @@ beforeEach(() => {
 });
 
 describe("CreateCampaignDialog", () => {
-  test("collects the four things the Identity step decides, with Classic preselected", async () => {
+  test("collects the five things the Identity step decides (D86), in three numbered sections, with Classic preselected", async () => {
     const user = userEvent.setup();
     renderDialog();
     await openDialog(user);
@@ -63,6 +63,14 @@ describe("CreateCampaignDialog", () => {
     // The mode cards keep the kit's raw-value name; Classic ("brief") is the default.
     expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe("false");
+    // The three numbered sections, under the dialog's h2 — sibling h3s, never h2s.
+    for (const title of [
+      messages.createSectionTargeting,
+      messages.createSectionStartFrom,
+      messages.createSectionMode,
+    ]) {
+      expect(screen.getByRole("heading", { level: 3, name: title })).toBeTruthy();
+    }
   });
 
   test("the region's Other… escape reveals the free-text input, as Identity renders it", async () => {
@@ -107,6 +115,79 @@ describe("CreateCampaignDialog", () => {
     await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
 
     expect(screen.getByRole("status").textContent).toBe(messages.targetAudience);
+  });
+
+  test("a refused create marks every missing field in place while the status line still names only the first (D91)", async () => {
+    const user = userEvent.setup();
+    const { container } = renderDialog();
+    await openDialog(user);
+    await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
+
+    // Exactly one live region, however many fields are missing — and it stays
+    // first-missing-wins, speaking today's sentence and nothing more.
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(screen.getByRole("status").textContent).toBe(messages.campaignNameRequired);
+
+    // Every missing field is marked in its own slot, not only the first.
+    const fieldText = (key: string) =>
+      container.querySelector(`[data-field-key="${key}"]`)!.textContent!;
+    expect(fieldText("campaignName")).toContain(messages.campaignNameRequired);
+    expect(fieldText("targetRegion")).toContain(messages.targetRegion);
+    expect(fieldText("targetAudience")).toContain(messages.targetAudience);
+    expect(screen.getByLabelText(messages.targetAudienceLabel).getAttribute("aria-invalid")).toBe(
+      "true",
+    );
+
+    // One chip per mark in the footer strip.
+    expect(screen.getByRole("button", { name: "Campaign Name 1" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Target Region 1" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Target Audience 1" })).toBeTruthy();
+  });
+
+  test("a footer chip jumps to the section the marked field lives in", async () => {
+    const user = userEvent.setup();
+    const { container } = renderDialog();
+    await openDialog(user);
+    await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
+    const identity = container.querySelector<HTMLElement>('[data-create-section="identity"]')!;
+    const targeting = container.querySelector<HTMLElement>('[data-create-section="targeting"]')!;
+    identity.scrollIntoView = vi.fn();
+    targeting.scrollIntoView = vi.fn();
+
+    // The name mark jumps to the identity strip; the region mark, to `01 · Targeting`.
+    await user.click(screen.getByRole("button", { name: "Campaign Name 1" }));
+    expect(identity.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+    expect(targeting.scrollIntoView).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Target Region 1" }));
+    expect(targeting.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+  });
+
+  test("a chip's jump respects prefers-reduced-motion (D28)", async () => {
+    const matchMedia = vi
+      .spyOn(window, "matchMedia")
+      .mockReturnValue({
+        matches: true,
+        media: "(prefers-reduced-motion: reduce)",
+        onchange: null,
+        addListener() {},
+        removeListener() {},
+        addEventListener() {},
+        removeEventListener() {},
+        dispatchEvent: () => false,
+      } as MediaQueryList);
+    try {
+      const user = userEvent.setup();
+      const { container } = renderDialog();
+      await openDialog(user);
+      await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
+      const identity = container.querySelector<HTMLElement>('[data-create-section="identity"]')!;
+      identity.scrollIntoView = vi.fn();
+      await user.click(screen.getByRole("button", { name: "Campaign Name 1" }));
+
+      expect(identity.scrollIntoView).toHaveBeenCalledWith({ behavior: "auto", block: "start" });
+    } finally {
+      matchMedia.mockRestore();
+    }
   });
 
   test("the dialog never shows the slug the name derives (D65)", async () => {

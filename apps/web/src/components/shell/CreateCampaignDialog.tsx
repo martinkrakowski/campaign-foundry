@@ -1,8 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState, type RefObject } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Button, ChipGroup, DialogBody, DialogFoot, DialogHead, DialogShell, Input } from "@/components/ui";
+import {
+  Button,
+  ChipGroup,
+  DialogBody,
+  DialogFoot,
+  DialogHead,
+  DialogShell,
+  Input,
+  JumpStrip,
+  SectionBlock,
+} from "@/components/ui";
 import { ModePanel } from "@/components/campaign/ModePanel";
 import { Field, REGION_OPTIONS } from "@/components/campaign/sections/IdentitySection";
 import { stashStep } from "@/lib/use-step-navigation";
@@ -19,12 +29,45 @@ import * as messages from "@/components/campaign/messages";
 const COPY_STEP = "copy";
 
 /**
+ * The fields a refused create marks (D91): the closed set of answers that can be
+ * missing. Mode cannot be — it has a default — and start-from cannot, so the
+ * marks, the JumpStrip's chips and the sections they jump to are all keyed to
+ * these three, never to free-form strings.
+ */
+type CreateMarkKey = "campaignName" | "targetRegion" | "targetAudience";
+
+interface CreateMark {
+  readonly key: CreateMarkKey;
+  readonly message: string;
+}
+
+/** The JumpStrip chip's label for each mark — the field's own label, spelled once. */
+const CREATE_MARK_LABELS: Record<CreateMarkKey, string> = {
+  campaignName: messages.campaignNameLabel,
+  targetRegion: messages.targetRegionLabel,
+  targetAudience: messages.targetAudienceLabel,
+};
+
+/** The section each mark's chip jumps to: the name strip, or `01 · Targeting`. */
+type CreateSectionKey = "identity" | "targeting";
+
+const CREATE_MARK_SECTIONS: Record<CreateMarkKey, CreateSectionKey> = {
+  campaignName: "identity",
+  targetRegion: "targeting",
+  targetAudience: "targeting",
+};
+
+/**
  * The create moment (W1): the Identity step in a dialog (D66), on the shared dialog
- * kit. It collects the four things the wizard's first step decides — name, region,
- * audience, mode — and nothing else. Create is never disabled (DESIGN.md §5): the
+ * kit. It collects the five things the wizard's first step decides — name, region,
+ * audience, start-from source and mode (D86) — and nothing else. The name stands
+ * alone above the numbered sections; region and audience share `01 · Targeting`,
+ * start-from is `02`, mode is `03`. Create is never disabled (DESIGN.md §5): the
  * press is how the user asks what is wrong, and the refusal answers in one
- * `role="status"` sentence. The dialog derives no id and shows no slug (D65) — the
- * brief-id readout stays in Identity.
+ * `role="status"` sentence — first missing field wins (D66) — while every missing
+ * field is marked in place and one chip per mark jumps to its section (D91). The
+ * dialog derives no id and shows no slug (D65) — the brief-id readout stays in
+ * Identity.
  */
 export function CreateCampaignDialog() {
   const { createDialogOpen, closeCreateDialog } = useCreateCampaign();
@@ -42,8 +85,41 @@ export function CreateCampaignDialog() {
   // copy inherits the source's mode, so the dialog's own choice is not sent.
   const [source, setSource] = useState<StartFromSource | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
+  // D91 — every field a refused create found missing, not just the first: the
+  // status line speaks one sentence, the marks and the footer's chips speak the
+  // rest. Cleared wherever the refusal is (the next edit, a fresh press).
+  const [marks, setMarks] = useState<readonly CreateMark[]>([]);
   const [creating, setCreating] = useState(false);
   const [resumePrompt, setResumePrompt] = useState(false);
+  // The sections a chip jumps to. Both always render while the dialog is open, so
+  // a chip can only be clicked when both refs are attached.
+  const identityRef = useRef<HTMLDivElement>(null);
+  const targetingRef = useRef<HTMLDivElement>(null);
+  const sectionRefs: Record<CreateSectionKey, RefObject<HTMLDivElement | null>> = {
+    identity: identityRef,
+    targeting: targetingRef,
+  };
+
+  /** Where a cleared answer takes its notice down: the marks ride with the refusal. */
+  const clearRefusal = () => {
+    setRefusal(null);
+    setMarks([]);
+  };
+
+  /** The error a field shows in its own slot, when the refusal marked it. */
+  const markFor = (key: CreateMarkKey): string | undefined =>
+    marks.find((mark) => mark.key === key)?.message;
+
+  /** A footer chip's jump: to the mark's section, calm under reduced motion (D28). */
+  const jumpToSection = (key: string) => {
+    const section = sectionRefs[CREATE_MARK_SECTIONS[key as CreateMarkKey]];
+    // The strip is only clickable while the dialog is open, and both sections
+    // render for the dialog's whole open life — the ref is attached.
+    section.current!.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      block: "start",
+    });
+  };
 
   /** A cancelled or completed create leaves nothing behind — the typed fields included. */
   const closeAndReset = () => {
@@ -53,7 +129,7 @@ export function CreateCampaignDialog() {
     setTargetAudience("");
     setMode("brief");
     setSource(null);
-    setRefusal(null);
+    clearRefusal();
     setResumePrompt(false);
   };
 
@@ -109,28 +185,35 @@ export function CreateCampaignDialog() {
   const handleCreate = async () => {
     // The refusal set is name, region and audience — all three (D66): region is
     // required by `validateIdentity` and its chips start at "", so omitting it would
-    // land the user on Copy with a hole in the very step this dialog is. One
-    // progressive sentence, first missing field wins; region and audience reuse the
-    // Identity step's own strings, and the name's is this dialog's one new sentence.
+    // land the user on Copy with a hole in the very step this dialog is.
+    //
+    // D91 — two speakers, one set. `missing` is the FULL set in precedence order;
+    // the status line speaks only its first entry (first-missing-wins, today's
+    // exact strings — D66), while every entry marks its field in place and gets a
+    // footer chip. Without the split the ladder would mark at most one field.
     //
     // W2 adds a second name refusal, source-only: the copy's own name is derived
     // from this one, and a name with no letters or numbers derives nothing — refused
     // here, BEFORE the request. This is a derivability check, not a derivation: no
     // slug is computed for display (D65); the seam derives the id itself.
-    const missing =
-      name.trim() === ""
-        ? messages.campaignNameRequired
-        : source && slugify(name) === ""
-          ? messages.campaignNameNotSluggable
-          : targetRegion.trim() === ""
-            ? messages.targetRegion
-            : targetAudience.trim() === ""
-              ? messages.targetAudience
-              : null;
-    if (missing !== null) {
-      setRefusal(missing);
+    const missing: CreateMark[] = [];
+    if (name.trim() === "") {
+      missing.push({ key: "campaignName", message: messages.campaignNameRequired });
+    } else if (source && slugify(name) === "") {
+      missing.push({ key: "campaignName", message: messages.campaignNameNotSluggable });
+    }
+    if (targetRegion.trim() === "") {
+      missing.push({ key: "targetRegion", message: messages.targetRegion });
+    }
+    if (targetAudience.trim() === "") {
+      missing.push({ key: "targetAudience", message: messages.targetAudience });
+    }
+    if (missing.length > 0) {
+      setMarks(missing);
+      setRefusal(missing[0].message);
       return;
     }
+    setMarks([]);
     // W3 (F19) — before the seed publishes, ask about the abandoned draft it would
     // overwrite. The scope term is the lane's heart, and both halves are mandatory:
     //
@@ -171,85 +254,134 @@ export function CreateCampaignDialog() {
         open={createDialogOpen}
         onClose={closeAndReset}
         ariaLabel={messages.createCampaignTitle}
+        className="max-w-[820px]"
       >
         <DialogHead
           title={messages.createCampaignTitle}
           description={messages.createCampaignDescription}
           onClose={closeAndReset}
         />
-        <DialogBody className="space-y-4">
-          <Field fieldKey="campaignName" label={messages.campaignNameLabel}>
-            <Input
-              aria-label={messages.campaignNameLabel}
-              value={name}
-              placeholder={messages.campaignNamePlaceholder}
-              invalid={
-                refusal === messages.campaignNameRequired ||
-                refusal === messages.campaignNameNotSluggable
-              }
-              onChange={(e) => {
-                setName(e.target.value);
-                setRefusal(null);
-              }}
-            />
-          </Field>
-          <Field fieldKey="targetRegion" label={messages.targetRegionLabel} as="div">
-            <ChipGroup
-              label={messages.targetRegionLabel}
-              otherInputLabel={messages.targetRegionOtherInputLabel}
-              options={REGION_OPTIONS}
-              value={targetRegion}
-              onChange={(value) => {
-                setTargetRegion(value);
-                setRefusal(null);
-              }}
-              allowOther
-              otherLabel={messages.targetRegionOther}
-              otherPlaceholder={messages.targetRegionOtherPlaceholder}
-              invalid={refusal === messages.targetRegion}
-            />
-          </Field>
-          <Field fieldKey="targetAudience" label={messages.targetAudienceLabel}>
-            <Input
-              aria-label={messages.targetAudienceLabel}
-              value={targetAudience}
-              placeholder={messages.targetAudiencePlaceholder}
-              invalid={refusal === messages.targetAudience}
-              onChange={(e) => {
-                setTargetAudience(e.target.value);
-                setRefusal(null);
-              }}
-            />
-          </Field>
-          {/* W2 (D71) — the source list. Choosing is a selection, not a navigation,
-           *  and the blank row is where the dialog rests. */}
-          <Field fieldKey="startFrom" label={messages.startFromExistingLabel} as="div">
-            <StartFromExistingPicker
-              selectedId={source?.id ?? null}
-              onSelect={(next) => {
-                setSource(next);
-                setRefusal(null);
-              }}
-            />
-          </Field>
+        <DialogBody className="space-y-6">
+          {/* The identity strip: the name alone, above the numbered sections —
+           *  no id, no slug, no regen control (D65). */}
+          <div ref={identityRef} data-create-section="identity">
+            <Field
+              fieldKey="campaignName"
+              label={messages.campaignNameLabel}
+              error={markFor("campaignName")}
+            >
+              <Input
+                aria-label={messages.campaignNameLabel}
+                value={name}
+                placeholder={messages.campaignNamePlaceholder}
+                invalid={markFor("campaignName") !== undefined}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  clearRefusal();
+                }}
+              />
+            </Field>
+          </div>
+          <div ref={targetingRef} data-create-section="targeting">
+            <SectionBlock
+              numeral="01"
+              title={messages.createSectionTargeting}
+              hint={messages.createSectionTargetingHint}
+            >
+              <Field
+                fieldKey="targetRegion"
+                label={messages.targetRegionLabel}
+                as="div"
+                error={markFor("targetRegion")}
+              >
+                <ChipGroup
+                  label={messages.targetRegionLabel}
+                  otherInputLabel={messages.targetRegionOtherInputLabel}
+                  options={REGION_OPTIONS}
+                  value={targetRegion}
+                  onChange={(value) => {
+                    setTargetRegion(value);
+                    clearRefusal();
+                  }}
+                  allowOther
+                  otherLabel={messages.targetRegionOther}
+                  otherPlaceholder={messages.targetRegionOtherPlaceholder}
+                  invalid={markFor("targetRegion") !== undefined}
+                />
+              </Field>
+              <Field
+                fieldKey="targetAudience"
+                label={messages.targetAudienceLabel}
+                error={markFor("targetAudience")}
+              >
+                <Input
+                  aria-label={messages.targetAudienceLabel}
+                  value={targetAudience}
+                  placeholder={messages.targetAudiencePlaceholder}
+                  invalid={markFor("targetAudience") !== undefined}
+                  onChange={(e) => {
+                    setTargetAudience(e.target.value);
+                    clearRefusal();
+                  }}
+                />
+              </Field>
+            </SectionBlock>
+          </div>
+          {/* W2 (D71) — the source list, in its own numbered section. Choosing is
+           *  a selection, not a navigation, and the blank row is where the dialog
+           *  rests. It precedes Mode deliberately: choosing a source replaces the
+           *  mode control with the inherited readout, and this order keeps that
+           *  change below the point of interaction, where the user is looking. */}
+          <SectionBlock
+            numeral="02"
+            title={messages.createSectionStartFrom}
+            hint={messages.createSectionStartFromHint}
+          >
+            <Field fieldKey="startFrom" label={messages.startFromExistingLabel} as="div">
+              <StartFromExistingPicker
+                selectedId={source?.id ?? null}
+                onSelect={(next) => {
+                  setSource(next);
+                  clearRefusal();
+                }}
+              />
+            </Field>
+          </SectionBlock>
           {/* W2 — the mode field is a readout while a source is chosen: the copy
            *  inherits the source's mode (the route refuses a mode override, for a
            *  reason it documents), and a sentence can say so. Never a disabled
            *  control — DESIGN.md §5 lets only work in flight disable one; the raw
            *  mode goes through the display label at the call site, as validate.ts
            *  does. Deselecting the source restores the live toggle. */}
-          <Field fieldKey="createMode" label={messages.createModeLabel} as="div">
-            {source ? (
-              <p className="text-[13px] text-text-muted">
-                {messages.createModeInherited(modeDisplayName(source.mode))}
-              </p>
-            ) : (
-              <ModePanel mode={mode} onSetMode={setMode} />
-            )}
-          </Field>
+          <SectionBlock
+            numeral="03"
+            title={messages.createSectionMode}
+            hint={messages.createSectionModeHint}
+          >
+            <Field fieldKey="createMode" label={messages.createModeLabel} as="div">
+              {source ? (
+                <p className="text-[13px] text-text-muted">
+                  {messages.createModeInherited(modeDisplayName(source.mode))}
+                </p>
+              ) : (
+                <ModePanel mode={mode} onSetMode={setMode} />
+              )}
+            </Field>
+          </SectionBlock>
         </DialogBody>
         <DialogFoot>
           <div className="space-y-3">
+            {/* D91 — one chip per marked field, above the one live region. The
+             *  status line below stays first-missing-wins; the strip carries the
+             *  rest of the set and jumps to the offending section. */}
+            <JumpStrip
+              items={marks.map((mark) => ({
+                key: mark.key,
+                label: CREATE_MARK_LABELS[mark.key],
+                count: 1,
+              }))}
+              onJump={jumpToSection}
+            />
             {refusal ? (
               <p role="status" className="text-[12px] text-error">
                 {refusal}

@@ -939,6 +939,18 @@ export const createCampaignDuplicateConflict =
 export const createCampaignDuplicateFailed =
   "Could not start from the chosen campaign — nothing was created. Try again.";
 
+/* ── The create dialog's numbered sections (W1 / D86) ─────────────────────── */
+
+/** `01` — region and audience, the two answers that say who the campaign is for. */
+export const createSectionTargeting = "Targeting";
+export const createSectionTargetingHint = "Pick where the campaign runs, and say who it is for.";
+/** `02` — the start-from picker's section: blank, or an existing campaign's copy. */
+export const createSectionStartFrom = "Start from";
+export const createSectionStartFromHint = "Begin blank, or pick an existing campaign to copy from.";
+/** `03` — the mode panel's section: one design, or a set of variations. */
+export const createSectionMode = "Mode";
+export const createSectionModeHint = "Classic makes one design; Randomized makes a set of variations.";
+
 /* ── A campaign listing that failed (D83 / F-A) ──────────────────────────── */
 
 /**
