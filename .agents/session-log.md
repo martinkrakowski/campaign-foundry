@@ -2624,3 +2624,19 @@ plan's §6.5 is still unanswered.
   tiles, `packages/ui` deferred). To be revisited after a UI review of the shipped kit.
 - **Left open:** wave 2 (W1, the dialog) and wave 3 (W2(a), the discard guard) are specified and
   undispatched. Neither has been started; both need a fresh go-ahead.
+
+## 2026-09-07 — Lane B1: Button defaults to type=button (branch feat/b1)
+
+**Session:** 2026-09-07 — lane B1 of wave 2: the default-type fix recorded by wave 1
+
+- **Mode:** Implementer
+- **Changes:**
+  - `apps/web/src/components/ui/button.tsx` — `type="button"` hardcoded before the props spread, so a typeless `Button` no longer submits a surrounding `<form>` and a caller's `type` still wins.
+  - `apps/web/src/components/ui/__tests__/ui.test.tsx` — three tests: default renders `type="button"`, explicit `type="submit"` overrides, and a typeless `Button` in `<form onSubmit={spy}>` does not call the spy on click.
+- **Decisions:**
+  - The brief's stop-grep found a second `type="submit"` hit at `icon-button.test.tsx:38`; proceeded — it is a test rendering `IconButton` with an explicit prop, not a call site relying on the implicit default (flagged in the PR's Deviations). `BriefPicker.tsx:220` remains the only app source hit and is explicit; its tests pass unedited.
+  - Both prescribed mutations ran and failed the intended tests: default removed → default + in-form tests fail; default after the spread → override test fails.
+  - No call-site clean-up: now-redundant `type="button"` props elsewhere are other lanes' files and explicitly out of scope.
+- **Left open:**
+  - PR #201 opened against `main`, unmerged: https://github.com/martinkrakowski/campaign-foundry/pull/201
+  - Gates all green (build, typecheck, lint, lint:arch, sync:check on committed tree, test:cov 100% ×4, 3130 passed / 2 skipped). The `brief-editor.test.tsx` `waitForEditorReady` flake did not occur this run; B2 still owns the fix.
