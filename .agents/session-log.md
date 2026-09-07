@@ -2866,3 +2866,78 @@ G2/G3 consume `PosterFrame`/`PreviewPanel`/`PosterStack`/`ScrubBar` from the bar
   - `option-tile.test.tsx` left byte-identical.
 - **Left open:**
   - Push and PR-body "Review remediation" section for this session.
+
+## 2026-09-07 — Waves 2, 3 and A, orchestrated (the records this session owed)
+
+**Mode:** Orchestrator. Written late, in one entry, after the owner observed that the orchestrator
+had stopped closing out its waves. Waves 2, 3 and A each merged without a wave record; only the
+lanes' own entries existed. The deferral is recorded here rather than quietly backfilled, because
+"I'll put it in the session log" was said four times and not done — the failure is the pattern, not
+the missing paragraph.
+
+### What merged
+
+| Wave | Lane | PR | Commit |
+|---|---|---|---|
+| 2 | B1 — `Button` defaults to `type="button"` | #201 | `dfd8fba` |
+| 2 | B2 — `asyncUtilTimeout` 3000 | #202 | `17755cb` |
+| 2 | W1 — the create dialog, recomposed | #203 | `c9a0505` |
+| 3 | W2(a) — the inline discard guard | #204 | `3419b48` |
+| — | the graphics + world-map plan | #205 | `0b63d70` |
+| A | G1 — the kit previews | #206 | `2448b66` |
+| A | M1 — the world map in the kit | #207 | `404be17` |
+
+### What the review layer bought, counted
+
+Across waves 2, 3 and A: **31 findings fixed, 9 refuted with mechanisms.** Of the 31, **fourteen
+were tests that could not fail against the defect they named** — the vertex-only polygon containment
+(an edge left `NA` while every anchor passed), G1's dim-pinning test that never mounted a preview,
+`chaikin`'s shallow-copied mutation guard, the unpinned `fallbackHint`, the exactly-one selection
+assertion that never checked the others, `blank` untested on two variants, the missing unknown-value
+case, the head-close deviation, the `[hidden]` Tab-cycle gap, the unpinned guard copy, and the
+jargon gate's blindness to formatters (three separate violations). **Every gate was green and
+coverage was 100 % on all four counters before each of these was found.**
+
+Three defects would have been visible on first open: the map's paint order (selecting `GLOBAL` made
+the whole map read *unselected*), `PosterStack` off-centre at every non-square ratio, and — the one
+that mattered most — `fill-text-muted/18`, which emits no CSS at all, so the poster frames' largest
+layer rendered invisible. That last one was **the orchestrator's brief**, copied from the mockup's
+`rgb(…)/.18` without checking DESIGN.md:83.
+
+### Refuted, with reasons
+
+Three PR-Agent accessibility suggestions that would each have added a second live region against
+D91 and DESIGN.md §6.5; `useLayoutEffect` for guard focus (refs attach at commit, before effects);
+`animate-check-pop` "may loop" (it is a one-shot and `globals-motion.test.ts` asserts so);
+per-child `aria-hidden` under an already-hidden wrapper; an explicit `aria-label` duplicating a
+name the DOM already composes; `aria-live` on the map's hover caption (the map is `aria-hidden` by
+D94 — a screen-reader user never hovers it); and defaulting `Button`'s `type` inside K1 (29 call
+sites, not that lane's file — it became B1 instead).
+
+### Corrections to the plans, from review not planning
+
+- **`2026-09-07_graphics-and-the-world-map.md` §2.3 put a `label` column in the footprint data.**
+  That contradicts the same plan's §4 rule that no string literal lives in the kit. The lane built
+  what the plan said and shipped `"Germany"` / `"Europe"` inside `ui/`. Corrected on #207:
+  `labelFor(value)` is a required prop, the consumer supplies copy from `messages.ts`.
+- **The G1 brief specified `text-muted/18`**, an off-scale alpha that Tailwind never emits.
+  Corrected on #206, and guarded by a new `tailwind-alpha.test.ts` that compiles the classes.
+  Its own blind spot — a hard-coded file list — is being closed on #208.
+
+### Tooling defects found while driving the pipeline
+
+- **`scripts/merge-prs.sh` reads "no checks reported" as CHECKS FAILED.** When the refresh push
+  outruns CI registration, the merge aborts on a race. Cost one cycle on #206. It should poll for
+  checks to *appear* before watching them.
+- **`APPEND_ONLY` omits the two files concurrent lanes always share** —
+  `apps/web/src/components/ui/index.ts` and `apps/web/src/components/campaign/messages.ts`. Worked
+  around by passing an extended `APPEND_ONLY` env var at every merge; it belongs in the default.
+- **Two reviewers left throwaway worktrees** under `/private/tmp`; both removed by hand. The review
+  brief now says to clean up, but nothing enforces it.
+
+### Left open
+
+W2(b) — the resume two-way moving inline — stays deferred pending **D84**, by the owner's own
+confirmed decision. **D95** (what more than one region *means* for generation) is open and is why
+the map ships single-select. Wave B (#208 G2, #209 G3) is remediating; wave C (M2, the map into the
+dialog) is staged.
