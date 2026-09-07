@@ -2499,3 +2499,33 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Mutation checks (mutate → red → restore), all run:** (a) containment branch deleted → 5 red, incl. both body-focus tests; (b) registry-position check dropped (branch fires for every trap) → 3 red, **incl. the stacked body-focus test** (the lower-never-received-focus spy caught it); (c) rule swapped for DOM order (last `[role=dialog]`) → exactly the open-order test red; (d) `focusables.length === 0` early return dropped → the disabled-only test red (TypeError on `undefined.focus()`). Restored; suite green.
 - **Verification (gate order, committed tree):** build 7/7, typecheck 7/7, lint clean, lint:arch compliant, `test:cov` **178 files, 3081 passed | 2 skipped — 100% on all four counters (7804/7804 stmts, 5706/5706 branch, 1664/1664 funcs, 7007/7007 lines)**. Commit, `sync:check`, push, PR against `main` — NOT merged.
 - **Deviations:** one — the registry push/splice is guarded with `if (dialogElement)` (the exported hook's contract does not guarantee a mounted element), and the phantom-trap test above covers both guard paths; no `istanbul ignore` needed.
+
+## 2026-09-06 — The create dialog, recomposed (plan)
+
+**Mode:** Architect.
+
+**Changes:** Added `docs/planning/2026-09-06_create-dialog-recomposition.md` — an Architecture &
+Development Plan for rebuilding `CreateCampaignDialog` against a supplied HTML mockup. No code
+changed.
+
+**Decisions proposed (D86 – D92):** adopt the mockup's *form*, not its content model (D86); a
+domain-free `OptionTile` kit primitive plus a kit-boundary allowlist that may only shrink (D87);
+no new looping animation (D88); the discard guard is inline, with the resume two-way's move an
+opt-in half (D89); confirm-on-close is new behaviour and gets its own id (D90); one live region
+(D91); the kit stays at `apps/web/src/components/ui` and `packages/ui` is a separate lane (D92).
+
+**Findings (F1 – F8, all read from the code):** the mockup's three looping tile previews would
+break `globals-motion.test.ts`'s four-loop cap, and stock Tailwind `animate-ping`/`animate-bounce`
+would evade that test entirely; `targetRegion` is one string at every layer, so the world map has no
+domain; the mockup's "Format" is this app's Mode, and the real `format` axis is double-gated; the
+dialog stacks a second `DialogShell` (F22's shape); **five** kit files import `@/components/campaign`,
+not one; `ErrorStrip` is the wanted affordance but is domain-coupled; four kit components are
+missing from the barrel; and the dialog already sits at DESIGN.md §5's five-field budget while its
+own docstring still claims four.
+
+**Refuted in drafting:** that the kit-boundary violation was a single file (it is five — hence an
+allowlist, not a sweep); and that the resume two-way could move inline as presentation (two tests
+assert it is a separately-labelled dialog, which is a modality claim and therefore D84's subject).
+
+**Left open:** D90 and D89(b) are the owner's; five further questions in §6, including a real
+contradiction between DESIGN.md's `p-6` dialog padding and the kit's `px-4 py-3`.
