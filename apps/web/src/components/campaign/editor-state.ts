@@ -1679,9 +1679,8 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   // D112 — a draft saved before the type existed carries no `type`, and a
   // hand-edited one may carry anything: the enum is checked against its legal
   // vocabulary, never believed, and the absent key means the default.
-  const type: CampaignType = (CAMPAIGN_TYPES as readonly string[]).includes(raw.type as string)
-    ? (raw.type as CampaignType)
-    : DEFAULT_CAMPAIGN_TYPE;
+  const typeValid = (CAMPAIGN_TYPES as readonly string[]).includes(raw.type as string);
+  const type: CampaignType = typeValid ? (raw.type as CampaignType) : DEFAULT_CAMPAIGN_TYPE;
   const initial = initialEditorState(mode);
   const str = (value: unknown, fallback: string): string => (typeof value === "string" ? value : fallback);
   const rawSource = raw.source as Partial<EditorSource> | null | undefined;
@@ -1779,7 +1778,10 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     // survives in `mode`, and losing the marker only omits a key whose absence means
     // exactly what its value said. No authored work is lost.
     modeExplicit: raw.modeExplicit === true,
-    typeExplicit: raw.typeExplicit === true,
+    // An unknown stored type is the default, not an authored one: believing
+    // `typeExplicit` anyway would serialise an explicit `social-post` for a
+    // draft that never wrote that type.
+    typeExplicit: typeValid && raw.typeExplicit === true,
     // A draft written before these flags existed has none of them, and `=== true` would
     // read that absence as "never overridden". It is not the same statement: the draft
     // may well hold formats, ratios or motion the user authored by hand. Restoring those

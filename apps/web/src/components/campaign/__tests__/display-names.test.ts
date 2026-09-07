@@ -85,7 +85,7 @@ describe("display names", () => {
     }
     expect(typeDisplayName("social-post")).toBe("Social post");
     expect(typeDisplayName("paid-social")).toBe("Paid social");
-    expect(typeDisplayName("short-video")).toBe("Short video");
+    expect(typeDisplayName("short-video")).toBe("Short-form video");
   });
 });
 

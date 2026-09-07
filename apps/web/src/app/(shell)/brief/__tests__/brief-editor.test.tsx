@@ -4225,5 +4225,13 @@ describe("the pre-type draft (T2 / D112)", () => {
     await waitFor(() =>
       expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Restored"),
     );
+    // The editor path, not only the unit: a restored pre-type draft must carry
+    // the default on the state the autosave writes, not merely keep the name.
+    await waitFor(() => {
+      const restored = JSON.parse(localStorage.getItem("cf:draft:new") as string) as {
+        state: { type?: string };
+      };
+      expect(restored.state.type).toBe("social-post");
+    });
   });
 });

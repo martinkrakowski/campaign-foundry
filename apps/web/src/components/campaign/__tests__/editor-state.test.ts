@@ -2772,11 +2772,15 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
     expect(toBrief(loaded).type).toBe("social-post");
   });
 
-  test("a non-default type round-trips, and a freshly loaded typed brief is clean", () => {
+  test("a non-default type round-trips", () => {
+    const loaded = fromBrief(savedBrief({ type: "paid-social" }), { file: "camp.yaml" });
+    expect(toBrief(loaded).type).toBe("paid-social");
+  });
+
+  test("a freshly loaded typed brief is not dirty", () => {
     // Qodo flagged #224: without `type` on the state, the lossy projection
     // compared unequal to the snapshot and every typed brief read dirty on load.
     const loaded = fromBrief(savedBrief({ type: "paid-social" }), { file: "camp.yaml" });
-    expect(toBrief(loaded).type).toBe("paid-social");
     expect(isDirtySinceSave(loaded)).toBe(false);
   });
 
@@ -2797,5 +2801,7 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
     raw.typeExplicit = true;
     const restored = normalizeDraftState(raw);
     expect(restored.type).toBe("social-post");
+    expect(restored.typeExplicit).toBe(false);
+    expect(toBrief(restored)).not.toHaveProperty("type");
   });
 });

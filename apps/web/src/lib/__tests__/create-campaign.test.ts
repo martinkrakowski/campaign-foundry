@@ -138,6 +138,7 @@ describe("takeSeed — the baton is spent by a read", () => {
     ["a non-string field", { name: 42, type: "social-post" }],
     ["a missing type", { name: "Summer Spark" }],
     ["an unknown type", { name: "Summer Spark", type: "display-ad" }],
+    ["both the new type and the retired mode", { name: "Summer Spark", type: "social-post", mode: "variation" }],
     ["a JSON array", ["Summer Spark", "EU"]],
     ["a bare string", "Summer Spark"],
   ] as const)("answers null on %s and still spends the key", (_label, value) => {

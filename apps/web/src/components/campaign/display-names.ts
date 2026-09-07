@@ -121,7 +121,7 @@ export function modeDisplayName(mode: CampaignMode): string {
 const TYPE_LABELS: Record<CampaignType, string> = {
   "social-post": "Social post",
   "paid-social": "Paid social",
-  "short-video": "Short video",
+  "short-video": "Short-form video",
 };
 
 export function typeDisplayName(type: CampaignType): string {

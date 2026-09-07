@@ -3617,3 +3617,4 @@ impossible on `16:9`, which would need the owner's decision before any display s
   - The D9 seeding branch now exists three times in the reducer; a factoring lane could collapse it.
   - Gate sequence as T1 recorded it: pre-commit lint/typecheck/test:cov; `sync:check` after commit
     (it refuses a dirty tree).
+- **Remediation:** D108 display word is *Short-form video*; both-fields seed rejection pinned; typeExplicit gated on a valid stored type; editor-level D112 reads type; paid-social not-dirty split from the round-trip.
