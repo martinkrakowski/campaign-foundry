@@ -48,6 +48,7 @@ ports. It is a development tool for one operator on one machine.
 | **D104** | **No new runtime dependency.** `node:http`, `node:fs`, the `gh` and `git` CLIs already required, `tsx` (already a root devDependency), and a single hand-written HTML page with no framework and no build step. | `.agents/tech-stack.md` requires a stated reason for any new dependency, and there is none here: SSE is four lines of `node:http`, and the page is a table that polls. A build step for a dev tool means the tool needs building before it can tell you why your build failed. |
 | **D105** | **Bind `127.0.0.1` on port `4317`, never `3000` or `3001`.** The port is configurable and the server refuses to start on 3000/3001 even if asked. | The owner's `next dev` and API run on 3000/3001, and the house rules already forbid touching them. A refusal in code is better than a rule in a document — the rule has been in `AGENTS.md` all along and the port is still worth guarding. `4317` was verified free. |
 | **D106** | **The page is read-only. It starts nothing, kills nothing, and merges nothing.** | An observability tool that can act becomes a second control plane, and then the question "did the dashboard or the orchestrator do that?" has to be answerable. It does not. If a button would help, it belongs in the skill, not the window. |
+| **D107** | **`AGENTS.md` gains a *Wave Observability* section — in T2's PR, not before.** The exact wording is fixed here (§2.3) so it is reviewed with the plan rather than improvised at the end. | The owner asked for agents to be told to start and use the server. `AGENTS.md` is on its own never-edit list — *"Change it deliberately, never as a side effect"* — and an explicit request to add a section is deliberate, so the rule is satisfied. **The sequencing is the real constraint:** the contract is read by every agent on every task, so an instruction to run `tools/wave-status` while that path does not exist would send agents at a missing file — the precise failure the lane briefs forbid ("do not reference paths that do not exist"). Deciding the words now and landing them with the tool costs nothing and keeps the contract true at every commit. |
 
 ---
 
@@ -114,6 +115,37 @@ refuted / mutations). Click a lane to tail its log. A banner when derived facts 
 disagree — *"lane says settled; no PR found"* — because that contradiction is the single most
 valuable thing the pipeline has learned to look for.
 
+### 2.3 The `AGENTS.md` section, verbatim (D107)
+
+Added by **T2**, in the same PR that creates the server, immediately after *Commands After Edits*:
+
+```markdown
+## Wave Observability
+
+When you are running the delegated pipeline (`/orchestrate-wave`), a read-only status
+server can show every lane's stage, liveness, PR and gate at a glance.
+
+| Trigger | Command | Notes |
+| --- | --- | --- |
+| Starting a wave | `yarn wave:status` | Serves `http://127.0.0.1:4317`. Read-only; it starts, kills and merges nothing. |
+| Any stage transition | append an event (`scripts/wave-event.sh`) | **Emitting is part of the stage, not a courtesy** — see the skill. |
+
+**Emit, do not infer.** Log sizes, `EXIT` markers and PR checks are derivable; which stage
+a lane is in, how many findings were fixed versus refuted, and whether a mutation actually
+bit are not — they exist only if you record them. The page shows derived facts and reported
+events side by side and **flags disagreement rather than resolving it**: a lane reporting
+`settled` with no PR is the single most useful thing the pipeline can tell you.
+
+The server never binds `3000` or `3001` — those are the operator's `next dev` and API, and
+it refuses them by construction.
+```
+
+Two constraints on that text, both deliberate. It **never says the dashboard is required** —
+a wave must run correctly with nothing watching, and an agent that cannot start the server
+should proceed, not stop. And it repeats *emitting is part of the stage* in the contract as
+well as the skill, because the one thing this session proved is that a duty defined as a
+separate final step is the duty that slides.
+
 ---
 
 ## 3. Lanes
@@ -121,7 +153,7 @@ valuable thing the pipeline has learned to look for.
 | Lane | Task | Owns | Buys |
 |---|---|---|---|
 | **T1** | **The pure core.** `readEvents(path)` parses the JSONL, tolerating a truncated final line (a crash mid-append must not blank the view). `deriveLane({ logPath, worktree, pr })` returns log bytes/mtime/`EXIT`, liveness, gate exit and coverage. `mergeStatus(events, derived)` produces one `WaveStatus`, **flagging disagreements rather than resolving them** (D103). All pure: filesystem and `gh` results are passed **in**, never read here — that is what makes 100 % coverage cheap and honest. Tests: a truncated last line; an `EXIT 1` with a body; a lane with events but no PR; a lane with a PR but no events; a disagreement. | `tools/wave-status/lib/*.ts`, its tests, `vitest.config.ts` (a `tools` project + coverage include) | The object everything else renders. |
-| **T2** | **The server and the page.** `node:http` on `127.0.0.1:4317`, **refusing 3000/3001 by construction** (D105). `GET /` serves one hand-written HTML file; `GET /api/status` returns the `WaveStatus`; `GET /api/stream` is SSE pushing on change (`fs.watch` on the event log, plus a slow poll for `gh`); `GET /api/log/:wave/:lane?tail=N` returns the last N KB. Read-only — **no route mutates anything** (D106). The page is one table, no framework, no build step, and re-uses the repo's token names so it does not invent a second palette. | `tools/wave-status/server.ts`, `bin.ts`, `public/index.html`, their tests | The window. |
+| **T2** | **The server and the page.** `node:http` on `127.0.0.1:4317`, **refusing 3000/3001 by construction** (D105). `GET /` serves one hand-written HTML file; `GET /api/status` returns the `WaveStatus`; `GET /api/stream` is SSE pushing on change (`fs.watch` on the event log, plus a slow poll for `gh`); `GET /api/log/:wave/:lane?tail=N` returns the last N KB. Read-only — **no route mutates anything** (D106). The page is one table, no framework, no build step, and re-uses the repo's token names so it does not invent a second palette. | `tools/wave-status/server.ts`, `bin.ts`, `public/index.html`, their tests, **`AGENTS.md`** (the §2.3 section, verbatim), `package.json` (a `wave:status` script) | The window, and the contract that points at it. |
 | **T3** | **Instrumentation — the half that matters.** A `waveEvent()` helper and a matching `scripts/wave-event.sh` so both the orchestrator and shell steps can append. `SKILL.md` gains the emission points: one event per stage transition, and the numbers the orchestrator already computes for its disposition comments (fixed, refuted, mutations run, mutations that bit). **The skill must say emitting is part of the stage, not a courtesy** — the same lesson as #211's wave record, which slid for three waves precisely because it was defined as a separate final step. | `tools/wave-status/lib/emit.ts`, `scripts/wave-event.sh`, `.claude/skills/orchestrate-wave/SKILL.md` | Every column worth looking at. |
 
 **Order.** T3 ‖ T1 (disjoint), then T2. T3 alone is already worth having: it turns the pipeline's
@@ -139,6 +171,8 @@ prose into a durable record even with no server running.
 - The server **refuses to bind 3000 or 3001** — asserted, not documented.
 - **No route mutates**; a test enumerates the routes and asserts the set.
 - No new runtime dependency in any `package.json`.
+- **`AGENTS.md`'s new section is the §2.3 text verbatim**, added in the same PR as the server —
+  the contract must not reference `tools/wave-status` before it exists.
 - `yarn build && yarn typecheck && yarn lint && yarn lint:arch && yarn sync:check && yarn test:cov`
   green, and **`lint:arch` unaffected** — `tools/` is outside `packages/*/src`, which the plan states
   rather than assumes.
