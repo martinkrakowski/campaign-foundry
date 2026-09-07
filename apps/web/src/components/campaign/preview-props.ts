@@ -1,7 +1,7 @@
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import type { AnchorOption, CreativePreviewProps, LayoutOption, ToneOption } from "./CreativePreview";
 import type { PreviewShowcaseProps } from "./PreviewDock";
-import { STATIC_PLATFORMS, anchorAxisActive, briefStyle, type EditorState } from "./editor-state";
+import { anchorAxisActive, briefStyle, isDefaultOutput, type EditorState } from "./editor-state";
 
 /** The first entry of an optional list — undefined with the list, never a crash. */
 function firstOf<T>(list: readonly T[] | undefined): T | undefined {
@@ -11,18 +11,13 @@ function firstOf<T>(list: readonly T[] | undefined): T | undefined {
 /**
  * Whether the draft's output block would survive the projection: `toBrief` emits
  * `output` only when it diverges from the absent-key default (static × the static
- * platforms) or the loaded brief declared one. Mirrored here, not imported, because
- * `isDefaultOutput` is `toBrief`'s private — if the two ever disagree, the parity
- * test in `creative-preview.fabrication.test.tsx` is the tripwire.
+ * platforms) or the loaded brief declared one. The default check is `toBrief`'s
+ * own `isDefaultOutput`, which already runs the D99 classic-format gate — a
+ * local mirror of `state.formats` would show a platform the brief omits.
  */
 function outputShown(state: EditorState): boolean {
   if (state.outputExplicit) return true;
-  return !(
-    state.formats.length === 1 &&
-    state.formats[0] === "static" &&
-    state.platforms.length === STATIC_PLATFORMS.length &&
-    STATIC_PLATFORMS.every((platform) => state.platforms.includes(platform))
-  );
+  return !isDefaultOutput(state);
 }
 
 /**

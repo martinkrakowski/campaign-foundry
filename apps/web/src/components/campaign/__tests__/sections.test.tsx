@@ -317,6 +317,15 @@ describe("OutputSection", () => {
     expect(motion.className).toBe(staticFmt.className.replace(/\s*$/, ""));
   });
 
+  test("in Classic the Video card stays selected and shows the gate, so the UI and the brief cannot disagree in silence", () => {
+    render(
+      <OutputSection state={state({ formats: ["static", "motion"] })} dispatch={vi.fn()} errors={{}} />,
+    );
+    const motion = screen.getByRole("button", { name: "motion" });
+    expect(motion.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText(messages.formatsMotionNeedsRandomized)).toBeTruthy();
+  });
+
   test("an unselected platform renders in the secondary style", () => {
     const selected = state();
     const partial = { ...selected, platforms: [selected.platforms[0]] };

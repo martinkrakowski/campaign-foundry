@@ -321,18 +321,6 @@ export interface EditorState {
    * axis toggle that does not clamp. Derived UI state: never serialized.
    */
   countNotice: number | null;
-  /**
-   * Latched by the latest flip to Classic over a draft carrying the motion
-   * format (D99/F1), and taken down by any other flip. One lifetime, two duties:
-   * `toBrief` drops the format from the brief it serialises — a classic brief
-   * that requests motion is refused on every run path, so the flip must not
-   * author one — and the sidebar says so once beside the mode tiles, the way
-   * `countNotice` has the policy say the clamp. The draft's own formats are
-   * never touched: the remedy, "switch back to Randomized", restores them
-   * unchanged. A restored draft that was flipped keeps the latch (a save never
-   * re-authors the combination the user walked away from).
-   */
-  formatDroppedByMode: boolean;
   appliedSnapshot: CampaignBrief | null;
   capabilities: { motion: boolean; reason?: string } | null;
 }
@@ -436,7 +424,6 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
     pool: null,
     headlineAxisDropped: false,
     countNotice: null,
-    formatDroppedByMode: false,
     appliedSnapshot: null,
     capabilities: null,
   };
@@ -638,22 +625,11 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
   switch (action.type) {
     case "setMode": {
       // A flip to the same mode changed nothing — keep the state identity-equal,
-      // the way a refused action stays identity-equal.
+      // the way a refused action stays identity-equal. D99's drop lives in
+      // `toBrief` (a whole-classic gate), not here: the draft's formats must
+      // survive so the D5 round-trip and the remedy stay true.
       if (action.mode === state.mode) return state;
-      // D99/F1: a flip to Classic costs the Video format in the saved brief — the
-      // run paths refuse a classic brief that requests it, every time — so the
-      // flip latches `formatDroppedByMode`, which does two things with one
-      // lifetime: `toBrief` drops the format from the brief it serialises (the
-      // way `canSerializeTimeline` drops the timeline), and the sidebar says so
-      // once beside the tiles. The draft's own formats are deliberately
-      // untouched — the remedy, "switch back to Randomized", must restore the
-      // user's choice unchanged — and any other flip takes the latch and its
-      // line down: they describe the latest flip only.
-      return {
-        ...state,
-        mode: action.mode,
-        formatDroppedByMode: action.mode === "brief" && state.formats.includes("motion"),
-      };
+      return { ...state, mode: action.mode };
     }
     case "patch": {
       let patch = action.patch;
@@ -1132,22 +1108,49 @@ export function briefStyle(state: EditorState): Style | undefined {
   return state.styleExplicit || styleDiverges(state.style) ? { ...state.style } : undefined;
 }
 
+/**
+ * The formats the saved brief will carry (D99): a classic campaign renders
+ * stills only, so motion is omitted whenever `mode === "brief"`, however the
+ * draft still holds it. The draft itself is never touched — the D5 round-trip
+ * (switch to classic and back) and the remedy ("switch back to Randomized")
+ * both need the user's list intact. When dropping motion would empty the list,
+ * the projection is `["static"]`: the classic pipeline draws stills, and the
+ * API refuses an empty `output.formats`.
+ *
+ * The one derivation `toBrief` and the preview props share, so the dock can
+ * never show a platform the brief would not save (D45).
+ */
+export function serialisedFormats(state: EditorState): readonly string[] {
+  if (state.mode !== "brief") return state.formats;
+  const droppedMotion = state.formats.includes("motion");
+  const withoutMotion = state.formats.filter((format) => format !== "motion");
+  if (droppedMotion && withoutMotion.length === 0) return ["static"];
+  return withoutMotion;
+}
+
+/**
+ * Whether the serialised output equals the absent-key default (static × the
+ * static platforms). Shared with the preview so `outputShown` cannot disagree
+ * with `toBrief` about whether a platform caption exists (D45/D99).
+ */
+export function isDefaultOutput(state: EditorState): boolean {
+  const formats = serialisedFormats(state);
+  return (
+    formats.length === 1 &&
+    formats[0] === "static" &&
+    state.platforms.length === STATIC_PLATFORMS.length &&
+    STATIC_PLATFORMS.every((platform) => state.platforms.includes(platform))
+  );
+}
+
 export function toBrief(state: EditorState): CampaignBrief {
-  // D99/F1: a classic brief cannot request the motion format — the run paths
+  // D99: a classic brief cannot request the motion format — the run paths
   // refuse the combination every time, because the classic product × ratio ×
-  // treatment matrix has no motion path. A flip to Classic latched
-  // `formatDroppedByMode`, and the serialisation honours it here: the brief the
-  // flip produces carries only what the classic pipeline can actually render,
-  // while the draft keeps the user's own list (a flip back to Randomized has it
-  // again, unchanged). A state that never saw the flip — a loaded file, a
-  // hand-built classic draft — serialises exactly as before. When the gate
-  // empties the list, the block below writes it the way `toBrief` has always
-  // written an empty list — an explicit output block — never a fabricated
-  // fallback.
-  const serialisedFormats =
-    state.mode === "brief" && state.formatDroppedByMode
-      ? state.formats.filter((format) => format !== "motion")
-      : state.formats;
+  // treatment matrix has no motion path. The gate is `mode === "brief"`, not a
+  // flip latch: however the draft got here, the brief it serialises carries
+  // only what the classic pipeline can actually render, while the draft keeps
+  // the user's own list (a flip back to Randomized has it again, unchanged).
+  const formats = serialisedFormats(state);
   // `mode` and `output` are optional in CampaignBrief — absent means the classic
   // static pipeline, which is exactly what a fresh draft holds. Writing them
   // unconditionally grew every classic brief on save (and made a freshly loaded
@@ -1156,11 +1159,6 @@ export function toBrief(state: EditorState): CampaignBrief {
   // an output the loaded brief declared, the user has toggled, or that diverges
   // from the default. Rendering is unaffected either way — the static platforms
   // keep zero insets (D11) — same discipline the ratio axis already follows.
-  const isDefaultOutput =
-    serialisedFormats.length === 1 &&
-    serialisedFormats[0] === "static" &&
-    state.platforms.length === STATIC_PLATFORMS.length &&
-    STATIC_PLATFORMS.every((platform) => state.platforms.includes(platform));
   const style = briefStyle(state);
   const brief: CampaignBrief = {
     id: state.briefId,
@@ -1172,8 +1170,8 @@ export function toBrief(state: EditorState): CampaignBrief {
     // something the absent key does not (see briefStyle).
     ...(style !== undefined ? { style } : {}),
     ...(state.mode === "variation" || state.modeExplicit ? { mode: state.mode } : {}),
-    ...(state.outputExplicit || !isDefaultOutput
-      ? { output: { formats: [...serialisedFormats], platforms: [...state.platforms] } }
+    ...(state.outputExplicit || !isDefaultOutput(state)
+      ? { output: { formats: [...formats], platforms: [...state.platforms] } }
       : {}),
   };
   const localized = state.localizedMessage.trim();
@@ -1354,7 +1352,6 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
     pool: null,
     headlineAxisDropped: false,
     countNotice: null,
-    formatDroppedByMode: false,
     appliedSnapshot: null,
     capabilities: null,
   };
@@ -1722,11 +1719,8 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
         ? motion.length > 0 || duration.length > 0
         : raw.motionTouched === true,
     motionSeeded: raw.motionSeeded === true,
-    // The count notice is one-time UI, not part of the draft it describes. The
-    // mode-flip latch IS believed: a restored draft that was flipped must not
-    // re-serialise the combination the user walked away from.
+    // The count notice is one-time UI, not part of the draft it describes.
     countNotice: null,
-    formatDroppedByMode: raw.formatDroppedByMode === true,
   } as EditorState;
 }
 

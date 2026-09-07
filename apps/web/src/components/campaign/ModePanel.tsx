@@ -191,7 +191,7 @@ export function ModePanel({
   onSetMode: (mode: CampaignMode) => void;
   /** The sidebar form: no preview panel, no tag, no blurb — the glyph carries the tile. */
   compact?: boolean;
-  /** True while the latest flip to Classic dropped the Video format (D99) — said once, here, where the flip happened. */
+  /** True while Classic still holds the Video format the run paths refuse (D99) — said here, where the mode control lives. Derived by the caller from `mode === "brief" && formats.includes("motion")`. */
   formatDropped?: boolean;
 }): ReactNode {
   return (
