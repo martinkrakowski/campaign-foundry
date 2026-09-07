@@ -185,33 +185,45 @@ export function ModePanel({
   mode,
   onSetMode,
   compact = false,
+  formatDropped = false,
 }: {
   mode: CampaignMode;
   onSetMode: (mode: CampaignMode) => void;
   /** The sidebar form: no preview panel, no tag, no blurb — the glyph carries the tile. */
   compact?: boolean;
+  /** True while the latest flip to Classic dropped the Video format (D99) — said once, here, where the flip happened. */
+  formatDropped?: boolean;
 }): ReactNode {
   return (
-    <div className="grid grid-cols-2 gap-2">
-      {MODE_OPTIONS.map((option) => (
-        <OptionTile
-          key={option}
-          value={option}
-          name={option}
-          meta={modeDisplayName(option)}
-          selected={mode === option}
-          onToggle={(value) => onSetMode(value as CampaignMode)}
-          {...(compact
-            ? {}
-            : {
-                preview: MODE_TILE_EXTRAS[option].preview,
-                tag: MODE_TILE_EXTRAS[option].tag,
-                blurb: MODE_TILE_EXTRAS[option].blurb,
-              })}
-        >
-          <ModeGlyph scattered={option === "variation"} />
-        </OptionTile>
-      ))}
+    <div className="grid gap-2">
+      <div className="grid grid-cols-2 gap-2">
+        {MODE_OPTIONS.map((option) => (
+          <OptionTile
+            key={option}
+            value={option}
+            name={option}
+            meta={modeDisplayName(option)}
+            selected={mode === option}
+            onToggle={(value) => onSetMode(value as CampaignMode)}
+            {...(compact
+              ? {}
+              : {
+                  preview: MODE_TILE_EXTRAS[option].preview,
+                  tag: MODE_TILE_EXTRAS[option].tag,
+                  blurb: MODE_TILE_EXTRAS[option].blurb,
+                })}
+          >
+            <ModeGlyph scattered={option === "variation"} />
+          </OptionTile>
+        ))}
+      </div>
+      {/* D99: the drop is not silent. Muted, like the clamp notice — the flip
+          succeeded; the sentence says what it cost and how to undo it. */}
+      {formatDropped ? (
+        <p role="status" className="text-[11px] text-text-muted">
+          {messages.modeDroppedVideo}
+        </p>
+      ) : null}
     </div>
   );
 }

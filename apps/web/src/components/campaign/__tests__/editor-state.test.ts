@@ -42,6 +42,10 @@ import { type Style } from "@campaignfoundry/CampaignOrchestration/creative-styl
 import { load } from "js-yaml";
 import fs from "node:fs";
 import path from "node:path";
+// The real gate the run paths hit, imported across apps for the tests below — the
+// same cross-app import validate.test.ts makes, for the same reason: a mirror
+// without the parser it mirrors is exactly the drift these tests exist to catch.
+import { parseBrief } from "../../../../../api/server/lib/load-brief";
 
 const reduce = (state: EditorState, ...actions: EditorAction[]): EditorState =>
   actions.reduce(editorReducer, state);
@@ -2547,5 +2551,127 @@ describe("dirty-on-load over the corpus (B2)", () => {
     const state = fromBrief(parseBriefFile("sample-campaign.yaml"), { file: "sample-campaign.yaml" });
     const withGhost = { ...toBrief(state), ghost: undefined } as unknown as CampaignBrief;
     expect(isDirtySinceSave(reloaded(state, withGhost))).toBe(false);
+  });
+});
+
+describe("setMode and the mode-incompatible format (S4/D99)", () => {
+  // The run paths' parse of exactly what the flip produces: capability enforcement
+  // on and the probe answered available, so the only refusal in play is the mode ×
+  // format one — the :603 refusal the defect shipped.
+  const RUN = { enforceCapabilities: true, capabilities: { motion: true } };
+
+  /** Randomized, named so the parser can read it, Video on in Output, Still untouched. */
+  const randomWithMotion = (): EditorState =>
+    reduce(
+      reduce(base(), { type: "setMode", mode: "variation" }),
+      { type: "patch", patch: { campaignName: "camp", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi" } },
+      { type: "setProduct", key: 1, patch: { name: "A" } },
+      { type: "toggleFormat", value: "motion" },
+    );
+
+  test("flipping to Classic costs the Video format in the brief, and says so", () => {
+    // The acceptance's own construction: a motion-only draft. The saved brief's
+    // output carries the gated list — empty here, the shape `toBrief` has always
+    // written (pinned below) — while the draft itself keeps the user's formats,
+    // because the remedy ("switch back to Randomized") must restore them intact.
+    const motionOnly = reduce(randomWithMotion(), { type: "toggleFormat", value: "static" });
+    expect(motionOnly.formats).toEqual(["motion"]);
+    const flipped = reduce(motionOnly, { type: "setMode", mode: "brief" });
+    expect(flipped.mode).toBe("brief");
+    expect(flipped.formats).toEqual(["motion"]);
+    expect(flipped.formatDroppedByMode).toBe(true);
+    expect(toBrief(flipped).output?.formats).toEqual([]);
+  });
+
+  test("the brief that results from the flip parses on the run path", () => {
+    // The user-flow first case: Video on, Still untouched. The gate leaves the
+    // classic default output — the block is omitted entirely — and the parser,
+    // with capability enforcement on as every run path calls it, accepts it.
+    const flipped = reduce(randomWithMotion(), { type: "setMode", mode: "brief" });
+    expect(flipped.formats).toEqual(["static", "motion"]);
+    expect("output" in toBrief(flipped)).toBe(false);
+    expect(() => parseBrief(toBrief(flipped), RUN)).not.toThrow();
+  });
+
+  test("a classic draft with no motion format is untouched by a flip to Classic", () => {
+    const state = reduce(base(), { type: "toggleFormat", value: "static" });
+    expect(state.formats).toEqual([]);
+    const next = reduce(state, { type: "setMode", mode: "brief" });
+    expect(next).toBe(state);
+    expect(next.formatDroppedByMode).toBe(false);
+  });
+
+  test("flipping to Randomized never touches the formats", () => {
+    // A file that carried both formats under an explicit classic mode — the shape
+    // the fix must never "help" by clearing from the other direction too.
+    const loaded = fromBrief(
+      savedBrief({ mode: "brief", output: { formats: ["static", "motion"], platforms: [...STATIC_PLATFORMS, "instagram-reel"] } }),
+      { file: "camp.yaml" },
+    );
+    const flipped = reduce(loaded, { type: "setMode", mode: "variation" });
+    expect(flipped.mode).toBe("variation");
+    expect(flipped.formats).toEqual(["static", "motion"]);
+    expect(flipped.formatDroppedByMode).toBe(false);
+  });
+
+  test("a flip back to Randomized takes the notice down — it describes the latest flip", () => {
+    const flipped = reduce(randomWithMotion(), { type: "setMode", mode: "brief" });
+    expect(flipped.formatDroppedByMode).toBe(true);
+    const back = reduce(flipped, { type: "setMode", mode: "variation" });
+    expect(back.formatDroppedByMode).toBe(false);
+  });
+
+  test("the run paths refuse exactly the combination the gate removes", () => {
+    // The defect, pinned: a classic brief requesting motion on a platform that
+    // packages it — what the ungated serialisation used to write — is refused
+    // with the mode sentence, on the run path, every time.
+    const stale = fromBrief(
+      savedBrief({ mode: "brief", output: { formats: ["motion"], platforms: ["instagram-reel"] } }),
+      { file: "camp.yaml" },
+    );
+    expect(() => parseBrief(toBrief(stale), RUN)).toThrow(/requires mode "variation"/);
+  });
+
+  test("a motion-only flip leaves the empty-formats shape toBrief already writes", () => {
+    // No invented fallback: an empty list serialises the way `toBrief` has always
+    // written one — an explicit output block — and stays an authoring-only state
+    // the Output step's own error names ("Nothing to make yet…"), the same state
+    // turning Still off by hand has always produced.
+    const flipped = reduce(reduce(randomWithMotion(), { type: "toggleFormat", value: "static" }), {
+      type: "setMode",
+      mode: "brief",
+    });
+    expect(toBrief(flipped).output).toEqual({ formats: [], platforms: [...STATIC_PLATFORMS] });
+  });
+
+  test("a restored draft that was flipped keeps the latch", () => {
+    // The autosaved draft carries the latch, so a reload cannot re-author the
+    // combination the flip walked away from: the serialisation stays gated.
+    const restored = normalizeDraftState({
+      mode: "brief",
+      briefId: "camp",
+      formats: ["static", "motion"],
+      formatDroppedByMode: true,
+    });
+    expect(restored.formatDroppedByMode).toBe(true);
+    // Gated down to Still images over the default platforms, the brief is the
+    // absent-key default — no output block, and above all no motion in one.
+    expect(toBrief(restored)).not.toHaveProperty("output");
+    // An older draft wrote no latch — absent means false, never inferred: a
+    // loaded file round-trips verbatim (D11) and is fixed through the Video
+    // card, which stays selectable-while-selected on a classic draft.
+    expect(normalizeDraftState({ mode: "brief", briefId: "camp" }).formatDroppedByMode).toBe(false);
+  });
+
+  test("the draft loses nothing to the flip — the work behind the format survives", () => {
+    // The timeline's own rule (the beats survive a switch to classic): the gate
+    // takes the format out of the brief, never the work out of the draft, and the
+    // existing D5 round-trip test holds the same contract for the timeline.
+    const withTimeline = reduce(randomWithMotion(), { type: "addBeat", text: "one" });
+    const flipped = reduce(withTimeline, { type: "setMode", mode: "brief" });
+    expect(flipped.formats).toEqual(["static", "motion"]);
+    expect(flipped.motion.length).toBeGreaterThan(0);
+    expect(flipped.duration.length).toBeGreaterThan(0);
+    expect(flipped.timeline.beats).toHaveLength(1);
   });
 });

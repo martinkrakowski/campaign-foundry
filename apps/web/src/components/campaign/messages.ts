@@ -1079,3 +1079,13 @@ export const worldMapRegionHint = "The region shapes the generated backgrounds a
 export function startFromCampaignCount(count: number): string {
   return `${count} campaign${count === 1 ? "" : "s"}`;
 }
+
+/* ── S4 — the mode flip's dropped format (D99/F1) ─────────────────────────── */
+
+/**
+ * Said once, in a `role="status"` line beside the mode tiles, when switching to
+ * Classic removed the Video format the run paths refuse on a classic brief. The
+ * copy names the remedy: the mode that can carry Video again (D99).
+ */
+export const modeDroppedVideo =
+  "Switching to Classic turned Video off — switch back to Randomized to turn it on again.";
