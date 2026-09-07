@@ -746,7 +746,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     }
     setTopPanels(
       <>
-        <ModePanel mode={state.mode} onSetMode={(mode: CampaignMode) => dispatch({ type: "setMode", mode })} />
+        <ModePanel mode={state.mode} onSetMode={(mode: CampaignMode) => dispatch({ type: "setMode", mode })} compact />
         <SectionOutline mode={state.mode} visibleErrors={visibleErrors} onActivate={outlineActivate} />
       </>,
     );

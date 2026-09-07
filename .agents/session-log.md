@@ -2867,6 +2867,55 @@ G2/G3 consume `PosterFrame`/`PreviewPanel`/`PosterStack`/`ScrubBar` from the bar
 - **Left open:**
   - Push and PR-body "Review remediation" section for this session.
 
+---
+
+## 2026-09-07 — G2: the mode tiles, filled (this wave B lane)
+
+**Session:** 2026-09-07 — G2 on `feat/g2` (wave B, base `2448b66`)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `campaign/ModePanel.tsx` — each mode now fills every `OptionTile` slot (F1/D93): `preview` is a `PreviewPanel` (caption bottom-right) holding Classic's tidy 3×2 of six identical `PosterFrame`s (9:16, pA) and Randomized's six frames cycling pA/pB/pC across all three ratios; `tag` = Uniform/Varied; `blurb` per mode; `meta` unchanged (`modeDisplayName`); the raw value stays the visible and accessible name. New `compact` prop (SectionShell idiom): no preview, no tag, no blurb — the glyph-only tile the sidebar has today.
+  - `campaign/messages.ts` — appended the `// G2 — mode tiles` block: tags, blurbs, captions as plain exported consts (jargon-gate scanned; no formatters, no branches).
+  - `campaign/BriefEditor.tsx` — the one `:749` render line now passes `compact`; the dialog's `03 · Mode` renders the full form.
+  - `__tests__/ModePanel.test.tsx` — six appended tests (existing three untouched): full-form slots per tile; tag/blurb from messages; Classic six identical frames + caption; Randomized six frames classified to three variants and three shapes + caption; compact arm (no panel/tag/blurb, glyph present); no `animate-*` on anything the previews render.
+- **Decisions:**
+  - Tag words are relation words, not format words (Q1): Uniform / Varied — the mockup's STILLS/CLIPS describe formats, not modes; captions take the plan's "one design" / "six variations" sense per the brief's wording.
+  - Randomized's frame classification in tests keys on structure (circle → pB; ≥3 rounded rects → pC; else pA) because pA/pB CTA chips also carry `rx` — the first classifier draft misread pA as pC and was corrected before the green run.
+- **Verification:** full gate green (`yarn build && yarn typecheck && yarn lint && yarn lint:arch && yarn sync:check && yarn test:cov`), 100 % on all four counters; mutations run red→reverted: drop blurb (2 tests red), ignore compact (1 red), Randomized repeating one variant (1 red). The two pinned ModePanel assertions and the `CreateCampaignDialog` / `brief-editor` suites passed unedited.
+
+---
+
+## 2026-09-07 — G2 review remediation (PR #208)
+
+**Session:** 2026-09-07 — G2 remediation on `feat/g2`
+
+- **Mode:** Implementer
+- **Changes:**
+  - `ModePanel.test.tsx` — Classic's six frames now classify through the same `posterVariantOf` helper as Randomized and assert `variants.size === 1` (the old SVG-dimension check still stands; it could not tell one layout from three at a single ratio). The one-voice tag/blurb test gained the complementary claim the full-form test does not make: each tile must not carry the other mode's tag or blurb.
+  - `tailwind-alpha.test.ts` — `PREVIEW_FILES` four-file list replaced with a recursive text scan of `apps/web/src/components/` for `(fill|stroke|bg|text|border|ring|divide)-<token>/<alpha>`. Shrink-only `OFF_SCALE_ALLOWLIST` (empty: the scan found no pre-existing off-scale alphas).
+- **Decisions:**
+  - Item 2: unique assertion, not fold — cross-mode exclusion, so a copy-paste that puts both tags on both tiles fails only this test.
+  - Session-log append stays outside the owned set; `AGENTS.md` still mandates it.
+- **Verification:** mutations run red→reverted: Classic as `pA/pB/pC` at `9:16` (Classic one-variant assertion red; dimension check still green); `fill-text-muted/18` on `ModePanel.tsx` (alpha guard red).
+
+---
+
+## 2026-09-07 — G2 review remediation round 2 (PR #208)
+
+**Session:** 2026-09-07 — G2 remediation round 2 on `feat/g2`
+
+- **Mode:** Implementer
+- **Changes:**
+  - `tailwind-alpha.test.ts` — `COLOR_ALPHA` now requires a token boundary (`(?![\w-])` after the opacity digits and after the `]` of the bracket form). A stem scan then fails if the next source character is still `[\w-]`, so a trailing typo cannot compile the valid prefix while the real class emits nothing.
+  - `ModePanel.tsx` — Classic and Randomized share a `FrameCell` wrapper: `min-w-0 max-w-full [&>svg]:h-auto [&>svg]:max-w-full`. Frames scale to the grid cell rather than overflowing a ~46 px column on a 360 px viewport. No overflow-x scroller.
+  - `ModePanel.test.tsx` — appended a class assertion on the wrapper (happy-dom performs no layout). Existing assertions unedited.
+- **Decisions:**
+  - Max-width on the frame wrapper, not a smaller `PREVIEW_SIZE` at a breakpoint: it scales at every width instead of picking another magic number that still overflows between breakpoints.
+  - Trailing-typo detection is a next-char check on the unbounded stem, not a `[\w-]+` group — that group backtracks into the opacity digits (`/80` → `/8`+`0`).
+  - PR-Agent's two refuted items (panel located by `div.bg-background`; frames classified by SVG shape) stay refused.
+- **Verification:** mutations run red→reverted: `fill-text-muted/[0.18]xyz` on `FrameCell` (alpha guard red); wrapper stripped of `max-w-full` (frame-cap assertion red).
+
 ## 2026-09-07 — Waves 2, 3 and A, orchestrated (the records this session owed)
 
 **Mode:** Orchestrator. Written late, in one entry, after the owner observed that the orchestrator
