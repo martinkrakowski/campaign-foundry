@@ -279,8 +279,41 @@ Per lane:
 - **"The mockup's map is single-mode."** It is multi-select, and its hint describes per-region run
   dispatch. Neither is true here. The map is adopted; its two claims are not.
 
+- **"§2.3's footprint data carries a `label`."** It did, and that was wrong in this plan's own
+  terms: §4 requires every new string to live in `messages.ts` and forbids literals in the kit, and
+  a `label` column put `"Germany"`, `"Europe"`, `"United Kingdom"` inside `ui/geo/`. Lane M1 built
+  exactly what §2.3 specified; Qodo caught the contradiction on #207. `label` is gone from
+  `Footprint`; `labelFor: (value) => string` is a **required** `WorldMap` prop and the consumer
+  supplies copy. **The rule this makes explicit: a data table in a plan is a schema, and a schema
+  that carries user-facing words has already broken the string rule.**
+- **"The G1 brief's `text-muted/18`."** Copied from the mockup's `rgb(…)/.18` without checking
+  DESIGN.md:83, which states that arbitrary alphas require bracket syntax. `/18` is not on
+  Tailwind's opacity scale, so it emits **no rule at all** — the poster frames' image layer and the
+  scrub track rendered invisible while every class-string assertion passed. Corrected on #206, and
+  guarded by `apps/web/src/__tests__/tailwind-alpha.test.ts`, which compiles the classes and asserts
+  a rule is emitted for each. **A class-string assertion cannot distinguish a generated utility from
+  a dead one** — which is precisely the blindness that let the styling ship looking wrong.
+
 ---
 
 ## 8. Review record
 
-*(to be completed by the two-reviewer pass)*
+### Waves A and B
+
+| Lane | PR | Fixed | Refuted | Of the fixed, tests that could not fail |
+|---|---|---|---|---|
+| G1 — kit previews | #206 | 6 | 1 | 3 |
+| M1 — world map | #207 | 8 | 1 | 5 |
+| G2 — mode tiles | #208 | *(remediating)* | — | — |
+| G3 — start-from rail | #209 | *(remediating)* | — | — |
+
+Reviewers: an adversarial `grok-4.6` pass per PR against the branch diff (never the working tree),
+plus Qodo, CodeRabbit and PR-Agent. Every finding was verified against the code before action, and
+every fix was mutation-proven — by the fixer, and independently re-run by the orchestrator for the
+load-bearing ones.
+
+**The finding that best characterises this wave:** M1's `US` polygon. The brief required every
+anchor to sit inside `NA`; the lane did that and the test passed — while the northern chord *between*
+two valid anchors crossed Hudson Bay. Vertices inside, edge outside. The containment test now samples
+interpolated points along each edge. A test can be true of every point it checks and still be false
+of the shape.
