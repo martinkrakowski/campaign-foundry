@@ -127,11 +127,16 @@ for spec in "$@"; do
   # aborts on a PR that is perfectly healthy. Observed on #206. Poll for checks to
   # exist, then watch; a PR that genuinely has no checks configured still errors out,
   # but only after we have given the forge a fair chance to say so.
+  # Poll the NEW HEAD's check-runs, not the PR's check list. `gh pr checks --json name`
+  # answers at PR level and is satisfied by a check that registered instantly (a review
+  # bot) or by one carried from the pre-refresh head — so it returns >0 while the head
+  # that `--watch` resolves still has none, and the watch reports "no checks reported"
+  # anyway. That is how the first version of this guard still lost the race, twice.
+  head_sha=$(gh pr view "$pr" --json headRefOid --jq .headRefOid) || die "cannot read head of #$pr"
   registered=0
   for _ in $(seq 1 40); do            # up to ~10 minutes at 15s
-    if [ "$(gh pr checks "$pr" --json name --jq 'length' 2>/dev/null || echo 0)" -gt 0 ]; then
-      registered=1; break
-    fi
+    n=$(gh api "repos/{owner}/{repo}/commits/$head_sha/check-runs" --jq '.total_count' 2>/dev/null || echo 0)
+    if [ "${n:-0}" -gt 0 ]; then registered=1; break; fi
     sleep 15
   done
   [ "$registered" -eq 1 ] \
