@@ -2709,3 +2709,20 @@ plan's §6.5 is still unanswered.
 - **Left open:**
   - PR #201 opened against `main`, unmerged: https://github.com/martinkrakowski/campaign-foundry/pull/201
   - Gates all green (build, typecheck, lint, lint:arch, sync:check on committed tree, test:cov 100% ×4, 3130 passed / 2 skipped). The `brief-editor.test.tsx` `waitForEditorReady` flake did not occur this run; B2 still owns the fix.
+
+## 2026-09-07 — Lane W2(a): the create dialog's inline discard guard (branch feat/w2a)
+
+**Session:** 2026-09-07 — lane W2(a) of wave 3: D90, the owner-taken confirm-on-close
+
+- **Mode:** Implementer
+- **Changes:**
+  - `apps/web/src/components/shell/CreateCampaignDialog.tsx` — one `requestClose` funnel for every close gesture (Cancel, Escape, scrim, head's close); an empty draft closes as before, a draft with work (name / region / audience / chosen source — the mode toggle never counts) swaps the footer's button row for the kit's `GuardBar` (D90). While the guard shows the same gesture dismisses the guard — a second Escape is Keep editing, never Discard. Focus moves to the guard's first answer on open and back to the raiser on dismiss; both footer rows stay mounted and `[hidden]` does the swap so the restored node survives. No kit change, no `DialogShell`/`useDialogFocusTrap`/`openTraps` change.
+  - `apps/web/src/components/campaign/messages.ts` — **append only**: `discardGuardTitle`, `discardGuardKeepEditing`, `discardGuardDiscardClose`, and the branching `discardGuardDetail(hasName, hasRegion, hasAudience, hasSource)` over the existing `joinList`.
+  - `apps/web/src/components/shell/__tests__/CreateCampaignDialog.test.tsx` — new D90 describe (10 tests) plus a two-way-coexistence test appended to the W3 describe; the dirty-Cancel close path rewritten (one-line reason in the diff): the old dirty-Cancel test and the W3 test's tail now go through the guard. The two resume-two-way modality tests (`:225`, `:335`) untouched.
+- **Decisions:**
+  - Scrim click while the guard shows dismisses the guard (same-gesture-same-answer as Escape); the head's close (X) asks too — both stated as Deviations in the PR.
+  - The guard and the resume two-way cannot coexist structurally (the guard replaces the row whose Create press raises the two-way); asserted by a test, stated in the PR body.
+  - Four mutation checks run and reported: Escape-destroys → Escape-never-destroys test red; Keep-editing-resets → answers-survive test red; empty-draft-guard → empty-closes-immediately test red; focus-move removed → focus test red.
+- **Left open:**
+  - PR #204 opened against `main`, **not merged**: https://github.com/martinkrakowski/campaign-foundry/pull/204
+  - Gates all green (build, typecheck, lint, lint:arch, sync:check on committed tree, test:cov 100% ×4 — 7896/5788/1686/7090 — 183 files, 3144 passed / 2 skipped).
