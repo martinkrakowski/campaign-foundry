@@ -2839,3 +2839,20 @@ G2/G3 consume `PosterFrame`/`PreviewPanel`/`PosterStack`/`ScrubBar` from the bar
   - happy-dom keeps SVG presentation attributes out of the attribute list, so the blank card's dash is asserted against serialised markup, not a `[stroke-dasharray]` selector.
 - **Verification:** full gate green on the committed tree (`build`, `typecheck`, `lint`, `lint:arch`, `sync:check`, `test:cov` — 3181 passed / 2 skipped, 100 % ×4); `CreateCampaignDialog.test.tsx` passes unedited; `git diff origin/main...HEAD | grep -i template` empty. Mutations run red then reverted: (1) renaming the blank card's value → 2 dialog tests fail; (2) dropping `meta` → picker + dialog tests fail; (3) dropping `tag` → tag test fails.
 - **Left open:** PR against `main`, unmerged.
+
+---
+
+## 2026-09-07 — G3 review remediation (PR #209)
+
+**Session:** 2026-09-07 — G3 remediation on `feat/g3`
+
+- **Mode:** Implementer
+- **Changes:**
+  - `messages.ts` — `startFromRatioCaption` is a count (`1 ratio` / `3 ratios`), never `ratios.join`.
+  - `messages.test.ts` — the jargon gate calls each function export with representative args (typed `SAMPLE_ARGS` table, generic default of a string / number / string array / boolean) and fails if a formatter produces no scannable string. Shrink-only `JARGON_ALLOWLIST` for two pre-existing timeline "floor" strings.
+  - `StartFromExistingPicker.tsx` — rail is `p-2 scroll-p-2` so a focused tile's `ring-2 ring-offset-2` is not clipped by `overflow-x: auto`.
+- **Decisions:**
+  - Left `children={null}` on every card. The right fix is `OptionTile` skipping the children wrapper when `children` is nullish; that is a kit change (`option-tile.tsx` is not G3-owned). Omitting the prop is a type error (`children` is required) and would still mount the wrapper.
+  - Did not rewrite `timelineDwellUnderFloor` / `timelineBeatUnderFloor` (pre-existing, outside G3); allowlisted with one-line reasons.
+- **Verification:** full gate green (`build`, `typecheck`, `lint`, `lint:arch`, `test:cov` — 100 % ×4). `CreateCampaignDialog.test.tsx` unedited. Mutations: restore id join → jargon test fails on `9:16`; put `launch` in the formatter → D35 launch test fails. Both reverted.
+- **Left open:** kit follow-up: skip `OptionTile`'s children wrapper when `children` is nullish.

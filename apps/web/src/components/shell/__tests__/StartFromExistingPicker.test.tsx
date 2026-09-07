@@ -60,6 +60,20 @@ describe("StartFromExistingPicker (W2 / D71)", () => {
     expect(buttons.length).toBe(2);
   });
 
+  test("the rail's padding leaves room for a focused card's ring on every edge", async () => {
+    route([classic]);
+    const { container } = render(<StartFromExistingPicker selectedId={null} onSelect={vi.fn()} />);
+    await screen.findByRole("button", { name: messages.startFromExistingBlank });
+
+    // happy-dom performs no layout, so a visual assertion that the ring is
+    // unclipped is not available; the padding and scroll-padding class tokens
+    // are the stand-in.
+    const rail = container.querySelector(".overflow-x-auto");
+    const classes = rail?.className.split(/\s+/) ?? [];
+    expect(classes).toContain("p-2");
+    expect(classes).toContain("scroll-p-2");
+  });
+
   test("each brief card is named by its id alone, carries the mode's display name as its tag", async () => {
     route([classic, randomized]);
     render(<StartFromExistingPicker selectedId={null} onSelect={vi.fn()} />);

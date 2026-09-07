@@ -113,8 +113,10 @@ export function StartFromExistingPicker({
     return <p className="p-4 text-[13px] text-text-muted">{messages.startFromExistingEmpty}</p>;
   }
   return (
-    // The padding below keeps a tile's focus ring unclipped by the scroll box.
-    <div className="flex gap-2 overflow-x-auto pb-2">
+    // Symmetric padding (and matching scroll-padding) keeps a focused tile's
+    // ring unclipped: overflow-x:auto computes overflow-y to auto, which would
+    // clip ring-2 ring-offset-2 on every edge, including the first and last cards.
+    <div className="flex gap-2 overflow-x-auto p-2 scroll-p-2">
       <div className={`${CARD_WIDTH} shrink-0`}>
         <OptionTile
           value={messages.startFromExistingBlank}
