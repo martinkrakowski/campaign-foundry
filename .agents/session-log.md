@@ -2856,3 +2856,19 @@ G2/G3 consume `PosterFrame`/`PreviewPanel`/`PosterStack`/`ScrubBar` from the bar
   - Did not rewrite `timelineDwellUnderFloor` / `timelineBeatUnderFloor` (pre-existing, outside G3); allowlisted with one-line reasons.
 - **Verification:** full gate green (`build`, `typecheck`, `lint`, `lint:arch`, `test:cov` — 100 % ×4). `CreateCampaignDialog.test.tsx` unedited. Mutations: restore id join → jargon test fails on `9:16`; put `launch` in the formatter → D35 launch test fails. Both reverted.
 - **Left open:** kit follow-up: skip `OptionTile`'s children wrapper when `children` is nullish.
+
+---
+
+## 2026-09-07 — G3 review remediation round 2 (PR #209)
+
+**Session:** 2026-09-07 — G3 remediation round 2 on `feat/g3`
+
+- **Mode:** Implementer
+- **Changes:**
+  - `option-tile.tsx` — the name slot (and its flex row) gets `min-w-0 truncate` and `title={name}` so a 64-character unbroken brief id cannot overflow a fixed-width card. The button's `aria-label={value}` still owns the accessible name.
+  - `option-tile.test.tsx` — pins the class treatment (happy-dom performs no layout) and `getByRole("button", { name: <id> })` still resolving.
+- **Decisions:**
+  - Truncate-with-title, not wrap: a horizontal rail of fixed-width cards should stay one height. `title` lives on the name span, not the button, so it cannot join the accessible name.
+  - Ownership this round extends to the kit; the call site is unedited.
+- **Verification:** full gate green (`build`, `typecheck`, `lint`, `lint:arch`, `test:cov` — 3189 passed, 100 % ×4). Mutation: strip `truncate` / `min-w-0` / `title` from the name span → the new test fails on `truncate`. Restored. Regression surface unedited and green.
+- **Left open:** kit follow-up: skip `OptionTile`'s children wrapper when `children` is nullish.
