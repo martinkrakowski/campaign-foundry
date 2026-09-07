@@ -1011,6 +1011,21 @@ export function discardGuardDetail(
   return `Closing now discards ${joinList(parts)} from this draft.`;
 }
 
+/* ── G3 — start-from rail ─────────────────────────────────────────────────── */
+
+/**
+ * The mono corner caption on the blank card's preview panel: three dashed
+ * frames holding nothing, because nothing has been made yet.
+ */
+export const startFromBlankCaption = "Empty";
+/**
+ * One brief card's corner caption: how many ratios its creatives render at.
+ * A count, never the raw ids — D18, and the mockup's own `3 ratios` readout.
+ */
+export function startFromRatioCaption(ratios: readonly string[]): string {
+  const count = ratios.length;
+  return `${count} ${count === 1 ? "ratio" : "ratios"}`;
+}
 // G2 — mode tiles
 
 /**

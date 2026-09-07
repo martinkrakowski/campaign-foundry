@@ -118,8 +118,16 @@ export function OptionTile({
         <span aria-hidden="true" className={cn("block transition-[opacity,filter]", dim)}>
           {children}
         </span>
-        <span className="flex w-full items-baseline justify-between gap-2">
-          <span className="text-[15px] font-bold leading-tight text-text-primary">{name}</span>
+        <span className="flex w-full min-w-0 items-baseline justify-between gap-2">
+          {/* A name is user data (a brief id may be 64 unbroken chars). Truncate
+              it; `title` is the hover remainder. The button's aria-label still
+              owns the accessible name, so the tooltip cannot join it. */}
+          <span
+            className="min-w-0 truncate text-[15px] font-bold leading-tight text-text-primary"
+            title={name}
+          >
+            {name}
+          </span>
           {tag ? (
             <span
               aria-hidden="true"

@@ -35,6 +35,25 @@ describe("OptionTile", () => {
     expect(screen.getByTestId("picture")).toBeTruthy();
   });
 
+  test("a 64-character unbroken name truncates inside the tile without changing the accessible name", () => {
+    const id = "a".repeat(64);
+    render(
+      <OptionTile value={id} name={id} tag="Guided" selected={false} onToggle={vi.fn()}>
+        <span />
+      </OptionTile>,
+    );
+    // happy-dom performs no layout, so overflow is asserted as the class
+    // treatment (`truncate` + `min-w-0`), not as painted width. The tag is
+    // present because that is the flex row a long brief id actually shares.
+    const button = screen.getByRole("button", { name: id });
+    expect(button.getAttribute("aria-label")).toBe(id);
+    expect(button.getAttribute("title")).toBeNull();
+    const nameSlot = screen.getByText(id);
+    expect(nameSlot.className).toContain("truncate");
+    expect(nameSlot.className).toContain("min-w-0");
+    expect(nameSlot.getAttribute("title")).toBe(id);
+  });
+
   test("the tag, the blurb and the meta line are aria-hidden, so none of them extends the name", () => {
     render(allSlots());
     for (const slot of [screen.getByText("Guided"), screen.getByText("One design, repeated."), screen.getByText("6 creatives")]) {

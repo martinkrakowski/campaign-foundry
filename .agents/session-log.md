@@ -2869,6 +2869,53 @@ G2/G3 consume `PosterFrame`/`PreviewPanel`/`PosterStack`/`ScrubBar` from the bar
 
 ---
 
+## 2026-09-07 — G3: the start-from rail (wave B)
+
+**Session:** 2026-09-07 — G3 on `feat/g3` (from `main` at `2448b66`)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `shell/StartFromExistingPicker.tsx` — the vertical `divide-y` row list is now a horizontal rail of `OptionTile`s (`flex gap-2 overflow-x-auto`, no scroll-snap, DOM-order keyboard reach): the blank card first (`PreviewPanel` of three dashed empty `PosterFrame`s; `value`/`name` = `messages.startFromExistingBlank`; pressed when `selectedId === null`), then one card per brief (`PreviewPanel` of `PosterFrame`s at the brief's ratio axis narrowed to the domain vocabulary, falling back to all three ratios when nothing known is listed; `value`/`name` = the id; `meta` = `startFromRowMeta(...)` verbatim; `tag` = `modeDisplayName`). `onSelect` semantics and the loading/empty/error states and strings unchanged. `messages.ts` got an append-only G3 block (`startFromBlankCaption`, `startFromRatioCaption`).
+  - `shell/__tests__/StartFromExistingPicker.test.tsx` — rewritten for the rail: blank-first DOM order, tag both arms (absent mode → Classic), previews (dashed ×3; listed ratio; absent-ratio fallback; out-of-domain fallback), a D88/D96 animate scan exempting the check badge, and the original behavioural set.
+- **Deviations:**
+  - The brief's "mono via `className`, as today" for the brief id is not honoured: `OptionTile` fixes its `name`-slot style and exposes no class hook, and rendering the id a second time (mono caption or children span) would duplicate the text and break the pinned `findByText(id)` queries. The id renders once, in the tile's name style; recorded in the PR's Deviations.
+  - The two preview captions are additions beyond the plan's letter (it names no caption); they follow the `.pvbox` mono-corner-caption idiom and live in `messages.ts` past the jargon gate.
+  - happy-dom keeps SVG presentation attributes out of the attribute list, so the blank card's dash is asserted against serialised markup, not a `[stroke-dasharray]` selector.
+- **Verification:** full gate green on the committed tree (`build`, `typecheck`, `lint`, `lint:arch`, `sync:check`, `test:cov` — 3181 passed / 2 skipped, 100 % ×4); `CreateCampaignDialog.test.tsx` passes unedited; `git diff origin/main...HEAD | grep -i template` empty. Mutations run red then reverted: (1) renaming the blank card's value → 2 dialog tests fail; (2) dropping `meta` → picker + dialog tests fail; (3) dropping `tag` → tag test fails.
+- **Left open:** PR against `main`, unmerged.
+
+---
+
+## 2026-09-07 — G3 review remediation (PR #209)
+
+**Session:** 2026-09-07 — G3 remediation on `feat/g3`
+
+- **Mode:** Implementer
+- **Changes:**
+  - `messages.ts` — `startFromRatioCaption` is a count (`1 ratio` / `3 ratios`), never `ratios.join`.
+  - `messages.test.ts` — the jargon gate calls each function export with representative args (typed `SAMPLE_ARGS` table, generic default of a string / number / string array / boolean) and fails if a formatter produces no scannable string. Shrink-only `JARGON_ALLOWLIST` for two pre-existing timeline "floor" strings.
+  - `StartFromExistingPicker.tsx` — rail is `p-2 scroll-p-2` so a focused tile's `ring-2 ring-offset-2` is not clipped by `overflow-x: auto`.
+- **Decisions:**
+  - Left `children={null}` on every card. The right fix is `OptionTile` skipping the children wrapper when `children` is nullish; that is a kit change (`option-tile.tsx` is not G3-owned). Omitting the prop is a type error (`children` is required) and would still mount the wrapper.
+  - Did not rewrite `timelineDwellUnderFloor` / `timelineBeatUnderFloor` (pre-existing, outside G3); allowlisted with one-line reasons.
+- **Verification:** full gate green (`build`, `typecheck`, `lint`, `lint:arch`, `test:cov` — 100 % ×4). `CreateCampaignDialog.test.tsx` unedited. Mutations: restore id join → jargon test fails on `9:16`; put `launch` in the formatter → D35 launch test fails. Both reverted.
+- **Left open:** kit follow-up: skip `OptionTile`'s children wrapper when `children` is nullish.
+
+---
+
+## 2026-09-07 — G3 review remediation round 2 (PR #209)
+
+**Session:** 2026-09-07 — G3 remediation round 2 on `feat/g3`
+
+- **Mode:** Implementer
+- **Changes:**
+  - `option-tile.tsx` — the name slot (and its flex row) gets `min-w-0 truncate` and `title={name}` so a 64-character unbroken brief id cannot overflow a fixed-width card. The button's `aria-label={value}` still owns the accessible name.
+  - `option-tile.test.tsx` — pins the class treatment (happy-dom performs no layout) and `getByRole("button", { name: <id> })` still resolving.
+- **Decisions:**
+  - Truncate-with-title, not wrap: a horizontal rail of fixed-width cards should stay one height. `title` lives on the name span, not the button, so it cannot join the accessible name.
+  - Ownership this round extends to the kit; the call site is unedited.
+- **Verification:** full gate green (`build`, `typecheck`, `lint`, `lint:arch`, `test:cov` — 3189 passed, 100 % ×4). Mutation: strip `truncate` / `min-w-0` / `title` from the name span → the new test fails on `truncate`. Restored. Regression surface unedited and green.
+- **Left open:** kit follow-up: skip `OptionTile`'s children wrapper when `children` is nullish.
 ## 2026-09-07 — G2: the mode tiles, filled (this wave B lane)
 
 **Session:** 2026-09-07 — G2 on `feat/g2` (wave B, base `2448b66`)
