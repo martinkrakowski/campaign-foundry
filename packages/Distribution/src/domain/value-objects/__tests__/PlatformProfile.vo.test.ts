@@ -1,5 +1,6 @@
 import { describe, test, expect, expectTypeOf } from "vitest";
 import type { SafeInsets as PortSafeInsets } from "@campaignfoundry/CampaignOrchestration";
+import { CAMPAIGN_TYPE_PRESETS } from "@campaignfoundry/CampaignOrchestration";
 import {
   PLATFORM_PROFILES,
   formatsFor,
@@ -96,6 +97,76 @@ describe("PlatformProfile", () => {
     expect(motionPackagedRatios(["unknown-platform"])).toEqual(new Set());
     expect(motionPackagedRatios(["instagram-story"])).toEqual(new Set(["9:16"]));
     expect(motionPackagedRatios(["instagram-feed", "tiktok", "youtube-short"])).toEqual(new Set(["9:16"]));
+  });
+
+  // The campaign-type presets (D108–D112) live in CampaignOrchestration as plain
+  // string platform ids, because the domain layer must not import this package.
+  // This guard is the other half of the contract: a renamed or removed profile
+  // fails here, in the package that owns the ids — so a preset can never name a
+  // placement the compositor cannot render.
+  describe("campaign-type preset coverage (D108–D112)", () => {
+    test("every preset platform id is a PLATFORM_PROFILES id", () => {
+      for (const [type, preset] of Object.entries(CAMPAIGN_TYPE_PRESETS)) {
+        for (const id of preset.platforms) {
+          expect(PLATFORM_PROFILES[id], `${type} names unknown platform "${id}"`).toBeDefined();
+        }
+      }
+    });
+
+    // D111: paid-social is every surface. Membership above cannot catch a dropped
+    // id; this pins the list to the profiles object, not a second copy of the table.
+    test("paid-social lists every PLATFORM_PROFILES id", () => {
+      const listed = [...CAMPAIGN_TYPE_PRESETS["paid-social"].platforms].sort();
+      const all = Object.keys(PLATFORM_PROFILES).sort();
+      const missing = all.filter((id) => !listed.includes(id));
+      const extra = listed.filter((id) => !all.includes(id));
+      const reasons: string[] = [];
+      if (missing.length > 0) reasons.push(`missing ${missing.map((id) => `"${id}"`).join(", ")}`);
+      if (extra.length > 0) reasons.push(`extra ${extra.map((id) => `"${id}"`).join(", ")}`);
+      expect(listed, `paid-social ${reasons.join("; ")}`).toEqual(all);
+    });
+
+    test("every preset's formats agree with the profiles it lists", () => {
+      for (const [type, preset] of Object.entries(CAMPAIGN_TYPE_PRESETS)) {
+        const motionOnly = !preset.formats.includes("static");
+        const staticOnly = !preset.formats.includes("motion");
+        const packaged = new Set<string>();
+        for (const id of preset.platforms) {
+          const profile = PLATFORM_PROFILES[id];
+          if (!profile) continue;
+          for (const format of profile.formats) {
+            packaged.add(format);
+            expect(
+              preset.formats,
+              `${type} lists "${id}", which packages "${format}" the preset does not offer`,
+            ).toContain(format);
+          }
+          // A preset's format choice is also its ratio family: a motion-only
+          // preset lists only the 9:16 motion profiles, a static-only one only
+          // the still surfaces — read off the profile's own fields, not a
+          // hard-coded id list.
+          if (motionOnly) {
+            expect(profile.ratio, `${type} is motion-only but "${id}" is not a 9:16 motion profile`).toBe("9:16");
+          }
+          if (staticOnly) {
+            expect(
+              profile.formats.includes("motion"),
+              `${type} is static-only but "${id}" is a motion profile`,
+            ).toBe(false);
+          }
+        }
+        // Reverse: every format the preset offers must be packaged by at
+        // least one listed profile. Read off the profiles — no hard-coded
+        // ids or formats. A motion-only type that starts offering "static"
+        // would otherwise stay green.
+        for (const format of preset.formats) {
+          expect(
+            packaged,
+            `${type} offers "${format}" but none of its listed profiles package it`,
+          ).toContain(format);
+        }
+      }
+    });
   });
 });
 

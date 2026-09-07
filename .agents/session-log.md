@@ -3517,3 +3517,54 @@ wrong path. The rule is now: *compiled, ran, and targets the path the test names
 
 **Left open:** whether `paid-social` earns its tile; D114's byte-identical requirement may prove
 impossible on `16:9`, which would need the owner's decision before any display size renders.
+
+---
+
+## 2026-09-07 — lane T1, the campaign type (wave A)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Lane T1 of the campaign-type plan (D108–D112), PR #224 (`feat/t1` → `main`), not merged.
+  - `campaign-types.ts` (new): `CAMPAIGN_TYPES` / `CampaignType` / `DEFAULT_CAMPAIGN_TYPE` /
+    `CampaignTypePreset` / `CAMPAIGN_TYPE_PRESETS` — pure data, no Distribution import; platform
+    ids stay plain strings, the Distribution test owns the id contract.
+  - `CampaignBrief.type?` beside `mode?`; `validateType` in `load-brief.ts` beside `validateMode`
+    (structural in authoring mode too — unlike the motion rules); `"type"` in `BRIEF_KEY_ORDER`
+    after `"mode"`; tests appended in all four suites + fixture sweep extended to assert
+    `type === undefined` and to cover `sample-campaign.json` (8 files).
+- **Decisions:**
+  - The preset-coverage guard lives in Distribution (the package that owns `PLATFORM_PROFILES`)
+    and reads ratio families off the profiles' own `formats`/`ratio` fields — no second id list.
+  - T1 validates `type` only; applying the preset is T2's seam (D109). Nothing downstream reads it yet.
+  - M3's revert exposed that `git checkout` can't restore an untracked new file — used inverse
+    edits/backup copies for every mutation revert instead.
+- **Mutation results** (all compiled, ran, and failed the named test; recorded in the PR body):
+  M1 → D110 invariant test; M2 → "every preset platform id is a PLATFORM_PROFILES id"
+  (names `paid-social` / `"instagram-reels"`); M3 → absent-parses + fixture sweep; M4 → the
+  `"banner"` throw test; M5 → the positional `mode: < type: < variation:` ordering test.
+- **Left open:**
+  - `hexagen sync` reorders the value-objects barrel alphabetically — hand-placed exports drift;
+    run `yarn sync` after adding a VO file, don't hand-edit the barrel.
+  - Gate: `sync:check` refuses a dirty tree, so it can only run post-commit — sequence the final
+    gate as lint/typecheck/test:cov pre-commit, `sync:check` after.
+  - F3 stands: `paid-social` remains the type most likely to be reconsidered.
+
+---
+
+## 2026-09-07 — PR #224 remediator: paid-social completeness (D111)
+
+- **Mode:** Remediator
+- **Changes:**
+  - `PlatformProfile.vo.test.ts`: completeness test — `paid-social` platforms, sorted, equal
+    `Object.keys(PLATFORM_PROFILES)` sorted, message names missing/extra ids. Guarded the
+    formats-agree lookup (`if (!profile) continue`) so a misspelling fails with the preset's name.
+- **Decisions:**
+  - Keys are read off `PLATFORM_PROFILES`; the seven ids are not listed. Membership-only coverage
+    stays; completeness is the D111 half it could not express.
+  - Qodo regex / `profile.formats` / reviewer NITs left untouched (refuted or deferred).
+- **Mutation:** remove `"x"` from `paid-social.platforms` in `campaign-types.ts`. Compiled, ran,
+  failed `paid-social lists every PLATFORM_PROFILES id` (`AssertionError: paid-social missing "x"`).
+  Reverted.
+- **Round 2:** formats-agree is bidirectional — union of `profile.formats` over listed platforms must contain every `preset.formats` entry. Mutation: add `"static"` to `short-video.formats`. Failed `every preset's formats agree with the profiles it lists` (`AssertionError: short-video offers "static" but none of its listed profiles package it`). D110 intact (static+motion under variation is legal). Reverted.
+- **Left open:**
+  - Gate sequence unchanged: `sync:check` after commit if it refuses a dirty tree.
