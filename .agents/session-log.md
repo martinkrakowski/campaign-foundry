@@ -3293,3 +3293,24 @@ blocked-store paths pass unedited; the seed's deep-equal test was rewritten deli
   baton. Teaching the hook about seeds would couple a generic one-shot to one producer.
 
 **Left open:** none from this remediation.
+
+---
+
+## 2026-09-07 — S3 remediation round 2 (PR #217): the refused-seed upgrade path
+
+**Mode:** Implementer
+
+**Changes:**
+- No production code. The editor-level seed test now seeds both legacy keys
+  (`cf:create-seed` four-field + `cf:step-handoff` `"copy"`), mounts `/brief/new`,
+  and asserts the two user-visible halves: discarded Identity fields, and landing
+  on Identity not Copy. Storage-key assertions dropped — `cf:step-handoff` is
+  gone either way (the navigation hook spends it by applying it).
+
+**Decisions:**
+- `use-step-navigation.test.ts` already covers the baton in isolation (`takeStashedStep`
+  spends by reading; a stashed step is where the next mount lands). The editor test
+  is still required: the defect is the interaction of two independent keys, which
+  neither unit sees alone.
+
+**Left open:** none.

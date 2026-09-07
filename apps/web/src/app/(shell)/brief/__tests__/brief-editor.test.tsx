@@ -3719,22 +3719,33 @@ describe("the create seed (W1)", () => {
 
   test("a rejected legacy seed also spends its landing baton, so the editor lands on Identity (D98)", async () => {
     routes({});
-    // Both keys the previous build wrote: the four-field seed, and the Copy
-    // baton that landed the user past Identity. The seed is discarded; the
-    // companion baton must be spent too, or the user still lands on Copy with
-    // a blank brief — D98 arriving through the upgrade door.
+    // Both keys the previously deployed build left after an interrupted create —
+    // the old four-field seed and the Copy baton that skipped Identity. takeSeed
+    // in isolation and the navigation hook in isolation each look fine; the bug
+    // is the interaction: a refused seed that does not spend the companion baton
+    // lets the mount effect apply "copy" and land a blank brief one step past
+    // two empty required fields.
     localStorage.setItem(
-      CREATE_SEED_KEY,
+      "cf:create-seed",
       JSON.stringify({ name: "Summer Spark", targetRegion: "EU", targetAudience: "trail runners", mode: "brief" }),
     );
-    stashStep("copy");
+    localStorage.setItem("cf:step-handoff", "copy");
     nextMock().nav.pathname = "/brief/new";
     renderWithRun(<NewEditor />);
+
+    // Landing, not the spent key: cf:step-handoff is gone either way (the
+    // navigation hook spends it by applying it). Identity is also first-paint
+    // default, but render() flushes that effect, so a leftover baton has already
+    // moved the cursor to Copy before this waits.
     await waitFor(() => expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy());
     expect(screen.queryByRole("button", { name: /: Copy, current step/ })).toBeNull();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Identity");
+
+    // Discard: no name, region or audience seeded. Assertable only once Identity
+    // is the mounted step — Copy does not render these fields.
     expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("");
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-    expect(localStorage.getItem("cf:step-handoff")).toBeNull();
+    expect((screen.getByLabelText(messages.targetRegionLabel) as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe("");
   });
 
   test("a malformed seed leaves a working blank editor rather than throwing", async () => {
