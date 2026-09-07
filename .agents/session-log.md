@@ -2718,7 +2718,7 @@ plan's §6.5 is still unanswered.
 - **Changes:**
   - `apps/web/src/components/shell/CreateCampaignDialog.tsx` — one `requestClose` funnel for every close gesture (Cancel, Escape, scrim, head's close); an empty draft closes as before, a draft with work (name / region / audience / chosen source — the mode toggle never counts) swaps the footer's button row for the kit's `GuardBar` (D90). While the guard shows the same gesture dismisses the guard — a second Escape is Keep editing, never Discard. Focus moves to the guard's first answer on open and back to the raiser on dismiss; both footer rows stay mounted and `[hidden]` does the swap so the restored node survives. No kit change, no `DialogShell`/`useDialogFocusTrap`/`openTraps` change.
   - `apps/web/src/components/campaign/messages.ts` — **append only**: `discardGuardTitle`, `discardGuardKeepEditing`, `discardGuardDiscardClose`, and the branching `discardGuardDetail(hasName, hasRegion, hasAudience, hasSource)` over the existing `joinList`.
-  - `apps/web/src/components/shell/__tests__/CreateCampaignDialog.test.tsx` — new D90 describe (10 tests) plus a two-way-coexistence test appended to the W3 describe; the dirty-Cancel close path rewritten (one-line reason in the diff): the old dirty-Cancel test and the W3 test's tail now go through the guard. The two resume-two-way modality tests (`:225`, `:335`) untouched.
+  - `apps/web/src/components/shell/__tests__/CreateCampaignDialog.test.tsx` — new D90 describe (10 tests) plus a two-way-coexistence test appended to the W3 describe; the dirty-Cancel close path rewritten (one-line reason in the diff): the old dirty-Cancel test and the W3 two-way test's dirty-Cancel tail ("Escape and Cancel on the two-way…") now go through the guard — D90 makes a dirty Cancel ask, so that tail could not stay as an immediate close. The two-way's modality assertions (a second dialog named `resumeDraftTitle`; Escape closes only that overlay) are unchanged in substance.
 - **Decisions:**
   - Scrim click while the guard shows dismisses the guard (same-gesture-same-answer as Escape); the head's close (X) asks too — both stated as Deviations in the PR.
   - The guard and the resume two-way cannot coexist structurally (the guard replaces the row whose Create press raises the two-way); asserted by a test, stated in the PR body.
@@ -2726,3 +2726,16 @@ plan's §6.5 is still unanswered.
 - **Left open:**
   - PR #204 opened against `main`, **not merged**: https://github.com/martinkrakowski/campaign-foundry/pull/204
   - Gates all green (build, typecheck, lint, lint:arch, sync:check on committed tree, test:cov 100% ×4 — 7896/5788/1686/7090 — 183 files, 3144 passed / 2 skipped).
+
+## 2026-09-07 — W2(a) review remediation (PR #204)
+
+- **Mode:** Implementer (remediation).
+- **Changes:**
+  - `CreateCampaignDialog.tsx` — dismiss the guard when the still-interactive body empties the draft (empty-draft rule is "closes immediately"); restore focus only if the raiser is `isConnected` and not `disabled`, otherwise the campaign-name input; footer comment now says only the button row stays mounted.
+  - `messages.ts` — **append only**: export the four detail part strings as consts; the formatter composes from those so the jargon gate scans them.
+  - `CreateCampaignDialog.test.tsx` — empty-draft dismiss, detached-raiser fallback, disabled-raiser fallback, head Close asks, Tab-cycle exclusion of Cancel/Create, literal one-part and all-parts sentences.
+- **Decisions:**
+  - Fixed the state, not the string: a fallback empty-parts sentence would keep a guard open over nothing. Refuted PR-Agent layout-effect and fallback-message findings, as the brief recorded.
+  - The W3 two-way test's dirty-Cancel tail was a required edit (D90), previously described as "untouched"; declared in Deviations.
+- **Verification:** Full gate green. Six mutations, each red then restored.
+- **Left open:** PR #204 against `main`, **not merged**.
