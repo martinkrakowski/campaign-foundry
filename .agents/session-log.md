@@ -3052,3 +3052,19 @@ dialog) is staged.
   - The `focusable="false"`/Tab-cycle assertion is scoped to the map's own SVG (the dialog now carries mode-glyph SVGs too) and additionally proves no `getFocusableDialogElements` entry descends from any SVG.
 - **Verification:** full gate green on the committed tree (`build`, `typecheck`, `lint`, `lint:arch`, `sync:check`, `test:cov` — 3248 passed / 2 skipped, 100 % ×4: 8091/5871/1737/7269). Mutations run red then reverted: (1) `onSelect` disconnected → footprint-press test fails; (2) constant `value={null}` to `WorldMap` → chip-paints test fails (note: a constant *equal to the clicked value* passes — the mutation must be degenerate); (3) the mockup's "runs dispatch per region" sentence prepended to the hint → the F2 regex test fails.
 - **Left open:** PR #214 against `main`, unmerged. D95 (multi-region semantics) untouched, as planned.
+
+## 2026-09-07 — M2 review remediation (PR #214)
+
+**Session:** 2026-09-07 — four-item remediation on `feat/m2`
+
+- **Mode:** Implementer
+- **Changes:**
+  - `ui/world-map.tsx` — paint order and hit-testing are decided separately: the selected footprint still paints last, but `pointer-events: none` on its `<g>` lets clicks fall through to the region underneath (GLOBAL no longer traps the map).
+  - `ui/chip-group.tsx` — when `value` becomes a known option from outside, the Other… draft closes and that option renders selected. Existing tests unedited; a new reconciliation test added.
+  - `shell/StartFromExistingPicker.tsx` — reports its listing count up via optional `onCount`. The dialog no longer fetches `listBriefs` itself.
+  - `shell/CreateCampaignDialog.tsx` — eyebrow count comes from the picker; `closeAndReset` clears it so a reopen does not flash the previous number.
+- **Decisions:**
+  - Hit-testing: `pointer-events: none` on the selected footprint's `<g>` (paths, hub, and label together), not a revert of the #207 paint-order fix.
+  - Count: picker reports up (`onCount={setCampaignCount}`), rather than lifting the fetch into the dialog.
+- **Verification:** full gate green (`build`, `typecheck`, `lint`, `lint:arch`, `test:cov` — 3257 passed, 100 % ×4: 8091/5875/1734/7270). Mutations run (each compiled and ran, then reverted): (1) drop `pointerEvents` → GLOBAL→DE fails (`null` vs `"none"`); (2) drop ChipGroup reconciliation → DE stays `aria-pressed="false"`; (3) re-add a dialog `listBriefs()` → fetch count 2 not 1; (4) skip `setCampaignCount(null)` on close → reopen flashes `"2 campaigns"`.
+- **Left open:** PR #214 unmerged. D95 untouched.
