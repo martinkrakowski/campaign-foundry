@@ -59,4 +59,20 @@ export {
   type DrawerShellProps,
   type UseDialogFocusTrapOptions,
 } from "./dialog-shell";
+// M1 — the world map
+export { chaikin, polyPath, type Pt } from "./geo/chaikin";
+export { pip } from "./geo/pip";
+export {
+  centroid,
+  dotMatrix,
+  GRATICULE_HORIZONTALS,
+  GRATICULE_VERTICALS,
+  MAP_HEIGHT,
+  MAP_WIDTH,
+  REGION_FOOTPRINTS,
+  type Footprint,
+  type MapDot,
+} from "./geo/footprints";
+export { WorldMap, type WorldMapProps } from "./world-map";
+export { RegionChip, type RegionChipProps } from "./region-chip";
 
