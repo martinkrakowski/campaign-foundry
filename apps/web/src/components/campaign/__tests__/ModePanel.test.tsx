@@ -139,4 +139,23 @@ describe("ModePanel — the filled tiles (G2, F1/D93)", () => {
       expect(picture.className).not.toContain("animate-");
     }
   });
+
+  test("each preview frame wrapper is capped to its cell so a landscape frame cannot overflow a narrow tile", () => {
+    // happy-dom performs no layout, so this is a class assertion on the wrapper,
+    // not a pixel measurement of the cell.
+    render(<ModePanel mode="brief" onSetMode={() => {}} />);
+    for (const name of ["brief", "variation"] as const) {
+      const panel = previewOf(screen.getByRole("button", { name }));
+      const grid = panel.querySelector(".grid");
+      expect(grid).not.toBeNull();
+      const wrappers = Array.from((grid as HTMLElement).children);
+      expect(wrappers).toHaveLength(6);
+      for (const wrap of wrappers) {
+        expect(wrap.tagName).toBe("DIV");
+        expect(wrap.className).toContain("max-w-full");
+        expect(wrap.className).toContain("[&>svg]:max-w-full");
+        expect(wrap.querySelector("svg")).not.toBeNull();
+      }
+    }
+  });
 });

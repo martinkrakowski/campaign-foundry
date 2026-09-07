@@ -100,6 +100,20 @@ function ModeGlyph({ scattered }: { scattered: boolean }): ReactNode {
 const PREVIEW_SIZE = 56;
 
 /**
+ * One cell of the 3×2. `PosterFrame` sizes by its long side, so a `16:9` miniature
+ * is `PREVIEW_SIZE` wide and overflows a ~46 px column on a 360 px viewport.
+ * `max-w-full` on the wrapper (and on the svg) scales the frame to the cell —
+ * not a smaller `PREVIEW_SIZE` at a breakpoint, and not an overflow-x scroller.
+ */
+function FrameCell({ ratio, variant }: { ratio: RatioOption; variant: PosterVariant }): ReactNode {
+  return (
+    <div className="min-w-0 max-w-full [&>svg]:h-auto [&>svg]:max-w-full">
+      <PosterFrame ratio={ratio} variant={variant} size={PREVIEW_SIZE} />
+    </div>
+  );
+}
+
+/**
  * Classic's picture (F1/D93): the same poster six times — one design, repeated —
  * in a tidy three-by-two of `PosterFrame`s on the panel's own ground.
  */
@@ -108,7 +122,7 @@ function ClassicPreview(): ReactNode {
     <PreviewPanel caption={messages.modeTileCaptionBrief}>
       <div className="grid grid-cols-3 items-center justify-items-center gap-2">
         {Array.from({ length: 6 }, (_, index) => (
-          <PosterFrame key={index} ratio="9:16" variant="pA" size={PREVIEW_SIZE} />
+          <FrameCell key={index} ratio="9:16" variant="pA" />
         ))}
       </div>
     </PreviewPanel>
@@ -134,7 +148,7 @@ function RandomizedPreview(): ReactNode {
     <PreviewPanel caption={messages.modeTileCaptionVariation}>
       <div className="grid grid-cols-3 items-center justify-items-center gap-2">
         {VARIATION_FRAMES.map((frame, index) => (
-          <PosterFrame key={index} ratio={frame.ratio} variant={frame.variant} size={PREVIEW_SIZE} />
+          <FrameCell key={index} ratio={frame.ratio} variant={frame.variant} />
         ))}
       </div>
     </PreviewPanel>

@@ -2855,3 +2855,20 @@ G2/G3 consume `PosterFrame`/`PreviewPanel`/`PosterStack`/`ScrubBar` from the bar
   - Session-log append stays outside the owned set; `AGENTS.md` still mandates it.
 - **Verification:** mutations run red→reverted: Classic as `pA/pB/pC` at `9:16` (Classic one-variant assertion red; dimension check still green); `fill-text-muted/18` on `ModePanel.tsx` (alpha guard red).
 
+---
+
+## 2026-09-07 — G2 review remediation round 2 (PR #208)
+
+**Session:** 2026-09-07 — G2 remediation round 2 on `feat/g2`
+
+- **Mode:** Implementer
+- **Changes:**
+  - `tailwind-alpha.test.ts` — `COLOR_ALPHA` now requires a token boundary (`(?![\w-])` after the opacity digits and after the `]` of the bracket form). A stem scan then fails if the next source character is still `[\w-]`, so a trailing typo cannot compile the valid prefix while the real class emits nothing.
+  - `ModePanel.tsx` — Classic and Randomized share a `FrameCell` wrapper: `min-w-0 max-w-full [&>svg]:h-auto [&>svg]:max-w-full`. Frames scale to the grid cell rather than overflowing a ~46 px column on a 360 px viewport. No overflow-x scroller.
+  - `ModePanel.test.tsx` — appended a class assertion on the wrapper (happy-dom performs no layout). Existing assertions unedited.
+- **Decisions:**
+  - Max-width on the frame wrapper, not a smaller `PREVIEW_SIZE` at a breakpoint: it scales at every width instead of picking another magic number that still overflows between breakpoints.
+  - Trailing-typo detection is a next-char check on the unbounded stem, not a `[\w-]+` group — that group backtracks into the opacity digits (`/80` → `/8`+`0`).
+  - PR-Agent's two refuted items (panel located by `div.bg-background`; frames classified by SVG shape) stay refused.
+- **Verification:** mutations run red→reverted: `fill-text-muted/[0.18]xyz` on `FrameCell` (alpha guard red); wrapper stripped of `max-w-full` (frame-cap assertion red).
+

@@ -137,8 +137,20 @@ describe('Tailwind container query variant (the preview rail)', () => {
 // (DESIGN.md:83). Walk the component tree and compile every color-alpha class
 // it actually writes — G1's four files were the original net; every later lane
 // is in scope the same way. Text scan only; no parser.
+//
+// The capture must end the class token. Without a boundary, `bg-red-500/50foo`
+// is captured as `bg-red-500/50` — a valid class that compiles — while the
+// real token in the source emits nothing. `(?![\w-])` refuses a match that
+// continues as a token; the same after the `]` of the bracket form.
 const COMPONENTS_DIR = join(__dirname, '../components');
 const COLOR_ALPHA =
+  /\b((?:fill|stroke|bg|text|border|ring|divide)-[a-z0-9-]+\/(?:\d+|\[[^\]]+\])(?![\w-]))/g;
+
+// The same stem without the boundary. Used only to find a match whose next
+// source character is still a token char — a trailing typo the bounded regex
+// would skip, which is how the guard used to be walked past. Next-char, not a
+// `[\w-]+` group: that group backtracks into the opacity digits (`/80` → `/8`+`0`).
+const COLOR_ALPHA_STEM =
   /\b((?:fill|stroke|bg|text|border|ring|divide)-[a-z0-9-]+\/(?:\d+|\[[^\]]+\]))/g;
 
 // Off-scale alphas outside G2 that this lane does not fix. The list may only
@@ -171,12 +183,33 @@ function componentAlphaClasses(): string[] {
   return [...found];
 }
 
+function componentAlphaTrailingTypos(): string[] {
+  const found: string[] = [];
+  for (const file of listComponentSources(COMPONENTS_DIR)) {
+    const source = readFileSync(file, 'utf-8');
+    for (const match of source.matchAll(COLOR_ALPHA_STEM)) {
+      const end = (match.index ?? 0) + match[0].length;
+      const next = source[end];
+      if (next !== undefined && /[\w-]/.test(next)) {
+        const extra = source.slice(end).match(/^[\w-]+/)?.[0] ?? '';
+        found.push(match[1] + extra);
+      }
+    }
+  }
+  return found;
+}
+
 function selectorOf(cls: string): string {
   return `.${cls.replace(/[^-_a-zA-Z0-9]/g, (ch) => `\\${ch}`)}`;
 }
 
 describe('component color-alpha utilities actually emit (DESIGN.md:83)', () => {
   it('emits a real rule for every color-alpha class the component tree uses', async () => {
+    const trailing = componentAlphaTrailingTypos();
+    expect(
+      trailing,
+      `trailing junk after an alpha class compiles the valid prefix and emits nothing for the real token: ${trailing.join(', ')}`,
+    ).toEqual([]);
     const classes = componentAlphaClasses().filter((cls) => !(cls in OFF_SCALE_ALLOWLIST));
     expect(classes.length).toBeGreaterThan(0);
     const css = await generateCss(classes);
