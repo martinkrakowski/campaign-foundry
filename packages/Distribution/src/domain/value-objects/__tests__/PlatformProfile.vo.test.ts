@@ -113,12 +113,26 @@ describe("PlatformProfile", () => {
       }
     });
 
+    // D111: paid-social is every surface. Membership above cannot catch a dropped
+    // id; this pins the list to the profiles object, not a second copy of the table.
+    test("paid-social lists every PLATFORM_PROFILES id", () => {
+      const listed = [...CAMPAIGN_TYPE_PRESETS["paid-social"].platforms].sort();
+      const all = Object.keys(PLATFORM_PROFILES).sort();
+      const missing = all.filter((id) => !listed.includes(id));
+      const extra = listed.filter((id) => !all.includes(id));
+      const reasons: string[] = [];
+      if (missing.length > 0) reasons.push(`missing ${missing.map((id) => `"${id}"`).join(", ")}`);
+      if (extra.length > 0) reasons.push(`extra ${extra.map((id) => `"${id}"`).join(", ")}`);
+      expect(listed, `paid-social ${reasons.join("; ")}`).toEqual(all);
+    });
+
     test("every preset's formats agree with the profiles it lists", () => {
       for (const [type, preset] of Object.entries(CAMPAIGN_TYPE_PRESETS)) {
         const motionOnly = !preset.formats.includes("static");
         const staticOnly = !preset.formats.includes("motion");
         for (const id of preset.platforms) {
-          const profile = PLATFORM_PROFILES[id]!;
+          const profile = PLATFORM_PROFILES[id];
+          if (!profile) continue;
           for (const format of profile.formats) {
             expect(
               preset.formats,

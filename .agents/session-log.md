@@ -3452,3 +3452,22 @@ impossible on `16:9`, which would need the owner's decision before any display s
   - Gate: `sync:check` refuses a dirty tree, so it can only run post-commit — sequence the final
     gate as lint/typecheck/test:cov pre-commit, `sync:check` after.
   - F3 stands: `paid-social` remains the type most likely to be reconsidered.
+
+---
+
+## 2026-09-07 — PR #224 remediator: paid-social completeness (D111)
+
+- **Mode:** Remediator
+- **Changes:**
+  - `PlatformProfile.vo.test.ts`: completeness test — `paid-social` platforms, sorted, equal
+    `Object.keys(PLATFORM_PROFILES)` sorted, message names missing/extra ids. Guarded the
+    formats-agree lookup (`if (!profile) continue`) so a misspelling fails with the preset's name.
+- **Decisions:**
+  - Keys are read off `PLATFORM_PROFILES`; the seven ids are not listed. Membership-only coverage
+    stays; completeness is the D111 half it could not express.
+  - Qodo regex / `profile.formats` / reviewer NITs left untouched (refuted or deferred).
+- **Mutation:** remove `"x"` from `paid-social.platforms` in `campaign-types.ts`. Compiled, ran,
+  failed `paid-social lists every PLATFORM_PROFILES id` (`AssertionError: paid-social missing "x"`).
+  Reverted.
+- **Left open:**
+  - Gate sequence unchanged: `sync:check` after commit if it refuses a dirty tree.
