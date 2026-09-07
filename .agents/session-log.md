@@ -2672,3 +2672,40 @@ plan's §6.5 is still unanswered.
   suite (`sections.test.tsx`) and LayoutSection / border-control ChipGroup tests green.
 - **Left open:** visual chip error treatment, if a later kit pass wants one, is a token
   (`border-error`) and needs a selected-state design. W2(a) still undispatched.
+## 2026-09-07 — Wave 2, lane B2: de-flake brief-editor via asyncUtilTimeout (PR #202)
+
+- **Change (1 file, `apps/web/vitest.setup.ts`):** `configure({ asyncUtilTimeout: 3000 })`
+  from `@testing-library/dom`, with a why-comment. No test files touched; no retries; no
+  `testTimeout` change.
+
+- **Deviation from the brief (documented in the PR):** the brief mandated **5000**; shipped
+  **3000**. At 5000, `grid.test.tsx:328`'s `findByText("IMAGEN").catch(() => undefined)` grace
+  wait — which intentionally burns the full `asyncUtilTimeout` when the pill never renders —
+  collides with Vitest's own 5000ms `testTimeout` and the test is killed
+  (`Error: Test timed out in 5000ms`). Verified: 5000 failed that test in every configuration
+  (full suite ×2, file alone, single test) and reverting fixed it; 3000 passes with ~2s
+  headroom. Lesson for future knobs: **`asyncUtilTimeout` must stay meaningfully below
+  `testTimeout`** because of that grace-wait idiom. If 5000 is still wanted, grid.test.tsx:328
+  needs an explicitly bounded wait first (out of B2's scope).
+
+- **Results:** baseline `yarn test:cov` 36.3s wall; post-change runs 37.8s and 36.0s —
+  delta within run-to-run noise, 100% on all four coverage counters in all three runs
+  (183 files / 3127 tests). All gates green post-commit (`build`, `typecheck`, `lint`,
+  `lint:arch`, `sync:check`).
+
+- **PR:** #202 against `main`, **not merged** (per lane instructions).
+## 2026-09-07 — Lane B1: Button defaults to type=button (branch feat/b1)
+
+**Session:** 2026-09-07 — lane B1 of wave 2: the default-type fix recorded by wave 1
+
+- **Mode:** Implementer
+- **Changes:**
+  - `apps/web/src/components/ui/button.tsx` — `type="button"` hardcoded before the props spread, so a typeless `Button` no longer submits a surrounding `<form>` and a caller's `type` still wins.
+  - `apps/web/src/components/ui/__tests__/ui.test.tsx` — three tests: default renders `type="button"`, explicit `type="submit"` overrides, and a typeless `Button` in `<form onSubmit={spy}>` does not call the spy on click.
+- **Decisions:**
+  - The brief's stop-grep found a second `type="submit"` hit at `icon-button.test.tsx:38`; proceeded — it is a test rendering `IconButton` with an explicit prop, not a call site relying on the implicit default (flagged in the PR's Deviations). `BriefPicker.tsx:220` remains the only app source hit and is explicit; its tests pass unedited.
+  - Both prescribed mutations ran and failed the intended tests: default removed → default + in-form tests fail; default after the spread → override test fails.
+  - No call-site clean-up: now-redundant `type="button"` props elsewhere are other lanes' files and explicitly out of scope.
+- **Left open:**
+  - PR #201 opened against `main`, unmerged: https://github.com/martinkrakowski/campaign-foundry/pull/201
+  - Gates all green (build, typecheck, lint, lint:arch, sync:check on committed tree, test:cov 100% ×4, 3130 passed / 2 skipped). The `brief-editor.test.tsx` `waitForEditorReady` flake did not occur this run; B2 still owns the fix.

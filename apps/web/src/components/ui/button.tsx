@@ -49,6 +49,10 @@ export function Button(props: ButtonProps): ReactNode {
 
   return (
     <button
+      // Default to `type="button"` so a Button dropped inside a `<form>` does not
+      // submit it; a caller's own `type` (e.g. BriefPicker's submit) still wins,
+      // because this default sits before the props spread.
+      type="button"
       className={cn(
         "inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",

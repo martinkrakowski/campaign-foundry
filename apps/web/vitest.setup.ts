@@ -1,7 +1,22 @@
 import { afterEach, beforeEach, vi } from "vitest";
+import { configure } from "@testing-library/dom";
 import { cleanup } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { mockPipelineApi } from "@/__tests__/helpers";
+
+// @testing-library's default asyncUtilTimeout is 1000ms, which is not enough headroom
+// for files like brief-editor.test.tsx (298 waitFor calls) when the full 183-file suite
+// runs in parallel. This is a ceiling on how long a waitFor may poll, not a delay, so
+// raising it costs nothing when async updates resolve quickly. Do not "tidy" this away
+// as an arbitrary number.
+//
+// 3000, not 5000: it must stay safely below Vitest's 5000ms testTimeout, because
+// grid.test.tsx's `await screen.findByText("IMAGEN").catch(() => undefined)` grace wait
+// intentionally burns the full asyncUtilTimeout when the pill never renders. At 5000
+// that wait collides with the runner's own 5s test budget and the test is killed with
+// "Test timed out in 5000ms"; 3000 leaves ~2s of headroom for the rest of that test
+// under full-suite parallel load.
+configure({ asyncUtilTimeout: 3000 });
 
 // happy-dom v20 refuses to initialize localStorage without a file path, so swap in a
 // simple in-memory implementation (the run state persistence the app relies on).
