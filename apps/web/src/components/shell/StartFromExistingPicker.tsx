@@ -1,8 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { listBriefs, type BriefEntry } from "@/lib/briefs-api";
+import {
+  OptionTile,
+  PosterFrame,
+  PreviewPanel,
+  type PosterVariant,
+  type RatioOption,
+} from "@/components/ui";
 import type { CampaignMode } from "@/components/campaign/editor-state";
+import { modeDisplayName } from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
 
 /** What a chosen row hands the dialog: the source's id and the mode its copy inherits. */
@@ -11,15 +21,54 @@ export interface StartFromSource {
   readonly mode: CampaignMode;
 }
 
+/** The layout variants cycled across a brief card's frames, like `PosterStack`'s. */
+const VARIANTS: readonly PosterVariant[] = ["pA", "pB", "pC"];
+/** A brief card's preview frames are small enough that three fit the panel. */
+const FRAME_SIZE = 64;
+/** Every card in the rail is one width, so the frames line up across the row. */
+const CARD_WIDTH = "w-52";
+
+/** The brief's ratio axis narrowed to the domain's vocabulary, defensively —
+ * the store's JSON is untrusted, so a value outside the union cannot reach
+ * `PosterFrame`. Nothing known listed → every ratio, the planner's own default. */
+function briefRatios(brief: CampaignBrief): readonly RatioOption[] {
+  const requested = brief.variation?.axes?.ratio;
+  const known = requested?.filter((value): value is RatioOption =>
+    (RATIO_VALUES as readonly string[]).includes(value),
+  );
+  return known !== undefined && known.length > 0 ? known : RATIO_VALUES;
+}
+
+/** One brief card's picture: a frame per ratio at its true proportion. */
+function briefPreview(brief: CampaignBrief): ReactNode {
+  const ratios = briefRatios(brief);
+  return (
+    <PreviewPanel caption={messages.startFromRatioCaption(ratios)}>
+      <span className="flex items-center gap-2">
+        {ratios.map((ratio, index) => (
+          <PosterFrame
+            key={ratio}
+            ratio={ratio}
+            variant={VARIANTS[index % VARIANTS.length]}
+            size={FRAME_SIZE}
+          />
+        ))}
+      </span>
+    </PreviewPanel>
+  );
+}
+
 /**
- * W2 (D71) — "start from an existing campaign" inside the create dialog. Lists the
- * store's briefs with the row shape the brief picker uses (id · products ·
- * treatments · region) and hands a choice back as a selection, not a navigation.
- * The blank default row is the dialog's resting state: a blank create is the common
- * case, so selecting nothing is what the dialog opens with (the caller owns that
- * selection; this component only renders it). The row labels the brief by its id —
- * which *is* a slug — but no slug is ever derived or previewed for the new campaign
- * (D65).
+ * W2 (D71) — "start from an existing campaign" inside the create dialog, as a
+ * horizontal rail of `OptionTile`s (D93, the plan's G3): the blank card first —
+ * three dashed empty frames, the resting selection — then one card per brief
+ * with a miniature poster at each of its ratios. Each card's accessible name is
+ * exactly its value (the blank message, or the brief's id — which *is* a slug,
+ * though no slug is ever derived or previewed for the new campaign, D65), and
+ * the whole card is the one control: keyboard reachable in DOM order, the rail
+ * scrolls horizontally when the store is long. The meta line and the
+ * loading/empty/error states are the row list's, unchanged. The caller owns the
+ * selection; this component only renders it.
  */
 export function StartFromExistingPicker({
   selectedId,
@@ -64,39 +113,51 @@ export function StartFromExistingPicker({
     return <p className="p-4 text-[13px] text-text-muted">{messages.startFromExistingEmpty}</p>;
   }
   return (
-    <div className="max-h-56 divide-y divide-border overflow-auto rounded-lg border border-border">
-      <button
-        type="button"
-        aria-pressed={selectedId === null}
-        onClick={() => onSelect(null)}
-        className={`flex w-full flex-col items-start gap-0.5 px-4 py-3 text-left transition-colors hover:bg-surface-2 ${
-          selectedId === null ? "bg-surface-2" : ""
-        }`}
-      >
-        <span className="text-[13px] font-medium text-text-primary">{messages.startFromExistingBlank}</span>
-      </button>
+    // Symmetric padding (and matching scroll-padding) keeps a focused tile's
+    // ring unclipped: overflow-x:auto computes overflow-y to auto, which would
+    // clip ring-2 ring-offset-2 on every edge, including the first and last cards.
+    <div className="flex gap-2 overflow-x-auto p-2 scroll-p-2">
+      <div className={`${CARD_WIDTH} shrink-0`}>
+        <OptionTile
+          value={messages.startFromExistingBlank}
+          name={messages.startFromExistingBlank}
+          selected={selectedId === null}
+          onToggle={() => onSelect(null)}
+          preview={
+            <PreviewPanel caption={messages.startFromBlankCaption}>
+              <span className="flex items-center gap-2">
+                {RATIO_VALUES.map((ratio) => (
+                  <PosterFrame key={ratio} ratio={ratio} variant="pA" size={FRAME_SIZE} blank />
+                ))}
+              </span>
+            </PreviewPanel>
+          }
+        >
+          {null}
+        </OptionTile>
+      </div>
       {entries.map((entry) => {
         const id = entry.brief.id;
-        const selected = selectedId === id;
+        // An absent mode field means classic behaviour (the domain's own default).
+        const mode: CampaignMode = entry.brief.mode ?? "brief";
         return (
-          <button
-            key={id}
-            type="button"
-            aria-pressed={selected}
-            onClick={() => onSelect({ id, mode: entry.brief.mode ?? "brief" })}
-            className={`flex w-full flex-col items-start gap-0.5 px-4 py-3 text-left transition-colors hover:bg-surface-2 ${
-              selected ? "bg-surface-2" : ""
-            }`}
-          >
-            <span className="font-mono text-[13px] text-text-primary">{id}</span>
-            <span className="text-[11px] text-text-muted">
-              {messages.startFromRowMeta(
+          <div key={id} className={`${CARD_WIDTH} shrink-0`}>
+            <OptionTile
+              value={id}
+              name={id}
+              selected={selectedId === id}
+              onToggle={() => onSelect({ id, mode })}
+              tag={modeDisplayName(mode)}
+              meta={messages.startFromRowMeta(
                 entry.brief.products.length,
                 entry.brief.treatments?.length ?? 1,
                 entry.brief.targetRegion,
               )}
-            </span>
-          </button>
+              preview={briefPreview(entry.brief)}
+            >
+              {null}
+            </OptionTile>
+          </div>
         );
       })}
     </div>
