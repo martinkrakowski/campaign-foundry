@@ -2839,3 +2839,19 @@ G2/G3 consume `PosterFrame`/`PreviewPanel`/`PosterStack`/`ScrubBar` from the bar
   - Tag words are relation words, not format words (Q1): Uniform / Varied — the mockup's STILLS/CLIPS describe formats, not modes; captions take the plan's "one design" / "six variations" sense per the brief's wording.
   - Randomized's frame classification in tests keys on structure (circle → pB; ≥3 rounded rects → pC; else pA) because pA/pB CTA chips also carry `rx` — the first classifier draft misread pA as pC and was corrected before the green run.
 - **Verification:** full gate green (`yarn build && yarn typecheck && yarn lint && yarn lint:arch && yarn sync:check && yarn test:cov`), 100 % on all four counters; mutations run red→reverted: drop blurb (2 tests red), ignore compact (1 red), Randomized repeating one variant (1 red). The two pinned ModePanel assertions and the `CreateCampaignDialog` / `brief-editor` suites passed unedited.
+
+---
+
+## 2026-09-07 — G2 review remediation (PR #208)
+
+**Session:** 2026-09-07 — G2 remediation on `feat/g2`
+
+- **Mode:** Implementer
+- **Changes:**
+  - `ModePanel.test.tsx` — Classic's six frames now classify through the same `posterVariantOf` helper as Randomized and assert `variants.size === 1` (the old SVG-dimension check still stands; it could not tell one layout from three at a single ratio). The one-voice tag/blurb test gained the complementary claim the full-form test does not make: each tile must not carry the other mode's tag or blurb.
+  - `tailwind-alpha.test.ts` — `PREVIEW_FILES` four-file list replaced with a recursive text scan of `apps/web/src/components/` for `(fill|stroke|bg|text|border|ring|divide)-<token>/<alpha>`. Shrink-only `OFF_SCALE_ALLOWLIST` (empty: the scan found no pre-existing off-scale alphas).
+- **Decisions:**
+  - Item 2: unique assertion, not fold — cross-mode exclusion, so a copy-paste that puts both tags on both tiles fails only this test.
+  - Session-log append stays outside the owned set; `AGENTS.md` still mandates it.
+- **Verification:** mutations run red→reverted: Classic as `pA/pB/pC` at `9:16` (Classic one-variant assertion red; dimension check still green); `fill-text-muted/18` on `ModePanel.tsx` (alpha guard red).
+

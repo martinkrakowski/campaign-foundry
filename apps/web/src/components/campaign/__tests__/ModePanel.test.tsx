@@ -43,6 +43,17 @@ describe("ModePanel — the filled tiles (G2, F1/D93)", () => {
     return panel as HTMLElement;
   }
 
+  /**
+   * pB draws a round avatar (a circle); pC centres its image (a second rounded
+   * rect beyond the frame's own rounded border); pA is the remainder. Shared so
+   * Classic's "one design" and Randomized's "three variants" classify the same way.
+   */
+  function posterVariantOf(frame: Element): "pA" | "pB" | "pC" {
+    if (frame.querySelector("circle") !== null) return "pB";
+    const rounded = Array.from(frame.querySelectorAll("rect")).filter((rect) => rect.getAttribute("rx"));
+    return rounded.length >= 3 ? "pC" : "pA";
+  }
+
   test("in the full form, each tile carries a preview panel, a tag and a blurb", () => {
     render(<ModePanel mode="brief" onSetMode={() => {}} />);
     for (const [option, tag, blurb] of [
@@ -64,6 +75,13 @@ describe("ModePanel — the filled tiles (G2, F1/D93)", () => {
     expect(brief.textContent).toContain(messages.modeTileBlurbBrief);
     expect(variation.textContent).toContain(messages.modeTileTagVariation);
     expect(variation.textContent).toContain(messages.modeTileBlurbVariation);
+    // Unique vs the full-form test, which only checks each tile CONTAINS its
+    // own words: a copy-paste that puts both tags on both tiles still passes
+    // that test, and fails here.
+    expect(brief.textContent).not.toContain(messages.modeTileTagVariation);
+    expect(brief.textContent).not.toContain(messages.modeTileBlurbVariation);
+    expect(variation.textContent).not.toContain(messages.modeTileTagBrief);
+    expect(variation.textContent).not.toContain(messages.modeTileBlurbBrief);
   });
 
   test("Classic's panel holds six identical frames of one design, captioned", () => {
@@ -75,6 +93,8 @@ describe("ModePanel — the filled tiles (G2, F1/D93)", () => {
       Array.from(frames).map((frame) => `${frame.getAttribute("width")}x${frame.getAttribute("height")}`),
     );
     expect(shapes.size).toBe(1);
+    const variants = new Set(Array.from(frames).map(posterVariantOf));
+    expect(variants.size).toBe(1);
     const caption = Array.from(panel.querySelectorAll("span")).find((span) =>
       span.className.includes("font-mono"),
     );
@@ -86,16 +106,7 @@ describe("ModePanel — the filled tiles (G2, F1/D93)", () => {
     const panel = previewOf(screen.getByRole("button", { name: "variation" }));
     const frames = panel.querySelectorAll("svg");
     expect(frames).toHaveLength(6);
-    // pB draws a round avatar (a circle); pC centres its image (a second rounded
-    // rect beyond the frame's own rounded border); pA is the remainder. Classifying
-    // per frame pins all three variants present.
-    const variants = new Set(
-      Array.from(frames).map((frame) => {
-        if (frame.querySelector("circle") !== null) return "pB";
-        const rounded = Array.from(frame.querySelectorAll("rect")).filter((rect) => rect.getAttribute("rx"));
-        return rounded.length >= 3 ? "pC" : "pA";
-      }),
-    );
+    const variants = new Set(Array.from(frames).map(posterVariantOf));
     expect(variants.size).toBe(3);
     const shapes = new Set(
       Array.from(frames).map((frame) => `${frame.getAttribute("width")}x${frame.getAttribute("height")}`),

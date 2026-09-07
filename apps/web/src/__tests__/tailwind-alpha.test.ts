@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import postcss from 'postcss';
 import tailwindcss from 'tailwindcss';
@@ -132,24 +132,38 @@ describe('Tailwind container query variant (the preview rail)', () => {
   });
 });
 
-// G1 previews: a class-string assertion cannot tell a generated utility from a
-// dead one. `/18` is not on Tailwind's default opacity scale, so it emits
-// nothing and the image layer / scrub track would be blank (DESIGN.md:83).
-// This compiles every color-alpha class the four preview files actually write.
-const PREVIEW_FILES = [
-  'poster-frame.tsx',
-  'poster-stack.tsx',
-  'preview-panel.tsx',
-  'scrub-bar.tsx',
-] as const;
-const PREVIEW_DIR = join(__dirname, '../components/ui');
+// A class-string assertion cannot tell a generated utility from a dead one.
+// `/18` is not on Tailwind's default opacity scale, so it emits nothing
+// (DESIGN.md:83). Walk the component tree and compile every color-alpha class
+// it actually writes — G1's four files were the original net; every later lane
+// is in scope the same way. Text scan only; no parser.
+const COMPONENTS_DIR = join(__dirname, '../components');
 const COLOR_ALPHA =
-  /\b((?:fill|bg|text|stroke|border)-[a-z0-9-]+\/(?:\d+|\[[^\]]+\]))/g;
+  /\b((?:fill|stroke|bg|text|border|ring|divide)-[a-z0-9-]+\/(?:\d+|\[[^\]]+\]))/g;
 
-function previewAlphaClasses(): string[] {
+// Off-scale alphas outside G2 that this lane does not fix. The list may only
+// shrink — a stale entry is permission for a class that was already converted
+// to bracket form (kit-boundaries.test.ts). Empty: the scan found none.
+const OFF_SCALE_ALLOWLIST: Record<string, string> = {};
+
+function listComponentSources(dir: string): string[] {
+  const names: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === '__tests__') continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      names.push(...listComponentSources(full));
+    } else if (/\.(ts|tsx)$/.test(entry.name)) {
+      names.push(full);
+    }
+  }
+  return names;
+}
+
+function componentAlphaClasses(): string[] {
   const found = new Set<string>();
-  for (const file of PREVIEW_FILES) {
-    const source = readFileSync(join(PREVIEW_DIR, file), 'utf-8');
+  for (const file of listComponentSources(COMPONENTS_DIR)) {
+    const source = readFileSync(file, 'utf-8');
     for (const match of source.matchAll(COLOR_ALPHA)) {
       found.add(match[1]);
     }
@@ -161,15 +175,26 @@ function selectorOf(cls: string): string {
   return `.${cls.replace(/[^-_a-zA-Z0-9]/g, (ch) => `\\${ch}`)}`;
 }
 
-describe('G1 preview alpha utilities actually emit (DESIGN.md:83)', () => {
-  it('emits a real rule for every color-alpha class the four preview files use', async () => {
-    const classes = previewAlphaClasses();
+describe('component color-alpha utilities actually emit (DESIGN.md:83)', () => {
+  it('emits a real rule for every color-alpha class the component tree uses', async () => {
+    const classes = componentAlphaClasses().filter((cls) => !(cls in OFF_SCALE_ALLOWLIST));
     expect(classes.length).toBeGreaterThan(0);
     const css = await generateCss(classes);
     for (const cls of classes) {
       expect(css, `${cls} emits nothing — off-scale alphas need bracket form (e.g. /18 is not a scale key)`).toContain(
         selectorOf(cls),
       );
+    }
+  });
+
+  it('every off-scale allowlist entry still matches a class the tree still writes, each with a reason', () => {
+    const classes = new Set(componentAlphaClasses());
+    for (const [cls, reason] of Object.entries(OFF_SCALE_ALLOWLIST)) {
+      expect(reason.trim().length, `${cls} must carry a one-line reason`).toBeGreaterThan(0);
+      expect(
+        classes.has(cls),
+        `${cls} is no longer written — remove its allowlist entry (the list may only shrink)`,
+      ).toBe(true);
     }
   });
 });
