@@ -3602,3 +3602,57 @@ and the existing Identity assertions passed unedited throughout. PR #225 open ag
 - **Round 2:** formats-agree is bidirectional — union of `profile.formats` over listed platforms must contain every `preset.formats` entry. Mutation: add `"static"` to `short-video.formats`. Failed `every preset's formats agree with the profiles it lists` (`AssertionError: short-video offers "static" but none of its listed profiles package it`). D110 intact (static+motion under variation is legal). Reverted.
 - **Left open:**
   - Gate sequence unchanged: `sync:check` after commit if it refuses a dirty tree.
+
+## 2026-09-07 — Campaign type, wave A (T1 merged as #224)
+
+**Mode:** Orchestrator. Record written at merge time (stage 6).
+
+### What merged
+
+| Lane | PR | Commit | What |
+|---|---|---|---|
+| T1 | #224 | `fcbd718` | `CAMPAIGN_TYPES`, `CampaignBrief.type?`, `CAMPAIGN_TYPE_PRESETS`, `validateType`, `"type"` in the YAML key order (D108–D112) |
+
+**Review (grok-4.6 + Qodo + CodeRabbit).** Contract held; no PR-body claim refuted. Two fixes: the
+Distribution coverage guard was membership-only, so D111's "all seven" was locked only by a
+snapshot that goes stale in lockstep with the table (`8f0304a`); the format-agreement test was
+one-directional — a preset offering `static` over motion-only profiles passed (`f9e7d39`). Two
+Qodo suggestions refuted (exact error string is the contract; `ratio` is a single `CanvasRatio`).
+One Qodo bug **confirmed and sequenced**: the editor's `toBrief`/`fromBrief` drop `type` — T1 owns
+nothing under `apps/web`, so it is T2's brief, with "a freshly loaded typed brief is not dirty"
+added as an acceptance line because of it. The thread stays open until T2 is on `main`.
+
+### The orchestrator's own mutation misfired — twice, the same way
+
+Verifying `f9e7d39`, the orchestrator's first mutation searched for `"short-video"` and hit the
+**tuple at the top of the file**, so the edit landed on `social-post` and tripped the snapshot test
+instead of the bidirectional one. Green-looking evidence for the wrong claim. Re-run against the
+preset row itself, the bidirectional test failed by name (*"short-video offers static but none of
+its listed profiles package it"*). Same misfire mode as S3's `takeStashedStep()` — wrong call site —
+so the rule stands as written: **compiled, ran, and targets the path the test names.** Check the
+diff of the mutant, not just its exit code.
+
+### The merge script, sixth incident, a new mechanism
+
+#223 fixed *which check* the poll waits on. #224 exposed *which commit*: after the refresh push,
+`gh pr view --json headRefOid` still answered the previous SHA, whose runs had just been cancelled
+by our push — "not success" read as a failed PR while the real head was pending. **#226** polls the
+SHA the script itself pushed, and dies if the forge later reports a head that has ours as an
+ancestor (someone else pushed). Both scripts are now asking the question they mean to ask.
+
+### Also in this wave's window
+
+- **S2** (map into Identity, #225): first run silent 88 min and killed; second run shipped. Review
+  found one real gap — Identity never pins M2's Other-then-map path — remediation in flight. "Copied
+  not moved" refuted for the lane: its brief forbade the dialog; deletion is T3's, and the
+  duplication window until then is sequenced. Qodo's "clicking the selected DE hits EU" is
+  **confirmed kit behaviour** (`world-map.tsx:80-84`, the #215 trade-off), out of lane, recorded as a
+  kit follow-up: hit-test by the smallest containing footprint.
+- **W1** (wave-status core, from #219's plan) dispatched in parallel at the owner's request; first
+  run silent 12 min and killed, second run in flight. Plan order changed from "T3 ‖ T1" to
+  "core first, then server ‖ instrumentation" because the instrumentation lane's tests need the
+  vitest project the core lane owns — two lanes never own `vitest.config.ts` at once.
+- **A 0-byte log is a hang, not buffering**: every healthy lane this session flushed within a
+  minute. Kill after ~15 minutes of silence; the dispatch wait accepts the `EXIT 143` a kill writes.
+
+**Next:** T2 (seam + preset applied once) is dispatched; T3 ‖ T4 follow; then P1 alone.
