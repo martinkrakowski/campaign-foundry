@@ -3517,3 +3517,37 @@ wrong path. The rule is now: *compiled, ran, and targets the path the test names
 
 **Left open:** whether `paid-social` earns its tile; D114's byte-identical requirement may prove
 impossible on `16:9`, which would need the owner's decision before any display size renders.
+
+---
+
+## 2026-09-07 — wave B, lane S2: the map moves to Identity (#225)
+
+**Re-dispatch.** The lane's first run hung for 88 minutes and was killed with no commit; this run
+started from `feat/s2` reset to `main` at `7727cbc`. Per the re-dispatch note, the dialog's map
+wiring was **re-read at `CreateCampaignDialog.tsx:402-416`** rather than trusted from memory —
+#217 had changed the call args and the baton name, though the map block itself had survived intact.
+
+**The change.** `IdentitySection` renders `WorldMap` above the region chips, wired exactly as M2
+wired it in the dialog — same `REGION_FOOTPRINTS`, same `REGION_OPTIONS`-gated `value` (a custom
+`Other…` paints nothing), `onSelect` dispatching the same patch the chips do, `labelFor` and
+`fallbackHint` from `messages.ts`. The section now takes `compact` and threads it through
+`SectionShell` (the `PolicySection`/`OutputSection` idiom); compact renders the chips alone (F4).
+The chips stay the accessible and keyboard control (D94): the SVG is `aria-hidden`,
+`focusable="false"`, and adds no focusable element; the section adds no `role="status"`.
+
+**The one test-shape discovery.** The dialog's map tests get their two directions for free — the
+dialog owns its state — but `IdentitySection` is controlled, so a mock `dispatch` proves the
+dispatch and nothing else. The two-direction tests dispatch through `editorReducer` and rerender;
+the first run of the suite proved the point by failing exactly the three assertions a static state
+cannot satisfy.
+
+**Deviations (both the expected shape).** No strings appended to `messages.ts` — the three verified
+strings were reused, so the S2 block never gets written and the S1/S4 seam is untouched. No
+`BriefEditor` change — it does not render Identity in the sidebar today; the `compact` treatment
+now exists for wherever Identity is placed compact.
+
+**Mutations, each compiled, ran, red, reverted:** disconnected `onSelect` → map→chip test red;
+constant `value={null}` → chip→map test red; map rendered unconditionally → compact test red.
+
+**Gate:** build / typecheck / lint / lint:arch / sync:check / test:cov green, 100 % ×4. `sections.test.tsx`
+and the existing Identity assertions passed unedited throughout. PR #225 open against `main`, not merged.
