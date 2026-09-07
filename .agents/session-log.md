@@ -2625,6 +2625,28 @@ plan's §6.5 is still unanswered.
 - **Left open:** wave 2 (W1, the dialog) and wave 3 (W2(a), the discard guard) are specified and
   undispatched. Neither has been started; both need a fresh go-ahead.
 
+## 2026-09-07 — Wave 2, lane B2: de-flake brief-editor via asyncUtilTimeout (PR #202)
+
+- **Change (1 file, `apps/web/vitest.setup.ts`):** `configure({ asyncUtilTimeout: 3000 })`
+  from `@testing-library/dom`, with a why-comment. No test files touched; no retries; no
+  `testTimeout` change.
+
+- **Deviation from the brief (documented in the PR):** the brief mandated **5000**; shipped
+  **3000**. At 5000, `grid.test.tsx:328`'s `findByText("IMAGEN").catch(() => undefined)` grace
+  wait — which intentionally burns the full `asyncUtilTimeout` when the pill never renders —
+  collides with Vitest's own 5000ms `testTimeout` and the test is killed
+  (`Error: Test timed out in 5000ms`). Verified: 5000 failed that test in every configuration
+  (full suite ×2, file alone, single test) and reverting fixed it; 3000 passes with ~2s
+  headroom. Lesson for future knobs: **`asyncUtilTimeout` must stay meaningfully below
+  `testTimeout`** because of that grace-wait idiom. If 5000 is still wanted, grid.test.tsx:328
+  needs an explicitly bounded wait first (out of B2's scope).
+
+- **Results:** baseline `yarn test:cov` 36.3s wall; post-change runs 37.8s and 36.0s —
+  delta within run-to-run noise, 100% on all four coverage counters in all three runs
+  (183 files / 3127 tests). All gates green post-commit (`build`, `typecheck`, `lint`,
+  `lint:arch`, `sync:check`).
+
+- **PR:** #202 against `main`, **not merged** (per lane instructions).
 ## 2026-09-07 — Lane B1: Button defaults to type=button (branch feat/b1)
 
 **Session:** 2026-09-07 — lane B1 of wave 2: the default-type fix recorded by wave 1
