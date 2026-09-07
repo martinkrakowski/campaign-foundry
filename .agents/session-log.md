@@ -3236,3 +3236,42 @@ one and retired the other. Not waste — the kit components are unchanged — bu
 
 **Left open:** whether `layer-rules.yaml` gains a presentation layer or `packages/ui` gets a written
 exemption (D100's real question); **D95** (multi-region) unchanged.
+
+## 2026-09-07 — The wave status server (plan)
+
+**Mode:** Architect. The owner asked whether a local web application could show the exact status,
+logs and telemetry of each lane and wave as the pipeline runs.
+
+**The motivating incident, from this session.** Lane S2's log sat at **0 bytes for 43 minutes**
+because `opencode` buffers. Deciding whether it was alive or dead took four commands, and the log
+alone could not settle it — a lane working silently and a lane that died at startup look identical.
+The dispatch script already records the mirror-image trap in its own comment: a lane that dies
+immediately writes its `EXIT` marker instantly, so a marker-only wait returns at once and reads as
+success.
+
+**The finding that shapes the plan.** Almost nothing worth watching is derivable from the
+filesystem. Log sizes, `EXIT` markers, PR numbers and check conclusions are free; **which stage a
+lane is in, how many findings were fixed versus refuted, and whether a mutation actually bit exist
+only as orchestrator prose in a chat transcript.** This session ran five distinct remediation rounds
+across two waves and none of it is recorded anywhere machine-readable.
+
+So the plan's spine (**D103**) is that the orchestrator *emits* a JSON event per stage transition and
+the server merges that with derived facts — and **where the two disagree the page shows both**,
+rather than resolving it. That contradiction is the pipeline's most valuable signal: it has caught a
+false success report twice in this session.
+
+**Decisions proposed:** D102 (`tools/`, outside the workspaces but inside the 100 % test gate —
+accepting that a broken dev tool will block a product PR), D103 (emit, do not infer), D104 (no new
+dependency: `node:http`, `tsx`, one hand-written page, no build step), D105 (bind `127.0.0.1:4317`
+and refuse 3000/3001 **in code**, since the rule has been in `AGENTS.md` all along and the port is
+still worth guarding), D106 (read-only — an observability tool that can act becomes a second control
+plane).
+
+**Recorded against my own likely failure:** T1 (the pure core) and T2 (the server) are self-contained
+and satisfying; **T3 (instrumentation) is the actual deliverable.** Shipping the display and
+deferring the emission points is precisely how three waves' records went unwritten earlier today
+until the owner noticed. §7 of the plan says so in those words.
+
+**Left open:** whether `tools/` gating product PRs proves intolerable (the fix would be a separate CI
+job, not an exemption); whether the event log should outlive `/tmp`; and whether a wave wants a
+timeline rather than a table.
