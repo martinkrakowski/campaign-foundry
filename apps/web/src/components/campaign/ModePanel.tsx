@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { AxisCard } from "./axis-card";
+import { OptionTile } from "@/components/ui";
 import { modeDisplayName } from "@/components/campaign/display-names";
 import { MODE_OPTIONS, type CampaignMode } from "@/components/campaign/editor-state";
 
@@ -90,10 +90,10 @@ function ModeGlyph({ scattered }: { scattered: boolean }): ReactNode {
 }
 
 /**
- * The mode switch as two pictures at the top of the sidebar (D4/U1): an AxisCard per
- * mode, its raw value (`brief` / `variation`) the whole accessible name and its caption
- * reading Classic / Randomized. Switching mode stays non-destructive (D10) — the
- * cards only dispatch `setMode`, exactly as the header buttons they replace did.
+ * The mode switch as two pictures at the top of the sidebar (D4/U1): an OptionTile per
+ * mode, its raw value (`brief` / `variation`) the whole accessible name and its visible
+ * name reading Classic / Randomized. Switching mode stays non-destructive (D10) — the
+ * tiles only dispatch `setMode`, exactly as the header buttons they replace did.
  */
 export function ModePanel({
   mode,
@@ -105,15 +105,15 @@ export function ModePanel({
   return (
     <div className="grid grid-cols-2 gap-2">
       {MODE_OPTIONS.map((option) => (
-        <AxisCard
+        <OptionTile
           key={option}
           value={option}
+          name={modeDisplayName(option)}
           selected={mode === option}
           onToggle={(value) => onSetMode(value as CampaignMode)}
-          meta={modeDisplayName(option)}
         >
           <ModeGlyph scattered={option === "variation"} />
-        </AxisCard>
+        </OptionTile>
       ))}
     </div>
   );

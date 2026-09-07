@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Button, ChipGroup, DialogBody, DialogFoot, DialogHead, DialogShell, Input } from "@/components/ui";
-import { ModePanel } from "@/components/ui/mode-panel";
+import { ModePanel } from "@/components/campaign/ModePanel";
 import { Field, REGION_OPTIONS } from "@/components/campaign/sections/IdentitySection";
 import { stashStep } from "@/lib/use-step-navigation";
 import { createCampaign } from "@/lib/create-campaign";

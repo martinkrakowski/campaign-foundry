@@ -1,7 +1,7 @@
 import { describe, test, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ModePanel } from "../mode-panel";
+import { ModePanel } from "../ModePanel";
 
 describe("ModePanel", () => {
   test("each mode card captions itself with its display name (D4)", () => {
