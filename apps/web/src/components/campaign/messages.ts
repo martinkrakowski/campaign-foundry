@@ -1026,3 +1026,18 @@ export function startFromRatioCaption(ratios: readonly string[]): string {
   const count = ratios.length;
   return `${count} ${count === 1 ? "ratio" : "ratios"}`;
 }
+// G2 — mode tiles
+
+/**
+ * The mode tile's classification word — the pill beside the name (the mockup's
+ * tag). Not format words (the mockup's STILLS / CLIPS lie about a mode): the
+ * honest pair is how the set relates to the design.
+ */
+export const modeTileTagBrief = "Uniform";
+export const modeTileTagVariation = "Varied";
+/** The mode tile's one-sentence body: what the mode produces. */
+export const modeTileBlurbBrief = "One design for the whole set — every creative matches.";
+export const modeTileBlurbVariation = "A set of creatives, each a different take on the same brief.";
+/** The mode tile's preview panel caption, in its bottom-right corner. */
+export const modeTileCaptionBrief = "one design";
+export const modeTileCaptionVariation = "six variations";

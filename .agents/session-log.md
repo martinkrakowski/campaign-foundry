@@ -2771,6 +2771,50 @@ green.
 
 **Left open:** D95; the tag word per mode; whether `EU = EUR + SCAN` is acceptable at picker grain;
 whether the brief editor's Identity step gets the map too.
+## 2026-09-07 — wave A, lane M1: the world map in the kit (PR #207)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `ui/geo/` (new): the mockup's map geometry ported verbatim — `chaikin.ts`
+    (`chaikin`, `polyPath`, `Pt`), `pip.ts`, `polygons.ts` (all constants + the three
+    hubs), `footprints.ts` (`REGION_FOOTPRINTS` in `REGION_OPTIONS` order, `dotMatrix`,
+    graticule, `centroid`), unit-tested against the ported numbers.
+  - `ui/world-map.tsx` (new): single-select `WorldMap`, `aria-hidden` SVG with no
+    focusable descendant (D94), dot-matrix reveal as a one-shot transition (D96), no
+    ping/loops/arcs. `ui/region-chip.tsx` (new): chip with state dot, name = label.
+  - `ui/index.ts`: one `// M1 — the world map` block appended; nothing else touched.
+  - PR #207 → `main` (feat/m1 @ 82931ea); not merged. Full gate green; 100 % on all
+    four coverage counters; six mutations applied and each caught.
+- **Decisions:**
+  - F5's Germany and contiguous-US polygons drawn as 9- and 10-anchor lists on the
+    mockup's 960×500 grid; every anchor `pip`-verified against its parent by test.
+  - `DE`/`UK` hubs derived by `centroid()` (mean of anchors) rather than hardcoded.
+  - Polygon constants stay internal to `geo/` — the barrel exports the footprint
+    table and the geo functions, not the 24 landmasses.
+  - Dots computed in one `useMemo` per `footprints` prop so hover re-renders are cheap.
+- **Left open:**
+  - D95 (multi-select semantics) — `multiple`/arcs land with it, per the plan.
+  - M2 wires the map + chips into `01 · Targeting`; `Other…` clears the map.
+  - §6's open questions (EU grain; the brief editor's Identity step) untouched.
+
+## 2026-09-07 — M1 review remediation (PR #207)
+
+- **Mode:** Implementer (remediation)
+- **Changes:**
+  - `world-map.tsx` — selected footprint paints last; hub dot only when selected;
+    dot reveal `motion-safe:` + `pointerEvents="none"`; required `labelFor` for hub
+    text and caption (kit no longer owns copy).
+  - `geo/footprints.ts` — `label` removed from `Footprint` / `REGION_FOOTPRINTS`.
+  - `geo/polygons.ts` — `US` gains `(252,92)` south of `NA`'s Hudson-Bay notch;
+    ported constants otherwise byte-identical.
+  - Tests: paint-order + exclusive selected fill; no hub when nothing selected;
+    motion-safe class tokens; `labelFor` hub text; edge-sampled DE⊂EUR / US⊂NA;
+    unknown `Other…` paints nothing; `fallbackHint` sits outside the `aria-hidden` SVG.
+- **Decisions:**
+  - Item 4 corrects the plan's §2.3 `label` column — that was the plan's defect
+    against its own §4 rule (every new string in `messages.ts`; no literals in the kit).
+  - PR-Agent `aria-live` on the hover caption remains refused (D94 / D91).
+- **Left open:** same as the original M1 entry (D95; M2 wiring; §6).
 
 ## 2026-09-07 — G1: the kit previews (wave A)
 
@@ -2872,3 +2916,124 @@ G2/G3 consume `PosterFrame`/`PreviewPanel`/`PosterStack`/`ScrubBar` from the bar
   - Ownership this round extends to the kit; the call site is unedited.
 - **Verification:** full gate green (`build`, `typecheck`, `lint`, `lint:arch`, `test:cov` — 3189 passed, 100 % ×4). Mutation: strip `truncate` / `min-w-0` / `title` from the name span → the new test fails on `truncate`. Restored. Regression surface unedited and green.
 - **Left open:** kit follow-up: skip `OptionTile`'s children wrapper when `children` is nullish.
+## 2026-09-07 — G2: the mode tiles, filled (this wave B lane)
+
+**Session:** 2026-09-07 — G2 on `feat/g2` (wave B, base `2448b66`)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `campaign/ModePanel.tsx` — each mode now fills every `OptionTile` slot (F1/D93): `preview` is a `PreviewPanel` (caption bottom-right) holding Classic's tidy 3×2 of six identical `PosterFrame`s (9:16, pA) and Randomized's six frames cycling pA/pB/pC across all three ratios; `tag` = Uniform/Varied; `blurb` per mode; `meta` unchanged (`modeDisplayName`); the raw value stays the visible and accessible name. New `compact` prop (SectionShell idiom): no preview, no tag, no blurb — the glyph-only tile the sidebar has today.
+  - `campaign/messages.ts` — appended the `// G2 — mode tiles` block: tags, blurbs, captions as plain exported consts (jargon-gate scanned; no formatters, no branches).
+  - `campaign/BriefEditor.tsx` — the one `:749` render line now passes `compact`; the dialog's `03 · Mode` renders the full form.
+  - `__tests__/ModePanel.test.tsx` — six appended tests (existing three untouched): full-form slots per tile; tag/blurb from messages; Classic six identical frames + caption; Randomized six frames classified to three variants and three shapes + caption; compact arm (no panel/tag/blurb, glyph present); no `animate-*` on anything the previews render.
+- **Decisions:**
+  - Tag words are relation words, not format words (Q1): Uniform / Varied — the mockup's STILLS/CLIPS describe formats, not modes; captions take the plan's "one design" / "six variations" sense per the brief's wording.
+  - Randomized's frame classification in tests keys on structure (circle → pB; ≥3 rounded rects → pC; else pA) because pA/pB CTA chips also carry `rx` — the first classifier draft misread pA as pC and was corrected before the green run.
+- **Verification:** full gate green (`yarn build && yarn typecheck && yarn lint && yarn lint:arch && yarn sync:check && yarn test:cov`), 100 % on all four counters; mutations run red→reverted: drop blurb (2 tests red), ignore compact (1 red), Randomized repeating one variant (1 red). The two pinned ModePanel assertions and the `CreateCampaignDialog` / `brief-editor` suites passed unedited.
+
+---
+
+## 2026-09-07 — G2 review remediation (PR #208)
+
+**Session:** 2026-09-07 — G2 remediation on `feat/g2`
+
+- **Mode:** Implementer
+- **Changes:**
+  - `ModePanel.test.tsx` — Classic's six frames now classify through the same `posterVariantOf` helper as Randomized and assert `variants.size === 1` (the old SVG-dimension check still stands; it could not tell one layout from three at a single ratio). The one-voice tag/blurb test gained the complementary claim the full-form test does not make: each tile must not carry the other mode's tag or blurb.
+  - `tailwind-alpha.test.ts` — `PREVIEW_FILES` four-file list replaced with a recursive text scan of `apps/web/src/components/` for `(fill|stroke|bg|text|border|ring|divide)-<token>/<alpha>`. Shrink-only `OFF_SCALE_ALLOWLIST` (empty: the scan found no pre-existing off-scale alphas).
+- **Decisions:**
+  - Item 2: unique assertion, not fold — cross-mode exclusion, so a copy-paste that puts both tags on both tiles fails only this test.
+  - Session-log append stays outside the owned set; `AGENTS.md` still mandates it.
+- **Verification:** mutations run red→reverted: Classic as `pA/pB/pC` at `9:16` (Classic one-variant assertion red; dimension check still green); `fill-text-muted/18` on `ModePanel.tsx` (alpha guard red).
+
+---
+
+## 2026-09-07 — G2 review remediation round 2 (PR #208)
+
+**Session:** 2026-09-07 — G2 remediation round 2 on `feat/g2`
+
+- **Mode:** Implementer
+- **Changes:**
+  - `tailwind-alpha.test.ts` — `COLOR_ALPHA` now requires a token boundary (`(?![\w-])` after the opacity digits and after the `]` of the bracket form). A stem scan then fails if the next source character is still `[\w-]`, so a trailing typo cannot compile the valid prefix while the real class emits nothing.
+  - `ModePanel.tsx` — Classic and Randomized share a `FrameCell` wrapper: `min-w-0 max-w-full [&>svg]:h-auto [&>svg]:max-w-full`. Frames scale to the grid cell rather than overflowing a ~46 px column on a 360 px viewport. No overflow-x scroller.
+  - `ModePanel.test.tsx` — appended a class assertion on the wrapper (happy-dom performs no layout). Existing assertions unedited.
+- **Decisions:**
+  - Max-width on the frame wrapper, not a smaller `PREVIEW_SIZE` at a breakpoint: it scales at every width instead of picking another magic number that still overflows between breakpoints.
+  - Trailing-typo detection is a next-char check on the unbounded stem, not a `[\w-]+` group — that group backtracks into the opacity digits (`/80` → `/8`+`0`).
+  - PR-Agent's two refuted items (panel located by `div.bg-background`; frames classified by SVG shape) stay refused.
+- **Verification:** mutations run red→reverted: `fill-text-muted/[0.18]xyz` on `FrameCell` (alpha guard red); wrapper stripped of `max-w-full` (frame-cap assertion red).
+
+## 2026-09-07 — Waves 2, 3 and A, orchestrated (the records this session owed)
+
+**Mode:** Orchestrator. Written late, in one entry, after the owner observed that the orchestrator
+had stopped closing out its waves. Waves 2, 3 and A each merged without a wave record; only the
+lanes' own entries existed. The deferral is recorded here rather than quietly backfilled, because
+"I'll put it in the session log" was said four times and not done — the failure is the pattern, not
+the missing paragraph.
+
+### What merged
+
+| Wave | Lane | PR | Commit |
+|---|---|---|---|
+| 2 | B1 — `Button` defaults to `type="button"` | #201 | `dfd8fba` |
+| 2 | B2 — `asyncUtilTimeout` 3000 | #202 | `17755cb` |
+| 2 | W1 — the create dialog, recomposed | #203 | `c9a0505` |
+| 3 | W2(a) — the inline discard guard | #204 | `3419b48` |
+| — | the graphics + world-map plan | #205 | `0b63d70` |
+| A | G1 — the kit previews | #206 | `2448b66` |
+| A | M1 — the world map in the kit | #207 | `404be17` |
+
+### What the review layer bought, counted
+
+Across waves 2, 3 and A: **31 findings fixed, 9 refuted with mechanisms.** Of the 31, **fourteen
+were tests that could not fail against the defect they named** — the vertex-only polygon containment
+(an edge left `NA` while every anchor passed), G1's dim-pinning test that never mounted a preview,
+`chaikin`'s shallow-copied mutation guard, the unpinned `fallbackHint`, the exactly-one selection
+assertion that never checked the others, `blank` untested on two variants, the missing unknown-value
+case, the head-close deviation, the `[hidden]` Tab-cycle gap, the unpinned guard copy, and the
+jargon gate's blindness to formatters (three separate violations). **Every gate was green and
+coverage was 100 % on all four counters before each of these was found.**
+
+Three defects would have been visible on first open: the map's paint order (selecting `GLOBAL` made
+the whole map read *unselected*), `PosterStack` off-centre at every non-square ratio, and — the one
+that mattered most — `fill-text-muted/18`, which emits no CSS at all, so the poster frames' largest
+layer rendered invisible. That last one was **the orchestrator's brief**, copied from the mockup's
+`rgb(…)/.18` without checking DESIGN.md:83.
+
+### Refuted, with reasons
+
+Three PR-Agent accessibility suggestions that would each have added a second live region against
+D91 and DESIGN.md §6.5; `useLayoutEffect` for guard focus (refs attach at commit, before effects);
+`animate-check-pop` "may loop" (it is a one-shot and `globals-motion.test.ts` asserts so);
+per-child `aria-hidden` under an already-hidden wrapper; an explicit `aria-label` duplicating a
+name the DOM already composes; `aria-live` on the map's hover caption (the map is `aria-hidden` by
+D94 — a screen-reader user never hovers it); and defaulting `Button`'s `type` inside K1 (29 call
+sites, not that lane's file — it became B1 instead).
+
+### Corrections to the plans, from review not planning
+
+- **`2026-09-07_graphics-and-the-world-map.md` §2.3 put a `label` column in the footprint data.**
+  That contradicts the same plan's §4 rule that no string literal lives in the kit. The lane built
+  what the plan said and shipped `"Germany"` / `"Europe"` inside `ui/`. Corrected on #207:
+  `labelFor(value)` is a required prop, the consumer supplies copy from `messages.ts`.
+- **The G1 brief specified `text-muted/18`**, an off-scale alpha that Tailwind never emits.
+  Corrected on #206, and guarded by a new `tailwind-alpha.test.ts` that compiles the classes.
+  Its own blind spot — a hard-coded file list — is being closed on #208.
+
+### Tooling defects found while driving the pipeline
+
+- **`scripts/merge-prs.sh` reads "no checks reported" as CHECKS FAILED.** When the refresh push
+  outruns CI registration, the merge aborts on a race. Cost one cycle on #206. It should poll for
+  checks to *appear* before watching them.
+- **`APPEND_ONLY` omits the two files concurrent lanes always share** —
+  `apps/web/src/components/ui/index.ts` and `apps/web/src/components/campaign/messages.ts`. Worked
+  around by passing an extended `APPEND_ONLY` env var at every merge; it belongs in the default.
+- **Two reviewers left throwaway worktrees** under `/private/tmp`; both removed by hand. The review
+  brief now says to clean up, but nothing enforces it.
+
+### Left open
+
+W2(b) — the resume two-way moving inline — stays deferred pending **D84**, by the owner's own
+confirmed decision. **D95** (what more than one region *means* for generation) is open and is why
+the map ships single-select. Wave B (#208 G2, #209 G3) is remediating; wave C (M2, the map into the
+dialog) is staged.
