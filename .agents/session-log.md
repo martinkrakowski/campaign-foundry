@@ -3520,6 +3520,40 @@ impossible on `16:9`, which would need the owner's decision before any display s
 
 ---
 
+## 2026-09-07 — wave B, lane S2: the map moves to Identity (#225)
+
+**Re-dispatch.** The lane's first run hung for 88 minutes and was killed with no commit; this run
+started from `feat/s2` reset to `main` at `7727cbc`. Per the re-dispatch note, the dialog's map
+wiring was **re-read at `CreateCampaignDialog.tsx:402-416`** rather than trusted from memory —
+#217 had changed the call args and the baton name, though the map block itself had survived intact.
+
+**The change.** `IdentitySection` renders `WorldMap` above the region chips, wired exactly as M2
+wired it in the dialog — same `REGION_FOOTPRINTS`, same `REGION_OPTIONS`-gated `value` (a custom
+`Other…` paints nothing), `onSelect` dispatching the same patch the chips do, `labelFor` and
+`fallbackHint` from `messages.ts`. The section now takes `compact` and threads it through
+`SectionShell` (the `PolicySection`/`OutputSection` idiom); compact renders the chips alone (F4).
+The chips stay the accessible and keyboard control (D94): the SVG is `aria-hidden`,
+`focusable="false"`, and adds no focusable element; the section adds no `role="status"`.
+
+**The one test-shape discovery.** The dialog's map tests get their two directions for free — the
+dialog owns its state — but `IdentitySection` is controlled, so a mock `dispatch` proves the
+dispatch and nothing else. The two-direction tests dispatch through `editorReducer` and rerender;
+the first run of the suite proved the point by failing exactly the three assertions a static state
+cannot satisfy.
+
+**Deviations (both the expected shape).** No strings appended to `messages.ts` — the three verified
+strings were reused, so the S2 block never gets written and the S1/S4 seam is untouched. No
+`BriefEditor` change — it does not render Identity in the sidebar today; the `compact` treatment
+now exists for wherever Identity is placed compact.
+
+**Mutations, each compiled, ran, red, reverted:** disconnected `onSelect` → map→chip test red;
+constant `value={null}` → chip→map test red; map rendered unconditionally → compact test red.
+
+**Gate:** build / typecheck / lint / lint:arch / sync:check / test:cov green, 100 % ×4. `sections.test.tsx`
+and the existing Identity assertions passed unedited throughout. PR #225 open against `main`, not merged.
+
+**Remediation.** Identity never proved the M2 Other-then-map path (dialog:1003). Ported onto IdentitySection with the reducer loop; mutation (ChipGroup `customOpen` effect disabled) failed `a map pick after Other… selects that chip and closes the custom input` (DE chip not pressed); reverted. Gate green. Not merged.
+**Remediation, round 2.** WorldMap rebuilt on every IdentitySection render (`onSelect` inline). `useCallback`/`useMemo` so the map element is built once per displayed region; render-count test (audience ×3 stays at 1, region patch → 2); drop-`useMemo` mutation failed at 4 calls. brief-editor.test.tsx 70.00s → 56.26s locally (166 passed). Gate green. Not merged.
 ## 2026-09-07 — lane T1, the campaign type (wave A)
 
 - **Mode:** Implementer
@@ -3618,3 +3652,76 @@ impossible on `16:9`, which would need the owner's decision before any display s
   - Gate sequence as T1 recorded it: pre-commit lint/typecheck/test:cov; `sync:check` after commit
     (it refuses a dirty tree).
 - **Remediation:** D108 display word is *Short-form video*; both-fields seed rejection pinned; typeExplicit gated on a valid stored type; editor-level D112 reads type; paid-social not-dirty split from the round-trip.
+## 2026-09-07 — Campaign type, wave A (T1 merged as #224)
+
+**Mode:** Orchestrator. Record written at merge time (stage 6).
+
+### What merged
+
+| Lane | PR | Commit | What |
+|---|---|---|---|
+| T1 | #224 | `fcbd718` | `CAMPAIGN_TYPES`, `CampaignBrief.type?`, `CAMPAIGN_TYPE_PRESETS`, `validateType`, `"type"` in the YAML key order (D108–D112) |
+
+**Review (grok-4.6 + Qodo + CodeRabbit).** Contract held; no PR-body claim refuted. Two fixes: the
+Distribution coverage guard was membership-only, so D111's "all seven" was locked only by a
+snapshot that goes stale in lockstep with the table (`8f0304a`); the format-agreement test was
+one-directional — a preset offering `static` over motion-only profiles passed (`f9e7d39`). Two
+Qodo suggestions refuted (exact error string is the contract; `ratio` is a single `CanvasRatio`).
+One Qodo bug **confirmed and sequenced**: the editor's `toBrief`/`fromBrief` drop `type` — T1 owns
+nothing under `apps/web`, so it is T2's brief, with "a freshly loaded typed brief is not dirty"
+added as an acceptance line because of it. The thread stays open until T2 is on `main`.
+
+### The orchestrator's own mutation misfired — twice, the same way
+
+Verifying `f9e7d39`, the orchestrator's first mutation searched for `"short-video"` and hit the
+**tuple at the top of the file**, so the edit landed on `social-post` and tripped the snapshot test
+instead of the bidirectional one. Green-looking evidence for the wrong claim. Re-run against the
+preset row itself, the bidirectional test failed by name (*"short-video offers static but none of
+its listed profiles package it"*). Same misfire mode as S3's `takeStashedStep()` — wrong call site —
+so the rule stands as written: **compiled, ran, and targets the path the test names.** Check the
+diff of the mutant, not just its exit code.
+
+### The merge script, sixth incident, a new mechanism
+
+#223 fixed *which check* the poll waits on. #224 exposed *which commit*: after the refresh push,
+`gh pr view --json headRefOid` still answered the previous SHA, whose runs had just been cancelled
+by our push — "not success" read as a failed PR while the real head was pending. **#226** polls the
+SHA the script itself pushed, and dies if the forge later reports a head that has ours as an
+ancestor (someone else pushed). Both scripts are now asking the question they mean to ask.
+
+### Also in this wave's window
+
+- **S2** (map into Identity, #225): first run silent 88 min and killed; second run shipped. Review
+  found one real gap — Identity never pins M2's Other-then-map path — remediation in flight. "Copied
+  not moved" refuted for the lane: its brief forbade the dialog; deletion is T3's, and the
+  duplication window until then is sequenced. Qodo's "clicking the selected DE hits EU" is
+  **confirmed kit behaviour** (`world-map.tsx:80-84`, the #215 trade-off), out of lane, recorded as a
+  kit follow-up: hit-test by the smallest containing footprint.
+- **W1** (wave-status core, from #219's plan) dispatched in parallel at the owner's request; first
+  run silent 12 min and killed, second run in flight. Plan order changed from "T3 ‖ T1" to
+  "core first, then server ‖ instrumentation" because the instrumentation lane's tests need the
+  vitest project the core lane owns — two lanes never own `vitest.config.ts` at once.
+- **A 0-byte log is a hang, not buffering**: every healthy lane this session flushed within a
+  minute. Kill after ~15 minutes of silence; the dispatch wait accepts the `EXIT 143` a kill writes.
+
+**Next:** T2 (seam + preset applied once) is dispatched; T3 ‖ T4 follow; then P1 alone.
+
+---
+
+## 2026-09-07 — W1 wave-status core (#229)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `vitest.config.ts`: one `tools` project after `web`; `tools/**/*.ts` in coverage include.
+  - `tools/wave-status/lib/{types,events,derive,merge}.ts` and tests: `readEvents`, `deriveLane`, `mergeStatus`.
+  - `tools/wave-status/tsconfig.json`: strict, `noEmit`, extends `tsconfig.base.json`.
+- **Decisions:**
+  - Hang disagreement requires a pgrep observation; events-only `alive: false` is "nobody looked".
+  - "no PR found" fires when implement settled and neither the event nor the observation has a PR.
+  - Gate exit is the trailing `GATE EXIT n` or `EXIT n` line; last `^EXIT n$` in the lane log wins.
+- **Mutations:** M1–M5 compiled, ran, failed the named test, reverted. Recorded in #229.
+- **Left open:**
+  - W2 (server + `AGENTS.md` section) and W3 (emit helper + skill). This lane binds nothing.
+  - `yarn typecheck` is turbo-per-workspace; `tools/` is typechecked by vitest and `tsc -p tools/wave-status --noEmit`.
+- **Remediation:** five verified findings (gate-exit, observed no-PR, closed-unmerged, EXIT trailing space, istanbul indent); four mutations compiled, ran, failed the named test, reverted. PR-Agent trim/Set refuted (D103).
+
