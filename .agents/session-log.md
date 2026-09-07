@@ -3469,5 +3469,6 @@ impossible on `16:9`, which would need the owner's decision before any display s
 - **Mutation:** remove `"x"` from `paid-social.platforms` in `campaign-types.ts`. Compiled, ran,
   failed `paid-social lists every PLATFORM_PROFILES id` (`AssertionError: paid-social missing "x"`).
   Reverted.
+- **Round 2:** formats-agree is bidirectional — union of `profile.formats` over listed platforms must contain every `preset.formats` entry. Mutation: add `"static"` to `short-video.formats`. Failed `every preset's formats agree with the profiles it lists` (`AssertionError: short-video offers "static" but none of its listed profiles package it`). D110 intact (static+motion under variation is legal). Reverted.
 - **Left open:**
   - Gate sequence unchanged: `sync:check` after commit if it refuses a dirty tree.

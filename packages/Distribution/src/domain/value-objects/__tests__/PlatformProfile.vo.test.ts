@@ -130,10 +130,12 @@ describe("PlatformProfile", () => {
       for (const [type, preset] of Object.entries(CAMPAIGN_TYPE_PRESETS)) {
         const motionOnly = !preset.formats.includes("static");
         const staticOnly = !preset.formats.includes("motion");
+        const packaged = new Set<string>();
         for (const id of preset.platforms) {
           const profile = PLATFORM_PROFILES[id];
           if (!profile) continue;
           for (const format of profile.formats) {
+            packaged.add(format);
             expect(
               preset.formats,
               `${type} lists "${id}", which packages "${format}" the preset does not offer`,
@@ -152,6 +154,16 @@ describe("PlatformProfile", () => {
               `${type} is static-only but "${id}" is a motion profile`,
             ).toBe(false);
           }
+        }
+        // Reverse: every format the preset offers must be packaged by at
+        // least one listed profile. Read off the profiles — no hard-coded
+        // ids or formats. A motion-only type that starts offering "static"
+        // would otherwise stay green.
+        for (const format of preset.formats) {
+          expect(
+            packaged,
+            `${type} offers "${format}" but none of its listed profiles package it`,
+          ).toContain(format);
         }
       }
     });
