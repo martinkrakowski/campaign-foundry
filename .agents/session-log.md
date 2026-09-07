@@ -3236,3 +3236,34 @@ one and retired the other. Not waste — the kit components are unchanged — bu
 
 **Left open:** whether `layer-rules.yaml` gains a presentation layer or `packages/ui` gets a written
 exemption (D100's real question); **D95** (multi-region) unchanged.
+
+## 2026-09-07 — S4: the setMode leak, closed without touching a shipped test
+
+**Mode:** Implementer (lane S4 of wave A, worktree `wt-s4`, branch `feat/s4` off `2341401`). PR
+#218, not merged. Gate green: build, typecheck, lint, lint:arch, sync:check (on the committed
+tree), test:cov at 100 % × 4 (194 files, 3267 tests).
+
+**The plan's two readings of "drops" were in conflict, and the regression surface decided.** Read
+as the reducer's `formats` array, the drop reds the shipped D5 round-trip test (a switch to classic
+and back must restore a serialisable timeline — the draft's formats have to survive the flip), and
+the lane's own mutation ("make it clear formats in both directions") forbids a flip-back restore.
+Read as the brief's `output.formats`, a whole-classic gate reds the shipped `toBrief` pin at
+`editor-state.test.ts:558` — whose motion assertion builds a **classic** state (`filled()` without
+a mode override) and pins exactly the serialisation `load-brief.ts:603` refuses, i.e. the defect
+itself, written before the defect was understood (#95). Both reds verified empirically before
+choosing. The shipped design: `setMode` latches `formatDroppedByMode`; `toBrief` honours the latch
+for the flip's brief only; the draft keeps the user's formats and the remedy copy is literally
+true. D99's own wording ("leaves `output.formats` intact") is what the fix answers.
+
+**Two lessons worth keeping.** First: a regression-surface red is not always a contract break —
+one of the two reds was a genuine contract (D5), the other a defect pin; reading the test's intent
+(the D7 write/omit rule) against its accidental construction (classic + motion) told them apart.
+Second: the empty-formats answer was already in `toBrief` — an explicit output block, refused by
+the parser on every path, flagged by the editor's own validate — and the discipline was to not
+invent a fallback (`addPhotoOutput`'s static-restore was the tempting invention).
+
+**Findings left for other lanes** (in the PR body): the format vocabulary is the one axis with no
+shared domain export (`MOTION_FORMAT` is API-app; the web repeats the literal); `togglePlatform`
+can still derive motion into a classic draft with no flip involved — same class, likely wants the
+gate keyed off mode rather than the flip; and the latched state's preview reads the draft's
+formats, not the gated brief's (D45's rule, eventually).
