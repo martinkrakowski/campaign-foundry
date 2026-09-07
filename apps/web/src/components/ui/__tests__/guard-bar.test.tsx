@@ -79,6 +79,25 @@ describe("GuardBar", () => {
     expect(held).not.toHaveBeenCalled();
   });
 
+  test("an action inside a form does not submit the form", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const onAct = vi.fn();
+    render(
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <GuardBar title="Discard this draft?" actions={[{ label: "Discard", onAct }]} />
+      </form>,
+    );
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    expect(onAct).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   test("the guard is a region inside its footer, never a second overlay", () => {
     const { container } = render(<GuardBar title="Discard this draft?" actions={THREE_WAY} />);
     // no scrim, no focus trap surface, no fixed positioning — the dialog around it

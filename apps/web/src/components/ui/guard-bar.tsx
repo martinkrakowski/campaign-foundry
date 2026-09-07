@@ -49,9 +49,11 @@ export function GuardBar({ title, detail, busy = false, actions }: GuardBarProps
         {detail ? <p className="mt-0.5 text-[12px] leading-snug text-text-secondary">{detail}</p> : null}
       </div>
       <div className="flex flex-wrap gap-2">
-        {actions.map((action) => (
+        {actions.map((action, index) => (
+          // labels are not unique; GuardBarAction carries no id
           <Button
-            key={action.label}
+            key={index}
+            type="button"
             size="sm"
             variant={action.variant ?? "secondary"}
             disabled={busy || action.disabled}
