@@ -94,11 +94,14 @@ export function CreateCampaignDialog() {
   const [resumePrompt, setResumePrompt] = useState(false);
   // W2(a) (D90) — the footer's third state: the inline discard guard. Raised by
   // any close gesture on a draft with work in it; taken down by Keep editing,
-  // a second close gesture, or spent by Discard and close.
+  // a second close gesture, the draft becoming empty, or spent by Discard and
+  // close.
   const [guardOpen, setGuardOpen] = useState(false);
   const guardRef = useRef<HTMLDivElement>(null);
-  // The control that raised the guard — focus returns there when it comes down.
+  // The control that raised the guard — focus returns there when it comes down,
+  // provided the node is still connected; the name input is the stable fallback.
   const guardReturnFocusRef = useRef<HTMLElement | null>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
   // The sections a chip jumps to. Both always render while the dialog is open, so
   // a chip can only be clicked when both refs are attached.
   const identityRef = useRef<HTMLDivElement>(null);
@@ -183,20 +186,35 @@ export function CreateCampaignDialog() {
 
   // D90 — the guard is reachable by keyboard or it is not a guard: opening it
   // moves focus to its first control (its first answer), and taking it down
-  // returns focus to the control that raised it. An effect, because the answer
-  // the button row is restored under — or the guard replacing the row — only
-  // exists in the DOM after the commit; a full close skips the restore (the
-  // shell's own trap hands focus back) and clears the stale raiser.
+  // returns focus to the control that raised it — but only while that node is
+  // still connected and enabled. The body stays interactive, so a conditionally
+  // rendered raiser (the Other… input, a mode card) can unmount before Keep
+  // editing, and focus() on a detached node is a silent no-op; the name input
+  // is the stable fallback. An empty draft while the guard shows dismisses it
+  // (there is nothing left to guard); the next run is the ordinary restore.
+  // An effect, because the answer the button row is restored under — or the
+  // guard replacing the row — only exists in the DOM after the commit; a full
+  // close skips the restore (the shell's own trap hands focus back) and
+  // clears the stale raiser.
   useEffect(() => {
+    if (guardOpen && !draftHasWork) {
+      setGuardOpen(false);
+      return;
+    }
     if (guardOpen) {
       guardRef.current?.querySelector("button")?.focus();
       return;
     }
     if (createDialogOpen && guardReturnFocusRef.current) {
-      guardReturnFocusRef.current.focus();
+      const raiser = guardReturnFocusRef.current;
+      if (raiser.isConnected && !(raiser as HTMLButtonElement).disabled) {
+        raiser.focus();
+      } else {
+        nameInputRef.current?.focus();
+      }
     }
     guardReturnFocusRef.current = null;
-  }, [guardOpen, createDialogOpen]);
+  }, [guardOpen, createDialogOpen, draftHasWork]);
 
   const runCreate = async () => {
     setRefusal(null);
@@ -336,6 +354,7 @@ export function CreateCampaignDialog() {
               error={markFor("campaignName")}
             >
               <Input
+                ref={nameInputRef}
                 aria-label={messages.campaignNameLabel}
                 value={name}
                 placeholder={messages.campaignNamePlaceholder}
@@ -455,13 +474,14 @@ export function CreateCampaignDialog() {
             {/* D90 — the footer's third state. On a close ask with work in the
              *  draft the row is replaced in place by the guard: one overlay, one
              *  scrim, the form stays mounted, the answers survive. The detail
-             *  names what is actually filled in — never a generic sentence. Both
-             *  rows stay mounted and the `[hidden]` attribute does the swapping:
-             *  the row's own nodes survive the swap (so focus can return to the
-             *  control that raised the guard), the hidden row is out of the
-             *  trap's focusables and out of the accessibility tree, and a
-             *  display:none class would be neither — happy-dom computes no
-             *  stylesheet, so the attribute is the only honest hidden. */}
+             *  names what is actually filled in — never a generic sentence. The
+             *  button row stays mounted and the `[hidden]` attribute does the
+             *  swapping: the row's own nodes survive the swap (so focus can
+             *  return to Cancel or Create if either raised the guard), the
+             *  hidden row is out of the trap's focusables and out of the
+             *  accessibility tree, and a display:none class would be neither —
+             *  happy-dom computes no stylesheet, so the attribute is the only
+             *  honest hidden. The guard itself mounts only while it shows. */}
             <div hidden={guardOpen} className="flex justify-end gap-2">
               {/* D67: a cancelled create leaves nothing behind — the reset runs
                *  here too, now once the guard's Discard and close confirms it. */}

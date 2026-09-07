@@ -988,8 +988,14 @@ export const discardGuardDiscardClose = "Discard and close";
  * a default the user may never have touched, so it is not work in the draft
  * (D90), and neither is the untouched mode toggle. A formatter rather than a
  * fixed string because the sentence is only honest when it lists the answers
- * that are really filled in.
+ * that are really filled in. The part strings are exported consts so the jargon
+ * gate scans them; the formatter composes from those, never from literals of
+ * its own.
  */
+export const discardGuardPartName = "a name";
+export const discardGuardPartRegion = "a region";
+export const discardGuardPartAudience = "an audience";
+export const discardGuardPartSource = "a chosen source";
 export function discardGuardDetail(
   hasName: boolean,
   hasRegion: boolean,
@@ -997,10 +1003,10 @@ export function discardGuardDetail(
   hasSource: boolean,
 ): string {
   const parts = [
-    hasName ? "a name" : null,
-    hasRegion ? "a region" : null,
-    hasAudience ? "an audience" : null,
-    hasSource ? "a chosen source" : null,
+    hasName ? discardGuardPartName : null,
+    hasRegion ? discardGuardPartRegion : null,
+    hasAudience ? discardGuardPartAudience : null,
+    hasSource ? discardGuardPartSource : null,
   ].filter((part): part is string => part !== null);
   return `Closing now discards ${joinList(parts)} from this draft.`;
 }
