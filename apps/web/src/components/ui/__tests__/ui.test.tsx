@@ -1,5 +1,6 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { Button } from "../button";
 import { Card, CardHeader, CardContent } from "../card";
 import { Input } from "../input";
@@ -31,6 +32,33 @@ describe("Button", () => {
   test("honours the disabled prop", () => {
     render(<Button disabled>X</Button>);
     expect((screen.getByRole("button") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  test("defaults to type=button so it does not submit a surrounding form", () => {
+    render(<Button>X</Button>);
+    expect(screen.getByRole("button").getAttribute("type")).toBe("button");
+  });
+
+  test("a caller's own type overrides the default", () => {
+    render(<Button type="submit">X</Button>);
+    expect(screen.getByRole("button").getAttribute("type")).toBe("submit");
+  });
+
+  test("clicking a typeless Button inside a form does not submit the form", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <Button>Save</Button>
+      </form>,
+    );
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });
 
