@@ -3237,6 +3237,44 @@ one and retired the other. Not waste — the kit components are unchanged — bu
 **Left open:** whether `layer-rules.yaml` gains a presentation layer or `packages/ui` gets a written
 exemption (D100's real question); **D95** (multi-region) unchanged.
 
+## 2026-09-07 — The wave status server (plan)
+
+**Mode:** Architect. The owner asked whether a local web application could show the exact status,
+logs and telemetry of each lane and wave as the pipeline runs.
+
+**The motivating incident, from this session.** Lane S2's log sat at **0 bytes for 43 minutes**
+because `opencode` buffers. Deciding whether it was alive or dead took four commands, and the log
+alone could not settle it — a lane working silently and a lane that died at startup look identical.
+The dispatch script already records the mirror-image trap in its own comment: a lane that dies
+immediately writes its `EXIT` marker instantly, so a marker-only wait returns at once and reads as
+success.
+
+**The finding that shapes the plan.** Almost nothing worth watching is derivable from the
+filesystem. Log sizes, `EXIT` markers, PR numbers and check conclusions are free; **which stage a
+lane is in, how many findings were fixed versus refuted, and whether a mutation actually bit exist
+only as orchestrator prose in a chat transcript.** This session ran five distinct remediation rounds
+across two waves and none of it is recorded anywhere machine-readable.
+
+So the plan's spine (**D103**) is that the orchestrator *emits* a JSON event per stage transition and
+the server merges that with derived facts — and **where the two disagree the page shows both**,
+rather than resolving it. That contradiction is the pipeline's most valuable signal: it has caught a
+false success report twice in this session.
+
+**Decisions proposed:** D102 (`tools/`, outside the workspaces but inside the 100 % test gate —
+accepting that a broken dev tool will block a product PR), D103 (emit, do not infer), D104 (no new
+dependency: `node:http`, `tsx`, one hand-written page, no build step), D105 (bind `127.0.0.1:4317`
+and refuse 3000/3001 **in code**, since the rule has been in `AGENTS.md` all along and the port is
+still worth guarding), D106 (read-only — an observability tool that can act becomes a second control
+plane).
+
+**Recorded against my own likely failure:** T1 (the pure core) and T2 (the server) are self-contained
+and satisfying; **T3 (instrumentation) is the actual deliverable.** Shipping the display and
+deferring the emission points is precisely how three waves' records went unwritten earlier today
+until the owner noticed. §7 of the plan says so in those words.
+
+**Left open:** whether `tools/` gating product PRs proves intolerable (the fix would be a separate CI
+job, not an exemption); whether the event log should outlive `/tmp`; and whether a wave wants a
+timeline rather than a table.
 ## 2026-09-07 — S3: the seam moves ahead of the dialog (wave A, PR #217)
 
 Lane S3 of the two-field create's wave A, implemented by glm-5.3-flash in the `wt-s3` worktree
@@ -3374,6 +3412,64 @@ formats, not the gated brief's (D45's rule, eventually).
 **Left open:** Qodo's motion-only-platforms pairing; the format vocabulary still has no
 shared domain export.
 
+## 2026-09-07 — Wave A of the two-field create, orchestrated (S4 + S3 merged)
+
+**Mode:** Orchestrator. Record written at merge time, per stage 6 of the skill (#211).
+
+### What merged
+
+| Lane | PR | Commit | What |
+|---|---|---|---|
+| S4 | #218 | `6217632` | the `setMode` leak — a live defect found by the plan, not caused by it |
+| S3 | #217 | `100dcec` | the create seam becomes `{name, mode}`; Create lands on Identity; a refused seed spends its baton |
+
+**S4's design changed under review twice, and both moves were right.** The brief asked for the
+destructive fix (filter motion out of the draft in the reducer); the lane refused it with evidence —
+it reds the shipped D5 round-trip contract — and the orchestrator verified that independently. The
+lane's answer was a flip-scoped latch. The adversarial reviewer then found the third reading nobody
+had tested: **gate the serialisation on `mode === "brief"` outright, no flag.** The draft is still
+untouched so D5 stays green, and the only remaining red in the entire suite was
+`editor-state.test.ts:554` — **a shipped assertion that specified the defect**, expecting a classic
+brief's serialised output to *contain* motion. A test that specifies a bug is worse than the bug,
+because it defends it. Disabling the gate now fails 14 tests.
+
+**S3's fix shipped completely untested, and the pipeline caught it.** Round 1 fixed the legacy-baton
+bug Qodo found (two independent storage keys; rejecting the old seed did not stop the old `"copy"`
+handoff landing the user on Copy). The orchestrator then commented the fix out and ran the whole web
+project — 115 files, 1834 tests, all green. Round 2 added the editor-level test; the mutation at the
+refusal path now fails it, the landing assertion catching it.
+
+### A fourth way a mutation misfires
+
+The orchestrator's first mutation of S3's fix returned **green** — because there are two
+`takeStashedStep()` calls and the substitution hit the first, which is not the refusal path. It
+compiled, it ran, and it targeted the wrong code. Added to the three earlier modes (pattern missed,
+mutant did not compile, wrong test file). The rule is now: **compiled, ran, and targets the path the
+test names.**
+
+### D97 superseded before its lane dispatched
+
+The owner's market statement (online ads; social posts; static and video) showed that the create
+dialog's second field should be the **campaign type**, not the mode. The question that produced D97
+had the wrong options on it. S1 had not been dispatched, so the correction cost nothing; the
+wave-B brief for S1 is marked superseded and the next dispatch is T1 of
+`2026-09-07_campaign-type.md`, once #221 is on `main`.
+
+### Tooling: the CI race, fourth attempt
+
+#211 guarded `gh pr checks --watch` with a PR-level poll (a bot check satisfied it instantly). #212
+made the poll head-specific. #217 then failed with the check-runs API reporting **2 runs registered
+on the head** while `--watch` on the same PR said *no checks reported* — the two resolve the head
+differently for a window after a push. **#220 stops calling `--watch` at all** and polls the same
+API to conclusion, so the guard and the wait cannot disagree because they are the same question.
+Three fixes guarded the unreliable call better; the fourth removes it.
+
+### Also this session
+
+The wave-status server plan (#219, D102–D107) with its `AGENTS.md` section decided now and landed
+with the tool; the hexagen add-on template doc for it; and lane S2 (the map into Identity), which has
+been alive at 0 bytes for 83 minutes because `opencode` buffers — the exact ambiguity #219 exists
+to remove.
 ## 2026-09-07 — Campaign type, and display advertising (two plans)
 
 **Mode:** Architect. The owner stated the product's market — online static and video ads, and
