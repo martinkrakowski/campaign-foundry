@@ -2767,3 +2767,22 @@ whether the brief editor's Identity step gets the map too.
   - D95 (multi-select semantics) — `multiple`/arcs land with it, per the plan.
   - M2 wires the map + chips into `01 · Targeting`; `Other…` clears the map.
   - §6's open questions (EU grain; the brief editor's Identity step) untouched.
+
+## 2026-09-07 — M1 review remediation (PR #207)
+
+- **Mode:** Implementer (remediation)
+- **Changes:**
+  - `world-map.tsx` — selected footprint paints last; hub dot only when selected;
+    dot reveal `motion-safe:` + `pointerEvents="none"`; required `labelFor` for hub
+    text and caption (kit no longer owns copy).
+  - `geo/footprints.ts` — `label` removed from `Footprint` / `REGION_FOOTPRINTS`.
+  - `geo/polygons.ts` — `US` gains `(252,92)` south of `NA`'s Hudson-Bay notch;
+    ported constants otherwise byte-identical.
+  - Tests: paint-order + exclusive selected fill; no hub when nothing selected;
+    motion-safe class tokens; `labelFor` hub text; edge-sampled DE⊂EUR / US⊂NA;
+    unknown `Other…` paints nothing; `fallbackHint` sits outside the `aria-hidden` SVG.
+- **Decisions:**
+  - Item 4 corrects the plan's §2.3 `label` column — that was the plan's defect
+    against its own §4 rule (every new string in `messages.ts`; no literals in the kit).
+  - PR-Agent `aria-live` on the hover caption remains refused (D94 / D91).
+- **Left open:** same as the original M1 entry (D95; M2 wiring; §6).
