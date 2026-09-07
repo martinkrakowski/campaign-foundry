@@ -1,6 +1,6 @@
 import { describe, test, expect } from "vitest";
 import { previewDockProps } from "../preview-props";
-import { initialEditorState, emptyProduct, STATIC_PLATFORMS } from "../editor-state";
+import { initialEditorState, emptyProduct, STATIC_PLATFORMS, toBrief } from "../editor-state";
 
 /** A product the preview can actually draw — emptyProduct's id is the blank draft's placeholder. */
 const namedProduct = (key = 1, primaryColor = "#1473E6") => ({
@@ -80,6 +80,15 @@ describe("previewDockProps", () => {
     classic.formats = ["static", "motion"];
     classic.motion = ["ken-burns-in"];
     expect(previewDockProps(classic, 0, 6)!.motion).toBeUndefined();
+  });
+
+  test("a classic draft that still holds motion omits the platform, as toBrief omits output (D99/D45)", () => {
+    const state = initialEditorState("brief");
+    state.products = [namedProduct()];
+    state.formats = ["static", "motion"];
+    // The draft still holds Video; the saved brief is the absent-key default.
+    expect(toBrief(state)).not.toHaveProperty("output");
+    expect(previewDockProps(state, 0, 6)!.platformId).toBeUndefined();
   });
 
   test("the platform comes from the draft's own output, as the projection emits it", () => {
