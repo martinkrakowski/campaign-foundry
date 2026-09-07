@@ -2554,3 +2554,18 @@ green untouched.
 **Left open:** W1 builds on these exports (three `SectionBlock`s in the dialog); W2's inline guard
 consumes `GuardBar`; D90 and D89(b) remain the owner's; the barrel-padding contradiction from the
 plan's §6.5 is still unanswered.
+
+## 2026-09-06 — K1 review remediation (PR #199)
+
+- **Mode:** Implementer.
+- **Changes:** Eight mutation-proven items in `feat/k1-kit-primitives`. Restored ModePanel to
+  `name={option} meta={modeDisplayName(option)}` (raw value bold, display name caption). GuardBar
+  actions now `type="button"` and keyed by array index. Kit-boundary scan matches import statements
+  (not comments) and walks nested kit files, skipping `__tests__`. OptionTile tests pin D88 on the
+  button's own className and the blurb/description tone split; dropped the vacuous `✓` assertion.
+  JumpStrip's no-handler test now asserts the click does not throw and the chip remains.
+- **Decisions:** Keyed GuardBar actions by index rather than adding a required `id` to the public
+  type. Did not default `Button`'s `type` (refuted #5 — 29 call sites, not this lane's file).
+  Withdrew the PR body's claim that putting the display name on `name` was required for the tile
+  contract.
+- **Left open:** W1 / W2 still consume these primitives; D90 and D89(b) remain the owner's.
