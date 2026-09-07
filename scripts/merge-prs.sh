@@ -38,6 +38,9 @@ MAIN=${MAIN_BRANCH:-main}
 # earned their place the hard way: every wave with two parallel lanes touches them,
 # and without them the second merge of each wave aborts. Only ever add a file whose
 # lanes append at the END — the resolver preserves order, not intent.
+# The check whose conclusion gates a merge (regex over check-run names). A run that
+# registers instantly — a review bot — must never satisfy the wait on its own.
+REQUIRED_CHECK=${REQUIRED_CHECK:-'^Build'}
 APPEND_ONLY=${APPEND_ONLY:-'^(\.agents/session-log\.md|CHANGELOG\.md|packages/[^/]+/src/application/ports/out/index\.ts|apps/web/src/components/ui/index\.ts|apps/web/src/components/campaign/messages\.ts)$'}
 
 KEEP_BOTH='
@@ -141,7 +144,8 @@ for spec in "$@"; do
   for _ in $(seq 1 40); do            # up to ~10 minutes at 15s
     head_sha=$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null || true)
     if [ -n "$head_sha" ]; then
-      n=$(gh api "repos/{owner}/{repo}/commits/$head_sha/check-runs" --jq '.total_count' 2>/dev/null || echo 0)
+      n=$(gh api "repos/{owner}/{repo}/commits/$head_sha/check-runs" \
+        --jq "[.check_runs[] | select(.name | test(\"$REQUIRED_CHECK\"))] | length" 2>/dev/null || echo 0)
       if [ "${n:-0}" -gt 0 ]; then registered=1; break; fi
     fi
     sleep 15
@@ -153,13 +157,20 @@ for spec in "$@"; do
   # reported" — the two resolve the head differently for a window after a push, and
   # `--fail-fast` turns that window into an aborted merge on a healthy PR. Poll the same
   # API the registration guard used, until every run has concluded.
+  # Both loops key on REQUIRED_CHECK, not on "whatever has registered": observed on #222
+  # and #219, a review bot's run registers and concludes within seconds of the push, so
+  # "the list is non-empty and every run is completed" was true before the build workflow
+  # had registered at all, and the script declared green beside a `pending` line. The
+  # question is never "has everything so far finished" — it is "has the check that gates
+  # this repo finished".
   echo "waiting for checks on $head_sha …"
   concluded=0
   for _ in $(seq 1 120); do          # up to ~30 minutes at 15s
     runs=$(gh api "repos/{owner}/{repo}/commits/$head_sha/check-runs" \
       --jq '[.check_runs[] | {n:.name, s:.status, c:.conclusion}]' 2>/dev/null || echo '[]')
     pending=$(printf '%s' "$runs" | python3 -c 'import json,sys;r=json.load(sys.stdin);print(sum(1 for x in r if x["s"]!="completed"))')
-    if [ "${pending:-1}" -eq 0 ] && [ "$(printf '%s' "$runs" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')" -gt 0 ]; then
+    required=$(printf '%s' "$runs" | python3 -c 'import json,sys,re;r=json.load(sys.stdin);print(sum(1 for x in r if re.search(sys.argv[1],x["n"])))' "$REQUIRED_CHECK")
+    if [ "${pending:-1}" -eq 0 ] && [ "${required:-0}" -gt 0 ]; then
       concluded=1; break
     fi
     sleep 15
