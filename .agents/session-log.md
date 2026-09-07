@@ -3640,4 +3640,5 @@ ancestor (someone else pushed). Both scripts are now asking the question they me
 - **Left open:**
   - W2 (server + `AGENTS.md` section) and W3 (emit helper + skill). This lane binds nothing.
   - `yarn typecheck` is turbo-per-workspace; `tools/` is typechecked by vitest and `tsc -p tools/wave-status --noEmit`.
+- **Remediation:** five verified findings (gate-exit, observed no-PR, closed-unmerged, EXIT trailing space, istanbul indent); four mutations compiled, ran, failed the named test, reverted. PR-Agent trim/Set refuted (D103).
 

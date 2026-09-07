@@ -38,6 +38,10 @@ describe("parseLastExit — the dispatch script's EXIT-marker contract", () => {
     expect(parseLastExit("grep EXIT patterns here\nEXIT 0\n")).toBe(0);
     expect(parseLastExit("the marker is EXIT not EXIT-ish\n")).toBeUndefined();
   });
+
+  test("a trailing space on the EXIT marker is still a marker — last one still wins", () => {
+    expect(parseLastExit("first attempt died\nEXIT 1\nretrying\nEXIT 0 ")).toBe(0);
+  });
 });
 
 describe("parseGateLog — the gate log's coverage summary and exit", () => {
@@ -50,6 +54,20 @@ describe("parseGateLog — the gate log's coverage summary and exit", () => {
       lines: 100,
     });
     expect(gate.exit).toBe(0);
+  });
+
+  test("an indented istanbul summary still produces the four counters", () => {
+    const indented = coverageSummary()
+      .split("\n")
+      .map((line) => `  ${line}`)
+      .join("\n");
+    const gate = parseGateLog(`${indented}\nEXIT 0\n`);
+    expect(gate.coverage).toEqual({
+      statements: 100,
+      branches: 100,
+      functions: 100,
+      lines: 100,
+    });
   });
 
   test("fractional counters parse as numbers, not strings", () => {
@@ -67,6 +85,14 @@ describe("parseGateLog — the gate log's coverage summary and exit", () => {
   test("GATE EXIT 0 trailing is accepted as the gate's exit", () => {
     expect(parseGateLog(`${coverageSummary()}\nGATE EXIT 0\n`).exit).toBe(0);
     expect(parseGateLog("...\nGATE EXIT 1\n").exit).toBe(1);
+  });
+
+  test("a trailing space on GATE EXIT is still the gate's exit — last marker still wins", () => {
+    expect(parseGateLog("GATE EXIT 1\nGATE EXIT 0 ").exit).toBe(0);
+  });
+
+  test("a trailing space on the gate log EXIT marker is still the gate's exit", () => {
+    expect(parseGateLog(`${coverageSummary()}\nEXIT 0 `).exit).toBe(0);
   });
 
   test("a non-trailing exit line is not the gate's exit", () => {

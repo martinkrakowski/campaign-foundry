@@ -121,10 +121,19 @@ describe("mergeStatus — shape and ordering", () => {
 
 describe("mergeStatus — disagreements are flagged, never resolved (D103)", () => {
   test("reported implement settled with no PR found", () => {
-    const status = mergeStatus([event({ stage: "implement", event: "settled" })], {}, "now");
+    const status = mergeStatus(
+      [event({ stage: "implement", event: "settled" })],
+      { "S/s4": observation() },
+      "now",
+    );
     expect(status.waves[0]?.lanes[0]?.disagreements).toEqual([
       "lane says implement settled; no PR found",
     ]);
+  });
+
+  test("sibling: an unobserved lane (events only) is never told no PR found — nobody looked", () => {
+    const status = mergeStatus([event({ stage: "implement", event: "settled" })], {}, "now");
+    expect(status.waves[0]?.lanes[0]?.disagreements).toEqual([]);
   });
 
   test("sibling: implement settled with a PR observed agrees — no disagreement", () => {
@@ -153,6 +162,17 @@ describe("mergeStatus — disagreements are flagged, never resolved (D103)", () 
     );
     expect(status.waves[0]?.lanes[0]?.disagreements).toEqual([
       "lane says merge settled; PR #218 is still open",
+    ]);
+  });
+
+  test("reported merge settled with the PR closed without merging", () => {
+    const status = mergeStatus(
+      [event({ stage: "merge", event: "settled" })],
+      { "S/s4": observation({ pr: { number: 218, state: "closed", checks: "fail" } }) },
+      "now",
+    );
+    expect(status.waves[0]?.lanes[0]?.disagreements).toEqual([
+      "lane says merge settled; PR #218 was closed without merging",
     ]);
   });
 
@@ -190,6 +210,26 @@ describe("mergeStatus — disagreements are flagged, never resolved (D103)", () 
           log: { bytes: 10, mtimeMs: 1, tail: "done\nEXIT 0\n" },
         }),
       },
+      "now",
+    );
+    expect(status.waves[0]?.lanes[0]?.disagreements).toEqual([]);
+  });
+
+  test("reported gate settled with a non-zero GATE EXIT in the gate log", () => {
+    const status = mergeStatus(
+      [event({ stage: "gate", event: "settled" })],
+      { "S/s4": observation({ gateLog: "yarn run test:cov\nGATE EXIT 1\n" }) },
+      "now",
+    );
+    expect(status.waves[0]?.lanes[0]?.disagreements).toEqual([
+      "lane says gate settled; gate log reports GATE EXIT 1",
+    ]);
+  });
+
+  test("sibling: reported gate settled with GATE EXIT 0 agrees", () => {
+    const status = mergeStatus(
+      [event({ stage: "gate", event: "settled" })],
+      { "S/s4": observation({ gateLog: "yarn run test:cov\nGATE EXIT 0\n" }) },
       "now",
     );
     expect(status.waves[0]?.lanes[0]?.disagreements).toEqual([]);

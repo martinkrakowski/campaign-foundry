@@ -94,7 +94,10 @@ function findDisagreements(
 
   const disagreements: string[] = [];
 
+  // "No PR found" is a gh observation. An events-only row has no observation, so
+  // a missing derived.pr there is "nobody looked", not "there is no PR".
   if (
+    observed &&
     reported.stage === "implement" &&
     reported.event === "settled" &&
     reported.pr === undefined &&
@@ -107,8 +110,21 @@ function findDisagreements(
     disagreements.push(`lane says merge settled; PR #${derived.pr.number} is still open`);
   }
 
+  if (reported.stage === "merge" && reported.event === "settled" && derived.pr?.state === "closed") {
+    disagreements.push(`lane says merge settled; PR #${derived.pr.number} was closed without merging`);
+  }
+
   if (reported.event === "settled" && derived.exit !== undefined && derived.exit !== 0) {
     disagreements.push(`lane says ${reported.stage} settled; lane log reports EXIT ${derived.exit}`);
+  }
+
+  if (
+    reported.stage === "gate" &&
+    reported.event === "settled" &&
+    derived.gate?.exit !== undefined &&
+    derived.gate.exit !== 0
+  ) {
+    disagreements.push(`lane says gate settled; gate log reports GATE EXIT ${derived.gate.exit}`);
   }
 
   // Hang is a pgrep claim. An events-only row has no observation, so alive:false

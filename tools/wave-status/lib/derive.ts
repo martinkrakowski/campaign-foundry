@@ -3,7 +3,7 @@ import type { DerivedLane, LaneObservation } from "./types.js";
 export function parseLastExit(tail: string): number | undefined {
   const lines = tail.split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
-    const match = /^EXIT (\d+)$/.exec(lines[i]);
+    const match = /^\s*EXIT (\d+)\s*$/.exec(lines[i]);
     if (match) return Number(match[1]);
   }
   return undefined;
@@ -24,8 +24,8 @@ export function parseGateLog(text: string): {
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
     if (line.trim() === "") continue;
-    const gateMatch = /^GATE EXIT (\d+)$/.exec(line);
-    const exitMatch = /^EXIT (\d+)$/.exec(line);
+    const gateMatch = /^\s*GATE EXIT (\d+)\s*$/.exec(line);
+    const exitMatch = /^\s*EXIT (\d+)\s*$/.exec(line);
     if (gateMatch) {
       exit = Number(gateMatch[1]);
     } else if (exitMatch) {
@@ -39,13 +39,13 @@ export function parseGateLog(text: string): {
   let functions: number | undefined;
   let lineCount: number | undefined;
   for (const line of lines) {
-    const stmt = /Statements\s*:\s*([\d.]+)%/.exec(line);
+    const stmt = /^\s*Statements\s*:\s*([\d.]+)%/.exec(line);
     if (stmt) statements = Number(stmt[1]);
-    const br = /Branches\s*:\s*([\d.]+)%/.exec(line);
+    const br = /^\s*Branches\s*:\s*([\d.]+)%/.exec(line);
     if (br) branches = Number(br[1]);
-    const fn = /Functions\s*:\s*([\d.]+)%/.exec(line);
+    const fn = /^\s*Functions\s*:\s*([\d.]+)%/.exec(line);
     if (fn) functions = Number(fn[1]);
-    const ln = /Lines\s*:\s*([\d.]+)%/.exec(line);
+    const ln = /^\s*Lines\s*:\s*([\d.]+)%/.exec(line);
     if (ln) lineCount = Number(ln[1]);
   }
 
