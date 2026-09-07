@@ -1010,3 +1010,15 @@ export function discardGuardDetail(
   ].filter((part): part is string => part !== null);
   return `Closing now discards ${joinList(parts)} from this draft.`;
 }
+
+/* ── G3 — start-from rail ─────────────────────────────────────────────────── */
+
+/**
+ * The mono corner caption on the blank card's preview panel: three dashed
+ * frames holding nothing, because nothing has been made yet.
+ */
+export const startFromBlankCaption = "Empty";
+/** One brief card's corner caption: the ratios its creatives render at. */
+export function startFromRatioCaption(ratios: readonly string[]): string {
+  return ratios.join(" · ");
+}
