@@ -1,7 +1,14 @@
 import type { ReactNode } from "react";
-import { OptionTile } from "@/components/ui";
+import {
+  OptionTile,
+  PosterFrame,
+  PreviewPanel,
+  type PosterVariant,
+  type RatioOption,
+} from "@/components/ui";
 import { modeDisplayName } from "@/components/campaign/display-names";
 import { MODE_OPTIONS, type CampaignMode } from "@/components/campaign/editor-state";
+import * as messages from "@/components/campaign/messages";
 
 /** One miniature of the grid: the CreativeGlyph layer idiom at cell scale. */
 interface CellSpec {
@@ -89,19 +96,86 @@ function ModeGlyph({ scattered }: { scattered: boolean }): ReactNode {
   );
 }
 
+/** The preview pictures' long side; six of them stack two rows high inside the 132px panel. */
+const PREVIEW_SIZE = 56;
+
+/**
+ * Classic's picture (F1/D93): the same poster six times — one design, repeated —
+ * in a tidy three-by-two of `PosterFrame`s on the panel's own ground.
+ */
+function ClassicPreview(): ReactNode {
+  return (
+    <PreviewPanel caption={messages.modeTileCaptionBrief}>
+      <div className="grid grid-cols-3 items-center justify-items-center gap-2">
+        {Array.from({ length: 6 }, (_, index) => (
+          <PosterFrame key={index} ratio="9:16" variant="pA" size={PREVIEW_SIZE} />
+        ))}
+      </div>
+    </PreviewPanel>
+  );
+}
+
+/** Union-keyed so a fourth ratio or variant is a compile error, not a blank frame. */
+const VARIATION_FRAMES: readonly { readonly ratio: RatioOption; readonly variant: PosterVariant }[] = [
+  { ratio: "9:16", variant: "pA" },
+  { ratio: "1:1", variant: "pB" },
+  { ratio: "16:9", variant: "pC" },
+  { ratio: "9:16", variant: "pB" },
+  { ratio: "1:1", variant: "pC" },
+  { ratio: "16:9", variant: "pA" },
+];
+
+/**
+ * Randomized's picture (F1/D93): a set of variations — six `PosterFrame`s cycling
+ * the three layout variants across the domain's ratios, no two rows alike.
+ */
+function RandomizedPreview(): ReactNode {
+  return (
+    <PreviewPanel caption={messages.modeTileCaptionVariation}>
+      <div className="grid grid-cols-3 items-center justify-items-center gap-2">
+        {VARIATION_FRAMES.map((frame, index) => (
+          <PosterFrame key={index} ratio={frame.ratio} variant={frame.variant} size={PREVIEW_SIZE} />
+        ))}
+      </div>
+    </PreviewPanel>
+  );
+}
+
+/** The full tile's body copy, keyed by the mode union so a new mode is a compile error. */
+const MODE_TILE_EXTRAS: Record<CampaignMode, { tag: string; blurb: string; preview: ReactNode }> = {
+  brief: {
+    tag: messages.modeTileTagBrief,
+    blurb: messages.modeTileBlurbBrief,
+    preview: <ClassicPreview />,
+  },
+  variation: {
+    tag: messages.modeTileTagVariation,
+    blurb: messages.modeTileBlurbVariation,
+    preview: <RandomizedPreview />,
+  },
+};
+
 /**
  * The mode switch as two pictures at the top of the sidebar (D4/U1): an OptionTile per
  * mode, its raw value (`brief` / `variation`) the visible name and the whole accessible
  * name, and its muted caption (`meta`) reading Classic / Randomized. Switching mode
  * stays non-destructive (D10) — the tiles only dispatch `setMode`, exactly as the
  * header buttons they replace did.
+ *
+ * In the dialog the tile is the full three-part form (F1/D93): a `PreviewPanel` holding
+ * the mode's picture edge to edge, then glyph, name, tag, blurb and meta. The
+ * `compact` prop is the `SectionShell` idiom for the editor's 320px sidebar, where a
+ * 132px panel cannot fit a ~150px tile: there the tile keeps today's glyph-only look.
  */
 export function ModePanel({
   mode,
   onSetMode,
+  compact = false,
 }: {
   mode: CampaignMode;
   onSetMode: (mode: CampaignMode) => void;
+  /** The sidebar form: no preview panel, no tag, no blurb — the glyph carries the tile. */
+  compact?: boolean;
 }): ReactNode {
   return (
     <div className="grid grid-cols-2 gap-2">
@@ -113,6 +187,13 @@ export function ModePanel({
           meta={modeDisplayName(option)}
           selected={mode === option}
           onToggle={(value) => onSetMode(value as CampaignMode)}
+          {...(compact
+            ? {}
+            : {
+                preview: MODE_TILE_EXTRAS[option].preview,
+                tag: MODE_TILE_EXTRAS[option].tag,
+                blurb: MODE_TILE_EXTRAS[option].blurb,
+              })}
         >
           <ModeGlyph scattered={option === "variation"} />
         </OptionTile>
