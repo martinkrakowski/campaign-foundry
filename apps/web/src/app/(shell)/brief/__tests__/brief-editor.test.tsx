@@ -3479,7 +3479,7 @@ describe("the create seed (W1)", () => {
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("cf:brief-picked", "1");
-    // Guided default: the step walk is what "lands on Copy" means (D66).
+    // Guided default: the step walk is what "lands on Identity" means (D98).
     localStorage.removeItem("cf:presentation");
   });
 
@@ -3496,7 +3496,7 @@ describe("the create seed (W1)", () => {
   test("the guard asks exactly once for a dirty editor, before the dialog opens, and Create applies the seed in place", async () => {
     nextMock().nav.pathname = "/brief/new";
     // Everything presentation: every section stays mounted, so the applied values
-    // are assertable directly — the landing-on-Copy claim has its own test below.
+    // are assertable directly — the landing claim has its own tests below.
     localStorage.setItem("cf:presentation", "everything");
     const user = userEvent.setup();
     routes({});
@@ -3523,14 +3523,52 @@ describe("the create seed (W1)", () => {
     await waitFor(() =>
       expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark"),
     );
-    expect((screen.getByLabelText("Target Region") as HTMLInputElement).value).toBe("EU");
-    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe("trail runners");
+    // D97 — the seed answers name and mode only: region and audience stay blank,
+    // waiting for the Identity step this landing is now on (D98).
+    expect((screen.getByLabelText("Target Region") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe("");
     expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 25));
     expect(screen.queryAllByRole("dialog", { name: "Unsaved edits" })).toHaveLength(0);
   });
 
-  test("an in-place seed lands on Copy with the fields filled (D66)", async () => {
+  test("an in-place seed moves the cursor even in the everything presentation (D98)", async () => {
+    nextMock().nav.pathname = "/brief/new";
+    // Everything mode renders no step walk — the segbar and the arrow keys are
+    // guided-only, so the cursor's only mover there is the seed effect itself. A
+    // landing baton (the dialog's cross-route branch, spent at mount) puts the
+    // cursor on Copy; the in-place create walks it back to Identity, with no
+    // heading on screen to focus — which is exactly what the handoff guard
+    // allows for.
+    localStorage.setItem("cf:presentation", "everything");
+    stashStep("copy");
+    const user = userEvent.setup();
+    routes({});
+    renderWithRun(
+      <>
+        <BrowseBriefsButton />
+        <NewEditor />
+      </>,
+    );
+    await waitFor(() => expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(""));
+    await user.type(screen.getByLabelText(messages.campaignNameLabel), "typed");
+
+    await user.click(screen.getByRole("button", { name: /Create new/ }));
+    const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    await user.click(within(prompt).getByRole("button", { name: "Leave" }));
+    await fillDialog(user, within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })));
+
+    await waitFor(() =>
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark"),
+    );
+    // D97 — and no half-answers rode along: the Identity fields wait for the step
+    // the landing is on.
+    expect((screen.getByLabelText("Target Region") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe("");
+    expect(screen.queryAllByRole("dialog", { name: "Unsaved edits" })).toHaveLength(0);
+  });
+
+  test("an in-place seed lands on Identity with the name applied (D98)", async () => {
     nextMock().nav.pathname = "/brief/new";
     const user = userEvent.setup();
     routes({});
@@ -3548,13 +3586,13 @@ describe("the create seed (W1)", () => {
     await user.click(within(prompt).getByRole("button", { name: "Leave" }));
     await fillDialog(user, within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })));
 
-    // The cursor moved to Copy (guided: the Copy section is what is mounted).
-    await waitFor(() => expect(screen.getByLabelText("Headline")).toBeTruthy());
-    expect(screen.getByRole("button", { name: /: Copy, current step/ })).toBeTruthy();
+    // D98 — the cursor sits on Identity (guided: the Identity section is what is
+    // mounted), BEFORE Copy: region and audience are unanswered and both are
+    // required by `validateIdentity`, so the seed lands the user there.
+    await waitFor(() => expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy());
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-    // The seed rode patch actions, so the slug was derived in the reducer (F18) —
+    // The seed rode a patch action, so the slug was derived in the reducer (F18) —
     // the Identity readout shows it; the dialog never did.
-    await user.click(screen.getByRole("button", { name: /: Identity,/ }));
     expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark");
     expect(screen.getByText("summer-spark")).toBeTruthy();
   });
@@ -3577,7 +3615,7 @@ describe("the create seed (W1)", () => {
     await user.click(within(prompt).getByRole("button", { name: "Leave" }));
     await fillDialog(user, within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })));
 
-    await waitFor(() => expect(screen.getByLabelText("Headline")).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy());
     // Never both: in place the editor's seed effect moved the cursor, so a stashed
     // baton would survive unspent and move the NEXT mount's cursor.
     expect(localStorage.getItem("cf:step-handoff")).toBeNull();
@@ -3604,35 +3642,52 @@ describe("the create seed (W1)", () => {
     await user.click(within(prompt).getByRole("button", { name: "Leave" }));
     await fillDialog(user, within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })));
 
-    // The arrival on Copy is not red: the seed reset attempted/touched (L1.1).
-    await waitFor(() => expect(screen.getByLabelText("Headline")).toBeTruthy());
+    // D98 — the seed walks the cursor BACK to Identity from Copy, and the arrival
+    // is not red: the seed reset attempted/touched (L1.1).
+    await waitFor(() => expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy());
     expect(screen.queryByText(/Not saved yet/)).toBeNull();
     expect(screen.getByText(/New brief — fill/)).toBeTruthy();
   });
 
-  test("a seed created elsewhere is applied on mount and lands on Copy (D66)", async () => {
+  test("a seed created elsewhere is applied on mount and lands on Identity (D98)", async () => {
     routes({});
     // What the dialog's Create does from another route (verified in its own suite):
     // publish the seed, stash the landing step, then push.
     await act(async () => {
-      await createCampaign({ name: "Summer Spark", targetRegion: "EU", targetAudience: "trail runners", mode: "brief" });
+      await createCampaign({ name: "Summer Spark", mode: "brief" });
     });
-    stashStep("copy");
+    stashStep("identity");
 
     nextMock().nav.pathname = "/brief/new";
     renderWithRun(<NewEditor />);
     // The mount spent both batons by a read: no seed key, no leftover step baton.
-    await waitFor(() => expect(screen.getByLabelText("Headline")).toBeTruthy());
-    expect(screen.getByRole("button", { name: /: Copy, current step/ })).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy());
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
     expect(localStorage.getItem("cf:step-handoff")).toBeNull();
-    // The applied fields, not only the spent key — a take-then-skip would keep this
-    // test green on Copy alone, because stashStep("copy") is what landed us here.
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /: Identity,/ }));
+    // The applied field, not only the spent key — a take-then-skip would keep this
+    // test green on Identity alone, because stashStep("identity") is what landed
+    // us here.
     expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark");
-    expect((screen.getByLabelText(messages.targetRegionLabel) as HTMLInputElement).value).toBe("EU");
-    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe("trail runners");
+  });
+
+  test("an old-shape seed from the previous build is discarded, not half-applied (F5)", async () => {
+    routes({});
+    // What the currently deployed build writes: the four-field seed. Accepting it
+    // would seed a brief with a name and nothing else, silently — the guard
+    // discards it wholesale and the user starts clean.
+    localStorage.setItem(
+      CREATE_SEED_KEY,
+      JSON.stringify({ name: "Summer Spark", targetRegion: "EU", targetAudience: "trail runners", mode: "brief" }),
+    );
+    nextMock().nav.pathname = "/brief/new";
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect(screen.getByLabelText(messages.campaignNameLabel)).toBeTruthy());
+    // No partial patch: even the name is not seeded — the seed was discarded whole.
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText(messages.targetRegionLabel) as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe("");
+    // Spent, not retried: a refused baton cannot poison the next mount either.
+    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
   });
 
   test("a malformed seed leaves a working blank editor rather than throwing", async () => {
@@ -3655,7 +3710,7 @@ describe("the create seed (W1)", () => {
     await waitFor(() => expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("camp"));
 
     await act(async () => {
-      await createCampaign({ name: "Other", targetRegion: "EU", targetAudience: "a", mode: "variation" });
+      await createCampaign({ name: "Other", mode: "variation" });
     });
     // The gate is the route: the named brief stays on screen, and the seed waits in
     // the store for a blank-route mount to spend it.

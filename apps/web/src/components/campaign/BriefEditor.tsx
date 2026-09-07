@@ -496,22 +496,26 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     purgeDraftFromStorage(state);
     dispatch({ type: "load", brief: blankBrief() });
     // `patch` actions — not a hand-built state — so slug derivation stays in the
-    // reducer (F18), exactly as the Identity step's own controls dispatch.
+    // reducer (F18), exactly as the Identity step's own controls dispatch. D97 —
+    // the seed carries the name and the mode only; region and audience are the
+    // Identity step's answers, and no seed may half-answer them.
     dispatch({ type: "patch", patch: { campaignName: seed.name } });
-    dispatch({ type: "patch", patch: { targetRegion: seed.targetRegion } });
-    dispatch({ type: "patch", patch: { targetAudience: seed.targetAudience } });
     dispatch({ type: "setMode", mode: seed.mode });
     // The reset createNew performed (L1.1): an in-place seed after a refused Save
-    // would otherwise inherit `attempted` and paint Copy red on arrival.
+    // would otherwise inherit `attempted` and paint Identity red on arrival.
     setAttempted(false);
     setTouched(new Set());
     setTouchedSections(new Set());
-    // D66 — land on Copy. The dialog stashed the baton when it navigated here (the
-    // mount effect spent it); in place, the cursor move is ours. `go` takes a
-    // number, so the step id goes in as its position.
+    // D98 — land on Identity, not Copy. D66 skipped past Identity because the
+    // dialog answered it; the two-field dialog no longer does, and region and
+    // audience are both required by `validateIdentity` — landing on Copy would
+    // drop the user one step past two empty required fields. The dialog stashed
+    // the baton when it navigated here (the mount effect spent it); in place, the
+    // cursor move is ours. `go` takes a number, so the step id goes in as its
+    // position.
     // `state`, `steps` and `go` are read from the render this effect runs in — the
     // deps mirror the recovery effect above, which reads them the same way.
-    go(steps.indexOf("copy"));
+    go(steps.indexOf("identity"));
   }, [seedVersion, blank]);
 
   // W8.1 — the review step's projection: one `toBrief` call, passed into `ReviewStep`,

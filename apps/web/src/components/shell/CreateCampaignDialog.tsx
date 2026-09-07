@@ -29,8 +29,14 @@ import { modeDisplayName } from "@/components/campaign/display-names";
 import { StartFromExistingPicker, type StartFromSource } from "@/components/shell/StartFromExistingPicker";
 import * as messages from "@/components/campaign/messages";
 
-/** The step Create lands on (D66) — the baton's payload, spent by the editor's mount. */
-const COPY_STEP = "copy";
+/**
+ * The step Create lands on (D98) — the baton's payload, spent by the editor's
+ * mount. No longer Copy (D66): D66 sent Create past Identity because the dialog
+ * answered Identity; under D97 it does not — region and audience are unanswered
+ * here and both are required by `validateIdentity`, so landing on Copy would drop
+ * the user one step past two empty required fields.
+ */
+const IDENTITY_STEP = "identity";
 
 /**
  * The fields a refused create marks (D91): the closed set of answers that can be
@@ -232,8 +238,6 @@ export function CreateCampaignDialog() {
     try {
       const result = await createCampaign({
         name,
-        targetRegion,
-        targetAudience,
         mode,
         source: source?.id,
       });
@@ -247,7 +251,7 @@ export function CreateCampaignDialog() {
         setRefusal(messages.createCampaignBlocked);
         return;
       }
-      // D66 — the landing branch belongs to the caller, not the editor. Already on
+      // D98 — the landing branch belongs to the caller, not the editor. Already on
       // the blank route: the mounted editor's seed effect moves the cursor itself.
       // Anywhere else: the step baton crosses the navigation this push causes, and
       // the editor's mount effect spends it. Never both — the baton is spent by a
@@ -255,7 +259,7 @@ export function CreateCampaignDialog() {
       //
       // W2: the baton is the blank create's landing branch only. A source create
       // publishes no seed (so no seed effect) and opens the copy itself.
-      if (!source && pathname !== "/brief/new") stashStep(COPY_STEP);
+      if (!source && pathname !== "/brief/new") stashStep(IDENTITY_STEP);
       closeAndReset();
       router.push(result.route);
     } catch (err) {
