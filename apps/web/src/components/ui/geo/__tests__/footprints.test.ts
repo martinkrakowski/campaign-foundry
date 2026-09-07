@@ -32,7 +32,6 @@ describe("REGION_FOOTPRINTS", () => {
   test("every footprint is non-empty and hubless GLOBAL sits alone", () => {
     for (const f of REGION_FOOTPRINTS) {
       expect(f.polys.length, `${f.value} has no polygons`).toBeGreaterThan(0);
-      expect(f.label.length).toBeGreaterThan(0);
     }
     expect(footprint("GLOBAL").hub).toBeUndefined();
     for (const value of VALUES.slice(1)) {
@@ -56,16 +55,27 @@ describe("REGION_FOOTPRINTS", () => {
     expect(de.length).toBeGreaterThanOrEqual(8);
     expect(de.length).toBeLessThanOrEqual(10);
     expect(us.length).toBeGreaterThanOrEqual(8);
-    expect(us.length).toBeLessThanOrEqual(10);
+    expect(us.length).toBeLessThanOrEqual(11);
   });
 
-  test("every DE anchor is inside EUR and every US anchor inside NA (no anchors in the sea)", () => {
+  test("every DE/US vertex and sampled edge point is inside its parent (no outline in the sea)", () => {
     const de = footprint("DE").polys[0] as readonly Pt[];
     const us = footprint("US").polys[0] as readonly Pt[];
-    const deInTheSea = de.filter(([x, y]) => !pip(x, y, EUR));
-    const usInTheSea = us.filter(([x, y]) => !pip(x, y, NA));
-    expect(deInTheSea).toEqual([]);
-    expect(usInTheSea).toEqual([]);
+    const fractions = [0.25, 0.5, 0.75];
+    const outline = (poly: readonly Pt[]): Pt[] => {
+      const pts: Pt[] = [];
+      for (let i = 0; i < poly.length; i++) {
+        const a = poly[i] as Pt;
+        const b = poly[(i + 1) % poly.length] as Pt;
+        pts.push(a);
+        for (const t of fractions) {
+          pts.push([a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]);
+        }
+      }
+      return pts;
+    };
+    expect(outline(de).filter(([x, y]) => !pip(x, y, EUR))).toEqual([]);
+    expect(outline(us).filter(([x, y]) => !pip(x, y, NA))).toEqual([]);
   });
 
   test("the delegated hubs are the mockup's own and the drawn ones are their centroids", () => {

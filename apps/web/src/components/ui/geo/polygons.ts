@@ -32,8 +32,9 @@ export const NZS: Pt[] = [[926,436],[938,448],[932,462],[922,446]];
 /** New for M1 (F5): Germany, a coarse anchor list inside `EUR` (verified with `pip`). */
 export const DE: Pt[] = [[522,112],[528,106],[536,106],[543,110],[545,118],[542,126],[534,130],[526,128],[520,120]];
 
-/** New for M1 (F5): the contiguous states, a coarse anchor list inside `NA` (verified with `pip`). */
-export const US: Pt[] = [[150,80],[190,72],[232,70],[266,78],[292,94],[296,110],[278,132],[246,150],[206,148],[164,132]];
+/** New for M1 (F5): the contiguous states, a coarse anchor list inside `NA` (verified with `pip`).
+ *  `(252,92)` sits south of `NA`'s Hudson-Bay notch so the northern chord does not cross water. */
+export const US: Pt[] = [[150,80],[190,72],[232,70],[252,92],[266,78],[292,94],[296,110],[278,132],[246,150],[206,148],[164,132]];
 
 /** The mockup's hubs — reused where §2.3 says so. */
 export const HUB_NA: Pt = [240,108];

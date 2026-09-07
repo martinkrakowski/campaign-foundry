@@ -10,8 +10,8 @@ export interface WorldMapProps {
   readonly value: string | null;
   /** Called with a footprint's value when its landmass is clicked. */
   readonly onSelect: (value: string) => void;
-  /** The hover caption's text; defaults to the footprint's label. */
-  readonly hoverLabel?: (value: string) => string;
+  /** Hub text and hover caption. The kit owns geometry, not copy. */
+  readonly labelFor: (value: string) => string;
   /**
    * Visually-hidden hint rendered beside the map. The SVG is `aria-hidden` — a pointer
    * enhancement bound to the same state as the chips (D94), which remain the sole
@@ -30,16 +30,12 @@ export function WorldMap({
   footprints,
   value,
   onSelect,
-  hoverLabel,
+  labelFor,
   fallbackHint,
   className,
 }: WorldMapProps): ReactNode {
-  const [hovered, setHovered] = useState<{ readonly value: string; readonly label: string } | null>(null);
-  const caption = hovered === null
-    ? ""
-    : hoverLabel !== undefined
-      ? hoverLabel(hovered.value)
-      : hovered.label;
+  const [hovered, setHovered] = useState<string | null>(null);
+  const caption = hovered === null ? "" : labelFor(hovered);
 
   // The dot matrix is generated geometry — compute it once per footprints prop, not
   // on every hover re-render.
@@ -47,12 +43,18 @@ export function WorldMap({
     () => footprints.map((f) => ({ ...f, dots: dotMatrix(f.polys, f.hub) })),
     [footprints],
   );
+  // Unselected stay in vocabulary order; the selected footprint paints last so an
+  // overlapping later region cannot cover it. Unknown / null values paint as-is.
+  const selectedFootprint = painted.find((f) => f.value === value);
+  const ordered = selectedFootprint === undefined
+    ? painted
+    : [...painted.filter((f) => f.value !== selectedFootprint.value), selectedFootprint];
 
   return (
     <div className={cn("space-y-1", className)}>
       <svg
         viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
-                aria-hidden="true"
+        aria-hidden="true"
         focusable="false"
         className="w-full"
         onMouseLeave={() => setHovered(null)}
@@ -67,59 +69,62 @@ export function WorldMap({
           ))}
         </g>
 
-        {painted.map((f) => {
-          const selected = value === f.value;
-          return (
-            <g
-              key={f.value}
-              data-region={f.value}
-              data-selected={selected || undefined}
-              className="group cursor-pointer"
-              onClick={() => onSelect(f.value)}
-              onMouseEnter={() => setHovered({ value: f.value, label: f.label })}
-            >
-              {f.polys.map((poly, i) => (
-                <path
-                  key={i}
-                  d={polyPath(poly)}
-                  strokeWidth={1}
-                  className={cn(
-                    "transition-colors",
-                    selected
-                      ? "fill-brand-primary/20 stroke-brand-primary/55"
-                      : "fill-text-muted/[0.16] stroke-border group-hover:stroke-border-hover",
-                  )}
-                />
-              ))}
-              {f.dots.map((dot) => (
-                <circle
-                  key={`${dot.x}-${dot.y}`}
-                  cx={dot.x}
-                  cy={dot.y}
-                  r={1.5}
-                  style={{ transformBox: "fill-box", transformOrigin: "center", transitionDelay: `${dot.delay}s` }}
-                  className={cn(
-                    "fill-brand-primary/90 transition-transform duration-fast",
-                    selected ? "scale-100" : "scale-0",
-                  )}
-                />
-              ))}
-              {f.hub !== undefined ? (
-                <circle cx={f.hub[0]} cy={f.hub[1]} r={2.5} className={selected ? "fill-brand-primary" : "fill-text-muted"} />
-              ) : null}
-              {selected ? (
-                <text
-                  x={f.hub !== undefined ? f.hub[0] + 6 : MAP_WIDTH / 2}
-                  y={f.hub !== undefined ? f.hub[1] - 6 : MAP_HEIGHT / 2}
-                  textAnchor={f.hub !== undefined ? undefined : "middle"}
-                  className="fill-text-primary font-mono text-[11px]"
-                >
-                  {f.label}
-                </text>
-              ) : null}
-            </g>
-          );
-        })}
+        <g>
+          {ordered.map((f) => {
+            const selected = value === f.value;
+            return (
+              <g
+                key={f.value}
+                data-region={f.value}
+                data-selected={selected || undefined}
+                className="group cursor-pointer"
+                onClick={() => onSelect(f.value)}
+                onMouseEnter={() => setHovered(f.value)}
+              >
+                {f.polys.map((poly, i) => (
+                  <path
+                    key={i}
+                    d={polyPath(poly)}
+                    strokeWidth={1}
+                    className={cn(
+                      "transition-colors",
+                      selected
+                        ? "fill-brand-primary/20 stroke-brand-primary/55"
+                        : "fill-text-muted/[0.16] stroke-border group-hover:stroke-border-hover",
+                    )}
+                  />
+                ))}
+                {f.dots.map((dot) => (
+                  <circle
+                    key={`${dot.x}-${dot.y}`}
+                    cx={dot.x}
+                    cy={dot.y}
+                    r={1.5}
+                    pointerEvents="none"
+                    style={{ transformBox: "fill-box", transformOrigin: "center", transitionDelay: `${dot.delay}s` }}
+                    className={cn(
+                      "fill-brand-primary/90 motion-safe:transition-transform motion-safe:duration-fast",
+                      selected ? "scale-100" : "scale-0",
+                    )}
+                  />
+                ))}
+                {selected && f.hub !== undefined ? (
+                  <circle cx={f.hub[0]} cy={f.hub[1]} r={2.5} className="fill-brand-primary" />
+                ) : null}
+                {selected ? (
+                  <text
+                    x={f.hub !== undefined ? f.hub[0] + 6 : MAP_WIDTH / 2}
+                    y={f.hub !== undefined ? f.hub[1] - 6 : MAP_HEIGHT / 2}
+                    textAnchor={f.hub !== undefined ? undefined : "middle"}
+                    className="fill-text-primary font-mono text-[11px]"
+                  >
+                    {labelFor(f.value)}
+                  </text>
+                ) : null}
+              </g>
+            );
+          })}
+        </g>
       </svg>
       {/* The hover caption: mono, under the map, empty until a footprint is hovered. */}
       <p className="font-mono text-[11px] text-text-muted">{caption}</p>

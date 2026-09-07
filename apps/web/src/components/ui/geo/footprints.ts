@@ -7,9 +7,8 @@ import {
 } from "./polygons";
 
 // The vocabulary of §2.3 (plan 2026-09-07_graphics-and-the-world-map, D94), mapped to
-// footprints in REGION_OPTIONS order. The labels and codes here are *data for the
-// caller*, like the mockup's own REGIONS table — the kit components take everything
-// they say as props and contain no strings. `Other…` has no footprint and is absent.
+// footprints in REGION_OPTIONS order. The kit owns geometry, not copy — the consumer
+// supplies labels via WorldMap's `labelFor`. `Other…` has no footprint and is absent.
 
 /** The map's fixed grid, ported from the mockup's 960×500 viewBox. */
 export const MAP_WIDTH = 960;
@@ -17,7 +16,6 @@ export const MAP_HEIGHT = 500;
 
 export interface Footprint {
   readonly value: string;
-  readonly label: string;
   readonly polys: readonly (readonly Pt[])[];
   /** The hub dot's anchor; `GLOBAL` has none — its label sits at the map's centre. */
   readonly hub?: Pt;
@@ -37,14 +35,13 @@ export function centroid(pts: readonly Pt[]): Pt {
 }
 
 export const REGION_FOOTPRINTS: readonly Footprint[] = [
-  { value: "GLOBAL", label: "Global", polys: LANDMASSES },
-  { value: "EU", label: "Europe", polys: [EUR, SCAN], hub: HUB_EMEA },
-  { value: "DE", label: "Germany", polys: [DE], hub: centroid(DE) },
-  { value: "UK", label: "United Kingdom", polys: [UK], hub: centroid(UK) },
-  { value: "US", label: "United States", polys: [US], hub: HUB_NA },
+  { value: "GLOBAL", polys: LANDMASSES },
+  { value: "EU", polys: [EUR, SCAN], hub: HUB_EMEA },
+  { value: "DE", polys: [DE], hub: centroid(DE) },
+  { value: "UK", polys: [UK], hub: centroid(UK) },
+  { value: "US", polys: [US], hub: HUB_NA },
   {
     value: "APAC",
-    label: "Asia-Pacific",
     polys: [ASIA, J1, J2, TWN, PHI, SUM, JAV, BOR, SUL, NG, SLK, AUS, TAS, NZN, NZS],
     hub: HUB_APAC,
   },
