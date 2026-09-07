@@ -64,13 +64,22 @@ describe("CreateCampaignDialog", () => {
     expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe("false");
     // The three numbered sections, under the dialog's h2 — sibling h3s, never h2s.
-    for (const title of [
-      messages.createSectionTargeting,
-      messages.createSectionStartFrom,
-      messages.createSectionMode,
-    ]) {
-      expect(screen.getByRole("heading", { level: 3, name: title })).toBeTruthy();
-    }
+    // DOM order and numerals are the structure D86 specifies: start-from precedes
+    // mode because choosing a source replaces the mode control with a readout.
+    const headings = screen.getAllByRole("heading", { level: 3 });
+    expect(
+      headings.map((h) => {
+        const numeral = h.querySelector("span[aria-hidden='true']")?.textContent ?? "";
+        const title =
+          [...h.querySelectorAll("span")].find((s) => s.getAttribute("aria-hidden") !== "true")
+            ?.textContent ?? "";
+        return `${numeral} · ${title}`;
+      }),
+    ).toEqual([
+      `01 · ${messages.createSectionTargeting}`,
+      `02 · ${messages.createSectionStartFrom}`,
+      `03 · ${messages.createSectionMode}`,
+    ]);
   });
 
   test("the region's Other… escape reveals the free-text input, as Identity renders it", async () => {
@@ -135,6 +144,9 @@ describe("CreateCampaignDialog", () => {
     expect(fieldText("targetRegion")).toContain(messages.targetRegion);
     expect(fieldText("targetAudience")).toContain(messages.targetAudience);
     expect(screen.getByLabelText(messages.targetAudienceLabel).getAttribute("aria-invalid")).toBe(
+      "true",
+    );
+    expect(screen.getByLabelText(messages.targetRegionLabel).getAttribute("aria-invalid")).toBe(
       "true",
     );
 
