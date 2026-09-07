@@ -1041,3 +1041,41 @@ export const modeTileBlurbVariation = "A set of creatives, each a different take
 /** The mode tile's preview panel caption, in its bottom-right corner. */
 export const modeTileCaptionBrief = "one design";
 export const modeTileCaptionVariation = "six variations";
+
+/* ── M2 — the map in the dialog ───────────────────────────────────────────── */
+
+/**
+ * The map footprint's display name, keyed by `REGION_OPTIONS` value. The kit owns
+ * geometry, not copy (D94 as review corrected it on #207) — the dialog supplies
+ * `labelFor` from here, so the names leave the kit and live in the one voice.
+ * An exported record, not literals at the call site, so the jargon gate scans it.
+ */
+export const regionDisplayNames: Readonly<Record<string, string>> = {
+  GLOBAL: "Global",
+  EU: "Europe",
+  DE: "Germany",
+  UK: "United Kingdom",
+  US: "United States",
+  APAC: "Asia-Pacific",
+};
+/** A region value's display name; a value outside the table names itself. */
+export function regionDisplayName(value: string): string {
+  return regionDisplayNames[value] ?? value;
+}
+/**
+ * The map's visually-hidden fallback hint: the SVG is `aria-hidden` and the chips
+ * remain the accessible and keyboard control (D94), so a screen reader is told
+ * where the same choice is really made.
+ */
+export const worldMapFallbackHint =
+  "The map is a pointer view only — or use the chips below to pick the region.";
+/**
+ * The map's visible hint, written against F2 and deliberately against the mockup:
+ * the region reaches generation only as prompt text — it shapes the generated
+ * backgrounds and copy, and nothing dispatches or fans out per region (D94).
+ */
+export const worldMapRegionHint = "The region shapes the generated backgrounds and copy.";
+/** The start-from rail's eyebrow readout: how many campaigns the store holds. */
+export function startFromCampaignCount(count: number): string {
+  return `${count} campaign${count === 1 ? "" : "s"}`;
+}
