@@ -25,8 +25,12 @@ const PROPORTIONS: Record<RatioOption, { width: number; height: number }> = {
  * The mockup's four content layers, each one token fill via Tailwind's
  * `color-mix` scale — never `--rgb-*`, never a hex. The frame itself is
  * `RatioFrame`'s hairline idiom (`fill-surface-2 stroke-border`).
+ *
+ * `/18` is not on Tailwind's default opacity scale, so it emits nothing —
+ * the image layer would be unfilled. Arbitrary alphas use bracket form
+ * (DESIGN.md:83). On-scale values (`/30`, `/50`, `/80`) stay as-is.
  */
-const IMAGE = "fill-text-muted/18";
+const IMAGE = "fill-text-muted/[0.18]";
 const IMAGE_TINTED = "fill-brand-primary/80";
 const HEADLINE = "fill-text-secondary/50";
 const SUBHEAD = "fill-text-secondary/30";
@@ -78,6 +82,13 @@ const LAYOUTS: Record<PosterVariant, (w: number, h: number) => readonly Layer[]>
 
 const AVATAR_FRACTION = 0.055;
 
+/** Pixel box of a `PosterFrame` at `ratio` whose long side is `size`. */
+export function frameSize(ratio: RatioOption, size: number): { width: number; height: number } {
+  const { width: rw, height: rh } = PROPORTIONS[ratio];
+  const long = Math.max(rw, rh);
+  return { width: (rw / long) * size, height: (rh / long) * size };
+}
+
 /**
  * A miniature poster at one of the domain's true ratios — the mockup's `.f` +
  * `.fv` skeleton: a hairline frame holding four layered content rects. Wholly
@@ -85,10 +96,7 @@ const AVATAR_FRACTION = 0.055;
  * never the picture. Static by construction — no animation classes anywhere.
  */
 export function PosterFrame({ ratio, variant, size = 96, blank = false }: PosterFrameProps): ReactNode {
-  const { width: rw, height: rh } = PROPORTIONS[ratio];
-  const long = Math.max(rw, rh);
-  const w = (rw / long) * size;
-  const h = (rh / long) * size;
+  const { width: w, height: h } = frameSize(ratio, size);
   const layers = blank ? [] : LAYOUTS[variant](w, h);
   return (
     <svg

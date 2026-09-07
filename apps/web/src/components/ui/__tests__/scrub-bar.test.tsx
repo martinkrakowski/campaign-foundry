@@ -8,7 +8,7 @@ describe("ScrubBar", () => {
     const track = container.firstElementChild as HTMLElement;
     expect(track.getAttribute("aria-hidden")).toBe("true");
     expect(track.className).toContain("rounded-full");
-    expect(track.className).toContain("bg-text-muted/18");
+    expect(track.className).toContain("bg-text-muted/[0.18]");
     const children = Array.from(track.children) as HTMLElement[];
     expect(children).toHaveLength(3);
     const ticks = children.slice(0, 2);

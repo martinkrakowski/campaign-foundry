@@ -2773,3 +2773,23 @@ the body; `animate-pulse` on `PosterStack`).
 
 **Left open:** PR #206 opened against `main`, unmerged: https://github.com/martinkrakowski/campaign-foundry/pull/206
 G2/G3 consume `PosterFrame`/`PreviewPanel`/`PosterStack`/`ScrubBar` from the barrel.
+
+---
+
+## 2026-09-07 — G1 review remediation (PR #206)
+
+**Session:** 2026-09-07 — G1 remediation on `feat/g1`
+
+- **Mode:** Implementer
+- **Changes:**
+  - `poster-frame.tsx` — exported `frameSize(ratio, size)`; `PosterFrame` sizes from it; image fill is `fill-text-muted/[0.18]` (DESIGN.md:83; `/18` emits nothing).
+  - `poster-stack.tsx` — wrapper box is `frameSize` plus the offsets, not `size` on both axes.
+  - `scrub-bar.tsx` — track is `bg-text-muted/[0.18]`.
+  - `preview-panel.tsx` / `option-tile.tsx` — JSDoc rule on both: leave `dimmed` unset inside a tile slot.
+  - Tests: stack wrapper style at 9:16; static-motion scan of inline `animation`/`transition`+`infinite` and `<style>`/`@keyframes`; compile-the-kit-alphas in `tailwind-alpha.test.ts`; dim-pinning mounts `preview=`; composition pin (dim exactly once on the preview path); `blank` × each variant.
+- **Decisions:**
+  - Alpha proof is a compile: extract color-alpha classes from the four preview files and assert Tailwind emits a rule for each. A class-string assertion cannot tell a generated utility from a dead one.
+  - PR-Agent's per-child `aria-hidden` on `PosterStack` spans remains refused: the outer wrapper already has it.
+  - `option-tile.test.tsx` left byte-identical.
+- **Left open:**
+  - Push and PR-body "Review remediation" section for this session.

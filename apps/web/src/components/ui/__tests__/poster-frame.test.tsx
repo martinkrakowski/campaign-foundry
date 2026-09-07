@@ -1,8 +1,14 @@
 import { describe, test, expect } from "vitest";
 import { render } from "@testing-library/react";
-import { PosterFrame } from "../poster-frame";
+import { PosterFrame, frameSize } from "../poster-frame";
 
 describe("PosterFrame", () => {
+  test("frameSize treats size as the long side", () => {
+    expect(frameSize("1:1", 96)).toEqual({ width: 96, height: 96 });
+    expect(frameSize("9:16", 96)).toEqual({ width: 54, height: 96 });
+    expect(frameSize("16:9", 96)).toEqual({ width: 96, height: 54 });
+  });
+
   test("draws each ratio at its true proportion from the long side", () => {
     const dimensions = [
       ["1:1", 96, 96],
@@ -30,7 +36,7 @@ describe("PosterFrame", () => {
     // 1:1 at 96 → viewBox 0 0 96 96; pA's image is 82 % wide, 52 % tall, at the top.
     const { container } = render(<PosterFrame ratio="1:1" variant="pA" size={96} />);
     const rects = Array.from(container.querySelectorAll("rect"));
-    const image = rects.find((rect) => rect.getAttribute("class")?.includes("fill-text-muted/18"));
+    const image = rects.find((rect) => rect.getAttribute("class")?.includes("fill-text-muted/[0.18]"));
     expect(image).toBeTruthy();
     expect(Number(image?.getAttribute("x"))).toBeCloseTo(0.09 * 96);
     expect(Number(image?.getAttribute("y"))).toBeCloseTo(0.07 * 96);
@@ -65,7 +71,7 @@ describe("PosterFrame", () => {
   test("pC centres the round image, the text and the CTA", () => {
     const { container } = render(<PosterFrame ratio="1:1" variant="pC" size={96} />);
     const rects = Array.from(container.querySelectorAll("rect"));
-    const image = rects.find((rect) => rect.getAttribute("class")?.includes("fill-text-muted/18"));
+    const image = rects.find((rect) => rect.getAttribute("class")?.includes("fill-text-muted/[0.18]"));
     expect(image).toBeTruthy();
     // Round: the rx rounds the rect into a circle at half its width.
     expect(image?.getAttribute("rx")).toBe(String(Number(image?.getAttribute("width")) / 2));
@@ -78,15 +84,27 @@ describe("PosterFrame", () => {
     }
   });
 
-  test("blank draws a dashed empty frame and none of the content layers", () => {
-    const { container } = render(<PosterFrame ratio="1:1" variant="pA" blank />);
-    const svg = container.querySelector("svg") as SVGSVGElement;
-    const frame = svg.querySelector("rect") as SVGRectElement;
-    expect(frame.getAttribute("stroke-dasharray")).toBe("4 3");
-    for (const fill of ["fill-text-muted/18", "fill-text-secondary/50", "fill-text-secondary/30", "fill-brand-primary"]) {
-      expect(svg.querySelector(`[class*="${fill}"]`)).toBeNull();
+  test("blank × each variant draws a dashed empty frame and none of the content layers", () => {
+    for (const variant of ["pA", "pB", "pC"] as const) {
+      const { container, unmount } = render(<PosterFrame ratio="1:1" variant={variant} blank />);
+      const svg = container.querySelector("svg") as SVGSVGElement;
+      const frame = svg.querySelector("rect") as SVGRectElement;
+      expect(frame.getAttribute("stroke-dasharray")).toBe("4 3");
+      for (const fill of [
+        "fill-text-muted/[0.18]",
+        "fill-text-secondary/50",
+        "fill-text-secondary/30",
+        "fill-brand-primary",
+      ]) {
+        expect(
+          Array.from(svg.querySelectorAll("[class]")).some((node) => node.getAttribute("class")?.includes(fill)),
+        ).toBe(false);
+      }
+      // pB's avatar is gated on `!blank`; dropping that conjunct stays green if
+      // blank is only ever mounted as pA. Each variant must assert no circle.
+      expect(svg.querySelector("circle")).toBeNull();
+      unmount();
     }
-    expect(svg.querySelector("circle")).toBeNull();
   });
 
   test("is decorative: aria-hidden, not focusable", () => {

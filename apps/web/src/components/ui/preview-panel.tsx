@@ -8,8 +8,8 @@ export interface PreviewPanelProps {
   readonly caption?: string;
   /**
    * The unselected treatment (`opacity-[0.55] saturate-[0.45]`). Standalone use
-   * only: when the panel sits in an `OptionTile`'s `preview` slot, the tile dims
-   * its own wrapper — leave this unset there.
+   * only: leave `dimmed` unset inside a tile slot — `OptionTile` dims its own
+   * wrapper around `preview`, and setting this too double-dims.
    */
   readonly dimmed?: boolean;
   /** The panel's fixed height in px. */
@@ -21,6 +21,7 @@ export interface PreviewPanelProps {
  * with a rule beneath, rounded at the top only — the preview sits edge to edge
  * inside the card, above the padded body, not as a picture in a frame (D93).
  * The dim/undim is a transition on an interaction, never a loop (D88).
+ * Leave `dimmed` unset inside a tile slot: the tile already dims its wrapper.
  */
 export function PreviewPanel({
   children,

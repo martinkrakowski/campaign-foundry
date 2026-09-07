@@ -7,11 +7,15 @@ const HEAD = 0.3;
  * A rounded track with two tick marks and a `brand-primary` head parked at
  * ~30 % — the static replacement for the mockup's sweeping playhead (§2.2).
  * The head does not move: nothing here animates, ever (D88). Wholly decorative
- * (`aria-hidden`); the option's name carries the meaning.
+ * (`aria-hidden`); the option's name carries the meaning. Track fill is
+ * `bg-text-muted/[0.18]` — `/18` is off-scale and emits nothing (DESIGN.md:83).
  */
 export function ScrubBar(): ReactNode {
   return (
-    <span aria-hidden="true" className="relative block h-1.5 w-full rounded-full bg-text-muted/18">
+    <span
+      aria-hidden="true"
+      className="relative block h-1.5 w-full rounded-full bg-text-muted/[0.18]"
+    >
       {TICKS.map((tick) => (
         <span
           key={tick}

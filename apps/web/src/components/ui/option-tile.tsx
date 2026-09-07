@@ -16,8 +16,8 @@ export interface OptionTileProps {
   /**
    * A full-bleed preview panel rendered edge to edge above the body, outside
    * the padding — the mockup's `.pvbox` (F3). The tile applies the unselected
-   * dim to its own wrapper around this node, so a `PreviewPanel` placed here
-   * must leave its own `dimmed` prop unset; the caller does not pass it.
+   * dim to its own wrapper around this node. Leave `dimmed` unset inside a
+   * tile slot: a nested `PreviewPanel` that also sets `dimmed` double-dims.
    */
   readonly preview?: ReactNode;
   /** The visible name under the picture; the accessible name stays `value`. */
@@ -46,7 +46,8 @@ export interface OptionTileProps {
  *
  * An optional `preview` panel runs edge to edge above the body (F3): the
  * padding lives on the body wrapper, not the button, so the panel touches the
- * tile's own edges like the mockup's `.pvbox`.
+ * tile's own edges like the mockup's `.pvbox`. Leave `dimmed` unset inside a
+ * tile slot — this wrapper is the one dim.
  *
  * The accessible-name contract is `AxisCard`'s, copied not reinvented: the name
  * is exactly `value` (an explicit aria-label, which overrides content), and the

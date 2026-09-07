@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { PosterFrame, type PosterVariant } from "./poster-frame";
+import { PosterFrame, frameSize, type PosterVariant } from "./poster-frame";
 import type { RatioOption } from "./ratio-frame";
 
 export interface PosterStackProps {
@@ -22,13 +22,14 @@ const OFFSET_Y = 6;
  * and purely static — no animation classes anywhere (D88).
  */
 export function PosterStack({ ratio = "1:1", size = 84 }: PosterStackProps): ReactNode {
+  const { width, height } = frameSize(ratio, size);
   return (
     <span
       aria-hidden="true"
       className="relative inline-block"
       style={{
-        width: size + (VARIANTS.length - 1) * OFFSET_X,
-        height: size + (VARIANTS.length - 1) * OFFSET_Y,
+        width: width + (VARIANTS.length - 1) * OFFSET_X,
+        height: height + (VARIANTS.length - 1) * OFFSET_Y,
       }}
     >
       {VARIANTS.map((variant, index) => (

@@ -61,7 +61,7 @@ export {
 } from "./dialog-shell";
 
 // G1 — previews
-export { PosterFrame, type PosterFrameProps, type PosterVariant } from "./poster-frame";
+export { PosterFrame, frameSize, type PosterFrameProps, type PosterVariant } from "./poster-frame";
 export { PreviewPanel, type PreviewPanelProps } from "./preview-panel";
 export { PosterStack, type PosterStackProps } from "./poster-stack";
 export { ScrubBar } from "./scrub-bar";

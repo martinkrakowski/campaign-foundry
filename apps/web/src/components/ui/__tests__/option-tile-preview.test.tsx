@@ -1,6 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { render } from "@testing-library/react";
 import { OptionTile } from "../option-tile";
+import { PreviewPanel } from "../preview-panel";
 
 describe("OptionTile's preview slot (F3)", () => {
   test("the preview panel is a sibling before the padded body, its parent the button, not the body", () => {
@@ -32,8 +33,14 @@ describe("OptionTile's preview slot (F3)", () => {
 
   test("the tile dims its own wrapper around the preview — the caller passes no dimmed", () => {
     const { container, rerender } = render(
-      <OptionTile value="brief" name="Classic" selected={false} onToggle={() => {}}>
-        <span data-testid="preview" />
+      <OptionTile
+        value="brief"
+        name="Classic"
+        selected={false}
+        onToggle={() => {}}
+        preview={<span data-testid="preview" />}
+      >
+        <span />
       </OptionTile>,
     );
     const unselected = container.querySelector("[data-testid='preview']")?.parentElement as HTMLElement;
@@ -44,13 +51,52 @@ describe("OptionTile's preview slot (F3)", () => {
     expect(unselected.className).not.toMatch(/animate-/);
 
     rerender(
-      <OptionTile value="brief" name="Classic" selected onToggle={() => {}}>
-        <span data-testid="preview" />
+      <OptionTile
+        value="brief"
+        name="Classic"
+        selected
+        onToggle={() => {}}
+        preview={<span data-testid="preview" />}
+      >
+        <span />
       </OptionTile>,
     );
     const full = container.querySelector("[data-testid='preview']")?.parentElement as HTMLElement;
     expect(full.className).toContain("opacity-100");
     expect(full.className).toContain("saturate-100");
+  });
+
+  test("a PreviewPanel in the tile slot is dimmed exactly once — leave dimmed unset", () => {
+    const { container } = render(
+      <OptionTile
+        value="brief"
+        name="Classic"
+        selected={false}
+        onToggle={() => {}}
+        preview={
+          <PreviewPanel>
+            <span data-testid="picture" />
+          </PreviewPanel>
+        }
+      >
+        <span />
+      </OptionTile>,
+    );
+    const picture = container.querySelector("[data-testid='picture']") as HTMLElement;
+    const panel = picture.parentElement as HTMLElement;
+    const wrapper = panel.parentElement as HTMLElement;
+    expect(wrapper.getAttribute("aria-hidden")).toBe("true");
+    expect(wrapper.className).toContain("opacity-[0.55]");
+    expect(wrapper.className).toContain("saturate-[0.45]");
+    // The panel itself stays undimmed: two wrappers both applying the pair
+    // would double-dim. The children glyph has its own independent dim.
+    expect(panel.className).toContain("opacity-100");
+    expect(panel.className).not.toContain("opacity-[0.55]");
+    const previewTree = [wrapper, ...Array.from(wrapper.querySelectorAll("*"))];
+    const dimmed = previewTree.filter(
+      (el) => typeof el.className === "string" && el.className.includes("opacity-[0.55]"),
+    );
+    expect(dimmed).toHaveLength(1);
   });
 
   test("without a preview the tile renders exactly the padded body", () => {
