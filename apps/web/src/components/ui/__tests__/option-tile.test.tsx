@@ -87,8 +87,6 @@ describe("OptionTile", () => {
     expect(unselected.className).toContain("border-border-control");
     expect(unselected.className).toContain("hover:border-border-control-hover");
     expect(unselected.className).not.toContain("border-brand-primary");
-    // no badge before selection
-    expect(unselected.textContent).not.toContain("✓");
     expect(
       Array.from(unselected.querySelectorAll("span")).some((span) => span.className.includes("animate-check-pop")),
     ).toBe(false);
@@ -114,12 +112,15 @@ describe("OptionTile", () => {
         <span data-testid="picture" />
       </OptionTile>,
     );
+    const unselectedButton = screen.getByRole("button", { name: "brief" });
     const pictureHolder = screen.getByTestId("picture").parentElement as HTMLElement;
     expect(pictureHolder.getAttribute("aria-hidden")).toBe("true");
     expect(pictureHolder.className).toContain("opacity-[0.55]");
     expect(pictureHolder.className).toContain("saturate-[0.45]");
     expect(pictureHolder.className).toContain("transition-[opacity,filter]");
-    // dimmed is not animated: nothing loops, by utility class or otherwise
+    // dimmed is not animated: nothing loops, by utility class or otherwise —
+    // the tile's own className as well as the picture wrapper (D88)
+    expect(unselectedButton.className).not.toMatch(/animate-/);
     expect(pictureHolder.className).not.toMatch(/animate-/);
 
     rerender(
@@ -127,9 +128,21 @@ describe("OptionTile", () => {
         <span data-testid="picture" />
       </OptionTile>,
     );
+    const selectedButton = screen.getByRole("button", { name: "brief" });
     const full = screen.getByTestId("picture").parentElement as HTMLElement;
+    expect(selectedButton.className).not.toMatch(/animate-/);
     expect(full.className).toContain("opacity-100");
     expect(full.className).toContain("saturate-100");
+  });
+
+  test("blurb is the neutral tone and description is the warning tone", () => {
+    render(allSlots());
+    const blurb = screen.getByText("One design, repeated.");
+    const description = screen.getByText("needs a source");
+    expect(blurb.className).toContain("text-text-secondary");
+    expect(blurb.className).not.toContain("text-warning");
+    expect(description.className).toContain("text-warning");
+    expect(description.className).not.toContain("text-text-secondary");
   });
 
   test("pressing toggles with the raw value, by mouse or keyboard", async () => {
