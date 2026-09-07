@@ -2771,3 +2771,54 @@ green.
 
 **Left open:** D95; the tag word per mode; whether `EU = EUR + SCAN` is acceptable at picker grain;
 whether the brief editor's Identity step gets the map too.
+
+## 2026-09-07 — G1: the kit previews (wave A)
+
+**Mode:** Implementer.
+
+**Changes:** Lane G1 of the graphics-and-world-map plan. New kit components `ui/poster-frame.tsx`
+(true-ratio poster skeleton, three union-keyed variants `pA/pB/pC`, `blank` for the start-blank
+card), `ui/preview-panel.tsx` (the `.pvbox`, D93), `ui/poster-stack.tsx` and `ui/scrub-bar.tsx`
+(the §2.2 static replacements — three overlapping frames; a scrub head parked at 30 % that does not
+move). `OptionTile` gained the `preview?: ReactNode` slot rendered edge to edge above the body (F3):
+the `p-3.5` moved onto a body wrapper, the accessible-name contract untouched. Barrel exports
+appended as one contiguous `// G1 — previews` block, no existing line edited.
+
+**Decisions:**
+- Dim-through: the tile dims its own wrapper around the `preview` node (same mechanism as the
+  `children` slot) rather than mutating the caller's node; an embedded `PreviewPanel` leaves its own
+  `dimmed` unset — documented on the prop and pinned by `option-tile-preview.test.tsx`.
+- The existing `option-tile.test.tsx` was left byte-identical; the preview-slot tests live in a new
+  sibling file.
+- `pB`'s round avatar is a `<circle>` beside the four-layer table (variant decoration, not a layer);
+  its geometry is still asserted.
+- `ScrubBar` takes no props — wholly static and decorative; callers size it through layout.
+
+**Verification:** full gate green (`build`, `typecheck`, `lint`, `lint:arch`, `sync:check` on the
+committed tree, `test:cov` — 3156 passed / 2 skipped, 100 % on all four counters);
+`option-tile.test.tsx`, `ModePanel.test.tsx` and `CreateCampaignDialog.test.tsx` pass unedited. All
+four prescribed mutations ran red and were reverted (pA geometry; `dimmed` classes; preview inside
+the body; `animate-pulse` on `PosterStack`).
+
+**Left open:** PR #206 opened against `main`, unmerged: https://github.com/martinkrakowski/campaign-foundry/pull/206
+G2/G3 consume `PosterFrame`/`PreviewPanel`/`PosterStack`/`ScrubBar` from the barrel.
+
+---
+
+## 2026-09-07 — G1 review remediation (PR #206)
+
+**Session:** 2026-09-07 — G1 remediation on `feat/g1`
+
+- **Mode:** Implementer
+- **Changes:**
+  - `poster-frame.tsx` — exported `frameSize(ratio, size)`; `PosterFrame` sizes from it; image fill is `fill-text-muted/[0.18]` (DESIGN.md:83; `/18` emits nothing).
+  - `poster-stack.tsx` — wrapper box is `frameSize` plus the offsets, not `size` on both axes.
+  - `scrub-bar.tsx` — track is `bg-text-muted/[0.18]`.
+  - `preview-panel.tsx` / `option-tile.tsx` — JSDoc rule on both: leave `dimmed` unset inside a tile slot.
+  - Tests: stack wrapper style at 9:16; static-motion scan of inline `animation`/`transition`+`infinite` and `<style>`/`@keyframes`; compile-the-kit-alphas in `tailwind-alpha.test.ts`; dim-pinning mounts `preview=`; composition pin (dim exactly once on the preview path); `blank` × each variant.
+- **Decisions:**
+  - Alpha proof is a compile: extract color-alpha classes from the four preview files and assert Tailwind emits a rule for each. A class-string assertion cannot tell a generated utility from a dead one.
+  - PR-Agent's per-child `aria-hidden` on `PosterStack` spans remains refused: the outer wrapper already has it.
+  - `option-tile.test.tsx` left byte-identical.
+- **Left open:**
+  - Push and PR-body "Review remediation" section for this session.

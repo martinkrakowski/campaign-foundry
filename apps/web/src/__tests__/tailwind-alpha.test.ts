@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import postcss from 'postcss';
 import tailwindcss from 'tailwindcss';
 import type { Config } from 'tailwindcss';
@@ -127,5 +129,47 @@ describe('Tailwind container query variant (the preview rail)', () => {
   it('emits container-type for the row that hosts the query', async () => {
     const css = await generateCss(['[container-type:inline-size]']);
     expect(css).toContain('container-type: inline-size');
+  });
+});
+
+// G1 previews: a class-string assertion cannot tell a generated utility from a
+// dead one. `/18` is not on Tailwind's default opacity scale, so it emits
+// nothing and the image layer / scrub track would be blank (DESIGN.md:83).
+// This compiles every color-alpha class the four preview files actually write.
+const PREVIEW_FILES = [
+  'poster-frame.tsx',
+  'poster-stack.tsx',
+  'preview-panel.tsx',
+  'scrub-bar.tsx',
+] as const;
+const PREVIEW_DIR = join(__dirname, '../components/ui');
+const COLOR_ALPHA =
+  /\b((?:fill|bg|text|stroke|border)-[a-z0-9-]+\/(?:\d+|\[[^\]]+\]))/g;
+
+function previewAlphaClasses(): string[] {
+  const found = new Set<string>();
+  for (const file of PREVIEW_FILES) {
+    const source = readFileSync(join(PREVIEW_DIR, file), 'utf-8');
+    for (const match of source.matchAll(COLOR_ALPHA)) {
+      found.add(match[1]);
+    }
+  }
+  return [...found];
+}
+
+function selectorOf(cls: string): string {
+  return `.${cls.replace(/[^-_a-zA-Z0-9]/g, (ch) => `\\${ch}`)}`;
+}
+
+describe('G1 preview alpha utilities actually emit (DESIGN.md:83)', () => {
+  it('emits a real rule for every color-alpha class the four preview files use', async () => {
+    const classes = previewAlphaClasses();
+    expect(classes.length).toBeGreaterThan(0);
+    const css = await generateCss(classes);
+    for (const cls of classes) {
+      expect(css, `${cls} emits nothing — off-scale alphas need bracket form (e.g. /18 is not a scale key)`).toContain(
+        selectorOf(cls),
+      );
+    }
   });
 });

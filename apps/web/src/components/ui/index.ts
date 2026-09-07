@@ -60,3 +60,9 @@ export {
   type UseDialogFocusTrapOptions,
 } from "./dialog-shell";
 
+// G1 — previews
+export { PosterFrame, frameSize, type PosterFrameProps, type PosterVariant } from "./poster-frame";
+export { PreviewPanel, type PreviewPanelProps } from "./preview-panel";
+export { PosterStack, type PosterStackProps } from "./poster-stack";
+export { ScrubBar } from "./scrub-bar";
+
