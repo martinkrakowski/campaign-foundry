@@ -3237,6 +3237,83 @@ one and retired the other. Not waste — the kit components are unchanged — bu
 **Left open:** whether `layer-rules.yaml` gains a presentation layer or `packages/ui` gets a written
 exemption (D100's real question); **D95** (multi-region) unchanged.
 
+## 2026-09-07 — S3: the seam moves ahead of the dialog (wave A, PR #217)
+
+Lane S3 of the two-field create's wave A, implemented by glm-5.3-flash in the `wt-s3` worktree
+(`feat/s3`, from `main` at `2341401`). The contract S1 consumes, plus the D98 landing — while S4
+(the D99 `setMode` fix) ships in parallel, disjoint.
+
+**What landed.** `CreateCampaignInput` is `{ name, mode }` (plus W2's `source?`); region and
+audience left the seed, the editor's seed effect patches exactly those two, and `isStoredSeed`
+**rejects an old-shape seed instead of half-applying one** — a seed written by the deployed build
+is discarded whole, so no user inherits a brief with a name and nothing else. The landing baton is
+Identity (D98); `COPY_STEP`'s name and its comment changed together, because the comment documented
+a reason that is now false. `duplicateBrief`'s overrides body on the source path is empty — the
+copy inherits the source's answers wholesale.
+
+**The finding the brief asked to be recorded, recorded:** the duplicate route's `overrides`
+parameter is now carried by no production caller — the dialog's source path sends `{}` and
+`BriefPicker`'s Duplicate never sent any. `DuplicateOverrides` stays accurate to the route's
+contract (and its transport test passes unedited), but the parameter is a vestigial candidate for
+S1 or an API lane to cut deliberately. PR #217 states it.
+
+**The coverage lesson.** The landing change silently uncovered `BriefEditor.tsx:706` — the
+`presentation !== "guided"` return in the step-heading handoff. The old seed moved the cursor 0→1
+even in the everything presentation (the only `go` reachable there: no segbar, no arrows); landing
+on Identity is a 0→0 no-change. The fix is a new test with a real claim, not an exclusion: a mount
+baton to Copy, then an in-place seed walking the cursor back — the cursor's only mover in the
+stack, observed or not. Worth remembering for D98-shaped changes: a landing that moves *onto* the
+default step erases the one observable trace the everything presentation had of the cursor.
+
+**Gate:** green, 100 % ×4. Both brief mutations confirmed to compile and run: restoring
+`stashStep(COPY_STEP)` failed the baton tests (2 in the dialog suite); letting `isStoredSeed`
+accept the old shape failed the discard tests (3 across the seam and editor suites). Both mutants
+restored. `sync:check` green on the committed tree. No new strings in `messages.ts`. The 409 and
+blocked-store paths pass unedited; the seed's deep-equal test was rewritten deliberately to
+`{ name, mode }` — fields left and remaining named in the PR body.
+
+---
+
+## 2026-09-07 — S3 review remediation (PR #217)
+
+**Mode:** Implementer
+
+**Changes:**
+- `takeSeed` now distinguishes *no seed* from *a refused seed*: a refusal spends the companion
+  step baton via exported `takeStashedStep`; an absent seed leaves it (H5). The seed consume in
+  `BriefEditor` is a layout effect so that spend wins the race against the navigation hook's
+  mount effect.
+- Seed tests pin the cursor move (switch to Guided so Copy vs Identity is on screen), Randomized
+  `setMode` (mode tile + Variation Policy / no Treatments), extra-key forward-compat on
+  `isStoredSeed`, and the refused-Next comment (cursor never left Identity).
+
+**Decisions:**
+- Changed the seam, not the baton: `use-step-navigation` still knows nothing about seeds. The
+  generic spend is exported; `takeSeed` is the caller that knows a refused seed has a companion
+  baton. Teaching the hook about seeds would couple a generic one-shot to one producer.
+
+**Left open:** none from this remediation.
+
+---
+
+## 2026-09-07 — S3 remediation round 2 (PR #217): the refused-seed upgrade path
+
+**Mode:** Implementer
+
+**Changes:**
+- No production code. The editor-level seed test now seeds both legacy keys
+  (`cf:create-seed` four-field + `cf:step-handoff` `"copy"`), mounts `/brief/new`,
+  and asserts the two user-visible halves: discarded Identity fields, and landing
+  on Identity not Copy. Storage-key assertions dropped — `cf:step-handoff` is
+  gone either way (the navigation hook spends it by applying it).
+
+**Decisions:**
+- `use-step-navigation.test.ts` already covers the baton in isolation (`takeStashedStep`
+  spends by reading; a stashed step is where the next mount lands). The editor test
+  is still required: the defect is the interaction of two independent keys, which
+  neither unit sees alone.
+
+**Left open:** none.
 ## 2026-09-07 — S4: the setMode leak, closed without touching a shipped test
 
 **Mode:** Implementer (lane S4 of wave A, worktree `wt-s4`, branch `feat/s4` off `2341401`). PR
