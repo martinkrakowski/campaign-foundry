@@ -2,6 +2,7 @@
 
 import { MODE_OPTIONS, slugify, type CampaignMode } from "@/components/campaign/editor-state";
 import { duplicateBrief } from "./briefs-api";
+import { takeStashedStep } from "./use-step-navigation";
 
 /**
  * D65 — create is a seam, not a POST. The dialog hands the two create answers — a
@@ -78,6 +79,7 @@ function isStoredSeed(value: unknown): value is CreateCampaignInput {
     targetRegion?: unknown;
     targetAudience?: unknown;
   };
+  // Unknown extra keys are accepted: this is a shape check, not a freeze, so a later build can add a field without this one discarding its seeds.
   return (
     typeof seed.name === "string" &&
     typeof seed.mode === "string" &&
@@ -87,14 +89,30 @@ function isStoredSeed(value: unknown): value is CreateCampaignInput {
   );
 }
 
-/** Read and clear the seed. Reading it is what spends it. */
+/**
+ * Read and clear the seed. Reading it is what spends it.
+ *
+ * `null` is two different facts, and they must not be treated the same: there was
+ * no seed, or there was one we refused. A refusal also spends the companion step
+ * baton so a leftover `"copy"` from a previous build cannot land the user past two
+ * empty required fields (D98). An absent seed leaves that baton alone — it is H5's,
+ * not ours.
+ */
 export function takeSeed(): CreateCampaignInput | null {
   try {
     const raw = localStorage.getItem(CREATE_SEED_KEY);
     localStorage.removeItem(CREATE_SEED_KEY);
     if (raw === null) return null;
-    const parsed: unknown = JSON.parse(raw);
-    return isStoredSeed(parsed) ? parsed : null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      takeStashedStep();
+      return null;
+    }
+    if (isStoredSeed(parsed)) return parsed;
+    takeStashedStep();
+    return null;
   } catch {
     return null;
   }

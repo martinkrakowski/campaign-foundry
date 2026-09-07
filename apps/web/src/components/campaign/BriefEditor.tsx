@@ -484,7 +484,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // localStorage, and a read during render would make the first client render
   // disagree with it (the trap `Disclosure` documents). The baton is spent by a
   // read: `takeSeed()` is `takeStashedStep`'s pattern.
-  useEffect(() => {
+  // Layout, not passive: a refused seed spends its companion step baton inside
+  // `takeSeed`, and that spend must happen before the navigation hook's mount
+  // effect applies a leftover `"copy"` from a previous build. A `useEffect` here
+  // is declared after that hook and would lose the race.
+  useLayoutEffect(() => {
     // A seed arriving while a named brief is open must never load a blank draft in
     // place — the gate is the route's own statement about what this editor is.
     if (!blank) return;

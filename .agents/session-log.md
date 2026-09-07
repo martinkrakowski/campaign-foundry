@@ -3271,3 +3271,25 @@ accept the old shape failed the discard tests (3 across the seam and editor suit
 restored. `sync:check` green on the committed tree. No new strings in `messages.ts`. The 409 and
 blocked-store paths pass unedited; the seed's deep-equal test was rewritten deliberately to
 `{ name, mode }` — fields left and remaining named in the PR body.
+
+---
+
+## 2026-09-07 — S3 review remediation (PR #217)
+
+**Mode:** Implementer
+
+**Changes:**
+- `takeSeed` now distinguishes *no seed* from *a refused seed*: a refusal spends the companion
+  step baton via exported `takeStashedStep`; an absent seed leaves it (H5). The seed consume in
+  `BriefEditor` is a layout effect so that spend wins the race against the navigation hook's
+  mount effect.
+- Seed tests pin the cursor move (switch to Guided so Copy vs Identity is on screen), Randomized
+  `setMode` (mode tile + Variation Policy / no Treatments), extra-key forward-compat on
+  `isStoredSeed`, and the refused-Next comment (cursor never left Identity).
+
+**Decisions:**
+- Changed the seam, not the baton: `use-step-navigation` still knows nothing about seeds. The
+  generic spend is exported; `takeSeed` is the caller that knows a refused seed has a companion
+  baton. Teaching the hook about seeds would couple a generic one-shot to one producer.
+
+**Left open:** none from this remediation.

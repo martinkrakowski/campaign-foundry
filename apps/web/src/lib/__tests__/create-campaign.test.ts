@@ -1,5 +1,6 @@
 import { describe, test, expect, vi, afterEach } from "vitest";
 import { CREATE_SEED_KEY, createCampaign, subscribeToSeed, takeSeed } from "../create-campaign";
+import { stashStep } from "../use-step-navigation";
 import { BriefsApiError } from "../briefs-api";
 import { API } from "@/lib/run-context";
 import { EMPTY_REPORT, json, mockPipelineApi } from "@/__tests__/helpers";
@@ -114,6 +115,17 @@ describe("takeSeed — the baton is spent by a read", () => {
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
   });
 
+  test("answers null when the store throws on read", () => {
+    vi.spyOn(localStorage, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    try {
+      expect(takeSeed()).toBeNull();
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   // A parse is not a check: syntactically valid JSON that is not a seed must
   // still spend the key, so a bad baton cannot poison the next mount. F5 — the
   // first two entries are the old-shape seeds the deployed build writes; a
@@ -131,5 +143,24 @@ describe("takeSeed — the baton is spent by a read", () => {
     localStorage.setItem(CREATE_SEED_KEY, JSON.stringify(value));
     expect(takeSeed()).toBeNull();
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+  });
+
+  test("a seed with an extra unknown field is accepted", () => {
+    const withExtra = { ...seed, extra: "forward-compat" };
+    localStorage.setItem(CREATE_SEED_KEY, JSON.stringify(withExtra));
+    expect(takeSeed()).toEqual(withExtra);
+  });
+
+  test("a refused seed spends the companion step baton; an absent seed leaves it", () => {
+    stashStep("copy");
+    expect(takeSeed()).toBeNull();
+    expect(localStorage.getItem("cf:step-handoff")).toBe("copy");
+
+    localStorage.setItem(
+      CREATE_SEED_KEY,
+      JSON.stringify({ name: "Summer Spark", targetRegion: "EU", targetAudience: "trail runners", mode: "brief" }),
+    );
+    expect(takeSeed()).toBeNull();
+    expect(localStorage.getItem("cf:step-handoff")).toBeNull();
   });
 });

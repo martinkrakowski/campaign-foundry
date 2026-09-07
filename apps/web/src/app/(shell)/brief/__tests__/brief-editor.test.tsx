@@ -3539,7 +3539,9 @@ describe("the create seed (W1)", () => {
     // landing baton (the dialog's cross-route branch, spent at mount) puts the
     // cursor on Copy; the in-place create walks it back to Identity, with no
     // heading on screen to focus — which is exactly what the handoff guard
-    // allows for.
+    // allows for. Identity is sectionOrder[0], so "lands on Identity" is true by
+    // default in the stack: switch to Guided so the walk is on screen and a
+    // restored go(copy) fails.
     localStorage.setItem("cf:presentation", "everything");
     stashStep("copy");
     const user = userEvent.setup();
@@ -3551,6 +3553,10 @@ describe("the create seed (W1)", () => {
       </>,
     );
     await waitFor(() => expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(""));
+    await user.click(screen.getByRole("button", { name: messages.presentationGuided }));
+    expect(screen.getByRole("button", { name: /: Copy, current step/ })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
+
     await user.type(screen.getByLabelText(messages.campaignNameLabel), "typed");
 
     await user.click(screen.getByRole("button", { name: /Create new/ }));
@@ -3566,6 +3572,9 @@ describe("the create seed (W1)", () => {
     expect((screen.getByLabelText("Target Region") as HTMLInputElement).value).toBe("");
     expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe("");
     expect(screen.queryAllByRole("dialog", { name: "Unsaved edits" })).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: messages.presentationGuided }));
+    expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /: Copy, current step/ })).toBeNull();
   });
 
   test("an in-place seed lands on Identity with the name applied (D98)", async () => {
@@ -3642,8 +3651,9 @@ describe("the create seed (W1)", () => {
     await user.click(within(prompt).getByRole("button", { name: "Leave" }));
     await fillDialog(user, within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })));
 
-    // D98 — the seed walks the cursor BACK to Identity from Copy, and the arrival
-    // is not red: the seed reset attempted/touched (L1.1).
+    // D98 — validateIdentity refuses Next, so the cursor never left Identity and
+    // go(identity) is a no-op on this path. The arrival is not red: the seed
+    // reset attempted/touched (L1.1).
     await waitFor(() => expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy());
     expect(screen.queryByText(/Not saved yet/)).toBeNull();
     expect(screen.getByText(/New brief — fill/)).toBeTruthy();
@@ -3670,6 +3680,23 @@ describe("the create seed (W1)", () => {
     expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark");
   });
 
+  test("a Randomized seed sets the editor's mode and the Randomized section list", async () => {
+    routes({});
+    await act(async () => {
+      await createCampaign({ name: "Summer Spark", mode: "variation" });
+    });
+    stashStep("identity");
+
+    nextMock().nav.pathname = "/brief/new";
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy());
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark");
+    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "Variation Policy" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Treatments" })).toBeNull();
+  });
+
   test("an old-shape seed from the previous build is discarded, not half-applied (F5)", async () => {
     routes({});
     // What the currently deployed build writes: the four-field seed. Accepting it
@@ -3688,6 +3715,26 @@ describe("the create seed (W1)", () => {
     expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe("");
     // Spent, not retried: a refused baton cannot poison the next mount either.
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+  });
+
+  test("a rejected legacy seed also spends its landing baton, so the editor lands on Identity (D98)", async () => {
+    routes({});
+    // Both keys the previous build wrote: the four-field seed, and the Copy
+    // baton that landed the user past Identity. The seed is discarded; the
+    // companion baton must be spent too, or the user still lands on Copy with
+    // a blank brief — D98 arriving through the upgrade door.
+    localStorage.setItem(
+      CREATE_SEED_KEY,
+      JSON.stringify({ name: "Summer Spark", targetRegion: "EU", targetAudience: "trail runners", mode: "brief" }),
+    );
+    stashStep("copy");
+    nextMock().nav.pathname = "/brief/new";
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy());
+    expect(screen.queryByRole("button", { name: /: Copy, current step/ })).toBeNull();
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("");
+    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    expect(localStorage.getItem("cf:step-handoff")).toBeNull();
   });
 
   test("a malformed seed leaves a working blank editor rather than throwing", async () => {
