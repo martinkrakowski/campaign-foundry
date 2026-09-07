@@ -14,7 +14,8 @@
 #      sides; anything else — a different path, a modify/delete, a binary conflict, a
 #      failed resolution — aborts the merge and exits non-zero.
 #   2. Push the refreshed branch.
-#   3. Wait for CI on the new head (`gh pr checks --watch --fail-fast`).
+#   3. Wait for CI on the new head — poll until checks are REGISTERED, then watch
+#      (`gh pr checks --watch --fail-fast`). A fixed sleep races the forge; see #206.
 #   4. Squash-merge.
 # Then remove the worktrees and delete the merged branches, and fast-forward main.
 #
@@ -32,7 +33,12 @@ MAIN=${MAIN_BRANCH:-main}
 
 # Files where two branches legitimately append and both sides must survive.
 # Extend for your repo (a session log, a hand-maintained barrel, a changelog).
-APPEND_ONLY=${APPEND_ONLY:-'^(\.agents/session-log\.md|CHANGELOG\.md|packages/[^/]+/src/application/ports/out/index\.ts)$'}
+# Files that concurrent lanes routinely append to, where keeping BOTH sides of a
+# conflict hunk is the correct resolution. The web barrel and the message catalogue
+# earned their place the hard way: every wave with two parallel lanes touches them,
+# and without them the second merge of each wave aborts. Only ever add a file whose
+# lanes append at the END — the resolver preserves order, not intent.
+APPEND_ONLY=${APPEND_ONLY:-'^(\.agents/session-log\.md|CHANGELOG\.md|packages/[^/]+/src/application/ports/out/index\.ts|apps/web/src/components/ui/index\.ts|apps/web/src/components/campaign/messages\.ts)$'}
 
 KEEP_BOTH='
 import re, sys
@@ -115,7 +121,21 @@ for spec in "$@"; do
     git worktree remove --force "$tmp" || die "cannot remove temp worktree $tmp"
   fi
 
-  sleep 15  # let the forge register checks for the new head before watching
+  # Wait for the forge to REGISTER checks on the new head before watching them.
+  # A fixed sleep is a race: when the refresh push outruns registration, `gh pr checks`
+  # reports "no checks reported", `--fail-fast` treats that as a failure, and the merge
+  # aborts on a PR that is perfectly healthy. Observed on #206. Poll for checks to
+  # exist, then watch; a PR that genuinely has no checks configured still errors out,
+  # but only after we have given the forge a fair chance to say so.
+  registered=0
+  for _ in $(seq 1 40); do            # up to ~10 minutes at 15s
+    if [ "$(gh pr checks "$pr" --json name --jq 'length' 2>/dev/null || echo 0)" -gt 0 ]; then
+      registered=1; break
+    fi
+    sleep 15
+  done
+  [ "$registered" -eq 1 ] \
+    || { echo "NO CHECKS REGISTERED for #$pr after ~10m — not merging"; exit 1 }
   gh pr checks "$pr" --watch --fail-fast 2>&1 | tail -2 \
     || { echo "CHECKS FAILED for #$pr"; gh pr checks "$pr"; exit 1 }
   gh pr merge "$pr" --squash || die "squash-merge failed for #$pr"
