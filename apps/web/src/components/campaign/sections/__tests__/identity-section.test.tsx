@@ -4,6 +4,15 @@ import userEvent from "@testing-library/user-event";
 import { IdentitySection } from "../IdentitySection";
 import { editorReducer, initialEditorState, type EditorAction, type EditorState } from "../../editor-state";
 import * as messages from "../../messages";
+import { WorldMap } from "@/components/ui";
+
+vi.mock("@/components/ui", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/ui")>();
+  return {
+    ...actual,
+    WorldMap: vi.fn(actual.WorldMap),
+  };
+});
 
 const state = (over: Partial<EditorState> = {}): EditorState => ({
   ...initialEditorState(),
@@ -124,5 +133,19 @@ describe("IdentitySection — the world map", () => {
     expect(hint.textContent).not.toMatch(/dispatch|per region|\brun/i);
     expect(container.querySelector("p.sr-only")?.textContent).toBe(messages.worldMapFallbackHint);
     expect(container.querySelectorAll('[role="status"]')).toHaveLength(0);
+  });
+
+  test("the map is built once per region — unrelated patches do not re-render it", () => {
+    vi.mocked(WorldMap).mockClear();
+    const { dispatch } = renderWithReducer(state());
+    expect(WorldMap).toHaveBeenCalledTimes(1);
+
+    dispatch({ type: "patch", patch: { targetAudience: "a" } });
+    dispatch({ type: "patch", patch: { targetAudience: "ab" } });
+    dispatch({ type: "patch", patch: { targetAudience: "abc" } });
+    expect(WorldMap).toHaveBeenCalledTimes(1);
+
+    dispatch({ type: "patch", patch: { targetRegion: "US" } });
+    expect(WorldMap).toHaveBeenCalledTimes(2);
   });
 });

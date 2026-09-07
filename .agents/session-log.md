@@ -3553,6 +3553,7 @@ constant `value={null}` → chip→map test red; map rendered unconditionally �
 and the existing Identity assertions passed unedited throughout. PR #225 open against `main`, not merged.
 
 **Remediation.** Identity never proved the M2 Other-then-map path (dialog:1003). Ported onto IdentitySection with the reducer loop; mutation (ChipGroup `customOpen` effect disabled) failed `a map pick after Other… selects that chip and closes the custom input` (DE chip not pressed); reverted. Gate green. Not merged.
+**Remediation, round 2.** WorldMap rebuilt on every IdentitySection render (`onSelect` inline). `useCallback`/`useMemo` so the map element is built once per displayed region; render-count test (audience ×3 stays at 1, region patch → 2); drop-`useMemo` mutation failed at 4 calls. brief-editor.test.tsx 70.00s → 56.26s locally (166 passed). Gate green. Not merged.
 ## 2026-09-07 — lane T1, the campaign type (wave A)
 
 - **Mode:** Implementer

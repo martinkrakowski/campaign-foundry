@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, useRef, useEffect, type Dispatch } from "react";
+import { useId, useState, useRef, useEffect, useCallback, useMemo, type Dispatch } from "react";
 import { Input, ChipGroup, WorldMap, REGION_FOOTPRINTS } from "@/components/ui";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import type { FieldErrors } from "@/components/campaign/validate";
@@ -145,6 +145,30 @@ export function IdentitySection({
       ? state.briefId
       : state.campaignName || state.briefId;
 
+  const onSelectRegion = useCallback(
+    (value: string) => dispatch({ type: "patch", patch: { targetRegion: value } }),
+    [dispatch],
+  );
+
+  // The map's SVG is hundreds of nodes. An inline `onSelect` rebuilds the
+  // element on every editor update (keystroke, save-flow step) and happy-dom
+  // repaints the whole matrix. Memoize on the value it displays.
+  const mapValue = (REGION_OPTIONS as readonly string[]).includes(state.targetRegion)
+    ? state.targetRegion
+    : null;
+  const worldMap = useMemo(
+    () => (
+      <WorldMap
+        footprints={REGION_FOOTPRINTS}
+        value={mapValue}
+        onSelect={onSelectRegion}
+        labelFor={messages.regionDisplayName}
+        fallbackHint={messages.worldMapFallbackHint}
+      />
+    ),
+    [mapValue, onSelectRegion, REGION_FOOTPRINTS, messages.regionDisplayName, messages.worldMapFallbackHint],
+  );
+
   return (
     <SectionShell id="identity" title="1 · Identity" errorCount={countErrors(errors)} compact={compact}>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -189,17 +213,7 @@ export function IdentitySection({
           <div className={compact ? undefined : "space-y-2"}>
             {!compact ? (
               <>
-                <WorldMap
-                  footprints={REGION_FOOTPRINTS}
-                  value={
-                    (REGION_OPTIONS as readonly string[]).includes(state.targetRegion)
-                      ? state.targetRegion
-                      : null
-                  }
-                  onSelect={(value) => dispatch({ type: "patch", patch: { targetRegion: value } })}
-                  labelFor={messages.regionDisplayName}
-                  fallbackHint={messages.worldMapFallbackHint}
-                />
+                {worldMap}
                 <p className="text-[12px] text-text-muted">{messages.worldMapRegionHint}</p>
               </>
             ) : null}
