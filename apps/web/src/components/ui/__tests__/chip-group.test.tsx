@@ -112,6 +112,37 @@ describe("ChipGroup", () => {
     expect(input.value).toBe("FR");
   });
 
+  test("a known option arriving from outside closes Other… and selects that chip", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <ChipGroup
+        options={OPTIONS}
+        value=""
+        onChange={onChange}
+        allowOther
+        otherLabel="Other…"
+        otherPlaceholder="e.g. LATAM"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Other…" }));
+    expect(screen.getByPlaceholderText("e.g. LATAM")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "DE" }).getAttribute("aria-pressed")).toBe("false");
+
+    rerender(
+      <ChipGroup
+        options={OPTIONS}
+        value="DE"
+        onChange={onChange}
+        allowOther
+        otherLabel="Other…"
+        otherPlaceholder="e.g. LATAM"
+      />,
+    );
+    expect(screen.getByRole("button", { name: "DE" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByPlaceholderText("e.g. LATAM")).toBeNull();
+  });
+
   test("clicking an option chip while custom input is open resets custom state", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();

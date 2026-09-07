@@ -50,6 +50,18 @@ export function ChipGroup({
 }: ChipGroupProps): ReactNode {
   const isCustomValue = value !== "" && !options.includes(value);
   const [customOpen, setCustomOpen] = useState(false);
+  // A controlled group must not keep the Other… draft open against a value it
+  // did not cause. When `value` becomes a known option from outside (the map,
+  // a parent), close the custom input so that option renders selected. Compared
+  // against the last seen value so clicking Other… while the parent has not yet
+  // cleared a known option still reveals the input (the existing contract).
+  const [seenValue, setSeenValue] = useState(value);
+  if (value !== seenValue) {
+    setSeenValue(value);
+    if (options.includes(value)) {
+      setCustomOpen(false);
+    }
+  }
   const showCustomInput = allowOther && (customOpen || isCustomValue);
 
   const handleOptionClick = (option: string) => {

@@ -45,6 +45,37 @@ describe("WorldMap", () => {
     expect(onSelect).toHaveBeenCalledWith("EU");
   });
 
+  test("value=GLOBAL, clicking DE reaches DE — the selected footprint is not a pointer target", () => {
+    const { onSelect, container } = renderMap({ value: "GLOBAL" });
+    // GLOBAL paints last (so its fill is visible) but must not swallow the hit:
+    // its whole group is hit-transparent, so the event falls through to DE.
+    expect(regionOf(container, "GLOBAL").getAttribute("pointer-events")).toBe("none");
+    expect(regionOf(container, "DE").getAttribute("pointer-events")).not.toBe("none");
+    fireEvent.click(regionOf(container, "DE"));
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith("DE");
+  });
+
+  test("value=EU, clicking DE reaches DE — overlapping selected paint does not swallow the hit", () => {
+    const { onSelect, container } = renderMap({ value: "EU" });
+    expect(regionOf(container, "EU").getAttribute("pointer-events")).toBe("none");
+    expect(regionOf(container, "DE").getAttribute("pointer-events")).not.toBe("none");
+    fireEvent.click(regionOf(container, "DE"));
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith("DE");
+  });
+
+  test("value=null, every footprint is a pointer target", () => {
+    const { onSelect, container } = renderMap({ value: null });
+    for (const g of container.querySelectorAll("[data-region]")) {
+      expect(g.getAttribute("pointer-events")).not.toBe("none");
+    }
+    fireEvent.click(regionOf(container, "GLOBAL"));
+    expect(onSelect).toHaveBeenCalledWith("GLOBAL");
+    fireEvent.click(regionOf(container, "DE"));
+    expect(onSelect).toHaveBeenCalledWith("DE");
+  });
+
   test.each(["EU", "GLOBAL", "DE"] as const)(
     "value=%s paints that footprint last and only it carries the selected fill",
     (value) => {

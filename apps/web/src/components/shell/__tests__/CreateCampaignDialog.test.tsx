@@ -997,6 +997,19 @@ describe("the map in 01 · Targeting (M2 / D94)", () => {
     expect((screen.getByLabelText(messages.targetRegionLabel) as HTMLInputElement).value).toBe("EU");
   });
 
+  test("a map pick after Other… selects that chip and closes the custom input", async () => {
+    const user = userEvent.setup();
+    const { container } = renderDialog();
+    await openDialog(user);
+    await user.click(screen.getByRole("button", { name: messages.targetRegionOther }));
+    expect(screen.getByLabelText(messages.targetRegionOtherInputLabel)).toBeTruthy();
+
+    fireEvent.click(container.querySelector('[data-region="DE"]') as SVGGElement);
+
+    expect(screen.getByRole("button", { name: "DE" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByLabelText(messages.targetRegionOtherInputLabel)).toBeNull();
+  });
+
   test("clicking a chip paints its footprint — the map reads the same value", async () => {
     const user = userEvent.setup();
     const { container } = renderDialog();
@@ -1093,5 +1106,44 @@ describe("the map in 01 · Targeting (M2 / D94)", () => {
 
     expect(await screen.findByText(messages.startFromExistingError)).toBeTruthy();
     expect(screen.queryByText(messages.startFromCampaignCount(0))).toBeNull();
+  });
+
+  test("the rail's count comes from the picker's own list — one listing per open", async () => {
+    routeBriefs([classic, randomized]);
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+
+    expect(await screen.findByText(messages.startFromCampaignCount(2))).toBeTruthy();
+    const briefsCalls = vi.mocked(globalThis.fetch).mock.calls.filter(([url]) =>
+      String(url).includes("/campaigns/briefs"),
+    );
+    expect(briefsCalls).toHaveLength(1);
+  });
+
+  test("a close clears the count — a reopen does not flash the previous number", async () => {
+    routeBriefs([classic, randomized]);
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    expect(await screen.findByText(messages.startFromCampaignCount(2))).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: messages.confirmCancel }));
+    expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull();
+
+    let release!: () => void;
+    const held = new Promise<Response>((resolve) => {
+      release = () => resolve(json({ briefs: [classic, randomized] }));
+    });
+    mockPipelineApi({
+      result: (url: string) =>
+        url.includes("/campaigns/briefs") ? held : json(EMPTY_REPORT),
+    });
+    await user.click(screen.getByRole("button", { name: "open" }));
+    await screen.findByRole("dialog", { name: messages.createCampaignTitle });
+    expect(screen.queryByText(messages.startFromCampaignCount(2))).toBeNull();
+    expect(screen.getByText(messages.startFromExistingLoading)).toBeTruthy();
+    release();
+    expect(await screen.findByText(messages.startFromCampaignCount(2))).toBeTruthy();
   });
 });

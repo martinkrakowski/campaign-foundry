@@ -21,7 +21,7 @@ import { ModePanel } from "@/components/campaign/ModePanel";
 import { Field, REGION_OPTIONS } from "@/components/campaign/sections/IdentitySection";
 import { stashStep } from "@/lib/use-step-navigation";
 import { createCampaign } from "@/lib/create-campaign";
-import { isBriefsApiError, listBriefs } from "@/lib/briefs-api";
+import { isBriefsApiError } from "@/lib/briefs-api";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 import { hasRecoverableDraft, slugify, type CampaignMode } from "@/components/campaign/editor-state";
@@ -96,10 +96,10 @@ export function CreateCampaignDialog() {
   const [creating, setCreating] = useState(false);
   const [resumePrompt, setResumePrompt] = useState(false);
   // M2 — the start-from rail's eyebrow readout: how many campaigns the store
-  // holds. `null` while unknown (fetch in flight, or the read failed — the
-  // picker's own error sentence is the story then, and the eyebrow stays down).
-  // The picker owns its list and hands the dialog only the chosen source, so the
-  // count is read here; one extra listing per open, against the picker's own.
+  // holds. `null` while unknown (the picker has not yet reported, or its read
+  // failed — the picker's own error sentence is the story then, and the eyebrow
+  // stays down). The picker owns the list and reports the count up, so the
+  // eyebrow and the rail share one fetch.
   const [campaignCount, setCampaignCount] = useState<number | null>(null);
   // W2(a) (D90) — the footer's third state: the inline discard guard. Raised by
   // any close gesture on a draft with work in it; taken down by Keep editing,
@@ -155,6 +155,7 @@ export function CreateCampaignDialog() {
     clearRefusal();
     setResumePrompt(false);
     setGuardOpen(false);
+    setCampaignCount(null);
   };
 
   /**
@@ -224,29 +225,6 @@ export function CreateCampaignDialog() {
     }
     guardReturnFocusRef.current = null;
   }, [guardOpen, createDialogOpen, draftHasWork]);
-
-  // M2 — the rail's count, re-read on every open (the picker re-reads its list
-  // per mount, so the eyebrow would lie if the count outlived the close). The
-  // read failing is not this dialog's refusal to speak: the picker shows its own
-  // error sentence, and the eyebrow simply stays down.
-  useEffect(() => {
-    if (!createDialogOpen) return;
-    let active = true;
-    setCampaignCount(null);
-    (async () => {
-      try {
-        const briefs = await listBriefs();
-        /* istanbul ignore next -- `active` is the unmount-race guard; false only if the dialog closes mid-fetch */
-        if (active) setCampaignCount(briefs.length);
-      } catch {
-        /* istanbul ignore next -- a failed read leaves the count unknown; the picker's error state speaks */
-        if (active) setCampaignCount(null);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [createDialogOpen]);
 
   const runCreate = async () => {
     setRefusal(null);
@@ -489,6 +467,7 @@ export function CreateCampaignDialog() {
                   setSource(next);
                   clearRefusal();
                 }}
+                onCount={setCampaignCount}
               />
             </Field>
           </SectionBlock>
