@@ -1,6 +1,6 @@
 import { describe, test, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 
 // Kit files import types and constants from the @campaignfoundry/* domain packages
 // (ratio-frame, creative-glyph, platform-card, swatch-chip, duration-strip,
@@ -21,8 +21,25 @@ const allowlist: Record<string, string> = {
 };
 
 const kitDir = resolve(__dirname, "..");
-const kitFiles = readdirSync(kitDir).filter((file) => /\.(ts|tsx)$/.test(file));
-const CAMPAIGN_IMPORT = /@\/components\/campaign/;
+
+/** Recurse the kit, skipping `__tests__`. Nested sources are in scope (D87). */
+function listKitSources(dir: string): string[] {
+  const names: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === "__tests__") continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      names.push(...listKitSources(full));
+    } else if (/\.(ts|tsx)$/.test(entry.name)) {
+      names.push(relative(kitDir, full));
+    }
+  }
+  return names;
+}
+
+const kitFiles = listKitSources(kitDir);
+// An import statement, not a mention: a comment that names the path is not an import.
+const CAMPAIGN_IMPORT = /^\s*import\b[^\n]*["']@\/components\/campaign/m;
 
 describe("the kit does not import the campaign feature (D87)", () => {
   test("every kit file outside the allowlist is free of @/components/campaign imports", () => {
