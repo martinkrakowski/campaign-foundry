@@ -3197,3 +3197,42 @@ once reintroduced the same guard-and-watch-disagree shape. It merged first try a
 is not enough: an `onSelect` mutant this session broke the file syntactically and vitest reported
 `no tests` — neither a pass nor a fail, and indistinguishable from a weak test at a glance. The rule
 should read **confirm the mutation produced a valid mutant that actually ran**.
+
+## 2026-09-07 — The two-field create (plan), and a live defect it found
+
+**Mode:** Architect. Prompted by the owner's browser review of the shipped dialog: cut it to a name
+and a template type, move the rest into the editor's Everything/Guided views without duplication,
+and extract `packages/ui`.
+
+**Two readings confirmed with the owner before writing**, because each changed the plan's size by
+roughly three times:
+
+- **"Template type" means the campaign mode (Classic / Randomized), not the `static`/`motion` render
+  format.** The format reading would have required motion to silently set the mode — because
+  `load-brief.ts:603` refuses a classic brief requesting `formats: motion` on every run path — and
+  that cannot fire on the start-from path at all, since `mode` is deliberately not a duplicate
+  override (`duplicate.post.ts:88-92`). The mode reading is ungated and needs no probe.
+- **Start-from moves to `BriefPicker`'s Duplicate**, which already exists and is already guarded.
+
+**The defect the plan found, which is not the plan's subject.** `editor-state.ts:626`'s `setMode` is
+a bare passthrough: flipping Randomized → Classic leaves `output.formats: ["motion"]` intact, and
+that brief is then refused on every run path while it stays listed and looks fine. Reachable in
+today's editor. Graded **H** and given its own lane (**D99**) that can ship independently of
+everything else here.
+
+**Decisions proposed:** D97 (the dialog asks a name and a mode, nothing else), D98 (Create lands on
+Identity, not Copy — the baton's reason disappeared when the dialog stopped answering Identity),
+D99 (the `setMode` fix), D100 (`packages/ui` now, minus four files that import `campaign/messages`
+and cannot move yet), D101 (the mode tiles are the kit's `OptionTile` with G1's previews).
+
+**Recorded as a correction, not a finding:** the dialog has duplicated the Identity step since W1 —
+region, audience and mode all already exist in `IdentitySection` and the editor's sidebar — and
+three plans and eleven review passes did not say so. Every one asked whether the dialog was
+internally correct; none asked whether its fields existed elsewhere. A reviewer given a diff cannot
+see a duplicate it was never pointed at.
+
+**Also recorded:** the map and the start-from rail shipped in the dialog hours before this plan moved
+one and retired the other. Not waste — the kit components are unchanged — but the churn is counted.
+
+**Left open:** whether `layer-rules.yaml` gains a presentation layer or `packages/ui` gets a written
+exemption (D100's real question); **D95** (multi-region) unchanged.
