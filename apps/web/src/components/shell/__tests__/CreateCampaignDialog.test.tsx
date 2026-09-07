@@ -212,7 +212,7 @@ describe("CreateCampaignDialog", () => {
     expect(container.textContent).not.toContain("summer-spark");
   });
 
-  test("Create from elsewhere stashes the Copy step, closes the dialog, and pushes the seam's route", async () => {
+  test("Create from elsewhere stashes the Identity step, closes the dialog, and pushes the seam's route", async () => {
     const user = userEvent.setup();
     renderDialog();
     await openDialog(user);
@@ -220,14 +220,15 @@ describe("CreateCampaignDialog", () => {
     await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
 
     await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new"));
-    // D66: the landing branch belongs to the caller — off the blank route the baton
-    // crosses the navigation this push causes.
-    expect(localStorage.getItem("cf:step-handoff")).toBe("copy");
-    // D67: the create is not a cancelled one — the seed rides along for the editor.
+    // D98: the landing branch belongs to the caller — off the blank route the baton
+    // crosses the navigation this push causes, and it is Identity, not Copy: the
+    // dialog no longer answers Identity, and both its fields are required by
+    // `validateIdentity`.
+    expect(localStorage.getItem("cf:step-handoff")).toBe("identity");
+    // D97 — the seed carries the name and the mode only. targetRegion and
+    // targetAudience left the contract; the editor answers them in Identity.
     expect(JSON.parse(localStorage.getItem(CREATE_SEED_KEY) as string)).toEqual({
       name: "Summer Spark",
-      targetRegion: "EU",
-      targetAudience: "trail runners",
       mode: "brief",
     });
     await waitFor(() =>
@@ -361,7 +362,7 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
 
     await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new"));
     expect(JSON.parse(localStorage.getItem(CREATE_SEED_KEY) as string).name).toBe("Summer Spark");
-    expect(localStorage.getItem("cf:step-handoff")).toBe("copy");
+    expect(localStorage.getItem("cf:step-handoff")).toBe("identity");
     // One gesture, one answer: the seed's publication must not re-ask.
     expect(screen.queryAllByRole("dialog", { name: messages.resumeDraftTitle })).toHaveLength(0);
   });
@@ -548,13 +549,15 @@ describe("start from an existing campaign (W2 / D71)", () => {
     expect(await screen.findByText(messages.startFromExistingError)).toBeTruthy();
   });
 
-  test("creating from a source duplicates with the dialog's overrides and lands on the copy — no seed, no baton", async () => {
+  test("creating from a source duplicates and lands on the copy — no seed, no baton, no overrides", async () => {
     routeBriefs([classic], (url, init) => {
       expect(url).toBe("/api/pipeline/campaigns/briefs/summer-spark/duplicate");
-      // The dialog's region and audience win over the source's; mode is not sent.
+      // D97 — the dialog answers no Identity field, so the overrides body is
+      // empty: the copy inherits the source's answers. Mode is not sent either
+      // (the route refuses it; the copy inherits the source's mode).
       expect(JSON.parse(String(init.body))).toEqual({
         newId: "summer-spark",
-        overrides: { targetRegion: "EU", targetAudience: "trail runners" },
+        overrides: {},
       });
       return json({ file: "summer-spark.yaml", brief: copy }, 201);
     });

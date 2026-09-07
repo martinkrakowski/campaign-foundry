@@ -159,3 +159,22 @@ describe("ModePanel — the filled tiles (G2, F1/D93)", () => {
     }
   });
 });
+
+describe("ModePanel — the flip's dropped-format notice (S4/D99)", () => {
+  test("says the drop once, in a status line beside the tiles, when the flip removed Video", () => {
+    const { container } = render(<ModePanel mode="brief" onSetMode={() => {}} compact formatDropped />);
+    const status = container.querySelector('[role="status"]');
+    expect(status).not.toBeNull();
+    expect(status?.textContent).toBe(messages.modeDroppedVideo);
+  });
+
+  test("no drop, no live region — the compact sidebar stays silent", () => {
+    const { container } = render(<ModePanel mode="variation" onSetMode={() => {}} compact />);
+    expect(container.querySelector('[role="status"]')).toBeNull();
+  });
+
+  test("the full dialog form stays silent too — the dialog's mode tiles cannot drop a format", () => {
+    const { container } = render(<ModePanel mode="brief" onSetMode={() => {}} />);
+    expect(container.querySelector('[role="status"]')).toBeNull();
+  });
+});

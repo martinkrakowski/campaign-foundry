@@ -6,6 +6,7 @@ import { renderHook, act, render, fireEvent, screen } from "@testing-library/rea
 import {
   useStepNavigation,
   stashStep,
+  takeStashedStep,
   useStepSwipe,
   useStepKeys,
   useBecameTrue,
@@ -450,6 +451,13 @@ describe("the step baton (H5)", () => {
   test("a stashed step this list does not contain is ignored", () => {
     stashStep("policy");
     expect(hook().result.current.index).toBe(0);
+  });
+
+  test("takeStashedStep spends the baton by reading it, with no mount required", () => {
+    stashStep("copy");
+    expect(takeStashedStep()).toBe("copy");
+    expect(localStorage.getItem("cf:step-handoff")).toBeNull();
+    expect(takeStashedStep()).toBeNull();
   });
 
   test("a storage that throws on write does not break the save that was stashing", () => {

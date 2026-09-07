@@ -37,6 +37,15 @@ describe("formatGate", () => {
     });
   });
 
+  test("motion format is gated when mode is brief even while selected — the card discloses what the brief will drop", () => {
+    const gate = formatGate("motion", { mode: "brief", formats: ["static", "motion"] }, { motion: true });
+    expect(gate).toEqual({
+      gated: true,
+      disabled: false,
+      description: messages.formatsMotionNeedsRandomized,
+    });
+  });
+
   test("motion format is ungated when mode is variation and host has motion", () => {
     const gate = formatGate("motion", { mode: "variation", formats: ["static"] }, { motion: true });
     expect(gate).toEqual({ gated: false, disabled: false });
@@ -62,6 +71,14 @@ describe("FormatPanel", () => {
 
     await user.click(button);
     expect(onToggle).toHaveBeenCalledWith("static");
+  });
+
+  test("a selected Video card in Classic still shows the gate's reason", () => {
+    const gate = formatGate("motion", { mode: "brief", formats: ["static", "motion"] }, { motion: true });
+    render(<FormatPanel format="motion" selected onToggle={vi.fn()} gate={gate} />);
+    const button = screen.getByRole("button", { name: "motion" });
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText(messages.formatsMotionNeedsRandomized)).toBeTruthy();
   });
 
   test("renders motion format card with motion meta caption and gate description", () => {

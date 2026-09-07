@@ -148,8 +148,26 @@ for spec in "$@"; do
   done
   [ "$registered" -eq 1 ] \
     || { echo "NO CHECKS REGISTERED for #$pr after ~10m — not merging"; exit 1 }
-  gh pr checks "$pr" --watch --fail-fast 2>&1 | tail -2 \
-    || { echo "CHECKS FAILED for #$pr"; gh pr checks "$pr"; exit 1 }
+  # Do NOT use `gh pr checks --watch` here. Observed on #217: the check-runs API for the
+  # head reported 2 runs registered, and `--watch` on the same PR still said "no checks
+  # reported" — the two resolve the head differently for a window after a push, and
+  # `--fail-fast` turns that window into an aborted merge on a healthy PR. Poll the same
+  # API the registration guard used, until every run has concluded.
+  echo "waiting for checks on $head_sha …"
+  concluded=0
+  for _ in $(seq 1 120); do          # up to ~30 minutes at 15s
+    runs=$(gh api "repos/{owner}/{repo}/commits/$head_sha/check-runs" \
+      --jq '[.check_runs[] | {n:.name, s:.status, c:.conclusion}]' 2>/dev/null || echo '[]')
+    pending=$(printf '%s' "$runs" | python3 -c 'import json,sys;r=json.load(sys.stdin);print(sum(1 for x in r if x["s"]!="completed"))')
+    if [ "${pending:-1}" -eq 0 ] && [ "$(printf '%s' "$runs" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')" -gt 0 ]; then
+      concluded=1; break
+    fi
+    sleep 15
+  done
+  [ "$concluded" -eq 1 ] || { echo "CHECKS STILL PENDING for #$pr after ~30m — not merging"; exit 1 }
+  bad=$(printf '%s' "$runs" | python3 -c 'import json,sys;r=json.load(sys.stdin);print(",".join(x["n"] for x in r if x["c"] not in ("success","neutral","skipped")))')
+  [ -z "$bad" ] || { echo "CHECKS FAILED for #$pr: $bad"; gh pr checks "$pr"; exit 1 }
+  echo "checks green on $head_sha"; gh pr checks "$pr" 2>&1 | tail -3
   gh pr merge "$pr" --squash || die "squash-merge failed for #$pr"
   echo "merged #$pr"
 done

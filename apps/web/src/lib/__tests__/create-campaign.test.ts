@@ -1,10 +1,11 @@
 import { describe, test, expect, vi, afterEach } from "vitest";
 import { CREATE_SEED_KEY, createCampaign, subscribeToSeed, takeSeed } from "../create-campaign";
+import { stashStep } from "../use-step-navigation";
 import { BriefsApiError } from "../briefs-api";
 import { API } from "@/lib/run-context";
 import { EMPTY_REPORT, json, mockPipelineApi } from "@/__tests__/helpers";
 
-const seed = { name: "Summer Spark", targetRegion: "EU", targetAudience: "trail runners", mode: "brief" as const };
+const seed = { name: "Summer Spark", mode: "brief" as const };
 
 afterEach(() => {
   localStorage.clear();
@@ -51,16 +52,17 @@ describe("createCampaign (D65 — the seam)", () => {
 describe("createCampaign with a source (W2 / D71 — the duplicate path)", () => {
   const fromSource = { ...seed, source: "winter-wild" };
 
-  test("duplicates the source with the dialog's overrides and returns the copy's route", async () => {
+  test("duplicates the source and returns the copy's route", async () => {
     mockPipelineApi({
       result: () => json(EMPTY_REPORT),
       post: (url, init) => {
         expect(url).toBe(`${API}/campaigns/briefs/winter-wild/duplicate`);
-        // The copy's id is derived here from the name; the dialog's region and
-        // audience ride as the route's overrides.
+        // The copy's id is derived here from the name. D97 — the overrides body is
+        // empty: the dialog answers no Identity field, so the copy inherits the
+        // source's answers wholesale.
         expect(JSON.parse(String(init.body))).toEqual({
           newId: "summer-spark",
-          overrides: { targetRegion: "EU", targetAudience: "trail runners" },
+          overrides: {},
         });
         return json({ file: "summer-spark.yaml", brief: { id: "summer-spark", products: [] } }, 201);
       },
@@ -113,17 +115,52 @@ describe("takeSeed — the baton is spent by a read", () => {
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
   });
 
+  test("answers null when the store throws on read", () => {
+    vi.spyOn(localStorage, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    try {
+      expect(takeSeed()).toBeNull();
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   // A parse is not a check: syntactically valid JSON that is not a seed must
-  // still spend the key, so a bad baton cannot poison the next mount.
+  // still spend the key, so a bad baton cannot poison the next mount. F5 — the
+  // first two entries are the old-shape seeds the deployed build writes; a
+  // half-applied seed would be a brief with a name and nothing else, silently,
+  // so the guard discards them wholesale.
   test.each([
-    ["a non-string field", { name: 42, targetRegion: "EU", targetAudience: "trail runners", mode: "brief" }],
-    ["a missing field", { name: "Summer Spark", targetRegion: "EU", mode: "brief" }],
-    ["an unknown mode", { name: "Summer Spark", targetRegion: "EU", targetAudience: "trail runners", mode: "classic" }],
+    ["an old-shape seed from the previous build", { name: "Summer Spark", targetRegion: "EU", targetAudience: "trail runners", mode: "brief" }],
+    ["a half-old seed carrying an audience only", { name: "Summer Spark", targetAudience: "trail runners", mode: "brief" }],
+    ["a non-string field", { name: 42, mode: "brief" }],
+    ["a missing mode", { name: "Summer Spark" }],
+    ["an unknown mode", { name: "Summer Spark", mode: "classic" }],
     ["a JSON array", ["Summer Spark", "EU"]],
     ["a bare string", "Summer Spark"],
   ] as const)("answers null on %s and still spends the key", (_label, value) => {
     localStorage.setItem(CREATE_SEED_KEY, JSON.stringify(value));
     expect(takeSeed()).toBeNull();
     expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+  });
+
+  test("a seed with an extra unknown field is accepted", () => {
+    const withExtra = { ...seed, extra: "forward-compat" };
+    localStorage.setItem(CREATE_SEED_KEY, JSON.stringify(withExtra));
+    expect(takeSeed()).toEqual(withExtra);
+  });
+
+  test("a refused seed spends the companion step baton; an absent seed leaves it", () => {
+    stashStep("copy");
+    expect(takeSeed()).toBeNull();
+    expect(localStorage.getItem("cf:step-handoff")).toBe("copy");
+
+    localStorage.setItem(
+      CREATE_SEED_KEY,
+      JSON.stringify({ name: "Summer Spark", targetRegion: "EU", targetAudience: "trail runners", mode: "brief" }),
+    );
+    expect(takeSeed()).toBeNull();
+    expect(localStorage.getItem("cf:step-handoff")).toBeNull();
   });
 });

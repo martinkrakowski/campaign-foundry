@@ -624,6 +624,11 @@ function isBeatIndex(index: number, beatCount: number): boolean {
 function reduceEditor(state: EditorState, action: EditorAction): EditorState {
   switch (action.type) {
     case "setMode": {
+      // A flip to the same mode changed nothing — keep the state identity-equal,
+      // the way a refused action stays identity-equal. D99's drop lives in
+      // `toBrief` (a whole-classic gate), not here: the draft's formats must
+      // survive so the D5 round-trip and the remedy stay true.
+      if (action.mode === state.mode) return state;
       return { ...state, mode: action.mode };
     }
     case "patch": {
@@ -1103,7 +1108,49 @@ export function briefStyle(state: EditorState): Style | undefined {
   return state.styleExplicit || styleDiverges(state.style) ? { ...state.style } : undefined;
 }
 
+/**
+ * The formats the saved brief will carry (D99): a classic campaign renders
+ * stills only, so motion is omitted whenever `mode === "brief"`, however the
+ * draft still holds it. The draft itself is never touched — the D5 round-trip
+ * (switch to classic and back) and the remedy ("switch back to Randomized")
+ * both need the user's list intact. When dropping motion would empty the list,
+ * the projection is `["static"]`: the classic pipeline draws stills, and the
+ * API refuses an empty `output.formats`.
+ *
+ * The one derivation `toBrief` and the preview props share, so the dock can
+ * never show a platform the brief would not save (D45).
+ */
+export function serialisedFormats(state: EditorState): readonly string[] {
+  if (state.mode !== "brief") return state.formats;
+  const droppedMotion = state.formats.includes("motion");
+  const withoutMotion = state.formats.filter((format) => format !== "motion");
+  if (droppedMotion && withoutMotion.length === 0) return ["static"];
+  return withoutMotion;
+}
+
+/**
+ * Whether the serialised output equals the absent-key default (static × the
+ * static platforms). Shared with the preview so `outputShown` cannot disagree
+ * with `toBrief` about whether a platform caption exists (D45/D99).
+ */
+export function isDefaultOutput(state: EditorState): boolean {
+  const formats = serialisedFormats(state);
+  return (
+    formats.length === 1 &&
+    formats[0] === "static" &&
+    state.platforms.length === STATIC_PLATFORMS.length &&
+    STATIC_PLATFORMS.every((platform) => state.platforms.includes(platform))
+  );
+}
+
 export function toBrief(state: EditorState): CampaignBrief {
+  // D99: a classic brief cannot request the motion format — the run paths
+  // refuse the combination every time, because the classic product × ratio ×
+  // treatment matrix has no motion path. The gate is `mode === "brief"`, not a
+  // flip latch: however the draft got here, the brief it serialises carries
+  // only what the classic pipeline can actually render, while the draft keeps
+  // the user's own list (a flip back to Randomized has it again, unchanged).
+  const formats = serialisedFormats(state);
   // `mode` and `output` are optional in CampaignBrief — absent means the classic
   // static pipeline, which is exactly what a fresh draft holds. Writing them
   // unconditionally grew every classic brief on save (and made a freshly loaded
@@ -1112,11 +1159,6 @@ export function toBrief(state: EditorState): CampaignBrief {
   // an output the loaded brief declared, the user has toggled, or that diverges
   // from the default. Rendering is unaffected either way — the static platforms
   // keep zero insets (D11) — same discipline the ratio axis already follows.
-  const isDefaultOutput =
-    state.formats.length === 1 &&
-    state.formats[0] === "static" &&
-    state.platforms.length === STATIC_PLATFORMS.length &&
-    STATIC_PLATFORMS.every((platform) => state.platforms.includes(platform));
   const style = briefStyle(state);
   const brief: CampaignBrief = {
     id: state.briefId,
@@ -1128,8 +1170,8 @@ export function toBrief(state: EditorState): CampaignBrief {
     // something the absent key does not (see briefStyle).
     ...(style !== undefined ? { style } : {}),
     ...(state.mode === "variation" || state.modeExplicit ? { mode: state.mode } : {}),
-    ...(state.outputExplicit || !isDefaultOutput
-      ? { output: { formats: [...state.formats], platforms: [...state.platforms] } }
+    ...(state.outputExplicit || !isDefaultOutput(state)
+      ? { output: { formats: [...formats], platforms: [...state.platforms] } }
       : {}),
   };
   const localized = state.localizedMessage.trim();

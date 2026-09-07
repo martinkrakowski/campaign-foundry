@@ -69,8 +69,15 @@ export function stashStep(id: string): void {
   }
 }
 
-/** Read and clear the baton. Reading it is what spends it. */
-function takeStashedStep(): string | null {
+/**
+ * Read and clear the baton. Reading it is what spends it.
+ *
+ * Exported so a caller that must spend without applying (the create seed, when it
+ * refuses a payload) can do so without this module learning what a seed is — the
+ * baton stays a generic one-shot. The navigation hook is the other caller, and it
+ * is the one that applies the id.
+ */
+export function takeStashedStep(): string | null {
   try {
     const id = localStorage.getItem(STEP_HANDOFF_KEY);
     localStorage.removeItem(STEP_HANDOFF_KEY);

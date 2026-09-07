@@ -3275,3 +3275,245 @@ until the owner noticed. §7 of the plan says so in those words.
 **Left open:** whether `tools/` gating product PRs proves intolerable (the fix would be a separate CI
 job, not an exemption); whether the event log should outlive `/tmp`; and whether a wave wants a
 timeline rather than a table.
+## 2026-09-07 — S3: the seam moves ahead of the dialog (wave A, PR #217)
+
+Lane S3 of the two-field create's wave A, implemented by glm-5.3-flash in the `wt-s3` worktree
+(`feat/s3`, from `main` at `2341401`). The contract S1 consumes, plus the D98 landing — while S4
+(the D99 `setMode` fix) ships in parallel, disjoint.
+
+**What landed.** `CreateCampaignInput` is `{ name, mode }` (plus W2's `source?`); region and
+audience left the seed, the editor's seed effect patches exactly those two, and `isStoredSeed`
+**rejects an old-shape seed instead of half-applying one** — a seed written by the deployed build
+is discarded whole, so no user inherits a brief with a name and nothing else. The landing baton is
+Identity (D98); `COPY_STEP`'s name and its comment changed together, because the comment documented
+a reason that is now false. `duplicateBrief`'s overrides body on the source path is empty — the
+copy inherits the source's answers wholesale.
+
+**The finding the brief asked to be recorded, recorded:** the duplicate route's `overrides`
+parameter is now carried by no production caller — the dialog's source path sends `{}` and
+`BriefPicker`'s Duplicate never sent any. `DuplicateOverrides` stays accurate to the route's
+contract (and its transport test passes unedited), but the parameter is a vestigial candidate for
+S1 or an API lane to cut deliberately. PR #217 states it.
+
+**The coverage lesson.** The landing change silently uncovered `BriefEditor.tsx:706` — the
+`presentation !== "guided"` return in the step-heading handoff. The old seed moved the cursor 0→1
+even in the everything presentation (the only `go` reachable there: no segbar, no arrows); landing
+on Identity is a 0→0 no-change. The fix is a new test with a real claim, not an exclusion: a mount
+baton to Copy, then an in-place seed walking the cursor back — the cursor's only mover in the
+stack, observed or not. Worth remembering for D98-shaped changes: a landing that moves *onto* the
+default step erases the one observable trace the everything presentation had of the cursor.
+
+**Gate:** green, 100 % ×4. Both brief mutations confirmed to compile and run: restoring
+`stashStep(COPY_STEP)` failed the baton tests (2 in the dialog suite); letting `isStoredSeed`
+accept the old shape failed the discard tests (3 across the seam and editor suites). Both mutants
+restored. `sync:check` green on the committed tree. No new strings in `messages.ts`. The 409 and
+blocked-store paths pass unedited; the seed's deep-equal test was rewritten deliberately to
+`{ name, mode }` — fields left and remaining named in the PR body.
+
+---
+
+## 2026-09-07 — S3 review remediation (PR #217)
+
+**Mode:** Implementer
+
+**Changes:**
+- `takeSeed` now distinguishes *no seed* from *a refused seed*: a refusal spends the companion
+  step baton via exported `takeStashedStep`; an absent seed leaves it (H5). The seed consume in
+  `BriefEditor` is a layout effect so that spend wins the race against the navigation hook's
+  mount effect.
+- Seed tests pin the cursor move (switch to Guided so Copy vs Identity is on screen), Randomized
+  `setMode` (mode tile + Variation Policy / no Treatments), extra-key forward-compat on
+  `isStoredSeed`, and the refused-Next comment (cursor never left Identity).
+
+**Decisions:**
+- Changed the seam, not the baton: `use-step-navigation` still knows nothing about seeds. The
+  generic spend is exported; `takeSeed` is the caller that knows a refused seed has a companion
+  baton. Teaching the hook about seeds would couple a generic one-shot to one producer.
+
+**Left open:** none from this remediation.
+
+---
+
+## 2026-09-07 — S3 remediation round 2 (PR #217): the refused-seed upgrade path
+
+**Mode:** Implementer
+
+**Changes:**
+- No production code. The editor-level seed test now seeds both legacy keys
+  (`cf:create-seed` four-field + `cf:step-handoff` `"copy"`), mounts `/brief/new`,
+  and asserts the two user-visible halves: discarded Identity fields, and landing
+  on Identity not Copy. Storage-key assertions dropped — `cf:step-handoff` is
+  gone either way (the navigation hook spends it by applying it).
+
+**Decisions:**
+- `use-step-navigation.test.ts` already covers the baton in isolation (`takeStashedStep`
+  spends by reading; a stashed step is where the next mount lands). The editor test
+  is still required: the defect is the interaction of two independent keys, which
+  neither unit sees alone.
+
+**Left open:** none.
+## 2026-09-07 — S4: the setMode leak, closed without touching a shipped test
+
+**Mode:** Implementer (lane S4 of wave A, worktree `wt-s4`, branch `feat/s4` off `2341401`). PR
+#218, not merged. Gate green: build, typecheck, lint, lint:arch, sync:check (on the committed
+tree), test:cov at 100 % × 4 (194 files, 3267 tests).
+
+**The plan's two readings of "drops" were in conflict, and the regression surface decided.** Read
+as the reducer's `formats` array, the drop reds the shipped D5 round-trip test (a switch to classic
+and back must restore a serialisable timeline — the draft's formats have to survive the flip), and
+the lane's own mutation ("make it clear formats in both directions") forbids a flip-back restore.
+Read as the brief's `output.formats`, a whole-classic gate reds the shipped `toBrief` pin at
+`editor-state.test.ts:558` — whose motion assertion builds a **classic** state (`filled()` without
+a mode override) and pins exactly the serialisation `load-brief.ts:603` refuses, i.e. the defect
+itself, written before the defect was understood (#95). Both reds verified empirically before
+choosing. The shipped design: `setMode` latches `formatDroppedByMode`; `toBrief` honours the latch
+for the flip's brief only; the draft keeps the user's formats and the remedy copy is literally
+true. D99's own wording ("leaves `output.formats` intact") is what the fix answers.
+
+**Two lessons worth keeping.** First: a regression-surface red is not always a contract break —
+one of the two reds was a genuine contract (D5), the other a defect pin; reading the test's intent
+(the D7 write/omit rule) against its accidental construction (classic + motion) told them apart.
+Second: the empty-formats answer was already in `toBrief` — an explicit output block, refused by
+the parser on every path, flagged by the editor's own validate — and the discipline was to not
+invent a fallback (`addPhotoOutput`'s static-restore was the tempting invention).
+
+**Findings left for other lanes** (in the PR body): the format vocabulary is the one axis with no
+shared domain export (`MOTION_FORMAT` is API-app; the web repeats the literal); `togglePlatform`
+can still derive motion into a classic draft with no flip involved — same class, likely wants the
+gate keyed off mode rather than the flip; and the latched state's preview reads the draft's
+formats, not the gated brief's (D45's rule, eventually).
+
+## 2026-09-07 — S4 remediation: the latch was extra, the gate is mode
+
+**Mode:** Implementer (remediation). Worktree `wt-s4`, branch `feat/s4`, PR #218.
+
+**Changes:**
+- Deleted `formatDroppedByMode` from the state, the reducer, `normalizeDraftState`, and
+  serialisation. `toBrief` omits motion whenever `state.mode === "brief"`, via a shared
+  `serialisedFormats` helper that `preview-props` now answers through too (`isDefaultOutput`).
+- When dropping motion would empty the list, the projection is `["static"]` — the classic
+  pipeline renders stills, and the API refuses an empty `output.formats`.
+- The `role="status"` line is derived from `mode === "brief" && formats.includes("motion")`.
+- Changed the shipped assertion at `editor-state.test.ts:554` (it specified the defect).
+  Rewrote the S4 suite: save-and-reload vs draft autosave, the run-path test now exercises
+  the gate, the only-motion case parses with `enforceCapabilities: true`, and the Video
+  card is pinned as visibly gated in Classic.
+
+**Decisions:**
+- The reviewer's third reading was right: a whole-classic gate in `toBrief` keeps D5 green
+  without a latch. A gate has no lifetime to get wrong, which dissolves the preview
+  disagreement and the latch-restore questions by construction.
+- Save-and-reload (`fromBrief(toBrief(flipped))`) loses Video permanently; draft autosave
+  keeps it. That asymmetry is the contract, not a bug.
+- Platforms are not remapped. A motion-only platform list paired with the `["static"]`
+  projection can still fail format/platform compatibility — a different refusal, not this
+  lane's empty-formats bug.
+
+**Left open:** Qodo's motion-only-platforms pairing; the format vocabulary still has no
+shared domain export.
+
+## 2026-09-07 — Wave A of the two-field create, orchestrated (S4 + S3 merged)
+
+**Mode:** Orchestrator. Record written at merge time, per stage 6 of the skill (#211).
+
+### What merged
+
+| Lane | PR | Commit | What |
+|---|---|---|---|
+| S4 | #218 | `6217632` | the `setMode` leak — a live defect found by the plan, not caused by it |
+| S3 | #217 | `100dcec` | the create seam becomes `{name, mode}`; Create lands on Identity; a refused seed spends its baton |
+
+**S4's design changed under review twice, and both moves were right.** The brief asked for the
+destructive fix (filter motion out of the draft in the reducer); the lane refused it with evidence —
+it reds the shipped D5 round-trip contract — and the orchestrator verified that independently. The
+lane's answer was a flip-scoped latch. The adversarial reviewer then found the third reading nobody
+had tested: **gate the serialisation on `mode === "brief"` outright, no flag.** The draft is still
+untouched so D5 stays green, and the only remaining red in the entire suite was
+`editor-state.test.ts:554` — **a shipped assertion that specified the defect**, expecting a classic
+brief's serialised output to *contain* motion. A test that specifies a bug is worse than the bug,
+because it defends it. Disabling the gate now fails 14 tests.
+
+**S3's fix shipped completely untested, and the pipeline caught it.** Round 1 fixed the legacy-baton
+bug Qodo found (two independent storage keys; rejecting the old seed did not stop the old `"copy"`
+handoff landing the user on Copy). The orchestrator then commented the fix out and ran the whole web
+project — 115 files, 1834 tests, all green. Round 2 added the editor-level test; the mutation at the
+refusal path now fails it, the landing assertion catching it.
+
+### A fourth way a mutation misfires
+
+The orchestrator's first mutation of S3's fix returned **green** — because there are two
+`takeStashedStep()` calls and the substitution hit the first, which is not the refusal path. It
+compiled, it ran, and it targeted the wrong code. Added to the three earlier modes (pattern missed,
+mutant did not compile, wrong test file). The rule is now: **compiled, ran, and targets the path the
+test names.**
+
+### D97 superseded before its lane dispatched
+
+The owner's market statement (online ads; social posts; static and video) showed that the create
+dialog's second field should be the **campaign type**, not the mode. The question that produced D97
+had the wrong options on it. S1 had not been dispatched, so the correction cost nothing; the
+wave-B brief for S1 is marked superseded and the next dispatch is T1 of
+`2026-09-07_campaign-type.md`, once #221 is on `main`.
+
+### Tooling: the CI race, fourth attempt
+
+#211 guarded `gh pr checks --watch` with a PR-level poll (a bot check satisfied it instantly). #212
+made the poll head-specific. #217 then failed with the check-runs API reporting **2 runs registered
+on the head** while `--watch` on the same PR said *no checks reported* — the two resolve the head
+differently for a window after a push. **#220 stops calling `--watch` at all** and polls the same
+API to conclusion, so the guard and the wait cannot disagree because they are the same question.
+Three fixes guarded the unreliable call better; the fourth removes it.
+
+### Also this session
+
+The wave-status server plan (#219, D102–D107) with its `AGENTS.md` section decided now and landed
+with the tool; the hexagen add-on template doc for it; and lane S2 (the map into Identity), which has
+been alive at 0 bytes for 83 minutes because `opencode` buffers — the exact ambiguity #219 exists
+to remove.
+## 2026-09-07 — Campaign type, and display advertising (two plans)
+
+**Mode:** Architect. The owner stated the product's market — online static and video ads, and
+social-media posts, static and video — and asked for the create dialog's second field to be the
+campaign *type*, plus whether a quick-win third type exists.
+
+**This supersedes D97.** Forty minutes earlier the orchestrator had asked whether "template type"
+meant the render format or the campaign mode, and the owner chose mode. The market statement showed
+neither was the intended meaning; the right question — *what kind of campaign* — was not on the
+list. A well-formed question with the wrong options produces a confident wrong answer. Lane S1 had
+not dispatched, so the correction cost nothing.
+
+**The finding that shaped both plans.** All seven platform profiles are social, and they split
+perfectly: three static (`instagram-feed`, `linkedin`, `x`) and four motion, all `9:16`
+(`instagram-story`, `instagram-reel`, `tiktok`, `youtube-short`). There is no display placement and
+no IAB size. So **social posts** are what the platform set already is, **paid social** is a preset
+over the same platforms, and **display advertising** is a new ratio family.
+
+**The quick-win third type is short-form video** — the four motion platforms are already a coherent
+cluster needing no new ratio, platform or format. It must set `mode: variation` (D110), because the
+API refuses classic+motion on every run path (D99).
+
+**Two plans written:**
+- `2026-09-07_campaign-type.md` — D108–D112. Three types (`social-post`, `paid-social`,
+  `short-video`) as **presets applied once at create and never re-applied** (D109), stored on the
+  brief as an optional scalar like `mode`. Three lanes plus an optional fourth. Records that
+  `paid-social` is the only type with no structural identity (F3) and is the one most likely to be
+  reconsidered.
+- `2026-09-07_display-advertising.md` — D113–D118. **Not a quick win, and it says so first.** The
+  compositor sizes type as a fraction of canvas *width* (`fitText`, D55); a 728×90 leaderboard would
+  get a 44 px headline on a 90 px canvas. The plan makes display sizes a second ratio family (D113),
+  moves type scaling to the short side under **byte-identical** social goldens (D114), and closes
+  D85's `linux-x64` inset gap as a *prerequisite* (D115). `display-ad` joins the type vocabulary
+  **last**, after its sizes render (D117) — a create option that dead-ends is the D8 failure the
+  `GLOBAL` trap and the classic+motion defect both took.
+
+**Wave A, concluded.** S4 (#218) merged — the `setMode` leak fixed, with a shipped test at
+`editor-state.test.ts:554` found to *specify the defect* and corrected. S3 (#217) verified: its
+refused-seed fix had shipped **untested** (commenting it out left 115 files / 1834 tests green);
+round 2 added the editor-level test, and the mutation at the refusal path now fails it.
+
+**A fourth way a mutation misfires.** The orchestrator's first mutation of S3's fix hit the wrong
+of two `takeStashedStep()` calls and returned green. Confirmed compiled, ran — and targeted the
+wrong path. The rule is now: *compiled, ran, and targets the path the test names.*
+
+**Left open:** whether `paid-social` earns its tile; D114's byte-identical requirement may prove
+impossible on `16:9`, which would need the owner's decision before any display size renders.

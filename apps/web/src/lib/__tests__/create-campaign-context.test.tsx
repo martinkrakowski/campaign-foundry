@@ -45,7 +45,7 @@ describe("CreateCampaignProvider", () => {
     // The provider never consumes the key — a full page load on the blank route must
     // still find it — so the bump is the only thing it publishes.
     await act(async () => {
-      await createCampaign({ name: "Summer Spark", targetRegion: "EU", targetAudience: "a", mode: "brief" });
+      await createCampaign({ name: "Summer Spark", mode: "brief" });
     });
     expect(screen.getByTestId("version").textContent).toBe("1");
     await waitFor(() => expect(localStorage.getItem("cf:create-seed")).not.toBeNull());
