@@ -3713,3 +3713,22 @@ follow-up: hit-test by the smallest containing footprint, independent of paint o
 
 - **P1** — `packages/ui` extraction, after every campaign-type lane, alone.
 - Kit: smallest-footprint hit-testing; the map's per-mount cost in tests.
+---
+
+## 2026-09-07 — W1 wave-status core (#229)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `vitest.config.ts`: one `tools` project after `web`; `tools/**/*.ts` in coverage include.
+  - `tools/wave-status/lib/{types,events,derive,merge}.ts` and tests: `readEvents`, `deriveLane`, `mergeStatus`.
+  - `tools/wave-status/tsconfig.json`: strict, `noEmit`, extends `tsconfig.base.json`.
+- **Decisions:**
+  - Hang disagreement requires a pgrep observation; events-only `alive: false` is "nobody looked".
+  - "no PR found" fires when implement settled and neither the event nor the observation has a PR.
+  - Gate exit is the trailing `GATE EXIT n` or `EXIT n` line; last `^EXIT n$` in the lane log wins.
+- **Mutations:** M1–M5 compiled, ran, failed the named test, reverted. Recorded in #229.
+- **Left open:**
+  - W2 (server + `AGENTS.md` section) and W3 (emit helper + skill). This lane binds nothing.
+  - `yarn typecheck` is turbo-per-workspace; `tools/` is typechecked by vitest and `tsc -p tools/wave-status --noEmit`.
+- **Remediation:** five verified findings (gate-exit, observed no-PR, closed-unmerged, EXIT trailing space, istanbul indent); four mutations compiled, ran, failed the named test, reverted. PR-Agent trim/Set refuted (D103).
+

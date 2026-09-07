@@ -4,10 +4,13 @@ import react from "@vitejs/plugin-react";
 
 const webSrc = fileURLToPath(new URL("./apps/web/src", import.meta.url));
 
-// Root Vitest config for the monorepo. Two projects:
+// Root Vitest config for the monorepo. Four projects:
 //   - "node": every backend/domain package + the API app, default node env.
+//   - "api":  the Nitro API server, driven as real Request → Response.
 //   - "web":  the Next.js UI under happy-dom with the React plugin.
-// Coverage is a global concern (configured here) and aggregates across both.
+//   - "tools": the dev tools under tools/ (outside the workspaces, inside the
+//              gate — D102), plain node env.
+// Coverage is a global concern (configured here) and aggregates across all of them.
 export default defineConfig({
   test: {
     projects: [
@@ -44,6 +47,14 @@ export default defineConfig({
           setupFiles: ["./apps/web/vitest.setup.ts"],
         },
       },
+      {
+        extends: true,
+        test: {
+          name: "tools",
+          environment: "node",
+          include: ["tools/**/*.test.ts"],
+        },
+      },
     ],
     coverage: {
       // istanbul (not v8): the v8 provider's rolldown remapper can't parse
@@ -58,6 +69,7 @@ export default defineConfig({
         "apps/api/server/**/*.ts",
         "apps/api/bin/**/*.ts",
         "apps/web/src/**/*.{ts,tsx}",
+        "tools/**/*.ts",
       ],
       exclude: [
         "**/*.test.{ts,tsx}",
