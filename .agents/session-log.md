@@ -3068,3 +3068,71 @@ dialog) is staged.
   - Count: picker reports up (`onCount={setCampaignCount}`), rather than lifting the fetch into the dialog.
 - **Verification:** full gate green (`build`, `typecheck`, `lint`, `lint:arch`, `test:cov` — 3257 passed, 100 % ×4: 8091/5875/1734/7270). Mutations run (each compiled and ran, then reverted): (1) drop `pointerEvents` → GLOBAL→DE fails (`null` vs `"none"`); (2) drop ChipGroup reconciliation → DE stays `aria-pressed="false"`; (3) re-add a dialog `listBriefs()` → fetch count 2 not 1; (4) skip `setCampaignCount(null)` on close → reopen flashes `"2 campaigns"`.
 - **Left open:** PR #214 unmerged. D95 untouched.
+## 2026-09-07 — Wave B, orchestrated (G2 + G3), and two tooling defects the wave exposed
+
+**Mode:** Orchestrator. Written at merge time, per the stage-6 rule added in #211 — this is the
+first wave to get its record before the next one dispatches rather than after the run.
+
+### What merged
+
+| Lane | PR | Commit |
+|---|---|---|
+| G2 — the mode tiles, filled | #208 | `9ca5707` |
+| G3 — the start-from rail | #209 | `d41d2ed` |
+
+Both consumed G1's primitives; both appended to `campaign/messages.ts` concurrently, which is the
+seam the extended `APPEND_ONLY` was added for. It held: both blocks are on `main`.
+
+### What review bought — 11 fixed, 8 refuted
+
+Two would have shipped visibly:
+
+- **`OptionTile`'s name slot had no overflow treatment at all** — no `truncate`, no `break-*`, no
+  `min-w-0`. Brief ids are user data (64 chars permitted, no guaranteed hyphen) and the rail's cards
+  are fixed width, so a long id ran over its neighbour. Fixed **in the kit**, because every
+  `OptionTile` caller had the same exposure and the rail was merely where it surfaced.
+- **The Randomized preview clipped below ~360 px.** Qodo's arithmetic was wrong — it summed
+  intrinsic frame widths where `grid-cols-3` divides — but the conclusion held at narrow viewports.
+
+Three were guards with holes in them, which is this arc's recurring shape:
+
+- **`startFromRatioCaption` emitted raw ratio ids** (`1:1 · 9:16 · 16:9`), forbidden copy under D18
+  and the jargon list. It had never been tested, because **`messages.test.ts` called every function
+  export with no arguments** — formatters threw, were swallowed by a `try/catch`, and were never
+  scanned. That hole had already hidden `launch` in W2(a)'s guard-detail parts. The gate now calls
+  formatters with representative arguments and fails loudly when an export yields no scannable
+  string; fixing it immediately surfaced two pre-existing violations, correctly allowlisted rather
+  than rewritten out of scope.
+- **The alpha guard scanned a hard-coded list of G1's four files**, leaving every later lane
+  unguarded against the `/18` class of defect. Now walks the component tree; found no pre-existing
+  off-scale alphas, so its allowlist is empty.
+- **That same guard's regex had no token boundary** — `bg-red-500/50foo` was captured as the valid
+  `bg-red-500/50`, compiled, and passed, while the real class emitted nothing. The guard built to
+  catch invisible styling could be walked past by a trailing typo.
+
+**Refuted, with mechanisms:** a claim that `OptionTile` adds `animate-pulse` on hover (it contains
+zero — acting on it would have loosened a D88 guard to accommodate a class that does not exist);
+locating the preview panel by `bg-background` (that *is* the `.pvbox` contract); coupling the
+variant test to SVG shape (the shape is the claim under test — `PosterFrame` exposes no variant
+attribute); removing the focus-ring class pin (correct that happy-dom proves no visibility, but the
+pin guards a deliberate padding fix); a compound React key (brief ids are the store's primary key);
+and a `RATIO_VALUES` predicate (no behaviour change).
+
+### Tooling: the fix for #206's race did not work, twice
+
+**#211** replaced a fixed `sleep` with a poll on `gh pr checks --json name --jq 'length'`. That
+question is answered at **PR level**, so it is satisfied by a bot check that registers instantly, or
+by checks still attached to the pre-refresh head — it returned `3` while `--watch` resolved the new
+head and found none. It aborted #208 and #209 in turn. **#212** scopes the poll to
+`commits/<head_sha>/check-runs`, the same commit the watch resolves.
+
+Recorded because the diagnosis in #211 was right and the fix was written at the wrong granularity,
+then reported as working before it had run — the same shape as the mutation-confirmation failure the
+skill now warns about: asserting an effect from intent rather than observation.
+
+### Left open
+
+**M2** (the map into `01 · Targeting`) is staged, its brief pinned to the merged `WorldMap` API.
+**D95** — what more than one region means for generation — remains the owner's, and is why the map
+ships single-select. `OptionTile` still mounts its children wrapper when `children` is nullish
+(8 px per card); declined twice as a kit change no lane owned at the time.
