@@ -25,7 +25,7 @@ const renderWithReducer = (initial: EditorState) => {
   const { rerender, container } = render(
     <IdentitySection state={current} dispatch={dispatch} errors={{}} />,
   );
-  return { dispatch, container };
+  return { dispatch, container, getState: () => current };
 };
 
 /**
@@ -64,6 +64,28 @@ describe("IdentitySection — the world map", () => {
     await user.type(other, "LATAM");
     expect(dispatch).toHaveBeenLastCalledWith({ type: "patch", patch: { targetRegion: "LATAM" } });
     expect(document.querySelectorAll("[data-selected]")).toHaveLength(0);
+  });
+
+  // M2's Other-then-map path: ChipGroup closes customOpen when `value` becomes a
+  // known option (chip-group.tsx:59-64). The dialog pins this at
+  // CreateCampaignDialog.test.tsx:1003; Identity's Other test above only
+  // asserts that Other… paints no footprint.
+  test("a map pick after Other… selects that chip and closes the custom input", async () => {
+    const user = userEvent.setup();
+    const { container, getState } = renderWithReducer(state());
+
+    await user.click(screen.getByRole("button", { name: messages.targetRegionOther }));
+    const other = screen.getByLabelText(messages.targetRegionOtherInputLabel);
+    await user.type(other, "LATAM");
+
+    fireEvent.click(container.querySelector('[data-region="DE"]') as SVGGElement);
+
+    expect(getState().targetRegion).toBe("DE");
+    expect(screen.getByRole("button", { name: "DE" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: messages.targetRegionOther }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+    expect(screen.queryByLabelText(messages.targetRegionOtherInputLabel)).toBeNull();
   });
 
   test("compact omits the map — the chips alone remain, and still work", async () => {

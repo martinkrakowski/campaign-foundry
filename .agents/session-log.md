@@ -3551,3 +3551,5 @@ constant `value={null}` → chip→map test red; map rendered unconditionally �
 
 **Gate:** build / typecheck / lint / lint:arch / sync:check / test:cov green, 100 % ×4. `sections.test.tsx`
 and the existing Identity assertions passed unedited throughout. PR #225 open against `main`, not merged.
+
+**Remediation.** Identity never proved the M2 Other-then-map path (dialog:1003). Ported onto IdentitySection with the reducer loop; mutation (ChipGroup `customOpen` effect disabled) failed `a map pick after Other… selects that chip and closes the custom input` (DE chip not pressed); reverted. Gate green. Not merged.
