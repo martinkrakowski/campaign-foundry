@@ -3236,3 +3236,38 @@ one and retired the other. Not waste — the kit components are unchanged — bu
 
 **Left open:** whether `layer-rules.yaml` gains a presentation layer or `packages/ui` gets a written
 exemption (D100's real question); **D95** (multi-region) unchanged.
+
+## 2026-09-07 — S3: the seam moves ahead of the dialog (wave A, PR #217)
+
+Lane S3 of the two-field create's wave A, implemented by glm-5.3-flash in the `wt-s3` worktree
+(`feat/s3`, from `main` at `2341401`). The contract S1 consumes, plus the D98 landing — while S4
+(the D99 `setMode` fix) ships in parallel, disjoint.
+
+**What landed.** `CreateCampaignInput` is `{ name, mode }` (plus W2's `source?`); region and
+audience left the seed, the editor's seed effect patches exactly those two, and `isStoredSeed`
+**rejects an old-shape seed instead of half-applying one** — a seed written by the deployed build
+is discarded whole, so no user inherits a brief with a name and nothing else. The landing baton is
+Identity (D98); `COPY_STEP`'s name and its comment changed together, because the comment documented
+a reason that is now false. `duplicateBrief`'s overrides body on the source path is empty — the
+copy inherits the source's answers wholesale.
+
+**The finding the brief asked to be recorded, recorded:** the duplicate route's `overrides`
+parameter is now carried by no production caller — the dialog's source path sends `{}` and
+`BriefPicker`'s Duplicate never sent any. `DuplicateOverrides` stays accurate to the route's
+contract (and its transport test passes unedited), but the parameter is a vestigial candidate for
+S1 or an API lane to cut deliberately. PR #217 states it.
+
+**The coverage lesson.** The landing change silently uncovered `BriefEditor.tsx:706` — the
+`presentation !== "guided"` return in the step-heading handoff. The old seed moved the cursor 0→1
+even in the everything presentation (the only `go` reachable there: no segbar, no arrows); landing
+on Identity is a 0→0 no-change. The fix is a new test with a real claim, not an exclusion: a mount
+baton to Copy, then an in-place seed walking the cursor back — the cursor's only mover in the
+stack, observed or not. Worth remembering for D98-shaped changes: a landing that moves *onto* the
+default step erases the one observable trace the everything presentation had of the cursor.
+
+**Gate:** green, 100 % ×4. Both brief mutations confirmed to compile and run: restoring
+`stashStep(COPY_STEP)` failed the baton tests (2 in the dialog suite); letting `isStoredSeed`
+accept the old shape failed the discard tests (3 across the seam and editor suites). Both mutants
+restored. `sync:check` green on the committed tree. No new strings in `messages.ts`. The 409 and
+blocked-store paths pass unedited; the seed's deep-equal test was rewritten deliberately to
+`{ name, mode }` — fields left and remaining named in the PR body.
