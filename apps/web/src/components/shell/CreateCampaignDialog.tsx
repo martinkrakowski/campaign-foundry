@@ -9,16 +9,19 @@ import {
   DialogFoot,
   DialogHead,
   DialogShell,
+  Eyebrow,
   GuardBar,
   Input,
   JumpStrip,
+  REGION_FOOTPRINTS,
   SectionBlock,
+  WorldMap,
 } from "@/components/ui";
 import { ModePanel } from "@/components/campaign/ModePanel";
 import { Field, REGION_OPTIONS } from "@/components/campaign/sections/IdentitySection";
 import { stashStep } from "@/lib/use-step-navigation";
 import { createCampaign } from "@/lib/create-campaign";
-import { isBriefsApiError } from "@/lib/briefs-api";
+import { isBriefsApiError, listBriefs } from "@/lib/briefs-api";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 import { hasRecoverableDraft, slugify, type CampaignMode } from "@/components/campaign/editor-state";
@@ -92,6 +95,12 @@ export function CreateCampaignDialog() {
   const [marks, setMarks] = useState<readonly CreateMark[]>([]);
   const [creating, setCreating] = useState(false);
   const [resumePrompt, setResumePrompt] = useState(false);
+  // M2 — the start-from rail's eyebrow readout: how many campaigns the store
+  // holds. `null` while unknown (fetch in flight, or the read failed — the
+  // picker's own error sentence is the story then, and the eyebrow stays down).
+  // The picker owns its list and hands the dialog only the chosen source, so the
+  // count is read here; one extra listing per open, against the picker's own.
+  const [campaignCount, setCampaignCount] = useState<number | null>(null);
   // W2(a) (D90) — the footer's third state: the inline discard guard. Raised by
   // any close gesture on a draft with work in it; taken down by Keep editing,
   // a second close gesture, the draft becoming empty, or spent by Discard and
@@ -215,6 +224,29 @@ export function CreateCampaignDialog() {
     }
     guardReturnFocusRef.current = null;
   }, [guardOpen, createDialogOpen, draftHasWork]);
+
+  // M2 — the rail's count, re-read on every open (the picker re-reads its list
+  // per mount, so the eyebrow would lie if the count outlived the close). The
+  // read failing is not this dialog's refusal to speak: the picker shows its own
+  // error sentence, and the eyebrow simply stays down.
+  useEffect(() => {
+    if (!createDialogOpen) return;
+    let active = true;
+    setCampaignCount(null);
+    (async () => {
+      try {
+        const briefs = await listBriefs();
+        /* istanbul ignore next -- `active` is the unmount-race guard; false only if the dialog closes mid-fetch */
+        if (active) setCampaignCount(briefs.length);
+      } catch {
+        /* istanbul ignore next -- a failed read leaves the count unknown; the picker's error state speaks */
+        if (active) setCampaignCount(null);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [createDialogOpen]);
 
   const runCreate = async () => {
     setRefusal(null);
@@ -378,20 +410,43 @@ export function CreateCampaignDialog() {
                 as="div"
                 error={markFor("targetRegion")}
               >
-                <ChipGroup
-                  label={messages.targetRegionLabel}
-                  otherInputLabel={messages.targetRegionOtherInputLabel}
-                  options={REGION_OPTIONS}
-                  value={targetRegion}
-                  onChange={(value) => {
-                    setTargetRegion(value);
-                    clearRefusal();
-                  }}
-                  allowOther
-                  otherLabel={messages.targetRegionOther}
-                  otherPlaceholder={messages.targetRegionOtherPlaceholder}
-                  invalid={markFor("targetRegion") !== undefined}
-                />
+                {/* M2 (D94) — the map and the chips are two views of one control,
+                 * both bound to `targetRegion`. The SVG is aria-hidden: the chip
+                 * group below stays the accessible and keyboard control, and a
+                 * free-text region (Other…) paints no footprint. The hint is
+                 * written against F2 — the region is prompt text shaping the
+                 * generated backgrounds and copy, nothing more. */}
+                <div className="space-y-2">
+                  <WorldMap
+                    footprints={REGION_FOOTPRINTS}
+                    value={
+                      (REGION_OPTIONS as readonly string[]).includes(targetRegion)
+                        ? targetRegion
+                        : null
+                    }
+                    onSelect={(value) => {
+                      setTargetRegion(value);
+                      clearRefusal();
+                    }}
+                    labelFor={messages.regionDisplayName}
+                    fallbackHint={messages.worldMapFallbackHint}
+                  />
+                  <p className="text-[12px] text-text-muted">{messages.worldMapRegionHint}</p>
+                  <ChipGroup
+                    label={messages.targetRegionLabel}
+                    otherInputLabel={messages.targetRegionOtherInputLabel}
+                    options={REGION_OPTIONS}
+                    value={targetRegion}
+                    onChange={(value) => {
+                      setTargetRegion(value);
+                      clearRefusal();
+                    }}
+                    allowOther
+                    otherLabel={messages.targetRegionOther}
+                    otherPlaceholder={messages.targetRegionOtherPlaceholder}
+                    invalid={markFor("targetRegion") !== undefined}
+                  />
+                </div>
               </Field>
               <Field
                 fieldKey="targetAudience"
@@ -421,6 +476,12 @@ export function CreateCampaignDialog() {
             title={messages.createSectionStartFrom}
             hint={messages.createSectionStartFromHint}
           >
+            {/* M2 — the mockup's count readout over the rail. Down while the
+             * count is unknown (in flight, or the read failed): the picker's
+             * own loading and error sentences are the story then. */}
+            {campaignCount !== null ? (
+              <Eyebrow as="p">{messages.startFromCampaignCount(campaignCount)}</Eyebrow>
+            ) : null}
             <Field fieldKey="startFrom" label={messages.startFromExistingLabel} as="div">
               <StartFromExistingPicker
                 selectedId={source?.id ?? null}

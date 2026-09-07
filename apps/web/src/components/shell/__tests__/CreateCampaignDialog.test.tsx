@@ -971,3 +971,127 @@ describe("the inline discard guard (W2(a) / D90)", () => {
     expect(namesAfter).toContain(messages.createCampaignConfirm);
   });
 });
+
+describe("the map in 01 · Targeting (M2 / D94)", () => {
+  /** The store's briefs, for the rail's eyebrow count; listBriefs' row shape. */
+  const classic = { file: "summer-spark.yaml", brief: { id: "summer-spark", targetRegion: "EU", products: [{ id: "a" }] } };
+  const randomized = {
+    file: "winter-wild.yaml",
+    brief: { id: "winter-wild", mode: "variation", targetRegion: "DE", products: [{ id: "a" }] },
+  };
+  const routeBriefs = (briefs: unknown[]) =>
+    mockPipelineApi({
+      result: (url: string) =>
+        url.includes("/campaigns/briefs") ? json({ briefs }) : json(EMPTY_REPORT),
+    });
+
+  test("clicking a footprint sets the region exactly as its chip does — the two are one control", async () => {
+    const user = userEvent.setup();
+    const { container } = renderDialog();
+    await openDialog(user);
+    const eu = container.querySelector('[data-region="EU"]') as SVGGElement;
+    fireEvent.click(eu);
+
+    expect(screen.getByRole("button", { name: "EU" }).getAttribute("aria-pressed")).toBe("true");
+    // And the value itself is `EU` — the mirror input carries it to the seed.
+    expect((screen.getByLabelText(messages.targetRegionLabel) as HTMLInputElement).value).toBe("EU");
+  });
+
+  test("clicking a chip paints its footprint — the map reads the same value", async () => {
+    const user = userEvent.setup();
+    const { container } = renderDialog();
+    await openDialog(user);
+    await user.click(screen.getByRole("button", { name: "DE" }));
+
+    const selected = container.querySelectorAll("[data-selected]");
+    expect(selected).toHaveLength(1);
+    expect(selected[0]?.getAttribute("data-region")).toBe("DE");
+  });
+
+  test("Other… paints no footprint, and a typed custom region keeps the map clear", async () => {
+    const user = userEvent.setup();
+    const { container } = renderDialog();
+    await openDialog(user);
+    await user.click(screen.getByRole("button", { name: messages.targetRegionOther }));
+    expect(container.querySelectorAll("[data-selected]")).toHaveLength(0);
+
+    const other = screen.getByLabelText(messages.targetRegionOtherInputLabel);
+    await user.type(other, "LATAM");
+    expect((screen.getByLabelText(messages.targetRegionLabel) as HTMLInputElement).value).toBe("LATAM");
+    expect(container.querySelectorAll("[data-selected]")).toHaveLength(0);
+  });
+
+  test("the map's hint is written against F2 — it names what the region shapes, and never a per-region dispatch", async () => {
+    const user = userEvent.setup();
+    const { container } = renderDialog();
+    await openDialog(user);
+
+    const hint = screen.getByText(messages.worldMapRegionHint);
+    expect(hint.textContent).toBe("The region shapes the generated backgrounds and copy.");
+    // The mockup's sentence — "runs dispatch per region" — describes a product
+    // this is not (F2); the hint may never say it.
+    expect(hint.textContent).not.toMatch(/dispatch|per region|\brun/i);
+    // The sr-only fallback points at the chips (D94), and the map adds no live
+    // region of its own — the dialog's one `role="status"` split is untouched.
+    expect(container.querySelector("p.sr-only")?.textContent).toBe(messages.worldMapFallbackHint);
+    expect(container.querySelectorAll('[role="status"]')).toHaveLength(0);
+  });
+
+  test("the map is aria-hidden chrome: no focusable in the Tab cycle comes from the SVG", async () => {
+    const user = userEvent.setup();
+    const { container } = renderDialog();
+    await openDialog(user);
+    await user.click(screen.getByRole("button", { name: "EU" }));
+
+    const dialog = screen.getByRole("dialog", { name: messages.createCampaignTitle });
+    // The dialog carries other decorative SVGs (mode glyphs); the map's is the
+    // one painting the footprints.
+    const svg = (container.querySelector('[data-region="EU"]') as SVGGElement).closest(
+      "svg",
+    ) as SVGSVGElement;
+    expect(svg.getAttribute("aria-hidden")).toBe("true");
+    expect(svg.getAttribute("focusable")).toBe("false");
+    const focusables = getFocusableDialogElements(dialog);
+    expect(focusables.length).toBeGreaterThan(0);
+    for (const el of focusables) {
+      expect(el.closest("svg")).toBeNull();
+    }
+    // D96/D88 — selection paints the map, but nothing in the dialog loops.
+    for (const el of dialog.querySelectorAll("*")) {
+      for (const cls of Array.from(el.classList)) {
+        expect(cls.startsWith("animate-")).toBe(false);
+      }
+    }
+  });
+
+  test("the rail's eyebrow counts the campaigns, both plural arms", async () => {
+    routeBriefs([classic, randomized]);
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+
+    expect(await screen.findByText(messages.startFromCampaignCount(2))).toBeTruthy();
+  });
+
+  test("one campaign reads singular", async () => {
+    routeBriefs([classic]);
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+
+    expect(await screen.findByText(messages.startFromCampaignCount(1))).toBeTruthy();
+  });
+
+  test("a failed read leaves the eyebrow down — the picker's error sentence is the story", async () => {
+    mockPipelineApi({
+      result: (url: string) =>
+        url.includes("/campaigns/briefs") ? json({ error: "fail" }, 500) : json(EMPTY_REPORT),
+    });
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+
+    expect(await screen.findByText(messages.startFromExistingError)).toBeTruthy();
+    expect(screen.queryByText(messages.startFromCampaignCount(0))).toBeNull();
+  });
+});
