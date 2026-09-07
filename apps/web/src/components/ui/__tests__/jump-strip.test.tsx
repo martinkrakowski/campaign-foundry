@@ -29,7 +29,15 @@ describe("JumpStrip", () => {
   test("without a jump handler a press is still safe", async () => {
     const user = userEvent.setup();
     render(<JumpStrip items={ITEMS} />);
-    await user.click(screen.getByRole("button", { name: "Identity 1" }));
+    const chip = screen.getByRole("button", { name: "Identity 1" });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await expect(user.click(chip)).resolves.toBeUndefined();
+      expect(error).not.toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+    }
+    expect(screen.getByRole("button", { name: "Identity 1" })).toBeTruthy();
   });
 
   test("nothing to jump to renders nothing", () => {
