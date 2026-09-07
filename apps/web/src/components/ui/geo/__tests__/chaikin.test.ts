@@ -21,7 +21,7 @@ describe("chaikin", () => {
 
   test("does not mutate its input", () => {
     const square: Pt[] = [[0, 0], [10, 0], [10, 10], [0, 10]];
-    const before = [...square];
+    const before = square.map(([x, y]) => [x, y] as Pt);
     chaikin(square);
     expect(square).toEqual(before);
   });
