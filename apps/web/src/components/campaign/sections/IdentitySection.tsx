@@ -5,7 +5,7 @@ import { Input, ChipGroup } from "@/components/ui";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import type { FieldErrors } from "@/components/campaign/validate";
 import { keyForLabel } from "@/components/campaign/error-sections";
-import { ErrorPill } from "@/components/ui/error-pill";
+import { ErrorPill } from "@/components/ui";
 import { useSectionMode } from "@/components/campaign/SectionModeContext";
 import { sectionOrder } from "./index";
 
