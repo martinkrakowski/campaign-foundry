@@ -68,7 +68,10 @@ export function ChipGroup({
     <div role="group" aria-label={label ? `${label} options` : undefined} className="space-y-2">
       {/* The chips are the visible control; this mirrors them for assistive tech. It has
           to carry their gating too — disabling the buttons alone leaves a writable input
-          for exactly the users who cannot see that the group is unavailable. */}
+          for exactly the users who cannot see that the group is unavailable. The same
+          for invalid: the Other… field is unmounted while closed, so the prop is a
+          no-op unless the mirror carries it. Present when true, absent when valid —
+          `aria-invalid="false"` is not the same as no attribute (Input does this). */}
       <input
         type="text"
         aria-label={label}
@@ -76,6 +79,7 @@ export function ChipGroup({
         value={value}
         disabled={disabled}
         readOnly={readOnly}
+        aria-invalid={invalid || undefined}
         onChange={(e) => onChange(e.target.value)}
         tabIndex={-1}
       />

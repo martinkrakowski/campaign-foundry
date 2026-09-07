@@ -2625,6 +2625,53 @@ plan's §6.5 is still unanswered.
 - **Left open:** wave 2 (W1, the dialog) and wave 3 (W2(a), the discard guard) are specified and
   undispatched. Neither has been started; both need a fresh go-ahead.
 
+## 2026-09-07 — W1: the create dialog, recomposed (wave 2, PR #203)
+
+- **Mode:** Implementer. Plan `docs/planning/2026-09-06_create-dialog-recomposition.md` §3, lane W1
+  (D86/D91), branch `feat/w1` off `eb02af5`.
+- **Changes:** `CreateCampaignDialog` rebuilt on the wave-1 kit — identity strip (name alone, D65)
+  above three `SectionBlock`s (`01 · Targeting`, `02 · Start from`, `03 · Mode`), `max-w-[820px]`
+  through `DialogShell`'s `className`, same five answers, no `<form>`. D91's split: one
+  `role="status"` stays first-missing-wins with the exact legacy strings; `Field`'s `error` slot and
+  the footer `JumpStrip` render the FULL missing set (three empty fields → three marks, three chips,
+  one sentence). Chips jump to `data-create-section` targets via refs, `behavior: "auto"` under
+  `prefers-reduced-motion`. Docstring corrected to five things (F8). Six new strings appended to the
+  create-dialog block in `messages.ts` (section titles + hints; jargon gate clean).
+- **Decisions:** Marks keyed to a closed `CreateMarkKey` union, not free-form strings; marks cleared
+  wherever the refusal is (any edit, picker selection, close). JumpStrip chip keys are the mark keys;
+  the mark→section mapping is a `Record`, so the jump handler carries no lookup branches. Non-null
+  assertion on the section ref (chip only clickable while the dialog, and both sections, are mounted)
+  — no `istanbul ignore`. Section titles/hints are new strings because no existing ones fit; kept as
+  branchless consts so `messages.test.ts` needed no edit (not an owned file).
+- **Verification:** Full gate green; coverage 100/100/100/100. Mutation checks run: audience `error`
+  unwired → per-field test fails; refusal → `joinList` of all → 3 one-sentence tests fail; second
+  `role="status"` → 9 fail incl. the new count assertion. `brief-editor.test.tsx` passed alone and in
+  the full suite — `waitForEditorReady` did not flake this run (B2 still owns the fix); its
+  `fillDialog` helpers needed no edit.
+- **Left open:** W2(a) (D90 discard guard) and W2(b) (D89(b), deferred pending D84) — the resume
+  two-way remains a separate `DialogShell` at `z-[80]`. The kit-padding question (plan §6.5, dialogs
+  `p-6` vs the shell's `px-4 py-3`) is now visibly wide at 820px and still wants an answer.
+
+## 2026-09-07 — W1 review remediation: ChipGroup invalid + heading pin (PR #203)
+
+- **Mode:** Implementer. Remediation on `feat/w1`; ownership extended to `chip-group.tsx` for this
+  pass only.
+- **Changes:** `ChipGroup`'s `invalid` now lands on the sr-only mirror (`aria-invalid={invalid ||
+  undefined}`), not only the Other… `Input` that is unmounted while closed. Existing Other… forward
+  kept. Chip-group unit test added (invalid + Other closed → `aria-invalid="true"`; without invalid
+  the attribute is absent). Dialog D91 test now asserts the region control too. Heading test pins
+  DOM order and numerals (`01 · Targeting`, `02 · Start from`, `03 · Mode`). Existing chip-group
+  assertions unedited.
+- **Decisions:** No visible error edge on the chips. `Field` already shows the error string; selected
+  / unselected chip tokens (`border-brand-primary` / `border-border-control`) would fight
+  `border-error` without a design for that collision; IdentitySection would inherit the visual with
+  no pass. Stated in the PR body rather than applied.
+- **Verification:** Mutations run: drop mirror `aria-invalid` → chip-group invalid test and dialog
+  D91 region assertion fail; swap `02`/`03` `SectionBlock`s → heading test fails (`03 · Mode` then
+  `02 · Start from`); blank numeral `01` → heading test fails (` · Targeting`). IdentitySection
+  suite (`sections.test.tsx`) and LayoutSection / border-control ChipGroup tests green.
+- **Left open:** visual chip error treatment, if a later kit pass wants one, is a token
+  (`border-error`) and needs a selected-state design. W2(a) still undispatched.
 ## 2026-09-07 — Wave 2, lane B2: de-flake brief-editor via asyncUtilTimeout (PR #202)
 
 - **Change (1 file, `apps/web/vitest.setup.ts`):** `configure({ asyncUtilTimeout: 3000 })`

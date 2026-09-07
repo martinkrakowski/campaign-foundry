@@ -189,6 +189,42 @@ describe("ChipGroup", () => {
   });
 });
 
+describe("ChipGroup invalid reaches the mirror input", () => {
+  test("invalid marks the assistive-tech input even when Other is closed", () => {
+    const { rerender } = render(
+      <ChipGroup
+        label="Target Region"
+        options={OPTIONS}
+        value=""
+        onChange={vi.fn()}
+        allowOther
+        otherLabel="Other…"
+        otherInputLabel="Target Region — other"
+        invalid
+      />,
+    );
+    // Other is present but closed (empty value, custom field unmounted); the
+    // mirror is the control assistive tech reads, so invalid has to land there
+    // or the prop is a no-op for the normal case.
+    expect(screen.getByRole("button", { name: "Other…" })).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: "Target Region — other" })).toBeNull();
+    expect(screen.getByLabelText("Target Region").getAttribute("aria-invalid")).toBe("true");
+
+    rerender(
+      <ChipGroup
+        label="Target Region"
+        options={OPTIONS}
+        value=""
+        onChange={vi.fn()}
+        allowOther
+        otherLabel="Other…"
+        otherInputLabel="Target Region — other"
+      />,
+    );
+    expect(screen.getByLabelText("Target Region").getAttribute("aria-invalid")).toBeNull();
+  });
+});
+
 describe("ChipGroup gating reaches the mirror input", () => {
   test("disabled and readOnly close the assistive-tech input too, not just the chips", async () => {
     const onChange = vi.fn();
