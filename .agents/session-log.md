@@ -2651,3 +2651,24 @@ plan's §6.5 is still unanswered.
 - **Left open:** W2(a) (D90 discard guard) and W2(b) (D89(b), deferred pending D84) — the resume
   two-way remains a separate `DialogShell` at `z-[80]`. The kit-padding question (plan §6.5, dialogs
   `p-6` vs the shell's `px-4 py-3`) is now visibly wide at 820px and still wants an answer.
+
+## 2026-09-07 — W1 review remediation: ChipGroup invalid + heading pin (PR #203)
+
+- **Mode:** Implementer. Remediation on `feat/w1`; ownership extended to `chip-group.tsx` for this
+  pass only.
+- **Changes:** `ChipGroup`'s `invalid` now lands on the sr-only mirror (`aria-invalid={invalid ||
+  undefined}`), not only the Other… `Input` that is unmounted while closed. Existing Other… forward
+  kept. Chip-group unit test added (invalid + Other closed → `aria-invalid="true"`; without invalid
+  the attribute is absent). Dialog D91 test now asserts the region control too. Heading test pins
+  DOM order and numerals (`01 · Targeting`, `02 · Start from`, `03 · Mode`). Existing chip-group
+  assertions unedited.
+- **Decisions:** No visible error edge on the chips. `Field` already shows the error string; selected
+  / unselected chip tokens (`border-brand-primary` / `border-border-control`) would fight
+  `border-error` without a design for that collision; IdentitySection would inherit the visual with
+  no pass. Stated in the PR body rather than applied.
+- **Verification:** Mutations run: drop mirror `aria-invalid` → chip-group invalid test and dialog
+  D91 region assertion fail; swap `02`/`03` `SectionBlock`s → heading test fails (`03 · Mode` then
+  `02 · Start from`); blank numeral `01` → heading test fails (` · Targeting`). IdentitySection
+  suite (`sections.test.tsx`) and LayoutSection / border-control ChipGroup tests green.
+- **Left open:** visual chip error treatment, if a later kit pass wants one, is a token
+  (`border-error`) and needs a selected-state design. W2(a) still undispatched.
