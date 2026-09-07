@@ -387,6 +387,42 @@ describe("loadBrief", () => {
   });
 });
 
+describe("parseBrief campaign type (D108–D112)", () => {
+  test("a brief with no type parses exactly as before — absent means social-post", () => {
+    const parsed = parseBrief(valid);
+    expect(parsed.type).toBeUndefined();
+  });
+
+  test("a known type parses and is carried on the parsed brief verbatim", () => {
+    expect(parseBrief({ ...valid, type: "short-video" }).type).toBe("short-video");
+    expect(parseBrief({ ...valid, type: "paid-social" }).type).toBe("paid-social");
+    expect(parseBrief({ ...valid, type: "social-post" }).type).toBe("social-post");
+  });
+
+  test("an unknown type throws with the vocabulary spelled out", () => {
+    expect(() => parseBrief({ ...valid, type: "banner" })).toThrow(
+      'Campaign brief field "type" must be one of "social-post", "paid-social", "short-video"; got "banner".',
+    );
+  });
+
+  test("an unknown type is structural, never lenient — refused in enforcing mode too", () => {
+    // Unlike the motion rules (authoring accepts what this host cannot run),
+    // the type vocabulary has no capability behind it: both parse modes refuse.
+    expect(() => parseBrief({ ...valid, type: "banner" }, { enforceCapabilities: false })).toThrow(
+      /must be one of "social-post", "paid-social", "short-video"/,
+    );
+    expect(() =>
+      parseBrief({ ...valid, type: "banner" }, { capabilities: { motion: true }, enforceCapabilities: true }),
+    ).toThrow(/must be one of "social-post", "paid-social", "short-video"/);
+  });
+
+  test("a non-string type is refused", () => {
+    expect(() => parseBrief({ ...valid, type: 7 })).toThrow(
+      'Campaign brief field "type" must be one of "social-post", "paid-social", "short-video"; got 7.',
+    );
+  });
+});
+
 const MOTION_ON = { motion: true } as const;
 const MOTION_OFF = { motion: false, reason: "ffmpeg -version exited 1" } as const;
 
@@ -870,6 +906,7 @@ describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
     test("loads every existing brief in briefs/*.yaml", async () => {
       const briefFiles = [
         "briefs/sample-campaign.yaml",
+        "briefs/sample-campaign.json",
         "briefs/sample-campaign-orange.yaml",
         "briefs/sample-campaign-reuse.yaml",
         "briefs/sample-campaign-variants.yaml",
@@ -881,6 +918,9 @@ describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
         const loaded = await loadBrief(file);
         expect(loaded.id).toBeDefined();
         expect(loaded.copy?.timeline).toBeUndefined();
+        // No fixture predates the campaign type (D112): none names it, so
+        // every one keeps meaning "social-post" without an edit.
+        expect(loaded.type).toBeUndefined();
       }
     });
 

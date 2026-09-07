@@ -38,6 +38,9 @@ MAIN=${MAIN_BRANCH:-main}
 # earned their place the hard way: every wave with two parallel lanes touches them,
 # and without them the second merge of each wave aborts. Only ever add a file whose
 # lanes append at the END — the resolver preserves order, not intent.
+# The check whose conclusion gates a merge (regex over check-run names). A run that
+# registers instantly — a review bot — must never satisfy the wait on its own.
+REQUIRED_CHECK=${REQUIRED_CHECK:-'^Build'}
 APPEND_ONLY=${APPEND_ONLY:-'^(\.agents/session-log\.md|CHANGELOG\.md|packages/[^/]+/src/application/ports/out/index\.ts|apps/web/src/components/ui/index\.ts|apps/web/src/components/campaign/messages\.ts)$'}
 
 KEEP_BOTH='
@@ -106,6 +109,7 @@ for spec in "$@"; do
     cd "$worktree" || die "cannot cd to $worktree"
     refresh_here
     git push -q origin "$branch" || die "push failed for $branch"
+    pushed_sha=$(git rev-parse HEAD)
     cd "$REPO" || die "cannot cd back to $REPO"
   else
     # No worktree supplied: refresh in a throwaway one so this PR is not merged stale.
@@ -118,6 +122,7 @@ for spec in "$@"; do
       || { rm -rf "$tmp"; die "cannot create temp worktree for $branch" }
     ( cd "$tmp" && refresh_here && git push -q origin "HEAD:refs/heads/$branch" ) \
       || { git worktree remove --force "$tmp"; die "refresh/push failed for $branch" }
+    pushed_sha=$(git -C "$tmp" rev-parse HEAD)
     git worktree remove --force "$tmp" || die "cannot remove temp worktree $tmp"
   fi
 
@@ -137,11 +142,22 @@ for spec in "$@"; do
   # commit the watch has already moved past — the same guard-and-watch-disagree shape as
   # the bug this whole block exists to fix. An empty answer counts as not-yet-registered
   # rather than aborting, because a transient API hiccup is not a verdict.
+  # Ask about the commit THIS script just pushed, never about whatever `gh` says the head
+  # is. Observed on #224: after the refresh push, `gh pr view --json headRefOid` still
+  # answered the previous SHA for a while; that SHA's runs had just been CANCELLED by the
+  # new push, so "not success" read as a failed PR while the real head's checks were
+  # pending. If the forge later reports a head that is not ours, someone else pushed —
+  # stop rather than verify a commit we did not refresh.
+  head_sha=$pushed_sha
   registered=0
   for _ in $(seq 1 40); do            # up to ~10 minutes at 15s
-    head_sha=$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null || true)
+    forge_head=$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null || true)
+    if [ -n "$forge_head" ] && [ "$forge_head" != "$head_sha" ] && [ "$(git merge-base --is-ancestor "$head_sha" "$forge_head" 2>/dev/null; echo $?)" = "0" ]; then
+      die "PR #$pr head moved to $forge_head after our push of $head_sha — someone else pushed; not merging"
+    fi
     if [ -n "$head_sha" ]; then
-      n=$(gh api "repos/{owner}/{repo}/commits/$head_sha/check-runs" --jq '.total_count' 2>/dev/null || echo 0)
+      n=$(gh api "repos/{owner}/{repo}/commits/$head_sha/check-runs" \
+        --jq "[.check_runs[] | select(.name | test(\"$REQUIRED_CHECK\"))] | length" 2>/dev/null || echo 0)
       if [ "${n:-0}" -gt 0 ]; then registered=1; break; fi
     fi
     sleep 15
@@ -153,13 +169,20 @@ for spec in "$@"; do
   # reported" — the two resolve the head differently for a window after a push, and
   # `--fail-fast` turns that window into an aborted merge on a healthy PR. Poll the same
   # API the registration guard used, until every run has concluded.
+  # Both loops key on REQUIRED_CHECK, not on "whatever has registered": observed on #222
+  # and #219, a review bot's run registers and concludes within seconds of the push, so
+  # "the list is non-empty and every run is completed" was true before the build workflow
+  # had registered at all, and the script declared green beside a `pending` line. The
+  # question is never "has everything so far finished" — it is "has the check that gates
+  # this repo finished".
   echo "waiting for checks on $head_sha …"
   concluded=0
   for _ in $(seq 1 120); do          # up to ~30 minutes at 15s
     runs=$(gh api "repos/{owner}/{repo}/commits/$head_sha/check-runs" \
       --jq '[.check_runs[] | {n:.name, s:.status, c:.conclusion}]' 2>/dev/null || echo '[]')
     pending=$(printf '%s' "$runs" | python3 -c 'import json,sys;r=json.load(sys.stdin);print(sum(1 for x in r if x["s"]!="completed"))')
-    if [ "${pending:-1}" -eq 0 ] && [ "$(printf '%s' "$runs" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')" -gt 0 ]; then
+    required=$(printf '%s' "$runs" | python3 -c 'import json,sys,re;r=json.load(sys.stdin);print(sum(1 for x in r if re.search(sys.argv[1],x["n"])))' "$REQUIRED_CHECK")
+    if [ "${pending:-1}" -eq 0 ] && [ "${required:-0}" -gt 0 ]; then
       concluded=1; break
     fi
     sleep 15

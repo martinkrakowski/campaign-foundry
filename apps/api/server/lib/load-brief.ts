@@ -5,6 +5,7 @@ import { parse as parseYaml } from "yaml";
 import {
   HEADLINE_POOL_REF,
   ANCHOR_VALUES,
+  CAMPAIGN_TYPES,
   LAYOUT_VALUES,
   MAX_BEATS,
   MAX_WEIGHT,
@@ -106,6 +107,21 @@ function validateMode(value: unknown): void {
   if (typeof value !== "string" || !(BRIEF_MODES as readonly string[]).includes(value)) {
     throw new Error(
       `Campaign brief field "mode" must be "brief" or "variation"; got ${JSON.stringify(value)}.`,
+    );
+  }
+}
+
+/**
+ * The campaign type (D108–D112) is structural, never lenient: unlike the motion
+ * rules it is checked in authoring mode too, so an unknown type cannot be saved
+ * and surface as a broken preset later. Absent means "social-post" — existing
+ * briefs never name it.
+ */
+function validateType(value: unknown): void {
+  if (value === undefined) return;
+  if (typeof value !== "string" || !(CAMPAIGN_TYPES as readonly string[]).includes(value)) {
+    throw new Error(
+      `Campaign brief field "type" must be one of ${CAMPAIGN_TYPES.map((t) => `"${t}"`).join(", ")}; got ${JSON.stringify(value)}.`,
     );
   }
 }
@@ -591,6 +607,7 @@ export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): Campaig
   validateTreatments(record.treatments);
   validateStyle(record.style);
   validateMode(record.mode);
+  validateType(record.type);
   validateVariation(record.variation, effectiveCapabilities);
   validateOutput(record.output, effectiveCapabilities);
   validateMotionAxisRequested(record);
