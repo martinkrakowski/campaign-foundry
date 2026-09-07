@@ -2452,6 +2452,43 @@ To keep this file out of version control, add `.agents/session-log.md` to
 - **Verification (gate order, final tree):** build 7/7, typecheck 7/7, lint clean, lint:arch compliant, `test:cov` **177 files, 3065 passed | 2 skipped — 100% on all four counters (7785/7785 stmts, 5695/5695 branch, 1663/1663 funcs, 6993/6993 lines)**. Commit, `sync:check` on the committed tree, push, PR against `main` — NOT merged.
 - **Deviations:** none from the lane brief. The adapter stayed the home of the fix (the use case builds no prompt; `delimit` is the single rendering seam), so no file-ownership transfer was needed.
 
+### 2026-09-06 — F-A: a failed listing is its own state (D83 / F1 / F6)
+
+- **Mode:** Implementer, lane F-A of the remaining-work plan. Worktree `wt-fa-listing`, branch `fix/fa-failed-listing-state` (from `origin/main` at `950889e`). `briefs/` and `assets/inputs/` untouched; no dev servers, no curl; staged paths explicit.
+- **The defect:** `loadBriefs` swallowed every rejection and still set `briefsLoaded`, so a store outage on `/brief/<id>` rendered the not-found alert and offered "Start a new brief" — inviting a duplicate of a campaign that exists. F6 rode along: `fetchPersistedRun` answered "no run history" on both limbs (the catch **and** the tail `return null` a resolved-but-failed 500 lands on).
+- **BriefEditor:** `loadBriefs` records `briefsFailed` as well as logging (the `console.error` stays — `brief-editor.test.tsx` pins it); each call is stamped with a **ref-held** generation so a slow older answer cannot replace a newer one (a plain `let` would reset every render — the capabilities effect's `let` works only inside `useEffect(…, [])`). The route-load effect returns on a failed listing — an id is unknown only when a listing that *succeeded* lacks it. The failure render is scoped to exactly where the not-found alert would render (`routeId !== undefined && routeLoadedId !== routeId`): a failed refresh on a loaded editor (window focus, the post-save listing) and `/brief/new` — which never needs the listing — keep the editor on screen. The failure state: `role="alert"`, publishes **no** sidebar panels (the M3 gates at the two publication effects now include the failure predicate), copy from appended `messages.ts` strings, an **in-page retry** button (window focus never fires for the user sitting on the page), and never "Start a new brief".
+- **run-context:** `fetchPersistedRun` (now exported) resolves `null` **only** for a real absence — a 200 whose body carries no matching `log.campaignId` — and throws on a rejected fetch, non-JSON, or non-OK (`pipelineUnreachable`). Callers catch without conflating: the two restore sites restore nothing and claim nothing; the lost-job re-read keeps the interruption notice.
+- **Tests:** 9 in the F-A describe of `brief-editor.test.tsx` (failure-state vs not-found; empty-but-successful still not-found — `:3407` keep-green; `/brief/new` keeps the blank editor; post-save failed refresh keeps the loaded editor; no sidebar panels — `:3420` mirror; in-page retry without any focus event; stale-failure ignored; stale-success ignored; Save-as + failed refresh hands back a retryable failure state, not not-found — the adoptSavedCopy hazard pinned) and 4 in `run-context.test.tsx` (rejects on network failure; rejects on a 5xx with a JSON body; null only for a truthful absence; resolves the matching run).
+- **Mutation checks (mutate → red → restore), all run and reported:** (a) swallow restored in `loadBriefs` → 6 F-A tests red; (b) `setUnknownId` on the failure path → the failure-state test red; (c) render scope dropped → `/brief/new` **and** post-save tests red (exactly the two predicted); (d) retry deleted → retry test red; (e) `fetchPersistedRun` silent `null` per limb — full swallow: reject + 5xx tests red; `!res.ok` check removed alone: only the 5xx test red (limbs separately pinned); (f) panel gates left on `unknownId` alone → the no-panels test red.
+- **Verification (gate order, committed tree):** build 7/7, typecheck 7/7, lint clean, lint:arch compliant, `test:cov` **178 files, 3088 passed | 2 skipped — 100% on all four counters (7812/7812 stmts, 5715/5715 branch, 1669/1669 funcs, 7013/7013 lines)**; `sync:check` on the committed tree; push; PR against `main` — NOT merged.
+- **Deviations:** none from the lane brief. One addition: the brief's "noticed" item (a stale listing in `adoptSavedCopy` reaching `setUnknownId` on a just-created brief) is pinned by the Save-as test above — deliverable 2 makes it answer a retryable failure state instead of a false not-found.
+
+### 2026-09-06 — F-A follow-up (orchestrator sweep of PR #197)
+
+- **Mode:** Sweeper. Branch `fix/fa-failed-listing-state`, commits after the lane's own.
+- **The lane reintroduced F1 on its own retry path.** `loadBriefs` generation-checked its result but
+  the `finally` ran unconditionally, so a stale answer still set `briefsLoaded`. With a mount load
+  and a focus load overlapping and the stale one landing first, the route effect saw a settled
+  listing with an empty `briefs` and `briefsFailed` still false, and called `setUnknownId` on a
+  brief that exists. Found independently by three review bots; agy's full review missed it. Fixed by
+  letting only the current generation declare the listing settled.
+- **Two tests written for this were vacuous and had to be re-cut.** The first pin asserted
+  immediately after resolving the stale answer, and `waitFor` on an already-true condition returns
+  without yielding, so it ran before React committed the false not-found — green against the bug it
+  pinned. It now flushes with `act`.
+- **The `try`/`catch` generation guards had NO pin at all.** Verified by mutation: deleting both left
+  the entire 10-test F-A describe green. Added "a stale success does not clear the failure recorded
+  by a newer listing", which goes red when the `try` guard alone is removed.
+- **The `catch` guard remains unpinned, deliberately and in writing.** Every ordering in which a
+  stale failure lands is already answered by something that renders first. Annotated at the line
+  rather than covered by a contrived test.
+- **`/brief/new`'s pin was order-dependent.** It asserted the blank editor before awaiting the
+  failure, so it could pass before the 500 settled. Reordered; now red on three consecutive runs
+  under the scope-dropped mutant.
+- **Two older stale-answer tests pin the route-loaded short-circuit, not the stamp**, and now say so
+  at the line — removing the stamp leaves them green.
+- **Gate:** build, typecheck, lint, lint:arch, test:cov all green; 100 % on all four counters.
+
 ### 2026-09-06 — F5: the focus trap was escapable from a single dialog (containment + open-order registry)
 
 - **Mode:** Implementer, lane F5 of the remaining-work plan. Worktree `wt-f5-focus-trap`, branch `fix/f5-focus-trap-containment` (from `origin/main` at `950889e`). `briefs/` and `assets/inputs/` untouched; no dev servers, no curl; staged paths explicit. `BriefEditor.tsx` / `messages.ts` / `run-context.tsx` untouched (lane F-A owns them); the hand-rolled Save-as dialog inherits the fix through the shared, exported hook.

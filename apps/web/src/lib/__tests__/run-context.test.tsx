@@ -3,7 +3,7 @@ import { renderHook, act, waitFor, screen, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { createElement, type ReactNode } from "react";
 import { assetIdentity } from "@campaignfoundry/CampaignOrchestration";
-import { RunProvider, useRun, assetKey, assetLabel, type Asset } from "@/lib/run-context";
+import { RunProvider, useRun, assetKey, assetLabel, fetchPersistedRun, type Asset } from "@/lib/run-context";
 import { json, jobOk, mockPipelineApi, EMPTY_REPORT, renderWithRun } from "@/__tests__/helpers";
 import { Header } from "@/components/shell/Header";
 import { CommandBar } from "@/components/shell/CommandBar";
@@ -52,6 +52,34 @@ describe("useRun", () => {
     expect(
       assetLabel(asset({ productId: "hydra-bottle", aspectRatio: "1:1", treatment: "headline-top-bold", variantIndex: 4 })),
     ).toBe("hydra-bottle @ 1:1 · v4 · headline-top-bold");
+  });
+});
+
+describe("fetchPersistedRun — could not ask vs there is nothing (D83/F6)", () => {
+  test("a rejected fetch is not an absent run", async () => {
+    mockPipelineApi({ result: () => Promise.reject(new Error("down")) });
+    await expect(fetchPersistedRun("seed")).rejects.toThrow("down");
+  });
+
+  test("a 5xx with a JSON body is not an absent run", async () => {
+    // A 500 with a body does not throw at the fetch layer — it used to slip through
+    // the campaignId test and resolve as "no run". It is a failed read.
+    mockPipelineApi({ result: () => json({ error: "boom" }, 500) });
+    await expect(fetchPersistedRun("seed")).rejects.toThrow(/Pipeline API unreachable/);
+  });
+
+  test("a 200 whose body carries no run for the campaign is an absent run", async () => {
+    // The one truthful absence: the read succeeded and named no run for this campaign.
+    mockPipelineApi({ result: () => json({ halted: false, assets: [], log: null }) });
+    await expect(fetchPersistedRun("seed")).resolves.toBeNull();
+  });
+
+  test("a 200 carrying the campaign's own run resolves with it", async () => {
+    mockPipelineApi({
+      result: () => json({ halted: false, assets: [asset()], log: { entries: [], campaignId: "seed" } }),
+    });
+    const d = await fetchPersistedRun("seed");
+    expect(d?.assets).toHaveLength(1);
   });
 });
 

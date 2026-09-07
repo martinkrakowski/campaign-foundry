@@ -3769,3 +3769,265 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     expect(screen.queryAllByRole("dialog", { name: messages.resumeDraftTitle })).toHaveLength(0);
   });
 });
+
+describe("a failed listing is its own state (D83 / F-A)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:presentation", "everything");
+  });
+
+  test("a rejected listBriefs on a named route renders the failure state, not the not-found state", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    routes({ list: () => json({ error: "boom" }, 500) });
+    renderWithRun(
+      <>
+        <RunBriefProbe />
+        <Editor id="camp" />
+      </>,
+    );
+
+    // The failure is recorded as well as logged — the log alone was the defect.
+    await waitFor(() => expect(error).toHaveBeenCalledWith("Failed to load briefs:", expect.anything()));
+    expect(await screen.findByText(messages.briefListFailed("camp"))).toBeTruthy();
+    // D83: a failed read never becomes a statement that the campaign does not exist…
+    expect(screen.queryByText(messages.briefNotFound("camp"))).toBeNull();
+    // …and the remedy that invites a duplicate is exactly what it must not offer.
+    expect(screen.queryByText(messages.briefNotFoundNew)).toBeNull();
+    expect(screen.getByRole("button", { name: messages.briefListFailedRetry })).toBeTruthy();
+    // No draft was created for the id the listing could not answer about.
+    await new Promise((r) => setTimeout(r, 50));
+    const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i) ?? "");
+    expect(keys.filter((k) => k.startsWith("cf:draft:"))).toEqual([]);
+    error.mockRestore();
+  });
+
+  test("an empty-but-successful listing on a named route still renders the not-found state", async () => {
+    routes({ list: () => json({ briefs: [] }) });
+    renderWithRun(<Editor id="camp" />);
+
+    // A listing that succeeded and lacks the id is the one truthful not-found.
+    expect(await screen.findByText(messages.briefNotFound("camp"))).toBeTruthy();
+    expect(screen.queryByText(messages.briefListFailed("camp"))).toBeNull();
+  });
+
+  test("/brief/new with a rejected listing still renders the blank editor", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    routes({ list: () => json({ error: "boom" }, 500) });
+    renderWithRun(<NewEditor />);
+
+    // Wait for the listing to have actually FAILED before asserting anything about the
+    // editor. Campaign Name is "" on first paint and /brief/new never awaits the listing,
+    // so asserting first would pass before the 500 settled — green even with the render
+    // scope dropped. The failure must be on the record, and the blank editor must have
+    // survived it.
+    await waitFor(() => expect(error).toHaveBeenCalledWith("Failed to load briefs:", expect.anything()));
+    expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("");
+    expect(screen.getByRole("button", { name: /^Save$/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: messages.briefListFailedRetry })).toBeNull();
+    error.mockRestore();
+  });
+
+  test("a listing refresh that fails after a successful save leaves the loaded editor on screen", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const user = userEvent.setup();
+    let listFails = false;
+    const calls = routes({
+      list: () => (listFails ? json({ error: "boom" }, 500) : json({ briefs: [entry("camp", "r1")] })),
+      // handleSave refreshes the listing after the write; that refresh is the one that fails.
+      put: () => {
+        listFails = true;
+        return json({ file: "camp.yaml", brief: brief("camp"), revision: "r2" });
+      },
+    });
+    renderWithRun(<Editor id="camp" />);
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    await saveVia(user, "Save");
+    await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true));
+    await waitFor(() => expect(error).toHaveBeenCalledWith("Failed to load briefs:", expect.anything()));
+
+    // A failed refresh on a loaded editor changes nothing on screen…
+    expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp");
+    expect(screen.queryByText(messages.briefListFailed("camp"))).toBeNull();
+    expect(screen.queryByRole("button", { name: messages.briefListFailedRetry })).toBeNull();
+    error.mockRestore();
+  });
+
+  test("the failure state publishes no sidebar panels", async () => {
+    routes({ list: () => json({ error: "boom" }, 500) });
+    renderWithRun(<Editor id="camp" />);
+
+    // M3, extended: a page that is not an editor publishes nothing into the sidebar.
+    expect(await screen.findByText(messages.briefListFailed("camp"))).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Classic")).toBeNull());
+  });
+
+  test("the in-page retry re-runs the listing and renders the brief — no focus event", async () => {
+    const user = userEvent.setup();
+    let fail = true;
+    routes({ list: () => (fail ? json({ error: "boom" }, 500) : json({ briefs: [entry("camp", "r1")] })) });
+    renderWithRun(<Editor id="camp" />);
+    expect(await screen.findByText(messages.briefListFailed("camp"))).toBeTruthy();
+
+    // The user is sitting on the page: window focus never fires for them, so the
+    // retry affordance is the recovery path. Clicking it is all it takes.
+    fail = false;
+    await user.click(screen.getByRole("button", { name: messages.briefListFailedRetry }));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    expect(screen.queryByText(messages.briefListFailed("camp"))).toBeNull();
+  });
+
+  test("a stale success does not clear the failure recorded by a newer listing", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const pending: Array<(r: Response) => void> = [];
+    routes({ list: () => new Promise<Response>((resolve) => pending.push(resolve)) });
+    renderWithRun(<Editor id="camp" />);
+    await waitFor(() => expect(pending.length).toBe(1));
+
+    // A second listing overtakes the first, and fails.
+    fireEvent.focus(window);
+    await waitFor(() => expect(pending.length).toBe(2));
+    pending[1](json({ error: "boom" }, 500));
+    expect(await screen.findByText(messages.briefListFailed("camp"))).toBeTruthy();
+
+    // The older request now succeeds. Its data is stale: the newest thing we know is that
+    // the store could not be read, so this answer must not quietly load the editor and
+    // erase the failure. This is what the `try` generation guard is for — without it the
+    // editor appears and this test goes red.
+    pending[0](json({ briefs: [entry("camp", "r1")] }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText(messages.briefListFailed("camp"))).toBeTruthy();
+    expect(screen.queryByLabelText("Campaign Name")).toBeNull();
+    error.mockRestore();
+  });
+
+  test("a stale answer that lands first does not settle the listing into a false not-found", async () => {
+    const pending: Array<(r: Response) => void> = [];
+    routes({ list: () => new Promise<Response>((resolve) => pending.push(resolve)) });
+    renderWithRun(<Editor id="camp" />);
+    await waitFor(() => expect(pending.length).toBe(1));
+
+    // A second listing starts before the first answers — the mount load is now stale.
+    fireEvent.focus(window);
+    await waitFor(() => expect(pending.length).toBe(2));
+
+    // The stale one answers first, and empty. It must not mark the listing settled:
+    // that hands the route effect an empty listing with no failure recorded, and the
+    // effect would then call setUnknownId on a brief that exists.
+    pending[0](json({ briefs: [] }));
+    // Flush the stale answer's state updates before asserting. A `waitFor` on a condition
+    // that is already true returns without yielding, so the assertion would run before
+    // React committed the false not-found — passing against the very bug it pins.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByText(messages.briefNotFound("camp"))).toBeNull();
+
+    // The current answer decides.
+    pending[1](json({ briefs: [entry("camp", "r1")] }));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+    expect(screen.queryByText(messages.briefNotFound("camp"))).toBeNull();
+  });
+
+  test("a slow failed answer cannot replace a newer successful one", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const user = userEvent.setup();
+    const pending: Array<(r: Response) => void> = [];
+    routes({ list: () => new Promise<Response>((resolve) => pending.push(resolve)) });
+    renderWithRun(<Editor id="camp" />);
+
+    await waitFor(() => expect(pending.length).toBe(1));
+    pending[0](json({ error: "boom" }, 500));
+    expect(await screen.findByText(messages.briefListFailed("camp"))).toBeTruthy();
+
+    // Two retries in flight; the newer one answers first.
+    await user.click(screen.getByRole("button", { name: messages.briefListFailedRetry }));
+    await user.click(screen.getByRole("button", { name: messages.briefListFailedRetry }));
+    await waitFor(() => expect(pending.length).toBe(3));
+    pending[2](json({ briefs: [entry("camp", "r1")] }));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    // The older, failed answer lands last — it must not take the page back.
+    // NB what actually guarantees this: the route has loaded, so `routeLoadedId ===
+    // routeId` short-circuits the effect and nulls `failedRouteId` regardless of the
+    // generation stamp. This test pins the short-circuit, NOT the stamp — deleting the
+    // stamp leaves it green (verified by mutation on PR #197). The stamp's real pins are
+    // the two overlap tests, which act before the route has loaded.
+    pending[1](json({ error: "boom" }, 500));
+    await waitFor(() => expect(screen.queryByText(messages.briefListFailed("camp"))).toBeNull());
+    expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp");
+    error.mockRestore();
+  });
+
+  test("a slow successful answer cannot replace a newer one", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const user = userEvent.setup();
+    const pending: Array<(r: Response) => void> = [];
+    routes({ list: () => new Promise<Response>((resolve) => pending.push(resolve)) });
+    renderWithRun(<Editor id="camp" />);
+
+    await waitFor(() => expect(pending.length).toBe(1));
+    pending[0](json({ error: "boom" }, 500));
+    expect(await screen.findByText(messages.briefListFailed("camp"))).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: messages.briefListFailedRetry }));
+    await user.click(screen.getByRole("button", { name: messages.briefListFailedRetry }));
+    await waitFor(() => expect(pending.length).toBe(3));
+    pending[2](json({ briefs: [entry("camp", "r1")] }));
+    await waitFor(() => expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"));
+
+    // The older answer succeeds with an empty listing — it must not replace the
+    // newer one, or the route-load effect would re-decide the id it just loaded
+    // NB what actually guarantees this: the route has loaded, so `routeLoadedId ===
+    // routeId` short-circuits the effect and nulls `failedRouteId` regardless of the
+    // generation stamp. This test pins the short-circuit, NOT the stamp — deleting the
+    // stamp leaves it green (verified by mutation on PR #197). The stamp's real pins are
+    // the two overlap tests, which act before the route has loaded.
+    // and answer a false not-found.
+    pending[1](json({ briefs: [] }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText(messages.briefNotFound("camp"))).toBeNull();
+    expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp");
+    error.mockRestore();
+  });
+
+  test("a Save-as whose listing refresh fails hands back a retryable failure state, never a false not-found", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const user = userEvent.setup();
+    let listFails = false;
+    const calls = routes({
+      list: () => (listFails ? json({ error: "boom" }, 500) : json({ briefs: [entry("camp", "r1")] })),
+      // The copy is created; the refresh adoptSavedCopy awaits on the way out fails.
+      post: () => {
+        listFails = true;
+        return json({ file: "copy-1.yaml", brief: brief("copy-1"), revision: "mock-rev" }, 201);
+      },
+    });
+    const view = renderWithRun(<Editor id="camp" />);
+    await waitForEditorReady();
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New brief id"), "copy-1");
+    await user.click(within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+    await waitFor(() => expect(error).toHaveBeenCalledWith("Failed to load briefs:", expect.anything()));
+
+    // The route moves to the copy (as it always does); the stale-failure honest answer
+    // is the failure state — never not-found for a brief that was just created.
+    view.rerender(
+      <ShellProviders>
+        <CreateCampaignProvider>
+          <Editor id="copy-1" />
+          <CreateCampaignDialog />
+        </CreateCampaignProvider>
+      </ShellProviders>,
+    );
+    expect(await screen.findByText(messages.briefListFailed("copy-1"))).toBeTruthy();
+    expect(screen.queryByText(messages.briefNotFound("copy-1"))).toBeNull();
+    expect(screen.queryByText(messages.briefNotFoundNew)).toBeNull();
+    error.mockRestore();
+  });
+});
