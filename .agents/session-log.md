@@ -3373,3 +3373,51 @@ formats, not the gated brief's (D45's rule, eventually).
 
 **Left open:** Qodo's motion-only-platforms pairing; the format vocabulary still has no
 shared domain export.
+
+## 2026-09-07 — Campaign type, and display advertising (two plans)
+
+**Mode:** Architect. The owner stated the product's market — online static and video ads, and
+social-media posts, static and video — and asked for the create dialog's second field to be the
+campaign *type*, plus whether a quick-win third type exists.
+
+**This supersedes D97.** Forty minutes earlier the orchestrator had asked whether "template type"
+meant the render format or the campaign mode, and the owner chose mode. The market statement showed
+neither was the intended meaning; the right question — *what kind of campaign* — was not on the
+list. A well-formed question with the wrong options produces a confident wrong answer. Lane S1 had
+not dispatched, so the correction cost nothing.
+
+**The finding that shaped both plans.** All seven platform profiles are social, and they split
+perfectly: three static (`instagram-feed`, `linkedin`, `x`) and four motion, all `9:16`
+(`instagram-story`, `instagram-reel`, `tiktok`, `youtube-short`). There is no display placement and
+no IAB size. So **social posts** are what the platform set already is, **paid social** is a preset
+over the same platforms, and **display advertising** is a new ratio family.
+
+**The quick-win third type is short-form video** — the four motion platforms are already a coherent
+cluster needing no new ratio, platform or format. It must set `mode: variation` (D110), because the
+API refuses classic+motion on every run path (D99).
+
+**Two plans written:**
+- `2026-09-07_campaign-type.md` — D108–D112. Three types (`social-post`, `paid-social`,
+  `short-video`) as **presets applied once at create and never re-applied** (D109), stored on the
+  brief as an optional scalar like `mode`. Three lanes plus an optional fourth. Records that
+  `paid-social` is the only type with no structural identity (F3) and is the one most likely to be
+  reconsidered.
+- `2026-09-07_display-advertising.md` — D113–D118. **Not a quick win, and it says so first.** The
+  compositor sizes type as a fraction of canvas *width* (`fitText`, D55); a 728×90 leaderboard would
+  get a 44 px headline on a 90 px canvas. The plan makes display sizes a second ratio family (D113),
+  moves type scaling to the short side under **byte-identical** social goldens (D114), and closes
+  D85's `linux-x64` inset gap as a *prerequisite* (D115). `display-ad` joins the type vocabulary
+  **last**, after its sizes render (D117) — a create option that dead-ends is the D8 failure the
+  `GLOBAL` trap and the classic+motion defect both took.
+
+**Wave A, concluded.** S4 (#218) merged — the `setMode` leak fixed, with a shipped test at
+`editor-state.test.ts:554` found to *specify the defect* and corrected. S3 (#217) verified: its
+refused-seed fix had shipped **untested** (commenting it out left 115 files / 1834 tests green);
+round 2 added the editor-level test, and the mutation at the refusal path now fails it.
+
+**A fourth way a mutation misfires.** The orchestrator's first mutation of S3's fix hit the wrong
+of two `takeStashedStep()` calls and returned green. Confirmed compiled, ran — and targeted the
+wrong path. The rule is now: *compiled, ran, and targets the path the test names.*
+
+**Left open:** whether `paid-social` earns its tile; D114's byte-identical requirement may prove
+impossible on `16:9`, which would need the owner's decision before any display size renders.
