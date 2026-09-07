@@ -3037,3 +3037,18 @@ W2(b) — the resume two-way moving inline — stays deferred pending **D84**, b
 confirmed decision. **D95** (what more than one region *means* for generation) is open and is why
 the map ships single-select. Wave B (#208 G2, #209 G3) is remediating; wave C (M2, the map into the
 dialog) is staged.
+
+## 2026-09-07 — M2: the map in 01 · Targeting (wave C)
+
+**Session:** 2026-09-07 — M2 on `feat/m2` (from `origin/main` at `d41d2ed`)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `shell/CreateCampaignDialog.tsx` — the region field gains `WorldMap` above the existing `ChipGroup` (kept — the accessible and keyboard control per D94), both bound to `targetRegion`: a footprint press sets the value exactly as its chip does, a chip press paints its footprint, and `Other…`/a custom region passes `null` (no footprint). `labelFor` reads `messages.regionDisplayName`; `fallbackHint` reads `messages.worldMapFallbackHint`. A visible hint under the map is written against F2 ("The region shapes the generated backgrounds and copy."), never the mockup's dispatch sentence. Section 02 gains the mockup's eyebrow count readout over the rail (`Eyebrow` + `messages.startFromCampaignCount`), rendered only when the count is known.
+  - `campaign/messages.ts` — append-only `M2` block: `regionDisplayNames` + `regionDisplayName` (the display names #207's review moved out of the kit), `worldMapFallbackHint`, `worldMapRegionHint`, `startFromCampaignCount`.
+  - `shell/__tests__/CreateCampaignDialog.test.tsx` — new `M2` describe: map→chip (aria-pressed + the mirror input's value), chip→map (exactly one `[data-selected]`, the pressed footprint), Other…/custom clears the map, the F2 hint regex guard (`/dispatch|per region|\brun/i`), aria-hidden SVG + no focusable from any SVG in the Tab cycle + a dialog-wide `animate-` scan, and the count readout's both plural arms plus the failed-read arm. Every prior assertion passes unedited.
+- **Deviations:**
+  - The rail's count is read by the dialog, not the picker: `StartFromExistingPicker` owns its `listBriefs` call and exposes only the chosen source, and the file is outside M2's ownership — so the dialog reads the count itself (one extra `GET /campaigns/briefs` per open). The eyebrow renders only when the count is known, so it cannot disagree with the picker's loading/error/empty states.
+  - The `focusable="false"`/Tab-cycle assertion is scoped to the map's own SVG (the dialog now carries mode-glyph SVGs too) and additionally proves no `getFocusableDialogElements` entry descends from any SVG.
+- **Verification:** full gate green on the committed tree (`build`, `typecheck`, `lint`, `lint:arch`, `sync:check`, `test:cov` — 3248 passed / 2 skipped, 100 % ×4: 8091/5871/1737/7269). Mutations run red then reverted: (1) `onSelect` disconnected → footprint-press test fails; (2) constant `value={null}` to `WorldMap` → chip-paints test fails (note: a constant *equal to the clicked value* passes — the mutation must be degenerate); (3) the mockup's "runs dispatch per region" sentence prepended to the hint → the F2 regex test fails.
+- **Left open:** PR #214 against `main`, unmerged. D95 (multi-region semantics) untouched, as planned.
