@@ -965,3 +965,48 @@ export function briefListFailed(id: string): string {
 }
 /** The failed listing's way out: re-read the store where the user is standing. */
 export const briefListFailedRetry = "Try again";
+
+/* ── The create dialog's inline discard guard (W2(a) / D90) ───────────────── */
+
+/**
+ * The guard's question. It replaces the footer's button row in place when a
+ * close gesture (Cancel, Escape, the scrim, the head's close) lands on a draft
+ * with work in it — a cancelled create still leaves nothing behind (D67), it is
+ * now confirmed rather than implicit.
+ */
+export const discardGuardTitle = "Discard this draft?";
+/**
+ * The guard's protective answer: the guard comes down and every typed answer
+ * is exactly where the user left it.
+ */
+export const discardGuardKeepEditing = "Keep editing";
+/** The guard's destructive answer: the one control that may destroy the draft. */
+export const discardGuardDiscardClose = "Discard and close";
+/**
+ * The guard's detail line names what would actually be dropped — the draft's
+ * own answer set, never a generic sentence. Mode is deliberately absent: it has
+ * a default the user may never have touched, so it is not work in the draft
+ * (D90), and neither is the untouched mode toggle. A formatter rather than a
+ * fixed string because the sentence is only honest when it lists the answers
+ * that are really filled in. The part strings are exported consts so the jargon
+ * gate scans them; the formatter composes from those, never from literals of
+ * its own.
+ */
+export const discardGuardPartName = "a name";
+export const discardGuardPartRegion = "a region";
+export const discardGuardPartAudience = "an audience";
+export const discardGuardPartSource = "a chosen source";
+export function discardGuardDetail(
+  hasName: boolean,
+  hasRegion: boolean,
+  hasAudience: boolean,
+  hasSource: boolean,
+): string {
+  const parts = [
+    hasName ? discardGuardPartName : null,
+    hasRegion ? discardGuardPartRegion : null,
+    hasAudience ? discardGuardPartAudience : null,
+    hasSource ? discardGuardPartSource : null,
+  ].filter((part): part is string => part !== null);
+  return `Closing now discards ${joinList(parts)} from this draft.`;
+}

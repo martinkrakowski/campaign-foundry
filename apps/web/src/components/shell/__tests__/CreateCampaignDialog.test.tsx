@@ -7,6 +7,7 @@ import { ShellProviders, EMPTY_REPORT, json, mockPipelineApi, nextMock } from "@
 import { editorReducer, initialEditorState, saveDraftToStorage } from "@/components/campaign/editor-state";
 import * as messages from "@/components/campaign/messages";
 import * as createCampaignLib from "@/lib/create-campaign";
+import { getFocusableDialogElements } from "@/components/ui";
 import { CreateCampaignDialog } from "../CreateCampaignDialog";
 
 /** Opens the dialog the way the shell's entry points do, so the closed state is real. */
@@ -280,12 +281,16 @@ describe("CreateCampaignDialog", () => {
     }
   });
 
-  test("Cancel leaves no seed behind and resets the fields", async () => {
+  test("Discard and close leaves no seed behind and resets the fields (D67, confirmed)", async () => {
     const user = userEvent.setup();
     renderDialog();
     await openDialog(user);
     await user.type(screen.getByLabelText(messages.campaignNameLabel), "Summer Spark");
+    // D90: the typed work asks first — the guard rises in the footer…
     await user.click(screen.getByRole("button", { name: messages.confirmCancel }));
+    expect(screen.getByText(messages.discardGuardTitle)).toBeTruthy();
+    // …and Discard and close is the one control that completes the close.
+    await user.click(screen.getByRole("button", { name: messages.discardGuardDiscardClose }));
 
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull(),
@@ -449,15 +454,37 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
       ),
     );
     expect(screen.queryByRole("dialog", { name: messages.resumeDraftTitle })).toBeNull();
-    // The form's own Cancel then closes everything; a reopened dialog starts at
-    // the form, never mid-prompt.
+    // The form's own Cancel now asks before discarding the typed work (D90 rewrote
+    // this close path): the guard rises, and only Discard and close completes it.
     await user.click(screen.getByRole("button", { name: messages.confirmCancel }));
+    expect(screen.getByText(messages.discardGuardTitle)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: messages.discardGuardDiscardClose }));
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull(),
     );
     await user.click(screen.getByRole("button", { name: "open" }));
     expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
     expect(screen.queryByRole("dialog", { name: messages.resumeDraftTitle })).toBeNull();
+  });
+
+  test("the resume two-way and the discard guard never show together — the guard rides the footer the form keeps", async () => {
+    stashAbandonedDraft();
+    const user = userEvent.setup();
+    renderDialog();
+    await raiseTwoWay(user);
+
+    // The two-way is up; the guard is not — the guard can only be raised from the
+    // footer, and the footer's Create was the press that raised the two-way.
+    expect(screen.queryByText(messages.discardGuardTitle)).toBeNull();
+
+    // Escape takes the two-way down and raises no guard with it; the form's own
+    // gestures are back afterwards, and a dirty Escape asks through the guard now.
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: messages.resumeDraftTitle })).toBeNull();
+    expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
+    expect(screen.queryByText(messages.discardGuardTitle)).toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByText(messages.discardGuardTitle)).toBeTruthy();
   });
 });
 
@@ -664,5 +691,283 @@ describe("start from an existing campaign (W2 / D71)", () => {
     await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/summer-spark"));
     // The draft the blank path would have asked about is exactly where it was.
     expect(localStorage.getItem("cf:draft:new")).not.toBeNull();
+  });
+});
+
+describe("the inline discard guard (W2(a) / D90)", () => {
+  /** The store's one brief, for the chosen-source cases; listBriefs' row shape. */
+  const classic = { file: "summer-spark.yaml", brief: { id: "summer-spark", targetRegion: "EU", products: [{ id: "a" }] } };
+  const routeBriefs = (briefs: unknown[]) =>
+    mockPipelineApi({
+      result: (url: string) =>
+        url.includes("/campaigns/briefs") ? json({ briefs }) : json(EMPTY_REPORT),
+    });
+
+  test("an empty draft closes on the first Cancel — even a toggled mode is not work, so a pristine dialog gains no confirmation", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    // The mode toggle alone is never work in the draft: it has a default the
+    // user may never have touched (D90).
+    await user.click(screen.getByRole("button", { name: "variation" }));
+    await user.click(screen.getByRole("button", { name: messages.confirmCancel }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull(),
+    );
+    expect(screen.queryByText(messages.discardGuardTitle)).toBeNull();
+  });
+
+  test("Escape closes an empty draft immediately too — the guard is for work, not for gestures", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull(),
+    );
+    expect(screen.queryByText(messages.discardGuardTitle)).toBeNull();
+    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+  });
+
+  test("a dirty Cancel does not close — the guard asks in the footer and names what would be dropped", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    await fillValid(user);
+    await user.click(screen.getByRole("button", { name: messages.confirmCancel }));
+
+    // The question replaces the row in place: same dialog, same scrim, form intact.
+    expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
+    expect(screen.getByText(messages.discardGuardTitle)).toBeTruthy();
+    expect(
+      screen.getByText("Closing now discards a name, a region and an audience from this draft."),
+    ).toBeTruthy();
+    // The row it replaced is gone while it shows.
+    expect(screen.queryByRole("button", { name: messages.confirmCancel })).toBeNull();
+    expect(screen.queryByRole("button", { name: messages.createCampaignConfirm })).toBeNull();
+    // Asking publishes nothing, and the guard adds no second live region (D91).
+    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  test("the guard's detail names only what is filled in — a half-answered draft is named half-answered", async () => {
+    const user = userEvent.setup();
+    // A name alone…
+    const first = renderDialog();
+    await openDialog(user);
+    await user.type(screen.getByLabelText(messages.campaignNameLabel), "Summer Spark");
+    await user.click(screen.getByRole("button", { name: messages.confirmCancel }));
+    expect(screen.getByText("Closing now discards a name from this draft.")).toBeTruthy();
+    first.unmount();
+
+    // …a region alone…
+    const second = renderDialog();
+    await openDialog(user);
+    await user.click(screen.getByRole("button", { name: "EU" }));
+    await user.click(screen.getByRole("button", { name: messages.confirmCancel }));
+    expect(screen.getByText("Closing now discards a region from this draft.")).toBeTruthy();
+    second.unmount();
+
+    // …an audience alone: each answer is named when it exists and never otherwise.
+    renderDialog();
+    await openDialog(user);
+    await user.type(screen.getByLabelText(messages.targetAudienceLabel), "trail runners");
+    await user.click(screen.getByRole("button", { name: messages.confirmCancel }));
+    expect(screen.getByText("Closing now discards an audience from this draft.")).toBeTruthy();
+  });
+
+  test("a chosen source alone is work in the draft — the guard asks and names it", async () => {
+    routeBriefs([classic]);
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    await user.click(await screen.findByText("summer-spark"));
+    await user.click(screen.getByRole("button", { name: messages.confirmCancel }));
+
+    expect(screen.getByText(messages.discardGuardTitle)).toBeTruthy();
+    expect(screen.getByText("Closing now discards a chosen source from this draft.")).toBeTruthy();
+  });
+
+  test("a draft with every answer filled is named in full — the sentence lists all four", async () => {
+    routeBriefs([classic]);
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    await fillValid(user);
+    await user.click(await screen.findByText("summer-spark"));
+    await user.click(screen.getByRole("button", { name: messages.confirmCancel }));
+
+    expect(
+      screen.getByText(
+        "Closing now discards a name, a region, an audience and a chosen source from this draft.",
+      ),
+    ).toBeTruthy();
+  });
+
+  test("Keep editing restores the button row with every typed answer intact", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    await fillValid(user);
+    await user.click(screen.getByRole("button", { name: messages.confirmCancel }));
+    await user.click(screen.getByRole("button", { name: messages.discardGuardKeepEditing }));
+
+    expect(screen.queryByText(messages.discardGuardTitle)).toBeNull();
+    expect(screen.getByRole("button", { name: messages.confirmCancel })).toBeTruthy();
+    expect(screen.getByRole("button", { name: messages.createCampaignConfirm })).toBeTruthy();
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+      "Summer Spark",
+    );
+    expect(screen.getByRole("button", { name: "EU" }).getAttribute("aria-pressed")).toBe("true");
+    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe(
+      "trail runners",
+    );
+  });
+
+  test("Escape asks before discarding, and a second Escape keeps editing — Escape never destroys", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    await user.type(screen.getByLabelText(messages.campaignNameLabel), "Summer Spark");
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    // The first Escape raises the guard; the dialog and its answer stay.
+    expect(screen.getByText(messages.discardGuardTitle)).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+      "Summer Spark",
+    );
+
+    // The second Escape is Keep editing, never Discard: no keystroke sequence
+    // can destroy a filled-in form.
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByText(messages.discardGuardTitle)).toBeNull();
+    expect(screen.getByRole("button", { name: messages.confirmCancel })).toBeTruthy();
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+      "Summer Spark",
+    );
+    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+  });
+
+  test("the scrim asks on a dirty draft, and asks once — the second click keeps editing", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    await user.type(screen.getByLabelText(messages.campaignNameLabel), "Summer Spark");
+    // The scrim is the shell's own overlay, not a control — userEvent would land
+    // the pointer on the panel, so the gesture is driven at the overlay itself
+    // (fireEvent only where userEvent would refuse).
+    fireEvent.click(screen.getByRole("dialog", { name: messages.createCampaignTitle }));
+    expect(screen.getByText(messages.discardGuardTitle)).toBeTruthy();
+
+    // While the guard shows, the same gesture is Keep editing, never Discard.
+    fireEvent.click(screen.getByRole("dialog", { name: messages.createCampaignTitle }));
+    expect(screen.queryByText(messages.discardGuardTitle)).toBeNull();
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+      "Summer Spark",
+    );
+  });
+
+  test("opening the guard moves focus to its first answer; dismissing returns it to the control that raised it", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    await user.type(screen.getByLabelText(messages.campaignNameLabel), "Summer Spark");
+    await user.click(screen.getByRole("button", { name: messages.confirmCancel }));
+
+    // A guard nobody can reach by keyboard is not a guard: its first control
+    // holds focus while it shows.
+    expect(document.activeElement?.textContent).toBe(messages.discardGuardKeepEditing);
+
+    // Dismissing hands focus back to the control that raised the guard.
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(document.activeElement?.textContent).toBe(messages.confirmCancel);
+  });
+
+  test("clearing the last filled field while the guard shows dismisses it — a guard over nothing is the defect", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    const name = screen.getByLabelText(messages.campaignNameLabel);
+    await user.type(name, "Summer Spark");
+    await user.click(screen.getByRole("button", { name: messages.confirmCancel }));
+    expect(screen.getByText(messages.discardGuardTitle)).toBeTruthy();
+
+    await user.clear(name);
+
+    // The empty-parts sentence is the defect; asserting it is gone is the
+    // mutation target — remove the dismiss and this is what fails. HTML
+    // collapses the two spaces `joinList([])` leaves, so the match is the
+    // collapsed form.
+    expect(
+      screen.getByRole("dialog", { name: messages.createCampaignTitle }).textContent,
+    ).not.toMatch(/Closing now discards\s+from this draft/);
+    expect(screen.queryByText(messages.discardGuardTitle)).toBeNull();
+    expect(screen.getByRole("button", { name: messages.confirmCancel })).toBeTruthy();
+    expect(screen.getByRole("button", { name: messages.createCampaignConfirm })).toBeTruthy();
+    expect(document.activeElement?.textContent).toBe(messages.confirmCancel);
+  });
+
+  test("Keep editing restores focus to the name input when the raiser has unmounted", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    await user.click(screen.getByRole("button", { name: messages.targetRegionOther }));
+    const other = screen.getByLabelText(messages.targetRegionOtherInputLabel);
+    await user.type(other, "LATAM");
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByText(messages.discardGuardTitle)).toBeTruthy();
+
+    // A preset chip unmounts the Other… input — the raiser is now detached.
+    await user.click(screen.getByRole("button", { name: "EU" }));
+    await user.click(screen.getByRole("button", { name: messages.discardGuardKeepEditing }));
+
+    expect(document.activeElement).toBe(screen.getByLabelText(messages.campaignNameLabel));
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  test("Keep editing restores focus to the name input when the raiser is still in the tree but disabled", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    await user.type(screen.getByLabelText(messages.campaignNameLabel), "Summer Spark");
+    const cancel = screen.getByRole("button", { name: messages.confirmCancel });
+    await user.click(cancel);
+    (cancel as HTMLButtonElement).disabled = true;
+    await user.click(screen.getByRole("button", { name: messages.discardGuardKeepEditing }));
+
+    expect(document.activeElement).toBe(screen.getByLabelText(messages.campaignNameLabel));
+  });
+
+  test("the head's Close asks on a dirty draft — the guard shows, the dialog stays", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    await user.type(screen.getByLabelText(messages.campaignNameLabel), "Summer Spark");
+    const dialog = screen.getByRole("dialog", { name: messages.createCampaignTitle });
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+
+    expect(screen.getByText(messages.discardGuardTitle)).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
+  });
+
+  test("while the guard shows, Cancel and Create are out of the Tab cycle — Keep editing puts them back", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    await user.type(screen.getByLabelText(messages.campaignNameLabel), "Summer Spark");
+    await user.click(screen.getByRole("button", { name: messages.confirmCancel }));
+
+    const dialog = screen.getByRole("dialog", { name: messages.createCampaignTitle });
+    const namesWhile = getFocusableDialogElements(dialog).map((el) => el.textContent);
+    expect(namesWhile).not.toContain(messages.confirmCancel);
+    expect(namesWhile).not.toContain(messages.createCampaignConfirm);
+
+    await user.click(screen.getByRole("button", { name: messages.discardGuardKeepEditing }));
+    const namesAfter = getFocusableDialogElements(dialog).map((el) => el.textContent);
+    expect(namesAfter).toContain(messages.confirmCancel);
+    expect(namesAfter).toContain(messages.createCampaignConfirm);
   });
 });
