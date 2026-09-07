@@ -77,6 +77,12 @@ export function WorldMap({
                 key={f.value}
                 data-region={f.value}
                 data-selected={selected || undefined}
+                // Paint order and hit-testing are decided separately: the selected
+                // footprint still paints last (so its fill is visible), but it is not
+                // a pointer target — clicking an already-selected region is a no-op,
+                // and the event must reach the footprint underneath (GLOBAL covers
+                // every landmass; EU overlaps DE the same way).
+                pointerEvents={selected ? "none" : undefined}
                 className="group cursor-pointer"
                 onClick={() => onSelect(f.value)}
                 onMouseEnter={() => setHovered(f.value)}

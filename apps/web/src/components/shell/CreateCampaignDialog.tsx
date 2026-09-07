@@ -9,10 +9,13 @@ import {
   DialogFoot,
   DialogHead,
   DialogShell,
+  Eyebrow,
   GuardBar,
   Input,
   JumpStrip,
+  REGION_FOOTPRINTS,
   SectionBlock,
+  WorldMap,
 } from "@/components/ui";
 import { ModePanel } from "@/components/campaign/ModePanel";
 import { Field, REGION_OPTIONS } from "@/components/campaign/sections/IdentitySection";
@@ -92,6 +95,12 @@ export function CreateCampaignDialog() {
   const [marks, setMarks] = useState<readonly CreateMark[]>([]);
   const [creating, setCreating] = useState(false);
   const [resumePrompt, setResumePrompt] = useState(false);
+  // M2 — the start-from rail's eyebrow readout: how many campaigns the store
+  // holds. `null` while unknown (the picker has not yet reported, or its read
+  // failed — the picker's own error sentence is the story then, and the eyebrow
+  // stays down). The picker owns the list and reports the count up, so the
+  // eyebrow and the rail share one fetch.
+  const [campaignCount, setCampaignCount] = useState<number | null>(null);
   // W2(a) (D90) — the footer's third state: the inline discard guard. Raised by
   // any close gesture on a draft with work in it; taken down by Keep editing,
   // a second close gesture, the draft becoming empty, or spent by Discard and
@@ -146,6 +155,7 @@ export function CreateCampaignDialog() {
     clearRefusal();
     setResumePrompt(false);
     setGuardOpen(false);
+    setCampaignCount(null);
   };
 
   /**
@@ -378,20 +388,43 @@ export function CreateCampaignDialog() {
                 as="div"
                 error={markFor("targetRegion")}
               >
-                <ChipGroup
-                  label={messages.targetRegionLabel}
-                  otherInputLabel={messages.targetRegionOtherInputLabel}
-                  options={REGION_OPTIONS}
-                  value={targetRegion}
-                  onChange={(value) => {
-                    setTargetRegion(value);
-                    clearRefusal();
-                  }}
-                  allowOther
-                  otherLabel={messages.targetRegionOther}
-                  otherPlaceholder={messages.targetRegionOtherPlaceholder}
-                  invalid={markFor("targetRegion") !== undefined}
-                />
+                {/* M2 (D94) — the map and the chips are two views of one control,
+                 * both bound to `targetRegion`. The SVG is aria-hidden: the chip
+                 * group below stays the accessible and keyboard control, and a
+                 * free-text region (Other…) paints no footprint. The hint is
+                 * written against F2 — the region is prompt text shaping the
+                 * generated backgrounds and copy, nothing more. */}
+                <div className="space-y-2">
+                  <WorldMap
+                    footprints={REGION_FOOTPRINTS}
+                    value={
+                      (REGION_OPTIONS as readonly string[]).includes(targetRegion)
+                        ? targetRegion
+                        : null
+                    }
+                    onSelect={(value) => {
+                      setTargetRegion(value);
+                      clearRefusal();
+                    }}
+                    labelFor={messages.regionDisplayName}
+                    fallbackHint={messages.worldMapFallbackHint}
+                  />
+                  <p className="text-[12px] text-text-muted">{messages.worldMapRegionHint}</p>
+                  <ChipGroup
+                    label={messages.targetRegionLabel}
+                    otherInputLabel={messages.targetRegionOtherInputLabel}
+                    options={REGION_OPTIONS}
+                    value={targetRegion}
+                    onChange={(value) => {
+                      setTargetRegion(value);
+                      clearRefusal();
+                    }}
+                    allowOther
+                    otherLabel={messages.targetRegionOther}
+                    otherPlaceholder={messages.targetRegionOtherPlaceholder}
+                    invalid={markFor("targetRegion") !== undefined}
+                  />
+                </div>
               </Field>
               <Field
                 fieldKey="targetAudience"
@@ -421,6 +454,12 @@ export function CreateCampaignDialog() {
             title={messages.createSectionStartFrom}
             hint={messages.createSectionStartFromHint}
           >
+            {/* M2 — the mockup's count readout over the rail. Down while the
+             * count is unknown (in flight, or the read failed): the picker's
+             * own loading and error sentences are the story then. */}
+            {campaignCount !== null ? (
+              <Eyebrow as="p">{messages.startFromCampaignCount(campaignCount)}</Eyebrow>
+            ) : null}
             <Field fieldKey="startFrom" label={messages.startFromExistingLabel} as="div">
               <StartFromExistingPicker
                 selectedId={source?.id ?? null}
@@ -428,6 +467,7 @@ export function CreateCampaignDialog() {
                   setSource(next);
                   clearRefusal();
                 }}
+                onCount={setCampaignCount}
               />
             </Field>
           </SectionBlock>

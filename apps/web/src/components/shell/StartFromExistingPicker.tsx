@@ -73,9 +73,13 @@ function briefPreview(brief: CampaignBrief): ReactNode {
 export function StartFromExistingPicker({
   selectedId,
   onSelect,
+  onCount,
 }: {
   readonly selectedId: string | null;
   readonly onSelect: (source: StartFromSource | null) => void;
+  /** How many campaigns the store holds, or `null` when the read failed.
+   *  Reported so a parent can label the rail from this listing, not a second fetch. */
+  readonly onCount?: (count: number | null) => void;
 }) {
   const [entries, setEntries] = useState<BriefEntry[] | null>(null);
   const [error, setError] = useState(false);
@@ -91,10 +95,14 @@ export function StartFromExistingPicker({
       try {
         const briefs = await listBriefs();
         /* istanbul ignore next -- `active` is the unmount-race guard; false only if the dialog closes mid-fetch */
-        if (active) setEntries(briefs);
+        if (!active) return;
+        setEntries(briefs);
+        onCount?.(briefs.length);
       } catch {
         /* istanbul ignore next -- same unmount-race guard on the error path */
-        if (active) setError(true);
+        if (!active) return;
+        setError(true);
+        onCount?.(null);
       }
     })();
     return () => {
