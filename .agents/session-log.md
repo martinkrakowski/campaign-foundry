@@ -3855,3 +3855,23 @@ across the wave directories, replacing capped ten-minute waits.
 
 **Next:** T3 ‖ T4 dispatched from `0838d56`; W2 ‖ W3 from `0176547`; #231 round 2 in flight. Then
 the campaign-type wave-C record, the wave-status close-out, and P1 alone.
+
+---
+
+## 2026-09-07 — T3 create dialog, name + campaign type (#236)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `CreateCampaignDialog.tsx`: two-field create — name + three `OptionTile`s over `CAMPAIGN_TYPES`. Removed ModePanel, region chips, audience, WorldMap, StartFromExistingPicker, SectionBlocks, JumpStrip, T2 bridge. Seed `{ name, type }`.
+  - `messages.ts`: append-only `// T3 — the two-field create` block (`createCampaignLead`, `createTypeLabel`, `typeTileGives`, `typeTileRunsAs`).
+  - Dialog suite rewritten; `brief-editor.test.tsx` `fillDialog` helpers name-only.
+- **Decisions:**
+  - Accessible name is the raw type id; display words from `typeDisplayName`; preset line from `CAMPAIGN_TYPE_PRESETS` + `formatDisplayName` (no `static`/`motion` literals). D110 line on `short-video` via `modeDisplayName("variation")`.
+  - `campaignNameNotSluggable` rung and test deleted with the start-from path (D98). Formatter stays (append-only).
+  - Discard guard: a typed name is work; a toggled type is not. `discardGuardDetail(hasName, false, false, false)`.
+  - Width via `className="max-w-md"` on `DialogShell` (`twMerge`); no kit change.
+- **Mutations:** M1–M4 compiled, ran, failed the named test, reverted. Recorded in #236.
+- **Left open:**
+  - T4 (optional): MiniChip on the grid/picker; type sentence in generator prompts.
+  - P1: `packages/ui`, after every campaign-type lane.
+  - Stale `createCampaignDescription` remains in `messages.ts` under the append-only rule.
