@@ -13,6 +13,12 @@
 set -u
 MODEL="${MODEL:-opencode/big-pickle}"
 VARIANT="${VARIANT:-high}"
+# Rule 7 (references/cast.md): every delegated run reports its own cost, because there is
+# no retroactive accounting — nothing on disk keeps a per-conversation token record, so a
+# run launched without this can never be costed. `--format json` makes opencode emit raw
+# JSON events; the wrapper's `EXIT n` marker is appended by the shell and is unaffected.
+# Set USAGE_FLAGS="" to opt out for a run you deliberately do not want measured.
+USAGE_FLAGS="${USAGE_FLAGS---format json}"
 STAGGER="${STAGGER:-45}"
 
 [ $# -ge 2 ] || { print -u2 "usage: $0 <logdir> <lane>:<worktree>:<brief> ..."; exit 2; }
@@ -50,7 +56,7 @@ for spec in "$@"; do
   if [[ -n "$LANE_CMD" ]]; then
     nohup zsh -c "cd ${(q)wt} && ${LANE_CMD} > ${(q)log} 2>&1; echo \"EXIT \$?\" >> ${(q)log}" >/dev/null 2>&1 & disown
   else
-    nohup zsh -c "cd ${(q)wt} && opencode run --auto --model ${(q)MODEL} --variant ${(q)VARIANT} \"\$(cat ${(q)brief})\" > ${(q)log} 2>&1; echo \"EXIT \$?\" >> ${(q)log}" >/dev/null 2>&1 & disown
+    nohup zsh -c "cd ${(q)wt} && opencode run ${=USAGE_FLAGS} --auto --model ${(q)MODEL} --variant ${(q)VARIANT} \"\$(cat ${(q)brief})\" > ${(q)log} 2>&1; echo \"EXIT \$?\" >> ${(q)log}" >/dev/null 2>&1 & disown
   fi
   print "dispatched $lane -> $log"
 done
