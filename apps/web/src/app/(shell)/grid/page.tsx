@@ -5,7 +5,8 @@ import { API, assetKey, assetLabel, useRun, type Asset } from "@/lib/run-context
 import { ASPECT_RATIOS } from "@/lib/aspect-ratios";
 import { cn } from "@/lib/cn";
 import { descriptorBeats, descriptorHeadline } from "@/components/campaign/messages";
-import { EmptyNote } from "@/components/ui";
+import { EmptyNote, MiniChip } from "@/components/ui";
+import { campaignTypeOf, typeDisplayName } from "@/components/campaign/display-names";
 
 /** Rank an aspect ratio by the shared display order. */
 const ratioRank = (r: string): number => {
@@ -201,6 +202,10 @@ export default function GridPage() {
     <div className="flex flex-col gap-12 p-6 pb-40">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-border bg-surface px-4 py-2 font-mono text-[11px]">
         <span className="uppercase tracking-wider text-text-muted">Review</span>
+        <span className="text-text-primary">{brief.id}</span>
+        <MiniChip tone="neutral">
+          {typeDisplayName(campaignTypeOf(brief))}
+        </MiniChip>
         <span className="text-success">✓ {review.approved} approved</span>
         <span className="text-error">✗ {review.rejected} rejected</span>
         <span className="text-text-muted">○ {review.pending} pending</span>

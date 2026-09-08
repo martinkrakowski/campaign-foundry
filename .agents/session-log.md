@@ -3858,6 +3858,28 @@ the campaign-type wave-C record, the wave-status close-out, and P1 alone.
 
 ---
 
+## 2026-09-07 — T4 campaign type read-back and prompt sentence (F5)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `campaign-types.ts`: `CAMPAIGN_TYPE_PROMPT_HINTS` + `campaignTypePromptSentence`. CreativeGeneration already depends on CampaignOrchestration, so the table stayed in T1's file.
+  - `BackgroundContext` (in `ImageGeneratorPort.ts`, not CreativeGeneration) gains `campaignType?: CampaignType`.
+  - `GenerateCampaignUseCase` passes `brief.type` at both context sites (classic :209, variation :336).
+  - Four generators append the type sentence. Prompt-shape tests pin the full prompt.
+  - `BriefPicker` row and grid Review bar: `MiniChip` via `typeDisplayName(type ?? DEFAULT_CAMPAIGN_TYPE)`. Absent type shows "Social post"; `short-video` shows "Short-form video" (T2's display name, never the raw id).
+- **Decisions:**
+  - Hints live in the domain as prompt text, not UI copy. Chip labels come from T2's `typeDisplayName` — no new literal under `apps/web`.
+  - The sentence is always present (absent → social-post) so prompts change once.
+  - Did not touch T3's files (`CreateCampaignDialog`, `messages.ts`, the dialog tests). Did not pass `campaignType` from `PreviewCreativeFrameUseCase` (not in this lane's ownership).
+- **Mutations:** each compiled, ran, failed the named test, reverted.
+  - M1: chip uses the raw id → `a brief without type shows Social post, never the raw id`
+  - M2: drop the sentence from Firefly only → `pins the prompt shape, including the campaign-type sentence` (Firefly); Gemini, OpenRouter image, OpenRouter copy stayed green
+  - M3: stop passing `campaignType` at site 2 → `variation path (site 2) passes brief.type into the image generator context`
+  - M4: `short-video` hint mapped to the social-post phrase → `each type has a distinct prompt hint; short-video is not the social-post phrase`
+- **Left open:**
+  - Preview path still omits `campaignType` (defaults to the social-post sentence).
+  - T3 (dialog) still concurrent.
+- **Remediation (PR #234):** `campaignTypeOf` at both read-back sites; preview forwards `brief.type`; prompt sentence coerces out-of-vocab; picker type chip `shrink-0`. Preview left-open above is closed.
 ## 2026-09-07 — T3 create dialog, name + campaign type (#236)
 
 - **Mode:** Implementer

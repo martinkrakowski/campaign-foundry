@@ -1,5 +1,6 @@
 import {
   CopyGeneratorError,
+  campaignTypePromptSentence,
   type CopyGeneratorInput,
   type CopyGeneratorPort,
 } from "@campaignfoundry/CampaignOrchestration";
@@ -128,6 +129,7 @@ export class OpenRouterCopyGenerator implements CopyGeneratorPort {
       `Audience: ${delimit(brief.targetAudience)}.`,
       `Market/region: ${delimit(brief.targetRegion)}.`,
       `Campaign message: ${delimit(brief.localizedMessage ?? brief.campaignMessage)}.`,
+      campaignTypePromptSentence(brief.type),
     ];
     if (locale) lines.push(`Locale: ${delimit(locale)}.`);
     return [
