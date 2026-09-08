@@ -1,5 +1,5 @@
 import { describe, test, expect, afterEach } from "vitest";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -15,6 +15,14 @@ const waveEventSh = fileURLToPath(
 const dispatchLaneSh = fileURLToPath(
   new URL("../../../../.claude/skills/orchestrate-wave/scripts/dispatch-lane.sh", import.meta.url),
 );
+
+// dispatch-lane.sh is the operator's zsh tool (quoting relies on zsh). GitHub
+// Linux runners do not ship zsh; skip those tests rather than spawnSync ENOENT.
+// wave-event.sh (the product writer it calls) is POSIX sh and is fully tested.
+const hasZsh = spawnSync("zsh", ["-c", "true"], { stdio: "ignore" }).status === 0;
+const zshSkip = hasZsh
+  ? undefined
+  : "zsh is not on PATH — dispatch-lane.sh stays zsh (operator tool; quoting relies on zsh); CI Linux runners do not ship it";
 
 const dirs: string[] = [];
 const tempDir = (): string => {
@@ -120,7 +128,7 @@ describe("appendEvent (the thin impure edge)", () => {
 describe("scripts/wave-event.sh agrees with formatEvent byte-for-byte", () => {
   test("a minimal event", () => {
     const dir = tempDir();
-    execFileSync("zsh", [waveEventSh, dir, "W3", "l1", "dispatch", "started"]);
+    execFileSync("sh", [waveEventSh, dir, "W3", "l1", "dispatch", "started"]);
     const written = readFileSync(join(dir, "events.jsonl"), "utf8");
     const ts = JSON.parse(written).ts as string;
     expect(written).toBe(
@@ -131,7 +139,7 @@ describe("scripts/wave-event.sh agrees with formatEvent byte-for-byte", () => {
   test("an event with --pr, --round and --detail", () => {
     const dir = tempDir();
     const detail = '{"fixed":5,"refuted":2,"mutations":3,"mutationsBit":3}';
-    execFileSync("zsh", [
+    execFileSync("sh", [
       waveEventSh,
       dir,
       "W3",
@@ -172,7 +180,7 @@ describe("scripts/wave-event.sh agrees with formatEvent byte-for-byte", () => {
     let status: number | undefined = -1;
     let stderr = "";
     try {
-      execFileSync("zsh", [waveEventSh, dir, "W3", "l1", "deploy", "started"]);
+      execFileSync("sh", [waveEventSh, dir, "W3", "l1", "deploy", "started"]);
     } catch (error) {
       const err = error as { status: number | undefined; stderr: Buffer };
       status = err.status;
@@ -188,7 +196,7 @@ describe("scripts/wave-event.sh agrees with formatEvent byte-for-byte", () => {
     let status: number | undefined = -1;
     let stderr = "";
     try {
-      execFileSync("zsh", [waveEventSh, dir, "W3", "l1", "gate", "skipped"]);
+      execFileSync("sh", [waveEventSh, dir, "W3", "l1", "gate", "skipped"]);
     } catch (error) {
       const err = error as { status: number | undefined; stderr: Buffer };
       status = err.status;
@@ -207,7 +215,7 @@ describe("scripts/wave-event.sh agrees with formatEvent byte-for-byte", () => {
     let status: number | undefined = -1;
     let stderr = "";
     try {
-      execFileSync("zsh", [waveEventSh, dir, "W3", 'l"1', "dispatch", "started"]);
+      execFileSync("sh", [waveEventSh, dir, "W3", 'l"1', "dispatch", "started"]);
     } catch (error) {
       const err = error as { status: number | undefined; stderr: Buffer };
       status = err.status;
@@ -226,7 +234,7 @@ describe("scripts/wave-event.sh agrees with formatEvent byte-for-byte", () => {
     let status: number | undefined = -1;
     let stderr = "";
     try {
-      execFileSync("zsh", [waveEventSh, dir, "W3", "l1", "dispatch", "started", "--detail", "[1]"]);
+      execFileSync("sh", [waveEventSh, dir, "W3", "l1", "dispatch", "started", "--detail", "[1]"]);
     } catch (error) {
       const err = error as { status: number | undefined; stderr: Buffer };
       status = err.status;
@@ -245,7 +253,7 @@ describe("scripts/wave-event.sh agrees with formatEvent byte-for-byte", () => {
     let status: number | undefined = -1;
     let stderr = "";
     try {
-      execFileSync("zsh", [waveEventSh, dir, "W3", "l1", "dispatch", "started", "--detail", "{bad"]);
+      execFileSync("sh", [waveEventSh, dir, "W3", "l1", "dispatch", "started", "--detail", "{bad"]);
     } catch (error) {
       const err = error as { status: number | undefined; stderr: Buffer };
       status = err.status;
@@ -274,41 +282,50 @@ describe("scripts/dispatch-lane.sh emits its events", () => {
     }
   };
 
-  test("a lane whose CLI exits zero emits dispatch started, then implement settled", () => {
-    const logdir = join(tempDir(), "waveT");
-    runDispatch("true", logdir);
-    const { events } = readEvents(readFileSync(join(logdir, "events.jsonl"), "utf8"));
-    expect(events).toEqual([
-      { ts: expect.any(String), wave: "W3T", lane: "l1", stage: "dispatch", event: "started" },
-      { ts: expect.any(String), wave: "W3T", lane: "l1", stage: "implement", event: "settled" },
-    ]);
-  });
+  test.skipIf(!hasZsh)(
+    zshSkip ?? "a lane whose CLI exits zero emits dispatch started, then implement settled",
+    () => {
+      const logdir = join(tempDir(), "waveT");
+      runDispatch("true", logdir);
+      const { events } = readEvents(readFileSync(join(logdir, "events.jsonl"), "utf8"));
+      expect(events).toEqual([
+        { ts: expect.any(String), wave: "W3T", lane: "l1", stage: "dispatch", event: "started" },
+        { ts: expect.any(String), wave: "W3T", lane: "l1", stage: "implement", event: "settled" },
+      ]);
+    },
+  );
 
-  test("a lane whose CLI exits non-zero emits implement failed", () => {
-    const logdir = join(tempDir(), "waveF");
-    runDispatch("false", logdir);
-    const { events } = readEvents(readFileSync(join(logdir, "events.jsonl"), "utf8"));
-    expect(events.map((event) => [event.stage, event.event])).toEqual([
-      ["dispatch", "started"],
-      ["implement", "failed"],
-    ]);
-  });
+  test.skipIf(!hasZsh)(
+    zshSkip ?? "a lane whose CLI exits non-zero emits implement failed",
+    () => {
+      const logdir = join(tempDir(), "waveF");
+      runDispatch("false", logdir);
+      const { events } = readEvents(readFileSync(join(logdir, "events.jsonl"), "utf8"));
+      expect(events.map((event) => [event.stage, event.event])).toEqual([
+        ["dispatch", "started"],
+        ["implement", "failed"],
+      ]);
+    },
+  );
 
-  test("without WAVE set, the wave id defaults to the log dir's basename", () => {
-    const logdir = join(tempDir(), "wavedefault");
-    const wt = tempDir();
-    const brief = join(tempDir(), "brief.md");
-    writeFileSync(brief, "x\n");
-    execFileSync("zsh", [dispatchLaneSh, logdir, `l1:${wt}:${brief}`], {
-      timeout: 20_000,
-      env: { ...process.env, STAGGER: "0", POLL: "1", LANE_CMD: "true" },
-    });
-    const { events } = readEvents(readFileSync(join(logdir, "events.jsonl"), "utf8"));
-    expect(events.map((event) => event.wave)).toEqual(["wavedefault", "wavedefault"]);
-  });
+  test.skipIf(!hasZsh)(
+    zshSkip ?? "without WAVE set, the wave id defaults to the log dir's basename",
+    () => {
+      const logdir = join(tempDir(), "wavedefault");
+      const wt = tempDir();
+      const brief = join(tempDir(), "brief.md");
+      writeFileSync(brief, "x\n");
+      execFileSync("zsh", [dispatchLaneSh, logdir, `l1:${wt}:${brief}`], {
+        timeout: 20_000,
+        env: { ...process.env, STAGGER: "0", POLL: "1", LANE_CMD: "true" },
+      });
+      const { events } = readEvents(readFileSync(join(logdir, "events.jsonl"), "utf8"));
+      expect(events.map((event) => event.wave)).toEqual(["wavedefault", "wavedefault"]);
+    },
+  );
 
-  test(
-    "a fast lane's implement settled is appended before a slow lane's marker exists",
+  test.skipIf(!hasZsh)(
+    zshSkip ?? "a fast lane's implement settled is appended before a slow lane's marker exists",
     async () => {
       const logdir = join(tempDir(), "waveOrder");
       mkdirSync(logdir, { recursive: true });
@@ -377,40 +394,44 @@ describe("scripts/dispatch-lane.sh emits its events", () => {
     20_000,
   );
 
-  test("a timed-out lane emits implement failed with reason timeout as the second line", () => {
-    const logdir = join(tempDir(), "waveTimeout");
-    const wt = tempDir();
-    const brief = join(tempDir(), "brief.md");
-    writeFileSync(brief, "x\n");
-    try {
-      execFileSync("zsh", [dispatchLaneSh, logdir, `l1:${wt}:${brief}`], {
-        timeout: 20_000,
-        env: {
-          ...process.env,
-          STAGGER: "0",
-          POLL: "1",
-          WAVE: "W3T",
-          WAIT_TIMEOUT: "2",
-          LANE_CMD: "sleep 30",
-        },
+  test.skipIf(!hasZsh)(
+    zshSkip ?? "a timed-out lane emits implement failed with reason timeout as the second line",
+    () => {
+      const logdir = join(tempDir(), "waveTimeout");
+      const wt = tempDir();
+      const brief = join(tempDir(), "brief.md");
+      writeFileSync(brief, "x\n");
+      try {
+        execFileSync("zsh", [dispatchLaneSh, logdir, `l1:${wt}:${brief}`], {
+          timeout: 20_000,
+          env: {
+            ...process.env,
+            STAGGER: "0",
+            POLL: "1",
+            WAVE: "W3T",
+            WAIT_TIMEOUT: "2",
+            LANE_CMD: "sleep 30",
+          },
+        });
+      } catch {
+        /* expected: timeout → exit 1 */
+      }
+      try {
+        execFileSync("pkill", ["-f", wt], { stdio: "ignore" });
+      } catch {
+        /* leftover sleep already gone */
+      }
+      const lines = readFileSync(join(logdir, "events.jsonl"), "utf8").trimEnd().split("\n");
+      expect(lines).toHaveLength(2);
+      expect(JSON.parse(lines[1]!)).toEqual({
+        ts: expect.any(String),
+        wave: "W3T",
+        lane: "l1",
+        stage: "implement",
+        event: "failed",
+        detail: { reason: "timeout" },
       });
-    } catch {
-      /* expected: timeout → exit 1 */
-    }
-    try {
-      execFileSync("pkill", ["-f", wt], { stdio: "ignore" });
-    } catch {
-      /* leftover sleep already gone */
-    }
-    const lines = readFileSync(join(logdir, "events.jsonl"), "utf8").trimEnd().split("\n");
-    expect(lines).toHaveLength(2);
-    expect(JSON.parse(lines[1]!)).toEqual({
-      ts: expect.any(String),
-      wave: "W3T",
-      lane: "l1",
-      stage: "implement",
-      event: "failed",
-      detail: { reason: "timeout" },
-    });
-  }, 20_000);
+    },
+    20_000,
+  );
 });

@@ -3785,6 +3785,7 @@ follow-up: hit-test by the smallest containing footprint, independent of paint o
 
 - **Mode:** Implementer
 - **Remediation:** emit `implement settled|failed` inside the wait loop; per-lane implement events are the dispatch completion record (no wave-level `dispatch settled`); validate `<wave>`/`<lane>` and `--detail` as a JSON object; timeout emits `implement failed` with `reason:timeout`; SKILL.md heading five→six (the one non-additive edit). Four mutations compiled, ran, failed the named test, reverted.
+- **Remediation (round 2):** `wave-event.sh` is POSIX `sh` (CI Linux has no zsh); dispatch-lane tests `skipIf` when `zsh` is missing.
 
 ---
 
