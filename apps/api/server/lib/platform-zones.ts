@@ -8,7 +8,11 @@ import { platformProfile } from "@campaignfoundry/Distribution";
  */
 export const platformZones: PlatformSafeZoneResolver = (platformId) => {
   const profile = platformProfile(platformId);
-  return profile ? { ratio: profile.ratio, safeInsets: profile.safeInsets, formats: profile.formats } : undefined;
+  // Display profiles carry sizes, not a social ratio — the compositor's
+  // per-ratio union has nothing to join them onto (D116). A4/A5 own size
+  // canvases; until then a display id is not a social safe-zone.
+  if (profile?.ratio === undefined) return undefined;
+  return { ratio: profile.ratio, safeInsets: profile.safeInsets, formats: profile.formats };
 };
 
 /**

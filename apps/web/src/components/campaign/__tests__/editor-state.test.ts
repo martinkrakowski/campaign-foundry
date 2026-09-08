@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, vi, afterEach } from "vitest";
 import type { CampaignBrief, CopyPool } from "@campaignfoundry/CampaignOrchestration";
+import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import { timelineProblem } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import { axisProductSize } from "../validate";
 import { platformsToFormats } from "../derive";
@@ -10,6 +11,7 @@ import {
   TONE_OPTIONS,
   PALETTE_SHIFT_OPTIONS,
   STATIC_PLATFORMS,
+  PLATFORM_ORDER,
   HEADLINE_POOL_REF,
   emptyProduct,
   slugify,
@@ -1765,6 +1767,11 @@ describe("motionPackagedRatios", () => {
     const ratios = motionPackagedRatios(["instagram-reel", "instagram-feed"]);
     expect(Array.from(ratios)).toEqual(["9:16"]);
   });
+
+  test("a display profile contributes no motion ratio", () => {
+    expect(Array.from(motionPackagedRatios(["google-display"]))).toEqual([]);
+    expect(Array.from(motionPackagedRatios(["google-display", "tiktok"]))).toEqual(["9:16"]);
+  });
 });
 
 
@@ -2803,5 +2810,117 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
     expect(restored.type).toBe("social-post");
     expect(restored.typeExplicit).toBe(false);
     expect(toBrief(restored)).not.toHaveProperty("type");
+  });
+});
+
+describe("display platforms (D116)", () => {
+  const SOCIAL_ONLY_OUTPUT = {
+    formats: ["static"],
+    platforms: ["instagram-feed", "linkedin", "x"],
+  } as const;
+
+  test("PLATFORM_ORDER lists the three display ids after the seven social ones", () => {
+    expect(PLATFORM_ORDER).toEqual([
+      "instagram-feed",
+      "linkedin",
+      "x",
+      "instagram-story",
+      "instagram-reel",
+      "tiktok",
+      "youtube-short",
+      "google-display",
+      "meta-audience-network",
+      "display-web",
+    ]);
+  });
+
+  test("toggling google-display on adds it to platforms and toBrief emits its five sizes", () => {
+    const on = reduce(base(), { type: "togglePlatform", value: "google-display" });
+    expect(on.platforms).toEqual([...STATIC_PLATFORMS, "google-display"]);
+    expect(toBrief(on).output?.platforms).toEqual([...STATIC_PLATFORMS, "google-display"]);
+    expect(toBrief(on).output?.sizes).toEqual([...DISPLAY_SIZE_VALUES]);
+  });
+
+  test("toggling google-display off removes sizes again", () => {
+    const on = reduce(base(), { type: "togglePlatform", value: "google-display" });
+    const off = reduce(on, { type: "togglePlatform", value: "google-display" });
+    expect(off.platforms).toEqual([...STATIC_PLATFORMS]);
+    expect(toBrief(off).output).toBeUndefined();
+    expect(toBrief(off)).not.toHaveProperty("output");
+  });
+
+  test("a social-only brief's toBrief is byte-identical to main's (no sizes key)", () => {
+    const declared = fromBrief(
+      savedBrief({ output: { formats: ["static"], platforms: [...STATIC_PLATFORMS] } }),
+    );
+    const serialised = toBrief(declared);
+    expect(JSON.stringify(serialised.output)).toBe(JSON.stringify(SOCIAL_ONLY_OUTPUT));
+    expect(serialised.output).not.toHaveProperty("sizes");
+  });
+
+  test("fromBrief restores a full size list verbatim", () => {
+    const stored: CampaignBrief = savedBrief({
+      output: {
+        formats: ["static"],
+        platforms: ["google-display"],
+        sizes: [...DISPLAY_SIZE_VALUES],
+      },
+    });
+    const loaded = fromBrief(stored, { file: "camp.yaml" });
+    expect(loaded.platforms).toEqual(["google-display"]);
+    expect(toBrief(loaded).output?.sizes).toEqual([...DISPLAY_SIZE_VALUES]);
+  });
+
+  test("a size subset survives the load→save round-trip verbatim", () => {
+    const stored: CampaignBrief = savedBrief({
+      output: {
+        formats: ["static"],
+        platforms: ["google-display"],
+        sizes: ["728x90"],
+      },
+    });
+    const loaded = fromBrief(stored, { file: "camp.yaml" });
+    expect(loaded.sizes).toEqual(["728x90"]);
+    // Deriving from the platforms again would widen the request back to all
+    // five — exactly the drift this round-trip exists to catch.
+    expect(toBrief(loaded).output?.sizes).toEqual(["728x90"]);
+  });
+
+  test("toggling a display platform off then on restores its full size list (a subset is not sticky)", () => {
+    const loaded = fromBrief(
+      savedBrief({ output: { formats: ["static"], platforms: ["google-display"], sizes: ["728x90"] } }),
+    );
+    const off = reduce(loaded, { type: "togglePlatform", value: "google-display" });
+    expect(off.sizes).toEqual([]);
+    const on = reduce(off, { type: "togglePlatform", value: "google-display" });
+    expect(on.sizes).toEqual([...DISPLAY_SIZE_VALUES]);
+    expect(toBrief(on).output?.sizes).toEqual([...DISPLAY_SIZE_VALUES]);
+  });
+
+  test("adding a second display platform contributes only the sizes not already present", () => {
+    const loaded = fromBrief(
+      savedBrief({ output: { formats: ["static"], platforms: ["google-display"], sizes: ["728x90"] } }),
+    );
+    const both = reduce(loaded, { type: "togglePlatform", value: "meta-audience-network" });
+    // meta offers 300x250 / 320x50 / 300x600; 728x90 was already authored —
+    // canonical order, no duplicates, and 160x600 stays absent (meta has it not).
+    expect(both.sizes).toEqual(["300x250", "728x90", "320x50", "300x600"]);
+  });
+
+  test("normalizeDraftState defaults sizes for drafts saved before the field existed", () => {
+    const raw = JSON.parse(JSON.stringify(initialEditorState())) as Record<string, unknown>;
+    delete raw.sizes;
+    raw.platforms = ["google-display"];
+    raw.formats = ["static"];
+    const restored = normalizeDraftState(raw);
+    expect(restored.sizes).toEqual([...DISPLAY_SIZE_VALUES]);
+  });
+
+  test("a draft's stored size list is filtered to the vocabulary, subset otherwise believed", () => {
+    const raw = JSON.parse(JSON.stringify(initialEditorState())) as Record<string, unknown>;
+    raw.platforms = ["google-display"];
+    raw.sizes = ["728x90", "999x999"];
+    const restored = normalizeDraftState(raw);
+    expect(restored.sizes).toEqual(["728x90"]);
   });
 });

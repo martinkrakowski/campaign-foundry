@@ -274,6 +274,7 @@ describe("pipeline composition root", () => {
       formats: ["motion"],
     });
     expect(platformZones("myspace")).toBeUndefined();
+    expect(platformZones("google-display")).toBeUndefined();
   });
 
   test("copyGenerator is undefined without OPENROUTER_API_KEY and constructed with it", () => {

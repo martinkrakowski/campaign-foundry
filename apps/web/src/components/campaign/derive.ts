@@ -1,5 +1,9 @@
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import {
+  DISPLAY_SIZE_VALUES,
+  type DisplaySize,
+} from "@campaignfoundry/CampaignOrchestration/display-sizes";
+import {
   PLATFORM_PROFILES,
   formatsFor,
 } from "@campaignfoundry/Distribution/platform-profiles";
@@ -18,16 +22,33 @@ export function platformsToFormats(platforms: readonly string[]): string[] {
 /**
  * Derives canvas ratios from a list of platform IDs.
  * Preserves canonical RATIO_VALUES order ("1:1", "9:16", "16:9").
+ * A display profile contributes no ratio (D116) — only its sizes.
  */
 export function platformsToRatios(platforms: readonly string[]): string[] {
   const ratios = new Set<string>();
   for (const id of platforms) {
     const profile = PLATFORM_PROFILES[id];
-    if (profile) {
+    if (profile?.ratio !== undefined) {
       ratios.add(profile.ratio);
     }
   }
   return RATIO_VALUES.filter((r) => ratios.has(r));
+}
+
+/**
+ * Derives display sizes from a list of platform IDs.
+ * Preserves canonical DISPLAY_SIZE_VALUES order; a social profile contributes none.
+ */
+export function platformsToSizes(platforms: readonly string[]): DisplaySize[] {
+  const sizes = new Set<DisplaySize>();
+  for (const id of platforms) {
+    const profile = PLATFORM_PROFILES[id];
+    if (profile?.sizes === undefined) continue;
+    for (const slot of profile.sizes) {
+      sizes.add(slot.size);
+    }
+  }
+  return DISPLAY_SIZE_VALUES.filter((size) => sizes.has(size));
 }
 
 /**
