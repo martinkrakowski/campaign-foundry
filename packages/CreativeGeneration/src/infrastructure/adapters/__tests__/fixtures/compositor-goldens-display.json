@@ -1,0 +1,24 @@
+{
+  "darwin-arm64": {
+    "headline-bottom/bold/300x250": "48016591a6f97b0f82009e8d4dca8a500ca944a931ace03ee9eb55f5c2f4eab7",
+    "headline-bottom/bold/728x90": "c786ba8ba0b64a0bdccfe8089370f44d6c28993ae0e8efe3880316fade91485d",
+    "headline-bottom/bold/160x600": "63b810c8ee4ce13aff5b6d3cc7aab607fe13f9e5bd656b0f71a03497204675b0",
+    "headline-bottom/bold/320x50": "19f2a34e06342e5449c0b673315a6f4ab651c9fd4b3063497ac2778933c2a0cf",
+    "headline-bottom/bold/300x600": "4e730d7f658f62cb9078cba544f966bcf2346175ab047390d89f0db261b78535",
+    "headline-bottom/subtle/300x250": "594a663557c293317c61e711dcf01d089206d7bed79d879147e7adc5d30e5d53",
+    "headline-bottom/subtle/728x90": "8fbdf417ecd16c3522b14e2bf5338d366e5e7f9c7acab814454cab5d370809eb",
+    "headline-bottom/subtle/160x600": "c1961d7606e02349a5e9b54ef8704c7880b0696e2d501f1abf84a54150431a64",
+    "headline-bottom/subtle/320x50": "1f73203fe443555a027322fcb98ac7cf04c1ffa652f90585c47d2fff7a8ae3a2",
+    "headline-bottom/subtle/300x600": "9536c2894cfb416f3305dec0bf90a0456dc8da8711b14fa7815fd4c81daf2f38",
+    "headline-top/bold/300x250": "4ec3d12aa8b237185851e8b6d4a866e8eead623e4042b21a876effc9ae019a58",
+    "headline-top/bold/728x90": "dd19f83107c3f5596ad9f6f22daf3364b7df757556fcc58a2372aa54dfd3c6cf",
+    "headline-top/bold/160x600": "581237367d42f870931246eba30a5ec62fab534419f61654ba3a6ada9c9f6e7a",
+    "headline-top/bold/320x50": "c4e07168c8a7433ecacc333cfb9bcfd8c3496adcac41a348959f7045c128ef43",
+    "headline-top/bold/300x600": "538bc701fe54421a355e345e1dd1dc81ac5ec92c507759d9d9f41fe07316297c",
+    "headline-top/subtle/300x250": "3d7e3e530fcb99a38fa0bc904baf1e660da8b3177f57c5dbac8193feb2b6de8e",
+    "headline-top/subtle/728x90": "ed9059f0c71d35e5145d0817ab51032f2d981a8b96b42434c619968942ac49d0",
+    "headline-top/subtle/160x600": "9b7971cbda1cd74f9013e54b4ac8be7262a965f3874f7815e5f81c89f0a4df5a",
+    "headline-top/subtle/320x50": "71b7c5549e063e351453333479417a85a82b3a85f6fd81dfa1f97a80891efa14",
+    "headline-top/subtle/300x600": "efddacb31e97a4a7a51f5cf39c850e0c08b0283ac241b490c3703619795d9d74"
+  }
+}

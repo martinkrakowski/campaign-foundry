@@ -45,7 +45,7 @@ const request = (over: Partial<CompositeRequest> = {}): CompositeRequest => ({
   message: "Stay wild, stay hydrated",
   brandColor: "#1473E6",
   logoPath: "assets/inputs/hydra-logo.png",
-  ratio: ratio("1:1"),
+  canvas: { ratio: "1:1" },
   layout: "headline-bottom",
   tone: "bold",
   ...over,
@@ -77,7 +77,7 @@ describe("NodeCanvasCompositor", () => {
   test("renders a PNG at the requested ratio's exact dimensions", async () => {
     for (const value of ["1:1", "9:16", "16:9"] as const) {
       const r = ratio(value);
-      const out = await compositor.compositeAsset(request({ ratio: r }));
+      const out = await compositor.compositeAsset(request({ canvas: { ratio: r.value } }));
       const img = await loadImage(Buffer.from(out.image));
       expect(img.width).toBe(r.width);
       expect(img.height).toBe(r.height);
@@ -91,7 +91,7 @@ describe("NodeCanvasCompositor", () => {
 
   test("logo geometry derives from the domain's creative-geometry leaf", async () => {
     const r = ratio("1:1");
-    const captured = await blit(request({ ratio: r }));
+    const captured = await blit(request({ canvas: { ratio: r.value } }));
     const logo = captured.drawImage[1];
     if (!logo) throw new Error("missing logo blit");
     const margin = r.width * CREATIVE_GEOMETRY.logoMarginFraction;
@@ -147,8 +147,8 @@ describe("NodeCanvasCompositor", () => {
       for (const value of ratios) {
         const r = ratio(value);
         const innerWidth = r.width - insets.left - insets.right;
-        const zero = await blit(request({ layout, ratio: r }));
-        const inset = await blit(request({ layout, ratio: r, safeInsets: insets }));
+        const zero = await blit(request({ layout, canvas: { ratio: r.value } }));
+        const inset = await blit(request({ layout, canvas: { ratio: r.value }, safeInsets: insets }));
 
         const zeroHeadline = zero.fillText[0];
         const insetHeadline = inset.fillText[0];
@@ -182,7 +182,7 @@ describe("NodeCanvasCompositor", () => {
     const insets: SafeInsets = { top: 200, right: 0, bottom: 400, left: 0 };
     const r = ratio("16:9");
     const captured = await blit(
-      request({ layout: "headline-top", ratio: r, message: THREE_LINE, safeInsets: insets }),
+      request({ layout: "headline-top", canvas: { ratio: r.value }, message: THREE_LINE, safeInsets: insets }),
     );
     const fontSize = Math.round(r.width * CREATIVE_GEOMETRY.headlineTypeWidthFraction);
     const lineHeight = fontSize * 1.25;
@@ -197,7 +197,7 @@ describe("NodeCanvasCompositor", () => {
     const insets: SafeInsets = { top: 400, right: 0, bottom: 200, left: 0 };
     const r = ratio("16:9");
     const captured = await blit(
-      request({ layout: "headline-bottom", ratio: r, message: THREE_LINE, safeInsets: insets }),
+      request({ layout: "headline-bottom", canvas: { ratio: r.value }, message: THREE_LINE, safeInsets: insets }),
     );
     const fontSize = Math.round(r.width * CREATIVE_GEOMETRY.headlineTypeWidthFraction);
     const minFirst = insets.top + fontSize;
@@ -209,7 +209,7 @@ describe("NodeCanvasCompositor", () => {
     const insets: SafeInsets = { top: 400, right: 0, bottom: 400, left: 0 };
     const r = ratio("16:9");
     const captured = await blit(
-      request({ layout: "headline-top", ratio: r, message: THREE_LINE, safeInsets: insets }),
+      request({ layout: "headline-top", canvas: { ratio: r.value }, message: THREE_LINE, safeInsets: insets }),
     );
     expect(captured.fillText).toHaveLength(2);
     const lineHeight = (captured.fillText[1]?.y ?? 0) - (captured.fillText[0]?.y ?? 0);
@@ -222,7 +222,7 @@ describe("NodeCanvasCompositor", () => {
     const insets: SafeInsets = { top: 500, right: 800, bottom: 500, left: 800 };
     const r = ratio("16:9");
     for (const layout of ["headline-top", "headline-bottom"] as const) {
-      const captured = await blit(request({ layout, ratio: r, message: THREE_LINE, safeInsets: insets }));
+      const captured = await blit(request({ layout, canvas: { ratio: r.value }, message: THREE_LINE, safeInsets: insets }));
       expect(captured.fillText).toHaveLength(1);
       expect(captured.fillText[0]?.text).toMatch(/…$/);
       const floor = Math.round(
@@ -240,7 +240,7 @@ describe("NodeCanvasCompositor", () => {
     const captured = await blit(
       request({
         layout: "headline-top",
-        ratio: r,
+        canvas: { ratio: r.value },
         message: "Supercalifragilisticexpialidocious wild stay hydrated",
         safeInsets: insets,
       }),
@@ -252,7 +252,7 @@ describe("NodeCanvasCompositor", () => {
   test("keeps a one-line headline at the floor when even that line is taller than the inset", async () => {
     const insets: SafeInsets = { top: 520, right: 0, bottom: 520, left: 0 };
     const r = ratio("16:9");
-    const captured = await blit(request({ layout: "headline-top", ratio: r, message: "Hi", safeInsets: insets }));
+    const captured = await blit(request({ layout: "headline-top", canvas: { ratio: r.value }, message: "Hi", safeInsets: insets }));
     expect(captured.fillText).toHaveLength(1);
     expect(captured.fillText[0]?.text).toBe("Hi");
   });
@@ -260,7 +260,7 @@ describe("NodeCanvasCompositor", () => {
   test("clamps the logo into the inset rectangle when margin would overflow it", async () => {
     const insets: SafeInsets = { top: 0, right: 400, bottom: 0, left: 500 };
     const r = ratio("1:1");
-    const captured = await blit(request({ layout: "headline-top", ratio: r, safeInsets: insets }));
+    const captured = await blit(request({ layout: "headline-top", canvas: { ratio: r.value }, safeInsets: insets }));
     const logo = captured.drawImage[1];
     if (!logo) throw new Error("missing logo blit");
     expect(logo.x).toBeGreaterThanOrEqual(insets.left);
@@ -272,7 +272,7 @@ describe("NodeCanvasCompositor", () => {
   test("pins the logo to the inset origin when the logo is larger than the inset rectangle", async () => {
     const insets: SafeInsets = { top: 50, right: 500, bottom: 1700, left: 500 };
     const r = ratio("9:16");
-    const prepared = await NodeCanvasCompositor.prepare(request({ layout: "headline-top", ratio: r, safeInsets: insets }));
+    const prepared = await NodeCanvasCompositor.prepare(request({ layout: "headline-top", canvas: { ratio: r.value }, safeInsets: insets }));
     expect(prepared.logo?.x).toBe(insets.left);
     expect(prepared.logo?.y).toBe(insets.top);
   });
@@ -281,7 +281,7 @@ describe("NodeCanvasCompositor", () => {
     const insets: SafeInsets = { top: 500, right: 960, bottom: 500, left: 959 };
     const r = ratio("16:9");
     const captured = await blit(
-      request({ layout: "headline-top", ratio: r, message: "Stay wild hydrated", safeInsets: insets }),
+      request({ layout: "headline-top", canvas: { ratio: r.value }, message: "Stay wild hydrated", safeInsets: insets }),
     );
     expect(captured.fillText).toHaveLength(1);
     expect(captured.fillText[0]?.text).toBe("…");
@@ -306,7 +306,7 @@ describe("NodeCanvasCompositor", () => {
     const r = ratio("1:1");
     const fontSize = Math.round(r.width * CREATIVE_GEOMETRY.headlineTypeWidthFraction);
     expect(fontSize).toBe(65);
-    const captured = await blit(request({ anchor: "middle", ratio: r, message: "Stay wild" }));
+    const captured = await blit(request({ anchor: "middle", canvas: { ratio: r.value }, message: "Stay wild" }));
     expect(captured.fillText).toHaveLength(1);
     // Zero insets: the safe area is the canvas, so the block's centre is H × 0.5
     // (the leaf's middle fraction, pinned literally) and the first baseline is
@@ -314,7 +314,7 @@ describe("NodeCanvasCompositor", () => {
     expect(captured.fillText[0]?.y).toBe(572.5);
     // With insets the safe-area centre — not the canvas centre — anchors the block.
     const insets: SafeInsets = { top: 100, right: 0, bottom: 60, left: 0 };
-    const inset = await blit(request({ anchor: "middle", ratio: r, message: "Stay wild", safeInsets: insets }));
+    const inset = await blit(request({ anchor: "middle", canvas: { ratio: r.value }, message: "Stay wild", safeInsets: insets }));
     expect(inset.fillText[0]?.y).toBe(100 + (1080 - 160) * 0.5 - fontSize / 2 + fontSize);
   });
 
@@ -324,7 +324,7 @@ describe("NodeCanvasCompositor", () => {
     const lineHeight = fontSize * 1.25;
     const insets: SafeInsets = { top: 100, right: 0, bottom: 100, left: 0 };
     const captured = await blit(
-      request({ anchor: "middle", layout: "headline-top", ratio: r, message: THREE_LINE, safeInsets: insets }),
+      request({ anchor: "middle", layout: "headline-top", canvas: { ratio: r.value }, message: THREE_LINE, safeInsets: insets }),
     );
     expect(captured.fillText).toHaveLength(3);
     // Pinned literally: safeCentre = 100 + (1080 − 200) × 0.5 = 540; blockH =
@@ -342,7 +342,7 @@ describe("NodeCanvasCompositor", () => {
     const insets: SafeInsets = { top: 200, right: 0, bottom: 200, left: 0 };
     const r = ratio("16:9");
     const captured = await blit(
-      request({ layout: "headline-top", ratio: r, message: THREE_LINE, safeInsets: insets }),
+      request({ layout: "headline-top", canvas: { ratio: r.value }, message: THREE_LINE, safeInsets: insets }),
     );
     expect(captured.fillText).toHaveLength(3);
     const fontSize = Math.round(r.width * CREATIVE_GEOMETRY.headlineTypeWidthFraction);
@@ -359,7 +359,7 @@ describe("NodeCanvasCompositor", () => {
     const insets: SafeInsets = { top: 200, right: 0, bottom: 50, left: 0 };
     const r = ratio("16:9");
     const captured = await blit(
-      request({ layout: "headline-top", ratio: r, message: THREE_LINE, safeInsets: insets }),
+      request({ layout: "headline-top", canvas: { ratio: r.value }, message: THREE_LINE, safeInsets: insets }),
     );
     const logo = captured.drawImage[1];
     if (!logo) throw new Error("missing logo blit");
@@ -369,7 +369,7 @@ describe("NodeCanvasCompositor", () => {
   test("flips the logo to the other inset edge when the opposite edge still overlaps", async () => {
     const insets: SafeInsets = { top: 200, right: 0, bottom: 1400, left: 0 };
     const r = ratio("9:16");
-    const captured = await blit(request({ layout: "headline-top", ratio: r, safeInsets: insets }));
+    const captured = await blit(request({ layout: "headline-top", canvas: { ratio: r.value }, safeInsets: insets }));
     const logo = captured.drawImage[1];
     if (!logo) throw new Error("missing logo blit");
     expect(logo.y).toBe(insets.top);
@@ -379,7 +379,7 @@ describe("NodeCanvasCompositor", () => {
     const insets: SafeInsets = { top: 200, right: 0, bottom: 200, left: 0 };
     const r = ratio("16:9");
     const captured = await blit(
-      request({ layout: "headline-bottom", ratio: r, message: THREE_LINE, safeInsets: insets }),
+      request({ layout: "headline-bottom", canvas: { ratio: r.value }, message: THREE_LINE, safeInsets: insets }),
     );
     const logo = captured.drawImage[1];
     if (!logo) throw new Error("missing logo blit");
@@ -406,7 +406,7 @@ describe("NodeCanvasCompositor", () => {
   test("prepare throws when left + right is not less than width", async () => {
     await expect(
       NodeCanvasCompositor.prepare(
-        request({ ratio: ratio("16:9"), safeInsets: { top: 0, right: 960, bottom: 0, left: 960 } }),
+        request({ canvas: { ratio: "16:9" }, safeInsets: { top: 0, right: 960, bottom: 0, left: 960 } }),
       ),
     ).rejects.toThrow(/safeInsets\.left \+ safeInsets\.right/);
   });

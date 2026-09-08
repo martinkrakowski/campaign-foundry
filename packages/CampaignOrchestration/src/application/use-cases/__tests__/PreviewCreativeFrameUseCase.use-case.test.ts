@@ -216,6 +216,16 @@ describe("PreviewCreativeFrameUseCase — the frame and its cache key", () => {
     expect(a.value.cacheKey).not.toBe(b.value.cacheKey);
   });
 
+  test("a display-size canvas does not share a fingerprint with the matching social request", async () => {
+    const d = deps();
+    const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const request = vi.mocked(d.compositor.compositeAsset).mock.calls[0][0];
+    const sized = { ...request, canvas: { size: "728x90" as const } };
+    expect(compositeRequestFingerprint(sized, sha256)).not.toBe(result.value.cacheKey);
+  });
+
   test("a style-less request hashes exactly as it did before style joined the fingerprint", async () => {
     const result = await new PreviewCreativeFrameUseCase(deps()).execute(baseBrief(), cell());
     expect(result.success).toBe(true);

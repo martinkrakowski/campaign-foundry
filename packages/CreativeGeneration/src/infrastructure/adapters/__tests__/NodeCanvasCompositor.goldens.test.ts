@@ -4,11 +4,23 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCanvas } from "@napi-rs/canvas";
-import { AspectRatio, MOTION_KINDS, restT, type CompositeRequest, type LayoutKind, type ToneKind } from "@campaignfoundry/CampaignOrchestration";
+import {
+  AspectRatio,
+  DISPLAY_SIZE_VALUES,
+  MOTION_KINDS,
+  resolveCanvas,
+  restT,
+  type CompositeRequest,
+  type DisplaySize,
+  type LayoutKind,
+  type ToneKind,
+} from "@campaignfoundry/CampaignOrchestration";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 import { ProceduralBackgroundGenerator } from "../ProceduralBackgroundGenerator.js";
 import {
   BASE_GOLDEN_CELL_COUNT,
+  DISPLAY_GOLDEN_CELL_COUNT,
+  DISPLAY_INSET_GOLDEN_CELL_COUNT,
   INSET_GOLDEN_CELL_COUNT,
   compositorGoldenKey,
   goldenRun,
@@ -47,6 +59,8 @@ const fixturesDir =
   join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const goldensPath = join(fixturesDir, "compositor-goldens.json");
 const insetsPath = join(fixturesDir, "compositor-goldens-insets.json");
+const displayGoldensPath = join(fixturesDir, "compositor-goldens-display.json");
+const displayInsetsPath = join(fixturesDir, "compositor-goldens-display-insets.json");
 
 const fixture = JSON.parse(readFileSync(goldensPath, "utf8")) as GoldenFixture;
 
@@ -90,7 +104,7 @@ describe("NodeCanvasCompositor goldens", () => {
               message: MESSAGE,
               brandColor: BRAND,
               logoPath: LOGO,
-              ratio: r,
+              canvas: { ratio: ratioValue },
               layout,
               tone,
             };
@@ -120,7 +134,7 @@ describe("NodeCanvasCompositor goldens", () => {
               message: MESSAGE,
               brandColor: BRAND,
               logoPath: LOGO,
-              ratio: r,
+              canvas: { ratio: ratioValue },
               layout,
               tone,
             };
@@ -176,7 +190,7 @@ describe("NodeCanvasCompositor inset goldens", () => {
       message: MESSAGE,
       brandColor: BRAND,
       logoPath: LOGO,
-      ratio: r,
+      canvas: { ratio: r.value },
       layout: "headline-top",
       tone: "bold",
       safeInsets: { ...INSET_INSETS },
@@ -185,3 +199,92 @@ describe("NodeCanvasCompositor inset goldens", () => {
     finishGolden(insetsPath, key, { [INSET_CELL]: sha256(out.image) }, run, INSET_GOLDEN_CELL_COUNT);
   });
 });
+
+const displayFixture = JSON.parse(readFileSync(displayGoldensPath, "utf8")) as GoldenFixture;
+const displayInsetFixture = JSON.parse(readFileSync(displayInsetsPath, "utf8")) as GoldenFixture;
+
+const DISPLAY_INSET_CELL = "headline-top/bold/300x250";
+const DISPLAY_INSET_INSETS = { top: 8, right: 8, bottom: 8, left: 8 } as const;
+
+const displayBackground = (size: DisplaySize): Uint8Array => {
+  const { width, height } = resolveCanvas({ size });
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = BRAND;
+  ctx.fillRect(0, 0, width, height);
+  return canvas.toBuffer("image/png");
+};
+
+describe("NodeCanvasCompositor display goldens", () => {
+  const compositor = new NodeCanvasCompositor();
+  const key = compositorGoldenKey();
+  const recording = isRecordingGoldens();
+  const goldens = resolveGoldenMap(displayFixture, key);
+  const missingMessage = missingGoldenMapMessage(key, Object.keys(displayFixture), {
+    fixtureFile: "compositor-goldens-display.json",
+    cellsHint: "20 sha256 cells (both layouts × both tones × five display sizes)",
+  });
+
+  test(
+    "still PNG sha256 matches the committed matrix (both layouts × both tones × five sizes)",
+    { timeout: 60_000 },
+    async () => {
+      const run = goldenRun(goldens, recording, missingMessage);
+
+      const observed: Record<string, string> = {};
+      for (const layout of LAYOUTS) {
+        for (const tone of TONES) {
+          for (const size of DISPLAY_SIZE_VALUES) {
+            const request: CompositeRequest = {
+              background: displayBackground(size),
+              message: MESSAGE,
+              brandColor: BRAND,
+              logoPath: LOGO,
+              canvas: { size },
+              layout,
+              tone,
+            };
+            const out = await compositor.compositeAsset(request);
+            observed[cellKey(layout, tone, size)] = sha256(out.image);
+          }
+        }
+      }
+      finishGolden(displayGoldensPath, key, observed, run, DISPLAY_GOLDEN_CELL_COUNT);
+    },
+  );
+});
+
+describe("NodeCanvasCompositor display inset goldens", () => {
+  const compositor = new NodeCanvasCompositor();
+  const key = compositorGoldenKey();
+  const recording = isRecordingGoldens();
+  const goldens = resolveGoldenMap(displayInsetFixture, key);
+  const missingMessage = missingGoldenMapMessage(key, Object.keys(displayInsetFixture), {
+    fixtureFile: "compositor-goldens-display-insets.json",
+    cellsHint: `the ${DISPLAY_INSET_CELL} cell`,
+  });
+
+  test(`still PNG sha256 with non-zero safeInsets matches ${DISPLAY_INSET_CELL}`, async () => {
+    const run = goldenRun(goldens, recording, missingMessage);
+
+    const request: CompositeRequest = {
+      background: displayBackground("300x250"),
+      message: MESSAGE,
+      brandColor: BRAND,
+      logoPath: LOGO,
+      canvas: { size: "300x250" },
+      layout: "headline-top",
+      tone: "bold",
+      safeInsets: { ...DISPLAY_INSET_INSETS },
+    };
+    const out = await compositor.compositeAsset(request);
+    finishGolden(
+      displayInsetsPath,
+      key,
+      { [DISPLAY_INSET_CELL]: sha256(out.image) },
+      run,
+      DISPLAY_INSET_GOLDEN_CELL_COUNT,
+    );
+  });
+});
+

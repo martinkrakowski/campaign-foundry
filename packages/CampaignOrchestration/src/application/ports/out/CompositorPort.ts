@@ -1,4 +1,4 @@
-import type { AspectRatio } from "../../../domain/value-objects/AspectRatio.vo.js";
+import type { CanvasSpec } from "../../../domain/value-objects/aspect-ratios.js";
 import type { LayoutKind, ToneKind } from "../../../domain/value-objects/Treatment.vo.js";
 import type { AnchorKind } from "../../../domain/value-objects/variation-defaults.js";
 import type { Style } from "../../../domain/value-objects/creative-style.js";
@@ -22,7 +22,17 @@ export interface CompositeRequest {
   /** The product's primary brand colour (hex) — rendered as the brand accent. */
   readonly brandColor: string;
   readonly logoPath: string;
-  readonly ratio: AspectRatio;
+  /**
+   * Canvas identity: a social `{ ratio }` or a display `{ size }` (D113).
+   * Dimensions come from `resolveCanvas(canvas)` unless `pixelSize` overrides.
+   */
+  readonly canvas: CanvasSpec;
+  /**
+   * Pixel override. Production omits it. The video-compositor suite shrinks a
+   * 9:16 to 108×192 so 24-frame encodes stay cheap; `prepare` then uses these
+   * numbers instead of `resolveCanvas`.
+   */
+  readonly pixelSize?: { readonly width: number; readonly height: number };
   /** Treatment: where the headline/logo anchor (data-driven, not hardcoded). */
   readonly layout: LayoutKind;
   /** Treatment: visual intensity of the overlay. */
@@ -57,7 +67,7 @@ export interface CompositeResult {
 
 /**
  * CompositorPort — outbound port: stack visual layers onto a canvas at the
- * ratio's dimensions and return the rendered PNG plus compositing signals.
+ * canvas's dimensions and return the rendered PNG plus compositing signals.
  * Implemented by CreativeGeneration.
  */
 export interface CompositorPort {

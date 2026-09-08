@@ -35,7 +35,7 @@ const request = (over: Partial<CompositeRequest> = {}): CompositeRequest => ({
   message: "Stay wild, stay hydrated",
   brandColor: "#1473E6",
   logoPath: "assets/inputs/hydra-logo.png",
-  ratio: ratio("1:1"),
+  canvas: { ratio: "1:1" },
   layout: "headline-bottom",
   tone: "bold",
   ...over,
@@ -297,7 +297,7 @@ describe("the overlap-snap box is align-aware (T5 finding 1)", () => {
 
   test("a left-aligned headline overlapping the logo's rest zone snaps (still)", async () => {
     const captured = await blit(
-      request({ layout: "headline-top", ratio: r, message: long, safeInsets: insets, style: { align: "left" } }),
+      request({ layout: "headline-top", canvas: { ratio: r.value }, message: long, safeInsets: insets, style: { align: "left" } }),
     );
     const logo = logoOf(captured);
     expect(captured.fillText[0]?.textAlign).toBe("left");
@@ -306,7 +306,7 @@ describe("the overlap-snap box is align-aware (T5 finding 1)", () => {
 
   test("the mirrored right-aligned headline snaps too (still)", async () => {
     const captured = await blit(
-      request({ layout: "headline-top", ratio: r, message: long, safeInsets: insets, style: { align: "right" } }),
+      request({ layout: "headline-top", canvas: { ratio: r.value }, message: long, safeInsets: insets, style: { align: "right" } }),
     );
     const logo = logoOf(captured);
     expect(logo.y).toBe(r.height - insets.bottom - logo.height);
@@ -319,7 +319,7 @@ describe("the overlap-snap box is align-aware (T5 finding 1)", () => {
     const captured = await blit(
       request({
         layout: "headline-top",
-        ratio: r,
+        canvas: { ratio: r.value },
         message: "Stay wild",
         anchor: "top",
         safeInsets: insets,
@@ -332,7 +332,7 @@ describe("the overlap-snap box is align-aware (T5 finding 1)", () => {
 
   test("the aligned box reaches the snap on a drawn timeline frame too", async () => {
     const timelineRequest: TimelineRequest = {
-      ...request({ layout: "headline-top", ratio: r, message: long, safeInsets: insets, style: { align: "left" } }),
+      ...request({ layout: "headline-top", canvas: { ratio: r.value }, message: long, safeInsets: insets, style: { align: "left" } }),
       durationSec: 8,
       timeline: { beats: [{ text: long, weight: 1 }], transition: "cut", keyBeat: 1 },
     };

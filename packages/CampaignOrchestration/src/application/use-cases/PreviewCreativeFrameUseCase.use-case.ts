@@ -2,7 +2,8 @@ import { err, ok, type Result } from "@campaignfoundry/shared";
 import type { CampaignBrief } from "../../domain/entities/CampaignBrief.js";
 import type { Product } from "../../domain/entities/Product.js";
 import { AspectRatio } from "../../domain/value-objects/AspectRatio.vo.js";
-import type { AspectRatioValue } from "../../domain/value-objects/aspect-ratios.js";
+import type { AspectRatioValue, CanvasSpec } from "../../domain/value-objects/aspect-ratios.js";
+import type { DisplaySize } from "../../domain/value-objects/display-sizes.js";
 import type { BackgroundSource } from "../../domain/value-objects/BackgroundSource.vo.js";
 import type { LayoutKind, ToneKind } from "../../domain/value-objects/Treatment.vo.js";
 import type { AnchorKind } from "../../domain/value-objects/variation-defaults.js";
@@ -69,6 +70,13 @@ export interface PreviewCreativeFrameDeps {
   readonly frameCache?: PreviewFrameCache;
 }
 
+/** Social fingerprints keep the `ratio` key so style-less hashes stay put. */
+function canvasFingerprint(spec: CanvasSpec): { readonly ratio: AspectRatioValue } | { readonly size: DisplaySize } {
+  const exclusive = spec as { readonly ratio: AspectRatioValue } | { readonly size: DisplaySize };
+  if ("ratio" in exclusive) return { ratio: exclusive.ratio };
+  return { size: exclusive.size };
+}
+
 /**
  * The preview frame's cache key: a stable hash of EVERY `CompositeRequest`
  * field, with the background entering as a content hash of its bytes — never
@@ -86,7 +94,7 @@ export function compositeRequestFingerprint(
       message: request.message,
       brandColor: request.brandColor,
       logoPath: request.logoPath,
-      ratio: request.ratio.value,
+      ...canvasFingerprint(request.canvas),
       layout: request.layout,
       tone: request.tone,
       ...(request.anchor !== undefined ? { anchor: request.anchor } : {}),
@@ -178,7 +186,7 @@ export class PreviewCreativeFrameUseCase {
       message: copy,
       brandColor: product.primaryColor,
       logoPath: product.logoPath,
-      ratio,
+      canvas: { ratio: ratio.value },
       layout: selection.layout,
       tone: selection.tone,
       // Absent → the compositor derives from layout, byte-identical to the pre-axis path.

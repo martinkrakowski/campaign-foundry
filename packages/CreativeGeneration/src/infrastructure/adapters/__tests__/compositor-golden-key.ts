@@ -8,6 +8,10 @@ import { readFileSync, writeFileSync } from "node:fs";
 export const BASE_GOLDEN_CELL_COUNT = 12;
 /** The inset suite records one cell (`headline-top/bold/9:16`). */
 export const INSET_GOLDEN_CELL_COUNT = 1;
+/** 2 layouts × 2 tones × 5 display sizes. */
+export const DISPLAY_GOLDEN_CELL_COUNT = 20;
+/** One display inset cell (`headline-top/bold/300x250`). */
+export const DISPLAY_INSET_GOLDEN_CELL_COUNT = 1;
 
 export function compositorGoldenKey(
   platform: string = process.platform,

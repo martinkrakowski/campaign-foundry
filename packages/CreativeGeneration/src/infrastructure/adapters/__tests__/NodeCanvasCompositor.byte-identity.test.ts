@@ -92,7 +92,7 @@ describe("NodeCanvasCompositor D10 — the legacy path is byte-identical after t
               message: MESSAGE,
               brandColor: BRAND,
               logoPath: LOGO,
-              ratio: r,
+              canvas: { ratio: ratioValue },
               layout,
               tone,
             };
@@ -129,16 +129,16 @@ describe("NodeCanvasCompositor D10 — the legacy path is byte-identical after t
       })(),
     };
     const variants: CompositeRequest[] = [
-      { ...base, message: MESSAGE, ratio: ratio("1:1"), layout: "headline-bottom", tone: "bold" },
+      { ...base, message: MESSAGE, canvas: { ratio: "1:1" }, layout: "headline-bottom", tone: "bold" },
       {
         ...base,
         message: MESSAGE,
-        ratio: ratio("16:9"),
+        canvas: { ratio: "16:9" },
         layout: "headline-top",
         tone: "subtle",
         safeInsets: { top: 120, right: 0, bottom: 200, left: 0 },
       },
-      { ...base, message: "Hi", ratio: ratio("9:16"), layout: "headline-top", tone: "bold" },
+      { ...base, message: "Hi", canvas: { ratio: "9:16" }, layout: "headline-top", tone: "bold" },
     ];
 
     for (const request of variants) {

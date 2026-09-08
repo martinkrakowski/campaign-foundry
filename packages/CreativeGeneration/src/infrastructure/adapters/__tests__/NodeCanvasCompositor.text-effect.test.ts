@@ -32,7 +32,7 @@ const request = (over: Partial<CompositeRequest> = {}): CompositeRequest => ({
   message: "Stay wild, stay hydrated",
   brandColor: "#1473E6",
   logoPath: "assets/inputs/hydra-logo.png",
-  ratio: ratio("1:1"),
+  canvas: { ratio: "1:1" },
   layout: "headline-bottom",
   tone: "bold",
   ...over,

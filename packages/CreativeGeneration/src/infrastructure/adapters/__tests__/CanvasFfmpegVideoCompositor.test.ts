@@ -7,7 +7,6 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import {
-  AspectRatio,
   MOTION_KINDS,
   resolveTimeline,
   restT,
@@ -73,15 +72,6 @@ function mvhdDuration(bytes: Buffer): number {
     : bytes.readUInt32BE(mvhd.payload + 4 + 4 + 4 + 4);
 }
 
-const ratio = () => {
-  const r = AspectRatio.create("9:16");
-  if (!r.success) throw r.error;
-  return Object.assign(Object.create(Object.getPrototypeOf(r.value)), r.value, {
-    width: 108,
-    height: 192,
-  }) as AspectRatio;
-};
-
 const background = (): Uint8Array => {
   const c = createCanvas(16, 16);
   c.getContext("2d").fillRect(0, 0, 16, 16);
@@ -93,7 +83,8 @@ const videoRequest = (over: Partial<VideoCompositeRequest> = {}): VideoComposite
   message: "Hi",
   brandColor: "#1473E6",
   logoPath: "assets/inputs/hydra-logo.png",
-  ratio: ratio(),
+  canvas: { ratio: "9:16" },
+  pixelSize: { width: 108, height: 192 },
   layout: "headline-bottom",
   tone: "bold",
   durationSec: 2,
