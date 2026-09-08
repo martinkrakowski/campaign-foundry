@@ -45,6 +45,19 @@ the problem. These rules are, in order of what they save:
    brief pointed at a 441-line document; the four paragraphs that mattered would have fitted in the
    brief.
 6. **Count runs per seat in every wave record**, so a burn is visible before a quota is.
+7. **Measure every run.** `agy` reports its own cost when given `--output-format json`: the result
+   is one JSON object with `usage` (`input_tokens`, `output_tokens`, `thinking_tokens`,
+   `cache_read_tokens`, `total_tokens`), plus `duration_seconds`, `num_turns` and `status`. `opencode
+   run --format json` emits raw JSON events. **Dispatch with the flag and record the numbers**;
+   there is no retroactive accounting — nothing on disk keeps a per-conversation token record, so a
+   run launched without it can never be costed. With the flag, the agent's reply (and its PR URL)
+   is the `.response` field: `jq -r .response`, and the `EXIT n` marker the wrapper appends still
+   works unchanged.
+
+   **The floor, measured 2026-09-08:** `agy --print "Say OK."` at low effort on the smallest model
+   costs **14 996 input tokens** and 2 output tokens. Every invocation pays roughly 15 k before it
+   reads a line of the brief. That is the number that makes a third round expensive: not the work,
+   the boot.
 
 **Why grok is out.** It exhausted a weekly quota in two days because it drifted from reviewer and
 fixer into default implementer (nine lane implementations on 09-07/08, every role at high effort,
