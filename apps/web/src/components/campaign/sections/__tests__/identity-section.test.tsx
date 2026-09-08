@@ -1,5 +1,6 @@
-import { describe, test, expect, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { useLayoutEffect } from "react";
+import { describe, test, expect, afterEach, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { IdentitySection } from "../IdentitySection";
 import { editorReducer, initialEditorState, type EditorAction, type EditorState } from "../../editor-state";
@@ -43,9 +44,15 @@ const renderWithReducer = (initial: EditorState) => {
  * control: the map's SVG is aria-hidden and adds no focusable element.
  */
 describe("IdentitySection — the world map", () => {
-  test("clicking a footprint sets the region exactly as its chip does — the two are one control", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  test("clicking a footprint sets the region exactly as its chip does — the two are one control", async () => {
     const { dispatch, container } = renderWithReducer(state());
 
+    await screen.findByText(messages.worldMapFallbackHint);
     fireEvent.click(container.querySelector('[data-region="EU"]') as SVGGElement);
     expect(dispatch).toHaveBeenCalledWith({ type: "patch", patch: { targetRegion: "EU" } });
     expect(screen.getByRole("button", { name: "EU" }).getAttribute("aria-pressed")).toBe("true");
@@ -57,6 +64,7 @@ describe("IdentitySection — the world map", () => {
 
     await user.click(screen.getByRole("button", { name: "DE" }));
 
+    await screen.findByText(messages.worldMapFallbackHint);
     const selected = document.querySelectorAll("[data-selected]");
     expect(selected).toHaveLength(1);
     expect(selected[0]?.getAttribute("data-region")).toBe("DE");
@@ -87,6 +95,7 @@ describe("IdentitySection — the world map", () => {
     const other = screen.getByLabelText(messages.targetRegionOtherInputLabel);
     await user.type(other, "LATAM");
 
+    await screen.findByText(messages.worldMapFallbackHint);
     fireEvent.click(container.querySelector('[data-region="DE"]') as SVGGElement);
 
     expect(getState().targetRegion).toBe("DE");
@@ -118,6 +127,7 @@ describe("IdentitySection — the world map", () => {
 
     await user.click(screen.getByRole("button", { name: "EU" }));
 
+    await screen.findByText(messages.worldMapFallbackHint);
     const svg = (container.querySelector('[data-region="EU"]') as SVGGElement).closest(
       "svg",
     ) as SVGSVGElement;
@@ -126,18 +136,21 @@ describe("IdentitySection — the world map", () => {
     expect(svg.querySelectorAll("[tabindex], button, a")).toHaveLength(0);
   });
 
-  test("the hint is written against F2, and the section adds no live region of its own", () => {
+  test("the hint is written against F2, and the section adds no live region of its own", async () => {
     const { container } = render(<IdentitySection state={state()} dispatch={vi.fn()} errors={{}} />);
 
     const hint = screen.getByText(messages.worldMapRegionHint);
     expect(hint.textContent).not.toMatch(/dispatch|per region|\brun/i);
-    expect(container.querySelector("p.sr-only")?.textContent).toBe(messages.worldMapFallbackHint);
+    expect((await screen.findByText(messages.worldMapFallbackHint)).textContent).toBe(
+      messages.worldMapFallbackHint,
+    );
     expect(container.querySelectorAll('[role="status"]')).toHaveLength(0);
   });
 
-  test("the map is built once per region — unrelated patches do not re-render it", () => {
+  test("the map is built once per region — unrelated patches do not re-render it", async () => {
     vi.mocked(WorldMap).mockClear();
     const { dispatch } = renderWithReducer(state());
+    await screen.findByText(messages.worldMapFallbackHint);
     expect(WorldMap).toHaveBeenCalledTimes(1);
 
     dispatch({ type: "patch", patch: { targetAudience: "a" } });
@@ -147,5 +160,143 @@ describe("IdentitySection — the world map", () => {
 
     dispatch({ type: "patch", patch: { targetRegion: "US" } });
     expect(WorldMap).toHaveBeenCalledTimes(2);
+  });
+
+  test("on first render the map is absent and the chips are present; after effects flush the map is present", async () => {
+    let firstPaint = { map: true, chips: false };
+
+    function FirstPaintProbe() {
+      useLayoutEffect(() => {
+        firstPaint = {
+          map: document.querySelector("[data-region]") !== null,
+          chips: document.querySelector('button[aria-label="EU"]') !== null,
+        };
+      }, []);
+      return null;
+    }
+
+    const { container } = render(
+      <>
+        <IdentitySection state={state()} dispatch={vi.fn()} errors={{}} />
+        <FirstPaintProbe />
+      </>,
+    );
+
+    expect(firstPaint.map).toBe(false);
+    expect(firstPaint.chips).toBe(true);
+    expect(screen.getByRole("button", { name: "EU" })).toBeTruthy();
+
+    await screen.findByText(messages.worldMapFallbackHint);
+    expect(container.querySelector('[data-region="EU"]')).not.toBeNull();
+  });
+
+  /**
+   * BriefEditor spends the create seed in a layout effect; those dispatches
+   * flush pending passive effects before paint. Flipping `mapReady` in the
+   * mount effect's body would still build the map on the first frame.
+   */
+  test("the map is absent after render and after a synchronous patch; it appears only after the frame", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      (cb: (time: number) => void) => setTimeout(() => cb(0), 0) as unknown as number,
+    );
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+      clearTimeout(id);
+    });
+
+    const { dispatch, container } = renderWithReducer(state());
+
+    expect(container.querySelector("[data-region]")).toBeNull();
+    expect(screen.getByRole("button", { name: "EU" })).toBeTruthy();
+
+    act(() => {
+      dispatch({ type: "patch", patch: { campaignName: "Summer" } });
+    });
+    expect(container.querySelector("[data-region]")).toBeNull();
+
+    act(() => {
+      vi.runOnlyPendingTimers();
+    });
+    expect(container.querySelector('[data-region="EU"]')).not.toBeNull();
+  });
+
+  test("without requestAnimationFrame the map appears on a zero-delay timer", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("requestAnimationFrame", undefined);
+
+    const { container } = render(<IdentitySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    expect(container.querySelector("[data-region]")).toBeNull();
+
+    act(() => {
+      vi.runOnlyPendingTimers();
+    });
+    expect(container.querySelector("[data-region]")).not.toBeNull();
+  });
+
+  /**
+   * The cancel on unmount is the thing coverage cannot see: a cleanup of
+   * `() => {}` still paints 100 %. Unmount before the frame/timer fires and
+   * the cancel must receive the id the request returned; advancing afterwards
+   * must not run `show`.
+   */
+  test("unmounting before the frame cancels it — show never fires", () => {
+    vi.useFakeTimers();
+    const show = vi.fn();
+    const requestAnimationFrame = vi.fn((cb: (time: number) => void) => {
+      return setTimeout(() => {
+        show();
+        cb(0);
+      }, 0) as unknown as number;
+    });
+    const cancelAnimationFrame = vi.fn((id: number) => {
+      clearTimeout(id);
+    });
+    vi.stubGlobal("requestAnimationFrame", requestAnimationFrame);
+    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+
+    const { unmount } = render(<IdentitySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
+    const frame = requestAnimationFrame.mock.results[0]?.value as number;
+
+    unmount();
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(frame);
+
+    act(() => {
+      vi.runOnlyPendingTimers();
+    });
+    expect(show).not.toHaveBeenCalled();
+  });
+
+  test("unmounting before the fallback timer cancels it — show never fires", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("requestAnimationFrame", undefined);
+
+    const show = vi.fn();
+    const fakeSetTimeout = globalThis.setTimeout.bind(globalThis);
+    const setTimeoutSpy = vi.fn((handler: TimerHandler, delay?: number, ...args: unknown[]) => {
+      if (typeof handler === "function" && delay === 0) {
+        return fakeSetTimeout(() => {
+          show();
+          (handler as () => void)();
+        }, delay);
+      }
+      return fakeSetTimeout(handler, delay, ...args);
+    });
+    vi.stubGlobal("setTimeout", setTimeoutSpy as unknown as typeof setTimeout);
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+
+    const { unmount } = render(<IdentitySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    const zeroDelay = setTimeoutSpy.mock.calls.findIndex((call) => call[1] === 0);
+    expect(zeroDelay).toBeGreaterThanOrEqual(0);
+    const timer = setTimeoutSpy.mock.results[zeroDelay]?.value as ReturnType<typeof setTimeout>;
+
+    unmount();
+    expect(clearTimeoutSpy).toHaveBeenCalledWith(timer);
+
+    act(() => {
+      vi.runOnlyPendingTimers();
+    });
+    expect(show).not.toHaveBeenCalled();
   });
 });

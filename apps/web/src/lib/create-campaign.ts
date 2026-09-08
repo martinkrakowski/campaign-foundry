@@ -1,15 +1,16 @@
 "use client";
 
-import { MODE_OPTIONS, slugify, type CampaignMode } from "@/components/campaign/editor-state";
+import { CAMPAIGN_TYPES, type CampaignType } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import { slugify } from "@/components/campaign/editor-state";
 import { duplicateBrief } from "./briefs-api";
 import { takeStashedStep } from "./use-step-navigation";
 
 /**
  * D65 — create is a seam, not a POST. The dialog hands the two create answers — a
- * campaign name and a mode (D97); region and audience live in Identity, where they
- * always have — plus, from W2, an optional source, to `createCampaign` and receives
- * `{ id, route }`, or `null` when the seed write is refused; it derives no id and
- * shows no slug.
+ * campaign name and a campaign type (D108, which superseded D97's mode; the type's
+ * preset is applied once by the editor, D109) — plus, from W2, an optional source,
+ * to `createCampaign` and receives `{ id, route }`, or `null` when the seed write is
+ * refused; it derives no id and shows no slug.
  * The wave-1 body publishes the seed the blank-route editor consumes (D66) and
  * writes nothing else; the W2 body duplicates the chosen source (D71). Under D64(b)
  * both bodies become a POST that mints a draft row and returns its route, and
@@ -18,7 +19,8 @@ import { takeStashedStep } from "./use-step-navigation";
 
 export interface CreateCampaignInput {
   readonly name: string;
-  readonly mode: CampaignMode;
+  /** The campaign type (D108) — resolved through `CAMPAIGN_TYPE_PRESETS` on arrival. */
+  readonly type: CampaignType;
   /**
    * W2 (D71) — the chosen source brief's id. Absent means a blank create: the seed
    * is published and nothing else is written.
@@ -66,26 +68,30 @@ function publishSeed(input: CreateCampaignInput): boolean {
 
 /**
  * Minimal shape guard for a seed restored from storage (don't trust hand-edited JSON).
- * F5 — an old-shape seed (the previous build's four fields) is REJECTED, not
- * half-applied: accepting it would seed a brief with a name and nothing else,
- * silently. The right answer for a seed written by a deployed predecessor is to
- * discard it and let the user start clean.
+ * F5 — an old-shape seed is REJECTED, not half-applied: accepting it would seed a
+ * brief with a name and nothing else, silently. Two retired shapes exist: the
+ * four-field one (region and audience spelled) and the #217 two-field one (`mode`,
+ * which D108 retired with the type). The right answer for a seed written by a
+ * deployed predecessor is to discard it and let the user start clean.
  */
 function isStoredSeed(value: unknown): value is CreateCampaignInput {
   if (typeof value !== "object" || value === null) return false;
-  // The old fields are spelled on the cast, not on the type: they exist only so the
-  // guard can refuse them — no consumer may read them off a seed again.
+  // The retired fields are spelled on the cast, not on the type: they exist only so
+  // the guard can refuse the shapes their builds wrote — no consumer may read them
+  // off a seed again.
   const seed = value as Partial<CreateCampaignInput> & {
     targetRegion?: unknown;
     targetAudience?: unknown;
+    mode?: unknown;
   };
   // Unknown extra keys are accepted: this is a shape check, not a freeze, so a later build can add a field without this one discarding its seeds.
   return (
     typeof seed.name === "string" &&
-    typeof seed.mode === "string" &&
-    (MODE_OPTIONS as readonly string[]).includes(seed.mode) &&
+    typeof seed.type === "string" &&
+    (CAMPAIGN_TYPES as readonly string[]).includes(seed.type) &&
     seed.targetRegion === undefined &&
-    seed.targetAudience === undefined
+    seed.targetAudience === undefined &&
+    seed.mode === undefined
   );
 }
 

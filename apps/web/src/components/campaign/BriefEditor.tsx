@@ -500,11 +500,14 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     purgeDraftFromStorage(state);
     dispatch({ type: "load", brief: blankBrief() });
     // `patch` actions — not a hand-built state — so slug derivation stays in the
-    // reducer (F18), exactly as the Identity step's own controls dispatch. D97 —
-    // the seed carries the name and the mode only; region and audience are the
-    // Identity step's answers, and no seed may half-answer them.
+    // reducer (F18), exactly as the Identity step's own controls dispatch. D108 —
+    // the seed carries the name and the campaign type; region and audience are
+    // the Identity step's answers, and no seed may half-answer them. The type's
+    // preset (platforms, formats, mode) is resolved by the `applyPreset` action,
+    // exactly once, here on arrival (D109) — the seed is spent by the `takeSeed`
+    // read above, so no remount, load or presentation switch can re-apply it.
     dispatch({ type: "patch", patch: { campaignName: seed.name } });
-    dispatch({ type: "setMode", mode: seed.mode });
+    dispatch({ type: "applyPreset", campaignType: seed.type });
     // The reset createNew performed (L1.1): an in-place seed after a refused Save
     // would otherwise inherit `attempted` and paint Identity red on arrival.
     setAttempted(false);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useState, useRef, useEffect, useCallback, useMemo, type Dispatch } from "react";
-import { Input, ChipGroup, WorldMap, REGION_FOOTPRINTS } from "@/components/ui";
+import { Input, ChipGroup, WorldMap, REGION_FOOTPRINTS, MAP_WIDTH, MAP_HEIGHT } from "@/components/ui";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import type { FieldErrors } from "@/components/campaign/validate";
 import { keyForLabel } from "@/components/campaign/error-sections";
@@ -119,6 +119,7 @@ export function IdentitySection({
 }: SectionProps & { compact?: boolean }) {
   const readOnly = state.source.kind === "file";
   const [copied, setCopied] = useState(false);
+  const [mapReady, setMapReady] = useState(false);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(
@@ -127,6 +128,20 @@ export function IdentitySection({
     },
     [],
   );
+
+  // The matrix is hundreds of SVG nodes. Paint it after the first frame, not in
+  // this effect's body: a layout-effect dispatch (the create seed) flushes
+  // pending passive effects before paint, which would otherwise build the map
+  // on the first frame the chips were meant to own.
+  useEffect(() => {
+    const show = () => setMapReady(true);
+    if (typeof requestAnimationFrame === "function") {
+      const frame = requestAnimationFrame(show);
+      return () => cancelAnimationFrame(frame);
+    }
+    const timer = setTimeout(show, 0);
+    return () => clearTimeout(timer);
+  }, []);
 
   const copyBriefId = async () => {
     if (!state.briefId || !navigator.clipboard) return;
@@ -213,7 +228,15 @@ export function IdentitySection({
           <div className={compact ? undefined : "space-y-2"}>
             {!compact ? (
               <>
-                {worldMap}
+                {mapReady ? (
+                  worldMap
+                ) : (
+                  <div
+                    aria-hidden="true"
+                    className="w-full"
+                    style={{ aspectRatio: `${MAP_WIDTH} / ${MAP_HEIGHT}` }}
+                  />
+                )}
                 <p className="text-[12px] text-text-muted">{messages.worldMapRegionHint}</p>
               </>
             ) : null}

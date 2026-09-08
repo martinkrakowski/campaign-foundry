@@ -5,6 +5,14 @@ import type {
   Treatment,
   VariationPolicy,
 } from "@campaignfoundry/CampaignOrchestration";
+// The leaf, never the barrel: the type vocabulary must reach the browser bundle
+// without the barrel's node:fs hitchhikers (see the comment below).
+import {
+  CAMPAIGN_TYPES,
+  CAMPAIGN_TYPE_PRESETS,
+  DEFAULT_CAMPAIGN_TYPE,
+  type CampaignType,
+} from "@campaignfoundry/CampaignOrchestration/campaign-types";
 // The leaf, never the barrel: the barrel re-exports the infrastructure adapters, which
 // pull node:fs/path/crypto into the browser bundle.
 import {
@@ -207,6 +215,14 @@ export type EditorSource =
 export interface EditorState {
   source: EditorSource;
   mode: CampaignMode;
+  /**
+   * The campaign type (D108): which preset seeded this brief. Recorded so
+   * surfaces can read it; nothing enforces it — the user may change platforms,
+   * formats and mode afterwards and the type does not fight back (D109).
+   * Absent on a brief means `social-post` (D112), exactly as absent mode means
+   * classic, so `toBrief` emits it under the same rule `mode` uses.
+   */
+  type: CampaignType;
   campaignName: string;
   briefId: string;
   targetRegion: string;
@@ -305,6 +321,14 @@ export interface EditorState {
    * already follows).
    */
   modeExplicit: boolean;
+  /**
+   * True only when the loaded brief wrote the default `type: social-post`
+   * explicitly (D112) — the `modeExplicit` pattern one line below: a type that
+   * is not the default always says something the absent key does not, an
+   * untouched default must never grow the key (the corpus round-trip depends on
+   * it), and an explicitly spelled default must round-trip byte-identically.
+   */
+  typeExplicit: boolean;
   /** True when formats were explicitly authored or loaded diverging from platform defaults (D7). */
   formatsOverridden: boolean;
   /** True when ratio was explicitly authored or loaded diverging from platform defaults (D7). */
@@ -327,6 +351,7 @@ export interface EditorState {
 
 export type EditorAction =
   | { type: "setMode"; mode: CampaignMode }
+  | { type: "applyPreset"; campaignType: CampaignType }
   | { type: "patch"; patch: Partial<Pick<EditorState, "campaignName" | "briefId" | "targetRegion" | "targetAudience" | "campaignMessage" | "localizedMessage">> }
   | { type: "setProduct"; key: number; patch: Partial<ProductDraft> }
   | { type: "addProduct" }
@@ -382,6 +407,7 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
   return {
     source: { kind: "new", tempId },
     mode,
+    type: DEFAULT_CAMPAIGN_TYPE,
     campaignName: "",
     briefId: "",
     targetRegion: "",
@@ -417,6 +443,7 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
     platforms: [...STATIC_PLATFORMS],
     outputExplicit: false,
     modeExplicit: false,
+    typeExplicit: false,
     formatsOverridden: false,
     ratioOverridden: false,
     motionTouched: false,
@@ -630,6 +657,45 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // survive so the D5 round-trip and the remedy stay true.
       if (action.mode === state.mode) return state;
       return { ...state, mode: action.mode };
+    }
+    case "applyPreset": {
+      // D109 — a type is a preset, applied once: it seeds the platforms, the
+      // formats and the mode the preset table carries, and the brief records
+      // the type. The mode goes through the `setMode` branch itself, so its
+      // rule (a same-mode flip stays identity-equal) is never restated here.
+      // Nothing re-applies a preset — no remount, no load, no presentation
+      // switch; the seed is spent by the one dispatch the seed effect makes.
+      const preset = CAMPAIGN_TYPE_PRESETS[action.campaignType];
+      const withMode = reduceEditor(state, { type: "setMode", mode: preset.mode });
+      // D9 — the same seeding rule the `toggleFormat` and `togglePlatform`
+      // cases run whenever Video turns on: a fresh draft gains the motion
+      // defaults, or a seeded motion preset would open an editor whose Save is
+      // blocked by an empty motion axis the user never saw a control for. The
+      // retraction mirrors it the same way, so switching to a still-only
+      // preset leaves no orphaned kinds behind.
+      const videoTurningOn = preset.formats.includes("motion") && !withMode.formats.includes("motion");
+      const videoTurningOff = !preset.formats.includes("motion") && withMode.formats.includes("motion");
+      let motion = withMode.motion;
+      let duration = withMode.duration;
+      let motionSeeded = withMode.motionSeeded;
+      if (videoTurningOn && motion.length === 0 && duration.length === 0 && !withMode.motionTouched) {
+        motion = [...MOTION_KINDS];
+        duration = [DEFAULT_DURATION_SEC];
+        motionSeeded = true;
+      } else if (videoTurningOff && !withMode.motionTouched) {
+        motion = [];
+        duration = [];
+        motionSeeded = false;
+      }
+      return {
+        ...withMode,
+        type: action.campaignType,
+        platforms: [...preset.platforms],
+        formats: [...preset.formats],
+        motion,
+        duration,
+        motionSeeded,
+      };
     }
     case "patch": {
       let patch = action.patch;
@@ -1170,6 +1236,11 @@ export function toBrief(state: EditorState): CampaignBrief {
     // something the absent key does not (see briefStyle).
     ...(style !== undefined ? { style } : {}),
     ...(state.mode === "variation" || state.modeExplicit ? { mode: state.mode } : {}),
+    // D112 — `type` follows `mode`'s rule one line above: absent means
+    // social-post, so a draft still on the default never grows the key (the
+    // corpus round-trip and the freshly-loaded-clean check depend on it),
+    // while a non-default type or an explicitly spelled default is written.
+    ...(state.type !== DEFAULT_CAMPAIGN_TYPE || state.typeExplicit ? { type: state.type } : {}),
     ...(state.outputExplicit || !isDefaultOutput(state)
       ? { output: { formats: [...formats], platforms: [...state.platforms] } }
       : {}),
@@ -1309,6 +1380,9 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
     source,
     nextBeatKey: timeline.beats.length + 1,
     mode: brief.mode ?? "brief",
+    // D112 — absent means the default; a brief that wrote the default
+    // explicitly keeps its marker, the way `mode`'s own flag does below.
+    type: brief.type ?? DEFAULT_CAMPAIGN_TYPE,
     campaignName: brief.id,
     briefId: brief.id,
     targetRegion: brief.targetRegion,
@@ -1345,6 +1419,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
     platforms,
     outputExplicit: brief.output !== undefined,
     modeExplicit: brief.mode === "brief",
+    typeExplicit: brief.type === DEFAULT_CAMPAIGN_TYPE,
     formatsOverridden,
     ratioOverridden,
     motionTouched,
@@ -1601,6 +1676,11 @@ function normalizeStyleDraft(value: unknown): Style {
 
 export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   const mode: CampaignMode = raw.mode === "variation" ? "variation" : "brief";
+  // D112 — a draft saved before the type existed carries no `type`, and a
+  // hand-edited one may carry anything: the enum is checked against its legal
+  // vocabulary, never believed, and the absent key means the default.
+  const typeValid = (CAMPAIGN_TYPES as readonly string[]).includes(raw.type as string);
+  const type: CampaignType = typeValid ? (raw.type as CampaignType) : DEFAULT_CAMPAIGN_TYPE;
   const initial = initialEditorState(mode);
   const str = (value: unknown, fallback: string): string => (typeof value === "string" ? value : fallback);
   const rawSource = raw.source as Partial<EditorSource> | null | undefined;
@@ -1666,6 +1746,7 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     ...raw,
     source,
     mode,
+    type,
     campaignName,
     briefId: str(raw.briefId, initial.briefId),
     products,
@@ -1697,6 +1778,10 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     // survives in `mode`, and losing the marker only omits a key whose absence means
     // exactly what its value said. No authored work is lost.
     modeExplicit: raw.modeExplicit === true,
+    // An unknown stored type is the default, not an authored one: believing
+    // `typeExplicit` anyway would serialise an explicit `social-post` for a
+    // draft that never wrote that type.
+    typeExplicit: typeValid && raw.typeExplicit === true,
     // A draft written before these flags existed has none of them, and `=== true` would
     // read that absence as "never overridden". It is not the same statement: the draft
     // may well hold formats, ratios or motion the user authored by hand. Restoring those

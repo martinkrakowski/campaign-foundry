@@ -2,16 +2,19 @@ import { describe, test, expect } from "vitest";
 import {
   alignDisplayName,
   anchorDisplayName,
+  campaignTypeOf,
   formatDisplayName,
   modeDisplayName,
   platformDisplayName,
   ratioDisplayName,
   textEffectDisplayName,
+  typeDisplayName,
   weightDisplayName,
 } from "../display-names";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { ANCHOR_VALUES } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import { TEXT_EFFECT_VALUES } from "@campaignfoundry/CampaignOrchestration/creative-style";
+import { CAMPAIGN_TYPES, DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 
 describe("display names", () => {
   test("formats read as things a person makes, not enum values", () => {
@@ -75,6 +78,23 @@ describe("display names", () => {
   test("both modes the editor knows read Classic and Randomized (D4)", () => {
     expect(modeDisplayName("brief")).toBe("Classic");
     expect(modeDisplayName("variation")).toBe("Randomized");
+  });
+
+  test("every campaign type the domain knows has a plain-English name (D108)", () => {
+    for (const type of CAMPAIGN_TYPES) {
+      expect(typeDisplayName(type)).not.toBe(type);
+    }
+    expect(typeDisplayName("social-post")).toBe("Social post");
+    expect(typeDisplayName("paid-social")).toBe("Paid social");
+    expect(typeDisplayName("short-video")).toBe("Short-form video");
+  });
+
+  test("campaignTypeOf returns the vocabulary member, else the default", () => {
+    expect(campaignTypeOf({ type: "social-post" })).toBe("social-post");
+    expect(campaignTypeOf({ type: "paid-social" })).toBe("paid-social");
+    expect(campaignTypeOf({ type: "short-video" })).toBe("short-video");
+    expect(campaignTypeOf({})).toBe(DEFAULT_CAMPAIGN_TYPE);
+    expect(campaignTypeOf({ type: "banner" })).toBe(DEFAULT_CAMPAIGN_TYPE);
   });
 });
 

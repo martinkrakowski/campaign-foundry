@@ -127,4 +127,27 @@ describe("OpenRouterImageGenerator", () => {
     const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
     expect(body.image_config.aspect_ratio).toBe("1:1");
   });
+
+  test("pins the prompt shape, including the campaign-type sentence", async () => {
+    const promptOf = (call = 0): string => {
+      const body = JSON.parse((fetchMock.mock.calls[call][1] as RequestInit).body as string) as {
+        messages: Array<{ content: string }>;
+      };
+      return body.messages[0].content;
+    };
+    fetchMock.mockResolvedValue(res({ json: messageWith({ images: [{ image_url: { url: pngDataUrl() } }] }) }));
+
+    await new OpenRouterImageGenerator({ apiKey: "k" }).resolveBackground(product, ratio(), ctx);
+    expect(promptOf(0)).toBe(
+      'Premium social-advertising hero background for the subject "Hydra Bottle". Audience: Urban. Market/region: DE. Evoke the brand accent colour #1473E6. Cinematic, photographic, high production value, with clean negative space toward the bottom for a headline. Absolutely no text, words, letters, logos or watermarks in the image. Campaign type: a social post for organic feeds.',
+    );
+
+    await new OpenRouterImageGenerator({ apiKey: "k" }).resolveBackground(product, ratio(), {
+      ...ctx,
+      campaignType: "paid-social",
+    });
+    expect(promptOf(1)).toBe(
+      'Premium social-advertising hero background for the subject "Hydra Bottle". Audience: Urban. Market/region: DE. Evoke the brand accent colour #1473E6. Cinematic, photographic, high production value, with clean negative space toward the bottom for a headline. Absolutely no text, words, letters, logos or watermarks in the image. Campaign type: paid social advertising across feeds, stories and reels.',
+    );
+  });
 });

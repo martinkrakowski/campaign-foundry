@@ -6,6 +6,12 @@ import { ALIGN_VALUES, FONT_WEIGHT_VALUES, type TextEffectKind } from "@campaign
 import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
 
 import type { CampaignMode } from "./editor-state";
+// The leaf, never the barrel: the barrel pulls node:fs into the browser bundle.
+import {
+  CAMPAIGN_TYPES,
+  DEFAULT_CAMPAIGN_TYPE,
+  type CampaignType,
+} from "@campaignfoundry/CampaignOrchestration/campaign-types";
 
 /** Display name for a format key. */
 export function formatDisplayName(format: string): string {
@@ -108,4 +114,32 @@ const MODE_LABELS: Record<CampaignMode, string> = {
 
 export function modeDisplayName(mode: CampaignMode): string {
   return MODE_LABELS[mode];
+}
+
+/**
+ * Display labels for the campaign types (D108) — keyed by the type union itself,
+ * so a fourth type is a compile error rather than a raw id on screen (D18),
+ * beside `MODE_LABELS` above. Nothing in the app renders it yet (T3's tiles and
+ * T4's chip do); it exists so the jargon gate has one source.
+ */
+const TYPE_LABELS: Record<CampaignType, string> = {
+  "social-post": "Social post",
+  "paid-social": "Paid social",
+  "short-video": "Short-form video",
+};
+
+export function typeDisplayName(type: CampaignType): string {
+  return TYPE_LABELS[type];
+}
+
+/**
+ * Coerce a brief's `type` onto the vocabulary (D108). Stored briefs and picker
+ * payloads are only shape-checked for id and products, so `type: "banner"` is
+ * a legal restore; `typeDisplayName` is a compile-locked lookup and would
+ * render an empty chip. Absent or unknown → social-post.
+ */
+export function campaignTypeOf(brief: { readonly type?: string }): CampaignType {
+  return (CAMPAIGN_TYPES as readonly string[]).includes(brief.type as string)
+    ? (brief.type as CampaignType)
+    : DEFAULT_CAMPAIGN_TYPE;
 }

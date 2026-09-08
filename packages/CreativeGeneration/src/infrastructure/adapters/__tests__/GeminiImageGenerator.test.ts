@@ -128,4 +128,22 @@ describe("GeminiImageGenerator", () => {
       new GeminiImageGenerator({ apiKey: "k", client }).resolveBackground(product, ratio(), ctx),
     ).rejects.toThrow("boom");
   });
+
+  test("pins the prompt shape, including the campaign-type sentence", async () => {
+    const generateImages = vi.fn(async (_args: GenArgs) => ({
+      generatedImages: [{ image: { imageBytes: "AA==" } }],
+    }));
+    const client: ImagenClient = { models: { generateImages } };
+    const generator = new GeminiImageGenerator({ apiKey: "k", client });
+
+    await generator.resolveBackground(product, ratio(), ctx);
+    expect(generateImages.mock.calls[0][0].prompt).toBe(
+      'Premium social-advertising hero background for the subject "Hydra Bottle". Audience: Urban. Market/region: DE. Evoke the brand accent colour #1473E6. Cinematic, photographic, high production value, with clean negative space toward the bottom for a headline. Absolutely no text, words, letters, logos or watermarks in the image. Campaign type: a social post for organic feeds.',
+    );
+
+    await generator.resolveBackground(product, ratio(), { ...ctx, campaignType: "paid-social" });
+    expect(generateImages.mock.calls[1][0].prompt).toBe(
+      'Premium social-advertising hero background for the subject "Hydra Bottle". Audience: Urban. Market/region: DE. Evoke the brand accent colour #1473E6. Cinematic, photographic, high production value, with clean negative space toward the bottom for a headline. Absolutely no text, words, letters, logos or watermarks in the image. Campaign type: paid social advertising across feeds, stories and reels.',
+    );
+  });
 });

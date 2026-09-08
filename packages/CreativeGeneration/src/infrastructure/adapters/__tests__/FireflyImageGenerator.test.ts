@@ -160,4 +160,27 @@ describe("FireflyImageGenerator", () => {
     expect((await generator.resolveBackground(product, ratio(), ctx)).source).toBe("firefly");
     expect(imsCalls()).toBe(2);
   });
+
+  test("pins the prompt shape, including the campaign-type sentence", async () => {
+    wire();
+    const promptOf = (): string => {
+      const generateCall = fetchMock.mock.calls.find((call: unknown[]) => String(call[0]).includes("firefly-api"));
+      return JSON.parse((generateCall![1] as RequestInit).body as string).prompt as string;
+    };
+
+    await new FireflyImageGenerator(creds).resolveBackground(product, ratio(), ctx);
+    expect(promptOf()).toBe(
+      'Premium social-advertising hero background for the subject "Hydra Bottle". Audience: Urban. Market/region: DE. Evoke the brand accent colour #1473E6. Cinematic, photographic, high production value, with clean negative space toward the bottom for a headline. Absolutely no text, words, letters, logos or watermarks in the image. Campaign type: a social post for organic feeds.',
+    );
+
+    fetchMock.mockClear();
+    wire();
+    await new FireflyImageGenerator(creds).resolveBackground(product, ratio(), {
+      ...ctx,
+      campaignType: "paid-social",
+    });
+    expect(promptOf()).toBe(
+      'Premium social-advertising hero background for the subject "Hydra Bottle". Audience: Urban. Market/region: DE. Evoke the brand accent colour #1473E6. Cinematic, photographic, high production value, with clean negative space toward the bottom for a headline. Absolutely no text, words, letters, logos or watermarks in the image. Campaign type: paid social advertising across feeds, stories and reels.',
+    );
+  });
 });
