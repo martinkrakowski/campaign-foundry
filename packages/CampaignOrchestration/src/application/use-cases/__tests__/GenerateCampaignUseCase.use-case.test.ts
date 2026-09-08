@@ -1158,3 +1158,23 @@ describe("GenerateCampaignUseCase — safe insets at generation (D11)", () => {
     expect(d.videoCompositor.compositeVideo).not.toHaveBeenCalled();
   });
 });
+
+describe("GenerateCampaignUseCase — campaign type in background context (T4)", () => {
+  test("classic path (site 1) passes brief.type into the image generator context", async () => {
+    const d = deps();
+    const result = await new GenerateCampaignUseCase(d).execute(baseBrief({ type: "short-video" }));
+    expect(result.success).toBe(true);
+    const ctx = vi.mocked(d.imageGenerator.resolveBackground).mock.calls[0][2];
+    expect(ctx.campaignType).toBe("short-video");
+  });
+
+  test("variation path (site 2) passes brief.type into the image generator context", async () => {
+    const d = deps({
+      planner: fakePlanner(fakePlan([fakeVariant({ backgroundSource: "genai" })])),
+    });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief({ type: "short-video" }));
+    expect(result.success).toBe(true);
+    const ctx = vi.mocked(d.imageGenerator.resolveBackground).mock.calls[0][2];
+    expect(ctx.campaignType).toBe("short-video");
+  });
+});

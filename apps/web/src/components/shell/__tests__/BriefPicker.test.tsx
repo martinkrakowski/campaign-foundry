@@ -10,6 +10,7 @@ import { EMPTY_REPORT, json, mockPipelineApi, nextMock, renderWithRun as renderW
 import * as messages from "@/components/campaign/messages";
 import { BriefPicker } from "../BriefPicker";
 import { CreateCampaignDialog } from "../CreateCampaignDialog";
+import { typeDisplayName } from "@/components/campaign/display-names";
 
 /**
  * W1: the picker and the create dialog are shell overlays mounted side by side in
@@ -223,5 +224,32 @@ describe("BriefPicker create / duplicate", () => {
     expect(await screen.findByText(/already exists/)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByLabelText("New brief id")).toBeNull();
+  });
+});
+
+describe("BriefPicker type chip (T4)", () => {
+  test("a brief without type shows Social post, never the raw id", async () => {
+    route({
+      briefs: [{ file: "organic.yaml", brief: { id: "organic", targetRegion: "DE", products: [{ id: "a" }] } }],
+    });
+    renderWithRun(<BriefPicker />);
+    await screen.findByText("organic.yaml");
+    expect(screen.getByText(typeDisplayName("social-post"))).toBeTruthy();
+    expect(screen.queryByText("social-post")).toBeNull();
+  });
+
+  test("a short-video brief shows the type display name, never the raw id", async () => {
+    route({
+      briefs: [
+        {
+          file: "reel.yaml",
+          brief: { id: "reel", type: "short-video", targetRegion: "DE", products: [{ id: "a" }] },
+        },
+      ],
+    });
+    renderWithRun(<BriefPicker />);
+    await screen.findByText("reel.yaml");
+    expect(screen.getByText(typeDisplayName("short-video"))).toBeTruthy();
+    expect(screen.queryByText("short-video")).toBeNull();
   });
 });

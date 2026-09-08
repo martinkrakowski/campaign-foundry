@@ -30,3 +30,19 @@ export const CAMPAIGN_TYPE_PRESETS: Readonly<Record<CampaignType, CampaignTypePr
   // Motion only — every short-video platform is a 9:16 motion profile, and the API refuses motion under classic mode (D110), so the mode must be variation or the type mints campaigns that never run.
   "short-video":  { platforms: ["instagram-story", "instagram-reel", "tiktok", "youtube-short"], formats: ["motion"], mode: "variation" },
 };
+
+/**
+ * One phrase per type, interpolated into every generator prompt (F5 / T4).
+ * Prompt text, not UI copy — the adapters share this table so the sentence
+ * cannot drift. Absent `type` uses the default, so prompts change once.
+ */
+export const CAMPAIGN_TYPE_PROMPT_HINTS: Readonly<Record<CampaignType, string>> = {
+  "social-post": "a social post for organic feeds",
+  "paid-social": "paid social advertising across feeds, stories and reels",
+  "short-video": "short-form video for social feeds",
+};
+
+/** The sentence every generator appends. Always present; absent type → social-post. */
+export function campaignTypePromptSentence(type?: CampaignType): string {
+  return `Campaign type: ${CAMPAIGN_TYPE_PROMPT_HINTS[type ?? DEFAULT_CAMPAIGN_TYPE]}.`;
+}

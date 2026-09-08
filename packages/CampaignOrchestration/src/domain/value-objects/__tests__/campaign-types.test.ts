@@ -2,7 +2,9 @@ import { describe, test, expect } from "vitest";
 import {
   CAMPAIGN_TYPES,
   CAMPAIGN_TYPE_PRESETS,
+  CAMPAIGN_TYPE_PROMPT_HINTS,
   DEFAULT_CAMPAIGN_TYPE,
+  campaignTypePromptSentence,
   type CampaignType,
 } from "../campaign-types.js";
 
@@ -60,5 +62,27 @@ describe("campaign types (D108–D112)", () => {
   test("the union is compile-locked: a fourth type is a type error until added", () => {
     const names: readonly CampaignType[] = CAMPAIGN_TYPES;
     expect(names).toHaveLength(3);
+  });
+
+  test("each type has a distinct prompt hint; short-video is not the social-post phrase", () => {
+    expect(Object.keys(CAMPAIGN_TYPE_PROMPT_HINTS).sort()).toEqual([...CAMPAIGN_TYPES].sort());
+    expect(CAMPAIGN_TYPE_PROMPT_HINTS["social-post"]).toBe("a social post for organic feeds");
+    expect(CAMPAIGN_TYPE_PROMPT_HINTS["paid-social"]).toBe(
+      "paid social advertising across feeds, stories and reels",
+    );
+    expect(CAMPAIGN_TYPE_PROMPT_HINTS["short-video"]).toBe("short-form video for social feeds");
+    expect(CAMPAIGN_TYPE_PROMPT_HINTS["short-video"]).not.toBe(CAMPAIGN_TYPE_PROMPT_HINTS["social-post"]);
+    expect(CAMPAIGN_TYPE_PROMPT_HINTS["paid-social"]).not.toBe(CAMPAIGN_TYPE_PROMPT_HINTS["social-post"]);
+  });
+
+  test("absent type uses the social-post prompt sentence", () => {
+    expect(campaignTypePromptSentence(undefined)).toBe(campaignTypePromptSentence(DEFAULT_CAMPAIGN_TYPE));
+    expect(campaignTypePromptSentence(undefined)).toBe("Campaign type: a social post for organic feeds.");
+    expect(campaignTypePromptSentence("paid-social")).toBe(
+      "Campaign type: paid social advertising across feeds, stories and reels.",
+    );
+    expect(campaignTypePromptSentence("short-video")).toBe(
+      "Campaign type: short-form video for social feeds.",
+    );
   });
 });
