@@ -3797,3 +3797,4 @@ follow-up: hit-test by the smallest containing footprint, independent of paint o
 - **Gate:** `yarn build && yarn typecheck && yarn lint && yarn lint:arch` (compliant) && `yarn test:cov` — 196 files / 3308 tests, **Statements 100% · Branches 100% · Functions 100% · Lines 100%**. `sync:check` after commit.
 - **Left open:**
   - RTL `act()` still flushes the map before `render()` returns, so isolated-file wall time only dropped ~2s. The CI win is first paint no longer blocking waitFor under contention; if #229/#230-class timeouts persist, the next lever is deferring past `act` (not a stub).
+- **Round 2:** stubbed `WorldMap` in `brief-editor.test.tsx` (no product change); medians 27.90s (pre-#225 `4546bfb`) / 49.31s (before) / 25.22s (after). Mutation: delete `vi.mock` → stub assertion fails, 57.24s. `kit-boundaries.test.ts` green.
