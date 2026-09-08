@@ -1,6 +1,6 @@
 import { useLayoutEffect } from "react";
-import { describe, test, expect, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, test, expect, afterEach, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { IdentitySection } from "../IdentitySection";
 import { editorReducer, initialEditorState, type EditorAction, type EditorState } from "../../editor-state";
@@ -44,6 +44,11 @@ const renderWithReducer = (initial: EditorState) => {
  * control: the map's SVG is aria-hidden and adds no focusable element.
  */
 describe("IdentitySection — the world map", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
   test("clicking a footprint sets the region exactly as its chip does — the two are one control", async () => {
     const { dispatch, container } = renderWithReducer(state());
 
@@ -183,5 +188,49 @@ describe("IdentitySection — the world map", () => {
 
     await screen.findByText(messages.worldMapFallbackHint);
     expect(container.querySelector('[data-region="EU"]')).not.toBeNull();
+  });
+
+  /**
+   * BriefEditor spends the create seed in a layout effect; those dispatches
+   * flush pending passive effects before paint. Flipping `mapReady` in the
+   * mount effect's body would still build the map on the first frame.
+   */
+  test("the map is absent after render and after a synchronous patch; it appears only after the frame", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      (cb: (time: number) => void) => setTimeout(() => cb(0), 0) as unknown as number,
+    );
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+      clearTimeout(id);
+    });
+
+    const { dispatch, container } = renderWithReducer(state());
+
+    expect(container.querySelector("[data-region]")).toBeNull();
+    expect(screen.getByRole("button", { name: "EU" })).toBeTruthy();
+
+    act(() => {
+      dispatch({ type: "patch", patch: { campaignName: "Summer" } });
+    });
+    expect(container.querySelector("[data-region]")).toBeNull();
+
+    act(() => {
+      vi.runOnlyPendingTimers();
+    });
+    expect(container.querySelector('[data-region="EU"]')).not.toBeNull();
+  });
+
+  test("without requestAnimationFrame the map appears on a zero-delay timer", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("requestAnimationFrame", undefined);
+
+    const { container } = render(<IdentitySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    expect(container.querySelector("[data-region]")).toBeNull();
+
+    act(() => {
+      vi.runOnlyPendingTimers();
+    });
+    expect(container.querySelector("[data-region]")).not.toBeNull();
   });
 });
