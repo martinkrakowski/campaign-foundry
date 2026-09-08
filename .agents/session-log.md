@@ -4366,3 +4366,49 @@ Refuted, as existing contract: `PlatformCard` announces `profile.id` for the soc
 - **Vocabulary-adjacent pins updated deliberately:** T1's vocabulary/table tests, T2's out-of-vocab draft and `takeSeed` fixtures (now `banner`), load-brief's type-refusal message expectations (the message names the live vocabulary).
 - **Gate:** 100 % × 4 (3610 tests, 209 files); lint:arch and sync:check clean.
 - **Plan closed** — `2026-09-07_display-advertising.md`: A0 #244 (linux-x64 inset goldens), A1 #243 (the size family + CanvasSpec), A2 #246 (type by short side, goldens byte-identical), A3 #248 (display profiles + per-size insets), A4 #249 (the kit resolves the union), A4b #251 (the run path honours sizes — the lane the plan lacked), A5 #252 (this PR: the create option, proven end to end). Deferred rows (HTML5/video display, responsive units, non-IAB sizes) remain open under D118 and §5.
+
+## 2026-09-08 — Display advertising: the plan closed (A4b #251, A5 #252)
+
+**Mode:** Orchestrator. Record written at merge time (stage 6). Every lane of
+`2026-09-07_display-advertising.md` (D113–D118) plus the one it lacked is on `main`.
+
+| Lane | PR | Commit | What |
+|---|---|---|---|
+| A4b | #251 | `03c208a` | **the run path honours `output.sizes`** — generate enumerates `CanvasSpec`s (social ratios plus every requested size), assets carry their canvas, packaging matches display profiles by size and fails loudly on nothing. Not in the plan; found by review of A3. |
+| A5 | #252 | `0b46688` | `display-ad` joins `CAMPAIGN_TYPES` last (D117), over the three display profiles, static, classic; the fourth tile in the create dialog; proven end to end against the API — parse, generate a display cell, package a non-empty manifest |
+
+### The arc, in one table
+
+| Wave | Lanes | PRs | What it bought |
+|---|---|---|---|
+| 1 | A0, A1 | #244, #243 | the golden tripwire trips where CI runs; the second ratio family and one resolver |
+| 2 | A2 | #246 | readable type on a 90 px canvas, no social pixel moved (the owner's split-by-family decision) |
+| 3 | A3, A4 | #248, #249 | somewhere to send a display campaign; previews that tell the truth about a leaderboard |
+| 3b | A4b | #251 | the run path — the lane the plan did not have |
+| 4 | A5 | #252 | the create option, once it could not dead-end |
+
+### What this plan taught
+
+- **Take the redesign decision before the lane can hit it.** A2's §2.1 wall was visible from
+  arithmetic on `fitText`; the owner chose split-by-family before a lane was dispatched.
+- **A "runs end to end" DoD needs a lane that owns the run path.** A3's review found generate
+  iterating the social ratios and packaging matching on `aspectRatio`; A4b was added before A5, as
+  D117 requires.
+- **Verification follows signal** (owner, 2026-09-08): Qodo found the run-path gap and the
+  widened sizes; PR-Agent's runtime claims were disproved by the gate; one mutation per PR with
+  its diff shown first; model reviews only where rendering or the kit changed.
+- **Seats:** grok-4.6 implemented A0–A4 first try and then ran out of credit mid-wave (402);
+  glm-5.3-flash finished the fix rounds, A4b and A5 under the five-minute silence rule.
+
+### Deferred, stated by the lanes
+
+- **A4b:** the variation planner's estimate route (`plan.post.ts`, `PlanEstimate`) still counts
+  ratio slots; rendering display cells in variation mode needs planner/re-roll semantics decided
+  above a lane. Display is classic and static (D118), so that route never sees a display brief.
+- **A4b's regenerate validator** accepted an entry carrying both canvases and did not check `size`
+  against the vocabulary (PR-Agent, confirmed against the code — the one PR-Agent finding this
+  plan acted on); fixed in the round.
+
+
+**Next:** nothing dispatched. The deferred rows in §5 of the plan (rich-media/video display,
+D118) remain deferred.
