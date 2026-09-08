@@ -3955,3 +3955,19 @@ merge unless the named test is the one that failed* — earned its keep twice to
 
 **Next:** P1 (`packages/ui`) alone; the wave-status close-out when #232 and #238 land; then the
 display-advertising plan awaits the owner's go.
+
+---
+
+## 2026-09-07 — P1 packages/ui (D100)
+
+- **Mode:** Implementer
+- **Changes:**
+  - New workspace package `@campaignfoundry/ui` (`packages/ui`). Domain-free kit files `git mv`'d from `apps/web/src/components/ui`. Four allowlisted files stay (`section-outline`, `confirm-dialog`, `seg-bar`, `theme-toggle`). Web barrel re-exports the package so the 43 `@/components/ui` importers are unchanged.
+  - `lib/cn.ts` stays in apps/web (campaign/shell still use it); a copy lives at `packages/ui/src/cn.ts`. Deep-import shims at the old paths for `card`, `dialog-shell`, `preview-layers`, `swatch-picker`.
+  - Five config surfaces: `transpilePackages`, Tailwind `content` glob, vitest web `include` + coverage `include`, `global_whitelist`, presentation layer in `layer-rules.yaml` + `layout.yaml` `contexts.ui`. `ui` added as a hexagen bounded context with empty hexagonal layers so it sits inside `lint:arch`.
+- **Decisions:**
+  - Presentation layer, not an exemption: an exemption is the same as being outside the gate. `allowed_imports` is `@campaignfoundry/shared` only; existing CampaignOrchestration/Distribution value-object imports are the kit's current contract (`depends_on`). Hexagen sync does not own the kit barrel (it only walks `src/{domain,application,infrastructure}`; `src/index.ts` is hand-written and skipped).
+  - `kit-boundaries.test.ts` scans both directories. Path-only rewrites in `border-control` / `dialog-shell` tests so `packages/ui` contains no `"@/` imports.
+- **Mutations:** add `import * as m from "@/components/campaign/messages"` to `packages/ui/src/button.tsx` → kit-boundaries fails naming `button.tsx`. Reverted.
+- **Left open:**
+  - Untangling the four allowlisted files (each still needs its `messages` dependency inverted).

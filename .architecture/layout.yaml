@@ -3,3 +3,11 @@ layers:
   - domain
   - application
   - infrastructure
+  - presentation
+
+contexts:
+  ui:
+    root: packages/ui
+    layers:
+      presentation:
+        - src

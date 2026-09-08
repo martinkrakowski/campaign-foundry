@@ -1,8 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Button } from "@/components/ui/button";
-import { DialogShell, DialogHead, DialogBody, DialogFoot } from "@/components/ui/dialog-shell";
+import { Button, DialogShell, DialogHead, DialogBody, DialogFoot } from "@campaignfoundry/ui";
 import * as messages from "@/components/campaign/messages";
 
 export interface ConfirmDialogProps {

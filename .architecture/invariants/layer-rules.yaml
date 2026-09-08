@@ -17,3 +17,13 @@ layers:
   infrastructure:
     access_rule: "adapters"
     allowed_imports: ["domain", "application", "@campaignfoundry/shared"]
+
+  # D100 — the kit is a presentation package, not a hexagonal slice. Allowed
+  # imports are the shared kernel only so the kit stays domain-free of sibling
+  # features. Existing value-object imports from CampaignOrchestration /
+  # Distribution are granted by the ui context's depends_on (the kit's current
+  # contract; kit-boundaries already scopes them out). An exemption would have
+  # left packages/ui outside the gate.
+  presentation:
+    access_rule: "ui-kit"
+    allowed_imports: ["@campaignfoundry/shared"]
