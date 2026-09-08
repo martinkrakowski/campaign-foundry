@@ -20,6 +20,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      record_goldens:
+        description: "Record compositor PNG goldens (linux-x64 artifact). The CI job still runs."
+        type: boolean
+        default: false
 
 # One in-flight CI run per ref; a new push cancels the previous run.
 concurrency:
@@ -143,3 +148,12 @@ jobs:
             exit 1
           fi
           echo "Nitro route manifest is free of test files."
+
+  # Dispatch entry for record-goldens.yml: GitHub 404s a workflow_dispatch
+  # that is not on the default branch. This job is a no-op on push/PR.
+  record-goldens:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.record_goldens == 'true' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/record-goldens.yml
+    secrets: inherit
