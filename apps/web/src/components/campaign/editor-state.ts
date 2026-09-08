@@ -61,6 +61,7 @@ export {
   MIN_DWELL_SEC,
 };
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import { DISPLAY_SIZE_VALUES, type DisplaySize } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import { PLATFORM_PROFILES, isRatioProfile, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
 import { platformsToFormats, platformsToRatios, platformsToSizes } from "./derive";
 
@@ -301,6 +302,14 @@ export interface EditorState {
   formats: string[];
   platforms: string[];
   /**
+   * Authored display sizes. A brief may request a subset of a display profile's
+   * sizes (`["728x90"]` on `google-display`); that subset is state, not a
+   * derivation from the selected platforms. `togglePlatform` keeps it consistent
+   * (union on add, drop sizes no remaining display platform offers on remove).
+   * There is no `toggleSize` action this round — no UI asks for it yet.
+   */
+  readonly sizes: DisplaySize[];
+  /**
    * Whether the output block must be written even when it equals the absent-key
    * default (static × the static platforms): true when the loaded brief declared
    * `output`. A default-valued output that was never declared serialises as the
@@ -441,6 +450,7 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
     duration: [],
     formats: ["static"],
     platforms: [...STATIC_PLATFORMS],
+    sizes: [],
     outputExplicit: false,
     modeExplicit: false,
     typeExplicit: false,
@@ -459,6 +469,12 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
 function toggleOrdered<T>(list: readonly T[], value: T, order: readonly T[]): T[] {
   const next = list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
   return order.filter((item) => next.includes(item));
+}
+
+/** The union's canonical DISPLAY_SIZE_VALUES order — the tuple is the compile-time fact, so sort by it. */
+function orderedDisplaySizes(sizes: Iterable<DisplaySize>): DisplaySize[] {
+  const set = new Set(sizes);
+  return DISPLAY_SIZE_VALUES.filter((size) => set.has(size));
 }
 
 /** True when the selection is exactly the derived pair the absent axis produces. */
@@ -1002,6 +1018,18 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       const nextPlatforms = toggleOrdered(state.platforms, action.value, PLATFORM_ORDER);
       const nextFormats = state.formatsOverridden ? state.formats : platformsToFormats(nextPlatforms);
       const nextRatio = state.ratioOverridden ? state.variation.ratio : platformsToRatios(nextPlatforms);
+      // `sizes` is authored state, so a toggle edits it rather than re-deriving:
+      // adding a display platform contributes the sizes it offers that are not
+      // already present (the user's subset survives), removing one drops the
+      // sizes no remaining display platform offers. A social-only toggle touches
+      // nothing — both branches degenerate to the list that is already there.
+      const removing = state.platforms.includes(action.value);
+      const nextSizes = removing
+        ? state.sizes.filter((size) => platformsToSizes(nextPlatforms).includes(size))
+        : orderedDisplaySizes([
+            ...state.sizes,
+            ...(PLATFORM_PROFILES[action.value]?.sizes ?? []).map((slot) => slot.size),
+          ]);
 
       let motion = state.motion;
       let duration = state.duration;
@@ -1025,6 +1053,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         ...state,
         platforms: nextPlatforms,
         formats: nextFormats,
+        sizes: nextSizes,
         motion,
         duration,
         motionSeeded,
@@ -1218,7 +1247,12 @@ export function toBrief(state: EditorState): CampaignBrief {
   // only what the classic pipeline can actually render, while the draft keeps
   // the user's own list (a flip back to Randomized has it again, unchanged).
   const formats = serialisedFormats(state);
-  const sizes = platformsToSizes(state.platforms);
+  // Authored state, not a re-derivation: `fromBrief` restores a brief's size
+  // subset into `state.sizes`, and deriving from the platforms here would widen
+  // a `["728x90"]` request back to the profile's full list on every save — the
+  // round-trip the merge gate exists to protect. A selection with no display
+  // platform holds an empty list, so a social-only brief still emits no key.
+  const sizes = state.sizes;
   // `mode` and `output` are optional in CampaignBrief — absent means the classic
   // static pipeline, which is exactly what a fresh draft holds. Writing them
   // unconditionally grew every classic brief on save (and made a freshly loaded
@@ -1248,9 +1282,9 @@ export function toBrief(state: EditorState): CampaignBrief {
           output: {
             formats: [...formats],
             platforms: [...state.platforms],
-            // Display sizes are derived from the selected platforms the way
-            // formats are (D116); a social-only selection emits no key.
-            ...(sizes.length > 0 ? { sizes } : {}),
+            // The authored size subset (see above); a social-only selection
+            // holds none, so the key is omitted exactly as before (D116).
+            ...(sizes.length > 0 ? { sizes: [...sizes] } : {}),
           },
         }
       : {}),
@@ -1349,9 +1383,11 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
   const treatments = brief.treatments?.map((t) => ({ id: t.id, layout: t.layout, tone: t.tone })) ?? [];
   const formats = [...(brief.output?.formats ?? ["static"])];
   const platforms = [...(brief.output?.platforms ?? [...STATIC_PLATFORMS])];
-  // `output.sizes` is not a draft field of its own: it is derived from the
-  // selected display platforms on save (`platformsToSizes`), so restoring
-  // `platforms` is what reads the sizes back (D116).
+  // The brief's size subset is authored state (D116): absent means the union of
+  // the selected display profiles' sizes — the pre-state derivation, unchanged
+  // for social-only and un-narrowed briefs — while a present list (possibly a
+  // single `["728x90"]`) is restored verbatim, so a load→save round-trip
+  // preserves exactly what the file asked for.
   // Carry the persisted variation policy back into the draft. Defaulting these would
   // silently rewrite a randomized brief's policy the first time it was saved, even
   // though E1 renders no controls for them yet (they arrive in E2.2 / E2.3).
@@ -1360,6 +1396,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
   const num = (value: unknown): string => (typeof value === "number" ? String(value) : "");
   const coverage = variation?.coverage as { perProduct?: number; perRatio?: number } | undefined;
   const derivedFormats = platformsToFormats(platforms);
+  const sizes = brief.output?.sizes !== undefined ? [...brief.output.sizes] : platformsToSizes(platforms);
   // One comparison for both paths. This used to be an inline set test while the draft
   // path used `differsFrom`, so the same brief got a different verdict depending on
   // whether it arrived from disk or from a restored draft — and the load path, the one
@@ -1430,6 +1467,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
     duration: durationList,
     formats,
     platforms,
+    sizes,
     outputExplicit: brief.output !== undefined,
     modeExplicit: brief.mode === "brief",
     typeExplicit: brief.type === DEFAULT_CAMPAIGN_TYPE,
@@ -1751,6 +1789,12 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   const duration = list(raw.duration, initial.duration);
   const formats = list(raw.formats, initial.formats);
   const platforms = list(raw.platforms, initial.platforms);
+  // A draft saved before `sizes` became state wrote no field: the union of the
+  // selected display profiles' sizes is exactly what the old derivation would
+  // have serialised, so it is the default. A stored list is filtered to the
+  // vocabulary — `list` only proves it is an array, and a hand-edited entry is
+  // dropped rather than dereferenced or serialised — while a present list is
+  // otherwise believed, subset included.
   const normalizedTimeline = normalizeTimelineDraft(raw.timeline);
   const style = normalizeStyleDraft(raw.style);
 
@@ -1786,6 +1830,9 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     duration,
     formats,
     platforms,
+    sizes: list(raw.sizes, platformsToSizes(platforms)).filter((size) =>
+      (DISPLAY_SIZE_VALUES as readonly string[]).includes(size),
+    ),
     outputExplicit: raw.outputExplicit === true,
     // Unlike the flags below, `=== true` is right for a legacy draft: the mode itself
     // survives in `mode`, and losing the marker only omits a key whose absence means

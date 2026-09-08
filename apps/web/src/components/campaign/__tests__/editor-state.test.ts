@@ -2858,7 +2858,7 @@ describe("display platforms (D116)", () => {
     expect(serialised.output).not.toHaveProperty("sizes");
   });
 
-  test("fromBrief reads output.sizes back by restoring the display platforms that derive them", () => {
+  test("fromBrief restores a full size list verbatim", () => {
     const stored: CampaignBrief = savedBrief({
       output: {
         formats: ["static"],
@@ -2869,5 +2869,58 @@ describe("display platforms (D116)", () => {
     const loaded = fromBrief(stored, { file: "camp.yaml" });
     expect(loaded.platforms).toEqual(["google-display"]);
     expect(toBrief(loaded).output?.sizes).toEqual([...DISPLAY_SIZE_VALUES]);
+  });
+
+  test("a size subset survives the load→save round-trip verbatim", () => {
+    const stored: CampaignBrief = savedBrief({
+      output: {
+        formats: ["static"],
+        platforms: ["google-display"],
+        sizes: ["728x90"],
+      },
+    });
+    const loaded = fromBrief(stored, { file: "camp.yaml" });
+    expect(loaded.sizes).toEqual(["728x90"]);
+    // Deriving from the platforms again would widen the request back to all
+    // five — exactly the drift this round-trip exists to catch.
+    expect(toBrief(loaded).output?.sizes).toEqual(["728x90"]);
+  });
+
+  test("toggling a display platform off then on restores its full size list (a subset is not sticky)", () => {
+    const loaded = fromBrief(
+      savedBrief({ output: { formats: ["static"], platforms: ["google-display"], sizes: ["728x90"] } }),
+    );
+    const off = reduce(loaded, { type: "togglePlatform", value: "google-display" });
+    expect(off.sizes).toEqual([]);
+    const on = reduce(off, { type: "togglePlatform", value: "google-display" });
+    expect(on.sizes).toEqual([...DISPLAY_SIZE_VALUES]);
+    expect(toBrief(on).output?.sizes).toEqual([...DISPLAY_SIZE_VALUES]);
+  });
+
+  test("adding a second display platform contributes only the sizes not already present", () => {
+    const loaded = fromBrief(
+      savedBrief({ output: { formats: ["static"], platforms: ["google-display"], sizes: ["728x90"] } }),
+    );
+    const both = reduce(loaded, { type: "togglePlatform", value: "meta-audience-network" });
+    // meta offers 300x250 / 320x50 / 300x600; 728x90 was already authored —
+    // canonical order, no duplicates, and 160x600 stays absent (meta has it not).
+    expect(both.sizes).toEqual(["300x250", "728x90", "320x50", "300x600"]);
+  });
+
+  test("normalizeDraftState defaults sizes for drafts saved before the field existed", () => {
+    const raw = JSON.parse(JSON.stringify(initialEditorState())) as Record<string, unknown>;
+    delete raw.sizes;
+    raw.platforms = ["google-display"];
+    raw.formats = ["static"];
+    const restored = normalizeDraftState(raw);
+    expect(restored.sizes).toEqual([...DISPLAY_SIZE_VALUES]);
+  });
+
+  test("a draft's stored size list is filtered to the vocabulary, subset otherwise believed", () => {
+    const raw = JSON.parse(JSON.stringify(initialEditorState())) as Record<string, unknown>;
+    raw.platforms = ["google-display"];
+    raw.sizes = ["728x90", "999x999"];
+    const restored = normalizeDraftState(raw);
+    expect(restored.sizes).toEqual(["728x90"]);
   });
 });
