@@ -4096,3 +4096,40 @@ found the *tests* leaking instead — two moved test files reached back into `ap
 
 **Next:** the display-advertising plan (D113–D118) awaits the owner's go; nothing else is
 dispatched.
+
+---
+
+## 2026-09-07 — lane A1, the second ratio family (D113)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Lane A1 of the display-advertising plan (D113), PR #243 (`feat/a1-display-sizes` → `main`), not merged.
+  - `display-sizes.ts` (new): `DISPLAY_SIZES` / `DisplaySize` / `DISPLAY_SIZE_VALUES` — five IAB units
+    at exact pixels; `RATIO_VALUES` / `RATIO_DIMENSIONS` untouched.
+  - `aspect-ratios.ts` gains `CanvasSpec` and `resolveCanvas` — the only function that turns a spec
+    into pixels. `AspectRatio.create` / `all` read width/height through `resolveCanvas({ ratio })`.
+  - `CampaignBrief.output.sizes?` beside `formats`/`platforms` (D112 optional-with-default); `validateSizes`
+    in `load-brief.ts` beside `validateType` (structural in authoring mode too); `dumpBrief` round-trips
+    the nested field with no top-level key-order change.
+  - Grep test scans `packages/*/src` (excluding `aspect-ratios.ts` and tests). Web readers
+    (`ReviewStep`, `CreativePreview`, `PolicySection`, `LayoutSection`) are out of scope until A4.
+  - Route 400s on unknown size for `POST /campaigns/briefs`, `generate`, and `plan`.
+  - `./display-sizes` package export; value-objects barrel re-exports the new file.
+- **Decisions:**
+  - `DISPLAY_SIZE_VALUES` is `Object.keys(DISPLAY_SIZES)` asserted as the table-order tuple, so
+    deleting a unit from the table drops it from the vocabulary at runtime (mutation 2) without a
+    compile error on the production files.
+  - A1 does not change how anything renders. `NodeCanvasCompositor` and CreativeGeneration goldens
+    are untouched; A2 owns type scale.
+- **Mutation results** (all compiled, ran, and failed the named test; reverted after each):
+  M1 → `resolveCanvas` always returns `RATIO_DIMENSIONS["1:1"]` for ratios → 16:9 assertion failed.
+  M2 → delete `"160x600"` from `DISPLAY_SIZES` → table test and `validateSizes` vocabulary message
+  test failed.
+  M3 → skip the membership check → `["banner"]` throw test failed (did not throw).
+  M4 → `RATIO_DIMENSIONS["1:1"].width` in `AspectRatio.vo.ts` → grep test failed naming that file;
+  widening the exclusion to all files made the same mutant pass.
+- **Remediator (PR #243):** tuple written out; exclusive CanvasSpec; empty sizes rejected; `output.sizes` is `readonly DisplaySize[]`; Exhaustive lock; grep exclusion anchored to `/aspect-ratios.ts`.
+- **Left open:**
+  - A0 (linux-x64 inset goldens) runs concurrently and owns the golden fixtures/test/workflow.
+  - A2 needs this join point before `fitText` can size by the short side.
+  - `yarn sync:check` refuses a dirty tree — run it post-commit.

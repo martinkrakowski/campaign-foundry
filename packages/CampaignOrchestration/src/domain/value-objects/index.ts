@@ -9,6 +9,7 @@ export * from "./CopyPool.vo.js";
 export * from "./CopyTimeline.vo.js";
 export * from "./creative-geometry.js";
 export * from "./creative-style.js";
+export * from "./display-sizes.js";
 export * from "./LogEntry.vo.js";
 export * from "./MotionKind.vo.js";
 export * from "./palette-shift.js";

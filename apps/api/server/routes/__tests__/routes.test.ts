@@ -131,6 +131,14 @@ describe("POST /campaigns/generate", () => {
     expect(((await report.json()) as { assets: unknown[] }).assets).toHaveLength(6);
   });
 
+  test("rejects an unknown display size with 400 (D113)", async () => {
+    const res = await call(brief({ output: { sizes: ["banner"] } }));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(
+      /"output.sizes" must be one of "300x250", "728x90", "160x600", "320x50", "300x600"/,
+    );
+  });
+
   test("refuses a classic brief that requests motion — the reported bug: it rendered stills", async () => {
     setCapabilities({ motion: true });
     try {
