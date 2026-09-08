@@ -53,7 +53,7 @@ that has no schema version.
 
 | id | Decision | Why |
 |---|---|---|
-| **D119** | **Three levels, each a union-keyed domain constant.** `ADVERTISING_UNITS` (the placement family: `standard-web` first), `CREATIVE_TYPES` (the composition recipe: `image-text`, `image-html`, `video`), `LAYER_KINDS` (the atoms: `image`, `static-text`, `animated-text`, `html`, `video`, `logo`, `accent`, `shade`). | The repo already models every vocabulary this way — `RATIO_VALUES`, `DISPLAY_SIZES`, `CAMPAIGN_TYPES`, `MOTION_KINDS`, `LAYOUT_VALUES`. A fourth shape would be a second idiom for the same job, and the union key is what makes a fifth member a compile error rather than a runtime surprise. |
+| **D119** | **Three levels, each a union-keyed domain constant.** `ADVERTISING_UNITS` (the placement family: `standard-web` first), `CREATIVE_TYPES` (the composition recipe: `image-text`, `image-html`, `video`), `LAYER_KINDS` (the atoms: `image`, `fill`, `static-text`, `animated-text`, `html`, `video`, `logo`, `accent`, `shade` — `fill` is in the vocabulary from L1 and accepted by no creative type until L11 draws it, D131). | The repo already models every vocabulary this way — `RATIO_VALUES`, `DISPLAY_SIZES`, `CAMPAIGN_TYPES`, `MOTION_KINDS`, `LAYOUT_VALUES`. A fourth shape would be a second idiom for the same job, and the union key is what makes a fifth member a compile error rather than a runtime surprise. |
 | **D120** | **`CAMPAIGN_TYPES` is re-parented, not replaced, and every type names a default template.** A campaign type stays the create dialog's second field and becomes a preset over `{ unit, creativeType, template, platforms, formats, mode }`. `display-ad` → `standard-web` + `image-text` + the canonical `image-text` template; the three social types keep their platform sets and gain the unit they always implied. **Every campaign has a template** (owner, item 2): `brief.template` is required in the domain and **defaulted at load** from the type's preset, so a brief written before this plan parses unedited and is normalised once. A brief with **no `type`** resolves through D112 to `social-post` first, then to that type's default template — type before template, one rule each. | The type exists because the create dialog needs *one* question, not three (D108). Re-parenting keeps the dialog and makes the levels beneath it addressable. Defaulting at load rather than refusing is the `mode`/`type` precedent: the validator convention here is to refuse the *wrong* value, not the *absent* one that has a sensible default. |
 | **D121** | **The layer stack becomes data, and there is exactly one source of it.** A creative type declares an ordered layer list; the compositor draws that list; the kit's preview reads the same list; `CREATIVE_GEOMETRY` keeps the per-layer fractions. Today's five-layer stack becomes the canonical `image-text` template. | The order lives in three places now (compositor draw order, `preview-layers.ts` `LAYERS`, the geometry leaf) and they agree only because a human kept them in step. The moment a user reorders anything, "the preview shows what the compositor draws" (D26) is a promise no one can keep by hand. |
 | **D122** | **HTML is `format: "html"`, a third member beside `static` and `motion`.** An HTML creative assembles markup server-side, packages as an HTML unit, and **always carries a raster rendition** produced by the existing pipeline as its static fallback. Markup is never rasterised. | The alternative — a headless browser — buys one output family at the price of a heavy dependency and cross-platform pixel determinism, and this repo has just spent a lane proving that fonts rasterise differently on macOS and Linux. A fallback rendition is what every ad server wants anyway. |
@@ -64,7 +64,7 @@ that has no schema version.
 | **D127** | **`animated-text` is one layer kind, not three mechanisms.** Text already animates three ways — `CopyTimeline` beats, `MOTION_KINDS`, and the text-effect poses. The layer kind names the capability; its props select which mechanism drives it. Nothing new is animated in this plan. | The owner's list names "animated text" as an atom. The repo has the capability under three older names; adding a fourth without folding them in would be the third vocabulary for one behaviour. |
 | **D128** | **Array position is z-order.** A template's `layers` array is the draw order, bottom first; there is no separate `order` field. Reordering is a move in the array. Ordering *rules* ("logo above image", "shade directly above image") live in the compatibility table as `above`/`below` constraints on kinds. | One source (D121) or none. A second `order` field is the three-lists problem of F1 brought back inside one record. |
 | **D129** | **A layer can be disabled, unless it is required.** `enabled?: boolean` (default true) hides a layer without removing it. A layer the creative type marks **required** cannot be disabled *or* removed — the two are one rule in D124's table. | The owner's Photoshop analogy (item 4). "Required" has to mean something a brand can rely on: a logo the template requires is a logo that ships, not a logo that was merely present. |
-| **D130** | **A frame is canvas-relative, and overridable per canvas family.** `frame?: { x, y, w, h, anchor }` in fractions of the resolved canvas, with `byFamily?: { ratio?, size? }` partial overrides. Absent, the kind's default frame applies — and **the canonical templates' default frames are `CREATIVE_GEOMETRY`'s fractions verbatim**, which is the mechanism that keeps goldens unedited in L2. | Every campaign renders across ratios *and* sizes (D113). "Bottom half" is a statement at 1:1 that means nothing at 728×90. The display plan already took this exact shape for insets (per-size, split by family under D114); frames follow the precedent rather than invent one. |
+| **D130** | **A frame is canvas-relative, and overridable per canvas.** `frame?: { x, y, w, h, anchor }` in fractions of the resolved canvas, with `byFamily?: { ratio?: { [ratio]: … }, size?: { [size]: … } }` partial overrides keyed by the canvas — 728×90 and 160×600 need different answers to "bottom half", as the display profiles' per-size insets already show. Absent, the kind's default frame applies — and **the canonical templates' default frames are `CREATIVE_GEOMETRY`'s fractions verbatim**, which is the mechanism that keeps goldens unedited in L2. | Every campaign renders across ratios *and* sizes (D113). "Bottom half" is a statement at 1:1 that means nothing at 728×90. The display plan already took this exact shape for insets (per-size, split by family under D114); frames follow the precedent rather than invent one. |
 | **D131** | **`fill` is a layer kind, and it names a brand role, not a colour.** `fill: { role: "primary" \| "accent" \| "surface" \| … }` resolves through the brand palette at render. The owner's example — bottom half a solid colour under white text, top half an image — is `[image{frame: top½}, fill{frame: bottom½, role: primary}, static-text{frame: bottom½}, logo]`. | A template that hard-codes `#1a2b3c` is a template for one brand. A role makes the library reusable across brands, which is the library's reason to exist (D123). |
 | **D132** | **A generative layer takes a `region`, and the region drives generation as well as clipping.** `region?: { shape: "rect" \| "path", …in canvas fractions }` on `image` and `video` layers when their source is generative. The compositor clips to it; the generation request derives its aspect from the region's bounding box, not the canvas. Absent, the region is the full canvas — today's behaviour. | Filling a 1:2 region with a 1:1 generation and clipping wastes two thirds of the pixels and the subject with them. The region is one fact used twice, and it is a value on the layer, so it verifies structurally (D125). |
 | **D133** | **The brief gets a `schemaVersion` before it gets a `template`.** An integer, required at the boundary, defaulted at load for documents that predate it, with one normaliser per step. | The document is unversioned today and about to double in nesting. Every migration this plan implies — into a database or an object store — needs to know what shape it is reading. This is the cheapest decision in the table and the one that hurts most if taken late. |
@@ -135,7 +135,7 @@ first lane is vocabulary rather than capability.
 ```
 advertising unit   standard-web            (then: social, native, dooh…)
   creative type    image-text | image-html | video
-    layers         [ image, shade, accent, static-text | animated-text | html, logo, video ]
+    layers         [ image, fill, shade, accent, static-text | animated-text | html, logo, video ]
 ```
 
 An **advertising unit** owns *where a creative runs*: its placements, its canvases (`sizes` or
@@ -195,7 +195,8 @@ interface Layer {
 }
 // z-order is the array position (D128). There is no `order` field.
 interface Frame { x: number; y: number; w: number; h: number; anchor: Anchor;
-                  byFamily?: { ratio?: Partial<Frame>; size?: Partial<Frame> } }
+                  byFamily?: { ratio?: Partial<Record<AspectRatio, Partial<Frame>>>;
+                               size?: Partial<Record<DisplaySize, Partial<Frame>>> } }
 interface Region { shape: "rect" | "path"; rect?: Frame; path?: string /* normalised, canvas fractions */ }
 ```
 
@@ -263,7 +264,9 @@ also a record is two sources of truth with a race between them.
 **Why so little runs in parallel.** The first revision paired lanes that own the same file, which
 the orchestration skill names as a plan defect: L6 must widen `SUPPORTED_FORMATS` in
 `load-brief.ts`, which L4 owns; L8 edits the layer-list control L5 creates; L7 seeds templates
-typed against the `Layer` record L3 defines; L6's format panel lives in the sections L5 owns.
+typed against the `Layer` record L3 defines; L6 widens the *existing* `OutputSection.tsx`, which sits
+in the `campaign/sections/` directory L5 owns — a shared directory, not a dependency. L6 goes first
+so that when L5 offers the `html` layer, the format it implies can already be packaged.
 Each pair is now sequential. The one pair that is genuinely disjoint — L4 (vocabulary, validator,
 derive) beside L7 (a new port, adapter, routes and library page) — stays parallel.
 
@@ -289,8 +292,8 @@ confirmed to compile, run and fail the test it names.
   (`git diff --stat` empty).
 - **L2**: **the golden fixtures are untouched** and every social and display cell passes on both
   platforms; declared layer order equals drawn order, asserted structurally; the preview and the
-  compositor read one list (a test greps for a second); **the canonical templates' default frames
-  are `CREATIVE_GEOMETRY`'s fractions, asserted equal** — that equality is why the goldens hold.
+  compositor read one list (a test greps for a second). L2 has no `frame` field; the goldens hold
+  because the compositor still reads `CREATIVE_GEOMETRY` for geometry, exactly as today.
 - **L3**: a template round-trips through YAML and the editor verbatim — the `output.sizes` lesson:
   a subset the user chose comes back the subset they chose; a pre-template draft normalises.
 - **L4**: an incompatible layer set is refused at the API **and** unreachable in the editor, both
@@ -307,8 +310,10 @@ confirmed to compile, run and fail the test it names.
   offered in the editor; the preview after a legal move draws in the new order (structural).
 - **L9**: disabling a required layer is a 400 and a disabled control; a disabled optional layer is
   absent from the draw list and present in the document.
-- **L10**: **goldens unedited** with frames present and defaulted; a frame override under
-  `byFamily.size` applies at 300×250 and not at 1:1, asserted on both; clicking a layer in the
+- **L10**: **goldens unedited** with frames present and defaulted, because **the canonical templates'
+  default frames are `CREATIVE_GEOMETRY`'s fractions, asserted equal** — that equality is the
+  mechanism; a frame override under `byFamily.size["300x250"]` applies at 300×250 and not at 1:1
+  or 728×90, asserted on all three; clicking a layer in the
   preview selects it by smallest containing footprint (H2's test, reused).
 - **L11**: a `fill` layer resolves a brand role, never a literal; a generative `region` of 1:2 on a
   1:1 canvas requests a 1:2 generation (asserted at the port, with a fake adapter) and clips to the
