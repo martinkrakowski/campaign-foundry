@@ -4103,7 +4103,7 @@ dispatched.
 
 - **Mode:** Implementer
 - **Changes:**
-  - Lane A1 of the display-advertising plan (D113), branch `feat/a1-display-sizes` → `main`, not merged.
+  - Lane A1 of the display-advertising plan (D113), PR #243 (`feat/a1-display-sizes` → `main`), not merged.
   - `display-sizes.ts` (new): `DISPLAY_SIZES` / `DisplaySize` / `DISPLAY_SIZE_VALUES` — five IAB units
     at exact pixels; `RATIO_VALUES` / `RATIO_DIMENSIONS` untouched.
   - `aspect-ratios.ts` gains `CanvasSpec` and `resolveCanvas` — the only function that turns a spec
