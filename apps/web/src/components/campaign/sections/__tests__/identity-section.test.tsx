@@ -233,4 +233,70 @@ describe("IdentitySection — the world map", () => {
     });
     expect(container.querySelector("[data-region]")).not.toBeNull();
   });
+
+  /**
+   * The cancel on unmount is the thing coverage cannot see: a cleanup of
+   * `() => {}` still paints 100 %. Unmount before the frame/timer fires and
+   * the cancel must receive the id the request returned; advancing afterwards
+   * must not run `show`.
+   */
+  test("unmounting before the frame cancels it — show never fires", () => {
+    vi.useFakeTimers();
+    const show = vi.fn();
+    const requestAnimationFrame = vi.fn((cb: (time: number) => void) => {
+      return setTimeout(() => {
+        show();
+        cb(0);
+      }, 0) as unknown as number;
+    });
+    const cancelAnimationFrame = vi.fn((id: number) => {
+      clearTimeout(id);
+    });
+    vi.stubGlobal("requestAnimationFrame", requestAnimationFrame);
+    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+
+    const { unmount } = render(<IdentitySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
+    const frame = requestAnimationFrame.mock.results[0]?.value as number;
+
+    unmount();
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(frame);
+
+    act(() => {
+      vi.runOnlyPendingTimers();
+    });
+    expect(show).not.toHaveBeenCalled();
+  });
+
+  test("unmounting before the fallback timer cancels it — show never fires", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("requestAnimationFrame", undefined);
+
+    const show = vi.fn();
+    const fakeSetTimeout = globalThis.setTimeout.bind(globalThis);
+    const setTimeoutSpy = vi.fn((handler: TimerHandler, delay?: number, ...args: unknown[]) => {
+      if (typeof handler === "function" && delay === 0) {
+        return fakeSetTimeout(() => {
+          show();
+          (handler as () => void)();
+        }, delay);
+      }
+      return fakeSetTimeout(handler, delay, ...args);
+    });
+    vi.stubGlobal("setTimeout", setTimeoutSpy as unknown as typeof setTimeout);
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+
+    const { unmount } = render(<IdentitySection state={state()} dispatch={vi.fn()} errors={{}} />);
+    const zeroDelay = setTimeoutSpy.mock.calls.findIndex((call) => call[1] === 0);
+    expect(zeroDelay).toBeGreaterThanOrEqual(0);
+    const timer = setTimeoutSpy.mock.results[zeroDelay]?.value as ReturnType<typeof setTimeout>;
+
+    unmount();
+    expect(clearTimeoutSpy).toHaveBeenCalledWith(timer);
+
+    act(() => {
+      vi.runOnlyPendingTimers();
+    });
+    expect(show).not.toHaveBeenCalled();
+  });
 });
