@@ -1,9 +1,24 @@
 import { execFile } from "node:child_process";
-import { readdir as fsReaddir, readFile as fsReadFile, stat as fsStat } from "node:fs/promises";
+import { open as fsOpen, readdir as fsReaddir, readFile as fsReadFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readEvents } from "./events.js";
 import { mergeStatus } from "./merge.js";
 import type { LaneObservation, WaveEvent, WaveStatus } from "./types.js";
+
+/**
+ * A readable file opened for a ranged tail. `FileHandle` satisfies this;
+ * tests inject a counter so a whole-file read cannot hide.
+ */
+export interface TailHandle {
+  stat(): Promise<{ readonly size: number; readonly mtimeMs: number }>;
+  read(
+    buffer: Uint8Array,
+    offset: number,
+    length: number,
+    position: number,
+  ): Promise<{ bytesRead: number }>;
+  close(): Promise<void>;
+}
 
 /**
  * The process-facing side of collection. Everything impure is behind this
@@ -13,7 +28,7 @@ import type { LaneObservation, WaveEvent, WaveStatus } from "./types.js";
 export interface CollectDeps {
   readonly readdir: (dir: string) => Promise<readonly string[]>;
   readonly readFile: (path: string) => Promise<string>;
-  readonly stat: (path: string) => Promise<{ readonly size: number; readonly mtimeMs: number }>;
+  readonly open: (path: string) => Promise<TailHandle>;
   readonly pgrep: (pattern: string) => Promise<number>;
   readonly gh: (args: readonly string[]) => Promise<string>;
 }
@@ -22,7 +37,10 @@ export interface CollectDeps {
 export const WAVE_LOG_ROOT = "/tmp";
 
 /** How much of a lane log travels with the observation (the EXIT marker lives at the end). */
-const LOG_TAIL_BYTES = 16 * 1024;
+export const LOG_TAIL_BYTES = 16 * 1024;
+
+/** Public `?tail=` is in KB; anything above this is 400, not an unbounded read. */
+export const MAX_TAIL_KB = 1024;
 
 /** Prefixed families are pipeline artefacts, not lane logs. */
 const LANE_LOG_EXCLUDED = /^(install|gate|review|fix)-/;
@@ -44,12 +62,21 @@ export function waveIdFromDirName(name: string): string {
  * Walk the wave log tree and build the one `WaveStatus` the server renders.
  * Every external result is data: a failing read or CLI call shrinks the
  * observation (no log, no gate, no PR) — it never throws (D103, D106).
+ *
+ * `cachedPrByLane`, when provided, is reused as-is: a watcher-triggered
+ * refresh re-reads local state without waiting on `gh`. Omit it (or pass
+ * nothing) to fetch PR facts now — startup, the slow poll, on-demand.
  */
-export async function collect(deps: CollectDeps, root: string, now: string): Promise<WaveStatus> {
+export async function collect(
+  deps: CollectDeps,
+  root: string,
+  now: string,
+  cachedPrByLane?: Readonly<Record<string, LaneObservation["pr"]>>,
+): Promise<WaveStatus> {
   const events: WaveEvent[] = [];
   const observed: Record<string, LaneObservation> = {};
 
-  const prByLane = await prFacts(deps);
+  const prByLane = cachedPrByLane ?? (await prFacts(deps));
 
   let dirNames: readonly string[];
   try {
@@ -78,8 +105,8 @@ export async function collect(deps: CollectDeps, root: string, now: string): Pro
 
       let log: LaneObservation["log"];
       try {
-        const [text, st] = await Promise.all([deps.readFile(logPath), deps.stat(logPath)]);
-        log = { bytes: st.size, mtimeMs: st.mtimeMs, tail: text.slice(-LOG_TAIL_BYTES) };
+        const part = await readTail(deps.open, logPath, LOG_TAIL_BYTES);
+        log = { bytes: part.size, mtimeMs: part.mtimeMs, tail: part.tail.toString("utf8") };
       } catch {
         log = undefined;
       }
@@ -123,26 +150,52 @@ export async function collect(deps: CollectDeps, root: string, now: string): Pro
 }
 
 /**
- * One `gh pr list` per collection, plus check-runs for open heads, mapped to
- * lanes by branch name `feat/<lane>`. Any `gh` failure yields no PRs.
+ * Last `maxBytes` of `path`, via `open` + `read` at `max(0, size − N)`.
+ * Never reads the bytes before that window. The caller must not have the
+ * file open already — this opens, reads, and closes.
  */
-async function prFacts(deps: CollectDeps): Promise<Record<string, LaneObservation["pr"]>> {
+export async function readTail(
+  open: (path: string) => Promise<TailHandle>,
+  path: string,
+  maxBytes: number,
+): Promise<{ readonly size: number; readonly mtimeMs: number; readonly tail: Buffer }> {
+  const handle = await open(path);
+  try {
+    const st = await handle.stat();
+    const length = Math.min(Math.max(0, maxBytes), st.size);
+    const position = Math.max(0, st.size - length);
+    const buf = Buffer.alloc(length);
+    const { bytesRead } = await handle.read(buf, 0, length, position);
+    return { size: st.size, mtimeMs: st.mtimeMs, tail: buf.subarray(0, bytesRead) };
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * One `gh pr list` plus check-runs for open heads, mapped to lanes by
+ * branch name `feat/<lane>`. Any `gh` failure, or a well-formed body of the
+ * wrong shape, yields no PRs — never a throw.
+ */
+export async function prFacts(deps: CollectDeps): Promise<Record<string, LaneObservation["pr"]>> {
   const byLane: Record<string, LaneObservation["pr"]> = {};
 
-  let listed: readonly GhPrListEntry[];
+  let listed: readonly GhPrListEntry[] | undefined;
   try {
-    const out = await deps.gh([
-      "pr",
-      "list",
-      "--state",
-      "all",
-      "--json",
-      "number,state,headRefName,headRefOid",
-    ]);
-    listed = JSON.parse(out) as readonly GhPrListEntry[];
+    listed = parsePrList(
+      await deps.gh([
+        "pr",
+        "list",
+        "--state",
+        "all",
+        "--json",
+        "number,state,headRefName,headRefOid",
+      ]),
+    );
   } catch {
     return byLane;
   }
+  if (listed === undefined) return byLane;
 
   for (const entry of listed) {
     if (!entry.headRefName.startsWith(PR_BRANCH_PREFIX)) continue;
@@ -194,11 +247,49 @@ export function parseChecks(json: string): "none" | "pending" | "pass" | "fail" 
   return "pass";
 }
 
+/**
+ * `gh --json` is well-formed JSON of the wrong shape more often than it is
+ * truncated: an object, a scalar, an array of partial rows. Anything other
+ * than an array of `{number, state, headRefName, headRefOid}` is "no facts".
+ */
+function parsePrList(json: string): readonly GhPrListEntry[] | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parsed)) return undefined;
+  if (!parsed.every(isGhPrListEntry)) return undefined;
+  return parsed;
+}
+
+function isGhPrListEntry(value: unknown): value is GhPrListEntry {
+  if (typeof value !== "object" || value === null) return false;
+  const rec = value as Record<string, unknown>;
+  return (
+    typeof rec.number === "number" &&
+    typeof rec.state === "string" &&
+    typeof rec.headRefName === "string" &&
+    typeof rec.headRefOid === "string"
+  );
+}
+
 /** The deps the real server runs with: the actual filesystem, `pgrep` and `gh`. */
 export const realDeps: CollectDeps = {
   readdir: (dir) => fsReaddir(dir),
   readFile: (path) => fsReadFile(path, "utf8"),
-  stat: (path) => fsStat(path).then((st) => ({ size: st.size, mtimeMs: st.mtimeMs })),
+  open: async (path) => {
+    const fh = await fsOpen(path, "r");
+    return {
+      stat: async () => {
+        const st = await fh.stat();
+        return { size: st.size, mtimeMs: st.mtimeMs };
+      },
+      read: (buffer, offset, length, position) => fh.read(buffer, offset, length, position),
+      close: () => fh.close(),
+    };
+  },
   pgrep: (pattern) =>
     new Promise((resolve, reject) => {
       // pgrep exits 1 when nothing matched — that is a count of zero, not a failure.

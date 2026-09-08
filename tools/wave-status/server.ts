@@ -3,8 +3,17 @@ import { watch as fsWatch, type FSWatcher } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { collect, realDeps, waveIdFromDirName } from "./lib/collect.js";
-import type { WaveStatus } from "./lib/types.js";
+import {
+  collect,
+  MAX_TAIL_KB,
+  prFacts,
+  readTail,
+  realDeps,
+  waveIdFromDirName,
+  type CollectDeps,
+  type TailHandle,
+} from "./lib/collect.js";
+import type { LaneObservation, WaveStatus } from "./lib/types.js";
 
 const DEFAULT_PORT = 4317;
 const DEFAULT_TAIL_KB = 16;
@@ -75,6 +84,11 @@ export interface StartOptions {
   readonly root: string;
   /** Collection is injected so tests never shell out to `gh`. */
   readonly collect?: (now: string) => Promise<WaveStatus>;
+  /**
+   * Process-facing deps for the default collector and for log tails.
+   * Tests inject `gh` (and wrap `open`) here; `collect` still wins when set.
+   */
+  readonly deps?: CollectDeps;
   /** The slow poll that catches `gh`-only changes; `fs.watch` covers the rest. */
   readonly pollMs?: number;
   /** Overridable so tests can point at a missing page. */
@@ -96,7 +110,7 @@ export interface ServerHandle {
  * whenever the collected status actually changes.
  */
 export async function startServer(options: StartOptions): Promise<ServerHandle> {
-  const collectStatus = options.collect ?? ((now: string) => collect(realDeps, options.root, now));
+  const deps = options.deps ?? realDeps;
   const indexHtmlPath =
     options.indexHtmlPath ?? fileURLToPath(new URL("./public/index.html", import.meta.url));
   const watchPath = options.watch ?? ((path, listener) => fsWatch(path, listener));
@@ -108,10 +122,25 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
   let lastComparable: string | undefined;
   let refreshRunning = false;
   let refreshQueued = false;
+  let queuedRefreshPr = false;
+  let prCache: Readonly<Record<string, LaneObservation["pr"]>> = {};
 
-  const refresh = async (): Promise<void> => {
+  /**
+   * Startup, the 15 s poll, and on-demand `/api/status` refresh PR facts.
+   * A watcher-triggered refresh reuses `prCache` and re-reads local state only.
+   */
+  const collectNow = async (refreshPr: boolean): Promise<WaveStatus> => {
+    const now = new Date().toISOString();
+    if (options.collect !== undefined) return options.collect(now);
+    if (refreshPr) {
+      prCache = await prFacts(deps);
+    }
+    return collect(deps, options.root, now, prCache);
+  };
+
+  const refresh = async (refreshPr: boolean): Promise<void> => {
     try {
-      const status = await collectStatus(new Date().toISOString());
+      const status = await collectNow(refreshPr);
       const json = JSON.stringify(status);
       // generatedAt changes on every collection; it is not a change.
       const comparable = JSON.stringify({ ...status, generatedAt: "" });
@@ -125,17 +154,20 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
   };
 
   /** Coalesce overlapping watch/poll ticks so a change during an in-flight collect is not dropped. */
-  const requestRefresh = (): void => {
+  const requestRefresh = (refreshPr: boolean): void => {
     if (refreshRunning) {
       refreshQueued = true;
+      queuedRefreshPr = queuedRefreshPr || refreshPr;
       return;
     }
     refreshRunning = true;
-    void refresh().finally(() => {
+    void refresh(refreshPr).finally(() => {
       refreshRunning = false;
       if (refreshQueued) {
         refreshQueued = false;
-        requestRefresh();
+        const nextPr = queuedRefreshPr;
+        queuedRefreshPr = false;
+        requestRefresh(nextPr);
       }
     });
   };
@@ -146,7 +178,7 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
       for (const name of names) {
         if (!name.startsWith("wave") || watched.has(name)) continue;
         watched.add(name);
-        watchers.push(watchPath(join(options.root, name), requestRefresh));
+        watchers.push(watchPath(join(options.root, name), () => requestRefresh(false)));
       }
     } catch {
       // No wave directories (yet); the poll picks them up.
@@ -177,9 +209,15 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
       return;
     }
     if (route.kind === "status") {
-      const status = await collectStatus(new Date().toISOString());
-      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(status));
+      try {
+        const status = await collectNow(true);
+        const json = JSON.stringify(status);
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(json);
+      } catch {
+        res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+        res.end("internal error");
+      }
       return;
     }
     if (route.kind === "stream") {
@@ -193,13 +231,13 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
       res.on("close", () => clients.delete(res));
       return;
     }
-    await serveLog(res, options.root, route.wave, route.lane, route.search);
+    await serveLog(res, options.root, route.wave, route.lane, route.search, deps.open);
   };
 
-  await refresh();
+  await refresh(true);
   await syncWatchers();
   const timer = setInterval(() => {
-    requestRefresh();
+    requestRefresh(true);
     void syncWatchers();
   }, options.pollMs ?? DEFAULT_POLL_MS);
   timer.unref();
@@ -239,7 +277,14 @@ async function serveLog(
   wave: string,
   lane: string,
   search: URLSearchParams,
+  open: (path: string) => Promise<TailHandle>,
 ): Promise<void> {
+  const kb = tailKb(search.get("tail"));
+  if (kb === undefined) {
+    res.writeHead(400);
+    res.end();
+    return;
+  }
   const logPath = await resolveLogPath(root, wave, lane);
   if (logPath === undefined) {
     res.writeHead(404);
@@ -247,11 +292,9 @@ async function serveLog(
     return;
   }
   try {
-    const buf = await readFile(logPath);
-    const bytes = tailKb(search.get("tail")) * 1024;
-    const sliced = buf.length > bytes ? buf.subarray(buf.length - bytes) : buf;
+    const part = await readTail(open, logPath, kb * 1024);
     res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
-    res.end(sliced);
+    res.end(part.tail);
   } catch {
     res.writeHead(404);
     res.end();
@@ -274,10 +317,11 @@ async function resolveLogPath(
   return dir === undefined ? undefined : join(root, dir, `${lane}.log`);
 }
 
-function tailKb(raw: string | null): number {
+function tailKb(raw: string | null): number | undefined {
   if (raw === null) return DEFAULT_TAIL_KB;
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < 1) return DEFAULT_TAIL_KB;
+  if (parsed > MAX_TAIL_KB) return undefined;
   return parsed;
 }
 

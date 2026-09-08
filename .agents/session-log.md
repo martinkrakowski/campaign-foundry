@@ -3880,4 +3880,5 @@ the campaign-type wave-C record, the wave-status close-out, and P1 alone.
   - Do not merge from this lane. W3 owns emit / `scripts/wave-event.sh` / the skill.
   - Never bind 3000/3001; the server refuses them by construction.
 - **Remediation:** SSE contract is the injected watcher (real `fs.watch` smoke, `skipIf(CI)`, 10s); `typecheck` covers `tools/`; lane rows take Enter/Space; SSE poll does not stack; gate pick is by round; `s2`/`s2i` gate and pgrep are anchored; check-runs failure keeps the PR; findings cells use `esc()`.
+- **Remediation round 2:** `prFacts` treats a well-formed `gh` body of the wrong shape as no PR facts (never a throw) and `/api/status` answers 500 on a thrown collect; log tails use `open`/`read` at `size-N` with `?tail=` capped at 1024 KB (400 above); watcher refreshes reuse cached PR facts — only startup, the 15 s poll, and on-demand status call `gh`.
 

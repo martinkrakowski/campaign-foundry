@@ -12,6 +12,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolvePort, routeFor, startServer, type ServerHandle } from "../server.js";
+import { realDeps } from "../lib/collect.js";
 import type { WaveStatus } from "../lib/types.js";
 
 type ExecCallback = (error: Error | null, stdout: string) => void;
@@ -95,21 +96,41 @@ const statusAt = (version: number): WaveStatus => ({
   ],
 });
 
-function get(port: number, path: string, method = "GET"): Promise<{
+function get(
+  port: number,
+  path: string,
+  method = "GET",
+  timeoutMs = 2_000,
+): Promise<{
   status: number;
   headers: IncomingMessage["headers"];
   body: Buffer;
 }> {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const succeed = (value: { status: number; headers: IncomingMessage["headers"]; body: Buffer }) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
     const options: RequestOptions = { host: "127.0.0.1", port, path, method };
     const req = httpRequest(options, (res) => {
       const chunks: Buffer[] = [];
       res.on("data", (chunk) => chunks.push(chunk));
       res.on("end", () =>
-        resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) }),
+        succeed({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) }),
       );
     });
-    req.on("error", reject);
+    req.setTimeout(timeoutMs, () => {
+      req.destroy();
+      fail(new Error(`timed out after ${timeoutMs}ms waiting for ${method} ${path}`));
+    });
+    req.on("error", (error) => fail(error instanceof Error ? error : new Error(String(error))));
     req.end();
   });
 }
@@ -279,6 +300,21 @@ describe("the server over real HTTP", () => {
     expect(parsed.waves).toEqual(statusAt(0).waves);
   });
 
+  test("GET /api/status is 500 with a one-line body when collect throws", async () => {
+    const handle = await start({
+      port: 0,
+      root: await makeFixture(),
+      collect: async () => {
+        throw new Error("collect exploded");
+      },
+    });
+    const res = await get(handle.port, "/api/status", "GET", 1_000);
+    expect(res.status).toBe(500);
+    const body = res.body.toString("utf8");
+    expect(body).toBe("internal error");
+    expect(body.split("\n")).toHaveLength(1);
+  });
+
   test("POST /api/status is 405; DELETE on the log route is 405; unknown paths are 404", async () => {
     const handle = await start({
       port: 0,
@@ -302,6 +338,47 @@ describe("the server over real HTTP", () => {
     expect(res.headers["content-type"]).toContain("text/plain");
     expect(res.body.length).toBe(1024);
     expect(res.body.equals(whole.subarray(whole.length - 1024))).toBe(true);
+  });
+
+  test("a >1 MB log is tailed without reading the whole file; ?tail=99999 is 400", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wave-status-big-"));
+    roots.push(root);
+    await mkdir(join(root, "waveT"));
+    const payload = Buffer.concat([Buffer.alloc(1_500_000, 0x61), Buffer.from("TAILEND\n")]);
+    const logPath = join(root, "waveT", "t1.log");
+    await writeFile(logPath, payload);
+
+    let bytesRead = 0;
+    const handle = await start({
+      port: 0,
+      root,
+      collect: async () => statusAt(0),
+      deps: {
+        ...realDeps,
+        open: async (path) => {
+          const fh = await realDeps.open(path);
+          return {
+            stat: () => fh.stat(),
+            read: async (buffer, offset, length, position) => {
+              const result = await fh.read(buffer, offset, length, position);
+              if (path === logPath) bytesRead += result.bytesRead;
+              return result;
+            },
+            close: () => fh.close(),
+          };
+        },
+      },
+    });
+
+    const res = await get(handle.port, "/api/log/T/t1?tail=1");
+    expect(res.status).toBe(200);
+    expect(res.body.length).toBe(1024);
+    expect(res.body.equals(payload.subarray(payload.length - 1024))).toBe(true);
+    expect(bytesRead).toBe(1024);
+    expect(bytesRead).toBeLessThan(payload.length);
+
+    const capped = await get(handle.port, "/api/log/T/t1?tail=99999");
+    expect(capped.status).toBe(400);
   });
 
   test("a log smaller than the tail, a missing tail param and a bad tail param all work", async () => {
@@ -453,6 +530,85 @@ describe("the server over real HTTP", () => {
     } finally {
       response.destroy();
     }
+  });
+
+  test("after startup, a watch-triggered refresh calls gh zero times; the poll tick calls it once", async () => {
+    const root = await makeFixture();
+    const gh = vi.fn(async () => "[]");
+    const listeners: Array<() => void> = [];
+    const handle = await start({
+      port: 0,
+      root,
+      pollMs: 200,
+      deps: { ...realDeps, gh, pgrep: async () => 0 },
+      watch: (_path, listener) => {
+        listeners.push(listener);
+        return { close(): void { /* the test owns the lifetime */ } };
+      },
+    });
+
+    const afterStart = gh.mock.calls.length;
+    expect(afterStart).toBe(1);
+
+    listeners[0]?.();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(gh.mock.calls.length).toBe(afterStart);
+
+    const deadline = Date.now() + 2_000;
+    while (gh.mock.calls.length < afterStart + 1) {
+      if (Date.now() > deadline) {
+        throw new Error(
+          `timed out waiting for the poll tick to call gh; have ${gh.mock.calls.length}, want ${afterStart + 1}`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(gh.mock.calls.length).toBe(afterStart + 1);
+  });
+
+  test("a poll tick queued behind a watch still refreshes PR facts", async () => {
+    const root = await makeFixture();
+    const gh = vi.fn(async () => "[]");
+    let hang = false;
+    let gate = Promise.resolve();
+    let release = (): void => undefined;
+    const listeners: Array<() => void> = [];
+    await start({
+      port: 0,
+      root,
+      pollMs: 80,
+      deps: {
+        ...realDeps,
+        gh,
+        pgrep: async () => 0,
+        readdir: async (dir) => {
+          if (hang) await gate;
+          return realDeps.readdir(dir);
+        },
+      },
+      watch: (_path, listener) => {
+        listeners.push(listener);
+        return { close(): void { /* the test owns the lifetime */ } };
+      },
+    });
+
+    expect(gh.mock.calls.length).toBe(1);
+    gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    hang = true;
+    listeners[0]?.();
+    await new Promise((resolve) => setTimeout(resolve, 160));
+    expect(gh.mock.calls.length).toBe(1);
+    release();
+    const deadline = Date.now() + 2_000;
+    while (gh.mock.calls.length < 2) {
+      if (Date.now() > deadline) {
+        throw new Error(`poll queued behind watch never called gh; have ${gh.mock.calls.length}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(gh.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
   test("/api/stream stays quiet while nothing changed or collection fails, then the poll pushes", async () => {

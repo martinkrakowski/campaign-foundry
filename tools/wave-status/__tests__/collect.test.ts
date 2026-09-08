@@ -3,8 +3,8 @@ import { describe, test, expect, vi, type Mock } from "vitest";
 vi.mock("node:child_process", () => ({ execFile: vi.fn() }));
 
 import { execFile } from "node:child_process";
-import { collect, parseChecks, realDeps, waveIdFromDirName } from "../lib/collect.js";
-import type { CollectDeps } from "../lib/collect.js";
+import { collect, LOG_TAIL_BYTES, parseChecks, realDeps, waveIdFromDirName } from "../lib/collect.js";
+import type { CollectDeps, TailHandle } from "../lib/collect.js";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,13 +34,35 @@ function fakeDeps({ dirs = {}, files = {}, pgrep = async () => 0, gh = async () 
       if (text === undefined) throw new Error(`ENOENT: readFile ${path}`);
       return text;
     },
-    stat: async (path) => {
+    open: async (path) => {
       const text = files[path];
-      if (text === undefined) throw new Error(`ENOENT: stat ${path}`);
-      return { size: text.length, mtimeMs: 1_000 };
+      if (text === undefined) throw new Error(`ENOENT: open ${path}`);
+      const data = Buffer.from(text, "utf8");
+      return memoryHandle(data);
     },
     pgrep,
     gh,
+  };
+}
+
+function memoryHandle(data: Buffer): TailHandle {
+  return {
+    async stat() {
+      return { size: data.length, mtimeMs: 1_000 };
+    },
+    async read(buffer, offset, length, position) {
+      const n = Math.max(0, Math.min(length, data.length - position));
+      if (n > 0) {
+        new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength).set(
+          data.subarray(position, position + n),
+          offset,
+        );
+      }
+      return { bytesRead: n };
+    },
+    async close() {
+      /* in-memory handle */
+    },
   };
 }
 
@@ -200,6 +222,18 @@ describe("collect", () => {
     expect(seen).toEqual(["wt-s2(/|$| )"]);
   });
 
+  test("cached PR facts are reused and gh is not called", async () => {
+    const gh = vi.fn(async () => {
+      throw new Error("gh should not run on a cached collect");
+    });
+    const status = await collect(fakeDeps({ ...TREE, gh }), ROOT, "now", {
+      t1: { number: 7, state: "open", checks: "pass" },
+    });
+    expect(gh).not.toHaveBeenCalled();
+    expect(status.waves[0]?.lanes[0]?.derived.pr).toEqual({ number: 7, state: "open", checks: "pass" });
+    expect(status.waves[1]?.lanes[0]?.derived.pr).toBeUndefined();
+  });
+
   test("a failing gh yields the same rows with pr absent, never a throw", async () => {
     const status = await collect(
       fakeDeps({ ...TREE, gh: async () => { throw new Error("gh: no auth"); } }),
@@ -219,6 +253,70 @@ describe("collect", () => {
       "now",
     );
     expect(status.waves[0]?.lanes[0]?.derived.pr).toBeUndefined();
+  });
+
+  test("wrong-shape gh JSON is no PRs on every row, never a throw", async () => {
+    const bodies = [
+      "{}",
+      "null",
+      "1",
+      '"open"',
+      "[1]",
+      "[null]",
+      JSON.stringify([{ state: "OPEN", headRefName: "feat/t1", headRefOid: "oid1" }]),
+      JSON.stringify([{ number: "218", state: "OPEN", headRefName: "feat/t1", headRefOid: "oid1" }]),
+      JSON.stringify([{ number: 218, state: 1, headRefName: "feat/t1", headRefOid: "oid1" }]),
+      JSON.stringify([{ number: 218, state: "OPEN", headRefName: 1, headRefOid: "oid1" }]),
+      JSON.stringify([{ number: 218, state: "OPEN", headRefName: "feat/t1", headRefOid: 1 }]),
+      JSON.stringify([
+        { number: 218, state: "OPEN", headRefName: "feat/t1", headRefOid: "oid1" },
+        { number: 219 },
+      ]),
+    ];
+    for (const body of bodies) {
+      const status = await collect(fakeDeps({ ...TREE, gh: async () => body }), ROOT, "now");
+      for (const wave of status.waves) {
+        for (const lane of wave.lanes) {
+          expect({ body, pr: lane.derived.pr }).toEqual({ body, pr: undefined });
+        }
+      }
+    }
+  });
+
+  test("a log larger than the tail is read from the end, not whole", async () => {
+    const big = `${"x".repeat(2 * 1024 * 1024)}EXIT 0\n`;
+    const logPath = `${ROOT}/waveB/b1.log`;
+    const inner = fakeDeps({
+      dirs: { [ROOT]: ["waveB"], [`${ROOT}/waveB`]: ["b1.log"] },
+      files: { [logPath]: big },
+    });
+    let bytesRead = 0;
+    const deps: CollectDeps = {
+      ...inner,
+      readFile: async (path) => {
+        const text = await inner.readFile(path);
+        if (path === logPath) bytesRead += Buffer.byteLength(text);
+        return text;
+      },
+      open: async (path) => {
+        const fh = await inner.open(path);
+        return {
+          stat: () => fh.stat(),
+          read: async (buffer, offset, length, position) => {
+            const result = await fh.read(buffer, offset, length, position);
+            if (path === logPath) bytesRead += result.bytesRead;
+            return result;
+          },
+          close: () => fh.close(),
+        };
+      },
+    };
+    const status = await collect(deps, ROOT, "now");
+    const log = status.waves[0]?.lanes[0]?.derived.log;
+    expect(log?.bytes).toBe(Buffer.byteLength(big));
+    expect(log?.tail).toBe(big.slice(-LOG_TAIL_BYTES));
+    expect(bytesRead).toBe(LOG_TAIL_BYTES);
+    expect(bytesRead).toBeLessThan(Buffer.byteLength(big));
   });
 
   test("an unreadable wave-log root is an empty status", async () => {
@@ -330,13 +428,22 @@ describe("realDeps — the process-level wiring", () => {
     );
   }
 
-  test("readdir, readFile and stat read the real filesystem", async () => {
+  test("readdir, readFile and open read the real filesystem", async () => {
     const dir = await mkdtemp(join(tmpdir(), "wave-status-deps-"));
     const file = join(dir, "t1.log");
     await writeFile(file, "hello\n");
     expect(await realDeps.readdir(dir)).toContain("t1.log");
     expect(await realDeps.readFile(file)).toBe("hello\n");
-    expect(await realDeps.stat(file)).toMatchObject({ size: 6 });
+    const fh = await realDeps.open(file);
+    try {
+      expect(await fh.stat()).toMatchObject({ size: 6 });
+      const buf = Buffer.alloc(5);
+      const { bytesRead } = await fh.read(buf, 0, 5, 1);
+      expect(bytesRead).toBe(5);
+      expect(buf.toString("utf8")).toBe("ello\n");
+    } finally {
+      await fh.close();
+    }
   });
 
   test("pgrep counts pids; 'no match' (exit 1) is a count of zero", async () => {
