@@ -8,10 +8,16 @@ import { AspectRatio, MOTION_KINDS, restT, type CompositeRequest, type LayoutKin
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 import { ProceduralBackgroundGenerator } from "../ProceduralBackgroundGenerator.js";
 import {
+  BASE_GOLDEN_CELL_COUNT,
+  INSET_GOLDEN_CELL_COUNT,
   compositorGoldenKey,
+  goldenRun,
+  isRecordingGoldens,
   missingGoldenMapMessage,
+  recordGoldenMap,
   resolveGoldenMap,
   type GoldenFixture,
+  type GoldenRun,
 } from "./compositor-golden-key.js";
 
 const LAYOUTS: readonly LayoutKind[] = ["headline-bottom", "headline-top"];
@@ -36,27 +42,42 @@ const cellKey = (layout: LayoutKind, tone: ToneKind, ratioValue: string) =>
 
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
-const fixture = JSON.parse(
-  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures/compositor-goldens.json"), "utf8"),
-) as GoldenFixture;
+const fixturesDir =
+  process.env.COMPOSITOR_GOLDEN_FIXTURE_DIR ??
+  join(dirname(fileURLToPath(import.meta.url)), "fixtures");
+const goldensPath = join(fixturesDir, "compositor-goldens.json");
+const insetsPath = join(fixturesDir, "compositor-goldens-insets.json");
+
+const fixture = JSON.parse(readFileSync(goldensPath, "utf8")) as GoldenFixture;
+
+const finishGolden = (
+  path: string,
+  key: string,
+  observed: Record<string, string>,
+  run: GoldenRun,
+  expectedCellCount: number,
+): void => {
+  if (run.kind === "record") {
+    recordGoldenMap(path, key, observed, expectedCellCount);
+    return;
+  }
+  expect(observed).toEqual(run.map);
+};
 
 describe("NodeCanvasCompositor goldens", () => {
   const compositor = new NodeCanvasCompositor();
   const backgrounds = new ProceduralBackgroundGenerator();
   const key = compositorGoldenKey();
+  const recording = isRecordingGoldens();
   const goldens = resolveGoldenMap(fixture, key);
-  const skipReason = goldens ? undefined : missingGoldenMapMessage(key, Object.keys(fixture));
+  const missingMessage = missingGoldenMapMessage(key, Object.keys(fixture));
 
-  test.skipIf(Boolean(skipReason))(
-    skipReason ??
-      "still PNG sha256 matches the committed matrix (both layouts × both tones × three ratios)",
+  test(
+    "still PNG sha256 matches the committed matrix (both layouts × both tones × three ratios)",
     // 12 cells × full-size raster: comfortably over Vitest's 5 s default on the CI runner.
     { timeout: 60_000 },
     async () => {
-      const map = resolveGoldenMap(fixture, key);
-      if (!map) {
-        throw new Error(`unreachable: skipped when goldens missing for "${key}"`);
-      }
+      const run = goldenRun(goldens, recording, missingMessage);
 
       const observed: Record<string, string> = {};
       for (const layout of LAYOUTS) {
@@ -78,20 +99,16 @@ describe("NodeCanvasCompositor goldens", () => {
           }
         }
       }
-      expect(observed).toEqual(map);
+      finishGolden(goldensPath, key, observed, run, BASE_GOLDEN_CELL_COUNT);
     },
   );
 
-  test.skipIf(Boolean(skipReason))(
-    skipReason ??
-      "draw at restT(kind) is byte-identical to the still for every MOTION_KINDS kind",
+  test(
+    "draw at restT(kind) is byte-identical to the still for every MOTION_KINDS kind",
     // 12 cells × 5 full-size rasters (still + four kinds): well over the 5 s default.
     { timeout: 60_000 },
     async () => {
-      const map = resolveGoldenMap(fixture, key);
-      if (!map) {
-        throw new Error(`unreachable: skipped when goldens missing for "${key}"`);
-      }
+      const run = goldenRun(goldens, recording, missingMessage);
 
       for (const layout of LAYOUTS) {
         for (const tone of TONES) {
@@ -114,7 +131,9 @@ describe("NodeCanvasCompositor goldens", () => {
             const ctx = canvas.getContext("2d");
             NodeCanvasCompositor.draw(ctx, prepared, 1);
             const stillHash = sha256(canvas.toBuffer("image/png"));
-            expect(stillHash).toBe(map[cellKey(layout, tone, ratioValue)]);
+            if (run.kind === "assert") {
+              expect(stillHash).toBe(run.map[cellKey(layout, tone, ratioValue)]);
+            }
 
             for (const kind of MOTION_KINDS) {
               NodeCanvasCompositor.draw(ctx, prepared, restT(kind), kind);
@@ -130,46 +149,39 @@ describe("NodeCanvasCompositor goldens", () => {
 const INSET_CELL = "headline-top/bold/9:16";
 const INSET_INSETS = { top: 120, right: 0, bottom: 200, left: 0 } as const;
 
-const insetFixture = JSON.parse(
-  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures/compositor-goldens-insets.json"), "utf8"),
-) as GoldenFixture;
+const insetFixture = JSON.parse(readFileSync(insetsPath, "utf8")) as GoldenFixture;
 
-// Pixel goldens are keyed by platform-arch (darwin-arm64 on the laptop today).
-// Structural tests in NodeCanvasCompositor.test.ts are the platform-independent
-// guard for offsets, wrap width, clamping, overlap, and validation. Record a
-// linux map from CI before un-skipping this cell there (same caveat as #45).
+// Pixel goldens are keyed by platform-arch. Structural tests in
+// NodeCanvasCompositor.test.ts are the platform-independent guard for offsets,
+// wrap width, clamping, overlap, and validation. A missing map fails (D115);
+// record via record-goldens.yml on the platform that will assert it.
 describe("NodeCanvasCompositor inset goldens", () => {
   const compositor = new NodeCanvasCompositor();
   const backgrounds = new ProceduralBackgroundGenerator();
   const key = compositorGoldenKey();
+  const recording = isRecordingGoldens();
   const goldens = resolveGoldenMap(insetFixture, key);
-  const recorded = Object.keys(insetFixture);
-  const skipReason = goldens
-    ? undefined
-    : `No compositor inset PNG goldens for "${key}" (recorded: ${recorded.length > 0 ? recorded.join(", ") : "none"}). Record the ${INSET_CELL} cell into fixtures/compositor-goldens-insets.json["${key}"].`;
+  const missingMessage = missingGoldenMapMessage(key, Object.keys(insetFixture), {
+    fixtureFile: "compositor-goldens-insets.json",
+    cellsHint: `the ${INSET_CELL} cell`,
+  });
 
-  test.skipIf(Boolean(skipReason))(
-    skipReason ?? `still PNG sha256 with non-zero safeInsets matches ${INSET_CELL}`,
-    async () => {
-      const map = resolveGoldenMap(insetFixture, key);
-      if (!map) {
-        throw new Error(`unreachable: skipped when inset goldens missing for "${key}"`);
-      }
+  test(`still PNG sha256 with non-zero safeInsets matches ${INSET_CELL}`, async () => {
+    const run = goldenRun(goldens, recording, missingMessage);
 
-      const r = ratio("9:16");
-      const bg = await backgrounds.resolveBackground(product, r, bgCtx);
-      const request: CompositeRequest = {
-        background: bg.image,
-        message: MESSAGE,
-        brandColor: BRAND,
-        logoPath: LOGO,
-        ratio: r,
-        layout: "headline-top",
-        tone: "bold",
-        safeInsets: { ...INSET_INSETS },
-      };
-      const out = await compositor.compositeAsset(request);
-      expect({ [INSET_CELL]: sha256(out.image) }).toEqual(map);
-    },
-  );
+    const r = ratio("9:16");
+    const bg = await backgrounds.resolveBackground(product, r, bgCtx);
+    const request: CompositeRequest = {
+      background: bg.image,
+      message: MESSAGE,
+      brandColor: BRAND,
+      logoPath: LOGO,
+      ratio: r,
+      layout: "headline-top",
+      tone: "bold",
+      safeInsets: { ...INSET_INSETS },
+    };
+    const out = await compositor.compositeAsset(request);
+    finishGolden(insetsPath, key, { [INSET_CELL]: sha256(out.image) }, run, INSET_GOLDEN_CELL_COUNT);
+  });
 });

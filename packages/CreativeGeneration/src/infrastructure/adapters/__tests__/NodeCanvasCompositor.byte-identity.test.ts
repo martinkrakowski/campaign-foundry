@@ -18,6 +18,7 @@ import { registerBundledFonts } from "../../fonts.js";
 import { ProceduralBackgroundGenerator } from "../ProceduralBackgroundGenerator.js";
 import {
   compositorGoldenKey,
+  goldenRun,
   missingGoldenMapMessage,
   resolveGoldenMap,
   type GoldenFixture,
@@ -65,20 +66,21 @@ describe("NodeCanvasCompositor D10 — the legacy path is byte-identical after t
   const backgrounds = new ProceduralBackgroundGenerator();
   const key = compositorGoldenKey();
   const goldens = resolveGoldenMap(fixture, key);
-  const skipReason = goldens ? undefined : missingGoldenMapMessage(key, Object.keys(fixture));
+  const missingMessage = missingGoldenMapMessage(key, Object.keys(fixture));
 
   // The committed platform goldens encode the pre-timeline still bytes. `draw` and
   // `drawLegacy` must BOTH land on them for every motion kind at rest, or the
-  // timeline feature changed what a timeline-free request renders (D10).
-  test.skipIf(Boolean(skipReason))(
-    skipReason ??
-      "draw and drawLegacy both match the committed still goldens at restT(kind) for every motion kind",
+  // timeline feature changed what a timeline-free request renders (D10). A missing
+  // map fails closed via goldenRun — never skipIf (D85 / D115).
+  test(
+    "draw and drawLegacy both match the committed still goldens at restT(kind) for every motion kind",
     { timeout: 120_000 },
     async () => {
-      const map = resolveGoldenMap(fixture, key);
-      if (!map) {
-        throw new Error(`unreachable: skipped when goldens missing for "${key}"`);
+      const run = goldenRun(goldens, false, missingMessage);
+      if (run.kind !== "assert") {
+        throw new Error("byte-identity suite does not record");
       }
+      const map = run.map;
 
       for (const layout of LAYOUTS) {
         for (const tone of TONES) {

@@ -4099,6 +4099,21 @@ dispatched.
 
 ---
 
+## 2026-09-07 — A0 linux inset goldens (D115 / D85)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `RECORD_COMPOSITOR_GOLDENS=1` writes the current platform-arch key into the golden fixture (pure merge + one `writeFileSync`); both golden suites share it.
+  - Missing maps fail via `goldenRun` instead of `test.skipIf`. `COMPOSITOR_GOLDEN_KEY_OVERRIDE` is the test hook.
+  - `.github/workflows/record-goldens.yml` (`workflow_dispatch` / `workflow_call`, ubuntu-latest, artifact only — never commits). GitHub 404s a dispatch file that is not on `main`, so CI's existing `workflow_dispatch` gained a `record_goldens` input that calls it.
+  - `compositor-goldens-insets.json` now has `linux-x64` (`headline-top/bold/9:16` = `86841e53…db67`), recorded on run [34182560608](https://github.com/martinkrakowski/campaign-foundry/actions/runs/34182560608) artifact `compositor-goldens-Linux-X64`. Base `compositor-goldens.json` untouched — runner linux-x64 cells matched #45.
+- **Decisions:**
+  - Recording must happen on the asserting platform (CoreText vs FreeType). The workflow is the recorder; a human (this lane) commits the artifact.
+  - A golden that skips on the platform CI runs is a vacuous tripwire; skip became throw.
+- **Left open:**
+  - `gh workflow run record-goldens.yml` still 404s until that file exists on `main`. Until then: `gh workflow run ci.yml --ref <branch> -f record_goldens=true`.
+  - Display lanes A1+ can now measure against both platform maps.
+- **Remediation:** record job has its own `record-goldens-${{ github.ref }}` group (`cancel-in-progress: false`); workflow-level `ci-${{ github.ref }}` moved onto the Build job keyed by `event_name` so a dispatch never cancels a push. `recordGoldenMap` re-reads the fixture, then asserts 12/1 cells and a round-trip re-read. Byte-identity goes through `goldenRun` (`COMPOSITOR_GOLDEN_KEY_OVERRIDE=nowhere-none` fails, does not skip).
 ## 2026-09-07 — lane A1, the second ratio family (D113)
 
 - **Mode:** Implementer

@@ -20,16 +20,24 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      record_goldens:
+        description: "Record compositor PNG goldens (linux-x64 artifact). The CI job still runs."
+        type: boolean
+        default: false
 
-# One in-flight CI run per ref; a new push cancels the previous run.
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
+# Concurrency is per-job, not per-workflow. A workflow_dispatch that records
+# goldens used to share `ci-${{ github.ref }}` with the push Build, and the two
+# cancelled each other (runs 34182560608 / 34182554160). The recorder has its
+# own group below; the Build group includes event_name so a dispatch's CI job
+# does not cancel a push's.
 jobs:
   ci:
     name: Build, Typecheck, Lint & Test
     runs-on: ubuntu-latest
+    concurrency:
+      group: ci-${{ github.ref }}-${{ github.event_name }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v5
 
@@ -143,3 +151,15 @@ jobs:
             exit 1
           fi
           echo "Nitro route manifest is free of test files."
+
+  # Dispatch entry for record-goldens.yml: GitHub 404s a workflow_dispatch
+  # that is not on the default branch. This job is a no-op on push/PR.
+  record-goldens:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.record_goldens == 'true' }}
+    concurrency:
+      group: record-goldens-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    uses: ./.github/workflows/record-goldens.yml
+    secrets: inherit

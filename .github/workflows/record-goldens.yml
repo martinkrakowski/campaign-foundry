@@ -1,0 +1,62 @@
+name: Record compositor goldens
+
+# Manual recording on the platform CI asserts (ubuntu-latest → linux-x64).
+# Never push or commit: the artifact is the output. A human (or the A0 lane)
+# downloads it and commits the cells. Do not set RECORD_COMPOSITOR_GOLDENS
+# on the normal CI run — that would rewrite goldens instead of asserting them.
+on:
+  workflow_dispatch:
+  # GitHub only indexes workflow_dispatch files that exist on the default
+  # branch. ci.yml (already on main) calls this via workflow_call when
+  # dispatched with record_goldens=true against this ref.
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  record:
+    name: Record compositor goldens
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      # Same setup as ci.yml: Corepack before setup-node so `cache: yarn`
+      # probes Berry's cache folder, not Yarn Classic's.
+      - name: Enable Corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "yarn"
+
+      - name: Prepare package manager
+        run: |
+          corepack prepare "$(node -p 'require("./package.json").packageManager')" --activate
+
+      - name: Install dependencies
+        run: "yarn install --immutable"
+
+      - name: Build
+        run: "yarn build"
+        env:
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+
+      - name: Record compositor goldens
+        run: "yarn vitest run packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.goldens.test.ts"
+        env:
+          NODE_ENV: test
+          RECORD_COMPOSITOR_GOLDENS: "1"
+
+      - name: Upload golden fixtures
+        uses: actions/upload-artifact@v4
+        with:
+          name: compositor-goldens-${{ runner.os }}-${{ runner.arch }}
+          if-no-files-found: error
+          path: |
+            packages/CreativeGeneration/src/infrastructure/adapters/__tests__/fixtures/compositor-goldens.json
+            packages/CreativeGeneration/src/infrastructure/adapters/__tests__/fixtures/compositor-goldens-insets.json
