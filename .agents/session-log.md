@@ -4049,3 +4049,50 @@ watcher refresh that waited on remote `gh` calls — the exact split the plan ha
   accepted cost (a broken dev tool blocks a product PR) ever bites.
 
 **Next:** with the observability plan closed, the display-advertising plan awaits the owner's go.
+
+## 2026-09-07 — P1 merged (#240): `packages/ui` exists; the two-field plan is closed
+
+**Mode:** Orchestrator. Record written at merge time (stage 6). This closes
+`2026-09-07_two-field-create.md` (S3, S4, S2, P1 merged; S1 became T3) and, with wave C of
+`2026-09-07_campaign-type.md` already recorded, the whole create-dialog arc the owner asked for on
+2026-09-06.
+
+### What merged
+
+| Lane | PR | Commit | What |
+|---|---|---|---|
+| P1 | #240 | `a0176d6` | `@campaignfoundry/ui` — 38 domain-free kit files moved with history; `section-outline`, `confirm-dialog`, `seg-bar`, `theme-toggle` stay; the app barrel re-exports the package so no call site changed twice; five config surfaces wired; the presentation layer taken over an exemption (D100) |
+
+### D100's real question, answered twice
+
+The lane took the **presentation layer** rather than an exemption, as the plan preferred. Qodo then
+showed the layer is documentary — hexagen validates layer imports for `domain`/`application` only —
+so the enforcing gate for the kit's import boundary is `kit-boundaries.test.ts`, which now scans
+**both** directories and the kit's own tests. The layer stays as the recorded decision with a
+comment saying exactly that. (The plan's warning came true in a form it did not predict: a
+single-directory scan would have passed vacuously against the four allowlisted files; the review
+found the *tests* leaking instead — two moved test files reached back into `apps/web` for
+`ModelSelector` and the app's test helpers.)
+
+### What the review and the orchestrator found
+
+- Two kit tests importing the app (fixed: the `ModelSelector` case moved back, kit-local helpers,
+  boundary test extended — the one stated deviation from "no test file edited").
+- `cn` copied into the package instead of owned by it (fixed: the app's `lib/cn.ts` is a re-export,
+  pinned by `cn-reexport.test.ts`).
+- Three PR-Agent claims refuted against the branch (a moved file "changed"; a staying file "gone";
+  a lint failure that `yarn lint:arch` did not have).
+- Tailwind's `content` glob proven by a class present only with it; `git log --follow` intact.
+
+### The arc, in one table
+
+| Plan | Lanes | PRs | Outcome |
+|---|---|---|---|
+| create-dialog recomposition (2026-09-06) | W1, W2a, K1, M1–M2, G1–G3 | #198–#215 | the styled dialog the mockup asked for |
+| two-field create (D97–D101) | S3, S4, S2, P1 (S1 → T3) | #217, #218, #225, #240 | seam, leak fix, map into Identity, `packages/ui` |
+| campaign type (D108–D112) | T1–T4 | #224, #228, #234, #236 | the second field is the campaign type |
+| hotfixes | — | #231, #235 | the editor suite back to 72 s on CI; the map painted after paint |
+| wave status (D102–D107) | W1–W3 | #229, #232, #238 | `yarn wave:status` |
+
+**Next:** the display-advertising plan (D113–D118) awaits the owner's go; nothing else is
+dispatched.
