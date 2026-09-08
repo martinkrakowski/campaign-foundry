@@ -4299,3 +4299,35 @@ exit because it keyed on lane name across re-runs; it now keys on marker plus mt
 - **Left open:**
   - Do not merge. A4 owns RatioFrame/PosterFrame/previews at true display proportion; A5 adds the `display-ad` type and maps it onto these three profiles.
   - `yarn sync:check` refuses a dirty tree — run it post-commit.
+
+## 2026-09-08 — Display advertising, wave 3: A3 (#248) and A4 (#249) merged
+
+**Mode:** Orchestrator. Record written at merge time (stage 6).
+
+| Lane | PR | Commit | What |
+|---|---|---|---|
+| A3 | #248 | `e9de925` | three display platform profiles (`google-display`, `meta-audience-network`, `display-web`) carrying `sizes: {size, insets}[]` where social carries `ratio`; `platformsToSizes`; mixed selections; `output.sizes` derived on save (D116, D118) |
+| A4 | #249 | `5d3fe0c` | the kit and the previews take a `CanvasSpec` and read dimensions through `resolveCanvas`; a 728×90 previews as a very wide, very short frame; the editor's readouts follow A2's rule for display sizes; no `RATIO_DIMENSIONS[` read left under `apps/web` (F4) |
+
+### Process, under the owner's 2026-09-08 feedback
+
+Both lanes shipped first try on grok. A3 (a domain lane) got the orchestrator's gate and one
+mutation — no model review; A4 (the kit) got the gate, one mutation and one gemini review. Qodo
+threads verified; PR-Agent threads resolved in bulk; no nit rounds.
+
+### What review found that the plan had not
+
+Qodo, on A3: `toBrief` derived `output.sizes` from the selected platforms and `fromBrief` never read
+it back, so a brief asking for `728x90` alone came back asking for all five — the orchestrator's
+brief had asked for exactly that derivation; fixed by making `sizes` editor state. And two findings
+that are one gap: the generate use case still enumerates `AspectRatio.all()` with `canvas: { ratio }`,
+and packaging matches on `asset.aspectRatio === profile.ratio`, so a display-only brief passes
+validation, renders the three social ratios, and packages a successful empty manifest. **The plan
+had no lane for the run path.** Lane **A4b** (generate renders sizes; assets carry their canvas;
+packaging by size, failing loudly on nothing) is added before A5 — D117 says the create option may
+not open onto a dead end, and this was one.
+
+Refuted, as existing contract: `PlatformCard` announces `profile.id` for the social profiles too;
+`label` has lived on the profile VO since the Distribution model was written.
+
+**Next:** A4b (the run path honours sizes), then A5 — `display-ad` joins the vocabulary, proven end to end against the API.
