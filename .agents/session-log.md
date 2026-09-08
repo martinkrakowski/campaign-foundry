@@ -3781,3 +3781,60 @@ follow-up: hit-test by the smallest containing footprint, independent of paint o
   - `yarn typecheck` is turbo-per-workspace; `tools/` is typechecked by vitest and `tsc -p tools/wave-status --noEmit`.
 - **Remediation:** five verified findings (gate-exit, observed no-PR, closed-unmerged, EXIT trailing space, istanbul indent); four mutations compiled, ran, failed the named test, reverted. PR-Agent trim/Set refuted (D103).
 
+
+## 2026-09-07 — Campaign type, wave B (T2 merged as #228); wave-status W1 merged as #229
+
+**Mode:** Orchestrator. Record written at merge time (stage 6). Two plans ran in parallel at the
+owner's request; both waves closed within the hour.
+
+### What merged
+
+| Lane | PR | Commit | What |
+|---|---|---|---|
+| T2 | #228 | `0838d56` | the create seam is `{ name, type }`; the preset applied once on arrival (D109); `type` round-trips; `typeDisplayName` |
+| W1 | #229 | `0176547` | `tools/wave-status/lib/` — `readEvents` / `deriveLane` / `mergeStatus`, pure, in the 100 % gate (D102, D103) |
+
+### T2: the plan overrode the brief, and the review found the tests that could not fail
+
+The orchestrator's brief named the third type *Short video*; D108 says *Short-form video*. The lane
+followed the brief; the reviewer read the plan. **The plan is the locked decision** — fixed. Four
+more review items were all of one kind: assertions that stayed green under the mutant the PR body
+claimed (the `mode === undefined` conjunct was unpinned; the editor-level draft test never read
+`type`; the not-dirty-on-load claim was masked by the assertion before it). Qodo found the fifth:
+`typeExplicit` copied for a rejected draft type. One refuted: "the once-guard is the spend, not
+`seedVersion`" — that is the design, and the test proves the spend. The first grok review died
+during worktree setup and was re-dispatched; derived status (no marker, no process) caught it.
+
+### W1: three seats, one artefact
+
+glm-5.3-flash hung twice at 0 bytes on this brief; gemini-3.1-pro (agy) drafted 847 lines then died
+on a transport timeout with a duplicated vitest project; grok-4.6 finished it. gemini-3.7-flash
+reviewed and verified all nine claims — and missed the three real gaps, which Qodo found: no rule
+for `GATE EXIT n`, "no PR found" raised without an observation, a *closed* PR read as agreement
+with "merge settled". All fixed (`cc03aed`). **A review driven by the brief finds what the brief
+lists**; the bots read the code cold. Both are required for a reason.
+
+### The gate went marginal, and the fix is not the one first shipped
+
+After #225 every editor mount paints the map once; the editor suite runs at ~2× on CI, and under
+runner load unrelated PRs (#229 tools-only, #230 docs-only) each lost a Build run to it. A hotfix
+lane deferred the paint to a mount effect (#231, round 1) — a product improvement, **but under RTL
+the effect flushes inside `act()` and the suite gained 4 %**. Round 2 stubs the kit's map in the
+editor suite only (its behaviour is pinned in `identity-section` and `world-map` tests), measured
+against the pre-#225 baseline. `testTimeout` stays.
+
+### Orchestrator misfires, counted honestly
+
+Three of this wave's own mutations did not apply on the first try (wrong symbol, broken call site,
+regex on the wrong shape); one did not compile. Each was caught by reading the diff and the runner
+output before the result was used, and each was re-run until it bit. The rule stands: compiled,
+ran, targets the path the test names — and *the diff is part of the evidence*.
+
+### Tooling
+
+`gh pr view --json headRefOid` answers the pre-push head for a window after a push (#226 — poll the
+SHA we pushed). Long waits: a persistent monitor now reports every lane `EXIT` and 15-minute stall
+across the wave directories, replacing capped ten-minute waits.
+
+**Next:** T3 ‖ T4 dispatched from `0838d56`; W2 ‖ W3 from `0176547`; #231 round 2 in flight. Then
+the campaign-type wave-C record, the wave-status close-out, and P1 alone.
