@@ -1,7 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { ADVERTISING_UNITS } from "../advertising-units.js";
 import { CREATIVE_TYPES, CREATIVE_TYPE_RULES } from "../creative-types.js";
-import { CANONICAL_TEMPLATES } from "../creative-templates.js";
+import { CANONICAL_TEMPLATES, CANONICAL_TEMPLATE_IDS } from "../creative-templates.js";
 import {
   CAMPAIGN_TYPES,
   CAMPAIGN_TYPE_PRESETS,
@@ -90,6 +90,24 @@ describe("campaign types (D108–D112, A5/D117)", () => {
         validTemplates.has(preset.template),
         `preset "${type}" names unknown template "${preset.template}"`,
       ).toBe(true);
+    }
+  });
+
+  test("CANONICAL_TEMPLATE_IDS and CAMPAIGN_TYPE_PRESETS template values are consistent", () => {
+    const canonicalSet = new Set<string>(CANONICAL_TEMPLATE_IDS);
+    const presetTemplateIds = new Set(Object.values(CAMPAIGN_TYPE_PRESETS).map((p) => p.template));
+
+    // Every preset id is a canonical id
+    for (const [type, preset] of Object.entries(CAMPAIGN_TYPE_PRESETS)) {
+      expect(
+        canonicalSet.has(preset.template),
+        `preset "${type}" names template "${preset.template}" which is not in CANONICAL_TEMPLATE_IDS`,
+      ).toBe(true);
+    }
+
+    // The union covers what the presets use
+    for (const templateId of presetTemplateIds) {
+      expect((CANONICAL_TEMPLATE_IDS as readonly string[]).includes(templateId)).toBe(true);
     }
   });
 

@@ -4510,4 +4510,5 @@ D118) remain deferred.
   - Mutation reverted cleanly and tests re-verified green.
 - **Left open:**
   - Lane L1b: `CampaignBrief`, `load-brief.ts`, and `brief-yaml.ts` carrying `template` and defaulting at load time.
+- **Remediation (PR #260 finding):** tightened `CampaignTypePreset.template` from `string` to `CanonicalTemplateId` via `import type`, verified no cycle with `creative-templates.ts`, added `CANONICAL_TEMPLATE_IDS` / preset template consistency test, and verified `"canonical-vidyo"` mutation fails `yarn typecheck` with TS2820.
 

@@ -1,4 +1,5 @@
 import type { AdvertisingUnit } from "./advertising-units.js";
+import type { CanonicalTemplateId } from "./creative-templates.js";
 import type { CreativeType } from "./creative-types.js";
 
 /**
@@ -25,7 +26,7 @@ export const DEFAULT_CAMPAIGN_TYPE: CampaignType = "social-post";
 export interface CampaignTypePreset {
   readonly unit: AdvertisingUnit;
   readonly creativeType: CreativeType;
-  readonly template: string;
+  readonly template: CanonicalTemplateId;
   readonly platforms: readonly string[];
   readonly formats: readonly ("static" | "motion")[];
   readonly mode: "brief" | "variation";
