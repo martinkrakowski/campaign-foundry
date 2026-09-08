@@ -5,6 +5,7 @@ import { PreviewFrame } from "../PreviewFrame";
 import { PREVIEW_FRAME_DEBOUNCE_MS } from "@/lib/preview-frame";
 
 const brief = (over: Partial<CampaignBrief> = {}): CampaignBrief => ({
+  schemaVersion: 1,
   id: "camp",
   targetRegion: "DE",
   targetAudience: "a",

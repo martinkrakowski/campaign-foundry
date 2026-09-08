@@ -1,3 +1,4 @@
+schemaVersion: 1
 id: corpus-scalars
 campaignMessage: Scalars stay scalars.
 targetAudience: Schema check

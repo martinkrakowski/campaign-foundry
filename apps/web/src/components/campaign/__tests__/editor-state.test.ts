@@ -59,6 +59,7 @@ const pool = (statuses: string[]): CopyPool =>
 
 const savedBrief = (over: Partial<CampaignBrief> = {}): CampaignBrief =>
   ({
+    schemaVersion: 1,
     id: "camp",
     targetRegion: "DE",
     targetAudience: "a",
@@ -2941,5 +2942,29 @@ describe("display platforms (D116)", () => {
     raw.sizes = ["728x90", "999x999"];
     const restored = normalizeDraftState(raw);
     expect(restored.sizes).toEqual(["728x90"]);
+  });
+
+  describe("schemaVersion in editor-state (D133)", () => {
+    test("fromBrief -> toBrief round-trips schemaVersion and preserves explicit version", () => {
+      const brief = savedBrief({ schemaVersion: 1 });
+      const state = fromBrief(brief);
+      expect(state.schemaVersion).toBe(1);
+      const roundTripped = toBrief(state);
+      expect(roundTripped.schemaVersion).toBe(1);
+
+      // Verify toBrief does not hard-code BRIEF_SCHEMA_VERSION, but flows state.schemaVersion
+      const customState = { ...state, schemaVersion: 99 };
+      expect(toBrief(customState).schemaVersion).toBe(99);
+    });
+
+    test("normalizeDraftState({}) produces an EditorState with schemaVersion: 1", () => {
+      const restored = normalizeDraftState({});
+      expect(restored.schemaVersion).toBe(1);
+    });
+
+    test("normalizeDraftState({ schemaVersion: 99 }) resets schemaVersion to 1", () => {
+      const restored = normalizeDraftState({ schemaVersion: 99 });
+      expect(restored.schemaVersion).toBe(1);
+    });
   });
 });

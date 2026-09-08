@@ -6,6 +6,7 @@ import { editorReducer, initialEditorState, toBrief, type EditorState } from "..
 
 const saved = (): CampaignBrief =>
   ({
+    schemaVersion: 1,
     id: "camp",
     targetRegion: "DE",
     targetAudience: "a",

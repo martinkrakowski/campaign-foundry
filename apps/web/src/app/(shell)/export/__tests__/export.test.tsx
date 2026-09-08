@@ -23,6 +23,7 @@ function RunDraft() {
       type="button"
       onClick={() =>
         execute({
+          schemaVersion: 1,
           id: "on-screen-draft",
           targetRegion: "US",
           targetAudience: "x",

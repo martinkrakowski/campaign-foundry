@@ -3,6 +3,7 @@ import { renderHook, act, waitFor, screen, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { createElement, type ReactNode } from "react";
 import { assetIdentity } from "@campaignfoundry/CampaignOrchestration";
+import { BRIEF_SCHEMA_VERSION } from "@campaignfoundry/CampaignOrchestration/brief-schema-version";
 import { RunProvider, useRun, assetKey, assetCanvas, assetLabel, fetchPersistedRun, type Asset } from "@/lib/run-context";
 import { json, jobOk, mockPipelineApi, EMPTY_REPORT, renderWithRun } from "@/__tests__/helpers";
 import { Header } from "@/components/shell/Header";
@@ -123,6 +124,7 @@ describe("RunProvider — execute", () => {
     // The shell holds one brief; the editor hands Generate the on-screen draft — a
     // brief that may never have been written to disk.
     const onScreenDraft = {
+      schemaVersion: BRIEF_SCHEMA_VERSION,
       id: "on-screen-draft",
       targetRegion: "US",
       targetAudience: "x",
@@ -192,6 +194,7 @@ describe("RunProvider — execute", () => {
     // Switch to a different brief while the POST is in flight (bumps the run token).
     act(() => {
       result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
         id: "other-brief",
         targetRegion: "US",
         targetAudience: "x",
@@ -427,6 +430,7 @@ describe("RunProvider — review decisions", () => {
 describe("RunProvider — result-scoped actions key off the brief the run ran (R6)", () => {
   /** The editor's on-screen draft: a brief the shell does not hold (D35). */
   const onScreenDraft = {
+    schemaVersion: BRIEF_SCHEMA_VERSION,
     id: "on-screen-draft",
     targetRegion: "US",
     targetAudience: "x",
@@ -537,6 +541,7 @@ describe("RunProvider — result-scoped actions key off the brief the run ran (R
     });
     act(() =>
       result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
         id: "switched",
         targetRegion: "US",
         targetAudience: "x",
@@ -567,7 +572,7 @@ describe("RunProvider — briefApplied", () => {
     // `blankBrief()` (editor-state.ts): a blank id is the marker for "no campaign" —
     // nothing can be saved, listed or run under it, so nothing has been applied.
     act(() => {
-      result.current.setBrief({ id: "", targetRegion: "", targetAudience: "", campaignMessage: "", products: [] });
+      result.current.setBrief({ schemaVersion: BRIEF_SCHEMA_VERSION, id: "", targetRegion: "", targetAudience: "", campaignMessage: "", products: [] });
     });
     expect(result.current.briefApplied).toBe(false);
   });
@@ -710,6 +715,7 @@ describe("RunProvider — brief picker & persistence", () => {
     const { result } = setup();
     act(() =>
       result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
         id: "other",
         targetRegion: "US",
         targetAudience: "x",
@@ -733,6 +739,7 @@ describe("RunProvider — brief picker & persistence", () => {
     const { result } = setup();
     act(() =>
       result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
         id: "nostore",
         targetRegion: "US",
         targetAudience: "x",
@@ -751,6 +758,7 @@ describe("RunProvider — brief picker & persistence", () => {
 
 describe("RunProvider — late results after a switch", () => {
   const otherBrief = {
+    schemaVersion: BRIEF_SCHEMA_VERSION,
     id: "switched",
     targetRegion: "US",
     targetAudience: "x",
@@ -880,6 +888,7 @@ describe("RunProvider — log-only and superseded restores", () => {
     const { result } = setup();
     act(() =>
       result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
         id: "halt2",
         targetRegion: "US",
         targetAudience: "x",
@@ -910,6 +919,7 @@ describe("RunProvider — log-only and superseded restores", () => {
     });
     act(() =>
       result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
         id: "sb",
         targetRegion: "US",
         targetAudience: "x",
@@ -947,6 +957,7 @@ describe("RunProvider — log-only and superseded restores", () => {
     });
     act(() =>
       result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
         id: "switched2",
         targetRegion: "US",
         targetAudience: "x",
@@ -973,6 +984,7 @@ describe("RunProvider — log-only and superseded restores", () => {
       },
     });
     const mk = (id: string) => ({
+      schemaVersion: BRIEF_SCHEMA_VERSION,
       id,
       targetRegion: "US",
       targetAudience: "x",
@@ -1202,6 +1214,7 @@ describe("RunProvider — job polling", () => {
     await waitFor(() => expect(typeof resolveJob).toBe("function"));
     act(() =>
       result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
         id: "switched",
         targetRegion: "US",
         targetAudience: "x",
@@ -1348,6 +1361,7 @@ describe("RunProvider — job polling", () => {
     expect(polls).toBe(1);
     act(() =>
       result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
         id: "switched",
         targetRegion: "US",
         targetAudience: "x",
@@ -1384,6 +1398,7 @@ describe("RunProvider — job polling", () => {
     await waitFor(() => expect(typeof resolveJob).toBe("function"));
     act(() =>
       result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
         id: "switched",
         targetRegion: "US",
         targetAudience: "x",
@@ -1425,6 +1440,7 @@ describe("RunProvider — job polling", () => {
     await waitFor(() => expect(typeof resolveResult).toBe("function"));
     act(() =>
       result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
         id: "switched",
         targetRegion: "US",
         targetAudience: "x",
@@ -1475,6 +1491,7 @@ describe("RunProvider — job polling", () => {
     await waitFor(() => expect(typeof resolveJob).toBe("function")); // POST 202, GET job hanging
     act(() =>
       result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
         id: "switched",
         targetRegion: "US",
         targetAudience: "x",
@@ -1594,6 +1611,7 @@ describe("RunProvider — estimate and packaging", () => {
     });
     act(() =>
       result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
         id: "other-camp",
         targetRegion: "US",
         targetAudience: "x",
@@ -1610,6 +1628,7 @@ describe("RunProvider — estimate and packaging", () => {
   });
 
   const otherBrief = {
+    schemaVersion: BRIEF_SCHEMA_VERSION,
     id: "other-camp",
     targetRegion: "US",
     targetAudience: "x",
@@ -1794,6 +1813,7 @@ describe("RunProvider — estimate and packaging", () => {
   });
 
   const onScreenDraft = {
+    schemaVersion: BRIEF_SCHEMA_VERSION,
     id: "on-screen-draft",
     targetRegion: "US",
     targetAudience: "x",

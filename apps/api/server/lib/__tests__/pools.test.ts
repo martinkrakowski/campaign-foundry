@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CampaignBrief, CopyPool } from "@campaignfoundry/CampaignOrchestration";
+import { BRIEF_SCHEMA_VERSION, type CampaignBrief, type CopyPool } from "@campaignfoundry/CampaignOrchestration";
 import { isBriefSourceName } from "../brief-files.js";
 
 const origRoot = process.env.PROJECT_ROOT;
@@ -221,6 +221,7 @@ describe("copy pool persistence", () => {
 describe("planInputFor / pooledPlanner", () => {
   let dir: string;
   const brief = (over: Partial<CampaignBrief> = {}): CampaignBrief => ({
+    schemaVersion: BRIEF_SCHEMA_VERSION,
     id: "camp",
     targetRegion: "DE",
     targetAudience: "a",

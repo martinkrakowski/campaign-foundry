@@ -13,7 +13,7 @@ import {
   SUPPORTED_FORMATS,
   TIMELINE_TRANSITIONS,
 } from "../load-brief.js";
-import { MAX_BEATS, MAX_WEIGHT, timelineProblem } from "@campaignfoundry/CampaignOrchestration";
+import { BRIEF_SCHEMA_VERSION, MAX_BEATS, MAX_WEIGHT, timelineProblem } from "@campaignfoundry/CampaignOrchestration";
 import type { Capabilities } from "../../lib/capabilities.js";
 
 const valid = {
@@ -49,6 +49,43 @@ describe("parseBrief", () => {
     ["a non-slug product id", { ...valid, products: [{ id: "Alpha" }, { id: "beta" }] }, /Product id must be a path-safe/],
   ])("rejects %s", (_label, input, message) => {
     expect(() => parseBrief(input)).toThrow(message);
+  });
+
+  describe("schemaVersion enforcement (D133)", () => {
+    test("a brief without schemaVersion parses successfully and carries schemaVersion: 1", () => {
+      const parsed = parseBrief(valid);
+      expect(parsed.schemaVersion).toBe(1);
+    });
+
+    test("a brief with schemaVersion: 1 parses successfully and carries schemaVersion: 1", () => {
+      const parsed = parseBrief({ ...valid, schemaVersion: 1 });
+      expect(parsed.schemaVersion).toBe(1);
+    });
+
+    test("a brief with schemaVersion: 2 throws the expected error message", () => {
+      expect(() => parseBrief({ ...valid, schemaVersion: 2 })).toThrow(
+        `Campaign brief field "schemaVersion" must be an integer between 1 and ${BRIEF_SCHEMA_VERSION}; got 2.`,
+      );
+    });
+
+    test.each([
+      ["string \"1\"", "1", '"1"'],
+      ["zero", 0, "0"],
+      ["float 1.5", 1.5, "1.5"],
+      ["negative -1", -1, "-1"],
+      ["null", null, "null"],
+      ["empty object", {}, "{}"],
+    ])("rejects non-integer / invalid schemaVersion (%s)", (_label, value, repr) => {
+      expect(() => parseBrief({ ...valid, schemaVersion: value })).toThrow(
+        `Campaign brief field "schemaVersion" must be an integer between 1 and ${BRIEF_SCHEMA_VERSION}; got ${repr}.`,
+      );
+    });
+
+    test("the refusal holds when enforceCapabilities: false (authoring mode refuses future schemas too)", () => {
+      expect(() => parseBrief({ ...valid, schemaVersion: 2 }, { enforceCapabilities: false })).toThrow(
+        `Campaign brief field "schemaVersion" must be an integer between 1 and ${BRIEF_SCHEMA_VERSION}; got 2.`,
+      );
+    });
   });
 
   describe("scalar shape checks (D68 — shape, not just presence)", () => {
@@ -995,6 +1032,7 @@ describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
       ];
       for (const file of briefFiles) {
         const loaded = await loadBrief(file);
+        expect(loaded.schemaVersion).toBe(1);
         expect(loaded.id).toBeDefined();
         expect(loaded.copy?.timeline).toBeUndefined();
         // No fixture predates the campaign type (D112): none names it, so
@@ -1012,7 +1050,7 @@ describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
 
       const parsedV2 = parseBrief(v2Brief);
       expect(parsedV2.copy).toBeUndefined();
-      expect(JSON.stringify(parsedV2)).toBe(JSON.stringify(v2Brief));
+      expect(JSON.stringify(parsedV2)).toBe(JSON.stringify({ schemaVersion: 1, ...v2Brief }));
     });
   });
 });

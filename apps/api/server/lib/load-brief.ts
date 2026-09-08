@@ -3,6 +3,7 @@ import { extname, isAbsolute, resolve } from "node:path";
 import { projectRoot } from "@campaignfoundry/shared";
 import { parse as parseYaml } from "yaml";
 import {
+  BRIEF_SCHEMA_VERSION,
   HEADLINE_POOL_REF,
   ANCHOR_VALUES,
   CAMPAIGN_TYPES,
@@ -15,6 +16,7 @@ import {
   SAFE_ID_PATTERN,
   TONE_VALUES,
   isPaletteShift,
+  isSupportedBriefSchemaVersion,
   styleProblem,
   timelineProblem,
   type CampaignBrief,
@@ -587,6 +589,22 @@ export interface ParseBriefOptions {
 /**
  * Structurally validate an untrusted value into a CampaignBrief. Business rules live in
  * the use case.
+ */
+export function validateSchemaVersion(value: unknown): number {
+  if (value === undefined) {
+    return BRIEF_SCHEMA_VERSION;
+  }
+  if (isSupportedBriefSchemaVersion(value)) {
+    return value;
+  }
+  throw new Error(
+    `Campaign brief field "schemaVersion" must be an integer between 1 and ${BRIEF_SCHEMA_VERSION}; got ${JSON.stringify(value)}.`,
+  );
+}
+
+/**
+ * Structurally validate an untrusted value into a CampaignBrief. Business rules live in
+ * the use case.
  *
  * `enforceCapabilities` defaults to **false**: a brief that names motion is structurally
  * valid everywhere, so it can be listed and saved on a host with no ffmpeg (D7/D12/D15).
@@ -603,6 +621,7 @@ export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): Campaig
     throw new Error("Campaign brief must be an object.");
   }
   const record = data as Record<string, unknown>;
+  const schemaVersion = validateSchemaVersion(record.schemaVersion);
   for (const field of REQUIRED_FIELDS) {
     if (!(field in record)) {
       throw new Error(`Campaign brief is missing required field: "${field}".`);
@@ -667,7 +686,9 @@ export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): Campaig
       throw new Error('Campaign brief field "variation.count" is required when mode is "variation".');
     }
   }
-  return record as unknown as CampaignBrief;
+  const rest = { ...record };
+  delete rest.schemaVersion;
+  return { schemaVersion, ...rest } as unknown as CampaignBrief;
 }
 
 /**

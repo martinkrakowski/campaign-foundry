@@ -1,8 +1,9 @@
 import { describe, test, expect, vi, afterEach } from "vitest";
-import { CopyGeneratorError, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { CopyGeneratorError, BRIEF_SCHEMA_VERSION, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { OpenRouterCopyGenerator } from "../OpenRouterCopyGenerator.js";
 
 const brief: CampaignBrief = {
+  schemaVersion: BRIEF_SCHEMA_VERSION,
   id: "camp",
   targetRegion: "DE",
   targetAudience: "Urban outdoor enthusiasts",

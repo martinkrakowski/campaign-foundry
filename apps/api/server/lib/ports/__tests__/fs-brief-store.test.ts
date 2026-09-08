@@ -2,11 +2,12 @@ import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { chmodSync, mkdtempSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { BRIEF_SCHEMA_VERSION, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { FsBriefStore } from "../fs-brief-store.js";
 import { hashBytes } from "../../brief-files.js";
 
 const minimalBrief: CampaignBrief = {
+  schemaVersion: BRIEF_SCHEMA_VERSION,
   id: "test-camp",
   targetRegion: "US",
   targetAudience: "developers",

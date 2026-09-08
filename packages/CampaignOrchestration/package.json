@@ -18,6 +18,10 @@
       "types": "./src/domain/value-objects/display-sizes.ts",
       "default": "./src/domain/value-objects/display-sizes.ts"
     },
+    "./brief-schema-version": {
+      "types": "./src/domain/value-objects/brief-schema-version.ts",
+      "default": "./src/domain/value-objects/brief-schema-version.ts"
+    },
     "./campaign-types": {
       "types": "./src/domain/value-objects/campaign-types.ts",
       "default": "./src/domain/value-objects/campaign-types.ts"

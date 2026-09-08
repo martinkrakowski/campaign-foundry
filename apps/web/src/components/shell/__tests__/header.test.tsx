@@ -264,6 +264,7 @@ describe("Header — Generate's three-way question (D35)", () => {
    * brief-editor.test.tsx; this pins the header's side of the contract.
    */
   const onScreenDraft = {
+    schemaVersion: 1,
     id: "on-screen-draft",
     targetRegion: "DE",
     targetAudience: "a",

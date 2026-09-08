@@ -15,6 +15,7 @@ import * as messages from "../messages";
 
 /** A classic brief carrying everything a row can show. */
 const classic: CampaignBrief = {
+  schemaVersion: 1,
   id: "summer-launch",
   targetRegion: "EU",
   targetAudience: "urban explorers",
@@ -68,6 +69,7 @@ describe("ReviewStep — summary rows", () => {
   test("a row whose field the projection omits does not render", () => {
     // No treatments, default output, classic mode: toBrief drops all three.
     const bare: CampaignBrief = {
+      schemaVersion: 1,
       id: "bare",
       targetRegion: "EU",
       targetAudience: "urban explorers",

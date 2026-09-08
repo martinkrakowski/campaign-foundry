@@ -3,6 +3,7 @@
 export * from "./aspect-ratios.js";
 export * from "./AspectRatio.vo.js";
 export * from "./BackgroundSource.vo.js";
+export * from "./brief-schema-version.js";
 export * from "./campaign-types.js";
 export * from "./ComplianceResult.vo.js";
 export * from "./CopyPool.vo.js";

@@ -13,6 +13,10 @@ import type { Product } from "./Product.js";
  * ValidateBriefIntegrity step, before any port is called.
  */
 export interface CampaignBrief {
+  /**
+   * The brief schema version (D133: required in the domain, defaulted at the boundary).
+   */
+  readonly schemaVersion: number;
   readonly id: string;
   readonly targetRegion: string;
   readonly targetAudience: string;

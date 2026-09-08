@@ -49,6 +49,7 @@ const validBrief =
   "id: good\ntargetRegion: DE\ntargetAudience: a\ncampaignMessage: Hi\nproducts:\n  - id: alpha\n  - id: beta\n";
 
 const brief = (over: Record<string, unknown> = {}) => ({
+  schemaVersion: 1,
   id: "camp",
   targetRegion: "DE",
   targetAudience: "a",
@@ -206,6 +207,7 @@ describe("authoring briefs", () => {
     expect(onDisk).toMatchObject({ id: "camp", localizedMessage: "Hallo" });
     const dumped = readFileSync(campYaml(), "utf8");
     expect([...dumped.matchAll(/^([a-zA-Z]+):/gm)].map((m) => m[1])).toEqual([
+      "schemaVersion",
       "id",
       "targetRegion",
       "targetAudience",

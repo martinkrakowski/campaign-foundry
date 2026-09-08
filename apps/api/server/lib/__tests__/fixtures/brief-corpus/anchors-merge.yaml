@@ -4,6 +4,7 @@ defaults: &defaults
   primaryColor: "#1473E6"
   tone: bold
 
+schemaVersion: 1
 id: corpus-anchors-merge
 campaignMessage: Merge me.
 targetAudience: Everyone

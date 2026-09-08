@@ -12,6 +12,7 @@ const ALL_RATIOS = "1:1, 9:16, 16:9";
 
 /** A valid classic brief; the per-test spread adds `mode`/`variation` when needed. */
 const BASE: CampaignBrief = {
+  schemaVersion: 1,
   id: "summer-hydration-2026",
   targetRegion: "DE",
   targetAudience: "Urban outdoor enthusiasts, 25-40",

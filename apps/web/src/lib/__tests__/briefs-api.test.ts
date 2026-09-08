@@ -23,6 +23,7 @@ import {
 } from "../briefs-api";
 
 const brief: CampaignBrief = {
+  schemaVersion: 1,
   id: "camp",
   targetRegion: "DE",
   targetAudience: "a",
@@ -452,6 +453,7 @@ describe("copy pool calls", () => {
 
   test("generatePool posts the brief inline with count and returns pool + added", async () => {
     const brief = {
+      schemaVersion: 1,
       id: "camp",
       targetRegion: "DE",
       targetAudience: "a",

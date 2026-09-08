@@ -73,6 +73,7 @@ const RunBriefProbe = () => {
 };
 
 const brief = (id: string) => ({
+  schemaVersion: 1,
   id,
   targetRegion: "DE",
   targetAudience: "a",

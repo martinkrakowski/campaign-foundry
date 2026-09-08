@@ -8,6 +8,7 @@ import {
   hasAllowedImageMagic,
   assetRelPath,
 } from "../asset-files.js";
+import { BRIEF_SCHEMA_VERSION } from "@campaignfoundry/CampaignOrchestration";
 
 const origRoot = process.env.PROJECT_ROOT;
 const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -133,6 +134,7 @@ describe("rewriteAssetPath and rewriteAssetPaths", () => {
   test("rewriteAssetPaths rewrites both logoPath and inputAsset on brief products", async () => {
     const { rewriteAssetPaths } = await import("../asset-files.js");
     const brief = {
+      schemaVersion: BRIEF_SCHEMA_VERSION,
       id: "new-camp",
       targetRegion: "US",
       targetAudience: "all",
@@ -165,6 +167,7 @@ describe("rewriteAssetPath and rewriteAssetPaths", () => {
   test("extractSourceAssetBriefIds finds distinct source brief IDs excluding target", async () => {
     const { extractSourceAssetBriefIds } = await import("../asset-files.js");
     const brief = {
+      schemaVersion: BRIEF_SCHEMA_VERSION,
       id: "target-camp",
       targetRegion: "US",
       targetAudience: "all",

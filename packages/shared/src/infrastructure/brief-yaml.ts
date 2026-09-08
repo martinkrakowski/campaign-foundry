@@ -11,6 +11,7 @@ import { stringify } from "yaml";
 
 /** The brief's canonical top-level key order (the sample-campaign order), then any remaining keys. */
 export const BRIEF_KEY_ORDER = [
+  "schemaVersion",
   "id",
   "targetRegion",
   "targetAudience",
