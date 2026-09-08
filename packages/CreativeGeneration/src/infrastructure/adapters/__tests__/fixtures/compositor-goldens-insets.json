@@ -1,5 +1,8 @@
 {
   "darwin-arm64": {
     "headline-top/bold/9:16": "3d45ff2f3d7006229592f45593e9c5a1e7df8585241072bccd7a343e4f09c23c"
+  },
+  "linux-x64": {
+    "headline-top/bold/9:16": "86841e53a671bf38cd929489d224e32359c67b4b22bc623b17ecefda0ae2db67"
   }
 }
