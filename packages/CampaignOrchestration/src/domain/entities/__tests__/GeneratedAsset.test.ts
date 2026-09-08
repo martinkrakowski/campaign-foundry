@@ -18,4 +18,10 @@ describe("assetIdentity", () => {
       }),
     ).toBe("alpha/v4");
   });
+
+  test("a display cell keys product/size/treatment — distinct from any ratio cell (D113)", () => {
+    expect(assetIdentity({ productId: "alpha", size: "728x90", treatment: "default" })).toBe(
+      "alpha/728x90/default",
+    );
+  });
 });

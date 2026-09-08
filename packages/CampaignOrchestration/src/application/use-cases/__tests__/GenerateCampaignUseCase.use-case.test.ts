@@ -1,7 +1,9 @@
 import { describe, test, expect, vi } from "vitest";
-import { GenerateCampaignUseCase, unionSafeInsets } from "../GenerateCampaignUseCase.use-case.js";
+import { GenerateCampaignUseCase, unionSafeInsets, unionSizeInsets } from "../GenerateCampaignUseCase.use-case.js";
 import type { GenerateCampaignDeps } from "../GenerateCampaignUseCase.use-case.js";
 import type { PlatformSafeZone, PlatformSafeZoneResolver } from "../../ports/out/PlatformProfilePort.js";
+import type { CompositeRequest } from "../../ports/out/CompositorPort.js";
+import { resolveCanvas } from "../../../domain/value-objects/aspect-ratios.js";
 import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
 import type { Product } from "../../../domain/entities/Product.js";
 import type { Variant } from "../../../domain/entities/Variant.js";
@@ -264,6 +266,164 @@ describe("GenerateCampaignUseCase — happy path", () => {
     const d = deps();
     const result = await new GenerateCampaignUseCase(d).execute(baseBrief());
     if (result.success) expect(result.value.log.totalOperations).toBe(6);
+  });
+});
+
+describe("GenerateCampaignUseCase — display sizes (A4b)", () => {
+  /**
+   * A stub compositor that honours the canvas it receives: the returned bytes
+   * are a header PNG whose IHDR records `resolveCanvas`'s dimensions, so the
+   * output's pixel size is assertable with no real generator behind the port.
+   * Only the IHDR is read — nothing in this suite decodes the image.
+   */
+  const headerPng = (width: number, height: number): Uint8Array => {
+    const bytes = new Uint8Array(33);
+    bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0); // PNG signature
+    const view = new DataView(bytes.buffer);
+    view.setUint32(8, 13); // IHDR chunk length
+    bytes.set([0x49, 0x48, 0x44, 0x52], 12); // "IHDR"
+    view.setUint32(16, width);
+    view.setUint32(20, height);
+    bytes.set([8, 6, 0, 0, 0], 24); // bit depth, colour, compression, filter, interlace
+    return bytes;
+  };
+
+  /** The existing PNG-size read (preview-frame.test.ts's IHDR offsets), named. */
+  const pngSize = (bytes: Uint8Array): { width: number; height: number } => {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    return { width: view.getUint32(16), height: view.getUint32(20) };
+  };
+
+  const canvasHonouringCompositor = () => {
+    const inner = fakeCompositor();
+    // Every rendered output, with the canvas that produced it — the same bytes
+    // the exporter saves, so the PNG's pixel dimensions are assertable.
+    const outputs: Array<{ canvas: CompositeRequest["canvas"]; image: Uint8Array }> = [];
+    const compositeAsset = vi.fn(async (request: CompositeRequest) => {
+      const { width, height } = resolveCanvas(request.canvas);
+      const image = headerPng(width, height);
+      outputs.push({ canvas: request.canvas, image });
+      return { image, logoApplied: true };
+    });
+    return { ...inner, compositeAsset, outputs };
+  };
+
+  /** A3's google-display profile, as the composition root's resolver would hand it over. */
+  const googleDisplayZones: PlatformSafeZoneResolver = (id) =>
+    id === "google-display"
+      ? {
+          safeInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+          formats: ["static"],
+          sizes: [
+            { size: "300x250", insets: { top: 8, right: 8, bottom: 8, left: 8 } },
+            { size: "728x90", insets: { top: 0, right: 0, bottom: 0, left: 0 } },
+          ],
+        }
+      : undefined;
+
+  const displayBrief = (over: Partial<CampaignBrief> = {}): CampaignBrief =>
+    baseBrief({
+      output: { platforms: ["google-display"], sizes: ["728x90", "300x250"] },
+      ...over,
+    });
+
+  test("renders the requested size cells at their exact pixels alongside the social ratios", async () => {
+    const compositor = canvasHonouringCompositor();
+    const d = deps({ compositor, platformSafeZones: googleDisplayZones });
+    const result = await new GenerateCampaignUseCase(d).execute(displayBrief());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    // 2 products × (3 ratios + 2 sizes) = 10 creatives; ratios still render.
+    expect(result.value.assets).toHaveLength(10);
+    const canvases = vi
+      .mocked(d.compositor.compositeAsset)
+      .mock.calls.map((call) => call[0].canvas);
+    expect(canvases).toContainEqual({ size: "728x90" });
+    expect(canvases).toContainEqual({ size: "300x250" });
+    expect(canvases).toContainEqual({ ratio: "1:1" });
+    expect(canvases).toContainEqual({ ratio: "9:16" });
+    expect(canvases).toContainEqual({ ratio: "16:9" });
+
+    // The output PNG's IHDR carries the display unit's own dimensions (D113: never scaled).
+    const saved = (compositor as { outputs: Array<{ canvas: CompositeRequest["canvas"]; image: Uint8Array }> }).outputs;
+    const leaderboard = saved.find((s) => s.canvas.size === "728x90");
+    const rectangle = saved.find((s) => s.canvas.size === "300x250");
+    expect(leaderboard).toBeDefined();
+    expect(rectangle).toBeDefined();
+    expect(pngSize(leaderboard!.image)).toEqual({ width: 728, height: 90 });
+    expect(pngSize(rectangle!.image)).toEqual({ width: 300, height: 250 });
+    // The exporter saved exactly those renders.
+    const exporter = d.exporter as RecordingExporter;
+    expect(exporter.saved.map((s) => s.path)).toContain("alpha/728x90.png");
+    expect(exporter.saved.map((s) => s.path)).toContain("alpha/300x250.png");
+
+    // Display assets carry their size, not a ratio; ratio assets are untouched.
+    const leaderboardAsset = result.value.assets.find((a) => a.outputPath === "alpha/728x90.png");
+    expect(leaderboardAsset).toMatchObject({ productId: "alpha", size: "728x90", treatment: "default" });
+    expect(leaderboardAsset).not.toHaveProperty("aspectRatio");
+    const ratioAsset = result.value.assets.find((a) => a.outputPath === "alpha/1x1.png");
+    expect(ratioAsset).toMatchObject({ productId: "alpha", aspectRatio: "1:1", treatment: "default" });
+    expect(ratioAsset).not.toHaveProperty("size");
+  });
+
+  test("composites display cells with the display profile's insets for that size (F5)", async () => {
+    const d = deps({ compositor: canvasHonouringCompositor(), platformSafeZones: googleDisplayZones });
+    const result = await new GenerateCampaignUseCase(d).execute(displayBrief());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const requests = vi.mocked(d.compositor.compositeAsset).mock.calls.map((call) => call[0]);
+    const bySize = (size: string) => requests.filter((r) => r.canvas.size === size);
+    // 300x250 takes the profile's 8 px inset; 728x90 takes its (present) zeros;
+    // ratio cells still receive no insets on the classic path.
+    expect(bySize("300x250")[0].safeInsets).toEqual({ top: 8, right: 8, bottom: 8, left: 8 });
+    expect(bySize("728x90")[0].safeInsets).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
+    expect(requests.find((r) => r.canvas.ratio === "1:1")).not.toHaveProperty("safeInsets");
+  });
+
+  test("a size no requested platform offers renders without insets", async () => {
+    const d = deps({ platformSafeZones: googleDisplayZones });
+    const result = await new GenerateCampaignUseCase(d).execute(
+      baseBrief({ output: { platforms: ["instagram-feed"], sizes: ["728x90"] } }),
+    );
+    expect(result.success).toBe(true);
+    const request = vi.mocked(d.compositor.compositeAsset).mock.calls.find(
+      (call) => call[0].canvas.size === "728x90",
+    );
+    expect(request).toBeDefined();
+    expect(request![0]).not.toHaveProperty("safeInsets");
+  });
+
+  test("counts size cells in totalOperations", async () => {
+    const d = deps({ platformSafeZones: googleDisplayZones });
+    const result = await new GenerateCampaignUseCase(d).execute(displayBrief());
+    if (result.success) expect(result.value.log.totalOperations).toBe(10);
+  });
+
+  test("regenerates a targeted display cell by its size identity", async () => {
+    const d = deps({ platformSafeZones: googleDisplayZones });
+    const result = await new GenerateCampaignUseCase(d).execute(displayBrief(), {
+      regenerateOnly: [{ productId: "alpha", size: "728x90", treatment: "default" }],
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.assets.map((a) => a.outputPath)).toEqual(["alpha/728x90.png"]);
+    // Not the 1:1 hero, so no proof is rewritten.
+    expect((d.exporter as RecordingExporter).proofs).toEqual([]);
+  });
+
+  test("rejects an unknown display size before touching any port", async () => {
+    const d = deps();
+    // A programmatic brief that bypassed parsing — the exact caller this
+    // defense-in-depth check exists for — so the type is deliberately forged.
+    const output = { sizes: ["999x99"] } as unknown as NonNullable<CampaignBrief["output"]>;
+    const result = await new GenerateCampaignUseCase(d).execute(baseBrief({ output }));
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toMatch(/output\.sizes entry "999x99" is not a display size/);
+    }
+    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+    expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
   });
 });
 
@@ -1114,6 +1274,50 @@ describe("unionSafeInsets (D11)", () => {
     expect(unionSafeInsets(["nope", "tiktok"], resolver).get("9:16")).toEqual(ZONES.tiktok.safeInsets);
     expect(unionSafeInsets(undefined, resolver).size).toBe(0);
     expect(unionSafeInsets(["tiktok"], undefined).size).toBe(0);
+  });
+
+  test("a display profile contributes no ratio (its insets are per size, F5)", () => {
+    const zones: Record<string, PlatformSafeZone> = {
+      ...ZONES,
+      "google-display": {
+        safeInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        formats: ["static"],
+        sizes: [{ size: "300x250", insets: { top: 8, right: 8, bottom: 8, left: 8 } }],
+      },
+    };
+    expect(unionSafeInsets(["google-display", "instagram-feed"], (id) => zones[id]).size).toBe(1);
+  });
+});
+
+describe("unionSizeInsets (F5)", () => {
+  const displayZones: Record<string, PlatformSafeZone> = {
+    "google-display": {
+      safeInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      formats: ["static"],
+      sizes: [
+        { size: "300x250", insets: { top: 8, right: 8, bottom: 8, left: 8 } },
+        { size: "728x90", insets: { top: 0, right: 0, bottom: 0, left: 0 } },
+      ],
+    },
+    "display-web": {
+      safeInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      formats: ["static"],
+      sizes: [{ size: "300x250", insets: { top: 10, right: 2, bottom: 8, left: 8 } }],
+    },
+  };
+  const displayResolver: PlatformSafeZoneResolver = (id) => displayZones[id];
+
+  test("takes the max per side across display platforms offering the same size", () => {
+    const union = unionSizeInsets(["google-display", "display-web"], displayResolver);
+    expect(union.get("300x250")).toEqual({ top: 10, right: 8, bottom: 8, left: 8 });
+    expect(union.get("728x90")).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
+  });
+
+  test("social profiles contribute nothing, and it is empty without platforms or a resolver", () => {
+    expect(unionSizeInsets(["instagram-feed"], resolver).size).toBe(0);
+    expect(unionSizeInsets(undefined, displayResolver).size).toBe(0);
+    expect(unionSizeInsets(["google-display"], undefined).size).toBe(0);
+    expect(unionSizeInsets(["nope"], displayResolver).size).toBe(0);
   });
 });
 

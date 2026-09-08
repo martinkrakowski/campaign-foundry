@@ -114,6 +114,24 @@ describe("report persistence", () => {
     ).toBe(false);
   });
 
+  test("isPersistedAsset takes a display size instead of a ratio — exactly one canvas (D113)", () => {
+    expect(
+      isPersistedAsset({ productId: "alpha", size: "728x90", treatment: "default", outputPath: "alpha/728x90.png" }),
+    ).toBe(true);
+    // Neither canvas: cannot be keyed or packaged.
+    expect(isPersistedAsset({ productId: "alpha", treatment: "default", outputPath: "alpha/x.png" })).toBe(false);
+    // Both canvases: a corrupt row, skipped like any other unusable one.
+    expect(
+      isPersistedAsset({
+        productId: "alpha",
+        aspectRatio: "1:1",
+        size: "728x90",
+        treatment: "default",
+        outputPath: "alpha/1x1.png",
+      }),
+    ).toBe(false);
+  });
+
   test("isPersistedAsset requires a string videoPath on motion rows", () => {
     const motion = {
       productId: "alpha",

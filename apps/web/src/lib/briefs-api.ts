@@ -344,7 +344,10 @@ export async function planCampaign(brief: CampaignBrief, signal?: AbortSignal): 
 /** One copied creative in a platform package (mirrors Distribution PackageManifestItem). */
 export interface PackageItem {
   productId: string;
-  aspectRatio: string;
+  /** The social canvas. Display items carry `size` instead (D113) — exactly one of the two. */
+  aspectRatio?: string;
+  /** The display family's canvas (the `728x90` form); ratio items omit it. */
+  size?: string;
   treatment: string;
   format?: "static" | "motion";
   source: string;
@@ -369,9 +372,12 @@ function isPackageItem(value: unknown): value is PackageItem {
   const checks = rec.checks;
   if (typeof checks !== "object" || checks === null) return false;
   const size = (checks as { size?: unknown }).size;
+  // The canvas is a social ratio or a display size (D113) — exactly one of the two.
+  const hasRatio = typeof rec.aspectRatio === "string";
+  const hasSize = typeof rec.size === "string";
   return (
     typeof rec.productId === "string" &&
-    typeof rec.aspectRatio === "string" &&
+    hasRatio !== hasSize &&
     typeof rec.treatment === "string" &&
     typeof rec.source === "string" &&
     typeof rec.packagedPath === "string" &&

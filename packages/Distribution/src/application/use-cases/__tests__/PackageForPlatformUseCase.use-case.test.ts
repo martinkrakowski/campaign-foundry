@@ -1,5 +1,6 @@
 import { describe, test, expect, vi } from "vitest";
 import type { GeneratedAsset } from "@campaignfoundry/CampaignOrchestration";
+import type { DisplaySize } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import { PackageForPlatformUseCase, withoutAbsolutePaths } from "../PackageForPlatformUseCase.use-case.js";
 import type { PackageManifest, PackageStorePort } from "../../ports/out/PackageStorePort.js";
 import { platformProfile } from "../../../domain/value-objects/PlatformProfile.vo.js";
@@ -248,6 +249,86 @@ describe("PackageForPlatformUseCase", () => {
     if (!result.success) expect(result.error.message).toMatch(/^Platform "x":/);
     expect(store.writeManifest).toHaveBeenCalledTimes(1);
     expect(store.manifests[0].platformId).toBe("instagram-feed");
+  });
+});
+
+describe("PackageForPlatformUseCase — display profiles (A4b)", () => {
+  /** A display row: size instead of a ratio (D113) — exactly one of the two. */
+  const displayAsset = (size: DisplaySize, over: Partial<GeneratedAsset> = {}): GeneratedAsset =>
+    asset({ size, aspectRatio: undefined, outputPath: `alpha/${size}.png`, ...over });
+
+  test("matches a display profile's assets by size and packages nothing social", async () => {
+    const store = fakeStore();
+    const assets = [
+      displayAsset("728x90"),
+      displayAsset("300x250"),
+      asset({ outputPath: "alpha/1x1.png" }),
+    ];
+    const result = await exec(store, { assets, platforms: ["google-display"] });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const [display] = result.value.platforms;
+    expect(display.items.map((i) => i.source)).toEqual(["alpha/728x90.png", "alpha/300x250.png"]);
+    // Manifest items carry the size, not a ratio.
+    expect(display.items[0].size).toBe("728x90");
+    expect(display.items[0].aspectRatio).toBeUndefined();
+    expect(display.items[1].size).toBe("300x250");
+    expect(display.included).toBe(2);
+    expect(display.excluded).toBe(0);
+  });
+
+  test("fails a display platform whose run produced no display assets, instead of an empty manifest", async () => {
+    const store = fakeStore();
+    const result = await exec(store, {
+      assets: [asset({ outputPath: "alpha/1x1.png" })],
+      platforms: ["google-display"],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toBe(
+        'Platform "google-display": no display assets for google-display — was the campaign generated with output.sizes?',
+      );
+    }
+    expect(store.readAsset).not.toHaveBeenCalled();
+    expect(store.writeManifest).not.toHaveBeenCalled();
+  });
+
+  test("an empty include list still writes an (empty) display manifest when eligible assets exist", async () => {
+    const store = fakeStore();
+    const result = await exec(store, {
+      assets: [displayAsset("728x90")],
+      platforms: ["google-display"],
+      include: [],
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.platforms[0].items).toEqual([]);
+    expect(store.writeManifest).toHaveBeenCalledTimes(1);
+  });
+
+  test("packages only the sizes a display profile accepts; an unaccepted size is not an error", async () => {
+    const store = fakeStore();
+    const assets = [displayAsset("728x90"), displayAsset("300x250")];
+    const result = await exec(store, { assets, platforms: ["meta-audience-network"] });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.platforms[0].items.map((i) => i.source)).toEqual(["alpha/300x250.png"]);
+    // A size the profile does not accept is not eligible at all (not excluded
+    // by `include`), and meta-audience-network has other sizes, so no failure.
+    expect(result.value.platforms[0].excluded).toBe(0);
+    expect(store.reads).not.toContain("alpha/728x90.png");
+  });
+
+  test("a size row never matches a social profile and a ratio row never matches a display one", async () => {
+    const store = fakeStore();
+    const result = await exec(store, {
+      assets: [displayAsset("728x90"), asset({ outputPath: "alpha/1x1.png" })],
+      platforms: ["instagram-feed"],
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.platforms[0].items.map((i) => i.source)).toEqual(["alpha/1x1.png"]);
+    expect(store.reads).not.toContain("alpha/728x90.png");
   });
 });
 

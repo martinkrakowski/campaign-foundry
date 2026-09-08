@@ -669,7 +669,7 @@ export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): Campaig
 export function parseRegenerateOnly(value: unknown): RegenerationTarget[] | undefined {
   if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value)) {
-    throw new Error('"regenerateOnly" must be an array of { productId, aspectRatio, treatment }.');
+    throw new Error('"regenerateOnly" must be an array of { productId, aspectRatio | size, treatment }.');
   }
   // An empty list would enable selective mode yet target nothing — a silent no-op
   // run. Reject it so the contract fails fast instead (omit the field for a full run).
@@ -695,16 +695,20 @@ export function parseRegenerateOnly(value: unknown): RegenerationTarget[] | unde
         ? { productId: rec.productId, variantIndex: rec.variantIndex }
         : { productId: rec.productId, variantIndex: rec.variantIndex, attempt: rec.attempt };
     }
-    if (
-      typeof rec.productId !== "string" ||
-      typeof rec.aspectRatio !== "string" ||
-      typeof rec.treatment !== "string"
-    ) {
-      throw new Error(
-        '"regenerateOnly" entries require string productId, aspectRatio, and treatment.',
-      );
+    if (typeof rec.productId !== "string" || typeof rec.treatment !== "string") {
+      throw new Error('"regenerateOnly" entries require string productId and treatment.');
     }
-    return { productId: rec.productId, aspectRatio: rec.aspectRatio, treatment: rec.treatment };
+    // The canvas is a social ratio or a display size (D113) — exactly one of the two,
+    // the same identity the run keys the cell on and the review UI sends back.
+    if (typeof rec.aspectRatio === "string") {
+      return { productId: rec.productId, aspectRatio: rec.aspectRatio, treatment: rec.treatment };
+    }
+    if (typeof rec.size === "string") {
+      return { productId: rec.productId, size: rec.size, treatment: rec.treatment };
+    }
+    throw new Error(
+      '"regenerateOnly" entries require a canvas: string aspectRatio (social) or size (display).',
+    );
   });
 }
 

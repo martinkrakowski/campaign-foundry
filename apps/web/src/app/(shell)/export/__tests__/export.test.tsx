@@ -100,6 +100,30 @@ describe("ExportPage — platform packaging", () => {
     expect((screen.getByRole("button", { name: "Download zip" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  test("a display package row names its size, not a ratio (D113)", async () => {
+    const user = userEvent.setup();
+    seedPersistedRun([makeAsset()]);
+    mockPipelineApi({
+      report: { halted: false, assets: [makeAsset()], log: { entries: [], campaignId: "seed" } },
+      packages: () => json({ platforms: [] }, 404),
+      packagePost: () =>
+        json({
+          platforms: [
+            {
+              platformId: "google-display",
+              items: [item({ aspectRatio: undefined, size: "728x90", packagedPath: "packages/seed/google-display/alpha/728x90.png" })],
+            },
+          ],
+        }),
+    });
+    renderWithRun(<ExportPage />);
+    await screen.findByRole("group", { name: "Platforms" });
+    await user.click(screen.getByRole("button", { name: "google-display" }));
+    await user.click(await screen.findByRole("button", { name: "Package" }));
+    expect(await screen.findByText("packages/seed/google-display/alpha/728x90.png")).toBeTruthy();
+    expect(screen.getByText("alpha @ 728x90 · default")).toBeTruthy();
+  });
+
   test("sends the approved asset keys as include, and omits include with no decisions", async () => {
     const user = userEvent.setup();
     const assets = [

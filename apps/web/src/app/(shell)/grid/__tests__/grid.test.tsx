@@ -70,8 +70,18 @@ describe("GridPage", () => {
     expect(screen.queryByText("social-post")).toBeNull();
   });
 
-  test("a short-video brief shows the type display name on the review summary, never the raw id", async () => {
-    seedPersistedRun([makeAsset()]);
+  test("a display cell groups under its IAB size and keys by it, never a ratio (D113)", async () => {
+    seedPersistedRun([
+      makeAsset({ aspectRatio: undefined, size: "728x90", outputPath: "alpha/728x90.png" }),
+    ]);
+    renderWithRun(<GridPage />);
+    // The filter offers the unit, the group heading is the unit itself, and the
+    // card carries no ratio.
+    expect((await screen.findAllByText("728x90")).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("alpha @ 728x90 · default")).toBeTruthy();
+  });
+
+  test("a short-video brief shows the type display name on the review summary, never the raw id", async () => {    seedPersistedRun([makeAsset()]);
     const stored = JSON.parse(localStorage.getItem("cf:brief") ?? "{}") as Record<string, unknown>;
     localStorage.setItem("cf:brief", JSON.stringify({ ...stored, type: "short-video" }));
     renderWithRun(<GridPage />);

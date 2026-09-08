@@ -350,6 +350,13 @@ describe("parseRegenerateOnly", () => {
     ]);
   });
 
+  test("maps a display cell target by size, and rejects a canvas-less one (D113)", () => {
+    expect(parseRegenerateOnly([{ productId: "p", size: "728x90", treatment: "default" }])).toEqual([
+      { productId: "p", size: "728x90", treatment: "default" },
+    ]);
+    expect(() => parseRegenerateOnly([{ productId: "p", treatment: "default" }])).toThrow(/require a canvas/);
+  });
+
   test("maps variation targets with optional attempt", () => {
     expect(parseRegenerateOnly([{ productId: "p", variantIndex: 0 }])).toEqual([
       { productId: "p", variantIndex: 0 },

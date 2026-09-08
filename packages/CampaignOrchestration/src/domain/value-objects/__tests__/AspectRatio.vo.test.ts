@@ -36,6 +36,19 @@ describe("AspectRatio", () => {
     if (r.success) expect(r.value.slug).toBe("9x16");
   });
 
+  test("forBackground maps a spec onto the ratio the background port speaks (D113)", () => {
+    // A ratio spec is itself; a display unit asks for the nearest social
+    // ratio's orientation, so a leaderboard requests a wide background.
+    const square = AspectRatio.forBackground({ ratio: "1:1" });
+    expect(square.value).toBe("1:1");
+    expect(square.width).toBe(1080);
+    expect(square.height).toBe(1080);
+    const leaderboard = AspectRatio.forBackground({ size: "728x90" });
+    expect(leaderboard.value).toBe("16:9");
+    expect(leaderboard.width).toBe(1920);
+    expect(leaderboard.height).toBe(1080);
+  });
+
   test("create width equals resolveCanvas for the same ratio — the VO reads through the resolver", () => {
     const r = AspectRatio.create("1:1");
     expect(r.success).toBe(true);

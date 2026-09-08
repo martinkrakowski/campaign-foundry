@@ -68,19 +68,24 @@ export function clampPolicy(state: EditorState): EditorState {
 }
 
 /**
- * How many creatives a classic brief yields: products × every aspect ratio ×
- * treatments. Classic draws one set per ratio (W1: it never narrows to the selected
- * platforms), so every ratio in the canonical set counts. `treatments` is optional on
+ * How many creatives a classic brief yields: products × every canvas ×
+ * treatments. Classic draws one set per canvas (W1: it never narrows to the selected
+ * platforms), so every ratio in the canonical set counts — plus each requested
+ * display size (`output.sizes`, D113). `treatments` is optional on
  * a stored brief, so the absent-or-empty distinction is the caller's: pass the length
  * when the key exists, `undefined` when a brief simply has no treatments block.
  *
  * This is the estimate's local truth for a classic draft (D31): the planner refuses
  * classic briefs, so the editor derives the deliverables count instead of asking.
  */
-export function classicAdCount(products: number, treatments: number | undefined): number {
+export function classicAdCount(
+  products: number,
+  treatments: number | undefined,
+  sizes = 0,
+): number {
   // A brief with no treatments still renders one creative per cell: the use case
   // substitutes DEFAULT_TREATMENT when the list is absent *or* empty
   // (GenerateCampaignUseCase.use-case.ts:163). `?? 1` only catches undefined, so an
   // empty array would otherwise multiply the whole estimate to zero.
-  return products * RATIO_VALUES.length * Math.max(1, treatments ?? 1);
+  return products * (RATIO_VALUES.length + sizes) * Math.max(1, treatments ?? 1);
 }

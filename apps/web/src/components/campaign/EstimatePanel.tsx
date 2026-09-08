@@ -55,16 +55,22 @@ function ClassicEstimate({ state }: { state: EditorState }) {
       </div>
     );
   }
-  const creatives = classicAdCount(products, state.treatments.length);
-  const perRatio = creatives / RATIO_VALUES.length;
-  const ratios = RATIO_VALUES.map((ratio) => ({ label: ratioDisplayName(ratio), count: perRatio }));
+  const sizeCount = state.sizes.length;
+  const creatives = classicAdCount(products, state.treatments.length, sizeCount);
+  const perCanvas = creatives / (RATIO_VALUES.length + sizeCount);
+  const canvases = [
+    ...RATIO_VALUES.map((ratio) => ({ label: ratioDisplayName(ratio), count: perCanvas })),
+    // A requested display unit is a canvas the run will render too (D113) —
+    // count it, or the sentence understates the deliverables it promises.
+    ...state.sizes.map((size) => ({ label: size, count: perCanvas })),
+  ];
   return (
     <div className="rounded-lg border border-border bg-surface p-4">
       <Eyebrow as="h4">Estimate</Eyebrow>
       <p className="mt-2 text-[13px] text-text-primary">
         {messages.estimateSentence({
           creatives,
-          ratios,
+          ratios: canvases,
           products,
           genaiCalls: 0,
         })}

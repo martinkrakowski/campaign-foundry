@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { API, assetKey, assetLabel, useRun, type Asset } from "@/lib/run-context";
+import { API, assetCanvas, assetKey, assetLabel, useRun, type Asset } from "@/lib/run-context";
 import { ASPECT_RATIOS } from "@/lib/aspect-ratios";
 import { cn } from "@/lib/cn";
 import { descriptorBeats, descriptorHeadline } from "@/components/campaign/messages";
@@ -113,7 +113,7 @@ export default function GridPage() {
   const filterOptions = useMemo(
     () => ({
       products: uniqueSorted(assets.map((a) => a.productId)),
-      ratios: uniqueSorted(assets.map((a) => a.aspectRatio)),
+      ratios: uniqueSorted(assets.map(assetCanvas)),
       formats: uniqueSorted(assets.map((a) => formatOf(a))),
       // A descriptor that lost a field to normalisation contributes no option for it —
       // `flatMap` over `?? []` drops it rather than offering an "undefined" filter.
@@ -145,7 +145,7 @@ export default function GridPage() {
     () =>
       assets.filter((a) => {
         if (productFilter && a.productId !== productFilter) return false;
-        if (ratioFilter && a.aspectRatio !== ratioFilter) return false;
+        if (ratioFilter && assetCanvas(a) !== ratioFilter) return false;
         if (formatFilter && formatOf(a) !== formatFilter) return false;
         if (layoutFilter && a.descriptor?.layout !== layoutFilter) return false;
         if (toneFilter && a.descriptor?.tone !== toneFilter) return false;
@@ -164,7 +164,7 @@ export default function GridPage() {
     const byProduct = new Map<string, Map<string, Asset[]>>();
     for (const a of visible) {
       const ratios = byProduct.get(a.productId) ?? new Map<string, Asset[]>();
-      ratios.set(a.aspectRatio, [...(ratios.get(a.aspectRatio) ?? []), a]);
+      ratios.set(assetCanvas(a), [...(ratios.get(assetCanvas(a)) ?? []), a]);
       byProduct.set(a.productId, ratios);
     }
     return [...byProduct.entries()].map(([productId, ratios]) => ({

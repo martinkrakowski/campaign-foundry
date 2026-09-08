@@ -43,13 +43,16 @@ export const latestReportPath = (root: string): string => resolve(root, "report.
 
 /**
  * A persisted report row that can be keyed. Every row — classic or variation —
- * has the four strings. Variation rows additionally carry integer variantIndex
- * and attempt (>= 0); motion rows carry the mp4 path and clip length.
- * Planned-axis descriptor is carried additively on variation rows.
+ * has the four identity/path strings, where the canvas is a social `aspectRatio`
+ * or a display `size` (D113) — exactly one of the two. Variation rows additionally
+ * carry integer variantIndex and attempt (>= 0); motion rows carry the mp4 path
+ * and clip length. Planned-axis descriptor is carried additively on variation rows.
  */
 export type PersistedAsset = {
   productId: string;
-  aspectRatio: string;
+  aspectRatio?: string;
+  /** The display family's canvas (the `728x90` form); present only when `aspectRatio` is not. */
+  size?: string;
   treatment: string;
   outputPath: string;
   variantIndex?: number;
@@ -88,7 +91,11 @@ export function isPersistedAsset(a: unknown): a is PersistedAsset {
   if (typeof a !== "object" || a === null) return false;
   const rec = a as Record<string, unknown>;
   if (typeof rec.productId !== "string") return false;
-  if (typeof rec.aspectRatio !== "string") return false;
+  // The canvas is a social ratio or a display size (D113) — exactly one; a row
+  // with neither (or both) cannot be keyed or packaged, so it is skipped.
+  const hasRatio = typeof rec.aspectRatio === "string";
+  const hasSize = typeof rec.size === "string";
+  if (hasRatio === hasSize) return false;
   if (typeof rec.treatment !== "string") return false;
   if (typeof rec.outputPath !== "string") return false;
   // `format` is absent on classic rows, else static | motion. An unknown format is

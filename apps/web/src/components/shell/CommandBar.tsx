@@ -50,10 +50,15 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
 
   const isVariation = brief.mode === "variation";
 
-  // What a full run will (re)generate: products × aspect ratios × treatments.
+  // What a full run will (re)generate: products × canvases × treatments, where
+  // the canvases are the three ratios plus each requested display size (D113).
   // The formula lives in `derive.ts` (D31) so the sidebar's classic estimate and this
   // readout state the same number rather than each guessing.
-  const expectedCount = classicAdCount(brief.products.length, brief.treatments?.length);
+  const expectedCount = classicAdCount(
+    brief.products.length,
+    brief.treatments?.length,
+    brief.output?.sizes?.length ?? 0,
+  );
 
   useEffect(() => {
     if (!isVariation) {

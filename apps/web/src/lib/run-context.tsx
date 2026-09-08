@@ -25,7 +25,10 @@ export const API = "/api/pipeline";
 /** One rendered creative, as returned by the pipeline run report. */
 export interface Asset {
   productId: string;
-  aspectRatio: string;
+  /** The social canvas. Display-size assets carry `size` instead (D113) — exactly one of the two. */
+  aspectRatio?: string;
+  /** The display family's canvas (the `728x90` form); ratio assets omit it. */
+  size?: string;
   /** The PNG — the poster on motion assets. */
   outputPath: string;
   /** The mp4 — motion assets only. */
@@ -256,20 +259,34 @@ export type EstimateStatus = "idle" | "loading" | "ok" | "infeasible" | "unavail
 export type { PackagedPlatform, PlanEstimate };
 
 /**
- * Stable key — classic triple, or `productId/v<index>` in variation mode.
+ * The canvas a row was rendered on: the ratio, or the IAB size for a display
+ * cell (D113). The API's report guard keeps rows to exactly one of the two, so
+ * the empty fallback is defense-in-depth for a hand-edited report: it degrades
+ * to the empty key instead of crashing the grid, export, or re-roll.
+ */
+export const assetCanvas = (a: Pick<Asset, "aspectRatio" | "size">): string =>
+  a.aspectRatio ?? a.size ?? "";
+
+/**
+ * Stable key — classic triple (canvas key: the ratio, or the size for a display
+ * cell, D113), or `productId/v<index>` in variation mode.
  * Mirrors domain `assetIdentity` (same fixtures; a runtime re-export of the
  * package hits webpack's inability to map `.js` specifiers onto `.ts` sources).
  */
-export const assetKey = (a: Pick<Asset, "productId" | "aspectRatio" | "treatment" | "variantIndex">): string =>
-  a.variantIndex !== undefined ? `${a.productId}/v${a.variantIndex}` : `${a.productId}/${a.aspectRatio}/${a.treatment}`;
+export const assetKey = (
+  a: Pick<Asset, "productId" | "aspectRatio" | "size" | "treatment" | "variantIndex">,
+): string =>
+  a.variantIndex !== undefined
+    ? `${a.productId}/v${a.variantIndex}`
+    : `${a.productId}/${assetCanvas(a)}/${a.treatment}`;
 
 /** Human-readable label — includes `v<index>` in variation mode so duplicate layouts are distinct. */
 export const assetLabel = (
-  a: Pick<Asset, "productId" | "aspectRatio" | "treatment" | "variantIndex">,
+  a: Pick<Asset, "productId" | "aspectRatio" | "size" | "treatment" | "variantIndex">,
 ): string =>
   a.variantIndex !== undefined
-    ? `${a.productId} @ ${a.aspectRatio} · v${a.variantIndex} · ${a.treatment}`
-    : `${a.productId} @ ${a.aspectRatio} · ${a.treatment}`;
+    ? `${a.productId} @ ${assetCanvas(a)} · v${a.variantIndex} · ${a.treatment}`
+    : `${a.productId} @ ${assetCanvas(a)} · ${a.treatment}`;
 
 /** Canvas raster + encode budget per frame (wave-4 perf spike), for the encode estimate. */
 export const ENCODE_MS_PER_FRAME = 7;
@@ -813,7 +830,11 @@ export function RunProvider({ children }: { children: ReactNode }) {
             variantIndex: a.variantIndex,
             attempt: (a.attempt ?? 0) + 1,
           }
-        : { productId: a.productId, aspectRatio: a.aspectRatio, treatment: a.treatment },
+        : // The canvas rides whichever family the row carries (D113): a social
+          // cell sends its ratio, a display cell its size.
+          a.aspectRatio !== undefined
+          ? { productId: a.productId, aspectRatio: a.aspectRatio, treatment: a.treatment }
+          : { productId: a.productId, size: a.size, treatment: a.treatment },
     );
 
     // Same claim discipline as execute: the press's token is captured before the POST
