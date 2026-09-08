@@ -14,9 +14,37 @@ unfunded, hangs (0-byte log at five minutes), or dies on arrival twice. **grok n
 | **implementer 2** | `MODEL=opencode/big-pickle dispatch-lane.sh …` — the script's default. |
 | **implementer 3** | `MODEL=opencode-go/glm-5.3-flash dispatch-lane.sh …`. Note the provider: `opencode-go/`, which is funded; `opencode/glm-5.3-flash` answers *Insufficient balance* on the same account. |
 | **PR reviewer** | `opencode run --model opencode-go/hy4-preview "$(cat REVIEW.md)"` in a **throwaway worktree** of the branch (so nothing it writes can matter). It answers a one-word probe with a paragraph of planning: give it a schema for the verdict and read past the preamble. |
-| **remediator** | the lane's own implementer first, then the next in the rotation. (Proposed, not yet the owner's rule: grok returns as remediator only — its 4/4 record — after its quota resets **2026-09-14 16:28**, and still never implements.) |
+| **remediator** | the lane's own implementer, at **medium** effort on a narrow brief (see Spending rules 3–4), then the next in the rotation. (Proposed, not yet the owner's rule: grok returns as remediator only — its 4/4 record — after its quota resets **2026-09-14 16:28**, and still never implements.) |
 | **plan reviewer** | `agy --print "$(cat PLAN-REVIEW.md)" --dangerously-skip-permissions --effort high --model gemini-3.1-pro-high` — one reviewer. (The id resolves again as of 2026-09-08; it did not on 09-07.) |
 | **orchestrator, final sweep, merge** | you, never delegated |
+
+## Spending rules (2026-09-08, after a gemini weekly quota went from ~97 % to 76 % in four runs)
+
+Four agy runs — L12, L1a, and two L1a fix rounds — cost roughly twenty points of a weekly quota.
+**Two of the four existed only because the orchestrator's brief specified the wrong types**, and
+every one of them re-ran a suite the orchestrator was already running for free. The model was not
+the problem. These rules are, in order of what they save:
+
+1. **One fix round, not three.** Do not dispatch a remediation until CI has settled **and** every
+   review bot has reported. Findings the orchestrator reads off the diff wait for that same moment.
+   One brief carrying every verified finding; a second round only if the first is refuted.
+2. **Red-team the brief against the plan's own tables, not only against the code.** Both L1a
+   defects — a scalar `outputFamily` where §2.1 says "static, *or* motion when a layer animates",
+   and a `string` template id where the same lane defines the union — were visible in the planning
+   document the brief was written from. Every type a brief dictates must be checked against the
+   decision it implements.
+3. **Fix rounds run the touched test files, never `yarn test:cov`.** The orchestrator runs the full
+   gate itself and that run is what gates the merge; the agent running it too is a duplicate paid
+   for inside a metered context. Reserve the full gate in a brief for an opening lane, and even
+   then ask for the coverage lines, not the whole log.
+4. **Match effort to task shape.** `--effort high` is for an open lane. A narrow, fully specified
+   remediation brief takes `gemini-3.8-flash-medium` (or `-low`) — this file's own track record
+   says that shape is where gemini is strongest, and it is not a reasoning-heavy job. Remember the
+   effort flag must match the id's suffix.
+5. **Never send an agent to read a long plan.** Quote the decisions it needs into the brief. L1a's
+   brief pointed at a 441-line document; the four paragraphs that mattered would have fitted in the
+   brief.
+6. **Count runs per seat in every wave record**, so a burn is visible before a quota is.
 
 **Why grok is out.** It exhausted a weekly quota in two days because it drifted from reviewer and
 fixer into default implementer (nine lane implementations on 09-07/08, every role at high effort,
