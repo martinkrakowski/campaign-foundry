@@ -11,6 +11,8 @@ import type {
 } from "../PreviewCreativeFrameUseCase.use-case.js";
 import type { PlatformSafeZone, PlatformSafeZoneResolver } from "../../ports/out/PlatformProfilePort.js";
 import { BRIEF_SCHEMA_VERSION } from "../../../domain/value-objects/brief-schema-version.js";
+import { DEFAULT_CAMPAIGN_TYPE } from "../../../domain/value-objects/campaign-types.js";
+import { templateFromCanonical } from "../../../domain/value-objects/brief-template.js";
 import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
 import type { Product } from "../../../domain/entities/Product.js";
 import { fakeCompositor, fakeImageGenerator } from "./_fakes.js";
@@ -29,6 +31,7 @@ const product = (id: string, over: Partial<Product> = {}): Product => ({
 
 const baseBrief = (over: Partial<CampaignBrief> = {}): CampaignBrief => ({
   schemaVersion: BRIEF_SCHEMA_VERSION,
+  template: templateFromCanonical(over.type ?? DEFAULT_CAMPAIGN_TYPE),
   id: "camp",
   targetRegion: "DE",
   targetAudience: "audience",

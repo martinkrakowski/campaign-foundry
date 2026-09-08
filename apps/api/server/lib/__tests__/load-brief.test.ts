@@ -1,19 +1,37 @@
-import { describe, test, expect, afterEach } from "vitest";
+import { describe, test, expect, afterEach, vi } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+vi.mock("@campaignfoundry/CampaignOrchestration", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@campaignfoundry/CampaignOrchestration")>();
+  return {
+    ...actual,
+    templateFromCanonical: vi.fn(actual.templateFromCanonical),
+  };
+});
 import {
   parseBrief,
   parseRegenerateOnly,
   loadBrief,
   assertSafeId,
+  validateTemplate,
   MOTION_AXES,
   MOTION_FORMAT,
   SUPPORTED_AXES,
   SUPPORTED_FORMATS,
   TIMELINE_TRANSITIONS,
 } from "../load-brief.js";
-import { BRIEF_SCHEMA_VERSION, MAX_BEATS, MAX_WEIGHT, timelineProblem } from "@campaignfoundry/CampaignOrchestration";
+import {
+  BRIEF_SCHEMA_VERSION,
+  CANONICAL_TEMPLATE_IDS,
+  DEFAULT_CAMPAIGN_TYPE,
+  MAX_BEATS,
+  MAX_WEIGHT,
+  templateFromCanonical,
+  timelineProblem,
+  type CampaignType,
+} from "@campaignfoundry/CampaignOrchestration";
 import type { Capabilities } from "../../lib/capabilities.js";
 
 const valid = {
@@ -84,6 +102,161 @@ describe("parseBrief", () => {
     test("the refusal holds when enforceCapabilities: false (authoring mode refuses future schemas too)", () => {
       expect(() => parseBrief({ ...valid, schemaVersion: 2 }, { enforceCapabilities: false })).toThrow(
         `Campaign brief field "schemaVersion" must be an integer between 1 and ${BRIEF_SCHEMA_VERSION}; got 2.`,
+      );
+    });
+  });
+
+  describe("template enforcement (D120, D124)", () => {
+    test("a brief with no template and type: 'display-ad' parses and returns the canonical image-text template with its five layers in order", () => {
+      vi.mocked(templateFromCanonical).mockClear();
+      const parsed = parseBrief({ ...valid, type: "display-ad" });
+      expect(parsed.template!.id).toBe("canonical-image-text");
+      expect(parsed.template!.creativeType).toBe("image-text");
+      expect(parsed.template!.unit).toBe("standard-web");
+      expect(parsed.template!.layers).toEqual([
+        { id: "image", kind: "image" },
+        { id: "shade", kind: "shade" },
+        { id: "accent", kind: "accent" },
+        { id: "static-text", kind: "static-text" },
+        { id: "logo", kind: "logo" },
+      ]);
+      expect(vi.mocked(templateFromCanonical)).toHaveBeenCalledWith("display-ad");
+      expect(parsed.template).toEqual(templateFromCanonical("display-ad"));
+    });
+
+    test("a brief with no template and no type returns social-post's template (D112 fallback)", () => {
+      const parsed = parseBrief(valid);
+      expect(parsed.template).toEqual(templateFromCanonical(DEFAULT_CAMPAIGN_TYPE));
+      expect(parsed.template!.id).toBe("canonical-image-text");
+      expect(parsed.template!.creativeType).toBe("image-text");
+      expect(parsed.template!.layers).toHaveLength(5);
+    });
+
+    test("an unknown template.id is refused with a 400-shaped throw", () => {
+      const template = {
+        ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        id: "unknown-template-id",
+      };
+      expect(() => parseBrief({ ...valid, template })).toThrow(
+        `Campaign brief field "template.id" must be one of ${CANONICAL_TEMPLATE_IDS.map((t) => `"${t}"`).join(", ")}; got "unknown-template-id".`,
+      );
+    });
+
+    test("an unknown template.creativeType is refused", () => {
+      const template = {
+        ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        creativeType: "unknown-creative-type",
+      };
+      expect(() => parseBrief({ ...valid, template })).toThrow(
+        /Campaign brief field "template.creativeType" must be one of/,
+      );
+    });
+
+    test("template.creativeType mismatched with canonical template id is refused", () => {
+      const template = {
+        ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        creativeType: "video",
+      };
+      expect(() => parseBrief({ ...valid, template })).toThrow(
+        'Campaign brief field "template.creativeType" must match canonical template "canonical-image-text"; got "video".',
+      );
+    });
+
+    test("a bad unit is refused", () => {
+      const template = {
+        ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        unit: "billboard-unknown",
+      };
+      expect(() => parseBrief({ ...valid, template })).toThrow(
+        /Campaign brief field "template.unit" must be one of/,
+      );
+    });
+
+    test.each([
+      ["zero", 0, "0"],
+      ["float 1.5", 1.5, "1.5"],
+      ["negative -1", -1, "-1"],
+    ])("rejects non-positive integer version (%s)", (_label, val, repr) => {
+      const template = {
+        ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        version: val,
+      };
+      expect(() => parseBrief({ ...valid, template })).toThrow(
+        `Campaign brief field "template.version" must be a positive integer; got ${repr}.`,
+      );
+    });
+
+    test("an empty layers array is refused", () => {
+      const template = {
+        ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        layers: [],
+      };
+      expect(() => parseBrief({ ...valid, template })).toThrow(
+        'Campaign brief field "template.layers" must be a non-empty array; got [].',
+      );
+    });
+
+    test("a layer whose kind its creative type does not accept is refused (fill on image-text)", () => {
+      const base = templateFromCanonical("social-post");
+      const template = {
+        ...base,
+        layers: [...base.layers, { id: "bg-fill", kind: "fill" }],
+      };
+      expect(() => parseBrief({ ...valid, template })).toThrow(
+        'Campaign brief field "template.layers[5].kind" must be one of ["image", "shade", "accent", "static-text", "animated-text", "logo"]; got "fill".',
+      );
+    });
+
+    test("a template missing a required kind is refused (dropping static-text from image-text)", () => {
+      const base = templateFromCanonical("social-post");
+      const template = {
+        ...base,
+        layers: base.layers.filter((l) => l.kind !== "static-text"),
+      };
+      expect(() => parseBrief({ ...valid, template })).toThrow(
+        'Campaign brief field "template.layers" must include required layer kind "static-text" for creative type "image-text".',
+      );
+    });
+
+    test("duplicate layer ids are refused", () => {
+      const base = templateFromCanonical("social-post");
+      const template = {
+        ...base,
+        layers: [...base.layers, { id: "image", kind: "image" }],
+      };
+      expect(() => parseBrief({ ...valid, template })).toThrow(
+        'Campaign brief field "template.layers" must not contain duplicate layer ids; "image" appears more than once.',
+      );
+    });
+
+    test("the refusal holds with enforceCapabilities: false", () => {
+      const base = templateFromCanonical("social-post");
+      const template = {
+        ...base,
+        layers: [...base.layers, { id: "bg-fill", kind: "fill" }],
+      };
+      expect(() => parseBrief({ ...valid, template }, { enforceCapabilities: false })).toThrow(
+        'Campaign brief field "template.layers[5].kind" must be one of ["image", "shade", "accent", "static-text", "animated-text", "logo"]; got "fill".',
+      );
+    });
+
+    test("rejects non-object template and malformed layer objects", () => {
+      expect(() => parseBrief({ ...valid, template: "invalid" })).toThrow(
+        'Campaign brief field "template" must be an object; got "invalid".',
+      );
+      const base = templateFromCanonical("social-post");
+      expect(() => parseBrief({ ...valid, template: { ...base, layers: ["not-an-obj"] } })).toThrow(
+        'Campaign brief field "template.layers[0]" must be an object; got "not-an-obj".',
+      );
+      expect(() => parseBrief({ ...valid, template: { ...base, layers: [{ id: "", kind: "image" }] } })).toThrow(
+        'Campaign brief field "template.layers[0].id" must be a non-empty string; got "".',
+      );
+    });
+
+    test("validateTemplate defaults to social-post when type is invalid or absent", () => {
+      expect(validateTemplate(undefined)).toEqual(templateFromCanonical(DEFAULT_CAMPAIGN_TYPE));
+      expect(validateTemplate(undefined, "invalid-type" as unknown as CampaignType)).toEqual(
+        templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
       );
     });
   });
@@ -1041,16 +1214,26 @@ describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
         // No fixture predates the display family (D113): none names sizes, so
         // every one keeps meaning the social ratios without an edit.
         expect(loaded.output?.sizes).toBeUndefined();
+        // Every sample brief carries a template whose id is a canonical id (D120)
+        expect(CANONICAL_TEMPLATE_IDS).toContain(loaded.template!.id);
+        expect(loaded.template).toEqual(templateFromCanonical("social-post"));
       }
     });
 
     test("a brief with no copy.timeline parses and serializes byte-for-byte as before", () => {
       const parsedClassic = parseBrief(valid);
       expect(parsedClassic.copy).toBeUndefined();
+      expect(parsedClassic.template).toEqual(templateFromCanonical(DEFAULT_CAMPAIGN_TYPE));
 
       const parsedV2 = parseBrief(v2Brief);
       expect(parsedV2.copy).toBeUndefined();
-      expect(JSON.stringify(parsedV2)).toBe(JSON.stringify({ schemaVersion: 1, ...v2Brief }));
+      expect(JSON.stringify(parsedV2)).toBe(
+        JSON.stringify({
+          schemaVersion: 1,
+          template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+          ...v2Brief,
+        }),
+      );
     });
   });
 });

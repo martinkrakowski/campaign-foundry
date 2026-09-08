@@ -4513,3 +4513,54 @@ D118) remain deferred.
 - **Remediation (PR #260 finding):** tightened `CampaignTypePreset.template` from `string` to `CanonicalTemplateId` via `import type`, verified no cycle with `creative-templates.ts`, added `CANONICAL_TEMPLATE_IDS` / preset template consistency test, and verified `"canonical-vidyo"` mutation fails `yarn typecheck` with TS2820.
 - **Remediation (PR #260 fix round 2):** replaced scalar `outputFamily` with non-empty list `outputFamilies` on `CreativeTypeRule` (`image-text` has `["static", "motion"]` per §2.1), asserted preset formats are a subset of `outputFamilies`, loosened `CreativeTemplate.version` to `number` (tested positive integer), and removed duplicate loop in `campaign-types.test.ts`.
 
+---
+
+## 2026-09-08 — Lane L1b: the brief carries its template (D120, D123, D124)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts`: declared `BriefTemplate` interface (`id`, `version`, `creativeType`, `unit`, `layers`) and `templateFromCanonical(type: CampaignType)`.
+  - `packages/CampaignOrchestration/src/domain/value-objects/index.ts`: exported `./brief-template.js`.
+  - `packages/CampaignOrchestration/package.json`: added subpath export `"./brief-template"`.
+  - `packages/CampaignOrchestration/src/domain/entities/CampaignBrief.ts`: added `readonly template?: BriefTemplate;` directly after `schemaVersion` and before `id`.
+  - `packages/shared/src/infrastructure/brief-yaml.ts`: added `"template"` to `BRIEF_KEY_ORDER` between `"schemaVersion"` and `"id"`.
+  - `apps/api/server/lib/load-brief.ts`: implemented and exported `validateTemplate(value: unknown, type?: CampaignType): BriefTemplate`. Wired into `parseBrief` directly after `validateType`. Defaults `template` from canonical preset when omitted/undefined. Return object places `template` directly after `schemaVersion`.
+  - Updated domain/API test fixtures across `GenerateCampaignUseCase`, `PlanVariationsUseCase`, `PreviewCreativeFrameUseCase`, `VariationPolicy`, `asset-files`, `brief-files`, `pipeline`, `pools`, `fs-brief-store`, and `briefs.ts`.
+  - Updated `apps/api/server/lib/__tests__/fixtures/brief-corpus/` YAML/JSON corpus fixtures to carry `template:` preserving byte-for-byte roundtrip save tests.
+  - Added test suites for template validation, canonical mapping, z-ordering, and YAML ordering in `brief-template.test.ts`, `load-brief.test.ts`, and `brief-yaml.test.ts`.
+- **Decisions:**
+  - Followed D120: every campaign brief has a template; defaulted at load from the campaign type's preset. A brief with no type resolves to `social-post` (`DEFAULT_CAMPAIGN_TYPE`) first, then that type's template.
+  - Followed D123: brief carries pinned reference and materialized layer list with layer ids unique within the brief.
+  - Followed D124: compatibility rules enforced at API boundary (in authoring mode too): valid id, positive integer version, unit matches creative type, non-empty layers, all layers accepted by creative type, required layers present, unique layer ids.
+  - Followed D128: array order defines z-order (no `order` field).
+  - Maintained `apps/web` isolation by typing `template?: BriefTemplate` on `CampaignBrief` until L3 updates the web editor, while `load-brief.ts` strictly requires/defaults `template` on all parsed domain briefs.
+- **Mutation Testing:**
+  - Mutation 1: Skipped `accepts` check in `validateTemplate`:
+    ```diff
+    --- a/apps/api/server/lib/load-brief.ts
+    +++ b/apps/api/server/lib/load-brief.ts
+    @@ -218,3 +218,0 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
+    -    if (!rule.accepts.includes(layer.kind)) {
+    -      throw new Error(`brief template: layer "${layer.id}" has kind "${layer.kind}" which is not accepted by creative type "${ruleUnit}"`);
+    -    }
+    ```
+    Failed test: `a layer whose kind its creative type does not accept is refused (fill on image-text)`
+    Error: `AssertionError: expected [Function] to throw an error`
+  - Mutation 2: Defaulted straight to `DEFAULT_CAMPAIGN_TYPE` ignoring `type`:
+    ```diff
+    --- a/apps/api/server/lib/load-brief.ts
+    +++ b/apps/api/server/lib/load-brief.ts
+    @@ -176,1 +176,1 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
+    -  const campaignType = type ?? DEFAULT_CAMPAIGN_TYPE;
+    +  const campaignType = DEFAULT_CAMPAIGN_TYPE;
+    ```
+    Failed test: `a brief with no template and type: 'display-ad' parses and returns the canonical image-text template with its five layers in order`
+    Error: `AssertionError: expected "vi.fn()" to be called with arguments: ['display-ad'], received ['social-post']`
+- **Coverage:**
+  - Statements: 100% (8863/8863)
+  - Branches: 100% (6430/6430)
+  - Functions: 100% (1865/1865)
+  - Lines: 100% (7946/7946)
+- **Left open:**
+  - Lane L1c / L2 / L3: compositor reading layers and web editor supporting template authoring.
+

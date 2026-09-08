@@ -22,6 +22,10 @@
       "types": "./src/domain/value-objects/brief-schema-version.ts",
       "default": "./src/domain/value-objects/brief-schema-version.ts"
     },
+    "./brief-template": {
+      "types": "./src/domain/value-objects/brief-template.ts",
+      "default": "./src/domain/value-objects/brief-template.ts"
+    },
     "./advertising-units": {
       "types": "./src/domain/value-objects/advertising-units.ts",
       "default": "./src/domain/value-objects/advertising-units.ts"
