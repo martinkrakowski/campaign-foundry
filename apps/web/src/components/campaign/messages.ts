@@ -856,9 +856,6 @@ export const previewFrameStandInBackground = "background is a stand-in until the
 
 /** The dialog's title — it is the Identity step in a door (D66). */
 export const createCampaignTitle = "Create a campaign";
-/** One sentence under the title: what the dialog collects, and where Create lands. */
-export const createCampaignDescription =
-  "Name the campaign, say who it is for, and pick a mode — Create opens the editor at Copy.";
 /** The mode field's label, over the two mode cards the editor opens with. */
 export const createModeLabel = "Campaign mode";
 /** The dialog's primary verb, in the foot beside Cancel. */
@@ -923,13 +920,6 @@ export function createModeInherited(mode: string): string {
   return `This copy starts as a ${mode} campaign — change it in the wizard.`;
 }
 /**
- * The name refusal a source create adds: the copy's own name is derived from this
- * one, and a name with no letters or numbers ("!!!") derives nothing — refused
- * here, before the request, instead of failing at the route.
- */
-export const campaignNameNotSluggable =
-  "That name has no letters or numbers in it, so it can't name a copy — use at least one letter or number.";
-/**
  * `create.duplicate.conflict` — the derived name already names a campaign (a 409).
  * Distinct from `createCampaignBlocked`, whose private-window story is false here.
  */
@@ -984,30 +974,19 @@ export const discardGuardKeepEditing = "Keep editing";
 export const discardGuardDiscardClose = "Discard and close";
 /**
  * The guard's detail line names what would actually be dropped — the draft's
- * own answer set, never a generic sentence. Mode is deliberately absent: it has
+ * own answer set, never a generic sentence. Type is deliberately absent: it has
  * a default the user may never have touched, so it is not work in the draft
- * (D90), and neither is the untouched mode toggle. A formatter rather than a
- * fixed string because the sentence is only honest when it lists the answers
- * that are really filled in. The part strings are exported consts so the jargon
- * gate scans them; the formatter composes from those, never from literals of
- * its own.
+ * (D90). A formatter rather than a fixed string because the sentence is only
+ * honest when it lists the answers that are really filled in. The part string
+ * is an exported const so the jargon gate scans it; the formatter composes from
+ * that, never from a literal of its own. Region, audience and source left with
+ * the fields; the dialog is the only caller, so the signature is `(hasName)`.
  */
 export const discardGuardPartName = "a name";
-export const discardGuardPartRegion = "a region";
-export const discardGuardPartAudience = "an audience";
-export const discardGuardPartSource = "a chosen source";
-export function discardGuardDetail(
-  hasName: boolean,
-  hasRegion: boolean,
-  hasAudience: boolean,
-  hasSource: boolean,
-): string {
-  const parts = [
-    hasName ? discardGuardPartName : null,
-    hasRegion ? discardGuardPartRegion : null,
-    hasAudience ? discardGuardPartAudience : null,
-    hasSource ? discardGuardPartSource : null,
-  ].filter((part): part is string => part !== null);
+export function discardGuardDetail(hasName: boolean): string {
+  const parts = [hasName ? discardGuardPartName : null].filter(
+    (part): part is string => part !== null,
+  );
   return `Closing now discards ${joinList(parts)} from this draft.`;
 }
 
@@ -1075,10 +1054,6 @@ export const worldMapFallbackHint =
  * backgrounds and copy, and nothing dispatches or fans out per region (D94).
  */
 export const worldMapRegionHint = "The region shapes the generated backgrounds and copy.";
-/** The start-from rail's eyebrow readout: how many campaigns the store holds. */
-export function startFromCampaignCount(count: number): string {
-  return `${count} campaign${count === 1 ? "" : "s"}`;
-}
 
 /* ── S4 — the mode flip's dropped format (D99/F1) ─────────────────────────── */
 
@@ -1090,3 +1065,29 @@ export function startFromCampaignCount(count: number): string {
  */
 export const modeDroppedVideo =
   "Switching to Classic turned Video off — switch back to Randomized to turn it on again.";
+
+// T3 — the two-field create
+
+/**
+ * The two-line lead under the create dialog's title (T3): name and type, then
+ * the editor.
+ */
+export const createCampaignLead =
+  "Give the campaign a name and pick a type. Create opens the editor so you can fill in the rest.";
+/** The type field's group label, over the three type tiles. */
+export const createTypeLabel = "Campaign type";
+/**
+ * One line on each type tile: how many platforms the preset seeds, and which
+ * formats, as display words the caller already converted (D18). Never a raw
+ * format id — the jargon gate forbids those here.
+ */
+export function typeTileGives(platformCount: number, formats: string): string {
+  return `${Number(platformCount) || 0} platforms · ${formats}`;
+}
+/**
+ * D110 — the short-video tile's extra line: the type must run as Randomized or
+ * the API refuses it. `mode` is the display word (`modeDisplayName("variation")`).
+ */
+export function typeTileRunsAs(mode: string): string {
+  return `Runs as a ${mode} campaign.`;
+}
