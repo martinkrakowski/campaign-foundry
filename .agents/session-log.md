@@ -3657,6 +3657,62 @@ ancestor (someone else pushed). Both scripts are now asking the question they me
 
 **Next:** T2 (seam + preset applied once) is dispatched; T3 ‖ T4 follow; then P1 alone.
 
+## 2026-09-07 — Two-field create, wave B closed: S2 merged as #225, S1 superseded by T3
+
+**Mode:** Orchestrator. Record written at merge time (stage 6). This closes
+`2026-09-07_two-field-create.md`: S3/S4 (wave A, #217/#218) and S2 (#225) merged; S1 is re-briefed
+as T3 of the campaign-type plan; P1 (`packages/ui`) remains, last and alone.
+
+### What merged
+
+| Lane | PR | Commit | What |
+|---|---|---|---|
+| S2 | #225 | `3a67e6e` | `IdentitySection` gains the world map, one control with the region chips (F4/D94) |
+
+### S2 took three attempts and taught two things
+
+**A 0-byte log is a hang.** The first run sat 88 minutes at 0 bytes with a clean tree and was
+killed; the second run flushed within a minute and shipped. Every healthy lane this session wrote
+within a minute. Kill after ~15 minutes of silence; the dispatch wait accepts the `EXIT 143`.
+
+**A green gate can hide a duration regression.** The merge script refused #225 twice: the `push`
+CI run failed with four, then five, `Test timed out in 5000ms` in `brief-editor.test.tsx` while the
+`pull_request` run on the *same commit* passed. That reads like a flake and was nearly re-run as
+one. Per-file durations said otherwise:
+
+| Run | `brief-editor.test.tsx` (166 tests) | "Save as… onto an existing id" |
+|---|---|---|
+| `main` before S2 | 65 s | 1.05 s |
+| #225, passing run | 155 s | 3.80 s |
+| #225, failing runs | 206 s | 5.08 s — timeout |
+| #225 after round 2 (memoised) | 126 s | 1.44 s |
+
+Every editor state update was rebuilding the map's dot matrix — hundreds of SVG nodes under
+happy-dom — because the element and its inline `onSelect` were recreated each render. Round 2
+memoised the element on the region it displays (`d344b79`); a render-count test pins it (three
+unrelated patches → one map render), and the orchestrator's compiling mutant (deps → `[state]`)
+fails it at four renders. **`testTimeout` was not raised.** What remains is the per-mount cost —
+each test that mounts the editor paints the map once — which is why the file is still 2× `main`.
+Recorded as a follow-up: paint the map after first render, or a lighter matrix.
+
+The orchestrator's first mutation of that memo did not compile ("no tests") — the second misfire
+mode again, caught by reading the runner's output rather than its exit code.
+
+### Review and sweep
+
+grok-4.6 found the one real gap — Identity never pinned M2's Other-then-map path (0 tests matched
+the name); the port of the dialog's test now fails when the kit's custom-input close is disabled.
+"Copied, not moved" was refuted for the lane: its brief forbade the dialog, whose deletion is T3's;
+**two maps render on `main` until T3 lands**, by sequence. Six PR-Agent comments refuted
+(`REGION_OPTIONS` is defined in the file; `SectionShell` already takes `compact`; the map is the
+control; React omits an undefined attribute). Qodo's "clicking the selected DE hits EU" is
+**confirmed kit behaviour** (`world-map.tsx:80-84`, the #215 trade-off) — recorded as a kit
+follow-up: hit-test by the smallest containing footprint, independent of paint order.
+
+### Deferred from this plan
+
+- **P1** — `packages/ui` extraction, after every campaign-type lane, alone.
+- Kit: smallest-footprint hit-testing; the map's per-mount cost in tests.
 ---
 
 ## 2026-09-07 — W1 wave-status core (#229)
