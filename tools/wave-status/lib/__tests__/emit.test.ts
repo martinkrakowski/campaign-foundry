@@ -1,5 +1,5 @@
 import { describe, test, expect, afterEach } from "vitest";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -198,6 +198,63 @@ describe("scripts/wave-event.sh agrees with formatEvent byte-for-byte", () => {
     expect(stderr).toContain("started settled failed");
     expect(existsSync(join(dir, "events.jsonl"))).toBe(false);
   });
+
+  test("a lane name with a quote exits 2 and the log file is unchanged", () => {
+    const dir = tempDir();
+    mkdirSync(dir, { recursive: true });
+    const log = join(dir, "events.jsonl");
+    writeFileSync(log, "sentinel\n");
+    let status: number | undefined = -1;
+    let stderr = "";
+    try {
+      execFileSync("zsh", [waveEventSh, dir, "W3", 'l"1', "dispatch", "started"]);
+    } catch (error) {
+      const err = error as { status: number | undefined; stderr: Buffer };
+      status = err.status;
+      stderr = err.stderr.toString();
+    }
+    expect(status).toBe(2);
+    expect(stderr.length).toBeGreaterThan(0);
+    expect(readFileSync(log, "utf8")).toBe("sentinel\n");
+  });
+
+  test("--detail '[1]' exits 2 and the log file is unchanged", () => {
+    const dir = tempDir();
+    mkdirSync(dir, { recursive: true });
+    const log = join(dir, "events.jsonl");
+    writeFileSync(log, "sentinel\n");
+    let status: number | undefined = -1;
+    let stderr = "";
+    try {
+      execFileSync("zsh", [waveEventSh, dir, "W3", "l1", "dispatch", "started", "--detail", "[1]"]);
+    } catch (error) {
+      const err = error as { status: number | undefined; stderr: Buffer };
+      status = err.status;
+      stderr = err.stderr.toString();
+    }
+    expect(status).toBe(2);
+    expect(stderr).toContain("--detail must be a JSON object");
+    expect(readFileSync(log, "utf8")).toBe("sentinel\n");
+  });
+
+  test("--detail '{bad' exits 2 and the log file is unchanged", () => {
+    const dir = tempDir();
+    mkdirSync(dir, { recursive: true });
+    const log = join(dir, "events.jsonl");
+    writeFileSync(log, "sentinel\n");
+    let status: number | undefined = -1;
+    let stderr = "";
+    try {
+      execFileSync("zsh", [waveEventSh, dir, "W3", "l1", "dispatch", "started", "--detail", "{bad"]);
+    } catch (error) {
+      const err = error as { status: number | undefined; stderr: Buffer };
+      status = err.status;
+      stderr = err.stderr.toString();
+    }
+    expect(status).toBe(2);
+    expect(stderr).toContain("--detail must be a JSON object");
+    expect(readFileSync(log, "utf8")).toBe("sentinel\n");
+  });
 });
 
 describe("scripts/dispatch-lane.sh emits its events", () => {
@@ -249,4 +306,111 @@ describe("scripts/dispatch-lane.sh emits its events", () => {
     const { events } = readEvents(readFileSync(join(logdir, "events.jsonl"), "utf8"));
     expect(events.map((event) => event.wave)).toEqual(["wavedefault", "wavedefault"]);
   });
+
+  test(
+    "a fast lane's implement settled is appended before a slow lane's marker exists",
+    async () => {
+      const logdir = join(tempDir(), "waveOrder");
+      mkdirSync(logdir, { recursive: true });
+      const wtFast = tempDir();
+      const wtSlow = tempDir();
+      const brief = join(tempDir(), "brief.md");
+      writeFileSync(brief, "x\n");
+      writeFileSync(join(wtFast, "lane-cmd"), "true\n");
+      writeFileSync(join(wtSlow, "lane-cmd"), "sleep 3; false\n");
+
+      const child = spawn(
+        "zsh",
+        [dispatchLaneSh, logdir, `fast:${wtFast}:${brief}`, `slow:${wtSlow}:${brief}`],
+        {
+          env: {
+            ...process.env,
+            STAGGER: "0",
+            POLL: "1",
+            WAVE: "W3T",
+            LANE_CMD: "zsh ./lane-cmd",
+          },
+          stdio: ["ignore", "ignore", "ignore"],
+        },
+      );
+
+      try {
+        const eventsPath = join(logdir, "events.jsonl");
+        const slowLog = join(logdir, "slow.log");
+        const deadline = Date.now() + 8_000;
+        let settledBeforeSlowMarker = false;
+        while (Date.now() < deadline) {
+          if (existsSync(eventsPath)) {
+            const { events } = readEvents(readFileSync(eventsPath, "utf8"));
+            const fastSettled = events.some(
+              (event) =>
+                event.lane === "fast" && event.stage === "implement" && event.event === "settled",
+            );
+            if (fastSettled) {
+              const slowText = existsSync(slowLog) ? readFileSync(slowLog, "utf8") : "";
+              expect(/^EXIT [0-9]+$/m.test(slowText)).toBe(false);
+              settledBeforeSlowMarker = true;
+              break;
+            }
+          }
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        expect(settledBeforeSlowMarker).toBe(true);
+      } finally {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(() => {
+            child.kill("SIGKILL");
+            resolve();
+          }, 15_000);
+          child.on("close", () => {
+            clearTimeout(timer);
+            resolve();
+          });
+        });
+        try {
+          execFileSync("pkill", ["-f", wtSlow], { stdio: "ignore" });
+        } catch {
+          /* leftover sleep already gone */
+        }
+      }
+    },
+    20_000,
+  );
+
+  test("a timed-out lane emits implement failed with reason timeout as the second line", () => {
+    const logdir = join(tempDir(), "waveTimeout");
+    const wt = tempDir();
+    const brief = join(tempDir(), "brief.md");
+    writeFileSync(brief, "x\n");
+    try {
+      execFileSync("zsh", [dispatchLaneSh, logdir, `l1:${wt}:${brief}`], {
+        timeout: 20_000,
+        env: {
+          ...process.env,
+          STAGGER: "0",
+          POLL: "1",
+          WAVE: "W3T",
+          WAIT_TIMEOUT: "2",
+          LANE_CMD: "sleep 30",
+        },
+      });
+    } catch {
+      /* expected: timeout → exit 1 */
+    }
+    try {
+      execFileSync("pkill", ["-f", wt], { stdio: "ignore" });
+    } catch {
+      /* leftover sleep already gone */
+    }
+    const lines = readFileSync(join(logdir, "events.jsonl"), "utf8").trimEnd().split("\n");
+    expect(lines).toHaveLength(2);
+    expect(JSON.parse(lines[1]!)).toEqual({
+      ts: expect.any(String),
+      wave: "W3T",
+      lane: "l1",
+      stage: "implement",
+      event: "failed",
+      detail: { reason: "timeout" },
+    });
+  }, 20_000);
 });

@@ -5,12 +5,13 @@
 #
 # Output is byte-identical to formatEvent in tools/wave-status/lib/emit.ts for
 # the same input, so the two writers cannot drift apart. Two consequences for
-# callers: --detail must be compact JSON (no spaces), and <wave>/<lane> must be
-# plain tokens (no quotes or backslashes).
+# callers, both checked before any write: --detail must be a compact JSON object
+# (no spaces), and <wave>/<lane> must match ^[A-Za-z0-9_-]+$.
 #
-# Validate first, append last: an unknown stage or event exits 2 with the
-# vocabulary on stderr and nothing is written — a rejected event must never
-# reach the log, not even as garbage a reader would have to reject later.
+# Validate first, append last: an unknown stage or event, a non-token wave/lane,
+# or a --detail that is not a JSON object exits 2 with the reason on stderr and
+# nothing is written — a rejected event must never reach the log, not even as
+# garbage a reader would have to reject later.
 set -u
 
 [ $# -ge 5 ] || {
@@ -40,8 +41,18 @@ while (( $# )); do
   esac
 done
 
-[[ -z "$pr" || "$pr" =~ ^[0-9]+$ ]] || { print -u2 "--pr must be a number: $pr"; exit 2; }
-[[ -z "$round" || "$round" =~ ^[0-9]+$ ]] || { print -u2 "--round must be a number: $round"; exit 2; }
+[[ -z "$pr" || "$pr" =~ ^[0-9]+$ ]] || { print -u2 -- "--pr must be a number: $pr"; exit 2; }
+[[ -z "$round" || "$round" =~ ^[0-9]+$ ]] || { print -u2 -- "--round must be a number: $round"; exit 2; }
+
+token_re='^[A-Za-z0-9_-]+$'
+[[ "$WAVE" =~ $token_re ]] || { print -u2 "invalid wave: $WAVE — must match $token_re"; exit 2; }
+[[ "$LANE" =~ $token_re ]] || { print -u2 "invalid lane: $LANE — must match $token_re"; exit 2; }
+if [[ -n "$detail" ]]; then
+  if ! python3 -c 'import json,sys; d=json.loads(sys.argv[1]); sys.exit(0 if isinstance(d, dict) else 1)' "$detail" 2>/dev/null; then
+    print -u2 -- "--detail must be a JSON object: $detail"
+    exit 2
+  fi
+fi
 
 ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 line="{\"ts\":\"$ts\",\"wave\":\"$WAVE\",\"lane\":\"$LANE\",\"stage\":\"$STAGE\",\"event\":\"$EVENT\""

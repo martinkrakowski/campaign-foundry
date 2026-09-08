@@ -57,7 +57,7 @@ output for a cell, the cell is *unknown* — a valid answer. A confident wrong o
    number a brief cites must exist; every acceptance criterion must be able to fail. This step has
    caught false premises that would have stalled a lane at its mandatory mutation check.
 
-## The five stages
+## The six stages
 
 *Emitting is part of the stage, not a courtesy.* Every transition below appends one event via
 `scripts/wave-event.sh <logdir> <wave> <lane> <stage> <event> [--pr N] [--round N] [--detail '<json>']`
@@ -67,9 +67,9 @@ that did not happen.
 1. **Implement.** One lane = one worktree = one branch = one PR. `yarn install` per worktree
    yourself. Write each brief from Template A, then launch detached via the dispatch script and
    wait on the `EXIT` marker. Never let two lanes own the same file at the same time.
-   Emit as you go (`scripts/wave-event.sh`): `dispatch started` per lane just before its launch
-   and `dispatch settled` with the lane list in `--detail` once the dispatch script returns;
-   `implement settled` when a lane's `EXIT` marker lands and `implement failed` on a non-zero
+   Emit as you go (`scripts/wave-event.sh`): `dispatch started` per lane just before its launch.
+   The per-lane `implement settled|failed` events **are** the completion record of a dispatch —
+   `implement settled` when a lane's `EXIT` marker lands, `implement failed` on a non-zero
    marker or a lane killed without one; and `gate settled` with the gate exit and the four
    coverage numbers (statements, branches, functions, lines) in `--detail` once the gate has run.
 2. **Review.** Two independent inputs per PR, both required: a read-only review from a model that

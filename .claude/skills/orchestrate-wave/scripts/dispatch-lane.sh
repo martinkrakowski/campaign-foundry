@@ -56,16 +56,31 @@ for spec in "$@"; do
 done
 
 # A lane killed by the OS (or a harness) never writes its marker, so an unbounded
-# wait hangs the orchestrator forever. Bound it, and say which lanes are missing.
+# wait hangs the orchestrator forever. Bound it, emit implement failed for every
+# still-pending lane, and say which lanes are missing.
 : ${WAIT_TIMEOUT:=5400}
 # Poll cadence; overridable so tests with instant fake lanes do not wait a full 30s.
 POLL="${POLL:-30}"
+# Terminal implement events fire the first time a lane's marker is seen — a fast
+# lane must not read as in-flight until the slowest sibling finishes. Timeout
+# (no marker) is implement failed with reason timeout. The post-wait loop only
+# accounts for exit codes.
+typeset -A emitted
 print "waiting for ${#lanes[@]} lane(s), up to ${WAIT_TIMEOUT}s…"
 started=$SECONDS
 while :; do
   done_count=0; pending=()
   for lane in "${lanes[@]}"; do
-    if grep -qE '^EXIT [0-9]+$' "$LOGDIR/$lane.log" 2>/dev/null; then
+    marker=$(grep -E '^EXIT [0-9]+$' "$LOGDIR/$lane.log" 2>/dev/null | tail -1)
+    if [[ -n "$marker" ]]; then
+      if (( ! ${+emitted[$lane]} )); then
+        if [[ "$marker" == "EXIT 0" ]]; then
+          emit_event "$lane" implement settled
+        else
+          emit_event "$lane" implement failed
+        fi
+        emitted[$lane]=1
+      fi
       (( done_count++ ))
     else
       pending+=("$lane")
@@ -75,6 +90,9 @@ while :; do
   if (( SECONDS - started > WAIT_TIMEOUT )); then
     print -u2 "TIMEOUT after ${WAIT_TIMEOUT}s — still pending: ${pending[*]}"
     print -u2 "Derive their real state before believing anything: gh pr list --head <branch>."
+    for lane in "${pending[@]}"; do
+      emit_event "$lane" implement failed --detail '{"reason":"timeout"}'
+    done
     break
   fi
   sleep "$POLL"
@@ -85,15 +103,6 @@ failed=0
 for lane in "${lanes[@]}"; do
   log="$LOGDIR/$lane.log"
   marker=$(grep -E '^EXIT [0-9]+$' "$log" | tail -1)
-  # A lane with a marker has finished its implement stage — say so. A lane killed
-  # before writing one emits nothing here: it never reached a settled or failed end.
-  if [[ -n "$marker" ]]; then
-    if [[ "$marker" == "EXIT 0" ]]; then
-      emit_event "$lane" implement settled
-    else
-      emit_event "$lane" implement failed
-    fi
-  fi
   [[ "$marker" == "EXIT 0" ]] || (( failed++ ))
   print "$lane: ${marker:-<no marker>}, $(wc -c < "$log" | tr -d ' ') bytes"
   sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -iE 'insufficient balance|database is locked|^Error:' | head -3 | sed 's/^/    /'
