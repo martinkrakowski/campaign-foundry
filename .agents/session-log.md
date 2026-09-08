@@ -4171,3 +4171,48 @@ dispatched.
   - Do not merge. CI Build on the PR is the linux proof for the new display cells (push CI at `744f384` failed closed: no `linux-x64` display map yet).
   - A3 ‖ A4 next; A5 last.
 - **Remediator (PR #246):** `compositeRequestFingerprint` includes `pixelSize` when present; `widthTermBasis` returns `w` (the long-side cap was `min(w, max(w, h))` ≡ `w`).
+## 2026-09-07 — Display advertising, wave 1: A0 (#244) and A1 (#243) merged; the A2 decision
+
+**Mode:** Orchestrator. Record written at merge time (stage 6). Plan:
+`2026-09-07_display-advertising.md` (D113–D118).
+
+### What merged
+
+| Lane | PR | Commit | What |
+|---|---|---|---|
+| A1 | #243 | `ae4ee93` | `DISPLAY_SIZES` (300×250, 728×90, 160×600, 320×50, 300×600) as a second, union-keyed family; an exclusive `CanvasSpec`; `resolveCanvas` as the only place a spec becomes pixels inside `packages/*/src`; `output.sizes` validated at the boundary (400 on `briefs`/`generate`/`plan`); nothing renders differently (D113) |
+| A0 | #244 | `3e8efcb` | the `linux-x64` inset golden recorded **on a GitHub runner** and committed; a golden recording mode; a dispatchable recorder that uploads fixtures as an artifact and never pushes; every golden suite **fails** on a platform with no map instead of skipping (D115, closing D85) |
+
+### The decision that shaped A2, taken before the lane could hit it
+
+`fitText` sizes type as `width × sizeScale` (D55). Short-side scaling (D114) is identical on 1:1 and
+9:16 — the short side *is* the width — and on 16:9 would size from 1080 instead of 1920, moving the
+landscape social golden by construction. §2.1 makes that a decision, not a lane's call. The owner
+chose **split by family**: the social ratios keep D55 exactly, so their goldens are byte-identical
+by construction; the five display sizes scale by the short side with a long-side cap. D114 is
+amended "for the size family" in A2's PR. The alternative (short side for everything, with the
+reviewed landscape output shrinking ~44 %) was declined.
+
+### What the lanes met that the briefs had not foreseen
+
+- **A0:** a new workflow file is not dispatchable until it exists on the default branch, so the
+  lane also gave `ci.yml`'s `workflow_dispatch` a `record_goldens` input and recorded through that.
+  Qodo then found the recorder job inheriting the branch's `cancel-in-progress` group — the branch's
+  own runs at 03:09 had cancelled each other — and a record mode that passed with no assertion; the
+  reviewer found the D10 byte-identity suite still skipping. All fixed. The runner's base cells
+  matched #45's committed `linux-x64` map exactly: no image drift in the intervening months.
+- **A1:** three real findings from the bots against one from the brief: the tuple built with an
+  `as unknown as` cast (the brief had asked for an explicit tuple), `validateSizes` accepting `[]`
+  where `formats`/`platforms` reject it (the orchestrator had first refuted this and corrected
+  itself against the file's convention), and a structural union admitting `{ ratio, size }` with
+  the size silently discarded. Two Qodo "rule violations" refuted: the API's validators inline their
+  messages and name the YAML field path by design; the UI catalog is not the API's.
+
+### Seats
+
+grok-4.6 implemented both lanes first try (no glm this wave, after six silent starts yesterday);
+gemini-3.8-flash reviewed both and, for A0, verified the committed cell against the downloaded
+runner artifact byte for byte.
+
+**Next:** A2 (short-side scaling for the size family, display goldens on both platforms) alone;
+then A3 ‖ A4; then A5.
