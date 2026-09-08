@@ -88,6 +88,12 @@ interface PreparedCreative {
         readonly height: number;
       }
     | undefined;
+  /**
+   * Brand-compliance signal: whether the logo drawer actually painted. Derived
+   * in `prepare` as *logo file loaded AND the resolved layer list contains a
+   * `logo` layer* — the load alone is not the signal, the layer is optional
+   * (F2), and a template that omits it draws no logo pixels.
+   */
   readonly logoApplied: boolean;
   /** Normalized safe-zone insets; zeros when the request omitted them. */
   readonly insets: SafeInsets;
@@ -140,9 +146,12 @@ interface LayerDrawContext {
 
 /**
  * Kind → drawer (D121): the draw order is the template's layer list; this
- * table owns kind → code. Kinds this compositor cannot draw (`fill`, `html`,
- * `video`, `animated-text` — L1a left them out of every `accepts` list) are
- * absent, and hitting one throws ({@link drawLayer}) instead of skipping.
+ * table owns kind → code. `animated-text` maps to the same drawer as
+ * `static-text` (D127): the kind names the capability and its props select
+ * which mechanism drives it, and a still frame of animated text is its rest
+ * pose — exactly what drawStaticText paints; the moving path is L6/L11's.
+ * Kinds this compositor cannot draw (`fill`, `html`, `video`) are absent, and
+ * hitting one throws ({@link drawLayer}) instead of skipping.
  * Module-private: the `@generated` barrels `export *` this file, so a named
  * export would leak `SKRSContext2D` (through {@link LayerDrawContext}) from
  * the public package surface; the structural tests spy the table through the
@@ -153,6 +162,7 @@ const LAYER_DRAWERS: Readonly<Partial<Record<LayerKind, LayerDrawer>>> = {
   shade: paintShade,
   accent: paintAccent,
   "static-text": drawStaticText,
+  "animated-text": drawStaticText,
   logo: drawLogo,
 };
 
@@ -331,11 +341,15 @@ export class NodeCanvasCompositor implements CompositorPort {
 
     const background = await loadImage(Buffer.from(request.background));
 
+    // The resolved draw order (D121/D128) — resolved here so `logoApplied`
+    // below can be derived from what the draw will actually paint.
+    const layers = resolveLayerList(request.template, request.creativeType);
+
     // Whether the logo applies is a brand-compliance signal the use case records
     // on the asset. The path is brief-supplied (untrusted), so it's resolved
     // through resolveAssetPath.
     let logo: PreparedCreative["logo"];
-    let logoApplied = false;
+    let logoLoaded = false;
     const logoPath = resolveAssetPath(request.logoPath);
     if (logoPath) {
       try {
@@ -352,7 +366,7 @@ export class NodeCanvasCompositor implements CompositorPort {
         const lx = clampInRange(rawX, insets.left, width - insets.right - target);
         const ly = clampInRange(rawY, insets.top, height - insets.bottom - logoH);
         logo = { image, x: lx, y: ly, width: target, height: logoH };
-        logoApplied = true;
+        logoLoaded = true;
       } catch (error) {
         // A missing logo is optional — skip cleanly. A present-but-unreadable or
         // corrupt one is likely a mistake, so surface it (observable degradation)
@@ -364,6 +378,15 @@ export class NodeCanvasCompositor implements CompositorPort {
         }
       }
     }
+
+    // `logoApplied` reports what was DRAWN, not what loaded (F2): the logo
+    // layer is optional, so a template that omits it paints no logo pixels
+    // even with the file loaded — and the load alone must not credit
+    // brand-compliance for a logo that never rendered. "Loaded AND the
+    // resolved list carries a `logo` layer" is exactly the logo drawer
+    // painting; computed here, where the list is resolved, never by mutating
+    // shared state mid-draw.
+    const logoApplied = logoLoaded && layers.some((layer) => layer.kind === "logo");
 
     const base: Omit<PreparedCreative, "timeline" | "beatLayouts" | "anchorLayout"> = {
       canvas,
@@ -382,7 +405,7 @@ export class NodeCanvasCompositor implements CompositorPort {
       logo,
       logoApplied,
       insets,
-      layers: resolveLayerList(request.template, request.creativeType),
+      layers,
     };
 
     // Sequenced copy: resolve windows and fit every beat at one common type size
@@ -812,6 +835,15 @@ function drawTimeline(
   // layer's code serves both paths. The ground trio is fixed because the
   // sequenced copy and logo below keep their own positions; `effectT` is a
   // value no ground drawer reads (`effectT ?? t` matches draw()'s clock shape).
+  //
+  // The trio is called BY KIND — not iterated from `prepared.layers` — and
+  // that is the design, not an oversight: D10 freezes motion bytes, and
+  // iterating a list here is exactly the kind of change that risks them. A
+  // template's declared order therefore governs the STILL path only
+  // (drawLegacy); making this motion path list-driven is deferred to the lanes
+  // that teach the compositor `video` and `animated-text` (L6/L11). The
+  // reordered-template test in NodeCanvasCompositor.layer-order pins today's
+  // order, so changing this flips a red test instead of shifting bytes.
   const ground: LayerDrawContext = { ctx, prepared, motion, eased, effectT: effectT ?? t };
   drawLayer("image", ground);
   drawLayer("shade", ground);
@@ -1051,15 +1083,15 @@ function resolveLayerList(
 
 /**
  * One layer of the draw: look the kind up in the dispatch table and paint it.
- * A kind this compositor cannot draw (L1a left `fill`, `html`, `video` and
- * `animated-text` out of every `accepts` list) has no entry — throw, never
- * skip: a silently dropped layer is a redesign the goldens cannot see.
+ * A kind with no entry — `fill`, `html`, `video` (drawn by their own lanes,
+ * L6/L11) — throws, never skips: a silently dropped layer is a redesign the
+ * goldens cannot see.
  */
 function drawLayer(kind: LayerKind, c: LayerDrawContext): void {
   const drawer = LAYER_DRAWERS[kind];
   if (drawer === undefined) {
     throw new Error(
-      `NodeCanvasCompositor: layer kind "${kind}" has no drawer in this compositor — it draws image, shade, accent, static-text and logo only`,
+      `NodeCanvasCompositor: layer kind "${kind}" has no drawer in this compositor — it draws image, shade, accent, static-text, animated-text and logo only`,
     );
   }
   drawer(c);
