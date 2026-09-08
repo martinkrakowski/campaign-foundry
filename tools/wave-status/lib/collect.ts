@@ -86,15 +86,12 @@ export async function collect(deps: CollectDeps, root: string, now: string): Pro
 
       let alive = false;
       try {
-        alive = (await deps.pgrep(`wt-${lane}`)) > 0;
+        alive = (await deps.pgrep(pgrepPattern(lane))) > 0;
       } catch {
         alive = false;
       }
 
-      const gateName = entries
-        .filter((entry) => entry.startsWith(`gate-${lane}`) && entry.endsWith(".log"))
-        .sort()
-        .at(-1);
+      const gateName = newestGateLog(entries, lane);
       let gateLog: string | undefined;
       if (gateName !== undefined) {
         try {
@@ -160,7 +157,8 @@ async function prFacts(deps: CollectDeps): Promise<Record<string, LaneObservatio
           await deps.gh(["api", `repos/:owner/:repo/commits/${entry.headRefOid}/check-runs`]),
         );
       } catch {
-        continue;
+        // Transient check-runs failure: keep the PR, surface checks as none.
+        checks = "none";
       }
     }
 
@@ -226,4 +224,38 @@ export const realDeps: CollectDeps = {
 
 function countPids(stdout: string): number {
   return stdout.split("\n").filter((line) => line.trim() !== "").length;
+}
+
+/** Escape a lane name for a JS / POSIX-ERE pattern. */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * `pgrep -f` is ERE against the full command line. Anchor to the worktree
+ * path segment so `wt-s2` does not match `wt-s2i`.
+ */
+function pgrepPattern(lane: string): string {
+  return `wt-${escapeRegExp(lane)}(/|$| )`;
+}
+
+/**
+ * `gate-<lane>.log` is round 0; `gate-<lane>-<n>.log` is round n. Highest n
+ * wins — not lexicographic order, where `-` (45) sorts before `.` (46) and
+ * `gate-u2.log` would beat `gate-u2-2.log`.
+ */
+function newestGateLog(entries: readonly string[], lane: string): string | undefined {
+  const re = new RegExp(`^gate-${escapeRegExp(lane)}(?:-(\\d+))?\\.log$`);
+  let bestName: string | undefined;
+  let bestRound = -1;
+  for (const entry of entries) {
+    const match = re.exec(entry);
+    if (match === null) continue;
+    const round = match[1] === undefined ? 0 : Number(match[1]);
+    if (round > bestRound) {
+      bestRound = round;
+      bestName = entry;
+    }
+  }
+  return bestName;
 }

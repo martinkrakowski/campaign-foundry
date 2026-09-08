@@ -178,8 +178,8 @@
   function findingsCell(lane) {
     const detail = lane.reported === undefined ? undefined : lane.reported.detail;
     if (detail === undefined) return '<span class="dim">—</span>';
-    return `${detail.fixed ?? "—"} / ${detail.refuted ?? "—"} / ${detail.mutations ?? "—"}`
-      + (detail.mutationsBit === undefined ? "" : ` <span class="dim">(${detail.mutationsBit} bit)</span>`);
+    return `${esc(detail.fixed ?? "—")} / ${esc(detail.refuted ?? "—")} / ${esc(detail.mutations ?? "—")}`
+      + (detail.mutationsBit === undefined ? "" : ` <span class="dim">(${esc(detail.mutationsBit)} bit)</span>`);
   }
 
   function render(status) {
@@ -189,7 +189,7 @@
       for (const lane of wave.lanes) {
         const key = `${esc(wave.id)}/${esc(lane.lane)}`;
         rows.push(
-          `<tr class="lane" data-wave="${esc(wave.id)}" data-lane="${esc(lane.lane)}">`
+          `<tr class="lane" data-wave="${esc(wave.id)}" data-lane="${esc(lane.lane)}" role="button" tabindex="0">`
           + `<td class="mono">${key}</td>`
           + `<td>${stage(lane)}</td>`
           + `<td>${liveness(lane)}</td>`
@@ -217,18 +217,31 @@
     }
   }
 
-  lanesBody.addEventListener("click", async (event) => {
-    const row = event.target.closest("tr.lane");
-    if (row === null) return;
+  async function openLog(row) {
     const res = await fetch(`/api/log/${row.dataset.wave}/${row.dataset.lane}?tail=16`);
     logView.hidden = false;
     logView.textContent = res.ok
       ? `--- ${row.dataset.wave}/${row.dataset.lane} (last 16 KB) ---\n` + (await res.text())
       : `no log for ${row.dataset.wave}/${row.dataset.lane}`;
+  }
+
+  lanesBody.addEventListener("click", (event) => {
+    const row = event.target.closest("tr.lane");
+    if (row === null) return;
+    void openLog(row);
+  });
+
+  lanesBody.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const row = event.target.closest("tr.lane");
+    if (row === null) return;
+    event.preventDefault();
+    void openLog(row);
   });
 
   // Live updates over SSE; if the stream drops, fall back to a 10 s poll.
   const source = new EventSource("/api/stream");
+  let pollTimer = null;
   source.addEventListener("status", (event) => {
     connection.textContent = "live (sse)";
     connection.className = "live";
@@ -242,7 +255,8 @@
     source.close();
     connection.textContent = "polling every 10s (sse closed)";
     connection.className = "polling";
-    setInterval(refresh, 10000);
+    if (pollTimer !== null) clearInterval(pollTimer);
+    pollTimer = setInterval(refresh, 10000);
     refresh();
   };
 

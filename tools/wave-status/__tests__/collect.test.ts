@@ -69,9 +69,9 @@ const TREE: FakeTree = {
     // gate-v3.log is listed but unreadable; waveV/events.jsonl likewise.
   },
   pgrep: async (pattern) => {
-    if (pattern === "wt-t1") return 0;
-    if (pattern === "wt-u2") return 2;
-    if (pattern === "wt-v3") throw new Error("pgrep exploded");
+    if (pattern === "wt-t1(/|$| )") return 0;
+    if (pattern === "wt-u2(/|$| )") return 2;
+    if (pattern === "wt-v3(/|$| )") throw new Error("pgrep exploded");
     return 0;
   },
   gh: async (args) => {
@@ -124,17 +124,80 @@ describe("collect", () => {
     expect(u2?.lane).toBe("u2");
     expect(u2?.reported).toBeUndefined();
     expect(u2?.derived.alive).toBe(true);
-    // gate-<lane>*.log: both gate-u2.log and gate-u2-2.log match, and the
-    // lexicographically last wins ("-" sorts before "."), so gate-u2.log.
-    expect(u2?.derived.gate).toEqual({ exit: 1 });
+    // Round 2 (gate-u2-2.log, EXIT 0) beats round 0 (gate-u2.log, EXIT 1).
+    expect(u2?.derived.gate).toEqual({ exit: 0 });
     expect(u2?.derived.pr).toBeUndefined();
 
     const v3 = status.waves[2]?.lanes[0];
     expect(v3?.lane).toBe("v3");
     expect(v3?.derived.alive).toBe(false);
     expect(v3?.derived.gate).toBeUndefined();
-    expect(v3?.derived.pr).toBeUndefined();
+    // check-runs failed for oid3; the PR is still listed with checks none.
+    expect(v3?.derived.pr).toEqual({ number: 220, state: "open", checks: "none" });
     expect(v3?.reported).toBeUndefined();
+  });
+
+  test("three gate rounds pick the highest n, not the lexicographic last", async () => {
+    const status = await collect(
+      fakeDeps({
+        dirs: {
+          [ROOT]: ["waveR"],
+          // Highest round listed first so a lexicographic pick still prefers
+          // gate-r1.log (because "-" < ".") and the assertion cannot pass by luck.
+          [`${ROOT}/waveR`]: ["r1.log", "gate-r1-3.log", "gate-r1-2.log", "gate-r1.log"],
+        },
+        files: {
+          [`${ROOT}/waveR/r1.log`]: "x\n",
+          [`${ROOT}/waveR/gate-r1.log`]: "GATE EXIT 1\n",
+          [`${ROOT}/waveR/gate-r1-2.log`]: "GATE EXIT 0\n",
+          [`${ROOT}/waveR/gate-r1-3.log`]: "GATE EXIT 2\n",
+        },
+      }),
+      ROOT,
+      "now",
+    );
+    expect(status.waves[0]?.lanes[0]?.derived.gate).toEqual({ exit: 2 });
+  });
+
+  test("gate-s2.log is not the gate for lane s2i", async () => {
+    const status = await collect(
+      fakeDeps({
+        dirs: {
+          [ROOT]: ["waveS"],
+          [`${ROOT}/waveS`]: ["s2.log", "s2i.log", "gate-s2.log", "gate-s2i.log"],
+        },
+        files: {
+          [`${ROOT}/waveS/s2.log`]: "s2\n",
+          [`${ROOT}/waveS/s2i.log`]: "s2i\n",
+          [`${ROOT}/waveS/gate-s2.log`]: "GATE EXIT 0\n",
+          [`${ROOT}/waveS/gate-s2i.log`]: "GATE EXIT 1\n",
+        },
+      }),
+      ROOT,
+      "now",
+    );
+    const lanes = Object.fromEntries(
+      (status.waves[0]?.lanes ?? []).map((lane) => [lane.lane, lane.derived.gate]),
+    );
+    expect(lanes.s2).toEqual({ exit: 0 });
+    expect(lanes.s2i).toEqual({ exit: 1 });
+  });
+
+  test("pgrep is anchored to the worktree path segment", async () => {
+    const seen: string[] = [];
+    await collect(
+      fakeDeps({
+        dirs: { [ROOT]: ["waveS"], [`${ROOT}/waveS`]: ["s2.log"] },
+        files: { [`${ROOT}/waveS/s2.log`]: "x\n" },
+        pgrep: async (pattern) => {
+          seen.push(pattern);
+          return 0;
+        },
+      }),
+      ROOT,
+      "now",
+    );
+    expect(seen).toEqual(["wt-s2(/|$| )"]);
   });
 
   test("a failing gh yields the same rows with pr absent, never a throw", async () => {

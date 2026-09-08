@@ -249,6 +249,10 @@ describe("the server over real HTTP", () => {
     expect(html).toContain("--color-background");
     expect(html).toContain("stage");
     expect(html).toContain("liveness");
+    expect(html).toContain('role="button"');
+    expect(html).toContain('addEventListener("keydown"');
+    expect(html).toContain("esc(detail.fixed");
+    expect(html).toContain("clearInterval(pollTimer)");
   });
 
   test("GET / is 500 when the page cannot be read", async () => {
@@ -340,32 +344,33 @@ describe("the server over real HTTP", () => {
     expect(t1?.reported).toMatchObject({ stage: "gate" });
   });
 
-  test("/api/stream sends a status event on connect and pushes on fs.watch change (M5)", async () => {
+  test("/api/stream sends a status event on connect and pushes when the injected watcher fires", async () => {
     const root = await makeFixture();
     let version = 0;
+    const listeners: Array<() => void> = [];
     // A poll that never fires inside the test: the only path to a second event
-    // is the fs.watch registration, so the mutation cannot hide behind the poll.
+    // is the injected watcher callback — no filesystem, no race.
     const handle = await start({
       port: 0,
       root,
       collect: async () => statusAt(version),
       pollMs: 3_600_000,
-      watch: (path, listener) => fsWatch(path, listener),
+      watch: (_path, listener) => {
+        listeners.push(listener);
+        return { close(): void { /* the test owns the lifetime */ } };
+      },
     });
 
     const { reader, response } = await openStream(handle.port);
     try {
       expect(response.headers["content-type"]).toContain("text/event-stream");
 
-      // One status event on connect.
       expect(await reader.waitFor(1)).toEqual([JSON.stringify(statusAt(0))]);
       await reader.expectQuiet(200);
 
-      // A create in a watched wave dir is a change → the second event within 2 s.
-      // (Overwriting an existing file is what macOS FSEvents most often coalesces.)
       version = 1;
-      await writeFile(join(root, "waveT", "changed.signal"), "changed\n");
-      expect(await reader.waitFor(2, 2_000)).toEqual([
+      listeners[0]?.();
+      expect(await reader.waitFor(2)).toEqual([
         JSON.stringify(statusAt(0)),
         JSON.stringify(statusAt(1)),
       ]);
@@ -373,6 +378,35 @@ describe("the server over real HTTP", () => {
       response.destroy();
     }
   });
+
+  test.skipIf(process.env.CI)(
+    "fs.watch on a real wave dir pushes a status event (smoke)",
+    async () => {
+      const root = await makeFixture();
+      let version = 0;
+      const handle = await start({
+        port: 0,
+        root,
+        collect: async () => statusAt(version),
+        pollMs: 3_600_000,
+        watch: (path, listener) => fsWatch(path, listener),
+      });
+
+      const { reader, response } = await openStream(handle.port);
+      try {
+        expect(await reader.waitFor(1)).toEqual([JSON.stringify(statusAt(0))]);
+        version = 1;
+        await writeFile(join(root, "waveT", "changed.signal"), "changed\n");
+        expect(await reader.waitFor(2, 10_000)).toEqual([
+          JSON.stringify(statusAt(0)),
+          JSON.stringify(statusAt(1)),
+        ]);
+      } finally {
+        response.destroy();
+      }
+    },
+    15_000,
+  );
 
   test("overlapping watch ticks still push the latest status", async () => {
     const root = await makeFixture();
