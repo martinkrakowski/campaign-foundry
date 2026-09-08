@@ -31,7 +31,7 @@ const request = (over: Partial<CompositeRequest> = {}): TimelineRequest => ({
   message: "Stay wild, stay hydrated",
   brandColor: "#1473E6",
   logoPath: "assets/inputs/hydra-logo.png",
-  ratio: ratio("1:1"),
+  canvas: { ratio: "1:1" },
   layout: "headline-bottom",
   tone: "bold",
   ...over,
@@ -147,7 +147,7 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
 
     // SHORT fits at its natural size; LONG must shrink on this deep-inset cell.
     expect(shortAlone.fontSize).toBe(
-      Math.round(base.ratio.width * CREATIVE_GEOMETRY.headlineTypeWidthFraction),
+      Math.round(singleShort.width * CREATIVE_GEOMETRY.headlineTypeWidthFraction),
     );
     expect(longAlone.fontSize).toBeLessThan(shortAlone.fontSize);
 
@@ -330,12 +330,12 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
     const r = ratio("16:9");
     const durationSec = 8;
     const keyedLong = {
-      ...request({ layout: "headline-top", ratio: r, safeInsets: insets }),
+      ...request({ layout: "headline-top", canvas: { ratio: r.value }, safeInsets: insets }),
       durationSec,
       timeline: copyTimeline([{ text: SHORT }, { text: LONG }], { keyBeat: 2 }),
     };
     const keyedShort = {
-      ...request({ layout: "headline-top", ratio: r, safeInsets: insets }),
+      ...request({ layout: "headline-top", canvas: { ratio: r.value }, safeInsets: insets }),
       durationSec,
       timeline: copyTimeline([{ text: SHORT }, { text: LONG }], { keyBeat: 1 }),
     };

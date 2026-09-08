@@ -58,5 +58,4 @@ jobs:
           name: compositor-goldens-${{ runner.os }}-${{ runner.arch }}
           if-no-files-found: error
           path: |
-            packages/CreativeGeneration/src/infrastructure/adapters/__tests__/fixtures/compositor-goldens.json
-            packages/CreativeGeneration/src/infrastructure/adapters/__tests__/fixtures/compositor-goldens-insets.json
+            packages/CreativeGeneration/src/infrastructure/adapters/__tests__/fixtures/compositor-goldens*.json

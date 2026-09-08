@@ -2,8 +2,10 @@ import { readFile } from "node:fs/promises";
 import { createCanvas, loadImage, type Image, type SKRSContext2D } from "@napi-rs/canvas";
 import {
   beatAt,
+  resolveCanvas,
   resolveTimeline,
   resolveStyle,
+  type CanvasSpec,
   type CompositeRequest,
   type CompositeResult,
   type CompositorPort,
@@ -33,6 +35,7 @@ import { resolveAssetPath } from "../safe-path.js";
  * export path.
  */
 interface PreparedCreative {
+  readonly canvas: CanvasSpec;
   readonly width: number;
   readonly height: number;
   readonly top: boolean;
@@ -254,7 +257,7 @@ export class NodeCanvasCompositor implements CompositorPort {
     // Still/poster callers pass 1 (H4) so a ken-burns-out rest (t = 0) never
     // samples the entrance; clip frames omit it and `t` is used. Undefined
     // effect → the identity pose → exactly the pre-effect bytes (D54).
-    const fx = textEffectPose(prepared.textEffect, effectT, width, height);
+    const fx = textEffectPose(prepared.textEffect, effectT, prepared.canvas, width, height);
     const dy = riseDy + fx.dy;
     const alpha = riseAlpha * fx.alpha;
     ctx.fillStyle = "#ffffff";
@@ -298,7 +301,10 @@ export class NodeCanvasCompositor implements CompositorPort {
     request: CompositeRequest & { readonly durationSec?: number; readonly timeline?: CopyTimeline },
     fontFamily: string = "Inter",
   ): Promise<PreparedCreative> {
-    const { width, height } = request.ratio;
+    const canvas = request.canvas;
+    const resolved = resolveCanvas(canvas);
+    const width = request.pixelSize?.width ?? resolved.width;
+    const height = request.pixelSize?.height ?? resolved.height;
     const top = request.layout === "headline-top";
     // The anchor axis (T4): absent → derived from layout, the pre-axis
     // behaviour bit for bit (D54 — the goldens pin both derived paths).
@@ -326,10 +332,10 @@ export class NodeCanvasCompositor implements CompositorPort {
     if (logoPath) {
       try {
         const image = await loadImage(await readFile(logoPath));
-        const target = width * CREATIVE_GEOMETRY.logoWidthFraction;
+        const target = scaleBasis(canvas, width, height) * CREATIVE_GEOMETRY.logoWidthFraction;
         const scale = target / image.width;
         const logoH = image.height * scale;
-        const margin = width * CREATIVE_GEOMETRY.logoMarginFraction;
+        const margin = widthTermBasis(canvas, width, height) * CREATIVE_GEOMETRY.logoMarginFraction;
         // Inset offset lives here so every still — and later every motion frame —
         // reuses the same logo geometry (`t` does not move the logo). Same additive
         // form as the pre-inset anchors so a no-op clamp stays bit-identical.
@@ -352,6 +358,7 @@ export class NodeCanvasCompositor implements CompositorPort {
     }
 
     const base: Omit<PreparedCreative, "timeline" | "beatLayouts" | "anchorLayout"> = {
+      canvas,
       width,
       height,
       top,
@@ -395,6 +402,35 @@ const ELLIPSIS = "…";
 /** Zoom amount applied away from the ken-burns rest pose so scale(restT) === 1. */
 const KEN_BURNS_ZOOM = 0.08;
 
+function isRatioFamily(spec: CanvasSpec): spec is { readonly ratio: NonNullable<CanvasSpec["ratio"]> } {
+  return "ratio" in spec && spec.ratio !== undefined;
+}
+
+/**
+ * Scale basis for type and logo width (D114, amended 2026-09-07).
+ *
+ * - **ratio family:** `w` — D55 width-proportional, so 1:1 / 9:16 / 16:9 goldens
+ *   stay byte-identical by construction.
+ * - **size family:** the short side `min(w, h)`. Type size never takes the long
+ *   side: a 728×90 headline is `90 × sizeScale`, not `728 × sizeScale`.
+ *
+ * Wrap width and logo margin are not this function — they are width-genuine
+ * terms and go through {@link widthTermBasis}.
+ */
+export function scaleBasis(spec: CanvasSpec, w: number, h: number): number {
+  if (isRatioFamily(spec)) return w;
+  return Math.min(w, h);
+}
+
+/**
+ * Wrap width and logo margin are width terms: they use `w` for both families
+ * (D114). A 728×90 wraps across the leaderboard; a 160×600 wraps at 160 px,
+ * not 600. Type size is not a width term — it stays on {@link scaleBasis}.
+ */
+export function widthTermBasis(_spec: CanvasSpec, w: number, _h: number): number {
+  return w;
+}
+
 function easeOutCubic(t: number): number {
   return 1 - (1 - t) ** 3;
 }
@@ -420,6 +456,7 @@ const TEXT_EFFECT_REST: TextEffectPose = { dx: 0, dy: 0, alpha: 1, scale: 1 };
 function textEffectPose(
   kind: TextEffectKind | undefined,
   local: number,
+  spec: CanvasSpec,
   width: number,
   height: number,
 ): TextEffectPose {
@@ -432,7 +469,7 @@ function textEffectPose(
     case "rise-in":
       return { ...TEXT_EFFECT_REST, dy: (1 - settled) * riseOffsetFraction * height };
     case "slide-in":
-      return { ...TEXT_EFFECT_REST, dx: (1 - settled) * slideOffsetFraction * width };
+      return { ...TEXT_EFFECT_REST, dx: (1 - settled) * slideOffsetFraction * scaleBasis(spec, width, height) };
     case "scale-in":
       return { ...TEXT_EFFECT_REST, scale: 1 - (1 - settled) * scaleAmplitude };
   }
@@ -531,7 +568,7 @@ interface HeadlineLayout {
  */
 type LayoutSource = Pick<
   PreparedCreative,
-  "width" | "height" | "top" | "anchor" | "fontWeight" | "fontFamily" | "style" | "insets"
+  "canvas" | "width" | "height" | "top" | "anchor" | "fontWeight" | "fontFamily" | "style" | "insets"
 >;
 
 /**
@@ -577,7 +614,7 @@ function headlineTextX(p: LayoutSource, centerX: number): number {
  * layout, and the per-beat first pass behind the D6 common size.
  */
 function fitText(ctx: SKRSContext2D, p: LayoutSource, text: string): HeadlineLayout {
-  const originalFontSize = Math.round(p.width * p.style.sizeScale);
+  const originalFontSize = Math.round(scaleBasis(p.canvas, p.width, p.height) * p.style.sizeScale);
   const floor = Math.round(originalFontSize * CREATIVE_GEOMETRY.headlineTypeFloorFraction);
 
   let fontSize = originalFontSize;
@@ -599,7 +636,8 @@ function layoutFixed(ctx: SKRSContext2D, p: LayoutSource, text: string, fontSize
 
 /** The exact legacy fitting arithmetic at a single type size. */
 function layoutAt(ctx: SKRSContext2D, p: LayoutSource, text: string, fontSize: number): LayoutAttempt {
-  const innerWidth = p.width - p.insets.left - p.insets.right;
+  const wrapBasis = widthTermBasis(p.canvas, p.width, p.height);
+  const innerWidth = wrapBasis - p.insets.left - p.insets.right;
   const wrapWidth = innerWidth * 0.85;
   ctx.font = `${p.fontWeight} ${fontSize}px ${p.fontFamily}, sans-serif`;
   // Letter spacing (T5) is a ctx-state control: wrapText must measure with it,
@@ -844,7 +882,7 @@ function drawBeat(
   // (the poster: 1, H4). Clip frames omit it, so the beat-local entrance
   // still plays. The beat's exit mix (`layerAlpha`) keeps its behaviour.
   // Undefined effect → the identity pose → the pre-effect bytes (D54).
-  const fx = textEffectPose(prepared.textEffect, effectT ?? local, prepared.width, prepared.height);
+  const fx = textEffectPose(prepared.textEffect, effectT ?? local, prepared.canvas, prepared.width, prepared.height);
   const dy = riseDy + fx.dy;
   const alpha = riseAlpha * fx.alpha;
   const opacity = alpha * layerAlpha;

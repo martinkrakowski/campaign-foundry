@@ -216,6 +216,16 @@ describe("PreviewCreativeFrameUseCase — the frame and its cache key", () => {
     expect(a.value.cacheKey).not.toBe(b.value.cacheKey);
   });
 
+  test("a display-size canvas does not share a fingerprint with the matching social request", async () => {
+    const d = deps();
+    const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const request = vi.mocked(d.compositor.compositeAsset).mock.calls[0][0];
+    const sized = { ...request, canvas: { size: "728x90" as const } };
+    expect(compositeRequestFingerprint(sized, sha256)).not.toBe(result.value.cacheKey);
+  });
+
   test("a style-less request hashes exactly as it did before style joined the fingerprint", async () => {
     const result = await new PreviewCreativeFrameUseCase(deps()).execute(baseBrief(), cell());
     expect(result.success).toBe(true);
@@ -225,6 +235,23 @@ describe("PreviewCreativeFrameUseCase — the frame and its cache key", () => {
     expect(result.value.cacheKey).toBe(
       "0db05026a4f815d53be5b9fefa79f26a775bcfc10ea0c034e25260027826dd52",
     );
+  });
+
+  test("two requests that differ only in pixelSize never share a key; omitting it leaves the style-less hash put", async () => {
+    const d = deps();
+    const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const request = vi.mocked(d.compositor.compositeAsset).mock.calls[0][0];
+    // canvasFingerprint's "style-less hashes stay put" contract: an absent
+    // pixelSize must not move the known key (mutation: drop the field → this
+    // still passes; the pair below is the one that fails).
+    expect(compositeRequestFingerprint(request, sha256)).toBe(
+      "0db05026a4f815d53be5b9fefa79f26a775bcfc10ea0c034e25260027826dd52",
+    );
+    const a = { ...request, pixelSize: { width: 108, height: 192 } };
+    const b = { ...request, pixelSize: { width: 216, height: 384 } };
+    expect(compositeRequestFingerprint(a, sha256)).not.toBe(compositeRequestFingerprint(b, sha256));
   });
 
   test("a cache hit returns the stored bytes without compositing again; a miss stores them", async () => {

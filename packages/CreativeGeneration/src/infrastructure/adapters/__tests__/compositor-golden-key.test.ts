@@ -5,6 +5,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   BASE_GOLDEN_CELL_COUNT,
+  DISPLAY_GOLDEN_CELL_COUNT,
+  DISPLAY_INSET_GOLDEN_CELL_COUNT,
   INSET_GOLDEN_CELL_COUNT,
   assertRecordedMap,
   compositorGoldenKey,
@@ -23,6 +25,15 @@ import {
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const GOLDENS_PATH = join(FIXTURES, "compositor-goldens.json");
+
+describe("golden cell counts", () => {
+  test("display matrix is 2 layouts × 2 tones × 5 sizes, inset is one cell", () => {
+    expect(DISPLAY_GOLDEN_CELL_COUNT).toBe(20);
+    expect(DISPLAY_INSET_GOLDEN_CELL_COUNT).toBe(1);
+    expect(BASE_GOLDEN_CELL_COUNT).toBe(12);
+    expect(INSET_GOLDEN_CELL_COUNT).toBe(1);
+  });
+});
 
 describe("compositorGoldenKey", () => {
   test("joins platform and arch", () => {

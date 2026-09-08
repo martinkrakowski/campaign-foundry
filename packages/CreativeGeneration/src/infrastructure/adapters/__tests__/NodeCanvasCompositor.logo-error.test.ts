@@ -10,14 +10,8 @@ vi.mock("node:fs/promises", () => ({
 }));
 
 import { createCanvas } from "@napi-rs/canvas";
-import { AspectRatio, type CompositeRequest } from "@campaignfoundry/CampaignOrchestration";
+import { type CompositeRequest } from "@campaignfoundry/CampaignOrchestration";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
-
-const ratio = () => {
-  const r = AspectRatio.create("1:1");
-  if (!r.success) throw r.error;
-  return r.value;
-};
 
 const request = (): CompositeRequest => {
   const c = createCanvas(32, 32);
@@ -27,7 +21,7 @@ const request = (): CompositeRequest => {
     message: "Hi",
     brandColor: "#1473E6",
     logoPath: "assets/inputs/hydra-logo.png",
-    ratio: ratio(),
+    canvas: { ratio: "1:1" },
     layout: "headline-bottom",
     tone: "bold",
   };

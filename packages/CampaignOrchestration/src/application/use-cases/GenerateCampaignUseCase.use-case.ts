@@ -254,7 +254,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
             message: copy,
             brandColor: product.primaryColor,
             logoPath: product.logoPath,
-            ratio,
+            canvas: { ratio: ratio.value },
             layout: treatment.layout,
             tone: treatment.tone,
             // The brief's style (T5) rides every creative it renders, classic
@@ -498,7 +498,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       message: variant.headline ?? copy,
       brandColor: product.primaryColor,
       logoPath: product.logoPath,
-      ratio,
+      canvas: { ratio: ratio.value },
       layout: variant.layout,
       tone: variant.tone,
       // The anchor axis draws only when the brief carries it; absent → the

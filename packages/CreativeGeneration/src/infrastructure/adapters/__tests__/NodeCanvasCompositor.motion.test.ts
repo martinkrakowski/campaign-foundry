@@ -22,7 +22,7 @@ const request = (over: Partial<CompositeRequest> = {}): CompositeRequest => ({
   message: "Stay wild, stay hydrated",
   brandColor: "#1473E6",
   logoPath: "assets/inputs/hydra-logo.png",
-  ratio: ratio("1:1"),
+  canvas: { ratio: "1:1" },
   layout: "headline-bottom",
   tone: "bold",
   ...over,
@@ -155,7 +155,7 @@ describe("NodeCanvasCompositor.draw motion", () => {
     // to the other edge for the first frames, so it visibly jumped mid-clip.
     const insets = { top: 200, right: 0, bottom: 200, left: 0 };
     const r = ratio("16:9");
-    const req = request({ layout: "headline-top", ratio: r, safeInsets: insets });
+    const req = request({ layout: "headline-top", canvas: { ratio: r.value }, safeInsets: insets });
     const rest = await spyDraw(req, 1, "headline-rise");
     const rising = await spyDraw(req, 0, "headline-rise");
     const midway = await spyDraw(req, 0.5, "headline-rise");
