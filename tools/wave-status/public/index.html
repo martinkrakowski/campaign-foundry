@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wave status</title>
+<style>
+  /* Token names come from apps/web/src/styles/tokens.css (DESIGN.md §2); the values
+     are that file's dark "Firefly" palette, which is what the product ships. The
+     page defines them as custom properties so it never invents a second palette. */
+  :root {
+    --color-background: #0f0f0f;
+    --color-surface: #1c1c1c;
+    --color-surface-2: #262626;
+    --color-border: #333333;
+    --color-text-primary: #e8e8e8;
+    --color-text-secondary: #9e9e9e;
+    --color-text-muted: #9e9e9e;
+    --color-success: #10b981;
+    --color-warning: #f59e0b;
+    --color-error: #ef4444;
+    --color-info: #3b82f6;
+    --color-brand-primary: #1473e6;
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-6: 24px;
+    --radius-sm: 4px;
+    --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --font-sans: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: var(--space-6);
+    background: var(--color-background);
+    color: var(--color-text-primary);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  h1 { font-size: 18px; margin: 0 0 var(--space-2); }
+  #connection {
+    margin: 0 0 var(--space-4);
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+  #connection.live { color: var(--color-success); }
+  #connection.polling { color: var(--color-warning); }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+  }
+  th, td {
+    padding: var(--space-2) var(--space-3);
+    text-align: left;
+    border-bottom: 1px solid var(--color-border);
+    vertical-align: top;
+  }
+  th {
+    color: var(--color-text-secondary);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: normal;
+  }
+  tr.wave td { background: var(--color-surface-2); font-family: var(--font-mono); }
+  tr.lane { cursor: pointer; }
+  tr.lane:hover td { background: var(--color-surface-2); }
+  td.mono { font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; }
+  .ok { color: var(--color-success); }
+  .warn { color: var(--color-warning); }
+  .bad { color: var(--color-error); }
+  .info { color: var(--color-info); }
+  .dim { color: var(--color-text-muted); }
+  tr.disagreement td {
+    background: var(--color-surface);
+    border-left: 3px solid var(--color-warning);
+    color: var(--color-warning);
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+  #log {
+    margin: var(--space-4) 0 0;
+    padding: var(--space-3);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    color: var(--color-text-secondary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    max-height: 40vh;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+</style>
+</head>
+<body>
+<h1>Wave status</h1>
+<p id="connection">connecting…</p>
+<table>
+  <thead>
+    <tr>
+      <th>lane</th>
+      <th>stage</th>
+      <th>liveness</th>
+      <th>log (bytes · mtime · EXIT)</th>
+      <th>PR · checks</th>
+      <th>gate (exit · coverage)</th>
+      <th>fixed / refuted / mutations</th>
+    </tr>
+  </thead>
+  <tbody id="lanes"></tbody>
+</table>
+<pre id="log" hidden></pre>
+<script>
+  "use strict";
+  const lanesBody = document.getElementById("lanes");
+  const connection = document.getElementById("connection");
+  const logView = document.getElementById("log");
+
+  function esc(value) {
+    return String(value).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    })[c]);
+  }
+
+  function mark(kind, text) {
+    return text === undefined ? '<span class="dim">—</span>' : `<span class="${kind}">${esc(text)}</span>`;
+  }
+
+  function stage(lane) {
+    if (lane.reported === undefined) return '<span class="dim">— (no events)</span>';
+    const tone = lane.reported.event === "failed" ? "bad" : lane.reported.event === "settled" ? "ok" : "info";
+    const round = lane.reported.round === undefined ? "" : ` (round ${lane.reported.round})`;
+    return `<span class="${tone}">${esc(lane.reported.stage)} ${esc(lane.reported.event)}${esc(round)}</span>`;
+  }
+
+  function liveness(lane) {
+    return lane.derived.alive ? '<span class="ok">alive</span>' : '<span class="dim">not alive</span>';
+  }
+
+  function logCell(lane) {
+    const log = lane.derived.log;
+    if (log === undefined) return '<span class="dim">no log</span>';
+    const exit = lane.derived.exit === undefined
+      ? '<span class="dim">no EXIT</span>'
+      : lane.derived.exit === 0 ? '<span class="ok">EXIT 0</span>' : `<span class="bad">EXIT ${esc(lane.derived.exit)}</span>`;
+    const age = Math.round((Date.now() - log.mtimeMs) / 1000);
+    return `${log.bytes.toLocaleString()} B · ${age}s ago · ${exit}`;
+  }
+
+  function prCell(lane) {
+    const pr = lane.derived.pr;
+    if (pr === undefined) return '<span class="dim">no PR</span>';
+    const tone = pr.state === "merged" ? "ok" : pr.state === "open" ? "info" : "bad";
+    const checks = { none: "dim", pending: "warn", pass: "ok", fail: "bad" }[pr.checks];
+    return `#${pr.number} <span class="${tone}">${esc(pr.state)}</span> · <span class="${checks}">${esc(pr.checks)}</span>`;
+  }
+
+  function gateCell(lane) {
+    const gate = lane.derived.gate;
+    if (gate === undefined) return '<span class="dim">no gate log</span>';
+    const exit = gate.exit === undefined
+      ? '<span class="dim">—</span>'
+      : gate.exit === 0 ? '<span class="ok">exit 0</span>' : `<span class="bad">exit ${esc(gate.exit)}</span>`;
+    const cov = gate.coverage === undefined ? "" :
+      ` · ${gate.coverage.statements}/${gate.coverage.branches}/${gate.coverage.functions}/${gate.coverage.lines}%`;
+    return `${exit}${esc(cov)}`;
+  }
+
+  function findingsCell(lane) {
+    const detail = lane.reported === undefined ? undefined : lane.reported.detail;
+    if (detail === undefined) return '<span class="dim">—</span>';
+    return `${detail.fixed ?? "—"} / ${detail.refuted ?? "—"} / ${detail.mutations ?? "—"}`
+      + (detail.mutationsBit === undefined ? "" : ` <span class="dim">(${detail.mutationsBit} bit)</span>`);
+  }
+
+  function render(status) {
+    const rows = [];
+    for (const wave of status.waves) {
+      rows.push(`<tr class="wave"><td colspan="7">wave ${esc(wave.id)}</td></tr>`);
+      for (const lane of wave.lanes) {
+        const key = `${esc(wave.id)}/${esc(lane.lane)}`;
+        rows.push(
+          `<tr class="lane" data-wave="${esc(wave.id)}" data-lane="${esc(lane.lane)}">`
+          + `<td class="mono">${key}</td>`
+          + `<td>${stage(lane)}</td>`
+          + `<td>${liveness(lane)}</td>`
+          + `<td class="mono">${logCell(lane)}</td>`
+          + `<td>${prCell(lane)}</td>`
+          + `<td class="mono">${gateCell(lane)}</td>`
+          + `<td>${findingsCell(lane)}</td>`
+          + "</tr>",
+        );
+        // A banner per disagreement, in the lane's own words (D103).
+        for (const disagreement of lane.disagreements) {
+          rows.push(`<tr class="disagreement"><td colspan="7">${esc(disagreement)}</td></tr>`);
+        }
+      }
+    }
+    lanesBody.innerHTML = rows.join("");
+  }
+
+  async function refresh() {
+    try {
+      const res = await fetch("/api/status");
+      render(await res.json());
+    } catch {
+      connection.textContent = "status unreachable";
+    }
+  }
+
+  lanesBody.addEventListener("click", async (event) => {
+    const row = event.target.closest("tr.lane");
+    if (row === null) return;
+    const res = await fetch(`/api/log/${row.dataset.wave}/${row.dataset.lane}?tail=16`);
+    logView.hidden = false;
+    logView.textContent = res.ok
+      ? `--- ${row.dataset.wave}/${row.dataset.lane} (last 16 KB) ---\n` + (await res.text())
+      : `no log for ${row.dataset.wave}/${row.dataset.lane}`;
+  });
+
+  // Live updates over SSE; if the stream drops, fall back to a 10 s poll.
+  const source = new EventSource("/api/stream");
+  source.addEventListener("status", (event) => {
+    connection.textContent = "live (sse)";
+    connection.className = "live";
+    render(JSON.parse(event.data));
+  });
+  source.onopen = () => {
+    connection.textContent = "live (sse)";
+    connection.className = "live";
+  };
+  source.onerror = () => {
+    source.close();
+    connection.textContent = "polling every 10s (sse closed)";
+    connection.className = "polling";
+    setInterval(refresh, 10000);
+    refresh();
+  };
+
+  refresh();
+</script>
+</body>
+</html>

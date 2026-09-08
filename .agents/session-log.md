@@ -3855,3 +3855,28 @@ across the wave directories, replacing capped ten-minute waits.
 
 **Next:** T3 ‖ T4 dispatched from `0838d56`; W2 ‖ W3 from `0176547`; #231 round 2 in flight. Then
 the campaign-type wave-C record, the wave-status close-out, and P1 alone.
+
+---
+
+## 2026-09-07 — W2 wave-status server
+
+- **Mode:** Implementer
+- **Changes:**
+  - `tools/wave-status/{server,bin,lib/collect}.ts` and `public/index.html`: read-only `node:http` window on `127.0.0.1:4317`, refusing 3000/3001 (D105).
+  - `tools/wave-status/__tests__/{collect,server,bin}.test.ts`: injected deps, `listen(0)`, hermetic `main({ root })`.
+  - `AGENTS.md`: `## Wave Observability` from plan §2.3, appended (D107).
+  - `package.json`: `"wave:status": "tsx tools/wave-status/bin.ts"` — no new dependency.
+- **Decisions:**
+  - `main({ root })` / `WAVE_LOG_ROOT` inject the collection root so tests never walk the real `/tmp`.
+  - `fs.watch` is driven by creating a file in the wave dir (overwrites coalesce on macOS FSEvents); overlapping ticks are queued so the latest status is not dropped.
+  - `sync:check` refuses a dirty tree; it ran after the commit.
+- **Mutations:** M1–M5 compiled (`tsc -p tools/wave-status --noEmit`), ran, failed the named test, reverted.
+  - M1 `resolvePort` accepts 3000 → `3000 and 3001 are refused by construction, naming D105`
+  - M2 `DELETE /api/log/:wave/:lane` → `any other method is 405 — including DELETE on the log route`
+  - M3 PRs keyed without `feat/` → `a full tree yields both rows with coverage, liveness and the pending PR`
+  - M4 drop segment validation → `path segments are validated — traversal is 404 (M4)`
+  - M5 SSE sends only the initial event → `/api/stream sends a status event on connect and pushes on fs.watch change (M5)`
+- **Left open:**
+  - Do not merge from this lane. W3 owns emit / `scripts/wave-event.sh` / the skill.
+  - Never bind 3000/3001; the server refuses them by construction.
+
