@@ -59,6 +59,16 @@ the problem. These rules are, in order of what they save:
    reads a line of the brief. That is the number that makes a third round expensive: not the work,
    the boot.
 
+8. **A lane agent never opens `.agents/session-log.md`.** It is **498 KB — about 125 000 tokens**,
+   and every brief written before 2026-09-08 ordered the agent to append to it. An agent that reads
+   before it writes pays that as input, once per round; four rounds could pay it four times.
+   **The lane reports itself in its PR body** (it already does), and the orchestrator appends both
+   the lane entry and the wave record at merge time, when reading the file costs nothing. This is
+   also what SKILL.md stage 6 already assigns: "a lane reports on itself, the orchestrator reports
+   on the wave" — the lane's *report* is the PR body, not a write into the largest file in the
+   repository. The same rule covers any file over ~50 KB: `DESIGN.md` (46 KB), `README.md` (29 KB),
+   a long planning document. Quote what the agent needs; never send it to open one.
+
 **Why grok is out.** It exhausted a weekly quota in two days because it drifted from reviewer and
 fixer into default implementer (nine lane implementations on 09-07/08, every role at high effort,
 reviewer briefs that re-ran the full gate). Reviewer briefs now carry the diff excerpt for the
