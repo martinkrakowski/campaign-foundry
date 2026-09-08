@@ -18,6 +18,21 @@ STAGGER="${STAGGER:-45}"
 [ $# -ge 2 ] || { print -u2 "usage: $0 <logdir> <lane>:<worktree>:<brief> ..."; exit 2; }
 LOGDIR="$1"; shift; mkdir -p "$LOGDIR"
 
+# Wave-status events (D103): emitting is part of the stage, not a courtesy. WAVE is
+# overridable so tests can pin it; it defaults to the log dir's own name.
+WAVE="${WAVE:-${LOGDIR:t}}"
+WAVE_EVENT="${0:A:h}/../../../../scripts/wave-event.sh"
+emit_event() {
+  if [[ -x "$WAVE_EVENT" ]]; then
+    "$WAVE_EVENT" "$LOGDIR" "$WAVE" "$@"
+  else
+    print -u2 "warning: $WAVE_EVENT not found — event not emitted: $*"
+  fi
+}
+# Test hook: the command run inside the worktree, overridable so a fake lane can be
+# `true`/`false`. The default is the real implementer invocation, unchanged.
+LANE_CMD="${LANE_CMD:-}"
+
 lanes=()
 first=1
 for spec in "$@"; do
@@ -29,15 +44,22 @@ for spec in "$@"; do
   [ -f "$brief" ] || { print -u2 "no brief: $brief";   exit 2; }
   [ -d "$wt/node_modules" ] || print -u2 "warning: $wt has no node_modules — run yarn install first"
   log="$LOGDIR/$lane.log"; : > "$log"; lanes+=("$lane")
+  emit_event "$lane" dispatch started
   [ $first -eq 1 ] || sleep "$STAGGER"
   first=0
-  nohup zsh -c "cd ${(q)wt} && opencode run --auto --model ${(q)MODEL} --variant ${(q)VARIANT} \"\$(cat ${(q)brief})\" > ${(q)log} 2>&1; echo \"EXIT \$?\" >> ${(q)log}" >/dev/null 2>&1 & disown
+  if [[ -n "$LANE_CMD" ]]; then
+    nohup zsh -c "cd ${(q)wt} && ${LANE_CMD} > ${(q)log} 2>&1; echo \"EXIT \$?\" >> ${(q)log}" >/dev/null 2>&1 & disown
+  else
+    nohup zsh -c "cd ${(q)wt} && opencode run --auto --model ${(q)MODEL} --variant ${(q)VARIANT} \"\$(cat ${(q)brief})\" > ${(q)log} 2>&1; echo \"EXIT \$?\" >> ${(q)log}" >/dev/null 2>&1 & disown
+  fi
   print "dispatched $lane -> $log"
 done
 
 # A lane killed by the OS (or a harness) never writes its marker, so an unbounded
 # wait hangs the orchestrator forever. Bound it, and say which lanes are missing.
 : ${WAIT_TIMEOUT:=5400}
+# Poll cadence; overridable so tests with instant fake lanes do not wait a full 30s.
+POLL="${POLL:-30}"
 print "waiting for ${#lanes[@]} lane(s), up to ${WAIT_TIMEOUT}s…"
 started=$SECONDS
 while :; do
@@ -55,7 +77,7 @@ while :; do
     print -u2 "Derive their real state before believing anything: gh pr list --head <branch>."
     break
   fi
-  sleep 30
+  sleep "$POLL"
 done
 
 print "\n=== derived outcome (read the body, not just the marker) ==="
@@ -63,6 +85,15 @@ failed=0
 for lane in "${lanes[@]}"; do
   log="$LOGDIR/$lane.log"
   marker=$(grep -E '^EXIT [0-9]+$' "$log" | tail -1)
+  # A lane with a marker has finished its implement stage — say so. A lane killed
+  # before writing one emits nothing here: it never reached a settled or failed end.
+  if [[ -n "$marker" ]]; then
+    if [[ "$marker" == "EXIT 0" ]]; then
+      emit_event "$lane" implement settled
+    else
+      emit_event "$lane" implement failed
+    fi
+  fi
   [[ "$marker" == "EXIT 0" ]] || (( failed++ ))
   print "$lane: ${marker:-<no marker>}, $(wc -c < "$log" | tr -d ' ') bytes"
   sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -iE 'insufficient balance|database is locked|^Error:' | head -3 | sed 's/^/    /'
