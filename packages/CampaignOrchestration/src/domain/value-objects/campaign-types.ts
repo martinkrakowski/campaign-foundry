@@ -9,7 +9,7 @@
  * applied once at create and never re-applied (D109): the brief records it so
  * surfaces can read it, not so anything can enforce it.
  */
-export const CAMPAIGN_TYPES = ["social-post", "paid-social", "short-video"] as const;
+export const CAMPAIGN_TYPES = ["social-post", "paid-social", "short-video", "display-ad"] as const;
 
 export type CampaignType = (typeof CAMPAIGN_TYPES)[number];
 
@@ -29,6 +29,8 @@ export const CAMPAIGN_TYPE_PRESETS: Readonly<Record<CampaignType, CampaignTypePr
   "paid-social":  { platforms: ["instagram-feed", "linkedin", "x", "instagram-story", "instagram-reel", "tiktok", "youtube-short"], formats: ["static", "motion"], mode: "variation" },
   // Motion only — every short-video platform is a 9:16 motion profile, and the API refuses motion under classic mode (D110), so the mode must be variation or the type mints campaigns that never run.
   "short-video":  { platforms: ["instagram-story", "instagram-reel", "tiktok", "youtube-short"], formats: ["motion"], mode: "variation" },
+  // IAB display units (D113) on the three display profiles (D116) — stills only (D118), Classic mode: static + brief is legal, and the type joined last (D117) so its sizes render before the option exists.
+  "display-ad":   { platforms: ["google-display", "meta-audience-network", "display-web"], formats: ["static"], mode: "brief" },
 };
 
 /**
@@ -40,6 +42,7 @@ export const CAMPAIGN_TYPE_PROMPT_HINTS: Readonly<Record<CampaignType, string>> 
   "social-post": "a social post for organic feeds",
   "paid-social": "paid social advertising across feeds, stories and reels",
   "short-video": "short-form video for social feeds",
+  "display-ad": "static display advertising in IAB banner sizes",
 };
 
 /** The sentence every generator appends. Always present; absent or unknown type → social-post. */

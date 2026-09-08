@@ -2769,6 +2769,23 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
     expect(() => parseBrief(toBrief(short), RUN)).not.toThrow();
   });
 
+  test("D117 — a display-ad seed is Classic, stills-only, seeds A3's profiles, derives the five sizes, and parses on the run path", () => {
+    const display = reduce(
+      base(),
+      { type: "patch", patch: { campaignName: "camp", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi" } },
+      { type: "setProduct", key: 1, patch: { name: "A" } },
+      { type: "applyPreset", campaignType: "display-ad" },
+    );
+    expect(display.mode).toBe("brief");
+    expect(display.formats).toEqual(["static"]);
+    expect(display.platforms).toEqual(["google-display", "meta-audience-network", "display-web"]);
+    const brief = toBrief(display);
+    expect(brief.type).toBe("display-ad");
+    expect(brief.output?.sizes).toEqual([...DISPLAY_SIZE_VALUES]);
+    // The D117 proof, run-path half: the seeded campaign is not a dead end.
+    expect(() => parseBrief(toBrief(display), RUN)).not.toThrow();
+  });
+
   test("a blank draft never grows a type key (D112)", () => {
     expect(toBrief(filled())).not.toHaveProperty("type");
   });
@@ -2803,8 +2820,10 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
   });
 
   test("a draft with an out-of-vocabulary type falls back to the default", () => {
+    // "display-ad" joined the vocabulary in A5 (D117), so the out-of-vocab
+    // example is a type that is still outside it.
     const raw = JSON.parse(JSON.stringify(initialEditorState())) as Record<string, unknown>;
-    raw.type = "display-ad";
+    raw.type = "banner";
     raw.typeExplicit = true;
     const restored = normalizeDraftState(raw);
     expect(restored.type).toBe("social-post");

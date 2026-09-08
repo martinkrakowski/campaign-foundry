@@ -341,5 +341,13 @@ describe("OpenRouterCopyGenerator", () => {
     expect(paid[1].content).toBe(
       "Subject(s): <<<Hydra Bottle>>>. Audience: <<<Urban outdoor enthusiasts>>>. Market/region: <<<DE>>>. Campaign message: <<<Stay wild. Stay hydrated.>>>. Campaign type: paid social advertising across feeds, stories and reels.",
     );
+
+    // A5 (D117) — the fourth type reaches the prompt through the same table.
+    fetchFn.mockClear();
+    await generator.suggestHeadlines({ brief: { ...brief, type: "display-ad" }, count: 3 });
+    const display = requestOf(fetchFn).body.messages as Array<{ role: string; content: string }>;
+    expect(display[1].content).toBe(
+      "Subject(s): <<<Hydra Bottle>>>. Audience: <<<Urban outdoor enthusiasts>>>. Market/region: <<<DE>>>. Campaign message: <<<Stay wild. Stay hydrated.>>>. Campaign type: static display advertising in IAB banner sizes.",
+    );
   });
 });

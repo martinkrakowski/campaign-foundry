@@ -709,6 +709,14 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         type: action.campaignType,
         platforms: [...preset.platforms],
         formats: [...preset.formats],
+        // A3 — a display preset's output.sizes are derived the same way the
+        // platform toggles contribute them: the union of the preset's display
+        // profiles' sizes, in canonical order (`platformsToSizes` answers []
+        // for a social-only preset, so the social seeds stay exactly as they
+        // were). `sizes` is authored state (see `toBrief`), so without this the
+        // seeded display campaign would carry platforms but no sizes and run
+        // with nothing to render — the D8 dead end D117 exists to refuse.
+        sizes: platformsToSizes(preset.platforms),
         motion,
         duration,
         motionSeeded,

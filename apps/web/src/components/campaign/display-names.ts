@@ -158,6 +158,7 @@ const TYPE_LABELS: Record<CampaignType, string> = {
   "social-post": "Social post",
   "paid-social": "Paid social",
   "short-video": "Short-form video",
+  "display-ad": "Display ad",
 };
 
 export function typeDisplayName(type: CampaignType): string {

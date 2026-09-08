@@ -6,16 +6,29 @@ import {
   CAMPAIGN_TYPE_PRESETS,
   DEFAULT_CAMPAIGN_TYPE,
 } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import { CreateCampaignProvider, useCreateCampaign } from "@/lib/create-campaign-context";
 import { CREATE_SEED_KEY } from "@/lib/create-campaign";
 import { ShellProviders, json, mockPipelineApi, nextMock } from "@/__tests__/helpers";
-import { editorReducer, initialEditorState, saveDraftToStorage } from "@/components/campaign/editor-state";
+import {
+  editorReducer,
+  initialEditorState,
+  normalizeDraftState,
+  saveDraftToStorage,
+  toBrief,
+} from "@/components/campaign/editor-state";
 import { formatDisplayName, modeDisplayName, typeDisplayName } from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
 import * as createCampaignLib from "@/lib/create-campaign";
 import { getFocusableDialogElements } from "@/components/ui";
 import { CreateCampaignDialog } from "../CreateCampaignDialog";
 import NewBriefPage from "@/app/(shell)/brief/new/page";
+// The real gate the run paths hit, imported across apps for the test below —
+// the same cross-app import editor-state.test.ts makes, for the same reason.
+import { parseBrief } from "../../../../../api/server/lib/load-brief";
+
+/** The run paths' parse options, as the API builds them. */
+const RUN = { enforceCapabilities: true, capabilities: { motion: true } };
 
 /** Opens the dialog the way the shell's entry points do, so the closed state is real. */
 const Harness = () => {
@@ -58,14 +71,14 @@ beforeEach(() => {
 });
 
 describe("CreateCampaignDialog", () => {
-  test("the dialog renders exactly two controls: one text input and one three-tile group", async () => {
+  test("the dialog renders exactly two controls: one text input and one four-tile group", async () => {
     const user = userEvent.setup();
     renderDialog();
     const dialog = await openDialog(user);
 
     expect(within(dialog).getAllByRole("textbox")).toHaveLength(1);
     const group = within(dialog).getByRole("group", { name: messages.createTypeLabel });
-    expect(within(group).getAllByRole("button")).toHaveLength(3);
+    expect(within(group).getAllByRole("button")).toHaveLength(4);
     expect(within(group).getAllByRole("button").map((tile) => tile.getAttribute("aria-label"))).toEqual([
       ...CAMPAIGN_TYPES,
     ]);
@@ -119,6 +132,19 @@ describe("CreateCampaignDialog", () => {
         expect(target?.textContent).toContain(messages.typeTileRunsAs(modeDisplayName("variation")));
       }
     }
+  });
+
+  test("the display-ad tile's description names the display placements (A5/D116)", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    const dialog = await openDialog(user);
+    const tile = within(dialog).getByRole("button", { name: "display-ad" });
+    const target = document.getElementById(tile.getAttribute("aria-describedby") as string);
+    expect(target?.textContent).toContain("Runs on Google Display, Meta Audience Network and Display Web.");
+    // The jargon gate: display words only — never a raw platform or format id.
+    expect(target?.textContent).not.toContain("google-display");
+    expect(target?.textContent).not.toContain("display-web");
+    expect(target?.textContent).not.toContain("static");
   });
 
   test("Create with an empty name is refused in the status line, and the dialog stays open", async () => {
@@ -234,6 +260,84 @@ describe("CreateCampaignDialog", () => {
     );
     expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  test("choosing display-ad stores { name, type: \"display-ad\" } and the editor that consumes it runs (D117)", async () => {
+    const user = userEvent.setup();
+    const view = renderDialog();
+    const dialog = await openDialog(user);
+    await fillValid(user);
+    await user.click(within(dialog).getByRole("button", { name: "display-ad" }));
+    await user.click(within(dialog).getByRole("button", { name: messages.createCampaignConfirm }));
+
+    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new"));
+    expect(JSON.parse(localStorage.getItem(CREATE_SEED_KEY) as string)).toEqual({
+      name: "Summer Spark",
+      type: "display-ad",
+    });
+    view.unmount();
+
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.removeItem("cf:presentation");
+    mockPipelineApi({
+      result: (url) =>
+        String(url).includes("/campaigns/capabilities")
+          ? json({ motion: true })
+          : String(url).includes("/campaigns/briefs")
+            ? json({ briefs: [] })
+            : json({ halted: false, assets: [], log: null }),
+    });
+    nextMock().nav.pathname = "/brief/new";
+    render(
+      <ShellProviders>
+        <CreateCampaignProvider>
+          <NewBriefPage />
+        </CreateCampaignProvider>
+      </ShellProviders>,
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+        "Summer Spark",
+      ),
+    );
+    // Classic mode — static + brief is legal, the D110 invariant the preset rides on.
+    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe("false");
+    // A3's three display profiles start selected — the editor lands on Identity,
+    // so the Output step's platform cards need the walk there first.
+    await user.click(screen.getByRole("button", { name: /Step 6 of 7: Output/ }));
+    for (const id of ["google-display", "meta-audience-network", "display-web"]) {
+      expect(screen.getByRole("button", { name: id }).getAttribute("aria-pressed")).toBe("true");
+    }
+    // The D117 proof — end to end against the run path, not the preset table:
+    // the editor's own autosaved state → toBrief → parseBrief with the run
+    // paths' enforceCapabilities gate, and the five IAB sizes come out derived.
+    await waitFor(() => expect(localStorage.getItem("cf:draft:new")).toBeTruthy());
+    const draft = JSON.parse(localStorage.getItem("cf:draft:new") as string) as {
+      state: Record<string, unknown>;
+    };
+    const state = normalizeDraftState(draft.state);
+    expect(state.platforms).toEqual(["google-display", "meta-audience-network", "display-web"]);
+    // Identity and products are the user's answers, not the seed's (D108) — fill
+    // them the way the editor's own controls dispatch, then run the D117 proof:
+    // toBrief → parseBrief with the run paths' enforceCapabilities gate, and the
+    // five IAB sizes come out derived.
+    const identified = editorReducer(state, {
+      type: "patch",
+      patch: { targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi" },
+    });
+    const completed = identified.products.reduce(
+      (acc, product) =>
+        editorReducer(acc, {
+          type: "setProduct",
+          key: product.key,
+          patch: { name: `Product ${product.key}` },
+        }),
+      identified,
+    );
+    const brief = toBrief(completed);
+    expect(brief.output?.sizes).toEqual([...DISPLAY_SIZE_VALUES]);
+    expect(() => parseBrief(brief, RUN)).not.toThrow();
   });
 
   test("a blocked store keeps the dialog open, says so, and neither navigates nor leaves a seed", async () => {

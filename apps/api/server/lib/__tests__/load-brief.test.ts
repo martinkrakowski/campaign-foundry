@@ -419,8 +419,9 @@ describe("parseBrief campaign type (D108–D112)", () => {
   });
 
   test("an unknown type throws with the vocabulary spelled out", () => {
+    // A5 (D117): the vocabulary is four types now, so the message names display-ad too.
     expect(() => parseBrief({ ...valid, type: "banner" })).toThrow(
-      'Campaign brief field "type" must be one of "social-post", "paid-social", "short-video"; got "banner".',
+      'Campaign brief field "type" must be one of "social-post", "paid-social", "short-video", "display-ad"; got "banner".',
     );
   });
 
@@ -437,7 +438,7 @@ describe("parseBrief campaign type (D108–D112)", () => {
 
   test("a non-string type is refused", () => {
     expect(() => parseBrief({ ...valid, type: 7 })).toThrow(
-      'Campaign brief field "type" must be one of "social-post", "paid-social", "short-video"; got 7.',
+      'Campaign brief field "type" must be one of "social-post", "paid-social", "short-video", "display-ad"; got 7.',
     );
   });
 });

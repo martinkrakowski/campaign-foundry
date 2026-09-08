@@ -1091,3 +1091,11 @@ export function typeTileGives(platformCount: number, formats: string): string {
 export function typeTileRunsAs(mode: string): string {
   return `Runs as a ${mode} campaign.`;
 }
+/**
+ * A5 (D117/D116) — the display-ad tile's extra line: the display placements the
+ * preset seeds, as display words the caller already converted (D18). Never a
+ * raw platform id — the jargon gate forbids those here.
+ */
+export function typeTilePlacements(placements: string): string {
+  return `Runs on ${placements}.`;
+}

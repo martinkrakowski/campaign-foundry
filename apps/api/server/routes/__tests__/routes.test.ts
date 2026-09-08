@@ -139,6 +139,52 @@ describe("POST /campaigns/generate", () => {
     );
   });
 
+  // D117 — the create option's proof, at the route the editor's Save → run path
+  // serves. The brief is the shape a display-ad create's `toBrief` emits (A5):
+  // A3's three display profiles, the five IAB sizes, stills, Classic, typed.
+  test("generates a display-ad brief end to end — a display cell renders at resolveCanvas dimensions and google-display packages a non-empty manifest", async () => {
+    const res = await call(
+      brief({
+        type: "display-ad",
+        products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "assets/inputs/hydra-logo.png" }],
+        output: {
+          formats: ["static"],
+          platforms: ["google-display", "meta-audience-network", "display-web"],
+          sizes: ["300x250", "728x90", "160x600", "320x50", "300x600"],
+        },
+      }),
+    );
+    expect(res.status).toBe(202);
+    const { body } = await awaitJob(((await res.json()) as { jobId: string }).jobId);
+    expect(body.status).toBe("completed");
+    expect(body.result?.halted).toBe(false);
+    // 1 product × (3 social ratios the run always renders + the 5 display sizes).
+    const paths = body.result?.assets.map((a) => a.outputPath) ?? [];
+    expect(paths).toContain("alpha/300x250.png");
+    expect(paths).toContain("alpha/728x90.png");
+    // The D113 proof at the pixel level: the saved PNG's IHDR carries
+    // resolveCanvas's dimensions for the unit — never scaled to a ratio.
+    const ihdr = (path: string) => {
+      const bytes = readFileSync(resolve(dir, path));
+      return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+    };
+    expect(ihdr("alpha/300x250.png")).toEqual({ width: 300, height: 250 });
+    expect(ihdr("alpha/728x90.png")).toEqual({ width: 728, height: 90 });
+    // A4b — packaging a display platform afterwards is not a dead end either.
+    const pack = await web("post", "/campaigns/package", packageHandler)(
+      new Request("http://x/campaigns/package", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ campaignId: "camp", platforms: ["google-display"] }),
+      }),
+    );
+    expect(pack.status).toBe(200);
+    const manifest = JSON.parse(
+      readFileSync(resolve(dir, "packages/camp/google-display/manifest.json"), "utf8"),
+    ) as { items: unknown[] };
+    expect(manifest.items.length).toBeGreaterThan(0);
+  });
+
   test("refuses a classic brief that requests motion — the reported bug: it rendered stills", async () => {
     setCapabilities({ motion: true });
     try {

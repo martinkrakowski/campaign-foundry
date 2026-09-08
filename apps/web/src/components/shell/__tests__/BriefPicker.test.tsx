@@ -253,6 +253,21 @@ describe("BriefPicker type chip (T4)", () => {
     expect(screen.queryByText("short-video")).toBeNull();
   });
 
+  test("a display-ad brief shows the type display name, never the raw id (A5/D117)", async () => {
+    route({
+      briefs: [
+        {
+          file: "leaderboard.yaml",
+          brief: { id: "leaderboard", type: "display-ad", targetRegion: "DE", products: [{ id: "a" }] },
+        },
+      ],
+    });
+    renderWithRun(<BriefPicker />);
+    await screen.findByText("leaderboard.yaml");
+    expect(screen.getByText(typeDisplayName("display-ad"))).toBeTruthy();
+    expect(screen.queryByText("display-ad")).toBeNull();
+  });
+
   test("a brief with type banner shows Social post, never an empty chip", async () => {
     route({
       briefs: [
