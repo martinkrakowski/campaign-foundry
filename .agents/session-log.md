@@ -4449,3 +4449,21 @@ D118) remain deferred.
 - **Left open:**
   - Lane L1 (the vocabulary: advertising units, creative types, layer kinds) follows L12.
 
+
+---
+
+## 2026-09-08 — Creative templates arc, wave 1: L12 merged (stage 6, at merge time)
+
+**Mode:** Orchestrator.
+
+**Merged:** #255 `feat(brief): the brief document declares its schema version (L12, D133)` → main `888675e`. `CampaignBrief.schemaVersion` required in the domain, defaulted to `1` at the boundary in both modes, refused outside `1..BRIEF_SCHEMA_VERSION`, first key in the YAML, carried through `EditorState` and draft normalisation. Every sample brief parses unedited. Implementer: agy `gemini-3.8-flash-high` — the only funded seat (grok 402; opencode/glm "insufficient balance"). 25 min, EXIT 0, one PR.
+
+**Verified:** full gate on the orchestrator's own run, 100 % ×4. Mutations: one equivalent (dropping `Number.isInteger` under a 1..1 range — discarded, proves nothing); `enforceCapabilities ? validate : 1` caught by 8 tests incl. the authoring-mode one; CodeRabbit's "vacuous key-order test" refuted by deleting the `BRIEF_KEY_ORDER` entry — the test fails.
+
+**Refuted:** 7 PR-Agent (type/factory/export already in the diff; two style-only), Qodo "inherited properties lost" (no caller builds such an object), CodeRabbit (by mutation).
+
+**Deferred with reason:** Qodo — a draft carrying a *future* `schemaVersion` is downgraded to `1` by `normalizeDraftState` rather than left untouched. No build writes another version today; the rule lands with the first v2 normaliser, where it can be tested against a real shape.
+
+**Seats:** agy refuses a `-high` model id with a lower `--effort`; the effort flag must match the id's suffix.
+
+**Next:** L1 (the vocabulary) per the plan's wave line — not dispatched; awaits the owner's go-ahead.
