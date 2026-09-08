@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
 import {
   ANCHOR_VALUES,
+  DISPLAY_SIZE_VALUES,
   LAYOUT_VALUES,
   PreviewCreativeFrameUseCase,
   RATIO_VALUES,
   TONE_VALUES,
+  type AspectRatioValue,
   type CampaignBrief,
+  type DisplaySize,
   type PreviewCellSelection,
   type PreviewFrameCacheEntry,
 } from "@campaignfoundry/CampaignOrchestration";
@@ -22,8 +25,9 @@ import { platformZones } from "../../lib/platform-zones.js";
  * layout in the hand-maintained SVG twin.
  *
  * Body is an envelope `{ brief, cell }` — a structurally valid brief (parsed via
- * `parseBrief`, the one chokepoint) plus one cell selection `{ productId, ratio,
- * layout, tone, anchor? }`. The answer is `image/png` bytes with the frame's
+ * `parseBrief`, the one chokepoint) plus one cell selection `{ productId, canvas,
+ * layout, tone, anchor? }` whose canvas is a social `{ ratio }` or a display
+ * `{ size }`. The answer is `image/png` bytes with the frame's
  * cache key in `x-preview-frame-cache-key`.
  *
  * CREDIT SAFETY (D52): the generator below is `ProceduralBackgroundGenerator`
@@ -71,12 +75,24 @@ function parsePreviewCell(value: unknown): PreviewCellSelection {
     throw new Error("Preview cell must be an object.");
   }
   const cell = value as Record<string, unknown>;
-  const { productId, ratio, layout, tone, anchor } = cell;
+  const { productId, canvas, layout, tone, anchor } = cell;
   if (typeof productId !== "string") {
     throw new Error('Preview cell requires a string "productId".');
   }
-  if (typeof ratio !== "string" || !(RATIO_VALUES as readonly string[]).includes(ratio)) {
-    throw new Error(`Preview cell ratio must be one of ${RATIO_VALUES.join(", ")}.`);
+  if (typeof canvas !== "object" || canvas === null) {
+    throw new Error('Preview cell requires a "canvas" of { ratio } or { size }.');
+  }
+  const spec = canvas as Record<string, unknown>;
+  const hasRatio = typeof spec.ratio === "string";
+  const hasSize = typeof spec.size === "string";
+  if (hasRatio === hasSize) {
+    throw new Error("Preview cell canvas must carry exactly one of ratio/size.");
+  }
+  if (hasRatio && !(RATIO_VALUES as readonly string[]).includes(spec.ratio as string)) {
+    throw new Error(`Preview cell canvas ratio must be one of ${RATIO_VALUES.join(", ")}.`);
+  }
+  if (hasSize && !(DISPLAY_SIZE_VALUES as readonly string[]).includes(spec.size as string)) {
+    throw new Error(`Preview cell canvas size must be one of ${DISPLAY_SIZE_VALUES.join(", ")}.`);
   }
   if (typeof layout !== "string" || !(LAYOUT_VALUES as readonly string[]).includes(layout)) {
     throw new Error(`Preview cell layout must be one of ${LAYOUT_VALUES.join(", ")}.`);
@@ -89,7 +105,9 @@ function parsePreviewCell(value: unknown): PreviewCellSelection {
   }
   return {
     productId,
-    ratio,
+    canvas: hasRatio
+      ? { ratio: spec.ratio as AspectRatioValue }
+      : { size: spec.size as DisplaySize },
     layout: layout as PreviewCellSelection["layout"],
     tone: tone as PreviewCellSelection["tone"],
     ...(anchor !== undefined ? { anchor: anchor as PreviewCellSelection["anchor"] } : {}),

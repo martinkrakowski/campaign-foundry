@@ -41,8 +41,8 @@ interface Layer {
 /**
  * Union-keyed layout lookups rather than `=== "pA"` comparisons: a Record over
  * the variant union makes a new member a *compile* error instead of a branch
- * that cannot be covered under the 100 % gate. Same idiom as `PROPORTIONS`
- * above and `TOP_EDGE` in `creative-glyph.tsx`. Each table returns the variant's
+ * that cannot be covered under the 100 % gate. Same idiom as `TOP_EDGE` in
+ * `creative-glyph.tsx`. Each table returns the variant's
  * four content layers — image block, headline bar, subhead bar, CTA chip — as
  * fractions of the frame's own box, so one table holds at every ratio.
  */

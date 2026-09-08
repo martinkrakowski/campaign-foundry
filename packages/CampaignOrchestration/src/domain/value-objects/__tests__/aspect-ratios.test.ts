@@ -4,12 +4,14 @@ import { join, relative, resolve } from "node:path";
 import { AspectRatio } from "../AspectRatio.vo.js";
 import {
   RATIO_VALUES,
+  nearestSocialRatio,
   resolveCanvas,
   scaleBasis,
   scaleBasisPx,
   widthTermBasis,
   type CanvasSpec,
 } from "../aspect-ratios.js";
+import { DISPLAY_SIZE_VALUES } from "../display-sizes.js";
 
 describe("resolveCanvas (D113)", () => {
   test("a social ratio resolves to the 1080/1920 canvas", () => {
@@ -117,5 +119,27 @@ describe("the resolver is the only reader of pixel dimensions", () => {
       if (DIRECT_DIMENSION_READ.test(source)) hits.push(relative(repoRoot, file));
     }
     expect(hits, hits.length ? `direct dimension reads in ${hits.join(", ")}` : "").toEqual([]);
+  });
+});
+
+describe("nearestSocialRatio — the background port's vocabulary", () => {
+  test("a ratio-family spec is itself", () => {
+    for (const ratio of RATIO_VALUES) {
+      expect(nearestSocialRatio({ ratio })).toBe(ratio);
+    }
+  });
+
+  test("each display size resolves to the social orientation it actually looks like", () => {
+    expect(nearestSocialRatio({ size: "300x250" })).toBe("1:1");
+    expect(nearestSocialRatio({ size: "728x90" })).toBe("16:9");
+    expect(nearestSocialRatio({ size: "320x50" })).toBe("16:9");
+    expect(nearestSocialRatio({ size: "160x600" })).toBe("9:16");
+    expect(nearestSocialRatio({ size: "300x600" })).toBe("9:16");
+  });
+
+  test("every member of the union is answered — a sixth size cannot fall through", () => {
+    for (const size of DISPLAY_SIZE_VALUES) {
+      expect(RATIO_VALUES).toContain(nearestSocialRatio({ size }));
+    }
   });
 });

@@ -51,25 +51,27 @@ export function PreviewFrame({
   readonly className: string;
 }): ReactNode {
   const canvas = canvasSpecOf(spec, ratio);
+  // The cell carries the whole CanvasSpec — a social ratio or a display size —
+  // so a leaderboard preview requests the real frame too, not only the social
+  // family. The memo keys on the spec's own family value.
   const cell = useMemo<PreviewCellSelection | undefined>(() => {
     const product = brief?.products[0];
     if (
       product === undefined ||
       product.id.length === 0 ||
       layout === undefined ||
-      tone === undefined ||
-      canvas.ratio === undefined
+      tone === undefined
     ) {
       return undefined;
     }
     return {
       productId: product.id,
-      ratio: canvas.ratio,
+      canvas,
       layout,
       tone,
       ...(anchor !== undefined ? { anchor } : {}),
     };
-  }, [brief, layout, tone, anchor, canvas.ratio]);
+  }, [brief, layout, tone, anchor, canvas]);
   const { frame } = usePreviewFrame(brief, cell);
 
   if (frame !== null) {

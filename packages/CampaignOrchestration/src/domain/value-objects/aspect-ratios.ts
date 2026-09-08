@@ -81,3 +81,28 @@ export function scaleBasisPx(spec: CanvasSpec, sizeScale: number): number {
   const { width, height } = resolveCanvas(spec);
   return Math.round(sizeScale * scaleBasis(spec, width, height));
 }
+
+/**
+ * The social ratio whose canvas aspect is nearest the spec's — the vocabulary
+ * the background port speaks (`ImageGeneratorPort` takes an `AspectRatio`, and
+ * the social family is all it can name). A size-family preview resolves its
+ * background at this orientation; the compositor then stretches it over the
+ * exact display canvas, so a leaderboard asks for a wide background, not a
+ * square one. A ratio-family spec is itself.
+ */
+export function nearestSocialRatio(spec: CanvasSpec): AspectRatioValue {
+  if (spec.ratio !== undefined) return spec.ratio;
+  const { width, height } = resolveCanvas(spec);
+  const aspect = width / height;
+  let nearest: AspectRatioValue = RATIO_VALUES[0];
+  let nearestDiff = Number.POSITIVE_INFINITY;
+  for (const ratio of RATIO_VALUES) {
+    const { width: w, height: h } = RATIO_DIMENSIONS[ratio];
+    const diff = Math.abs(aspect - w / h);
+    if (diff < nearestDiff) {
+      nearestDiff = diff;
+      nearest = ratio;
+    }
+  }
+  return nearest;
+}

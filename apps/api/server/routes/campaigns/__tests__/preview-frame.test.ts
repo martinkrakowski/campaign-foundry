@@ -37,7 +37,7 @@ const brief = (primaryColor = "#1473E6") => ({
 
 const cell = (over: Record<string, unknown> = {}) => ({
   productId: "alpha",
-  ratio: "9:16",
+  canvas: { ratio: "9:16" },
   layout: "headline-bottom",
   tone: "bold",
   ...over,
@@ -86,6 +86,16 @@ describe("POST /campaigns/preview-frame", () => {
     expect(bytes.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a"); // PNG signature
     expect(bytes.readUInt32BE(16)).toBe(1080);
     expect(bytes.readUInt32BE(20)).toBe(1920);
+  });
+
+  test("a display-size cell renders the exact pixel canvas, not a scaled ratio", async () => {
+    const res = await mount()(jsonReq({ brief: brief(), cell: cell({ canvas: { size: "728x90" } }) }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    const bytes = Buffer.from(await res.arrayBuffer());
+    // The PNG's IHDR carries the display unit's own dimensions (D113: never scaled).
+    expect(bytes.readUInt32BE(16)).toBe(728);
+    expect(bytes.readUInt32BE(20)).toBe(90);
   });
 
   test("a cell carrying an anchor renders with it", async () => {
@@ -146,7 +156,11 @@ describe("POST /campaigns/preview-frame", () => {
     ["a body without a cell", { brief: brief() }, /envelope/],
     ["a non-object cell", { brief: brief(), cell: "nope" }, /cell must be an object/],
     ["a cell without a productId", { brief: brief(), cell: cell({ productId: undefined }) }, /productId/],
-    ["an unknown ratio", { brief: brief(), cell: cell({ ratio: "4:3" }) }, /ratio must be one of/],
+    ["a non-object canvas", { brief: brief(), cell: cell({ canvas: "728x90" }) }, /canvas/],
+    ["a canvas carrying both families", { brief: brief(), cell: cell({ canvas: { ratio: "9:16", size: "728x90" } }) }, /exactly one of ratio\/size/],
+    ["a canvas carrying neither family", { brief: brief(), cell: cell({ canvas: {} }) }, /exactly one of ratio\/size/],
+    ["an unknown ratio", { brief: brief(), cell: cell({ canvas: { ratio: "4:3" } }) }, /canvas ratio must be one of/],
+    ["an unknown display size", { brief: brief(), cell: cell({ canvas: { size: "banner" } }) }, /canvas size must be one of/],
     ["an unknown layout", { brief: brief(), cell: cell({ layout: "headline-left" }) }, /layout must be one of/],
     ["an unknown tone", { brief: brief(), cell: cell({ tone: "loud" }) }, /tone must be one of/],
     ["an unknown anchor", { brief: brief(), cell: cell({ anchor: "left" }) }, /anchor must be one of/],

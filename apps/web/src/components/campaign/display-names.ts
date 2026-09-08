@@ -1,6 +1,6 @@
 // The leaf subpath, never the package barrel: the barrel re-exports the
 // infrastructure adapters, which pull node:fs/path/crypto into the browser bundle.
-import { RATIO_VALUES, type CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import { RATIO_VALUES, resolveCanvas, type CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { DISPLAY_SIZE_VALUES, type DisplaySize } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import { ANCHOR_VALUES } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import { ALIGN_VALUES, FONT_WEIGHT_VALUES, type TextEffectKind } from "@campaignfoundry/CampaignOrchestration/creative-style";
@@ -60,6 +60,10 @@ export function sizeDisplayName(size: string): string {
 
 /** Display name for a canvas spec — a social ratio or an IAB size, never a raw key. */
 export function canvasDisplayName(spec: CanvasSpec): string {
+  // resolveCanvas first: its exclusive-family guard is the one place a spec
+  // carrying BOTH keys is refused, so a dual-key canvas throws exactly as it
+  // does at the compositor — never "Square" for a leaderboard.
+  resolveCanvas(spec);
   if (spec.ratio !== undefined) return ratioDisplayName(spec.ratio);
   if (spec.size !== undefined) return sizeDisplayName(spec.size);
   throw new Error("CanvasSpec must carry exactly one of ratio/size");

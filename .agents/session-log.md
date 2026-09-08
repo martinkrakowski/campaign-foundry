@@ -4239,3 +4239,7 @@ then A3 ‖ A4; then A5.
 - **Left open:**
   - A3 owns display platform profiles; until those land, LayoutSection still derives a social canvas unless `brief.output.sizes` is present (ReviewStep already reads it).
   - A5 adds the `display-ad` create option that would mount a `PosterFrame` at a display size.
+
+## 2026-09-08 — A4 remediation (`feat/a4-kit-union`, PR #249)
+
+- **Mode:** Remediator — display previews now request the real frame (`PreviewCellSelection` carries `canvas: CanvasSpec`; size cells borrow `nearestSocialRatio` for the background and pass no insets; route and use case validate both families), and `canvasDisplayName` reuses `resolveCanvas`'s exclusive-family guard so a dual-key spec fails closed. Mutations: ratio gate re-added → the 728×90 request test failed; guard dropped → the dual-key test failed. Gate 100 % × 4.

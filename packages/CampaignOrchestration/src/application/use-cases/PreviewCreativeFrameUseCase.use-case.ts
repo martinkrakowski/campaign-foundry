@@ -2,8 +2,12 @@ import { err, ok, type Result } from "@campaignfoundry/shared";
 import type { CampaignBrief } from "../../domain/entities/CampaignBrief.js";
 import type { Product } from "../../domain/entities/Product.js";
 import { AspectRatio } from "../../domain/value-objects/AspectRatio.vo.js";
-import type { AspectRatioValue, CanvasSpec } from "../../domain/value-objects/aspect-ratios.js";
-import type { DisplaySize } from "../../domain/value-objects/display-sizes.js";
+import {
+  nearestSocialRatio,
+  type AspectRatioValue,
+  type CanvasSpec,
+} from "../../domain/value-objects/aspect-ratios.js";
+import { DISPLAY_SIZE_VALUES, type DisplaySize } from "../../domain/value-objects/display-sizes.js";
 import type { BackgroundSource } from "../../domain/value-objects/BackgroundSource.vo.js";
 import type { LayoutKind, ToneKind } from "../../domain/value-objects/Treatment.vo.js";
 import type { AnchorKind } from "../../domain/value-objects/variation-defaults.js";
@@ -19,7 +23,8 @@ import { unionSafeInsets } from "./GenerateCampaignUseCase.use-case.js";
  */
 export interface PreviewCellSelection {
   readonly productId: string;
-  readonly ratio: string;
+  /** The cell's canvas: a social `{ ratio }` or a display `{ size }` — never both. */
+  readonly canvas: CanvasSpec;
   readonly layout: LayoutKind;
   readonly tone: ToneKind;
   /** Absent → the compositor derives from layout, exactly as the run does. */
@@ -35,7 +40,8 @@ export interface PreviewCreativeFrame {
    */
   readonly cacheKey: string;
   readonly logoApplied: boolean;
-  readonly ratio: AspectRatioValue;
+  /** The canvas the frame was composited at, exactly as requested. */
+  readonly canvas: CanvasSpec;
   readonly backgroundSource: BackgroundSource;
 }
 
@@ -130,14 +136,32 @@ export class PreviewCreativeFrameUseCase {
     if (product === undefined) {
       return err(new Error(`Preview cell references unknown product "${selection.productId}".`));
     }
-    const ratio = AspectRatio.create(selection.ratio);
-    if (!ratio.success) return ratio;
+    // The canvas is exactly one family: a dual-key (or empty) spec is the
+    // caller's error, refused before any port is called — the same guard
+    // `resolveCanvas` applies downstream.
+    const { ratio, size } = selection.canvas;
+    if ((ratio !== undefined) === (size !== undefined)) {
+      return err(new Error("Preview cell canvas must carry exactly one of ratio/size."));
+    }
+    if (size !== undefined && !(DISPLAY_SIZE_VALUES as readonly string[]).includes(size)) {
+      return err(
+        new Error(`Unsupported display size "${size}" (expected one of ${DISPLAY_SIZE_VALUES.join(", ")})`),
+      );
+    }
+    // The background port speaks the social vocabulary; a display size borrows
+    // its nearest orientation and the compositor stretches the result over the
+    // exact canvas. Ratio validation (including the axis vocabulary) stays here.
+    const backgroundRatio =
+      ratio !== undefined
+        ? AspectRatio.create(ratio)
+        : AspectRatio.create(nearestSocialRatio(selection.canvas));
+    if (!backgroundRatio.success) return backgroundRatio;
 
     const { request, backgroundSource } = await this.buildCompositeRequest(
       brief,
       selection,
       product,
-      ratio.value,
+      backgroundRatio.value,
     );
     const cacheKey = compositeRequestFingerprint(request, this.deps.hash);
     const cached = this.deps.frameCache?.get(cacheKey);
@@ -146,7 +170,7 @@ export class PreviewCreativeFrameUseCase {
         image: cached.image,
         cacheKey,
         logoApplied: cached.logoApplied,
-        ratio: ratio.value.value,
+        canvas: selection.canvas,
         backgroundSource,
       });
     }
@@ -157,7 +181,7 @@ export class PreviewCreativeFrameUseCase {
       image: composite.image,
       cacheKey,
       logoApplied: composite.logoApplied,
-      ratio: ratio.value.value,
+      canvas: selection.canvas,
       backgroundSource,
     });
   }
@@ -167,7 +191,7 @@ export class PreviewCreativeFrameUseCase {
     brief: CampaignBrief,
     selection: PreviewCellSelection,
     product: Product,
-    ratio: AspectRatio,
+    backgroundRatio: AspectRatio,
   ): Promise<{ request: CompositeRequest; backgroundSource: BackgroundSource }> {
     // LocalizedMessageFallback — the use case resolves the copy, never the caller.
     const copy = brief.localizedMessage ?? brief.campaignMessage;
@@ -177,17 +201,20 @@ export class PreviewCreativeFrameUseCase {
       targetRegion: brief.targetRegion,
       campaignType: brief.type,
     };
-    const background = await this.deps.imageGenerator.resolveBackground(product, ratio, context);
-    // D11: the same per-ratio union of the requested platforms' safe insets the run passes.
-    const safeInsets = unionSafeInsets(brief.output?.platforms, this.deps.platformSafeZones).get(
-      ratio.value,
-    );
+    const background = await this.deps.imageGenerator.resolveBackground(product, backgroundRatio, context);
+    // D11: the same per-ratio union of the requested platforms' safe insets the
+    // run passes — keyed by the social ratio, so a display size (which no
+    // platform zone describes) passes none.
+    const safeInsets =
+      selection.canvas.ratio !== undefined
+        ? unionSafeInsets(brief.output?.platforms, this.deps.platformSafeZones).get(selection.canvas.ratio)
+        : undefined;
     const request: CompositeRequest = {
       background: background.image,
       message: copy,
       brandColor: product.primaryColor,
       logoPath: product.logoPath,
-      canvas: { ratio: ratio.value },
+      canvas: selection.canvas,
       layout: selection.layout,
       tone: selection.tone,
       // Absent → the compositor derives from layout, byte-identical to the pre-axis path.

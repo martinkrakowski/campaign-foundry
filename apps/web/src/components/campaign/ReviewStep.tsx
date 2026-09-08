@@ -102,7 +102,8 @@ function summaryRows(brief: CampaignBrief, spec: CanvasSpec): SummaryRow[] {
         break;
       case "layout": {
         // The template row (T7): the brief's authored type, in display labels
-        // (D18), the size in derived px at this row's own ratio (D55). Content,
+        // (D18), the size in derived px at this row's own canvas (D55 width for
+        // the social family, D114 short side for a display size). Content,
         // not presence: a brief that carries no style block gets no row (W8.1).
         const style = brief.style;
         if (style !== undefined) {

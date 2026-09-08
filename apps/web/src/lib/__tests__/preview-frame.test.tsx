@@ -14,7 +14,7 @@ const brief = (over: Partial<CampaignBrief> = {}): CampaignBrief => ({
 
 const cell = (over: Record<string, unknown> = {}): PreviewCellSelection => ({
   productId: "alpha",
-  ratio: "9:16",
+  canvas: { ratio: "9:16" },
   layout: "headline-bottom",
   tone: "bold",
   ...over,

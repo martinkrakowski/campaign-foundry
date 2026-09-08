@@ -38,7 +38,7 @@ const baseBrief = (over: Partial<CampaignBrief> = {}): CampaignBrief => ({
 
 const cell = (over: Record<string, unknown> = {}) => ({
   productId: "alpha",
-  ratio: "9:16",
+  canvas: { ratio: "9:16" } as const,
   layout: "headline-bottom" as const,
   tone: "bold" as const,
   ...over,
@@ -82,9 +82,45 @@ describe("PreviewCreativeFrameUseCase — cell validation", () => {
 
   test("rejects a ratio outside the axis vocabulary, before any port is called", async () => {
     const d = deps();
-    const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell({ ratio: "4:3" }));
+    const result = await new PreviewCreativeFrameUseCase(d).execute(
+      baseBrief(),
+      cell({ canvas: { ratio: "4:3" } }),
+    );
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error.message).toMatch(/Unsupported aspect ratio "4:3"/);
+    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+    expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
+  });
+
+  test("rejects a canvas carrying both families, before any port is called", async () => {
+    const d = deps();
+    const result = await new PreviewCreativeFrameUseCase(d).execute(
+      baseBrief(),
+      cell({ canvas: { ratio: "9:16", size: "728x90" } }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/exactly one of ratio\/size/);
+    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+    expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
+  });
+
+  test("rejects a canvas carrying neither family, before any port is called", async () => {
+    const d = deps();
+    const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell({ canvas: {} }));
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/exactly one of ratio\/size/);
+    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+    expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
+  });
+
+  test("rejects a size outside the display vocabulary, before any port is called", async () => {
+    const d = deps();
+    const result = await new PreviewCreativeFrameUseCase(d).execute(
+      baseBrief(),
+      cell({ canvas: { size: "banner" } }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toMatch(/Unsupported display size "banner"/);
     expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
     expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
   });
@@ -158,6 +194,29 @@ describe("PreviewCreativeFrameUseCase — the request mirrors the run", () => {
     const request = vi.mocked(unlisted.compositor.compositeAsset).mock.calls[0][0];
     expect("safeInsets" in request).toBe(false);
   });
+
+  test("a display-size cell composites the exact canvas, borrows the nearest background orientation, and passes no insets", async () => {
+    // Zones are wired AND the brief names a platform, yet a 728×90 carries none:
+    // the per-ratio insets are sized for a 1080 canvas, which a banner is not.
+    const d = deps({ platformSafeZones: oneZoneResolver() });
+    const result = await new PreviewCreativeFrameUseCase(d).execute(
+      baseBrief({ output: { formats: ["static"], platforms: ["instagram-story"] } }),
+      cell({ canvas: { size: "728x90" } }),
+    );
+    expect(result.success).toBe(true);
+    // The leaderboard borrows 16:9 for the background; the compositor stretches
+    // it over the exact canvas.
+    expect(d.imageGenerator.resolveBackground).toHaveBeenCalledWith(
+      product("alpha"),
+      expect.objectContaining({ value: "16:9" }),
+      expect.anything(),
+    );
+    const request = vi.mocked(d.compositor.compositeAsset).mock.calls[0][0];
+    expect(request.canvas).toEqual({ size: "728x90" });
+    expect("safeInsets" in request).toBe(false);
+    if (!result.success) return;
+    expect(result.value.canvas).toEqual({ size: "728x90" });
+  });
 });
 
 describe("PreviewCreativeFrameUseCase — the frame and its cache key", () => {
@@ -168,7 +227,7 @@ describe("PreviewCreativeFrameUseCase — the frame and its cache key", () => {
     if (!result.success) return;
     expect(result.value.image).toEqual(new Uint8Array([4, 5, 6]));
     expect(result.value.logoApplied).toBe(false);
-    expect(result.value.ratio).toBe("9:16");
+    expect(result.value.canvas).toEqual({ ratio: "9:16" });
     expect(result.value.backgroundSource).toBe("procedural");
     expect(result.value.cacheKey).toMatch(/^[a-f0-9]{64}$/);
   });

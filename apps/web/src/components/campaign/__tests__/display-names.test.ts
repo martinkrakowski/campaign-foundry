@@ -56,6 +56,12 @@ describe("display names", () => {
     expect(canvasDisplayName({ size: "728x90" })).toBe("Leaderboard");
     // @ts-expect-error an empty object is not a canvas
     expect(() => canvasDisplayName({})).toThrow("CanvasSpec must carry exactly one of ratio/size");
+    // A dual-key spec throws the same guard the compositor applies (resolveCanvas),
+    // not a silent "Square" for a leaderboard.
+    // @ts-expect-error a canvas carrying both keys is not a spec
+    expect(() => canvasDisplayName({ ratio: "1:1", size: "728x90" })).toThrow(
+      "CanvasSpec must carry exactly one of ratio/size",
+    );
   });
 
   test("platforms use the profile's own label, never a second table", () => {
