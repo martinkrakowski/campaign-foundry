@@ -147,6 +147,16 @@ function validateSizes(value: unknown): void {
       );
     }
   }
+  // A repeat would build two cells writing the same output path, the second
+  // silently overwriting the first. Structural, never lenient — like the
+  // vocabulary check above.
+  for (let i = 1; i < value.length; i++) {
+    if (value.indexOf(value[i]) < i) {
+      throw new Error(
+        `Campaign brief field "output.sizes" must not repeat a size; "${value[i]}" appears more than once.`,
+      );
+    }
+  }
 }
 
 function validateCoverage(value: unknown): void {

@@ -111,9 +111,6 @@ export class PackageForPlatformUseCase {
         // A display profile with nothing to package means the run was generated
         // without `output.sizes` (or for the wrong sizes). Writing a successful
         // empty manifest would send the buyer an empty package — say so instead.
-        // A display profile with nothing to package means the run was generated
-        // without `output.sizes` (or for the wrong sizes). Writing a successful
-        // empty manifest would send the buyer an empty package — say so instead.
         if (profile.sizes !== undefined && eligible.length === 0) {
           throw new Error(
             `no display assets for ${platformId} — was the campaign generated with output.sizes?`,

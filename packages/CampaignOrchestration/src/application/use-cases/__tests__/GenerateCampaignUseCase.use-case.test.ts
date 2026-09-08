@@ -397,7 +397,25 @@ describe("GenerateCampaignUseCase — display sizes (A4b)", () => {
   test("counts size cells in totalOperations", async () => {
     const d = deps({ platformSafeZones: googleDisplayZones });
     const result = await new GenerateCampaignUseCase(d).execute(displayBrief());
-    if (result.success) expect(result.value.log.totalOperations).toBe(10);
+    // Assert success first: a failed generation must fail this test, not silently
+    // skip the totalOperations assertion.
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.log.totalOperations).toBe(10);
+  });
+
+  test("duplicate output.sizes collapse to one cell per size, never two cells on one path", async () => {
+    const d = deps({ platformSafeZones: googleDisplayZones });
+    const result = await new GenerateCampaignUseCase(d).execute(
+      baseBrief({ output: { platforms: ["google-display"], sizes: ["728x90", "728x90"] } }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    // 2 products × (3 ratios + 1 deduped size) = 8 creatives.
+    expect(result.value.assets).toHaveLength(8);
+    expect(result.value.assets.filter((a) => a.size === "728x90")).toHaveLength(2);
+    expect(result.value.assets.map((a) => a.outputPath).filter((p) => p === "alpha/728x90.png")).toHaveLength(1);
+    expect(result.value.log.totalOperations).toBe(8);
   });
 
   test("regenerates a targeted display cell by its size identity", async () => {

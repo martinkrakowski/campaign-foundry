@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { API, assetCanvas, assetKey, assetLabel, useRun } from "@/lib/run-context";
-import { visiblePlatformIds } from "@campaignfoundry/Distribution/platform-profiles";
+import { platformProfile, visiblePlatformIds } from "@campaignfoundry/Distribution/platform-profiles";
 import { MiniChip } from "@/components/ui";
 
 /** Clip length shown on motion export rows, in whole seconds (the brief's `duration` axis). */
@@ -57,7 +57,15 @@ export default function ExportPage() {
   // the run contains a motion creative, since the API produces those only while
   // its ffmpeg probe is on, so the run is the proof.
   const hasMotion = assets.some((a) => a.format === "motion");
-  const platforms = visiblePlatformIds({ motion: hasMotion });
+  // A display profile joins the picker only when the run produced an asset at one
+  // of its sizes: the API fails a display profile with nothing to package, so on a
+  // social-only run its Package action would deterministically error. Hidden, on
+  // the same terms as motion platforms — the picker lists what can be packaged.
+  const runSizes = new Set(assets.flatMap((a) => (a.size === undefined ? [] : [a.size])));
+  const platforms = visiblePlatformIds({ motion: hasMotion }).filter((id) => {
+    const slots = platformProfile(id)?.sizes;
+    return slots === undefined || slots.some((slot) => runSizes.has(slot.size));
+  });
   // A selection made while a motion platform was visible must not survive a run
   // switch that hides it: nothing hidden is ever packaged, and with no visible
   // selection there is nothing to package.
@@ -209,7 +217,8 @@ export default function ExportPage() {
           <div className="mt-4 divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
             {selected.items.map((item) => (
               <div
-                key={`${item.productId}/${assetCanvas(item)}/${item.treatment}/${item.packagedPath}`}                className="flex items-center justify-between gap-4 p-4"
+                key={`${item.productId}/${assetCanvas(item)}/${item.treatment}/${item.packagedPath}`}
+                className="flex items-center justify-between gap-4 p-4"
               >
                 <div className="min-w-0">
                   <div className="truncate text-[13px] text-text-primary">

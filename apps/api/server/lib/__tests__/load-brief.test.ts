@@ -477,6 +477,16 @@ describe("parseBrief display sizes (D113)", () => {
     );
   });
 
+  test("a repeated size is refused in both modes, naming the duplicate", () => {
+    const dup = { ...valid, output: { sizes: ["728x90", "300x250", "728x90"] } };
+    expect(() => parseBrief(dup)).toThrow(
+      'Campaign brief field "output.sizes" must not repeat a size; "728x90" appears more than once.',
+    );
+    expect(() => parseBrief(dup, { enforceCapabilities: false })).toThrow(
+      new RegExp('must not repeat a size; "728x90" appears more than once'),
+    );
+  });
+
   test("an empty sizes array is refused in both modes", () => {
     const empty = { ...valid, output: { sizes: [] } };
     expect(() => parseBrief(empty)).toThrow(

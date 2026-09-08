@@ -166,7 +166,11 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     // 3-7. Generate every creative: one per (product × canvas × treatment), where the
     // canvas is a social ratio (as today) or a display size from `output.sizes` (D113).
     const ratios = AspectRatio.all();
-    const sizes = brief.output?.sizes ?? [];
+    // Duplicates collapse: a repeated size would build two cells writing the same
+    // output path, the second silently overwriting the first. The parser rejects
+    // them; this dedupe holds the use case's own contract for a programmatic
+    // caller that bypassed parsing (the SAFE_ID defense-in-depth reasoning).
+    const sizes = [...new Set(brief.output?.sizes ?? [])];
     // A brief with no treatments still produces one creative per cell (back-compat).
     const treatments = brief.treatments?.length ? brief.treatments : [DEFAULT_TREATMENT];
     // Only namespace output by treatment when there's variation to disambiguate, so a
