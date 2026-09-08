@@ -17,6 +17,22 @@ import NewBriefPage from "../new/page";
 import { Header } from "@/components/shell/Header";
 
 /**
+ * This suite pins the editor's data flow. The map's behaviour is pinned by
+ * identity-section.test.tsx and world-map.test.tsx. The real WorldMap paints
+ * hundreds of SVG nodes per mount under happy-dom; a stub keeps this file
+ * honest about the editor without that cost.
+ */
+vi.mock("@/components/ui", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/ui")>();
+  return {
+    ...actual,
+    WorldMap: ({ value }: { value: string | null }) => (
+      <div data-testid="world-map-stub" data-value={value ?? ""} />
+    ),
+  };
+});
+
+/**
  * W1: the create dialog and its provider are shell-layer mounts beside the editor —
  * the same tree the shell layout builds — so the create gesture is exercisable end
  * to end from this suite.
@@ -411,6 +427,8 @@ describe("BriefPage — data flow", () => {
     await waitFor(() => expect(calls.some((c) => c.url.includes("/campaigns/briefs"))).toBe(true));
     expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("");
     expect((screen.getByLabelText("Target Region") as HTMLInputElement).value).toBe("");
+    expect(document.querySelector('[data-testid="world-map-stub"]')).toBeTruthy();
+    expect(document.querySelector("[data-region]")).toBeNull();
   });
 
   test("New brief... on a dirty blank route asks once, then opens the dialog (W1)", async () => {
