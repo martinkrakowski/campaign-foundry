@@ -4148,3 +4148,25 @@ dispatched.
   - A0 (linux-x64 inset goldens) runs concurrently and owns the golden fixtures/test/workflow.
   - A2 needs this join point before `fitText` can size by the short side.
   - `yarn sync:check` refuses a dirty tree — run it post-commit.
+
+---
+
+## 2026-09-08 — lane A2, short-side scale (D114)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `scaleBasis(spec, w, h)`: ratio family → `w` (D55); size family → `min(w, h)`. `widthTermBasis` for wrap/logo margin: ratio → `w`; size → `min(w, longSide)`.
+  - Terms on `scaleBasis`: headline type (`fitText` `sizeScale`), logo width (`logoWidthFraction`), slide-in offset (`slideOffsetFraction`). Terms on `widthTermBasis`: logo margin (`logoMarginFraction`), wrap width (`innerWidth * 0.85`). Height-proportional terms (anchors, rise-in, shade) stay on height.
+  - Compositor entry points take `CanvasSpec`; social callers pass `{ ratio }` unchanged.
+  - Darwin display goldens recorded locally; linux-x64 display maps (20 cells + 1 inset) recorded on run [34185654884](https://github.com/martinkrakowski/campaign-foundry/actions/runs/34185654884) artifact `compositor-goldens-Linux-X64`. Social cells on both platforms and the linux-x64 inset cell compared byte-identical; not rewritten. Commits `744f384` (implementation) and `a17f5cb` (linux display maps).
+  - One-row D114 amendment: scaling is split by canvas family.
+- **Decisions:**
+  - Owner 2026-09-07: social stays width-proportional so goldens stay byte-identical by construction; display scales by the short side.
+  - Editor readouts (`LayoutSection.tsx:120`, `ReviewStep.tsx:115`) left width-based — A4.
+- **Mutations** (compiled, ran, failed the named test; reverted after each):
+  M1 → `scaleBasis` returns `min(w, h)` for the ratio family too → social golden `headline-bottom/bold/16:9` failed (darwin-arm64).
+  M2 → `scaleBasis` returns `w` for the size family → 728×90 layout test failed (`fontSize` 36 vs start 44; headline had to shrink) and display goldens failed.
+  M3 → drop the long-side cap (`widthTermBasis` returns `max(w, h)`) → 160×600 layout test failed (`wrapWidth` 510 vs 136).
+- **Left open:**
+  - Do not merge. CI Build on the PR is the linux proof for the new display cells (push CI at `744f384` failed closed: no `linux-x64` display map yet).
+  - A3 ‖ A4 next; A5 last.
