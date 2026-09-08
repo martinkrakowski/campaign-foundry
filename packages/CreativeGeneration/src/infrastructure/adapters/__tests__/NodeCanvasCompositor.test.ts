@@ -2,7 +2,12 @@ import { describe, test, expect, beforeAll, afterAll, afterEach, vi } from "vite
 import { writeFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
-import { AspectRatio, type CompositeRequest, type SafeInsets } from "@campaignfoundry/CampaignOrchestration";
+import {
+  AspectRatio,
+  type BriefTemplate,
+  type CompositeRequest,
+  type SafeInsets,
+} from "@campaignfoundry/CampaignOrchestration";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import { projectRoot } from "@campaignfoundry/shared";
 import * as CreativeGeneration from "@campaignfoundry/CreativeGeneration";
@@ -40,7 +45,9 @@ const background = (): Uint8Array => {
   return c.toBuffer("image/png");
 };
 
-const request = (over: Partial<CompositeRequest> = {}): CompositeRequest => ({
+type TemplateRequest = CompositeRequest & { readonly template?: BriefTemplate };
+
+const request = (over: Partial<TemplateRequest> = {}): TemplateRequest => ({
   background: background(),
   message: "Stay wild, stay hydrated",
   brandColor: "#1473E6",
@@ -49,6 +56,21 @@ const request = (over: Partial<CompositeRequest> = {}): CompositeRequest => ({
   layout: "headline-bottom",
   tone: "bold",
   ...over,
+});
+
+/** An image-text template whose copy layer is `static-text` or `animated-text`, logo last. */
+const templateWithCopyKind = (copyKind: "static-text" | "animated-text"): BriefTemplate => ({
+  id: "canonical-image-text",
+  version: 1,
+  creativeType: "image-text",
+  unit: "standard-web",
+  layers: [
+    { id: "image", kind: "image" },
+    { id: "shade", kind: "shade" },
+    { id: "accent", kind: "accent" },
+    { id: "copy", kind: copyKind },
+    { id: "logo", kind: "logo" },
+  ],
 });
 
 // A real but non-decodable file under assets/, to exercise the corrupt-logo branch.
@@ -128,6 +150,64 @@ describe("NodeCanvasCompositor", () => {
   test("logoApplied is false when the logo path is unsafe (resolves to nothing)", async () => {
     const out = await compositor.compositeAsset(request({ logoPath: "/etc/passwd" }));
     expect(out.logoApplied).toBe(false);
+  });
+
+  test("logoApplied follows the draw: a template without a logo layer reports false even with the logo file loaded", async () => {
+    // `logo` is optional for image-text (only `image` and `static-text` are
+    // required), so the file loading is not the signal — the logo layer being
+    // in the resolved list and painting is.
+    const template: BriefTemplate = {
+      id: "canonical-image-text",
+      version: 1,
+      creativeType: "image-text",
+      unit: "standard-web",
+      layers: [
+        { id: "image", kind: "image" },
+        { id: "shade", kind: "shade" },
+        { id: "accent", kind: "accent" },
+        { id: "static-text", kind: "static-text" },
+      ],
+    };
+    const prepared = await NodeCanvasCompositor.prepare(request({ template }));
+    expect(prepared.logo).toBeDefined();
+    expect(prepared.logoApplied).toBe(false);
+
+    const canvas = createCanvas(prepared.width, prepared.height);
+    const ctx = canvas.getContext("2d");
+    let blits = 0;
+    const origDraw = ctx.drawImage.bind(ctx);
+    ctx.drawImage = ((...args: Parameters<typeof ctx.drawImage>) => {
+      blits += 1;
+      return origDraw(...args);
+    }) as typeof ctx.drawImage;
+    NodeCanvasCompositor.draw(ctx, prepared, 1);
+    // One blit — the background. The logo loaded, but its layer is not in the
+    // resolved list, so no logo pixels were painted.
+    expect(blits).toBe(1);
+  });
+
+  test("an animated-text layer draws its still rest pose — the logo after it finds that headline (D127)", async () => {
+    // The snap must engage for the "finds its headline" half to mean anything:
+    // the same geometry the snap tests use (deep top insets, three-line block).
+    const insets: SafeInsets = { top: 200, right: 0, bottom: 50, left: 0 };
+    const r = ratio("16:9");
+    const common = {
+      layout: "headline-top" as const,
+      canvas: { ratio: r.value },
+      message: THREE_LINE,
+      safeInsets: insets,
+    };
+    const still = await blit(request({ ...common, template: templateWithCopyKind("static-text") }));
+    const animated = await blit(request({ ...common, template: templateWithCopyKind("animated-text") }));
+    const logo = animated.drawImage[1];
+    if (!logo) throw new Error("missing logo blit");
+    // The snap engaged against the animated-text layer's headline: flush on the
+    // opposite inset edge, not the prepared top-right corner.
+    expect(logo.y).toBe(r.height - insets.bottom - logo.height);
+    // A still frame of animated text is its rest pose — exactly what the
+    // static-text drawer paints (D127): same copy blits, same logo snap.
+    expect(animated.fillText).toEqual(still.fillText);
+    expect(animated.drawImage[1]).toEqual(still.drawImage[1]);
   });
 
   test("omitted and all-zero safeInsets produce identical PNG bytes", async () => {
