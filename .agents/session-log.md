@@ -3905,3 +3905,59 @@ the campaign-type wave-C record, the wave-status close-out, and P1 alone.
   - T4 (optional): MiniChip on the grid/picker; type sentence in generator prompts.
   - P1: `packages/ui`, after every campaign-type lane.
 - **Remediation:** dropped `campaignNameNotSluggable`, `createCampaignDescription`, `startFromCampaignCount` (and the pin test); `discardGuardDetail(hasName)` (dialog-only caller); type tiles pass `description` for AT; dirty-cancel queries the formatter. Mutation: re-add `startFromCampaignCount` → coverage fails (branches 99.98%, uncovered `count === 1` arm); jargon suite stays green.
+
+## 2026-09-07 — Campaign type, wave C closed: T3 (#236) and T4 (#234) merged; the hotfix pair (#231, #235)
+
+**Mode:** Orchestrator. Record written at merge time (stage 6). With this, every lane of
+`2026-09-07_campaign-type.md` is on `main`; P1 (`packages/ui`, the two-field plan's last lane)
+dispatches next, alone.
+
+### What merged
+
+| Lane | PR | Commit | What |
+|---|---|---|---|
+| T3 | #236 | `8c5c59b` | the create dialog cut to **name + campaign type** (three `OptionTile`s over `CAMPAIGN_TYPES`, default social-post; the D110 line on short-video); −976 lines |
+| T4 | #234 | `ad63be2` | the type read back (chip on the picker row and the grid bar) and one shared sentence in all four generator prompts |
+| hotfix | #231 | `54bf072` | Identity's map painted after first commit + the editor suite stubs the kit's map — CI editor suite 126–206 s → 72 s |
+| follow-up | #235 | pending in the queue | the map flips after a frame, so the seeded create path no longer builds it pre-paint |
+
+### The seat story of this wave
+
+glm-5.3-flash sat silent at 0 bytes for **both** T3 and T4, twice each; both wrote within a minute
+of moving to grok-4.6 and shipped clean. Every gemini launch died in seconds until `agy models`
+was re-probed: Google shipped gemini-3.8-flash the day before and the cast file's 3.7-flash /
+3.1-pro ids no longer resolved — *timeout waiting for response* is what a stale model id looks
+like. The cast reference is updated (#237); the skill already said to re-probe, and the
+orchestrator had not.
+
+### What the reviews found, and what the briefs got wrong
+
+- **T3**: the orchestrator's "append-only `messages.ts`" seam rule was read as a ban on
+  deletion, so three retired formatters stayed and one got a test whose only job was coverage. No
+  other open lane touched the file; the rule did not apply; the round deleted them, and re-adding
+  one without a caller now drops coverage to 99.98 %. Qodo found that the tiles' `tag`/`blurb`/
+  `meta` are `aria-hidden` by kit design, so screen readers never heard the D110 sentence — the
+  kit's `description` → `aria-describedby` existed for exactly this and the brief had not named
+  it. Raw-id accessible names were defended as the kit contract shared with `ModePanel`.
+- **T4**: Qodo found the read-back chip renders empty for a stored brief with an unknown `type`
+  (`isStoredBrief` validates id and products only; `typeDisplayName` is an unchecked lookup) — a
+  runtime data path, distinct from PR-Agent's refuted compile-time argument. `campaignTypeOf`
+  coerces at both read-back sites; the prompt helper coerces too; the preview use case now
+  carries the type for parity.
+- **The hotfix**: round 1 (paint after mount) was a product improvement that changed the suite by
+  4 % because RTL flushes the mount effect inside `act()`; round 2 stubbed the map in the editor
+  suite only, 49.3 s → 25.2 s locally against a 27.9 s pre-#225 baseline, and CI confirmed 72 s.
+  Qodo then showed the seeded path still built the map pre-paint (the seed is consumed in a
+  layout effect) — #235, from `main`, flips after a frame.
+
+### Orchestrator misfires this wave
+
+Four mutations did not apply on the first try (a tuple matched before the preset row; a
+`description` prop on the header instead of the tiles; a regex on the wrong shape; a broken call
+site) and one removed a structural line from an adapter, failing six unrelated tests. Every one
+was caught by reading the diff and the runner output before the result was used, and none was
+counted. The rule is unchanged and the guard that enforces it — *the chain refuses to sweep or
+merge unless the named test is the one that failed* — earned its keep twice today.
+
+**Next:** P1 (`packages/ui`) alone; the wave-status close-out when #232 and #238 land; then the
+display-advertising plan awaits the owner's go.
