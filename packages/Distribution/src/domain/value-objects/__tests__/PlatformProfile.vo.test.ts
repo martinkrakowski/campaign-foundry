@@ -1,13 +1,15 @@
 import { describe, test, expect, expectTypeOf } from "vitest";
-import type { SafeInsets as PortSafeInsets } from "@campaignfoundry/CampaignOrchestration";
+import type { DisplaySize as PortDisplaySize, SafeInsets as PortSafeInsets } from "@campaignfoundry/CampaignOrchestration";
 import { CAMPAIGN_TYPE_PRESETS } from "@campaignfoundry/CampaignOrchestration";
 import {
   PLATFORM_PROFILES,
   formatsFor,
   isPlatformVisible,
+  isRatioProfile,
   motionPackagedRatios,
   platformProfile,
   visiblePlatformIds,
+  type DisplaySize,
   type SafeInsets,
 } from "../PlatformProfile.vo.js";
 
@@ -24,7 +26,7 @@ describe("PlatformProfile", () => {
   test("every profile uses one of the three canvases and carries the required fields", () => {
     for (const [id, profile] of Object.entries(PLATFORM_PROFILES)) {
       expect(profile.id).toBe(id);
-      expect(CANVASES.has(profile.ratio)).toBe(true);
+      if (profile.ratio !== undefined) expect(CANVASES.has(profile.ratio)).toBe(true);
       expect(profile.label.length).toBeGreaterThan(0);
       expect(profile.formats.length).toBeGreaterThan(0);
       for (const side of Object.values(profile.safeInsets)) expect(side).toBeGreaterThanOrEqual(0);
@@ -52,7 +54,14 @@ describe("PlatformProfile", () => {
   });
 
   test("visiblePlatformIds follows the motion capability", () => {
-    expect(visiblePlatformIds({ motion: false })).toEqual(["instagram-feed", "linkedin", "x"]);
+    expect(visiblePlatformIds({ motion: false })).toEqual([
+      "instagram-feed",
+      "linkedin",
+      "x",
+      "google-display",
+      "meta-audience-network",
+      "display-web",
+    ]);
     expect(visiblePlatformIds({ motion: true })).toEqual([
       "instagram-feed",
       "linkedin",
@@ -61,6 +70,9 @@ describe("PlatformProfile", () => {
       "instagram-reel",
       "tiktok",
       "youtube-short",
+      "google-display",
+      "meta-audience-network",
+      "display-web",
     ]);
   });
 
@@ -113,11 +125,15 @@ describe("PlatformProfile", () => {
       }
     });
 
-    // D111: paid-social is every surface. Membership above cannot catch a dropped
-    // id; this pins the list to the profiles object, not a second copy of the table.
+    // D111: paid-social is every *social* surface — every profile with a ratio.
+    // Display profiles carry `sizes` instead (D116); A5 maps `display-ad` onto
+    // those. Membership above cannot catch a dropped social id; this pins the
+    // list to the ratio-bearing keys, not a second copy of the table.
     test("paid-social lists every PLATFORM_PROFILES id", () => {
       const listed = [...CAMPAIGN_TYPE_PRESETS["paid-social"].platforms].sort();
-      const all = Object.keys(PLATFORM_PROFILES).sort();
+      const all = Object.keys(PLATFORM_PROFILES)
+        .filter((id) => isRatioProfile(PLATFORM_PROFILES[id]!))
+        .sort();
       const missing = all.filter((id) => !listed.includes(id));
       const extra = listed.filter((id) => !all.includes(id));
       const reasons: string[] = [];
@@ -166,6 +182,80 @@ describe("PlatformProfile", () => {
           ).toContain(format);
         }
       }
+    });
+  });
+
+  describe("display profiles (D116, F5)", () => {
+    const DISPLAY_IDS = ["google-display", "meta-audience-network", "display-web"] as const;
+
+    test("DisplaySize is CampaignOrchestration's DisplaySize", () => {
+      expectTypeOf<DisplaySize>().toEqualTypeOf<PortDisplaySize>();
+    });
+
+    test("every profile carries exactly one of ratio/sizes, and every display size has insets", () => {
+      for (const [id, profile] of Object.entries(PLATFORM_PROFILES)) {
+        const hasRatio = profile.ratio !== undefined;
+        const hasSizes = profile.sizes !== undefined;
+        expect(hasRatio, `${id} must carry exactly one of ratio/sizes`).not.toBe(hasSizes);
+        if (!hasSizes) {
+          expect(isRatioProfile(profile)).toBe(true);
+          continue;
+        }
+        expect(isRatioProfile(profile)).toBe(false);
+        expect(profile.sizes!.length, `${id} sizes must not be empty`).toBeGreaterThan(0);
+        for (const slot of profile.sizes!) {
+          expect(slot.insets, `${id} ${slot.size} missing insets`).toBeDefined();
+          for (const side of Object.values(slot.insets)) {
+            expect(side, `${id} ${slot.size} inset`).toBeGreaterThanOrEqual(0);
+          }
+        }
+      }
+    });
+
+    test("the three display profiles are static-only and list the sizes each network accepts", () => {
+      const google = platformProfile("google-display");
+      const meta = platformProfile("meta-audience-network");
+      const web = platformProfile("display-web");
+      expect(google?.formats).toEqual(["static"]);
+      expect(meta?.formats).toEqual(["static"]);
+      expect(web?.formats).toEqual(["static"]);
+      expect(google?.sizes?.map((slot) => slot.size)).toEqual([
+        "300x250",
+        "728x90",
+        "160x600",
+        "320x50",
+        "300x600",
+      ]);
+      expect(meta?.sizes?.map((slot) => slot.size)).toEqual(["300x250", "320x50", "300x600"]);
+      expect(web?.sizes?.map((slot) => slot.size)).toEqual(google?.sizes?.map((slot) => slot.size));
+    });
+
+    test("320x50 and 728x90 carry zero insets; the other units carry a uniform 8 px", () => {
+      for (const id of DISPLAY_IDS) {
+        const profile = platformProfile(id)!;
+        for (const slot of profile.sizes ?? []) {
+          if (slot.size === "320x50" || slot.size === "728x90") {
+            expect(slot.insets, `${id} ${slot.size}`).toEqual(ZERO);
+          } else {
+            expect(slot.insets, `${id} ${slot.size}`).toEqual({ top: 8, right: 8, bottom: 8, left: 8 });
+          }
+        }
+      }
+    });
+
+    test("isRatioProfile is true only for the seven social profiles", () => {
+      const social = Object.values(PLATFORM_PROFILES).filter(isRatioProfile).map((profile) => profile.id);
+      expect(social).toEqual([
+        "instagram-feed",
+        "linkedin",
+        "x",
+        "instagram-story",
+        "instagram-reel",
+        "tiktok",
+        "youtube-short",
+      ]);
+      const feed = platformProfile("instagram-feed")!;
+      expect(isRatioProfile({ ...feed, sizes: [{ size: "300x250", insets: ZERO }] })).toBe(false);
     });
   });
 });

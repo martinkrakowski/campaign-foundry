@@ -4243,3 +4243,59 @@ then A3 ‖ A4; then A5.
 ## 2026-09-08 — A4 remediation (`feat/a4-kit-union`, PR #249)
 
 - **Mode:** Remediator — display previews now request the real frame (`PreviewCellSelection` carries `canvas: CanvasSpec`; size cells borrow `nearestSocialRatio` for the background and pass no insets; route and use case validate both families), and `canvasDisplayName` reuses `resolveCanvas`'s exclusive-family guard so a dual-key spec fails closed. Mutations: ratio gate re-added → the 728×90 request test failed; guard dropped → the dual-key test failed. Gate 100 % × 4.
+## 2026-09-08 — Display advertising, wave 2: A2 merged (#246) — readable type on a 90 px canvas, no social pixel moved
+
+**Mode:** Orchestrator. Record written at merge time (stage 6).
+
+| Lane | PR | Commit | What |
+|---|---|---|---|
+| A2 | #246 | `d3d6a57` | `scaleBasis`: the social ratios keep D55 (width), the five display sizes scale by the short side; the compositor takes a `CanvasSpec`; display goldens recorded on both platforms (20 cells + 1 inset); D114 amended "for the size family" |
+
+### The byte-identity proof, three ways
+
+The social fixtures show a **zero-line diff** against `main` — the display goldens live in their
+own two fixture files, so identity holds by construction, not by re-recording. The reviewer
+compared all 26 social cells and the 68 artifact cells byte for byte. The orchestrator's single
+mutation (short side for the ratio family) failed the 16:9 cells by name — the exact redesign the
+owner declined.
+
+### What the round fixed
+
+- The preview cache fingerprint omitted the new `pixelSize` override (Qodo): two previews
+  differing only in output size shared a key. Fixed with a difference test and a pinned hash.
+- `widthTermBasis` computed `min(w, max(w, h))`, which is `w` for every real pair — the "long-side
+  cap" was vacuous and its mutation had tested a different change (reviewer). Made honest: width
+  terms use width; the docstring and the D114 amendment say so; every golden stayed identical.
+
+### Process, under the owner's 2026-09-08 feedback
+
+One model review (A2 changes rendering), one orchestrator mutation with its diff printed before
+the run, Qodo verified, PR-Agent bulk-resolved, no nit rounds. A2's first run exited while waiting
+on the Linux recording; a continuation finished it in one pass. The lane monitor had missed that
+exit because it keyed on lane name across re-runs; it now keys on marker plus mtime.
+
+**Next:** A3 (display profiles) ‖ A4 (the kit resolves the union); then A5.
+
+---
+
+## 2026-09-08 — lane A3, display platform profiles (D116, F5)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `PlatformProfile` is an optional pair: exactly one of `ratio` (social) or `sizes` (display). Seven social entries byte-identical. Three new static profiles: `google-display` and `display-web` (all five IAB sizes), `meta-audience-network` (300×250, 320×50, 300×600).
+  - Per-size insets: zero on 320×50 and 728×90 (no room, F5); uniform 8 px on the other three (A2's display inset golden).
+  - `platformsToSizes` beside `platformsToRatios`/`platformsToFormats`; mixed selection: display contributes sizes not a ratio; formats stay `["static"]` when no motion platform is selected.
+  - `toBrief` derives `output.sizes` from selected display platforms; a social-only brief still emits no `sizes` key. `PLATFORM_ORDER` lists the three display ids after the seven social ones.
+  - Compiler-found `profile.ratio` sites: `derive.ts`, `editor-state.ts` (`motionPackagedRatios`), `PreviewDock.tsx`, `platform-card.tsx`, `platform-zones.ts`, `PlatformProfile.vo.test.ts`. A4's kit (`ratio-frame`/`poster-frame`/`preview-layers`, `PreviewFrame`, `CreativePreview`) untouched. `CAMPAIGN_TYPE_PRESETS` untouched.
+  - paid-social guard now asserts paid-social = every profile **with a ratio** (the seven social surfaces); display ids are not in that preset.
+- **Decisions:**
+  - Optional pair rather than a `never`-discriminated union, so the "both keys" mutation compiles and the invariant test can fail it.
+  - Profile-level `safeInsets` stays required (zeros on display) so the social compositor's no-op field and the existing static-zero test stay true; live offsets live per size.
+  - `platform-card` draws a display unit from the size id (`300x250`), not `DISPLAY_SIZES` — A1's resolver remains the only reader of that table.
+- **Mutations** (compiled, ran, failed the named test; reverted after each):
+  M1 → `google-display` gained `ratio: "1:1"` as well as `sizes` → invariant test failed (`google-display must carry exactly one of ratio/sizes`).
+  M2 → dropped insets from `300x250` on `display-web` → acceptance 2 failed (`display-web 300x250 missing insets`).
+  M3 → `platformsToSizes` returned insertion order (`[...sizes]`) → order test failed on `["meta-audience-network", "google-display"]`.
+- **Left open:**
+  - Do not merge. A4 owns RatioFrame/PosterFrame/previews at true display proportion; A5 adds the `display-ad` type and maps it onto these three profiles.
+  - `yarn sync:check` refuses a dirty tree — run it post-commit.

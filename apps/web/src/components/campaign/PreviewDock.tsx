@@ -28,7 +28,7 @@ export function derivePreviewRatio(
 ): AspectRatioValue {
   if (platformId !== undefined) {
     const profile = PLATFORM_PROFILES[platformId];
-    if (profile !== undefined) return profile.ratio;
+    if (profile?.ratio !== undefined) return profile.ratio;
   }
   if (explicitRatio !== undefined && (RATIO_VALUES as readonly string[]).includes(explicitRatio)) {
     return explicitRatio as AspectRatioValue;

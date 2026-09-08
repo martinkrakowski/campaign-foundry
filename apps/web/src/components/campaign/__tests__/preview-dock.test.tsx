@@ -32,6 +32,11 @@ describe("derivePreviewRatio", () => {
     expect(derivePreviewRatio("not-a-platform", "9:16")).toBe("9:16");
     expect(derivePreviewRatio("not-a-platform", undefined)).toBe("1:1");
   });
+
+  test("a display profile has no ratio, so the explicit default stands", () => {
+    expect(derivePreviewRatio("google-display", "16:9")).toBe("16:9");
+    expect(derivePreviewRatio("google-display", undefined)).toBe("1:1");
+  });
 });
 
 describe("derivePreviewSpec", () => {

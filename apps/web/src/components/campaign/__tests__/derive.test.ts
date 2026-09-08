@@ -1,5 +1,6 @@
 import { describe, test, expect } from "vitest";
-import { platformsToFormats, platformsToRatios, clampPolicy } from "../derive";
+import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
+import { platformsToFormats, platformsToRatios, platformsToSizes, clampPolicy } from "../derive";
 import { initialEditorState, axisProductSize } from "../editor-state";
 
 describe("derive.ts", () => {
@@ -20,6 +21,10 @@ describe("derive.ts", () => {
     test("derives static and motion for mixed platforms in canonical order", () => {
       expect(platformsToFormats(["tiktok", "instagram-feed"])).toEqual(["static", "motion"]);
     });
+
+    test("a mixed social+display selection stays static when no motion platform is selected", () => {
+      expect(platformsToFormats(["instagram-feed", "google-display"])).toEqual(["static"]);
+    });
   });
 
   describe("platformsToRatios", () => {
@@ -33,6 +38,25 @@ describe("derive.ts", () => {
       expect(platformsToRatios(["instagram-feed", "x"])).toEqual(["1:1", "16:9"]);
       expect(platformsToRatios(["instagram-story", "linkedin"])).toEqual(["1:1", "9:16"]);
       expect(platformsToRatios(["instagram-reel", "x", "instagram-feed"])).toEqual(["1:1", "9:16", "16:9"]);
+    });
+
+    test("a display profile contributes no ratio, even in a mixed selection", () => {
+      // Treating a display profile as "1:1" would make the empty case below fail.
+      expect(platformsToRatios(["google-display"])).toEqual([]);
+      expect(platformsToRatios(["instagram-feed", "google-display"])).toEqual(["1:1"]);
+    });
+  });
+
+  describe("platformsToSizes", () => {
+    test("returns empty for empty, invalid, or social-only platforms", () => {
+      expect(platformsToSizes([])).toEqual([]);
+      expect(platformsToSizes(["nonexistent"])).toEqual([]);
+      expect(platformsToSizes(["instagram-feed", "linkedin"])).toEqual([]);
+    });
+
+    test("dedupes in DISPLAY_SIZE_VALUES order, not insertion order", () => {
+      expect(platformsToSizes(["google-display", "meta-audience-network"])).toEqual([...DISPLAY_SIZE_VALUES]);
+      expect(platformsToSizes(["meta-audience-network", "google-display"])).toEqual([...DISPLAY_SIZE_VALUES]);
     });
   });
 
