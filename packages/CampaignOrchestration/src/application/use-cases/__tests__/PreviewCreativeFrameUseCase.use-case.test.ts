@@ -102,6 +102,7 @@ describe("PreviewCreativeFrameUseCase — the request mirrors the run", () => {
         campaignMessage: "Hello",
         targetAudience: "audience",
         targetRegion: "DE",
+        campaignType: undefined,
       },
     );
     expect(d.compositor.compositeAsset).toHaveBeenCalledWith(
@@ -113,6 +114,13 @@ describe("PreviewCreativeFrameUseCase — the request mirrors the run", () => {
         tone: "bold",
       }),
     );
+  });
+
+  test("preview context carries brief.type (parity with the run)", async () => {
+    const d = deps();
+    await new PreviewCreativeFrameUseCase(d).execute(baseBrief({ type: "short-video" }), cell());
+    const ctx = vi.mocked(d.imageGenerator.resolveBackground).mock.calls[0][2];
+    expect(ctx.campaignType).toBe("short-video");
   });
 
   test("falls back to the campaign message when no localized message exists", async () => {

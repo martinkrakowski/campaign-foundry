@@ -85,4 +85,10 @@ describe("campaign types (D108–D112)", () => {
       "Campaign type: short-form video for social feeds.",
     );
   });
+
+  test("a non-vocabulary type uses the social-post prompt sentence", () => {
+    expect(campaignTypePromptSentence("corrupted" as never)).toBe(
+      "Campaign type: a social post for organic feeds.",
+    );
+  });
 });

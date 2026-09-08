@@ -42,7 +42,10 @@ export const CAMPAIGN_TYPE_PROMPT_HINTS: Readonly<Record<CampaignType, string>> 
   "short-video": "short-form video for social feeds",
 };
 
-/** The sentence every generator appends. Always present; absent type → social-post. */
+/** The sentence every generator appends. Always present; absent or unknown type → social-post. */
 export function campaignTypePromptSentence(type?: CampaignType): string {
-  return `Campaign type: ${CAMPAIGN_TYPE_PROMPT_HINTS[type ?? DEFAULT_CAMPAIGN_TYPE]}.`;
+  const resolved = (CAMPAIGN_TYPES as readonly string[]).includes(type as string)
+    ? (type as CampaignType)
+    : DEFAULT_CAMPAIGN_TYPE;
+  return `Campaign type: ${CAMPAIGN_TYPE_PROMPT_HINTS[resolved]}.`;
 }

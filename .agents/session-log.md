@@ -3879,3 +3879,4 @@ the campaign-type wave-C record, the wave-status close-out, and P1 alone.
 - **Left open:**
   - Preview path still omits `campaignType` (defaults to the social-post sentence).
   - T3 (dialog) still concurrent.
+- **Remediation (PR #234):** `campaignTypeOf` at both read-back sites; preview forwards `brief.type`; prompt sentence coerces out-of-vocab; picker type chip `shrink-0`. Preview left-open above is closed.

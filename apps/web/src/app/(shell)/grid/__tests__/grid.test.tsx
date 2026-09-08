@@ -79,6 +79,15 @@ describe("GridPage", () => {
     expect(screen.queryByText("short-video")).toBeNull();
   });
 
+  test("a stored type banner shows Social post on the review summary, never an empty chip", async () => {
+    seedPersistedRun([makeAsset()]);
+    const stored = JSON.parse(localStorage.getItem("cf:brief") ?? "{}") as Record<string, unknown>;
+    localStorage.setItem("cf:brief", JSON.stringify({ ...stored, type: "banner" }));
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText(typeDisplayName("social-post"))).toBeTruthy();
+    expect(screen.queryByText("banner")).toBeNull();
+  });
+
   test("shows a descriptor chip on variation cells", async () => {
     seedPersistedRun([
       makeAsset({

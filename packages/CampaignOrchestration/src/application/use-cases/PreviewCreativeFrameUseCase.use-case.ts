@@ -166,6 +166,7 @@ export class PreviewCreativeFrameUseCase {
       campaignMessage: brief.campaignMessage,
       targetAudience: brief.targetAudience,
       targetRegion: brief.targetRegion,
+      campaignType: brief.type,
     };
     const background = await this.deps.imageGenerator.resolveBackground(product, ratio, context);
     // D11: the same per-ratio union of the requested platforms' safe insets the run passes.

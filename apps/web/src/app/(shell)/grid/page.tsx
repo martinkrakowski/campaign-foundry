@@ -6,8 +6,7 @@ import { ASPECT_RATIOS } from "@/lib/aspect-ratios";
 import { cn } from "@/lib/cn";
 import { descriptorBeats, descriptorHeadline } from "@/components/campaign/messages";
 import { EmptyNote, MiniChip } from "@/components/ui";
-import { typeDisplayName } from "@/components/campaign/display-names";
-import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import { campaignTypeOf, typeDisplayName } from "@/components/campaign/display-names";
 
 /** Rank an aspect ratio by the shared display order. */
 const ratioRank = (r: string): number => {
@@ -205,7 +204,7 @@ export default function GridPage() {
         <span className="uppercase tracking-wider text-text-muted">Review</span>
         <span className="text-text-primary">{brief.id}</span>
         <MiniChip tone="neutral">
-          {typeDisplayName(brief.type ?? DEFAULT_CAMPAIGN_TYPE)}
+          {typeDisplayName(campaignTypeOf(brief))}
         </MiniChip>
         <span className="text-success">✓ {review.approved} approved</span>
         <span className="text-error">✗ {review.rejected} rejected</span>

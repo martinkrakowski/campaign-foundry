@@ -7,8 +7,7 @@ import { useRouter } from "next/navigation";
 import { useRun } from "@/lib/run-context";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
-import { typeDisplayName } from "@/components/campaign/display-names";
-import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import { campaignTypeOf, typeDisplayName } from "@/components/campaign/display-names";
 
 // Mirrors CampaignOrchestration SAFE_ID_PATTERN. Value-importing the package
 // constant from source barrels fails the Next build (it resolves `.js` siblings).
@@ -171,8 +170,8 @@ export function BriefPicker() {
                   <span className="flex w-full items-center justify-between gap-2">
                     <span className="font-mono text-[13px] text-text-primary">{entry.file}</span>
                     <span className="flex shrink-0 items-center gap-1">
-                      <MiniChip tone="neutral">
-                        {typeDisplayName(entry.brief.type ?? DEFAULT_CAMPAIGN_TYPE)}
+                      <MiniChip tone="neutral" className="shrink-0">
+                        {typeDisplayName(campaignTypeOf(entry.brief))}
                       </MiniChip>
                       {isCurrent && (
                         <MiniChip tone="neutral" className="shrink-0">

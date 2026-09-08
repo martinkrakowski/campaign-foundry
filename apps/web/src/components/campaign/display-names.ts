@@ -7,7 +7,11 @@ import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profil
 
 import type { CampaignMode } from "./editor-state";
 // The leaf, never the barrel: the barrel pulls node:fs into the browser bundle.
-import type { CampaignType } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import {
+  CAMPAIGN_TYPES,
+  DEFAULT_CAMPAIGN_TYPE,
+  type CampaignType,
+} from "@campaignfoundry/CampaignOrchestration/campaign-types";
 
 /** Display name for a format key. */
 export function formatDisplayName(format: string): string {
@@ -126,4 +130,16 @@ const TYPE_LABELS: Record<CampaignType, string> = {
 
 export function typeDisplayName(type: CampaignType): string {
   return TYPE_LABELS[type];
+}
+
+/**
+ * Coerce a brief's `type` onto the vocabulary (D108). Stored briefs and picker
+ * payloads are only shape-checked for id and products, so `type: "banner"` is
+ * a legal restore; `typeDisplayName` is a compile-locked lookup and would
+ * render an empty chip. Absent or unknown → social-post.
+ */
+export function campaignTypeOf(brief: { readonly type?: string }): CampaignType {
+  return (CAMPAIGN_TYPES as readonly string[]).includes(brief.type as string)
+    ? (brief.type as CampaignType)
+    : DEFAULT_CAMPAIGN_TYPE;
 }
