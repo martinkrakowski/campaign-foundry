@@ -3506,8 +3506,6 @@ describe("the create seed (W1)", () => {
     root: { getByLabelText: typeof screen.getByLabelText; getByRole: typeof screen.getByRole },
   ) => {
     await user.type(root.getByLabelText(messages.campaignNameLabel), "Summer Spark");
-    await user.click(root.getByRole("button", { name: "EU" }));
-    await user.type(root.getByLabelText(messages.targetAudienceLabel), "trail runners");
     await user.click(root.getByRole("button", { name: messages.createCampaignConfirm }));
   };
 
@@ -3863,8 +3861,6 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     root: { getByLabelText: typeof screen.getByLabelText; getByRole: typeof screen.getByRole },
   ) => {
     await user.type(root.getByLabelText(messages.campaignNameLabel), "Summer Spark");
-    await user.click(root.getByRole("button", { name: "EU" }));
-    await user.type(root.getByLabelText(messages.targetAudienceLabel), "trail runners");
     await user.click(root.getByRole("button", { name: messages.createCampaignConfirm }));
   };
 
