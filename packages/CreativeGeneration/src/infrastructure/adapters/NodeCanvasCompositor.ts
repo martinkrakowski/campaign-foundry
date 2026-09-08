@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createCanvas, loadImage, type Image, type SKRSContext2D } from "@napi-rs/canvas";
 import {
+  CANONICAL_TEMPLATES,
   beatAt,
   resolveCanvas,
   resolveTimeline,
@@ -18,6 +19,10 @@ import {
   type SafeInsets,
   type AnchorKind,
   type TextEffectKind,
+  type BriefTemplate,
+  type CreativeTemplateLayer,
+  type CreativeType,
+  type LayerKind,
 } from "@campaignfoundry/CampaignOrchestration";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import { hexToRgb, wrapText } from "./canvas-util.js";
@@ -87,6 +92,15 @@ interface PreparedCreative {
   /** Normalized safe-zone insets; zeros when the request omitted them. */
   readonly insets: SafeInsets;
   /**
+   * The resolved draw order (D121/D128): array position is z-order, bottom
+   * first. Resolved once in `prepare` — the request's `template.layers` when
+   * the caller passes the L1b brief template, else the canonical layers for
+   * its creative type, else the `image-text` canonical list
+   * ({@link resolveLayerList}) — and iterated by `drawLegacy` through the
+   * {@link LAYER_DRAWERS} table.
+   */
+  readonly layers: readonly CreativeTemplateLayer[];
+  /**
    * Resolved beat windows when the request carried `copy.timeline` + `durationSec`;
    * undefined = the legacy single-message path (D10). All three scene fields are
    * set together in `prepare`, never per frame.
@@ -100,6 +114,47 @@ interface PreparedCreative {
   /** The key beat's layout: what the poster shows (D7) and the logo rests against. */
   readonly anchorLayout?: HeadlineLayout;
 }
+
+/**
+ * One layer drawer: a verbatim block of the former legacy blit (D121),
+ * parameterized by the shared draw context — no bespoke per-layer signatures.
+ */
+type LayerDrawer = (c: LayerDrawContext) => void;
+
+/**
+ * Everything a layer drawer reads: the real blit context, the prepared
+ * creative, and the pose values the draw path computed once. One object serves
+ * all five drawers (D121). `headline` is the `static-text` drawer's output
+ * handed to the `logo` drawer — the overlap snap must see the same rest-pose
+ * box the copy drew against — and is written only between those two drawers.
+ */
+interface LayerDrawContext {
+  readonly ctx: SKRSContext2D;
+  readonly prepared: PreparedCreative;
+  readonly motion: MotionKind | undefined;
+  readonly eased: number;
+  readonly effectT: number;
+  /** Set by the `static-text` drawer; read by the `logo` drawer's snap. */
+  headline?: HeadlineLayout;
+}
+
+/**
+ * Kind → drawer (D121): the draw order is the template's layer list; this
+ * table owns kind → code. Kinds this compositor cannot draw (`fill`, `html`,
+ * `video`, `animated-text` — L1a left them out of every `accepts` list) are
+ * absent, and hitting one throws ({@link drawLayer}) instead of skipping.
+ * Module-private: the `@generated` barrels `export *` this file, so a named
+ * export would leak `SKRSContext2D` (through {@link LayerDrawContext}) from
+ * the public package surface; the structural tests spy the table through the
+ * TS-private seam {@link NodeCanvasCompositor.layerDrawers}.
+ */
+const LAYER_DRAWERS: Readonly<Partial<Record<LayerKind, LayerDrawer>>> = {
+  image: paintBackground,
+  shade: paintShade,
+  accent: paintAccent,
+  "static-text": drawStaticText,
+  logo: drawLogo,
+};
 
 /**
  * NodeCanvasCompositor — CompositorPort adapter.
@@ -118,10 +173,24 @@ interface PreparedCreative {
  * Copy is drawn in a bundled font (default "Inter") so headlines look identical
  * on every machine, independent of the reviewer's installed system fonts.
  *
+ * The draw order is data (D121): `prepare` resolves the layer list (the brief's
+ * `template.layers` when present, else the canonical layers for its creative
+ * type, else the `image-text` canonical list) and the legacy blit iterates it
+ * through the {@link LAYER_DRAWERS} table — array position is z-order, bottom
+ * first (D128).
+ *
  * Still path: {@link NodeCanvasCompositor.prepare} (I/O) →
  * {@link NodeCanvasCompositor.draw} at `t = 1` with no `motion`.
  */
 export class NodeCanvasCompositor implements CompositorPort {
+  /**
+   * TS-private seam onto the module-level {@link LAYER_DRAWERS} table: the
+   * table (and its `LayerDrawContext` parameter) must stay off the `@generated`
+   * barrel, so the structural tests spy it through the index-signature escape —
+   * `NodeCanvasCompositor["layerDrawers"]` — instead of an export.
+   */
+  private static readonly layerDrawers = LAYER_DRAWERS;
+
   constructor(private readonly fontFamily: string = "Inter") {
     registerBundledFonts();
   }
@@ -184,12 +253,16 @@ export class NodeCanvasCompositor implements CompositorPort {
    * the same expressions with the same values (align `center` → the same
    * `centerX`; letterSpacing `0` → a no-op `"0px"`). New behaviour beyond the
    * style fields still belongs in the timeline branch of
-   * {@link NodeCanvasCompositor.draw}. The geometry literals below (band
-   * heights) mirror the values in `CREATIVE_GEOMETRY` and must stay in
-   * lockstep with it; the goldens pin them. **Amended 2026-09-02:** the
-   * signature gained an optional `effectT` (default the motion `t`) so the
-   * poster can settle the text effect independently of a `restT = 0` pose;
-   * a style-less brief is byte-identical either way (identity pose, D10).
+   * {@link NodeCanvasCompositor.draw}. **Amended 2026-09-02:** the signature
+   * gained an optional `effectT` (default the motion `t`) so the poster can
+   * settle the text effect independently of a `restT = 0` pose; a style-less
+   * brief is byte-identical either way (identity pose, D10). **Amended
+   * 2026-09-08 (L2a, D121):** the body is now a dispatch — it iterates
+   * `prepared.layers` (resolved in `prepare`, D128) through the
+   * {@link LAYER_DRAWERS} table, whose entries are this body's former five
+   * blocks extracted verbatim. The previous body's band-height literals
+   * mirrored `CREATIVE_GEOMETRY` values; the shared accent drawer now reads
+   * the leaf directly (same numbers — the goldens pin the bytes).
    */
   static drawLegacy(
     ctx: SKRSContext2D,
@@ -198,102 +271,17 @@ export class NodeCanvasCompositor implements CompositorPort {
     motion?: MotionKind,
     effectT: number = t,
   ): void {
-    const { width, height, top, shadeAlpha } = prepared;
-    const eased = motion === undefined ? 1 : easeOutCubic(t);
-
-    // Layer 1 — background. Ken-burns zooms this layer only, around the canvas centre.
-    const zoom = kenBurnsScale(motion, eased);
-    if (zoom === 1) {
-      ctx.drawImage(prepared.background, 0, 0, width, height);
-    } else {
-      ctx.save();
-      ctx.translate(width / 2, height / 2);
-      ctx.scale(zoom, zoom);
-      ctx.translate(-width / 2, -height / 2);
-      ctx.drawImage(prepared.background, 0, 0, width, height);
-      ctx.restore();
-    }
-
-    // Layer 2 — contrast shade, darkest at the headline edge, fading into the image.
-    const shade = top
-      ? ctx.createLinearGradient(0, height * 0.55, 0, 0)
-      : ctx.createLinearGradient(0, height * 0.45, 0, height);
-    shade.addColorStop(0, "rgba(0, 0, 0, 0)");
-    shade.addColorStop(1, `rgba(0, 0, 0, ${shadeAlpha})`);
-    ctx.fillStyle = shade;
-    ctx.fillRect(0, 0, width, height);
-
-    // Layer 3 — brand-colour accent band: a solid base flush to the headline edge
-    // plus a soft fade into the image. Solid stays opaque in every tone, and this
-    // band — not the logo — is what guarantees the brand-density compliance floor.
-    const [ar, ag, ab] = hexToRgb(prepared.brandColor);
-    const solidH = height * 0.05;
-    const fadeH = height * 0.06;
-    const wipe = motion === "accent-wipe" ? eased : 1;
-    ctx.fillStyle = `rgb(${ar}, ${ag}, ${ab})`;
-    if (top) {
-      ctx.fillRect(0, 0, width, solidH);
-      if (wipe > 0) {
-        const fade = ctx.createLinearGradient(0, solidH, 0, solidH + fadeH);
-        fade.addColorStop(0, `rgb(${ar}, ${ag}, ${ab})`);
-        fade.addColorStop(1, `rgba(${ar}, ${ag}, ${ab}, 0)`);
-        ctx.fillStyle = fade;
-        ctx.fillRect(0, solidH, width, fadeH * wipe);
-      }
-    } else {
-      ctx.fillRect(0, height - solidH, width, solidH);
-      if (wipe > 0) {
-        const fade = ctx.createLinearGradient(0, height - solidH - fadeH, 0, height - solidH);
-        fade.addColorStop(0, `rgba(${ar}, ${ag}, ${ab}, 0)`);
-        fade.addColorStop(1, `rgb(${ar}, ${ag}, ${ab})`);
-        ctx.fillStyle = fade;
-        ctx.fillRect(0, height - solidH - fadeH * wipe, width, fadeH * wipe);
-      }
-    }
-
-    // Layer 4 — campaign copy, wrapped to the inset-reduced width and placed
-    // in the inset rectangle per the prepared style's alignment (D10 amendment,
-    // T5). wrapText uses this ctx so metrics match the blit.
-    const headline = layoutHeadline(ctx, prepared);
-    const rise = motion === "headline-rise";
-    const riseDy = rise ? (1 - eased) * 0.12 * height : 0;
-    const riseAlpha = rise ? eased : 1;
-    // The text effect (T6) rides the effect clock, not the motion pose clock,
-    // and COMPOSES with the motion kind: translations add, alphas multiply.
-    // Still/poster callers pass 1 (H4) so a ken-burns-out rest (t = 0) never
-    // samples the entrance; clip frames omit it and `t` is used. Undefined
-    // effect → the identity pose → exactly the pre-effect bytes (D54).
-    const fx = textEffectPose(prepared.textEffect, effectT, prepared.canvas, width, height);
-    const dy = riseDy + fx.dy;
-    const alpha = riseAlpha * fx.alpha;
-    ctx.fillStyle = "#ffffff";
-    ctx.textAlign = prepared.style.align;
-    ctx.textBaseline = "alphabetic";
-    // A ctx-state control (F5a): re-stated at the blit, not inherited from the
-    // layout pass — the default 0px is a no-op, the goldens pin it.
-    ctx.letterSpacing = `${prepared.style.letterSpacing * headline.fontSize}px`;
-    const posed = openTextPose(ctx, alpha, fx.dx, dy, fx.scale, headline);
-    let y = headline.firstY;
-    for (const line of headline.lines) {
-      ctx.fillText(line, headlineTextX(prepared, headline.centerX), y);
-      y += headline.lineHeight;
-    }
-    if (posed) {
-      ctx.restore();
-    }
-
-    // Layer 5 — brand logo, anchored opposite the headline (top-right for a bottom
-    // headline, bottom-left for a top headline). Inset offset was captured in
-    // prepare; if the rest-pose headline block overlaps it, snap to an inset edge.
-    // The rest-pose box (not the translated one) keeps the logo static across `t`.
-    if (prepared.logo) {
-      const { image, x, width: lw, height: lh } = prepared.logo;
-      let ly = prepared.logo.y;
-      const logoBox = { x, y: ly, width: lw, height: lh };
-      if (boxesOverlap(headline.box, logoBox)) {
-        ly = resolveOverlappingLogoY(prepared, headline.box, lw, lh, x);
-      }
-      ctx.drawImage(image, x, ly, lw, lh);
+    const c: LayerDrawContext = {
+      ctx,
+      prepared,
+      motion,
+      eased: motion === undefined ? 1 : easeOutCubic(t),
+      effectT,
+    };
+    // The draw order is the layer list (D121/D128): array position is z-order,
+    // bottom first. A kind with no table entry throws — it never skips.
+    for (const layer of prepared.layers) {
+      drawLayer(layer.kind, c);
     }
   }
 
@@ -304,7 +292,21 @@ export class NodeCanvasCompositor implements CompositorPort {
    * durationSec) or a timeline-free request never resolves a timeline (D10).
    */
   static async prepare(
-    request: CompositeRequest & { readonly durationSec?: number; readonly timeline?: CopyTimeline },
+    request: CompositeRequest & {
+      readonly durationSec?: number;
+      readonly timeline?: CopyTimeline;
+      /**
+       * The L1b brief template (D120/D123): present → its `layers` ARE the
+       * draw order. A brief parsed through `parseBrief` always carries one;
+       * the field stays off the port interface until L3 wires it through.
+       */
+      readonly template?: BriefTemplate;
+      /**
+       * Direct-caller escape hatch: with no `template`, the canonical layers
+       * for this creative type. Production never passes it.
+       */
+      readonly creativeType?: CreativeType;
+    },
     fontFamily: string = "Inter",
   ): Promise<PreparedCreative> {
     const canvas = request.canvas;
@@ -380,6 +382,7 @@ export class NodeCanvasCompositor implements CompositorPort {
       logo,
       logoApplied,
       insets,
+      layers: resolveLayerList(request.template, request.creativeType),
     };
 
     // Sequenced copy: resolve windows and fit every beat at one common type size
@@ -805,9 +808,14 @@ function drawTimeline(
   const eased = motion === undefined ? 1 : easeOutCubic(t);
 
   // Layers 1–3 — identical to the legacy blit for this motion / pose clock.
-  paintBackground(ctx, prepared, eased, motion);
-  paintShade(ctx, prepared);
-  paintAccent(ctx, prepared, eased, motion);
+  // Drawn through the same table drawLegacy iterates (D121): one copy of each
+  // layer's code serves both paths. The ground trio is fixed because the
+  // sequenced copy and logo below keep their own positions; `effectT` is a
+  // value no ground drawer reads (`effectT ?? t` matches draw()'s clock shape).
+  const ground: LayerDrawContext = { ctx, prepared, motion, eased, effectT: effectT ?? t };
+  drawLayer("image", ground);
+  drawLayer("shade", ground);
+  drawLayer("accent", ground);
 
   // Layer 4 — sequenced copy: the beat is selected by copyT, crossfaded with any
   // incoming beat, and (for headline-rise) eased on its own local progress.
@@ -886,13 +894,9 @@ function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
 }
 
-/** Timeline-path layer 1 — background (identical to the legacy blit for the same `motion`/`eased`). */
-function paintBackground(
-  ctx: SKRSContext2D,
-  prepared: PreparedCreative,
-  eased: number,
-  motion: MotionKind | undefined,
-): void {
+/** The image layer — the background buffer; ken-burns zooms this layer only (D121). */
+function paintBackground(c: LayerDrawContext): void {
+  const { ctx, prepared, motion, eased } = c;
   const { width, height } = prepared;
   const zoom = kenBurnsScale(motion, eased);
   if (zoom === 1) {
@@ -907,8 +911,9 @@ function paintBackground(
   }
 }
 
-/** Timeline-path layer 2 — contrast shade, darkest at the headline edge. */
-function paintShade(ctx: SKRSContext2D, prepared: PreparedCreative): void {
+/** The shade layer — contrast shade, darkest at the headline edge (D121). */
+function paintShade(c: LayerDrawContext): void {
+  const { ctx, prepared } = c;
   const { width, height, top, shadeAlpha } = prepared;
   const shade = top
     ? ctx.createLinearGradient(0, height * 0.55, 0, 0)
@@ -919,13 +924,16 @@ function paintShade(ctx: SKRSContext2D, prepared: PreparedCreative): void {
   ctx.fillRect(0, 0, width, height);
 }
 
-/** Timeline-path layer 3 — brand-colour accent band (solid base + wipe fade). */
-function paintAccent(
-  ctx: SKRSContext2D,
-  prepared: PreparedCreative,
-  eased: number,
-  motion: MotionKind | undefined,
-): void {
+/**
+ * The accent layer (D121) — a brand-colour solid base flush to the headline
+ * edge plus a soft fade into the image; the fade's extent is scaled by the
+ * motion `wipe`. Solid stays opaque in every tone, and this band — not the
+ * logo — is what guarantees the brand-density compliance floor. The band
+ * heights read `CREATIVE_GEOMETRY` (the legacy body's literals mirrored these
+ * exact values; the goldens pin the bytes).
+ */
+function paintAccent(c: LayerDrawContext): void {
+  const { ctx, prepared, motion, eased } = c;
   const { width, height, top } = prepared;
   const [ar, ag, ab] = hexToRgb(prepared.brandColor);
   const solidH = height * CREATIVE_GEOMETRY.accentSolidHeightFraction;
@@ -951,4 +959,108 @@ function paintAccent(
       ctx.fillRect(0, height - solidH - fadeH * wipe, width, fadeH * wipe);
     }
   }
+}
+
+/**
+ * The static-text layer — the legacy copy block, extracted verbatim (D121):
+ * fitted on the real blit context (the layout pass's ctx.font state feeds the
+ * blit), posed by the motion kind and the effect clock, and its layout handed
+ * to the logo drawer through the context for the overlap snap.
+ */
+function drawStaticText(c: LayerDrawContext): void {
+  const { ctx, prepared, motion, eased, effectT } = c;
+  const { width, height } = prepared;
+  // Layer 4 — campaign copy, wrapped to the inset-reduced width and placed
+  // in the inset rectangle per the prepared style's alignment (D10 amendment,
+  // T5). wrapText uses this ctx so metrics match the blit.
+  const headline = layoutHeadline(ctx, prepared);
+  c.headline = headline;
+  const rise = motion === "headline-rise";
+  const riseDy = rise ? (1 - eased) * 0.12 * height : 0;
+  const riseAlpha = rise ? eased : 1;
+  // The text effect (T6) rides the effect clock, not the motion pose clock,
+  // and COMPOSES with the motion kind: translations add, alphas multiply.
+  // Still/poster callers pass 1 (H4) so a ken-burns-out rest (t = 0) never
+  // samples the entrance; clip frames omit it and `t` is used. Undefined
+  // effect → the identity pose → exactly the pre-effect bytes (D54).
+  const fx = textEffectPose(prepared.textEffect, effectT, prepared.canvas, width, height);
+  const dy = riseDy + fx.dy;
+  const alpha = riseAlpha * fx.alpha;
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = prepared.style.align;
+  ctx.textBaseline = "alphabetic";
+  // A ctx-state control (F5a): re-stated at the blit, not inherited from the
+  // layout pass — the default 0px is a no-op, the goldens pin it.
+  ctx.letterSpacing = `${prepared.style.letterSpacing * headline.fontSize}px`;
+  const posed = openTextPose(ctx, alpha, fx.dx, dy, fx.scale, headline);
+  let y = headline.firstY;
+  for (const line of headline.lines) {
+    ctx.fillText(line, headlineTextX(prepared, headline.centerX), y);
+    y += headline.lineHeight;
+  }
+  if (posed) {
+    ctx.restore();
+  }
+}
+
+/**
+ * The logo layer — the legacy logo block, extracted verbatim (D121). The
+ * overlap snap reads the static-text layer's layout off the context: the
+ * rest-pose headline box is what the logo must clear, so it exists only after
+ * that drawer ran — a logo with no text layer before it is a template this
+ * compositor cannot honour, and throws rather than guessing an anchor.
+ */
+function drawLogo(c: LayerDrawContext): void {
+  const { ctx, prepared } = c;
+  // Layer 5 — brand logo, anchored opposite the headline (top-right for a bottom
+  // headline, bottom-left for a top headline). Inset offset was captured in
+  // prepare; if the rest-pose headline block overlaps it, snap to an inset edge.
+  // The rest-pose box (not the translated one) keeps the logo static across `t`.
+  if (prepared.logo) {
+    const headline = c.headline;
+    if (headline === undefined) {
+      throw new Error(
+        "NodeCanvasCompositor: the logo layer snaps to the text block, but no static-text layer ran before it",
+      );
+    }
+    const { image, x, width: lw, height: lh } = prepared.logo;
+    let ly = prepared.logo.y;
+    const logoBox = { x, y: ly, width: lw, height: lh };
+    if (boxesOverlap(headline.box, logoBox)) {
+      ly = resolveOverlappingLogoY(prepared, headline.box, lw, lh, x);
+    }
+    ctx.drawImage(image, x, ly, lw, lh);
+  }
+}
+
+/**
+ * Resolve the draw order once in `prepare` (D121): the request's `template`
+ * when the caller passes the L1b brief template, else the canonical template
+ * for its creative type, else the `image-text` canonical list. A brief parsed
+ * through `parseBrief` always carries a template — both fallbacks are for
+ * direct callers and tests.
+ */
+function resolveLayerList(
+  template: BriefTemplate | undefined,
+  creativeType: CreativeType | undefined,
+): readonly CreativeTemplateLayer[] {
+  if (template !== undefined) return template.layers;
+  if (creativeType !== undefined) return CANONICAL_TEMPLATES[creativeType].layers;
+  return CANONICAL_TEMPLATES["image-text"].layers;
+}
+
+/**
+ * One layer of the draw: look the kind up in the dispatch table and paint it.
+ * A kind this compositor cannot draw (L1a left `fill`, `html`, `video` and
+ * `animated-text` out of every `accepts` list) has no entry — throw, never
+ * skip: a silently dropped layer is a redesign the goldens cannot see.
+ */
+function drawLayer(kind: LayerKind, c: LayerDrawContext): void {
+  const drawer = LAYER_DRAWERS[kind];
+  if (drawer === undefined) {
+    throw new Error(
+      `NodeCanvasCompositor: layer kind "${kind}" has no drawer in this compositor — it draws image, shade, accent, static-text and logo only`,
+    );
+  }
+  drawer(c);
 }
