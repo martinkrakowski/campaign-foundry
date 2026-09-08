@@ -175,6 +175,14 @@ describe("POST /campaigns/plan", () => {
     expect(((await res.json()) as { error: string }).error).toMatch(/missing required field/);
   });
 
+  test("returns 400 for an unknown display size (D113)", async () => {
+    const res = await call(variationBrief({ output: { sizes: ["banner"] } }));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(
+      /"output.sizes" must be one of "300x250", "728x90", "160x600", "320x50", "300x600"/,
+    );
+  });
+
   // D68 — the parser's scalar shape check, pinned on a VARIATION fixture: a classic
   // brief 400s with "not a variation brief" immediately after the parse block, so a
   // status-only assertion on a classic fixture could never go red. The message must

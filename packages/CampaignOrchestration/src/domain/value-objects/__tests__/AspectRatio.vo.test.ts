@@ -1,5 +1,6 @@
 import { describe, test, expect } from "vitest";
 import { AspectRatio } from "../AspectRatio.vo.js";
+import { resolveCanvas } from "../aspect-ratios.js";
 
 describe("AspectRatio", () => {
   test("create returns the canvas dimensions for each supported ratio", () => {
@@ -33,6 +34,12 @@ describe("AspectRatio", () => {
     const r = AspectRatio.create("9:16");
     expect(r.success).toBe(true);
     if (r.success) expect(r.value.slug).toBe("9x16");
+  });
+
+  test("create width equals resolveCanvas for the same ratio — the VO reads through the resolver", () => {
+    const r = AspectRatio.create("1:1");
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.value.width).toBe(resolveCanvas({ ratio: "1:1" }).width);
   });
 
   test("equals compares by value", () => {

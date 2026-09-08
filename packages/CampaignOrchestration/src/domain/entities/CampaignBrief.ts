@@ -2,6 +2,7 @@ import type { Treatment } from "../value-objects/Treatment.vo.js";
 import type { CopyTimeline } from "../value-objects/CopyTimeline.vo.js";
 import type { Style } from "../value-objects/creative-style.js";
 import type { CampaignType } from "../value-objects/campaign-types.js";
+import type { DisplaySize } from "../value-objects/display-sizes.js";
 import type { Product } from "./Product.js";
 
 /**
@@ -95,9 +96,14 @@ export interface CampaignBrief {
   };
   /**
    * Optional output request. Absent formats keep today's static pipeline.
+   * `sizes` is the display family's optional axis (D113): absent means the
+   * social ratios as today, so existing briefs are unchanged (D112's
+   * optional-with-default precedent). Validated at the API boundary by
+   * `validateSizes` in load-brief.ts.
    */
   readonly output?: {
     readonly formats?: readonly string[];
     readonly platforms?: readonly string[];
+    readonly sizes?: readonly DisplaySize[];
   };
 }
