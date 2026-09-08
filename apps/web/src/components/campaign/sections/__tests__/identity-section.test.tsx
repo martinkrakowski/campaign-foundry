@@ -1,3 +1,4 @@
+import { useLayoutEffect } from "react";
 import { describe, test, expect, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -43,9 +44,10 @@ const renderWithReducer = (initial: EditorState) => {
  * control: the map's SVG is aria-hidden and adds no focusable element.
  */
 describe("IdentitySection — the world map", () => {
-  test("clicking a footprint sets the region exactly as its chip does — the two are one control", () => {
+  test("clicking a footprint sets the region exactly as its chip does — the two are one control", async () => {
     const { dispatch, container } = renderWithReducer(state());
 
+    await screen.findByText(messages.worldMapFallbackHint);
     fireEvent.click(container.querySelector('[data-region="EU"]') as SVGGElement);
     expect(dispatch).toHaveBeenCalledWith({ type: "patch", patch: { targetRegion: "EU" } });
     expect(screen.getByRole("button", { name: "EU" }).getAttribute("aria-pressed")).toBe("true");
@@ -57,6 +59,7 @@ describe("IdentitySection — the world map", () => {
 
     await user.click(screen.getByRole("button", { name: "DE" }));
 
+    await screen.findByText(messages.worldMapFallbackHint);
     const selected = document.querySelectorAll("[data-selected]");
     expect(selected).toHaveLength(1);
     expect(selected[0]?.getAttribute("data-region")).toBe("DE");
@@ -87,6 +90,7 @@ describe("IdentitySection — the world map", () => {
     const other = screen.getByLabelText(messages.targetRegionOtherInputLabel);
     await user.type(other, "LATAM");
 
+    await screen.findByText(messages.worldMapFallbackHint);
     fireEvent.click(container.querySelector('[data-region="DE"]') as SVGGElement);
 
     expect(getState().targetRegion).toBe("DE");
@@ -118,6 +122,7 @@ describe("IdentitySection — the world map", () => {
 
     await user.click(screen.getByRole("button", { name: "EU" }));
 
+    await screen.findByText(messages.worldMapFallbackHint);
     const svg = (container.querySelector('[data-region="EU"]') as SVGGElement).closest(
       "svg",
     ) as SVGSVGElement;
@@ -126,18 +131,21 @@ describe("IdentitySection — the world map", () => {
     expect(svg.querySelectorAll("[tabindex], button, a")).toHaveLength(0);
   });
 
-  test("the hint is written against F2, and the section adds no live region of its own", () => {
+  test("the hint is written against F2, and the section adds no live region of its own", async () => {
     const { container } = render(<IdentitySection state={state()} dispatch={vi.fn()} errors={{}} />);
 
     const hint = screen.getByText(messages.worldMapRegionHint);
     expect(hint.textContent).not.toMatch(/dispatch|per region|\brun/i);
-    expect(container.querySelector("p.sr-only")?.textContent).toBe(messages.worldMapFallbackHint);
+    expect((await screen.findByText(messages.worldMapFallbackHint)).textContent).toBe(
+      messages.worldMapFallbackHint,
+    );
     expect(container.querySelectorAll('[role="status"]')).toHaveLength(0);
   });
 
-  test("the map is built once per region — unrelated patches do not re-render it", () => {
+  test("the map is built once per region — unrelated patches do not re-render it", async () => {
     vi.mocked(WorldMap).mockClear();
     const { dispatch } = renderWithReducer(state());
+    await screen.findByText(messages.worldMapFallbackHint);
     expect(WorldMap).toHaveBeenCalledTimes(1);
 
     dispatch({ type: "patch", patch: { targetAudience: "a" } });
@@ -147,5 +155,33 @@ describe("IdentitySection — the world map", () => {
 
     dispatch({ type: "patch", patch: { targetRegion: "US" } });
     expect(WorldMap).toHaveBeenCalledTimes(2);
+  });
+
+  test("on first render the map is absent and the chips are present; after effects flush the map is present", async () => {
+    let firstPaint = { map: true, chips: false };
+
+    function FirstPaintProbe() {
+      useLayoutEffect(() => {
+        firstPaint = {
+          map: document.querySelector("[data-region]") !== null,
+          chips: document.querySelector('button[aria-label="EU"]') !== null,
+        };
+      }, []);
+      return null;
+    }
+
+    const { container } = render(
+      <>
+        <IdentitySection state={state()} dispatch={vi.fn()} errors={{}} />
+        <FirstPaintProbe />
+      </>,
+    );
+
+    expect(firstPaint.map).toBe(false);
+    expect(firstPaint.chips).toBe(true);
+    expect(screen.getByRole("button", { name: "EU" })).toBeTruthy();
+
+    await screen.findByText(messages.worldMapFallbackHint);
+    expect(container.querySelector('[data-region="EU"]')).not.toBeNull();
   });
 });
