@@ -57,23 +57,40 @@ output for a cell, the cell is *unknown* — a valid answer. A confident wrong o
    number a brief cites must exist; every acceptance criterion must be able to fail. This step has
    caught false premises that would have stalled a lane at its mandatory mutation check.
 
-## The five stages
+## The six stages
+
+*Emitting is part of the stage, not a courtesy.* Every transition below appends one event via
+`scripts/wave-event.sh <logdir> <wave> <lane> <stage> <event> [--pr N] [--round N] [--detail '<json>']`
+— one JSON line in `<logdir>/events.jsonl` — and a stage with no event is, to the server, a stage
+that did not happen.
 
 1. **Implement.** One lane = one worktree = one branch = one PR. `yarn install` per worktree
    yourself. Write each brief from Template A, then launch detached via the dispatch script and
    wait on the `EXIT` marker. Never let two lanes own the same file at the same time.
+   Emit as you go (`scripts/wave-event.sh`): `dispatch started` per lane just before its launch.
+   The per-lane `implement settled|failed` events **are** the completion record of a dispatch —
+   `implement settled` when a lane's `EXIT` marker lands, `implement failed` on a non-zero
+   marker or a lane killed without one; and `gate settled` with the gate exit and the four
+   coverage numbers (statements, branches, functions, lines) in `--detail` once the gate has run.
 2. **Review.** Two independent inputs per PR, both required: a read-only review from a model that
    is **not** the implementer, and the bot comments (`gh pr checks`, `gh api …/comments`). Verify
    every finding — yours and the bots' — against the branch diff before acting on it. Require the
    reviewer to remove any throwaway worktree it created, and check: two have been left behind.
+   When the review of a PR is dispositioned, emit `review settled` (`scripts/wave-event.sh`)
+   with the counts of BUG / SUGGESTION / NIT findings in `--detail`.
 3. **Remediate.** Merge verified findings into a fix brief (Template C), listing refuted items with
    reasons. Run the remediator in that worktree, then **verify it yourself**: full gate, re-read the
    diff. Never merge on a remediator's self-report.
+   After each round you verify, emit `remediate settled` per round (`scripts/wave-event.sh`)
+   with the fixed/refuted counts in `--detail`.
 4. **Sweep** (you, no CLI). Per thread: verify → reply with the resolution and its commit, or the
    refutation and its mechanism → resolve. Then one disposition comment per PR. A refutation is a
    first-class outcome; a silently ignored comment is indistinguishable from an overlooked one.
+   When a PR's threads are all dispositioned, emit `sweep settled` with the `fixed` / `refuted` /
+   `deferred` counts in `--detail`.
 5. **Merge** (you). Sequential, via `scripts/merge-prs.sh` — each merge invalidates the CI of
    everything behind it. If main goes red: stop, reproduce locally, ship a minimal hotfix, resume.
+   After each merge lands, emit `merge settled` with the merge SHA in `--detail`.
 6. **Close the wave** (you, immediately — not later). Append the orchestrator's wave record to
    `.agents/session-log.md`: what merged with its commits, what was refuted **and why**, what the
    review layer actually bought, any defect found in the *plan* rather than the code, and what
@@ -82,6 +99,7 @@ output for a cell, the cell is *unknown* — a valid answer. A confident wrong o
    especially then, because chained waves are exactly where it slides. If a lane's own session-log
    entry already exists, yours is still owed: a lane reports on itself, the orchestrator reports on
    the wave.
+   When the record is committed, emit `record settled` with the PR number in `--pr`.
 
 ## Your authority, and its limits
 
