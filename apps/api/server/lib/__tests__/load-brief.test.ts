@@ -357,6 +357,18 @@ describe("parseRegenerateOnly", () => {
     expect(() => parseRegenerateOnly([{ productId: "p", treatment: "default" }])).toThrow(/require a canvas/);
   });
 
+  test("rejects an entry carrying both canvases — exactly one of the two (D113)", () => {
+    expect(() =>
+      parseRegenerateOnly([{ productId: "p", aspectRatio: "1:1", size: "728x90", treatment: "default" }]),
+    ).toThrow(/must carry exactly one canvas/);
+  });
+
+  test("rejects a size outside the display-size vocabulary (D113)", () => {
+    expect(() => parseRegenerateOnly([{ productId: "p", size: "999x999", treatment: "default" }])).toThrow(
+      /must be one of "300x250", "728x90", "160x600", "320x50", "300x600"/,
+    );
+  });
+
   test("maps variation targets with optional attempt", () => {
     expect(parseRegenerateOnly([{ productId: "p", variantIndex: 0 }])).toEqual([
       { productId: "p", variantIndex: 0 },

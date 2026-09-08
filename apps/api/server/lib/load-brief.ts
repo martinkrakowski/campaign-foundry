@@ -700,10 +700,18 @@ export function parseRegenerateOnly(value: unknown): RegenerationTarget[] | unde
     }
     // The canvas is a social ratio or a display size (D113) — exactly one of the two,
     // the same identity the run keys the cell on and the review UI sends back.
+    if (typeof rec.aspectRatio === "string" && typeof rec.size === "string") {
+      throw new Error('"regenerateOnly" entries must carry exactly one canvas');
+    }
     if (typeof rec.aspectRatio === "string") {
       return { productId: rec.productId, aspectRatio: rec.aspectRatio, treatment: rec.treatment };
     }
     if (typeof rec.size === "string") {
+      if (!(DISPLAY_SIZE_VALUES as readonly string[]).includes(rec.size)) {
+        throw new Error(
+          `"regenerateOnly" size must be one of ${DISPLAY_SIZE_VALUES.map((s) => `"${s}"`).join(", ")}; got ${JSON.stringify(rec.size)}.`,
+        );
+      }
       return { productId: rec.productId, size: rec.size, treatment: rec.treatment };
     }
     throw new Error(
