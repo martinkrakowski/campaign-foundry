@@ -3,16 +3,27 @@
 Re-probe before trusting any row: `grok models`, `agy models`, `opencode models`. Two of these
 fail with a misleading error rather than "no such model".
 
-## Seats
+## Seats — the order the owner set on 2026-09-08
 
-| Seat | Command |
+Implementers rotate in this order; the next seat takes a lane only when the one before it is
+unfunded, hangs (0-byte log at five minutes), or dies on arrival twice. **grok never implements.**
+
+| Seat | Command (every id probed live on 2026-09-08) |
 |---|---|
-| **implementer** | `opencode run --auto --model openrouter/z-ai/glm-5.3-flash --variant high "$(cat BRIEF.md)"` |
-| **PR reviewer A** | `grok -p "$(cat REVIEW.md)" --model grok-4.6 --effort high` (add `--disallowed-tools "edit,write"`) |
-| **PR reviewer B** | `agy --print "$(cat REVIEW.md)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high` |
-| **remediator** | `grok -p "$(cat FIX.md)" --model grok-4.6 --effort high` |
-| **plan reviewers** | `grok-4.6` high **and** `agy --model gemini-3.8-flash-high` (the 3.1-pro id no longer resolves) — run both |
-| **sweep, merge** | the orchestrator, never delegated |
+| **implementer 1** | `MODEL=opencode-go/glm-5.3-flash dispatch-lane.sh …` — the script's default. Note the provider: `opencode-go/`, which is funded; `opencode/glm-5.3-flash` answers *Insufficient balance* on the same account. |
+| **implementer 2** | `agy --print "$(cat BRIEF.md)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high --print-timeout 90m` (detached; the effort flag must match the id's suffix — `-high` with `--effort low` is refused) |
+| **implementer 3** | `MODEL=opencode/big-pickle dispatch-lane.sh …` |
+| **PR reviewer** | `opencode run --model opencode-go/hy4-preview "$(cat REVIEW.md)"` in a **throwaway worktree** of the branch (so nothing it writes can matter). It answers a one-word probe with a paragraph of planning: give it a schema for the verdict and read past the preamble. |
+| **remediator** | the lane's own implementer first, then the next in the rotation. (Proposed, not yet the owner's rule: grok returns as remediator only — its 4/4 record — after its quota resets **2026-09-14 16:28**, and still never implements.) |
+| **plan reviewer** | `agy --print "$(cat PLAN-REVIEW.md)" --dangerously-skip-permissions --effort high --model gemini-3.1-pro-high` — one reviewer. (The id resolves again as of 2026-09-08; it did not on 09-07.) |
+| **orchestrator, final sweep, merge** | you, never delegated |
+
+**Why grok is out.** It exhausted a weekly quota in two days because it drifted from reviewer and
+fixer into default implementer (nine lane implementations on 09-07/08, every role at high effort,
+reviewer briefs that re-ran the full gate). Reviewer briefs now carry the diff excerpt for the
+claim under test and a file list, and never ask a reviewer to run the full gate or the coverage
+run — the orchestrator does those. Every wave record counts runs per seat so a burn shows before
+a quota does.
 
 Launch every lane detached so a harness timeout cannot kill it, and wait on the marker:
 
@@ -36,6 +47,7 @@ while ! grep -qE '^EXIT [0-9]+$' /tmp/<lane>.log 2>/dev/null; do sleep 30; done
   with `curl -H "Authorization: Bearer $KEY" https://openrouter.ai/api/v1/key`; a 200 with
   `limit_remaining` means the failure is opencode-side. Back the file up, replace that one field,
   `chmod 600`.
+- **opencode: `opencode/` and `opencode-go/` are billed separately (2026-09-08).** `opencode/glm-5.3-flash` said *Insufficient balance* while `opencode-go/glm-5.3-flash` and `opencode/big-pickle` answered on the same account. Re-probe the exact provider prefix, not just the model.
 - **opencode: an unfunded seat kills every model on that account** (`Insufficient balance`), the
   alternates included, and leaves nothing behind — clean worktrees, no commits. Probe before a wave.
 - **grok can take 80+ minutes and look dead**: 0 bytes written, seconds of CPU, no error, then it
