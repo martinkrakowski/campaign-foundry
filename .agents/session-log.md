@@ -3781,6 +3781,12 @@ follow-up: hit-test by the smallest containing footprint, independent of paint o
   - `yarn typecheck` is turbo-per-workspace; `tools/` is typechecked by vitest and `tsc -p tools/wave-status --noEmit`.
 - **Remediation:** five verified findings (gate-exit, observed no-PR, closed-unmerged, EXIT trailing space, istanbul indent); four mutations compiled, ran, failed the named test, reverted. PR-Agent trim/Set refuted (D103).
 
+## 2026-09-07 — W3 wave-status emit (#232)
+
+- **Mode:** Implementer
+- **Remediation:** emit `implement settled|failed` inside the wait loop; per-lane implement events are the dispatch completion record (no wave-level `dispatch settled`); validate `<wave>`/`<lane>` and `--detail` as a JSON object; timeout emits `implement failed` with `reason:timeout`; SKILL.md heading five→six (the one non-additive edit). Four mutations compiled, ran, failed the named test, reverted.
+- **Remediation (round 2):** `wave-event.sh` is POSIX `sh` (CI Linux has no zsh); dispatch-lane tests `skipIf` when `zsh` is missing.
+
 ---
 
 ## 2026-09-07 — Identity map after first paint (`fix/identity-map-after-first-paint`)
@@ -3798,6 +3804,8 @@ follow-up: hit-test by the smallest containing footprint, independent of paint o
 - **Left open:**
   - RTL `act()` still flushes the map before `render()` returns, so isolated-file wall time only dropped ~2s. The CI win is first paint no longer blocking waitFor under contention; if #229/#230-class timeouts persist, the next lever is deferring past `act` (not a stub).
 - **Round 2:** stubbed `WorldMap` in `brief-editor.test.tsx` (no product change); medians 27.90s (pre-#225 `4546bfb`) / 49.31s (before) / 25.22s (after). Mutation: delete `vi.mock` → stub assertion fails, 57.24s. `kit-boundaries.test.ts` green.
+- **Follow-up:** `mapReady` flips after the first frame (`requestAnimationFrame`, else `setTimeout(0)`), cancelled on unmount, so a layout-effect seed dispatch cannot flush the map into the first paint. Mutation: sync `setMapReady(true)` in the effect body failed the new test (`expected SVGGElement to be null` after `render`). Round 2's editor-suite stub is unaffected. Gate: 199 files / 3394 tests, 100% × 4.
+- **Remediation (PR #235):** unmount-cancel of the deferred map was implemented and unasserted; `return () => {}` on both cleanups survived 100 %. Two tests now pin `cancel(id)` and that `show` never fires. Mutant compiled, ran, failed both named tests; reverted. Gate: 199 files / 3396 tests, 100% × 4. `sync:check` after commit.
 
 ## 2026-09-07 — Campaign type, wave B (T2 merged as #228); wave-status W1 merged as #229
 
@@ -3883,3 +3891,98 @@ the campaign-type wave-C record, the wave-status close-out, and P1 alone.
 - **Remediation round 2:** `prFacts` treats a well-formed `gh` body of the wrong shape as no PR facts (never a throw) and `/api/status` answers 500 on a thrown collect; log tails use `open`/`read` at `size-N` with `?tail=` capped at 1024 KB (400 above); watcher refreshes reuse cached PR facts — only startup, the 15 s poll, and on-demand status call `gh`.
 - **Remediation round 3:** real `fs.watch` smoke is opt-in (`WAVE_STATUS_REAL_WATCH=1`); skipped by default because platform watchers are load-sensitive under a full `yarn test:cov`; the injected-watcher test is the SSE-on-change contract.
 
+## 2026-09-07 — T4 campaign type read-back and prompt sentence (F5)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `campaign-types.ts`: `CAMPAIGN_TYPE_PROMPT_HINTS` + `campaignTypePromptSentence`. CreativeGeneration already depends on CampaignOrchestration, so the table stayed in T1's file.
+  - `BackgroundContext` (in `ImageGeneratorPort.ts`, not CreativeGeneration) gains `campaignType?: CampaignType`.
+  - `GenerateCampaignUseCase` passes `brief.type` at both context sites (classic :209, variation :336).
+  - Four generators append the type sentence. Prompt-shape tests pin the full prompt.
+  - `BriefPicker` row and grid Review bar: `MiniChip` via `typeDisplayName(type ?? DEFAULT_CAMPAIGN_TYPE)`. Absent type shows "Social post"; `short-video` shows "Short-form video" (T2's display name, never the raw id).
+- **Decisions:**
+  - Hints live in the domain as prompt text, not UI copy. Chip labels come from T2's `typeDisplayName` — no new literal under `apps/web`.
+  - The sentence is always present (absent → social-post) so prompts change once.
+  - Did not touch T3's files (`CreateCampaignDialog`, `messages.ts`, the dialog tests). Did not pass `campaignType` from `PreviewCreativeFrameUseCase` (not in this lane's ownership).
+- **Mutations:** each compiled, ran, failed the named test, reverted.
+  - M1: chip uses the raw id → `a brief without type shows Social post, never the raw id`
+  - M2: drop the sentence from Firefly only → `pins the prompt shape, including the campaign-type sentence` (Firefly); Gemini, OpenRouter image, OpenRouter copy stayed green
+  - M3: stop passing `campaignType` at site 2 → `variation path (site 2) passes brief.type into the image generator context`
+  - M4: `short-video` hint mapped to the social-post phrase → `each type has a distinct prompt hint; short-video is not the social-post phrase`
+- **Left open:**
+  - Preview path still omits `campaignType` (defaults to the social-post sentence).
+  - T3 (dialog) still concurrent.
+- **Remediation (PR #234):** `campaignTypeOf` at both read-back sites; preview forwards `brief.type`; prompt sentence coerces out-of-vocab; picker type chip `shrink-0`. Preview left-open above is closed.
+## 2026-09-07 — T3 create dialog, name + campaign type (#236)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `CreateCampaignDialog.tsx`: two-field create — name + three `OptionTile`s over `CAMPAIGN_TYPES`. Removed ModePanel, region chips, audience, WorldMap, StartFromExistingPicker, SectionBlocks, JumpStrip, T2 bridge. Seed `{ name, type }`.
+  - `messages.ts`: append-only `// T3 — the two-field create` block (`createCampaignLead`, `createTypeLabel`, `typeTileGives`, `typeTileRunsAs`).
+  - Dialog suite rewritten; `brief-editor.test.tsx` `fillDialog` helpers name-only.
+- **Decisions:**
+  - Accessible name is the raw type id; display words from `typeDisplayName`; preset line from `CAMPAIGN_TYPE_PRESETS` + `formatDisplayName` (no `static`/`motion` literals). D110 line on `short-video` via `modeDisplayName("variation")`.
+  - `campaignNameNotSluggable` rung and test deleted with the start-from path (D98). Formatter stays (append-only).
+  - Discard guard: a typed name is work; a toggled type is not. `discardGuardDetail(hasName, false, false, false)`.
+  - Width via `className="max-w-md"` on `DialogShell` (`twMerge`); no kit change.
+- **Mutations:** M1–M4 compiled, ran, failed the named test, reverted. Recorded in #236.
+- **Left open:**
+  - T4 (optional): MiniChip on the grid/picker; type sentence in generator prompts.
+  - P1: `packages/ui`, after every campaign-type lane.
+- **Remediation:** dropped `campaignNameNotSluggable`, `createCampaignDescription`, `startFromCampaignCount` (and the pin test); `discardGuardDetail(hasName)` (dialog-only caller); type tiles pass `description` for AT; dirty-cancel queries the formatter. Mutation: re-add `startFromCampaignCount` → coverage fails (branches 99.98%, uncovered `count === 1` arm); jargon suite stays green.
+
+## 2026-09-07 — Campaign type, wave C closed: T3 (#236) and T4 (#234) merged; the hotfix pair (#231, #235)
+
+**Mode:** Orchestrator. Record written at merge time (stage 6). With this, every lane of
+`2026-09-07_campaign-type.md` is on `main`; P1 (`packages/ui`, the two-field plan's last lane)
+dispatches next, alone.
+
+### What merged
+
+| Lane | PR | Commit | What |
+|---|---|---|---|
+| T3 | #236 | `8c5c59b` | the create dialog cut to **name + campaign type** (three `OptionTile`s over `CAMPAIGN_TYPES`, default social-post; the D110 line on short-video); −976 lines |
+| T4 | #234 | `ad63be2` | the type read back (chip on the picker row and the grid bar) and one shared sentence in all four generator prompts |
+| hotfix | #231 | `54bf072` | Identity's map painted after first commit + the editor suite stubs the kit's map — CI editor suite 126–206 s → 72 s |
+| follow-up | #235 | pending in the queue | the map flips after a frame, so the seeded create path no longer builds it pre-paint |
+
+### The seat story of this wave
+
+glm-5.3-flash sat silent at 0 bytes for **both** T3 and T4, twice each; both wrote within a minute
+of moving to grok-4.6 and shipped clean. Every gemini launch died in seconds until `agy models`
+was re-probed: Google shipped gemini-3.8-flash the day before and the cast file's 3.7-flash /
+3.1-pro ids no longer resolved — *timeout waiting for response* is what a stale model id looks
+like. The cast reference is updated (#237); the skill already said to re-probe, and the
+orchestrator had not.
+
+### What the reviews found, and what the briefs got wrong
+
+- **T3**: the orchestrator's "append-only `messages.ts`" seam rule was read as a ban on
+  deletion, so three retired formatters stayed and one got a test whose only job was coverage. No
+  other open lane touched the file; the rule did not apply; the round deleted them, and re-adding
+  one without a caller now drops coverage to 99.98 %. Qodo found that the tiles' `tag`/`blurb`/
+  `meta` are `aria-hidden` by kit design, so screen readers never heard the D110 sentence — the
+  kit's `description` → `aria-describedby` existed for exactly this and the brief had not named
+  it. Raw-id accessible names were defended as the kit contract shared with `ModePanel`.
+- **T4**: Qodo found the read-back chip renders empty for a stored brief with an unknown `type`
+  (`isStoredBrief` validates id and products only; `typeDisplayName` is an unchecked lookup) — a
+  runtime data path, distinct from PR-Agent's refuted compile-time argument. `campaignTypeOf`
+  coerces at both read-back sites; the prompt helper coerces too; the preview use case now
+  carries the type for parity.
+- **The hotfix**: round 1 (paint after mount) was a product improvement that changed the suite by
+  4 % because RTL flushes the mount effect inside `act()`; round 2 stubbed the map in the editor
+  suite only, 49.3 s → 25.2 s locally against a 27.9 s pre-#225 baseline, and CI confirmed 72 s.
+  Qodo then showed the seeded path still built the map pre-paint (the seed is consumed in a
+  layout effect) — #235, from `main`, flips after a frame.
+
+### Orchestrator misfires this wave
+
+Four mutations did not apply on the first try (a tuple matched before the preset row; a
+`description` prop on the header instead of the tiles; a regex on the wrong shape; a broken call
+site) and one removed a structural line from an adapter, failing six unrelated tests. Every one
+was caught by reading the diff and the runner output before the result was used, and none was
+counted. The rule is unchanged and the guard that enforces it — *the chain refuses to sweep or
+merge unless the named test is the one that failed* — earned its keep twice today.
+
+**Next:** P1 (`packages/ui`) alone; the wave-status close-out when #232 and #238 land; then the
+display-advertising plan awaits the owner's go.

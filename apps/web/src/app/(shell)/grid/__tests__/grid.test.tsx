@@ -14,6 +14,7 @@ import {
 } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import GridPage from "../page";
+import { typeDisplayName } from "@/components/campaign/display-names";
 
 /** A tiny harness exposing execute/regenerate so loading states can be driven. */
 function Harness() {
@@ -64,6 +65,27 @@ describe("GridPage", () => {
     expect(screen.getByText("OPENROUTER")).toBeTruthy();
     expect(screen.getByText("NO LOGO")).toBeTruthy();
     expect(screen.getByText(/✓ 0 approved/)).toBeTruthy();
+    expect(screen.getByText("seed")).toBeTruthy();
+    expect(screen.getByText(typeDisplayName("social-post"))).toBeTruthy();
+    expect(screen.queryByText("social-post")).toBeNull();
+  });
+
+  test("a short-video brief shows the type display name on the review summary, never the raw id", async () => {
+    seedPersistedRun([makeAsset()]);
+    const stored = JSON.parse(localStorage.getItem("cf:brief") ?? "{}") as Record<string, unknown>;
+    localStorage.setItem("cf:brief", JSON.stringify({ ...stored, type: "short-video" }));
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText(typeDisplayName("short-video"))).toBeTruthy();
+    expect(screen.queryByText("short-video")).toBeNull();
+  });
+
+  test("a stored type banner shows Social post on the review summary, never an empty chip", async () => {
+    seedPersistedRun([makeAsset()]);
+    const stored = JSON.parse(localStorage.getItem("cf:brief") ?? "{}") as Record<string, unknown>;
+    localStorage.setItem("cf:brief", JSON.stringify({ ...stored, type: "banner" }));
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText(typeDisplayName("social-post"))).toBeTruthy();
+    expect(screen.queryByText("banner")).toBeNull();
   });
 
   test("shows a descriptor chip on variation cells", async () => {

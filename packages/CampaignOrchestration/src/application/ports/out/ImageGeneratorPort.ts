@@ -1,6 +1,7 @@
 import type { Product } from "../../../domain/entities/Product.js";
 import type { AspectRatio } from "../../../domain/value-objects/AspectRatio.vo.js";
 import type { BackgroundSource } from "../../../domain/value-objects/BackgroundSource.vo.js";
+import type { CampaignType } from "../../../domain/value-objects/campaign-types.js";
 
 /**
  * Campaign context handed to background generation so adapters (e.g. a GenAI
@@ -11,6 +12,11 @@ export interface BackgroundContext {
   readonly campaignMessage: string;
   readonly targetAudience: string;
   readonly targetRegion: string;
+  /**
+   * Optional campaign type (D108 / F5). Absent means social-post — adapters
+   * always interpolate a type sentence so prompts change once, deliberately.
+   */
+  readonly campaignType?: CampaignType;
   /** Variation-plan seed. GenAI adapters hash it into the background cache key. */
   readonly seed?: number;
   /** Palette shift in hue-circle turns. Applied only by the procedural generator. */
