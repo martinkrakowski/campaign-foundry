@@ -4467,3 +4467,49 @@ D118) remain deferred.
 **Seats:** agy refuses a `-high` model id with a lower `--effort`; the effort flag must match the id's suffix.
 
 **Next:** L1 (the vocabulary) per the plan's wave line — not dispatched; awaits the owner's go-ahead.
+
+---
+
+## 2026-09-08 — Lane L1a: the creative vocabulary (D119, D120, D124)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `packages/CampaignOrchestration/src/domain/value-objects/advertising-units.ts`: `ADVERTISING_UNITS = ["standard-web"] as const`, `AdvertisingUnit`, `DEFAULT_ADVERTISING_UNIT = "standard-web"` (D119, §1 F7).
+  - `packages/CampaignOrchestration/src/domain/value-objects/layer-kinds.ts`: `LAYER_KINDS = ["image", "fill", "static-text", "animated-text", "html", "video", "logo", "accent", "shade"] as const`, `LayerKind` (D119, D131).
+  - `packages/CampaignOrchestration/src/domain/value-objects/creative-types.ts`: `CREATIVE_TYPES = ["image-text", "image-html", "video"] as const`, `CreativeType`, `CreativeTypeRule`, and `CREATIVE_TYPE_RULES` compatibility table (D119, D124, D131).
+  - `packages/CampaignOrchestration/src/domain/value-objects/creative-templates.ts`: `CANONICAL_TEMPLATE_IDS`, `CanonicalTemplateId`, `CreativeTemplateLayer`, `CreativeTemplate`, and `CANONICAL_TEMPLATES` for `canonical-image-text`, `canonical-image-html`, and `canonical-video` with z-ordered layers (D123, D128).
+  - `packages/CampaignOrchestration/src/domain/value-objects/campaign-types.ts`: re-parented presets over `{ unit, creativeType, template, platforms, formats, mode }` per D120; existing platforms/formats/mode values unchanged.
+  - `packages/CampaignOrchestration/src/domain/value-objects/index.ts`: exported 4 new files in alphabetical order with `.js` extension.
+  - `packages/CampaignOrchestration/package.json`: added export map entries mirroring `./campaign-types`.
+  - Added unit test suites beside each new constant file and expanded `campaign-types.test.ts`.
+- **Decisions:**
+  - Followed D119: 3-level union-keyed domain constants.
+  - Followed D120: re-parented campaign types to preset over unit, creativeType, template while preserving platform/format values.
+  - Followed D123 & D128: ownerless, versioned canonical templates with array position defining z-order (no separate order field); `image-text` order matches compositor draw order (`["image", "shade", "accent", "static-text", "logo"]`).
+  - Followed D124: declared compatibility rules table pinning accepts, required, and outputFamily.
+  - Followed D131: `fill` is in `LAYER_KINDS` vocabulary but accepted by no creative type in L1.
+- **Mutation Testing:**
+  - Mutation: added `"fill"` to `image-text`'s `accepts` in `packages/CampaignOrchestration/src/domain/value-objects/creative-types.ts`:
+    ```diff
+    --- a/packages/CampaignOrchestration/src/domain/value-objects/creative-types.ts
+    +++ b/packages/CampaignOrchestration/src/domain/value-objects/creative-types.ts
+    @@ -24,7 +24,7 @@ export interface CreativeTypeRule {
+     export const CREATIVE_TYPE_RULES: Readonly<Record<CreativeType, CreativeTypeRule>> = {
+       "image-text": {
+         unit: "standard-web",
+    -    accepts: ["image", "shade", "accent", "static-text", "animated-text", "logo"],
+    +    accepts: ["image", "fill", "shade", "accent", "static-text", "animated-text", "logo"],
+         required: ["image", "static-text"],
+         outputFamily: "static",
+       },
+    ```
+  - Test run: `npx vitest run packages/CampaignOrchestration/src/domain/value-objects/__tests__/creative-types.test.ts`
+  - Output: 2 tests failed:
+    `FAIL packages/CampaignOrchestration/src/domain/value-objects/__tests__/creative-types.test.ts > creative types and compatibility rules (D119, D124, D131) > fill is accepted by no creative type (pins D131)`
+    `AssertionError: creative type "image-text" must not accept "fill" until L11 (D131): expected true to be false`
+  - Mutation reverted cleanly and tests re-verified green.
+- **Left open:**
+  - Lane L1b: `CampaignBrief`, `load-brief.ts`, and `brief-yaml.ts` carrying `template` and defaulting at load time.
+- **Remediation (PR #260 finding):** tightened `CampaignTypePreset.template` from `string` to `CanonicalTemplateId` via `import type`, verified no cycle with `creative-templates.ts`, added `CANONICAL_TEMPLATE_IDS` / preset template consistency test, and verified `"canonical-vidyo"` mutation fails `yarn typecheck` with TS2820.
+- **Remediation (PR #260 fix round 2):** replaced scalar `outputFamily` with non-empty list `outputFamilies` on `CreativeTypeRule` (`image-text` has `["static", "motion"]` per §2.1), asserted preset formats are a subset of `outputFamilies`, loosened `CreativeTemplate.version` to `number` (tested positive integer), and removed duplicate loop in `campaign-types.test.ts`.
+
