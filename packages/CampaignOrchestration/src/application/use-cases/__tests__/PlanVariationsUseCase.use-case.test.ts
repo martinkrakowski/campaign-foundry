@@ -2,6 +2,8 @@ import { describe, test, expect } from "vitest";
 import { seedFrom } from "@campaignfoundry/shared";
 import type { CampaignBrief } from "../../../domain/entities/CampaignBrief.js";
 import { BRIEF_SCHEMA_VERSION } from "../../../domain/value-objects/brief-schema-version.js";
+import { DEFAULT_CAMPAIGN_TYPE } from "../../../domain/value-objects/campaign-types.js";
+import { templateFromCanonical } from "../../../domain/value-objects/brief-template.js";
 import type { Product } from "../../../domain/entities/Product.js";
 import type { Variant } from "../../../domain/entities/Variant.js";
 import type { VariationPlan } from "../../../domain/value-objects/VariationPlan.vo.js";
@@ -19,6 +21,7 @@ const product = (id: string): Product => ({
 
 const brief = (over: Partial<CampaignBrief> = {}): CampaignBrief => ({
   schemaVersion: BRIEF_SCHEMA_VERSION,
+  template: templateFromCanonical(over.type ?? DEFAULT_CAMPAIGN_TYPE),
   id: "golden",
   targetRegion: "DE",
   targetAudience: "audience",

@@ -2,6 +2,8 @@ import { describe, test, expect, vi } from "vitest";
 import { seedFrom } from "@campaignfoundry/shared";
 import type { CampaignBrief } from "../../entities/CampaignBrief.js";
 import { BRIEF_SCHEMA_VERSION } from "../brief-schema-version.js";
+import { DEFAULT_CAMPAIGN_TYPE } from "../campaign-types.js";
+import { templateFromCanonical } from "../brief-template.js";
 import type { Product } from "../../entities/Product.js";
 import { LAYOUT_VALUES, TONE_VALUES } from "../Treatment.vo.js";
 import { MOTION_KINDS } from "../MotionKind.vo.js";
@@ -32,6 +34,7 @@ const product = (id: string): Product => ({
 
 const brief = (over: Partial<CampaignBrief> = {}): CampaignBrief => ({
   schemaVersion: BRIEF_SCHEMA_VERSION,
+  template: templateFromCanonical(over.type ?? DEFAULT_CAMPAIGN_TYPE),
   id: "golden",
   targetRegion: "DE",
   targetAudience: "audience",

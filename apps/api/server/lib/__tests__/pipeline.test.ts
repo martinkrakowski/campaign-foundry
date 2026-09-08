@@ -2,11 +2,18 @@ import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { GenerateCampaignUseCase, BRIEF_SCHEMA_VERSION, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import {
+  GenerateCampaignUseCase,
+  BRIEF_SCHEMA_VERSION,
+  DEFAULT_CAMPAIGN_TYPE,
+  templateFromCanonical,
+  type CampaignBrief,
+} from "@campaignfoundry/CampaignOrchestration";
 import { ALLOWED_IMAGE_MODELS, buildPipeline, copyGenerator, messageFont, platformZones, runCampaign } from "../pipeline.js";
 
 const brief: CampaignBrief = {
   schemaVersion: BRIEF_SCHEMA_VERSION,
+  template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
   id: "camp",
   targetRegion: "DE",
   targetAudience: "a",

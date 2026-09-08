@@ -5,6 +5,22 @@ defaults: &defaults
   tone: bold
 
 schemaVersion: 1
+template:
+  id: canonical-image-text
+  version: 1
+  creativeType: image-text
+  unit: standard-web
+  layers:
+    - id: image
+      kind: image
+    - id: shade
+      kind: shade
+    - id: accent
+      kind: accent
+    - id: static-text
+      kind: static-text
+    - id: logo
+      kind: logo
 id: corpus-anchors-merge
 campaignMessage: Merge me.
 targetAudience: Everyone

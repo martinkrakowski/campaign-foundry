@@ -3,6 +3,7 @@ import type { CopyTimeline } from "../value-objects/CopyTimeline.vo.js";
 import type { Style } from "../value-objects/creative-style.js";
 import type { CampaignType } from "../value-objects/campaign-types.js";
 import type { DisplaySize } from "../value-objects/display-sizes.js";
+import type { BriefTemplate } from "../value-objects/brief-template.js";
 import type { Product } from "./Product.js";
 
 /**
@@ -17,6 +18,8 @@ export interface CampaignBrief {
    * The brief schema version (D133: required in the domain, defaulted at the boundary).
    */
   readonly schemaVersion: number;
+  /** The creative template this campaign renders (D120/D123: pinned reference + materialised layers). Required in domain at load; optional on interface until L3 updates web editor. */
+  readonly template?: BriefTemplate;
   readonly id: string;
   readonly targetRegion: string;
   readonly targetAudience: string;

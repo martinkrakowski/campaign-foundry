@@ -52,6 +52,22 @@ describe("dumpBrief", () => {
     expect(yaml.indexOf("schemaVersion:")).toBeLessThan(yaml.indexOf("id:"));
   });
 
+  test("emits template after schemaVersion and before id (D120, D123)", () => {
+    const yaml = dumpBrief({
+      schemaVersion: 1,
+      template: {
+        id: "canonical-image-text",
+        version: 1,
+        creativeType: "image-text",
+        unit: "standard-web",
+        layers: [{ id: "img", kind: "image" }],
+      },
+      ...brief,
+    });
+    expect(yaml.indexOf("schemaVersion:")).toBeLessThan(yaml.indexOf("template:"));
+    expect(yaml.indexOf("template:")).toBeLessThan(yaml.indexOf("id:"));
+  });
+
   test("emits canonical key order and quotes unsafe strings", () => {
     const yaml = dumpBrief(brief);
     expect(yaml.indexOf("id:")).toBeLessThan(yaml.indexOf("targetRegion:"));
