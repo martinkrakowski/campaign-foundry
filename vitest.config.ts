@@ -20,6 +20,7 @@ export default defineConfig({
           name: "node",
           environment: "node",
           include: ["packages/*/src/**/*.test.ts"],
+          exclude: ["packages/ui/**"],
         },
       },
       {
@@ -43,7 +44,7 @@ export default defineConfig({
         test: {
           name: "web",
           environment: "happy-dom",
-          include: ["apps/web/src/**/*.test.{ts,tsx}"],
+          include: ["apps/web/src/**/*.test.{ts,tsx}", "packages/ui/src/**/*.test.{ts,tsx}"],
           setupFiles: ["./apps/web/vitest.setup.ts"],
         },
       },
@@ -66,6 +67,7 @@ export default defineConfig({
       thresholds: { lines: 100, functions: 100, branches: 100, statements: 100 },
       include: [
         "packages/*/src/**/*.{ts,tsx}",
+        "packages/ui/src/**/*.{ts,tsx}",
         "apps/api/server/**/*.ts",
         "apps/api/bin/**/*.ts",
         "apps/web/src/**/*.{ts,tsx}",

@@ -17,3 +17,19 @@ layers:
   infrastructure:
     access_rule: "adapters"
     allowed_imports: ["domain", "application", "@campaignfoundry/shared"]
+
+  # hexagen validates layer imports only for domain/application, so
+  # presentation.allowed_imports is never consulted and ui.depends_on does not
+  # gate anything. The layer stays because D100 wanted the decision recorded
+  # in the invariants; packages/ui/src/__tests__/kit-boundaries.test.ts is the
+  # enforcing gate for the kit's import boundary.
+  #
+  # D100 — the kit is a presentation package, not a hexagonal slice. Allowed
+  # imports are the shared kernel only so the kit stays domain-free of sibling
+  # features. Existing value-object imports from CampaignOrchestration /
+  # Distribution are granted by the ui context's depends_on (the kit's current
+  # contract; kit-boundaries already scopes them out). An exemption would have
+  # left packages/ui outside the gate.
+  presentation:
+    access_rule: "ui-kit"
+    allowed_imports: ["@campaignfoundry/shared"]

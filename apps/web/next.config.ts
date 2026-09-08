@@ -13,6 +13,7 @@ const nextConfig: NextConfig = {
     "@campaignfoundry/GovernanceAndCompliance",
     "@campaignfoundry/Distribution",
     "@campaignfoundry/shared",
+    "@campaignfoundry/ui",
   ],
   // The workspace packages are raw TypeScript with NodeNext-style `.js` import
   // specifiers; map the alias so webpack resolves them to the `.ts` sources.

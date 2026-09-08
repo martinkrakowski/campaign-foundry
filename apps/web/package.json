@@ -12,6 +12,7 @@
   "dependencies": {
     "@campaignfoundry/CampaignOrchestration": "workspace:*",
     "@campaignfoundry/Distribution": "workspace:*",
+    "@campaignfoundry/ui": "workspace:*",
     "clsx": "^2.1.0",
     "js-yaml": "^5.4.1",
     "next": "^15.0.0",

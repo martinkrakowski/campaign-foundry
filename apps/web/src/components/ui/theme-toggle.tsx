@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { IconButton } from "./icon-button";
+import { IconButton } from "@campaignfoundry/ui";
 import { themeToDark, themeToLight } from "@/components/campaign/messages";
 import {
   DEFAULT_THEME,

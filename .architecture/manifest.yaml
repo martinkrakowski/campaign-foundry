@@ -261,3 +261,35 @@ bounded_contexts:
           out: []
       infrastructure:
         adapters: []
+  - name: ui
+    type: generic
+    description: >
+      Domain-free presentation kit. No hexagonal split — files live at src/
+      and are the presentation layer (D100). The four files that import the
+      campaign feature stay in apps/web.
+    depends_on:
+      - shared
+      - CampaignOrchestration
+      - Distribution
+    uiFramework: Next.js
+    apiFramework: Express
+    layers:
+      domain:
+        entities: []
+        value_objects: []
+        domain_services: []
+      application:
+        use_cases: []
+        ports:
+          in: []
+          out: []
+      infrastructure:
+        adapters: []
+    generator:
+      tsConfig:
+        compilerOptions:
+          jsx: react-jsx
+          lib:
+            - DOM
+            - DOM.Iterable
+            - ES2022

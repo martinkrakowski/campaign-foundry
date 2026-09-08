@@ -5,8 +5,7 @@ import { cn } from "@/lib/cn";
 import { SECTION_TITLES, sectionOrder } from "@/components/campaign/sections";
 import type { CampaignMode } from "@/components/campaign/editor-state";
 import type { FieldErrors } from "@/components/campaign/validate";
-import { ErrorPill } from "./error-pill";
-import { Eyebrow } from "./eyebrow";
+import { ErrorPill, Eyebrow } from "@campaignfoundry/ui";
 import * as messages from "@/components/campaign/messages";
 
 /**

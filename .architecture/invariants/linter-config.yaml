@@ -10,6 +10,7 @@ global_whitelist:
   # whitelisted: ports/types are re-exported through it and package.json exposes
   # no other subpath, so there is no deep-import surface to exempt.
   - "@campaignfoundry/CampaignOrchestration"
+  - "@campaignfoundry/ui"
 
 test_double_rules:
   allowed_cross_package_imports: true
