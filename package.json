@@ -9,10 +9,11 @@
   ],
   "scripts": {
     "generate": "tsx apps/api/bin/generate.ts",
+    "wave:status": "tsx tools/wave-status/bin.ts",
     "build": "turbo build",
     "dev": "turbo dev",
     "lint": "turbo lint",
-    "typecheck": "turbo typecheck",
+    "typecheck": "turbo typecheck && tsc -p tools/wave-status --noEmit",
     "test": "vitest run",
     "test:cov": "vitest run --coverage",
     "test:watch": "vitest",

@@ -93,3 +93,29 @@ Deeper guidance lives in `.agents/`:
 - `tech-stack.md` — exact tools, with negative examples
 - `session-log.md` — running log of AI-assisted sessions (present when session
   logging is enabled)
+
+## Wave Observability
+
+When you are running the delegated pipeline (`/orchestrate-wave`), a read-only status
+server can show every lane's stage, liveness, PR and gate at a glance.
+
+| Trigger | Command | Notes |
+| --- | --- | --- |
+| Starting a wave | `yarn wave:status` | Serves `http://127.0.0.1:4317`. Read-only; it starts, kills and merges nothing. |
+| Any stage transition | append an event (`scripts/wave-event.sh`) | **Emitting is part of the stage, not a courtesy** — see the skill. |
+
+**Emit, do not infer.** Log sizes, `EXIT` markers and PR checks are derivable; which stage
+a lane is in, how many findings were fixed versus refuted, and whether a mutation actually
+bit are not — they exist only if you record them. The page shows derived facts and reported
+events side by side and **flags disagreement rather than resolving it**: a lane reporting
+`settled` with no PR is the single most useful thing the pipeline can tell you.
+
+The server never binds `3000` or `3001` — those are the operator's `next dev` and API, and
+it refuses them by construction.
+
+Two constraints on that text, both deliberate. It **never says the dashboard is required** —
+a wave must run correctly with nothing watching, and an agent that cannot start the server
+should proceed, not stop. And it repeats *emitting is part of the stage* in the contract as
+well as the skill, because the one thing this session proved is that a duty defined as a
+separate final step is the duty that slides.
+
