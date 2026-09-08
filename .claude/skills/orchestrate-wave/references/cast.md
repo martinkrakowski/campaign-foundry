@@ -3,16 +3,16 @@
 Re-probe before trusting any row: `grok models`, `agy models`, `opencode models`. Two of these
 fail with a misleading error rather than "no such model".
 
-## Seats — the order the owner set on 2026-09-08
+## Seats — the order the owner set on 2026-09-08 (implementers reordered the same day)
 
 Implementers rotate in this order; the next seat takes a lane only when the one before it is
 unfunded, hangs (0-byte log at five minutes), or dies on arrival twice. **grok never implements.**
 
 | Seat | Command (every id probed live on 2026-09-08) |
 |---|---|
-| **implementer 1** | `MODEL=opencode-go/glm-5.3-flash dispatch-lane.sh …` — the script's default. Note the provider: `opencode-go/`, which is funded; `opencode/glm-5.3-flash` answers *Insufficient balance* on the same account. |
-| **implementer 2** | `agy --print "$(cat BRIEF.md)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high --print-timeout 90m` (detached; the effort flag must match the id's suffix — `-high` with `--effort low` is refused) |
-| **implementer 3** | `MODEL=opencode/big-pickle dispatch-lane.sh …` |
+| **implementer 1** | `agy --print "$(cat BRIEF.md)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high --print-timeout 90m` (detached; the effort flag must match the id's suffix — `-high` with `--effort low` is refused) |
+| **implementer 2** | `MODEL=opencode/big-pickle dispatch-lane.sh …` — the script's default. |
+| **implementer 3** | `MODEL=opencode-go/glm-5.3-flash dispatch-lane.sh …`. Note the provider: `opencode-go/`, which is funded; `opencode/glm-5.3-flash` answers *Insufficient balance* on the same account. |
 | **PR reviewer** | `opencode run --model opencode-go/hy4-preview "$(cat REVIEW.md)"` in a **throwaway worktree** of the branch (so nothing it writes can matter). It answers a one-word probe with a paragraph of planning: give it a schema for the verdict and read past the preamble. |
 | **remediator** | the lane's own implementer first, then the next in the rotation. (Proposed, not yet the owner's rule: grok returns as remediator only — its 4/4 record — after its quota resets **2026-09-14 16:28**, and still never implements.) |
 | **plan reviewer** | `agy --print "$(cat PLAN-REVIEW.md)" --dangerously-skip-permissions --effort high --model gemini-3.1-pro-high` — one reviewer. (The id resolves again as of 2026-09-08; it did not on 09-07.) |
