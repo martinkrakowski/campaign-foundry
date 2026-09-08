@@ -22,9 +22,25 @@
       "types": "./src/domain/value-objects/brief-schema-version.ts",
       "default": "./src/domain/value-objects/brief-schema-version.ts"
     },
+    "./advertising-units": {
+      "types": "./src/domain/value-objects/advertising-units.ts",
+      "default": "./src/domain/value-objects/advertising-units.ts"
+    },
     "./campaign-types": {
       "types": "./src/domain/value-objects/campaign-types.ts",
       "default": "./src/domain/value-objects/campaign-types.ts"
+    },
+    "./creative-templates": {
+      "types": "./src/domain/value-objects/creative-templates.ts",
+      "default": "./src/domain/value-objects/creative-templates.ts"
+    },
+    "./creative-types": {
+      "types": "./src/domain/value-objects/creative-types.ts",
+      "default": "./src/domain/value-objects/creative-types.ts"
+    },
+    "./layer-kinds": {
+      "types": "./src/domain/value-objects/layer-kinds.ts",
+      "default": "./src/domain/value-objects/layer-kinds.ts"
     },
     "./creative-geometry": {
       "types": "./src/domain/value-objects/creative-geometry.ts",
