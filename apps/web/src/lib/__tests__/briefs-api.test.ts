@@ -359,6 +359,35 @@ describe("packageCampaign / listPackages", () => {
     await expect(packageCampaign("camp", ["x"])).resolves.toEqual({ platforms: [] });
   });
 
+  test("a display item carries its size instead of a ratio; a canvas-less one is dropped (D113)", async () => {
+    const display = {
+      productId: "alpha",
+      size: "728x90",
+      treatment: "default",
+      source: "alpha/728x90.png",
+      packagedPath: "packages/camp/google-display/alpha/728x90.png",
+      bytes: 12,
+      checks: { size: "pass" as const },
+    };
+    mockFetch(() =>
+      json({
+        platforms: [
+          {
+            platformId: "google-display",
+            items: [
+              display,
+              { ...display, aspectRatio: "1:1", packagedPath: "both.png" }, // two canvases: corrupt
+              { ...display, size: undefined, packagedPath: "none.png" }, // no canvas: corrupt
+            ],
+          },
+        ],
+      }),
+    );
+    await expect(packageCampaign("camp", ["google-display"])).resolves.toEqual({
+      platforms: [{ platformId: "google-display", items: [display] }],
+    });
+  });
+
   test("listPackages returns the manifests and treats 404 as empty", async () => {
     mockFetch((url) => {
       expect(url).toBe(`${API}/campaigns/packages/camp`);

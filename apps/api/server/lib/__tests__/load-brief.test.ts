@@ -350,6 +350,25 @@ describe("parseRegenerateOnly", () => {
     ]);
   });
 
+  test("maps a display cell target by size, and rejects a canvas-less one (D113)", () => {
+    expect(parseRegenerateOnly([{ productId: "p", size: "728x90", treatment: "default" }])).toEqual([
+      { productId: "p", size: "728x90", treatment: "default" },
+    ]);
+    expect(() => parseRegenerateOnly([{ productId: "p", treatment: "default" }])).toThrow(/require a canvas/);
+  });
+
+  test("rejects an entry carrying both canvases — exactly one of the two (D113)", () => {
+    expect(() =>
+      parseRegenerateOnly([{ productId: "p", aspectRatio: "1:1", size: "728x90", treatment: "default" }]),
+    ).toThrow(/must carry exactly one canvas/);
+  });
+
+  test("rejects a size outside the display-size vocabulary (D113)", () => {
+    expect(() => parseRegenerateOnly([{ productId: "p", size: "999x999", treatment: "default" }])).toThrow(
+      /must be one of "300x250", "728x90", "160x600", "320x50", "300x600"/,
+    );
+  });
+
   test("maps variation targets with optional attempt", () => {
     expect(parseRegenerateOnly([{ productId: "p", variantIndex: 0 }])).toEqual([
       { productId: "p", variantIndex: 0 },
@@ -455,6 +474,16 @@ describe("parseBrief display sizes (D113)", () => {
   test("a non-string member is refused as not an array of strings", () => {
     expect(() => parseBrief({ ...valid, output: { sizes: [728] } })).toThrow(
       'Campaign brief field "output.sizes" must be a non-empty array of strings; got [728].',
+    );
+  });
+
+  test("a repeated size is refused in both modes, naming the duplicate", () => {
+    const dup = { ...valid, output: { sizes: ["728x90", "300x250", "728x90"] } };
+    expect(() => parseBrief(dup)).toThrow(
+      'Campaign brief field "output.sizes" must not repeat a size; "728x90" appears more than once.',
+    );
+    expect(() => parseBrief(dup, { enforceCapabilities: false })).toThrow(
+      new RegExp('must not repeat a size; "728x90" appears more than once'),
     );
   });
 

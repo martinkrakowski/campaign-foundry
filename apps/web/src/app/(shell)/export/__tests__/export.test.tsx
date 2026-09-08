@@ -100,6 +100,52 @@ describe("ExportPage — platform packaging", () => {
     expect((screen.getByRole("button", { name: "Download zip" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  test("a display package row names its size, not a ratio (D113)", async () => {
+    const user = userEvent.setup();
+    const assets = [
+      makeAsset({ size: "728x90", outputPath: "alpha/728x90.png" }),
+    ];
+    seedPersistedRun(assets);
+    mockPipelineApi({
+      report: { halted: false, assets, log: { entries: [], campaignId: "seed" } },
+      packages: () => json({ platforms: [] }, 404),
+      packagePost: () =>
+        json({
+          platforms: [
+            {
+              platformId: "google-display",
+              items: [item({ aspectRatio: undefined, size: "728x90", packagedPath: "packages/seed/google-display/alpha/728x90.png" })],
+            },
+          ],
+        }),
+    });
+    renderWithRun(<ExportPage />);
+    await screen.findByRole("group", { name: "Platforms" });
+    await user.click(screen.getByRole("button", { name: "google-display" }));
+    await user.click(await screen.findByRole("button", { name: "Package" }));
+    expect(await screen.findByText("packages/seed/google-display/alpha/728x90.png")).toBeTruthy();
+    expect(screen.getByText("alpha @ 728x90 · default")).toBeTruthy();
+  });
+
+  test("a social-only run lists no display profile — packaging one would deterministically fail", async () => {
+    seedPersistedRun([makeAsset()]);
+    renderWithRun(<ExportPage />);
+    expect(await screen.findByRole("group", { name: "Platforms" })).toBeTruthy();
+    for (const id of ["google-display", "meta-audience-network", "display-web"]) {
+      expect(screen.queryByRole("button", { name: id })).toBeNull();
+    }
+  });
+
+  test("a run with a 728x90 asset lists the display profiles that accept it", async () => {
+    seedPersistedRun([makeAsset(), makeAsset({ size: "728x90", outputPath: "alpha/728x90.png" })]);
+    renderWithRun(<ExportPage />);
+    expect(await screen.findByRole("group", { name: "Platforms" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "google-display", pressed: false })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "display-web", pressed: false })).toBeTruthy();
+    // meta-audience-network accepts no 728x90 unit, so it stays hidden.
+    expect(screen.queryByRole("button", { name: "meta-audience-network" })).toBeNull();
+  });
+
   test("sends the approved asset keys as include, and omits include with no decisions", async () => {
     const user = userEvent.setup();
     const assets = [

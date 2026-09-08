@@ -1,4 +1,5 @@
 import type { AspectRatioValue } from "../../../domain/value-objects/aspect-ratios.js";
+import type { DisplaySize } from "../../../domain/value-objects/display-sizes.js";
 import type { SafeInsets } from "./CompositorPort.js";
 
 /**
@@ -8,10 +9,13 @@ import type { SafeInsets } from "./CompositorPort.js";
  * to draw motion only where a requested platform can package a clip.
  */
 export interface PlatformSafeZone {
-  readonly ratio: AspectRatioValue;
+  /** Social profiles only; a display profile carries `sizes` instead (D116). */
+  readonly ratio?: AspectRatioValue;
   readonly safeInsets: SafeInsets;
   /** Output formats the platform accepts (`static` | `motion`). */
   readonly formats: readonly string[];
+  /** Display profiles only (A3): the units the profile accepts, with their insets. */
+  readonly sizes?: readonly { readonly size: DisplaySize; readonly insets: SafeInsets }[];
 }
 
 /** Resolve a platform id from `output.platforms`; unknown ids resolve to undefined and are ignored. */

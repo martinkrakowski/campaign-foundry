@@ -274,7 +274,16 @@ describe("pipeline composition root", () => {
       formats: ["motion"],
     });
     expect(platformZones("myspace")).toBeUndefined();
-    expect(platformZones("google-display")).toBeUndefined();
+    // A display profile carries a `sizes` list instead of a ratio (D116): the run
+    // path renders its units with the per-size insets (F5), so it now resolves.
+    expect(platformZones("google-display")).toEqual({
+      safeInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      formats: ["static"],
+      sizes: expect.arrayContaining([
+        { size: "728x90", insets: { top: 0, right: 0, bottom: 0, left: 0 } },
+        { size: "300x250", insets: { top: 8, right: 8, bottom: 8, left: 8 } },
+      ]),
+    });
   });
 
   test("copyGenerator is undefined without OPENROUTER_API_KEY and constructed with it", () => {

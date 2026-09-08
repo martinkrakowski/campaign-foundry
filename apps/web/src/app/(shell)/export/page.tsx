@@ -1,17 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { API, assetKey, assetLabel, useRun } from "@/lib/run-context";
+import { API, assetCanvas, assetKey, assetLabel, useRun } from "@/lib/run-context";
+import { platformProfile, visiblePlatformIds } from "@campaignfoundry/Distribution/platform-profiles";
 import { MiniChip } from "@/components/ui";
-
-/** Always-visible PLATFORM_PROFILES (static) — same list as wizard STATIC_PLATFORMS. */
-const STATIC_PLATFORMS = ["instagram-feed", "linkedin", "x"] as const;
-
-/**
- * Motion PLATFORM_PROFILES. Offered once the run holds a motion creative: the
- * API only produces those while its ffmpeg probe is on, so the run is the proof.
- */
-const MOTION_PLATFORMS = ["instagram-story", "instagram-reel", "tiktok", "youtube-short"] as const;
 
 /** Clip length shown on motion export rows, in whole seconds (the brief's `duration` axis). */
 const formatDuration = (seconds: number): string => `${seconds}s`;
@@ -30,7 +22,7 @@ export default function ExportPage() {
     packageSelected,
     loadPackages,
   } = useRun();
-  const [platform, setPlatform] = useState<string>(STATIC_PLATFORMS[0]);
+  const [platform, setPlatform] = useState<string>("instagram-feed");
 
   // The manifests — and the zips built from them — live under the campaign id the
   // on-screen run ran under, which a "Run this draft" run keeps even though the
@@ -60,9 +52,20 @@ export default function ExportPage() {
   const hasDecisions = pending < assets.length;
   const approvedKeys = useMemo(() => approved.map(assetKey), [approved]);
 
-  // Motion platforms join the picker once the run contains a motion creative.
+  // The picker is the profile table itself (D116): the seven social platforms,
+  // the display ones that package by size — and the motion platforms join once
+  // the run contains a motion creative, since the API produces those only while
+  // its ffmpeg probe is on, so the run is the proof.
   const hasMotion = assets.some((a) => a.format === "motion");
-  const platforms: readonly string[] = hasMotion ? [...STATIC_PLATFORMS, ...MOTION_PLATFORMS] : STATIC_PLATFORMS;
+  // A display profile joins the picker only when the run produced an asset at one
+  // of its sizes: the API fails a display profile with nothing to package, so on a
+  // social-only run its Package action would deterministically error. Hidden, on
+  // the same terms as motion platforms — the picker lists what can be packaged.
+  const runSizes = new Set(assets.flatMap((a) => (a.size === undefined ? [] : [a.size])));
+  const platforms = visiblePlatformIds({ motion: hasMotion }).filter((id) => {
+    const slots = platformProfile(id)?.sizes;
+    return slots === undefined || slots.some((slot) => runSizes.has(slot.size));
+  });
   // A selection made while a motion platform was visible must not survive a run
   // switch that hides it: nothing hidden is ever packaged, and with no visible
   // selection there is nothing to package.
@@ -214,12 +217,12 @@ export default function ExportPage() {
           <div className="mt-4 divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
             {selected.items.map((item) => (
               <div
-                key={`${item.productId}/${item.aspectRatio}/${item.treatment}/${item.packagedPath}`}
+                key={`${item.productId}/${assetCanvas(item)}/${item.treatment}/${item.packagedPath}`}
                 className="flex items-center justify-between gap-4 p-4"
               >
                 <div className="min-w-0">
                   <div className="truncate text-[13px] text-text-primary">
-                    {item.productId} @ {item.aspectRatio} · {item.treatment}
+                    {item.productId} @ {assetCanvas(item)} · {item.treatment}
                     {item.format === "motion" && item.durationSec !== undefined && ` · ${formatDuration(item.durationSec)}`}
                   </div>
                   <div className="truncate font-mono text-[11px] text-text-muted">{item.packagedPath}</div>

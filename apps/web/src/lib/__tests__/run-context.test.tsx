@@ -3,7 +3,7 @@ import { renderHook, act, waitFor, screen, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { createElement, type ReactNode } from "react";
 import { assetIdentity } from "@campaignfoundry/CampaignOrchestration";
-import { RunProvider, useRun, assetKey, assetLabel, fetchPersistedRun, type Asset } from "@/lib/run-context";
+import { RunProvider, useRun, assetKey, assetCanvas, assetLabel, fetchPersistedRun, type Asset } from "@/lib/run-context";
 import { json, jobOk, mockPipelineApi, EMPTY_REPORT, renderWithRun } from "@/__tests__/helpers";
 import { Header } from "@/components/shell/Header";
 import { CommandBar } from "@/components/shell/CommandBar";
@@ -33,8 +33,17 @@ describe("useRun", () => {
     expect(assetKey(asset({ productId: "p", aspectRatio: "9:16", treatment: "t" }))).toBe("p/9:16/t");
   });
 
+  test("assetCanvas names the canvas a row renders on; a corrupt row degrades to the empty key", () => {
+    expect(assetCanvas({ aspectRatio: "1:1" })).toBe("1:1");
+    expect(assetCanvas({ size: "728x90" })).toBe("728x90");
+    // The API's report guard keeps rows to exactly one canvas (D113); the empty
+    // fallback is defense-in-depth for a hand-edited report, never a real row.
+    expect(assetCanvas({})).toBe("");
+  });
+
   test("web assetKey and domain assetIdentity share classic and variation fixtures", () => {
     const classic = asset({ productId: "p", aspectRatio: "9:16", treatment: "t" });
+    const display = asset({ productId: "p", aspectRatio: undefined, size: "728x90", treatment: "t" });
     const variation = asset({
       productId: "p",
       aspectRatio: "1:1",
@@ -42,6 +51,9 @@ describe("useRun", () => {
       variantIndex: 3,
     });
     expect(assetKey(classic)).toBe(assetIdentity(classic));
+    // A display cell keys on its size — a 728x90 cell never collides with a ratio cell.
+    expect(assetKey(display)).toBe(assetIdentity(display));
+    expect(assetIdentity(display)).toBe("p/728x90/t");
     expect(assetKey(variation)).toBe(assetIdentity(variation));
     expect(assetIdentity(classic)).toBe("p/9:16/t");
     expect(assetIdentity(variation)).toBe("p/v3");
@@ -49,6 +61,9 @@ describe("useRun", () => {
 
   test("assetLabel includes v<index> for variation cells", () => {
     expect(assetLabel(asset({ productId: "p", aspectRatio: "9:16", treatment: "t" }))).toBe("p @ 9:16 · t");
+    expect(assetLabel(asset({ productId: "p", aspectRatio: undefined, size: "728x90", treatment: "t" }))).toBe(
+      "p @ 728x90 · t",
+    );
     expect(
       assetLabel(asset({ productId: "hydra-bottle", aspectRatio: "1:1", treatment: "headline-top-bold", variantIndex: 4 })),
     ).toBe("hydra-bottle @ 1:1 · v4 · headline-top-bold");
@@ -249,6 +264,37 @@ describe("RunProvider — review decisions", () => {
     });
     expect(result.current.assets[0].complianceScore).toBe(0.9);
     expect(result.current.decisions["alpha/1:1/default"]).toBeUndefined(); // cleared, back to review
+  });
+
+  test("re-roll of a display cell sends its size as the canvas (D113)", async () => {
+    const bodies: unknown[] = [];
+    const leaderboard = asset({
+      aspectRatio: undefined,
+      size: "728x90",
+      outputPath: "alpha/728x90.png",
+    });
+    mockPipelineApi({
+      post: (_url, init) => {
+        bodies.push(JSON.parse(init.body as string));
+        return json({ jobId: "job-1" }, 202);
+      },
+      job: () => jobOk({ halted: false, assets: [leaderboard], log: { entries: [] } }),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    // The display cell keys — and re-rolls — by its size, never a ratio.
+    expect(result.current.assets[0].outputPath).toBe("alpha/728x90.png");
+    act(() => result.current.decide("alpha/728x90/default", "rejected"));
+    await act(async () => {
+      await result.current.regenerateRejected();
+    });
+    expect(bodies[1]).toEqual(
+      expect.objectContaining({
+        regenerateOnly: [{ productId: "alpha", size: "728x90", treatment: "default" }],
+      }),
+    );
   });
 
   test("re-roll of a variant asset sends productId, variantIndex, attempt and increments", async () => {

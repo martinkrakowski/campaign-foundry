@@ -4,7 +4,8 @@ import type { GeneratedAsset, VariantDescriptor } from "../../domain/entities/Ge
 import type { Product } from "../../domain/entities/Product.js";
 import { variantTreatmentId, type Variant } from "../../domain/entities/Variant.js";
 import { AspectRatio } from "../../domain/value-objects/AspectRatio.vo.js";
-import type { AspectRatioValue } from "../../domain/value-objects/aspect-ratios.js";
+import { type AspectRatioValue } from "../../domain/value-objects/aspect-ratios.js";
+import { DISPLAY_SIZE_VALUES, type DisplaySize } from "../../domain/value-objects/display-sizes.js";
 import type { MotionKind } from "../../domain/value-objects/MotionKind.vo.js";
 import { DEFAULT_TREATMENT, SAFE_ID_PATTERN } from "../../domain/value-objects/Treatment.vo.js";
 import { styleProblem } from "../../domain/value-objects/creative-style.js";
@@ -162,8 +163,14 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       return this.executeVariation(brief, options, log);
     }
 
-    // 3-7. Generate every creative: one per (product × aspect ratio × treatment).
+    // 3-7. Generate every creative: one per (product × canvas × treatment), where the
+    // canvas is a social ratio (as today) or a display size from `output.sizes` (D113).
     const ratios = AspectRatio.all();
+    // Duplicates collapse: a repeated size would build two cells writing the same
+    // output path, the second silently overwriting the first. The parser rejects
+    // them; this dedupe holds the use case's own contract for a programmatic
+    // caller that bypassed parsing (the SAFE_ID defense-in-depth reasoning).
+    const sizes = [...new Set(brief.output?.sizes ?? [])];
     // A brief with no treatments still produces one creative per cell (back-compat).
     const treatments = brief.treatments?.length ? brief.treatments : [DEFAULT_TREATMENT];
     // Only namespace output by treatment when there's variation to disambiguate, so a
@@ -173,11 +180,13 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     // Selective regeneration (HITL re-roll): when `regenerateOnly` is present, only the
     // listed cells run — every other cell is skipped, leaving its output untouched.
     // Targets are matched by the same identity the review UI keys on. Absent → full run.
+    // The canvas key is the ratio for social cells and the size for display cells, so
+    // a `728x90` cell and a ratio cell can never collide (D113).
     const targets = options?.regenerateOnly;
     const targetKeys = targets
       ? new Set(
           targets.flatMap((t) =>
-            isVariationTarget(t) ? [] : [`${t.productId}/${t.aspectRatio}/${t.treatment}`],
+            isVariationTarget(t) ? [] : [`${t.productId}/${t.aspectRatio ?? t.size}/${t.treatment}`],
           ),
         )
       : null;
@@ -188,17 +197,22 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     if (targets !== undefined && targets.length > 0 && targets.some(isVariationTarget)) {
       return err(new Error(RE_ROLL_MODE_MISMATCH.randomizedTargetsOnClassic));
     }
-    const isTarget = (productId: string, ratioValue: string, treatmentId: string): boolean =>
-      targetKeys === null || targetKeys.has(`${productId}/${ratioValue}/${treatmentId}`);
+    const isTarget = (productId: string, canvas: string, treatmentId: string): boolean =>
+      targetKeys === null || targetKeys.has(`${productId}/${canvas}/${treatmentId}`);
+
+    // F5: per display size, the max-per-side union of the requested display platforms'
+    // insets for that size. A size no requested platform offers is absent from the map
+    // and renders with classic geometry, exactly like a ratio no platform targets.
+    const insetsBySize = unionSizeInsets(brief.output?.platforms, this.deps.platformSafeZones);
 
     // Count only the cells this run will actually touch (full matrix, or the subset).
     log.totalOperations = brief.products.reduce(
       (total, product) =>
         total +
-        ratios.reduce(
-          (perProduct, ratio) =>
+        [...ratios.map((ratio) => ratio.value), ...sizes].reduce(
+          (perProduct, canvas) =>
             perProduct +
-            treatments.filter((t) => isTarget(product.id, ratio.value, t.id)).length,
+            treatments.filter((t) => isTarget(product.id, canvas, t.id)).length,
           0,
         ),
       0,
@@ -212,7 +226,26 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       targetRegion: brief.targetRegion,
       campaignType: brief.type,
     };
-    // 3-6. Generate each in-scope cell (product × ratio): resolve its background, then
+    // A display unit resolves its background at the nearest social ratio's
+    // orientation — the background port speaks ratios only, and a leaderboard
+    // should ask for a wide background, not a square one. The compositor then
+    // draws it onto the exact pixel canvas. `forBackground` cannot fail for a
+    // vocabulary size (validateBrief has already gated the list), so there is
+    // no failure path here to cover.
+    const sizeCellsPrep: Array<{
+      readonly size: DisplaySize;
+      readonly backgroundRatio: AspectRatio;
+      readonly safeInsets?: SafeInsets;
+    }> = [];
+    for (const size of sizes) {
+      const insets = insetsBySize.get(size);
+      sizeCellsPrep.push({
+        size,
+        backgroundRatio: AspectRatio.forBackground({ size }),
+        ...(insets !== undefined ? { safeInsets: insets } : {}),
+      });
+    }
+    // 3-6. Generate each in-scope cell (product × canvas): resolve its background, then
     // composite/score/save every treatment that shares it. Cells run with BOUNDED
     // concurrency — background generation is the slow GenAI step, so a sequential run
     // overran the dev proxy's request timeout; an unbounded fan-out would instead
@@ -221,26 +254,42 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     // background is local to its cell and released once its composites are made. Each
     // generator still degrades on its own (Imagen → OpenRouter → procedural), so one
     // slow/failed provider can't stall the pool.
-    const cells = brief.products.flatMap((product) =>
-      ratios
+    const cells = brief.products.flatMap((product) => {
+      const ratioCells = ratios
         .map((ratio) => ({
           product,
-          ratio,
-          ratioTreatments: treatments.filter((t) => isTarget(product.id, ratio.value, t.id)),
+          canvas: ratio.value,
+          spec: { ratio: ratio.value },
+          backgroundRatio: ratio,
+          assetCanvas: { aspectRatio: ratio.value },
+          safeInsets: undefined,
+          treatments: treatments.filter((t) => isTarget(product.id, ratio.value, t.id)),
         }))
         // On a selective run, skip a ratio entirely when none of its treatments are targeted.
-        .filter((cell) => cell.ratioTreatments.length > 0),
-    );
+        .filter((cell) => cell.treatments.length > 0);
+      const sizeCells = sizeCellsPrep
+        .map(({ size, backgroundRatio, safeInsets }) => ({
+          product,
+          canvas: size,
+          spec: { size },
+          backgroundRatio,
+          assetCanvas: { size },
+          treatments: treatments.filter((t) => isTarget(product.id, size, t.id)),
+          ...(safeInsets !== undefined ? { safeInsets } : {}),
+        }))
+        .filter((cell) => cell.treatments.length > 0);
+      return [...ratioCells, ...sizeCells];
+    });
 
     const cellResults = await mapWithConcurrency(
       cells,
       MAX_CONCURRENT_BACKGROUNDS,
-      async ({ product, ratio, ratioTreatments }) => {
+      async ({ product, canvas, spec, backgroundRatio, assetCanvas, safeInsets, treatments: ratioTreatments }) => {
         // ResolveBackgroundAssets — reuse inputAsset or generate, once per cell.
-        const background = await this.deps.imageGenerator.resolveBackground(product, ratio, context);
+        const background = await this.deps.imageGenerator.resolveBackground(product, backgroundRatio, context);
         log.record(
           "ResolveBackgroundAssets",
-          `${product.id} @ ${ratio.value} — background: ${background.source}${background.source === "procedural" ? " (procedural fallback — no GenAI background)" : ""}`,
+          `${product.id} @ ${canvas} — background: ${background.source}${background.source === "procedural" ? " (procedural fallback — no GenAI background)" : ""}`,
           background.source === "procedural" ? "warn" : "info",
         );
 
@@ -254,12 +303,13 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
             message: copy,
             brandColor: product.primaryColor,
             logoPath: product.logoPath,
-            canvas: { ratio: ratio.value },
+            canvas: spec,
             layout: treatment.layout,
             tone: treatment.tone,
             // The brief's style (T5) rides every creative it renders, classic
             // included; absent → the renderer's defaults, byte-identical (D54).
             ...(brief.style !== undefined ? { style: brief.style } : {}),
+            ...(safeInsets !== undefined ? { safeInsets } : {}),
           });
 
           // ExecuteVisualComplianceCheck — brand-colour density.
@@ -269,15 +319,16 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
           );
 
           // SaveOutputFiles — the use case owns the path (OutputDirectoryConvention).
+          // A size is already path-safe ("728x90"); a ratio slugs its colons away.
           const outputPath = namespaceByTreatment
-            ? `${product.id}/${ratio.slug}/${treatment.id}.png`
-            : `${product.id}/${ratio.slug}.png`;
+            ? `${product.id}/${canvas.replace(":", "x")}/${treatment.id}.png`
+            : `${product.id}/${canvas.replace(":", "x")}.png`;
           await this.deps.exporter.saveToDirectory(composite.image, outputPath);
-          if (ratio.value === "1:1" && treatment === treatments[0]) heroImage = composite.image;
+          if (canvas === "1:1" && treatment === treatments[0]) heroImage = composite.image;
 
           cellAssets.push({
             productId: product.id,
-            aspectRatio: ratio.value,
+            ...assetCanvas,
             outputPath,
             proofPath: `proofs/${product.id}.pdf`,
             complianceScore: visual.score ?? 0,
@@ -288,7 +339,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
           });
           log.record(
             "CompositeVariations",
-            `${product.id} @ ${ratio.value} [${treatment.id}] — brand density ${(visual.score ?? 0).toFixed(3)}${visual.passed ? "" : " (below threshold)"}, logo ${composite.logoApplied ? "present" : "missing"}`,
+            `${product.id} @ ${canvas} [${treatment.id}] — brand density ${(visual.score ?? 0).toFixed(3)}${visual.passed ? "" : " (below threshold)"}, logo ${composite.logoApplied ? "present" : "missing"}`,
             visual.passed && composite.logoApplied ? "info" : "warn",
           );
         }
@@ -723,6 +774,18 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     // Defense-in-depth, exactly the SAFE_ID reasoning above.
     const styleProblemText = styleProblem(brief.style);
     if (styleProblemText !== undefined) return err(new Error(styleProblemText));
+    // `output.sizes` is the display family's axis (D113), parse-validated at the
+    // boundary; enforce the same vocabulary here so a programmatic caller bypassing
+    // parsing cannot hand the run a size the compositor would resolve to nothing.
+    for (const size of brief.output?.sizes ?? []) {
+      if (!(DISPLAY_SIZE_VALUES as readonly string[]).includes(size)) {
+        return err(
+          new Error(
+            `output.sizes entry "${size}" is not a display size (expected one of ${DISPLAY_SIZE_VALUES.join(", ")}).`,
+          ),
+        );
+      }
+    }
     return ok(true);
   }
 
@@ -765,7 +828,9 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
 
 /**
  * D11: per ratio, the max-per-side union of the requested platforms' safe insets.
- * Unknown platform ids and ratios no platform targets are absent from the map.
+ * Display profiles carry a `sizes` list instead of a ratio (D116), so they
+ * contribute no ratio; unknown platform ids and ratios no platform targets are
+ * absent from the map.
  */
 export function unionSafeInsets(
   platformIds: readonly string[] | undefined,
@@ -775,7 +840,7 @@ export function unionSafeInsets(
   if (!platformIds || !resolve) return byRatio;
   for (const id of platformIds) {
     const zone = resolve(id);
-    if (!zone) continue;
+    if (!zone || zone.ratio === undefined) continue;
     const current = byRatio.get(zone.ratio);
     byRatio.set(
       zone.ratio,
@@ -790,6 +855,39 @@ export function unionSafeInsets(
     );
   }
   return byRatio;
+}
+
+/**
+ * F5: per display size, the max-per-side union of the requested display platforms'
+ * insets for that size. Social profiles carry a ratio instead of a size list, so
+ * they contribute nothing; unknown platform ids and sizes no requested platform
+ * offers are absent from the map.
+ */
+export function unionSizeInsets(
+  platformIds: readonly string[] | undefined,
+  resolve: PlatformSafeZoneResolver | undefined,
+): Map<DisplaySize, SafeInsets> {
+  const bySize = new Map<DisplaySize, SafeInsets>();
+  if (!platformIds || !resolve) return bySize;
+  for (const id of platformIds) {
+    const zone = resolve(id);
+    if (!zone?.sizes) continue;
+    for (const { size, insets } of zone.sizes) {
+      const current = bySize.get(size);
+      bySize.set(
+        size,
+        current === undefined
+          ? insets
+          : {
+              top: Math.max(current.top, insets.top),
+              right: Math.max(current.right, insets.right),
+              bottom: Math.max(current.bottom, insets.bottom),
+              left: Math.max(current.left, insets.left),
+            },
+      );
+    }
+  }
+  return bySize;
 }
 
 /** First 1:1 variant of each product in plan order — the only slot that may rewrite its proof. */

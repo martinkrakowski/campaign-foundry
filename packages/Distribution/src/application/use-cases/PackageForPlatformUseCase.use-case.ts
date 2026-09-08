@@ -14,7 +14,10 @@ import type {
 /** The fields packaging needs from a persisted report row (`variantIndex` only on variation rows). */
 export interface PackageableAsset {
   readonly productId: string;
-  readonly aspectRatio: string;
+  /** The social canvas. Display rows carry `size` instead (D113) — exactly one of the two. */
+  readonly aspectRatio?: string;
+  /** The display family's canvas (the `728x90` form); ratio rows omit it. */
+  readonly size?: string;
   readonly treatment: string;
   /** The PNG — the poster on motion rows. */
   readonly outputPath: string;
@@ -66,10 +69,13 @@ const isMotionAsset = (asset: PackageableAsset): asset is PackageableAsset & { v
   asset.format === "motion" && typeof asset.videoPath === "string";
 
 /**
- * PackageForPlatformUseCase — copy matching-ratio creatives into per-platform
- * folders: statics for static profiles, mp4 + poster for motion profiles.
- * Never re-renders. Hidden / unknown platform ids fail the whole request.
- * Store failures are caught per platform and returned as err; they never throw.
+ * PackageForPlatformUseCase — copy matching-canvas creatives into per-platform
+ * folders: social profiles match by ratio, display profiles by size (D116);
+ * statics for static profiles, mp4 + poster for motion profiles. Never
+ * re-renders. Hidden / unknown platform ids fail the whole request. A display
+ * profile whose run produced no size assets fails loudly — a successful empty
+ * manifest is the D8 dead end, not a result. Store failures are caught per
+ * platform and returned as err; they never throw.
  */
 export class PackageForPlatformUseCase {
   constructor(private readonly store: PackageStorePort) {}
@@ -92,10 +98,24 @@ export class PackageForPlatformUseCase {
     for (const { platformId, profile } of profiles) {
       try {
         // A motion profile takes motion rows; a static profile ignores them.
+        // The canvas match follows the profile's family: a social profile takes
+        // rows at its ratio, a display profile takes rows whose size is one of
+        // the units it accepts (D116) — a ratio row never matches a display
+        // profile, and a size row never matches a social one.
         const wantsMotion = profile.formats.includes("motion");
-        const eligible = input.assets.filter(
-          (asset) => asset.aspectRatio === profile.ratio && isMotionAsset(asset) === wantsMotion,
-        );
+        const eligible = input.assets.filter((asset) => {
+          if (isMotionAsset(asset) !== wantsMotion) return false;
+          if (profile.sizes === undefined) return asset.aspectRatio === profile.ratio;
+          return asset.size !== undefined && profile.sizes.some((slot) => slot.size === asset.size);
+        });
+        // A display profile with nothing to package means the run was generated
+        // without `output.sizes` (or for the wrong sizes). Writing a successful
+        // empty manifest would send the buyer an empty package — say so instead.
+        if (profile.sizes !== undefined && eligible.length === 0) {
+          throw new Error(
+            `no display assets for ${platformId} — was the campaign generated with output.sizes?`,
+          );
+        }
         const selected = include === null ? eligible : eligible.filter((a) => include.has(assetIdentity(a)));
         const included = selected.length;
         const excluded = eligible.length - selected.length;
@@ -136,7 +156,10 @@ export class PackageForPlatformUseCase {
     const packagedPath = await this.store.writePackaged(platformId, asset.outputPath, bytes);
     return {
       productId: asset.productId,
+      // Exactly one of the two is defined on any real row (D113); undefined keys
+      // drop from the serialized manifest, so each item names its own family.
       aspectRatio: asset.aspectRatio,
+      size: asset.size,
       treatment: asset.treatment,
       format: "static",
       source: asset.outputPath,
@@ -164,6 +187,7 @@ export class PackageForPlatformUseCase {
     return {
       productId: asset.productId,
       aspectRatio: asset.aspectRatio,
+      size: asset.size,
       treatment: asset.treatment,
       format: "motion",
       source: asset.videoPath,

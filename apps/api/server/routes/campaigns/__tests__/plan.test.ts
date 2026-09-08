@@ -183,6 +183,14 @@ describe("POST /campaigns/plan", () => {
     );
   });
 
+  test("returns 400 for a repeated display size (D113)", async () => {
+    const res = await call(variationBrief({ output: { sizes: ["728x90", "300x250", "728x90"] } }));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(
+      /"output\.sizes" must not repeat a size; "728x90" appears more than once/,
+    );
+  });
+
   // D68 — the parser's scalar shape check, pinned on a VARIATION fixture: a classic
   // brief 400s with "not a variation brief" immediately after the parse block, so a
   // status-only assertion on a classic fixture could never go red. The message must

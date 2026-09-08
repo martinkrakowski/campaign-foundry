@@ -221,9 +221,24 @@ describe("EstimatePanel — the classic draft (W4.3)", () => {
     );
   });
 
+  test("a classic draft with a display platform counts the size units it requests too (A4b)", () => {
+    // Toggling google-display contributes its five IAB sizes as authored state;
+    // the estimate must count them beside the three ratios, not only those.
+    let s = planReady();
+    s = editorReducer(s, { type: "setMode", mode: "brief" });
+    s = editorReducer(s, { type: "togglePlatform", value: "google-display" });
+    render(<EstimatePanel state={s} />);
+    const sentence = screen.getByText(/You will get 8 ads/);
+    expect(sentence.textContent).toBe(
+      "You will get 8 ads — 1 square, 1 tall, 1 wide, 1 300x250, 1 728x90, 1 160x600, 1 320x50, 1 300x600 — for 1 product. No AI image calls.",
+    );
+  });
+
   test("classic derivation is shared with the CommandBar, so both spell the count alike", () => {
     // classicAdCount is the single formula the panel and the command bar both read.
     expect(classicAdCount(2, 4)).toBe(24);
+    // And it counts requested display sizes beside the canonical ratios (D113).
+    expect(classicAdCount(2, 1, 2)).toBe(10);
   });
 });
 

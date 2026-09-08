@@ -147,6 +147,16 @@ function validateSizes(value: unknown): void {
       );
     }
   }
+  // A repeat would build two cells writing the same output path, the second
+  // silently overwriting the first. Structural, never lenient — like the
+  // vocabulary check above.
+  for (let i = 1; i < value.length; i++) {
+    if (value.indexOf(value[i]) < i) {
+      throw new Error(
+        `Campaign brief field "output.sizes" must not repeat a size; "${value[i]}" appears more than once.`,
+      );
+    }
+  }
 }
 
 function validateCoverage(value: unknown): void {
@@ -669,7 +679,7 @@ export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): Campaig
 export function parseRegenerateOnly(value: unknown): RegenerationTarget[] | undefined {
   if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value)) {
-    throw new Error('"regenerateOnly" must be an array of { productId, aspectRatio, treatment }.');
+    throw new Error('"regenerateOnly" must be an array of { productId, aspectRatio | size, treatment }.');
   }
   // An empty list would enable selective mode yet target nothing — a silent no-op
   // run. Reject it so the contract fails fast instead (omit the field for a full run).
@@ -695,16 +705,28 @@ export function parseRegenerateOnly(value: unknown): RegenerationTarget[] | unde
         ? { productId: rec.productId, variantIndex: rec.variantIndex }
         : { productId: rec.productId, variantIndex: rec.variantIndex, attempt: rec.attempt };
     }
-    if (
-      typeof rec.productId !== "string" ||
-      typeof rec.aspectRatio !== "string" ||
-      typeof rec.treatment !== "string"
-    ) {
-      throw new Error(
-        '"regenerateOnly" entries require string productId, aspectRatio, and treatment.',
-      );
+    if (typeof rec.productId !== "string" || typeof rec.treatment !== "string") {
+      throw new Error('"regenerateOnly" entries require string productId and treatment.');
     }
-    return { productId: rec.productId, aspectRatio: rec.aspectRatio, treatment: rec.treatment };
+    // The canvas is a social ratio or a display size (D113) — exactly one of the two,
+    // the same identity the run keys the cell on and the review UI sends back.
+    if (typeof rec.aspectRatio === "string" && typeof rec.size === "string") {
+      throw new Error('"regenerateOnly" entries must carry exactly one canvas');
+    }
+    if (typeof rec.aspectRatio === "string") {
+      return { productId: rec.productId, aspectRatio: rec.aspectRatio, treatment: rec.treatment };
+    }
+    if (typeof rec.size === "string") {
+      if (!(DISPLAY_SIZE_VALUES as readonly string[]).includes(rec.size)) {
+        throw new Error(
+          `"regenerateOnly" size must be one of ${DISPLAY_SIZE_VALUES.map((s) => `"${s}"`).join(", ")}; got ${JSON.stringify(rec.size)}.`,
+        );
+      }
+      return { productId: rec.productId, size: rec.size, treatment: rec.treatment };
+    }
+    throw new Error(
+      '"regenerateOnly" entries require a canvas: string aspectRatio (social) or size (display).',
+    );
   });
 }
 

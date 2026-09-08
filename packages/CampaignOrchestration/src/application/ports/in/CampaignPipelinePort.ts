@@ -3,12 +3,17 @@ import type { PipelineResult } from "../../../domain/value-objects/PipelineResul
 import type { Result } from "@campaignfoundry/shared";
 
 /**
- * Classic cell identity: product × aspect ratio × treatment. Byte-identical to
- * the pre-variation target shape so existing HITL payloads keep working.
+ * Classic cell identity: product × canvas × treatment, where the canvas is a
+ * social `aspectRatio` or a display `size` (D113) — exactly one of the two.
+ * A ratio-only payload stays byte-identical to the pre-display target shape,
+ * so existing HITL payloads keep working.
  */
 export interface ClassicRegenerationTarget {
   readonly productId: string;
-  readonly aspectRatio: string;
+  /** Social cells only; display cells carry `size` instead. */
+  readonly aspectRatio?: string;
+  /** Display cells only (the `728x90` form, not a slug); ratio cells omit it. */
+  readonly size?: string;
   readonly treatment: string;
 }
 

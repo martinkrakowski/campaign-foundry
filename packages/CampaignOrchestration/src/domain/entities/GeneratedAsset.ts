@@ -1,4 +1,5 @@
 import type { AspectRatioValue } from "../value-objects/aspect-ratios.js";
+import type { DisplaySize } from "../value-objects/display-sizes.js";
 import type { BackgroundSource } from "../value-objects/BackgroundSource.vo.js";
 import type { LayoutKind, ToneKind } from "../value-objects/Treatment.vo.js";
 import type { MotionKind } from "../value-objects/MotionKind.vo.js";
@@ -9,19 +10,24 @@ import type { BackgroundAxisSource } from "../value-objects/VariationPolicy.vo.j
  * Fields that identify a creative in a report, grid, or merge.
  *
  * Variation identity is `productId/v<variantIndex>`; classic remains
- * `productId/aspectRatio/treatment` (D6). Presence of `variantIndex` is the discriminator.
+ * `productId/aspectRatio/treatment` (D6), with a display cell keyed
+ * `productId/size/treatment` — a `728x90` cell must not collide with a
+ * ratio cell. Presence of `variantIndex` is the discriminator.
  */
 export interface AssetIdentity {
   readonly productId: string;
   readonly variantIndex?: number;
   readonly aspectRatio?: string;
+  /** The display family's canvas (D113); present only when `aspectRatio` is not. */
+  readonly size?: string;
   readonly treatment?: string;
 }
 
 /** Stable identity key — classic triple, or `productId/v<index>` in variation mode. */
 export function assetIdentity(a: AssetIdentity): string {
   if (a.variantIndex !== undefined) return `${a.productId}/v${a.variantIndex}`;
-  return `${a.productId}/${a.aspectRatio}/${a.treatment}`;
+  const canvas = a.aspectRatio ?? a.size;
+  return `${a.productId}/${canvas}/${a.treatment}`;
 }
 
 /** Planned-axis snapshot stamped onto variation assets (omitted on classic). */
@@ -47,12 +53,16 @@ export interface VariantDescriptor {
 }
 
 /**
- * GeneratedAsset — one rendered creative (a product × aspect-ratio pairing).
+ * GeneratedAsset — one rendered creative (a product × canvas pairing: a social
+ * ratio or a display size, exactly one of the two, D113).
  * Identity is {@link assetIdentity}: classic triple, or product + variantIndex.
  */
 export interface GeneratedAsset {
   readonly productId: string;
-  readonly aspectRatio: AspectRatioValue;
+  /** The social family's canvas. Display-size cells carry `size` instead. */
+  readonly aspectRatio?: AspectRatioValue;
+  /** The display family's exact pixel unit (D113). Ratio cells omit it. */
+  readonly size?: DisplaySize;
   /** Relative path of the saved PNG (the poster, for motion), e.g. "hydra-bottle/1x1.png". */
   readonly outputPath: string;
   /** Relative path of the saved mp4. Motion variants only; static/classic omit it. */

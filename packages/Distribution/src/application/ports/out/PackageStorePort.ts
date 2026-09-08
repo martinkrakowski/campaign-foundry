@@ -3,7 +3,10 @@ import type { PlatformProfile } from "../../../domain/value-objects/PlatformProf
 /** One copied creative in a platform package. Motion items copy the mp4 and its poster. */
 export interface PackageManifestItem {
   readonly productId: string;
-  readonly aspectRatio: string;
+  /** The social canvas. Display items carry `size` instead (D113) — exactly one of the two. */
+  readonly aspectRatio?: string;
+  /** The display family's canvas (the `728x90` form); ratio items omit it. */
+  readonly size?: string;
   readonly treatment: string;
   readonly format: "static" | "motion";
   /** The PNG (static) or the mp4 (motion), relative to the output root. */
@@ -27,7 +30,7 @@ export interface PackageManifest {
   readonly platformId: string;
   readonly packagedAt: string;
   readonly skipped: number;
-  /** Ratio-matching assets kept / dropped by the caller's `include` list (0 excluded when omitted). */
+  /** Canvas-matching assets kept / dropped by the caller's `include` list (0 excluded when omitted). */
   readonly included: number;
   readonly excluded: number;
   readonly profile: PlatformProfile;
