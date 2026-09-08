@@ -10,6 +10,9 @@ import { join, relative, resolve } from "node:path";
 // What this test polices is the sibling feature, on both sides of the P1 split:
 //   - packages/ui/src: nothing may import the editor feature, the app alias,
 //     or the editor messages module.
+//   - packages/ui/src/__tests__: nothing may import apps/, the app alias, or
+//     the editor feature either (the source scan skips this directory, which
+//     is how a reverse import of ModelSelector previously slipped through).
 //   - apps/web/src/components/ui: only the declared allowlist may.
 // The allowlist may only ever shrink — an entry that no longer matches any kit
 // file is a failure, not a silent pass, because a stale entry is permission
@@ -23,6 +26,7 @@ const allowlist: Record<string, string> = {
 };
 
 const packageKitDir = resolve(import.meta.dirname, "..");
+const packageTestDir = resolve(import.meta.dirname);
 const webKitDir = resolve(import.meta.dirname, "../../../../apps/web/src/components/ui");
 
 const appAlias = "@" + "/";
@@ -45,6 +49,7 @@ function listKitSources(dir: string, root: string): string[] {
 }
 
 const packageFiles = listKitSources(packageKitDir, packageKitDir);
+const packageTestFiles = listKitSources(packageTestDir, packageTestDir);
 const webFiles = listKitSources(webKitDir, webKitDir);
 
 const IMPORT_SPEC =
@@ -58,11 +63,25 @@ function hitsEditorFeature(spec: string): boolean {
   return spec.includes(appAlias) || spec.includes(editorFeature) || spec.includes(messagesMod);
 }
 
+function hitsAppWorkspace(spec: string): boolean {
+  return spec.includes("apps/") || spec.includes(appAlias) || spec.includes(editorFeature);
+}
+
 describe("the kit does not import the campaign feature (D87)", () => {
   test("every file in the package kit is free of the editor feature, the app alias, and the messages module", () => {
     const violations = packageFiles
       .map((file) => {
         const specs = importSpecs(readFileSync(join(packageKitDir, file), "utf-8")).filter(hitsEditorFeature);
+        return { file, specs };
+      })
+      .filter((entry) => entry.specs.length > 0);
+    expect(violations).toEqual([]);
+  });
+
+  test("every file under the package kit's __tests__ is free of apps/, the app alias, and the editor feature", () => {
+    const violations = packageTestFiles
+      .map((file) => {
+        const specs = importSpecs(readFileSync(join(packageTestDir, file), "utf-8")).filter(hitsAppWorkspace);
         return { file, specs };
       })
       .filter((entry) => entry.specs.length > 0);

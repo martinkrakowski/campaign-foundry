@@ -3969,5 +3969,6 @@ display-advertising plan awaits the owner's go.
   - Presentation layer, not an exemption: an exemption is the same as being outside the gate. `allowed_imports` is `@campaignfoundry/shared` only; existing CampaignOrchestration/Distribution value-object imports are the kit's current contract (`depends_on`). Hexagen sync does not own the kit barrel (it only walks `src/{domain,application,infrastructure}`; `src/index.ts` is hand-written and skipped).
   - `kit-boundaries.test.ts` scans both directories. Path-only rewrites in `border-control` / `dialog-shell` tests so `packages/ui` contains no `"@/` imports.
 - **Mutations:** add `import * as m from "@/components/campaign/messages"` to `packages/ui/src/button.tsx` → kit-boundaries fails naming `button.tsx`. Reverted.
+- **Remediation:** package owns `cn` (app file re-exports); ModelSelector border case moved to the app; kit tests use kit-local helpers; `kit-boundaries` now scans `__tests__`; presentation layer comment records it is documentary.
 - **Left open:**
   - Untangling the four allowlisted files (each still needs its `messages` dependency inverted).

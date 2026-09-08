@@ -11,7 +11,7 @@ import {
   getFocusableDialogElements,
   dialogHoldsFocus,
 } from "../dialog-shell";
-import { exerciseFocusTrap } from "../../../../apps/web/src/__tests__/helpers";
+import { exerciseFocusTrap } from "./helpers";
 import { useRef, useState } from "react";
 
 describe("DialogShell and DrawerShell anatomy", () => {

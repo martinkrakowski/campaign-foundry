@@ -1,6 +1,7 @@
 // Barrel for the domain-free UI kit. Hand-written (not hexagen-owned): the
 // kit is a presentation package, not a hexagonal bounded context, and this
 // surface is the public API consumers import. Do not add an @generated marker.
+export { cn } from "./cn";
 export { AxisCard, type AxisCardProps } from "./axis-card";
 export { Button, type ButtonProps } from "./button";
 export { Card, CardHeader, CardContent, type CardProps } from "./card";

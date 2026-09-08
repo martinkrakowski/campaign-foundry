@@ -1,7 +1,5 @@
 import { describe, test, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { renderWithRun } from "../../../../apps/web/src/__tests__/helpers";
 import { Button } from "../button";
 import { Input } from "../input";
 import { Stepper } from "../stepper";
@@ -12,7 +10,6 @@ import { AxisCard } from "../axis-card";
 import { PreviewCard } from "../preview-card";
 import { PlatformCard } from "../platform-card";
 import { SwitchRow } from "../switch-row";
-import { ModelSelector } from "../../../../apps/web/src/components/shell/ModelSelector";
 import { platformProfile } from "@campaignfoundry/Distribution/platform-profiles";
 
 /**
@@ -137,22 +134,5 @@ describe("control boundaries carry border-control", () => {
     const on = screen.getByRole("switch", { name: "Vary the tone" });
     expect(classes(on)).toContain("border-brand-primary");
     expect(classes(on)).not.toContain("border-border-control");
-  });
-
-  test("ModelSelector — the trigger, and the row controls the modal opens", async () => {
-    const user = userEvent.setup();
-    renderWithRun(<ModelSelector />);
-    const trigger = screen.getByTitle("Change image model");
-    expect(classes(trigger)).toContain("border-border-control");
-    expect(classes(trigger)).toContain("hover:border-border-control-hover");
-    await user.click(trigger);
-    const dialog = await screen.findByRole("dialog", { name: "Select image model" });
-    // The row buttons' fill is the modal's own `surface` — a 1:1 match — so the rule
-    // between rows is the only edge a row has, and that is a control boundary. Same
-    // exact-token split as above: `divide-border` is a substring of
-    // `divide-border-control`, so only a split class list can see the regression.
-    const list = dialog.querySelector(".divide-y") as HTMLElement;
-    expect(classes(list)).toContain("divide-border-control");
-    expect(classes(list)).not.toContain("divide-border");
   });
 });
