@@ -10,12 +10,12 @@ unfunded, hangs (0-byte log at five minutes), or dies on arrival twice. **grok n
 
 | Seat | Command (every id probed live on 2026-09-08) |
 |---|---|
-| **implementer 1** | `agy --print "$(cat BRIEF.md)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high --print-timeout 90m` (detached; the effort flag must match the id's suffix — `-high` with `--effort low` is refused) |
+| **implementer 1** | `agy --print "$(cat BRIEF.md)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high --print-timeout 90m --output-format json` (detached; the effort flag must match the id's suffix — `-high` with `--effort low` is refused) |
 | **implementer 2** | `MODEL=opencode/big-pickle dispatch-lane.sh …` — the script's default. |
 | **implementer 3** | `MODEL=opencode-go/glm-5.3-flash dispatch-lane.sh …`. Note the provider: `opencode-go/`, which is funded; `opencode/glm-5.3-flash` answers *Insufficient balance* on the same account. |
-| **PR reviewer** | `opencode run --model opencode-go/hy4-preview "$(cat REVIEW.md)"` in a **throwaway worktree** of the branch (so nothing it writes can matter). It answers a one-word probe with a paragraph of planning: give it a schema for the verdict and read past the preamble. |
+| **PR reviewer** | `opencode run --format json --model opencode-go/hy4-preview "$(cat REVIEW.md)"` in a **throwaway worktree** of the branch (so nothing it writes can matter). It answers a one-word probe with a paragraph of planning: give it a schema for the verdict and read past the preamble. |
 | **remediator** | the lane's own implementer, at **medium** effort on a narrow brief (see Spending rules 3–4), then the next in the rotation. (Proposed, not yet the owner's rule: grok returns as remediator only — its 4/4 record — after its quota resets **2026-09-14 16:28**, and still never implements.) |
-| **plan reviewer** | `agy --print "$(cat PLAN-REVIEW.md)" --dangerously-skip-permissions --effort high --model gemini-3.1-pro-high` — one reviewer. (The id resolves again as of 2026-09-08; it did not on 09-07.) |
+| **plan reviewer** | `agy --print "$(cat PLAN-REVIEW.md)" --dangerously-skip-permissions --effort high --model gemini-3.1-pro-high --output-format json` — one reviewer. (The id resolves again as of 2026-09-08; it did not on 09-07.) |
 | **orchestrator, final sweep, merge** | you, never delegated |
 
 ## Spending rules (2026-09-08, after a gemini weekly quota went from ~97 % to 76 % in four runs)
@@ -48,11 +48,12 @@ the problem. These rules are, in order of what they save:
 7. **Measure every run.** `agy` reports its own cost when given `--output-format json`: the result
    is one JSON object with `usage` (`input_tokens`, `output_tokens`, `thinking_tokens`,
    `cache_read_tokens`, `total_tokens`), plus `duration_seconds`, `num_turns` and `status`. `opencode
-   run --format json` emits raw JSON events. **Dispatch with the flag and record the numbers**;
+   run --format json` emits raw JSON events. **The flag is in the seat commands above and `dispatch-lane.sh` passes `--format json` to opencode by default** (`USAGE_FLAGS`, opt out with `USAGE_FLAGS=""`). Record the numbers in the wave record;
    there is no retroactive accounting — nothing on disk keeps a per-conversation token record, so a
-   run launched without it can never be costed. With the flag, the agent's reply (and its PR URL)
-   is the `.response` field: `jq -r .response`, and the `EXIT n` marker the wrapper appends still
-   works unchanged.
+   run launched without it can never be costed. With the flag, an agy reply (and its PR URL) is the
+   `.response` field — `jq -r .response` — and the `EXIT n` marker the wrapper appends is written by
+   the shell, so it is unaffected either way. **A dispatch that cannot be costed is a dispatch that
+   ignored this rule**, not a limitation of the tools.
 
    **The floor, measured 2026-09-08:** `agy --print "Say OK."` at low effort on the smallest model
    costs **14 996 input tokens** and 2 output tokens. Every invocation pays roughly 15 k before it
