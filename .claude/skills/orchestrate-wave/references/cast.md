@@ -9,9 +9,9 @@ fail with a misleading error rather than "no such model".
 |---|---|
 | **implementer** | `opencode run --auto --model openrouter/z-ai/glm-5.3-flash --variant high "$(cat BRIEF.md)"` |
 | **PR reviewer A** | `grok -p "$(cat REVIEW.md)" --model grok-4.6 --effort high` (add `--disallowed-tools "edit,write"`) |
-| **PR reviewer B** | `agy --print "$(cat REVIEW.md)" --dangerously-skip-permissions --effort high --model gemini-3.7-flash-high` |
+| **PR reviewer B** | `agy --print "$(cat REVIEW.md)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high` |
 | **remediator** | `grok -p "$(cat FIX.md)" --model grok-4.6 --effort high` |
-| **plan reviewers** | `grok-4.6` high **and** `agy --model gemini-3.1-pro-high` — run both |
+| **plan reviewers** | `grok-4.6` high **and** `agy --model gemini-3.8-flash-high` (the 3.1-pro id no longer resolves) — run both |
 | **sweep, merge** | the orchestrator, never delegated |
 
 Launch every lane detached so a harness timeout cannot kill it, and wait on the marker:
@@ -68,3 +68,14 @@ while ! grep -qE '^EXIT [0-9]+$' /tmp/<lane>.log 2>/dev/null; do sleep 30; done
 wrote the code is worth little. When the two plan reviewers disagree, take it seriously: in this
 repo the dissenting one has been right both times, once overturning a plan's central claim after
 the other had approved it.
+
+- **glm-5.3-flash silent starts (2026-09-07).** Six launches this day (S2 ×1, W1 ×2, T3 ×2, T4 ×1)
+  produced a 0-byte log for 10–88 minutes with live processes and a clean tree, on briefs of the
+  same shape as the ones it completed within a minute. Every healthy run wrote within ~60 s. Rule:
+  a 0-byte log at five minutes is a hang — kill and re-dispatch; a second silent start on the same
+  brief → move the lane to grok-4.6 (T3/T4 both wrote within a minute of the switch). The
+  `dispatch-lane.sh` wait does not kill; the kill's `EXIT 143` is a marker it accepts.
+- **agy model ids (2026-09-07).** `gemini-3.7-flash-high` and `gemini-3.1-pro-high` stopped
+  resolving the day gemini-3.8-flash shipped; launches died in seconds with *timeout waiting for
+  response*. Current reviewer-B / plan-reviewer id: `gemini-3.8-flash-high`. Re-probe with
+  `agy models` before the first agy dispatch of a session — the table above is a snapshot.

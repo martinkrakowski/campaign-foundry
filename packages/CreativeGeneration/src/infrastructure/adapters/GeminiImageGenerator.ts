@@ -1,11 +1,12 @@
 import { GoogleGenAI } from "@google/genai";
-import type {
-  AspectRatio,
-  BackgroundCachePort,
-  BackgroundContext,
-  BackgroundResult,
-  ImageGeneratorPort,
-  Product,
+import {
+  campaignTypePromptSentence,
+  type AspectRatio,
+  type BackgroundCachePort,
+  type BackgroundContext,
+  type BackgroundResult,
+  type ImageGeneratorPort,
+  type Product,
 } from "@campaignfoundry/CampaignOrchestration";
 import { resolveCachedBackground } from "./FileSystemBackgroundCache.js";
 
@@ -97,6 +98,7 @@ export class GeminiImageGenerator implements ImageGeneratorPort {
       `Evoke the brand accent colour ${product.primaryColor}.`,
       `Cinematic, photographic, high production value, with clean negative space toward the bottom for a headline.`,
       `Absolutely no text, words, letters, logos or watermarks in the image.`,
+      campaignTypePromptSentence(context.campaignType),
     ].join(" ");
   }
 }

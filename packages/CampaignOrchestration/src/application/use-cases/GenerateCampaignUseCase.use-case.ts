@@ -206,10 +206,11 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     // LocalizedMessageFallback — the use case resolves the copy; adapters never do.
     const copy = brief.localizedMessage ?? brief.campaignMessage;
     // Campaign context handed to the image generator for personalized (GenAI) backgrounds.
-    const context = {
+    const context: BackgroundContext = {
       campaignMessage: brief.campaignMessage,
       targetAudience: brief.targetAudience,
       targetRegion: brief.targetRegion,
+      campaignType: brief.type,
     };
     // 3-6. Generate each in-scope cell (product × ratio): resolve its background, then
     // composite/score/save every treatment that shares it. Cells run with BOUNDED
@@ -334,6 +335,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       campaignMessage: brief.campaignMessage,
       targetAudience: brief.targetAudience,
       targetRegion: brief.targetRegion,
+      campaignType: brief.type,
     };
     // Sequenced copy for motion clips (D2/D5): fixed across variants, threaded straight
     // to the compositor for every motion slot. Absent → the legacy single-message path.

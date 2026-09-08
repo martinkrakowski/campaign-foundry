@@ -3857,3 +3857,45 @@ across the wave directories, replacing capped ten-minute waits.
 
 **Next:** T3 ‖ T4 dispatched from `0838d56`; W2 ‖ W3 from `0176547`; #231 round 2 in flight. Then
 the campaign-type wave-C record, the wave-status close-out, and P1 alone.
+
+---
+
+## 2026-09-07 — T4 campaign type read-back and prompt sentence (F5)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `campaign-types.ts`: `CAMPAIGN_TYPE_PROMPT_HINTS` + `campaignTypePromptSentence`. CreativeGeneration already depends on CampaignOrchestration, so the table stayed in T1's file.
+  - `BackgroundContext` (in `ImageGeneratorPort.ts`, not CreativeGeneration) gains `campaignType?: CampaignType`.
+  - `GenerateCampaignUseCase` passes `brief.type` at both context sites (classic :209, variation :336).
+  - Four generators append the type sentence. Prompt-shape tests pin the full prompt.
+  - `BriefPicker` row and grid Review bar: `MiniChip` via `typeDisplayName(type ?? DEFAULT_CAMPAIGN_TYPE)`. Absent type shows "Social post"; `short-video` shows "Short-form video" (T2's display name, never the raw id).
+- **Decisions:**
+  - Hints live in the domain as prompt text, not UI copy. Chip labels come from T2's `typeDisplayName` — no new literal under `apps/web`.
+  - The sentence is always present (absent → social-post) so prompts change once.
+  - Did not touch T3's files (`CreateCampaignDialog`, `messages.ts`, the dialog tests). Did not pass `campaignType` from `PreviewCreativeFrameUseCase` (not in this lane's ownership).
+- **Mutations:** each compiled, ran, failed the named test, reverted.
+  - M1: chip uses the raw id → `a brief without type shows Social post, never the raw id`
+  - M2: drop the sentence from Firefly only → `pins the prompt shape, including the campaign-type sentence` (Firefly); Gemini, OpenRouter image, OpenRouter copy stayed green
+  - M3: stop passing `campaignType` at site 2 → `variation path (site 2) passes brief.type into the image generator context`
+  - M4: `short-video` hint mapped to the social-post phrase → `each type has a distinct prompt hint; short-video is not the social-post phrase`
+- **Left open:**
+  - Preview path still omits `campaignType` (defaults to the social-post sentence).
+  - T3 (dialog) still concurrent.
+- **Remediation (PR #234):** `campaignTypeOf` at both read-back sites; preview forwards `brief.type`; prompt sentence coerces out-of-vocab; picker type chip `shrink-0`. Preview left-open above is closed.
+## 2026-09-07 — T3 create dialog, name + campaign type (#236)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `CreateCampaignDialog.tsx`: two-field create — name + three `OptionTile`s over `CAMPAIGN_TYPES`. Removed ModePanel, region chips, audience, WorldMap, StartFromExistingPicker, SectionBlocks, JumpStrip, T2 bridge. Seed `{ name, type }`.
+  - `messages.ts`: append-only `// T3 — the two-field create` block (`createCampaignLead`, `createTypeLabel`, `typeTileGives`, `typeTileRunsAs`).
+  - Dialog suite rewritten; `brief-editor.test.tsx` `fillDialog` helpers name-only.
+- **Decisions:**
+  - Accessible name is the raw type id; display words from `typeDisplayName`; preset line from `CAMPAIGN_TYPE_PRESETS` + `formatDisplayName` (no `static`/`motion` literals). D110 line on `short-video` via `modeDisplayName("variation")`.
+  - `campaignNameNotSluggable` rung and test deleted with the start-from path (D98). Formatter stays (append-only).
+  - Discard guard: a typed name is work; a toggled type is not. `discardGuardDetail(hasName, false, false, false)`.
+  - Width via `className="max-w-md"` on `DialogShell` (`twMerge`); no kit change.
+- **Mutations:** M1–M4 compiled, ran, failed the named test, reverted. Recorded in #236.
+- **Left open:**
+  - T4 (optional): MiniChip on the grid/picker; type sentence in generator prompts.
+  - P1: `packages/ui`, after every campaign-type lane.
+- **Remediation:** dropped `campaignNameNotSluggable`, `createCampaignDescription`, `startFromCampaignCount` (and the pin test); `discardGuardDetail(hasName)` (dialog-only caller); type tiles pass `description` for AT; dirty-cancel queries the formatter. Mutation: re-add `startFromCampaignCount` → coverage fails (branches 99.98%, uncovered `count === 1` arm); jargon suite stays green.
