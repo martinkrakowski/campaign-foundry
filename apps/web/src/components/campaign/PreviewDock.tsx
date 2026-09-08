@@ -1,7 +1,8 @@
 import type { CSSProperties, ReactNode } from "react";
-import type { AspectRatioValue } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
-import type { CampaignBrief, Style } from "@campaignfoundry/CampaignOrchestration";
+import type { AspectRatioValue, CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
+import type { CampaignBrief, Style } from "@campaignfoundry/CampaignOrchestration";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
 import { CreativePreview, type CreativePreviewProps } from "@/components/campaign/CreativePreview";
@@ -9,8 +10,8 @@ import { PreviewFrame } from "@/components/campaign/PreviewFrame";
 import { Eyebrow } from "@/components/ui";
 import { MOTION_KIND_META } from "@/components/campaign/MotionKindPanel";
 import {
+  canvasDisplayName,
   platformDisplayName,
-  ratioDisplayName,
   TEXT_EFFECT_META,
 } from "@/components/campaign/display-names";
 import { briefBackgroundIsStandIn } from "@/lib/preview-frame";
@@ -33,6 +34,26 @@ export function derivePreviewRatio(
     return explicitRatio as AspectRatioValue;
   }
   return "1:1";
+}
+
+/**
+ * The canvas the preview draws: a display size when the brief asked for one,
+ * otherwise the social ratio `derivePreviewRatio` already answers. One
+ * derivation, so the dock, the Layout readout and the Review figure cannot
+ * disagree by deriving twice.
+ */
+export function derivePreviewSpec(
+  platformId: string | undefined,
+  explicitRatio: string | undefined,
+  sizes?: readonly string[],
+): CanvasSpec {
+  const first = sizes?.[0];
+  if (first !== undefined) {
+    for (const size of DISPLAY_SIZE_VALUES) {
+      if (size === first) return { size };
+    }
+  }
+  return { ratio: derivePreviewRatio(platformId, explicitRatio) };
 }
 
 export interface PreviewShowcaseProps extends Omit<CreativePreviewProps, "className"> {
@@ -63,27 +84,28 @@ function PreviewSwatch({ primaryColor }: { primaryColor: string }): ReactNode {
 /** `<ratio display name> · <platform label>`, joined by each motion style's own name in words when the creative moves or the template carries a text effect (D50/T6) — display labels, never raw kind ids (D18). A non-procedural background axis adds the stand-in suffix (D52). */
 function PreviewCaption({
   platformId,
-  ratio,
+  spec,
   motion,
   textEffect,
   standIn,
 }: {
   platformId?: string;
-  ratio: AspectRatioValue;
+  spec: CanvasSpec;
   motion?: MotionKind;
   textEffect?: Style["textEffect"];
   standIn: boolean;
 }): ReactNode {
   const platformLabel =
     platformId !== undefined ? platformDisplayName(platformId) : messages.previewNoPlatform;
+  const canvasLabel = canvasDisplayName(spec);
   const styleLabels = [
     motion !== undefined ? MOTION_KIND_META[motion] : undefined,
     textEffect !== undefined ? TEXT_EFFECT_META[textEffect] : undefined,
   ].filter((label): label is string => label !== undefined);
   const caption =
     styleLabels.length > 0
-      ? messages.previewCaptionMotion(ratioDisplayName(ratio), platformLabel, styleLabels.join(" · "))
-      : messages.previewCaption(ratioDisplayName(ratio), platformLabel);
+      ? messages.previewCaptionMotion(canvasLabel, platformLabel, styleLabels.join(" · "))
+      : messages.previewCaption(canvasLabel, platformLabel);
   return (
     <p className="truncate font-mono text-[11px] text-text-muted">
       {standIn ? `${caption} · ${messages.previewFrameStandInBackground}` : caption}
@@ -119,7 +141,8 @@ export function PreviewPicture(props: {
   readonly primaryColor: string;
   readonly headline?: string;
   readonly motion?: MotionKind;
-  readonly ratio: AspectRatioValue;
+  readonly spec?: CanvasSpec;
+  readonly ratio?: AspectRatioValue;
   readonly className: string;
 }): ReactNode {
   return (
@@ -132,6 +155,7 @@ export function PreviewPicture(props: {
         primaryColor={props.primaryColor}
         headline={props.headline}
         motion={props.motion}
+        spec={props.spec}
         ratio={props.ratio}
         className={props.className}
       />
@@ -148,7 +172,7 @@ export function PreviewPicture(props: {
  * that mounts this body (D44/D61) — exactly one slot, whatever view it holds.
  */
 export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
-  const ratio = derivePreviewRatio(props.platformId, props.ratio);
+  const spec = props.spec ?? derivePreviewSpec(props.platformId, props.ratio, props.brief?.output?.sizes);
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <Eyebrow as="p">{messages.previewLegend}</Eyebrow>
@@ -161,14 +185,14 @@ export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
         primaryColor={props.primaryColor}
         headline={props.headline}
         motion={props.motion}
-        ratio={ratio}
+        spec={spec}
         className="block h-auto w-full"
       />
       <div className="flex items-center gap-2">
         <PreviewSwatch primaryColor={props.primaryColor} />
         <PreviewCaption
           platformId={props.platformId}
-          ratio={ratio}
+          spec={spec}
           motion={props.motion}
           textEffect={props.style?.textEffect}
           standIn={props.brief !== undefined && briefBackgroundIsStandIn(props.brief)}

@@ -1,7 +1,10 @@
 import { describe, test, expect } from "vitest";
 import { render } from "@testing-library/react";
-import type { AspectRatioValue } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
-import { RATIO_DIMENSIONS } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import {
+  resolveCanvas,
+  scaleBasisPx,
+  type AspectRatioValue,
+} from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import { DEFAULT_STYLE, type Style } from "@campaignfoundry/CampaignOrchestration/creative-style";
 import {
@@ -37,7 +40,7 @@ const logoRect = (svg: SVGSVGElement): SVGElement =>
 
 /** The fitHeadline arguments the component itself derives, per ratio. */
 const fitArgs = (ratio: AspectRatioValue) => {
-  const { width: W, height: H } = RATIO_DIMENSIONS[ratio];
+  const { width: W, height: H } = resolveCanvas({ ratio });
   const start = Math.round(W * PREVIEW_FONT_RATIO);
   return {
     W,
@@ -138,7 +141,7 @@ describe("CreativePreview", () => {
 
   test("accent geometry follows the compositor fractions (top layout)", () => {
     const svg = svgOf(<CreativePreview primaryColor="#1473E6" layout="headline-top" />);
-    const { height: H } = RATIO_DIMENSIONS["1:1"];
+    const { height: H } = resolveCanvas({ ratio: "1:1" });
     const band = H * CREATIVE_GEOMETRY.accentSolidHeightFraction;
     // Top layout: the band sits flush to the top edge (the headline edge).
     expect(Number(bandRect(svg).getAttribute("y"))).toBe(0);
@@ -147,7 +150,7 @@ describe("CreativePreview", () => {
 
   test("bottom layout flushes the band to the bottom edge", () => {
     const svg = svgOf(<CreativePreview primaryColor="#1473E6" layout="headline-bottom" />);
-    const { height: H } = RATIO_DIMENSIONS["1:1"];
+    const { height: H } = resolveCanvas({ ratio: "1:1" });
     expect(Number(bandRect(svg).getAttribute("y"))).toBe(H - H * CREATIVE_GEOMETRY.accentSolidHeightFraction);
   });
 
@@ -156,7 +159,7 @@ describe("CreativePreview", () => {
     // started at 0.6 opacity; the compositor's fade is height × 0.06, starting
     // continuous with the solid band. Assert the rendered rect and gradient.
     const svg = svgOf(<CreativePreview primaryColor="#1473E6" layout="headline-top" />);
-    const { height: H } = RATIO_DIMENSIONS["1:1"];
+    const { height: H } = resolveCanvas({ ratio: "1:1" });
     const fade = fadeRect(svg);
     const band = H * CREATIVE_GEOMETRY.accentSolidHeightFraction;
     expect(Number(fade.getAttribute("height"))).toBe(H * CREATIVE_GEOMETRY.accentFadeHeightFraction);
@@ -215,12 +218,24 @@ describe("CreativePreview", () => {
     }
   });
 
+  test("a display size mounts at resolveCanvas dimensions with short-side type (A4)", () => {
+    const spec = { size: "728x90" as const };
+    const { width, height } = resolveCanvas(spec);
+    const svg = svgOf(<CreativePreview primaryColor="#1473E6" headline="Stay wild" spec={spec} />);
+    expect(svg.getAttribute("width")).toBe(String(width));
+    expect(svg.getAttribute("height")).toBe(String(height));
+    expect(svg.getAttribute("viewBox")).toBe(`0 0 ${width} ${height}`);
+    expect(Number(svg.querySelector("text")!.getAttribute("font-size"))).toBe(
+      scaleBasisPx(spec, CREATIVE_GEOMETRY.headlineTypeWidthFraction),
+    );
+  });
+
   test("the type scale is the compositor's: width × 0.06, rounded (C1)", () => {
     // C1: the preview used to scale off the canvas height; the compositor's
     // fitText starts at Math.round(width * 0.06). Assert the rendered attribute.
     for (const ratio of ["1:1", "9:16", "16:9"] as const) {
       const svg = svgOf(<CreativePreview primaryColor="#1473E6" headline="Stay wild" ratio={ratio} />);
-      const { width: W } = RATIO_DIMENSIONS[ratio];
+      const { width: W } = resolveCanvas({ ratio });
       const text = svg.querySelector("text")!;
       expect(Number(text.getAttribute("font-size"))).toBe(
         Math.round(W * CREATIVE_GEOMETRY.headlineTypeWidthFraction),
@@ -232,7 +247,7 @@ describe("CreativePreview", () => {
     // C2: the compositor only ever centres; the preview used to left-align —
     // a state the renderer cannot produce. Assert the rendered attributes.
     const svg = svgOf(<CreativePreview primaryColor="#1473E6" headline="Stay wild. Stay hydrated." />);
-    const { width: W } = RATIO_DIMENSIONS["1:1"];
+    const { width: W } = resolveCanvas({ ratio: "1:1" });
     const text = svg.querySelector("text")!;
     expect(text.getAttribute("text-anchor")).toBe("middle");
     expect(Number(text.getAttribute("x"))).toBe(W / 2);
@@ -258,8 +273,8 @@ describe("CreativePreview", () => {
   });
 
   describe("the anchor axis (T4)", () => {
-    const H = RATIO_DIMENSIONS["1:1"].height;
-    const W = RATIO_DIMENSIONS["1:1"].width;
+    const H = resolveCanvas({ ratio: "1:1" }).height;
+    const W = resolveCanvas({ ratio: "1:1" }).width;
     const fontSize = Math.round(W * CREATIVE_GEOMETRY.headlineTypeWidthFraction);
     const headlineOf = (svg: SVGSVGElement): SVGTextElement => svg.querySelector("text")!;
     const baselineOf = (svg: SVGSVGElement): number => Number(headlineOf(svg).getAttribute("y"));
@@ -305,7 +320,7 @@ describe("CreativePreview", () => {
   });
 
   test("draws the logo block at the compositor's geometry, opposite the headline (C4)", () => {
-    const { width: W, height: H } = RATIO_DIMENSIONS["1:1"];
+    const { width: W, height: H } = resolveCanvas({ ratio: "1:1" });
     const logoW = W * CREATIVE_GEOMETRY.logoWidthFraction;
     const margin = W * CREATIVE_GEOMETRY.logoMarginFraction;
 
@@ -325,7 +340,7 @@ describe("CreativePreview", () => {
   });
 
   test("an empty headline leaves the text layer empty and the logo at its rest pose", () => {
-    const { width: W, height: H } = RATIO_DIMENSIONS["1:1"];
+    const { width: W, height: H } = resolveCanvas({ ratio: "1:1" });
     const svg = svgOf(<CreativePreview primaryColor="#1473E6" />);
     expect(svg.querySelector("text")).toBeNull();
     const margin = W * CREATIVE_GEOMETRY.logoMarginFraction;
@@ -335,8 +350,8 @@ describe("CreativePreview", () => {
 
   describe("resolveOverlappingLogoY (the compositor's snap, on preview line metrics)", () => {
     const logo = { x: 864, width: 173, height: 173 };
-    const H = RATIO_DIMENSIONS["1:1"].height;
-    const margin = RATIO_DIMENSIONS["1:1"].width * CREATIVE_GEOMETRY.logoMarginFraction;
+    const H = resolveCanvas({ ratio: "1:1" }).height;
+    const margin = resolveCanvas({ ratio: "1:1" }).width * CREATIVE_GEOMETRY.logoMarginFraction;
 
     test("a top headline's logo RESTS margined at the bottom edge", () => {
       expect(resolveOverlappingLogoY(undefined, logo, H, true, margin)).toBe(H - logo.height - margin);
@@ -444,7 +459,7 @@ describe("CreativePreview", () => {
     test("a style-less brief mirrors the leaf's defaults — the same ones the compositor resolves", () => {
       const svg = svgOf(<CreativePreview primaryColor="#1473E6" headline="Stay wild" />);
       const text = textOf(svg);
-      const { width: W } = RATIO_DIMENSIONS["1:1"];
+      const { width: W } = resolveCanvas({ ratio: "1:1" });
       expect(text.getAttribute("font-family")).toBe(DEFAULT_STYLE.fontFamily);
       expect(text.getAttribute("letter-spacing")).toBe(`${DEFAULT_STYLE.letterSpacing * Number(text.getAttribute("font-size"))}px`);
       expect(text.getAttribute("text-anchor")).toBe("middle");
@@ -452,7 +467,7 @@ describe("CreativePreview", () => {
     });
 
     test("sizeScale sets the starting type size as a fraction of the canvas width (D55)", () => {
-      const { width: W } = RATIO_DIMENSIONS["1:1"];
+      const { width: W } = resolveCanvas({ ratio: "1:1" });
       const text = textOf(styled({ sizeScale: 0.1 }));
       expect(Number(text.getAttribute("font-size"))).toBe(Math.round(W * 0.1));
     });
@@ -481,7 +496,7 @@ describe("CreativePreview", () => {
     });
 
     test("align left and right anchor the block against the text block edges (C2)", () => {
-      const { width: W } = RATIO_DIMENSIONS["1:1"];
+      const { width: W } = resolveCanvas({ ratio: "1:1" });
       const { textWidth } = fitArgs("1:1");
       const textEdge = (W - textWidth) / 2;
       const left = textOf(styled({ align: "left" }));

@@ -1,6 +1,6 @@
 import { describe, test, expect } from "vitest";
 import { render } from "@testing-library/react";
-import { PreviewDock, PreviewPicture, derivePreviewRatio } from "../PreviewDock";
+import { PreviewDock, PreviewPicture, derivePreviewRatio, derivePreviewSpec } from "../PreviewDock";
 import * as messages from "../messages";
 
 const showcase = {
@@ -39,6 +39,20 @@ describe("derivePreviewRatio", () => {
   });
 });
 
+describe("derivePreviewSpec", () => {
+  test("a display size wins over the social ratio", () => {
+    expect(derivePreviewSpec("instagram-story", "1:1", ["728x90"])).toEqual({ size: "728x90" });
+  });
+
+  test("an unknown size falls through to the social ratio", () => {
+    expect(derivePreviewSpec(undefined, "16:9", ["not-a-size"])).toEqual({ ratio: "16:9" });
+  });
+
+  test("without sizes, the social derivation stands", () => {
+    expect(derivePreviewSpec("instagram-story", "1:1")).toEqual({ ratio: "9:16" });
+  });
+});
+
 describe("PreviewPicture", () => {
   test("draws the final ratio it is handed — it never derives again", () => {
     // §6 question 4's trap, pinned: the caller derives once (the dock from the
@@ -51,9 +65,32 @@ describe("PreviewPicture", () => {
     const svg = container.querySelector("svg")!;
     expect(svg.getAttribute("viewBox")).toBe("0 0 1920 1080");
   });
+
+  test("a display spec mounts at resolveCanvas dimensions", () => {
+    const { container } = render(
+      <PreviewPicture
+        primaryColor="#1473E6"
+        headline="Hi"
+        spec={{ size: "728x90" }}
+        className="block h-auto w-full"
+      />,
+    );
+    const svg = container.querySelector("svg")!;
+    expect(svg.getAttribute("viewBox")).toBe("0 0 728 90");
+  });
 });
 
 describe("PreviewDock", () => {
+  test("an explicit display spec mounts the leaderboard, not the platform's social ratio", () => {
+    const { container } = render(
+      <PreviewDock {...showcase} platformId="instagram-story" spec={{ size: "728x90" }} />,
+    );
+    const svg = container.querySelector("svg")!;
+    expect(svg.getAttribute("viewBox")).toBe("0 0 728 90");
+    expect(container.textContent).toContain("Leaderboard · Instagram Story");
+    expect(container.textContent).not.toContain("728x90");
+  });
+
   test("derives the ratio once, at its own call site: the platform wins over the shape chips", () => {
     const { container } = render(<PreviewDock {...showcase} platformId="instagram-story" ratio="1:1" />);
     const svg = container.querySelector("svg")!;

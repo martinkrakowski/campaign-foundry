@@ -5,6 +5,8 @@ import {
   resolveCanvas,
   resolveTimeline,
   resolveStyle,
+  scaleBasis,
+  widthTermBasis,
   type CanvasSpec,
   type CompositeRequest,
   type CompositeResult,
@@ -21,6 +23,10 @@ import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creati
 import { hexToRgb, wrapText } from "./canvas-util.js";
 import { registerBundledFonts } from "../fonts.js";
 import { resolveAssetPath } from "../safe-path.js";
+
+// Re-export so A2's compositor tests keep importing from this module; the
+// functions live in the domain (lint:arch — the editor must not reach here).
+export { scaleBasis, widthTermBasis };
 
 /**
  * Everything {@link NodeCanvasCompositor.draw} needs to blit a still (or a later
@@ -401,35 +407,6 @@ const SIDES = ["top", "right", "bottom", "left"] as const;
 const ELLIPSIS = "…";
 /** Zoom amount applied away from the ken-burns rest pose so scale(restT) === 1. */
 const KEN_BURNS_ZOOM = 0.08;
-
-function isRatioFamily(spec: CanvasSpec): spec is { readonly ratio: NonNullable<CanvasSpec["ratio"]> } {
-  return "ratio" in spec && spec.ratio !== undefined;
-}
-
-/**
- * Scale basis for type and logo width (D114, amended 2026-09-07).
- *
- * - **ratio family:** `w` — D55 width-proportional, so 1:1 / 9:16 / 16:9 goldens
- *   stay byte-identical by construction.
- * - **size family:** the short side `min(w, h)`. Type size never takes the long
- *   side: a 728×90 headline is `90 × sizeScale`, not `728 × sizeScale`.
- *
- * Wrap width and logo margin are not this function — they are width-genuine
- * terms and go through {@link widthTermBasis}.
- */
-export function scaleBasis(spec: CanvasSpec, w: number, h: number): number {
-  if (isRatioFamily(spec)) return w;
-  return Math.min(w, h);
-}
-
-/**
- * Wrap width and logo margin are width terms: they use `w` for both families
- * (D114). A 728×90 wraps across the leaderboard; a 160×600 wraps at 160 px,
- * not 600. Type size is not a width term — it stays on {@link scaleBasis}.
- */
-export function widthTermBasis(_spec: CanvasSpec, w: number, _h: number): number {
-  return w;
-}
 
 function easeOutCubic(t: number): number {
   return 1 - (1 - t) ** 3;

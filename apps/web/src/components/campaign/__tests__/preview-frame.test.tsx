@@ -116,6 +116,25 @@ describe("PreviewFrame (D52)", () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 
+  test("a display-size spec issues exactly one preview request carrying { size: \"728x90\" } and mounts the frame", async () => {
+    vi.useFakeTimers();
+    vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());
+    const { container } = renderFrame({ spec: { size: "728x90" } });
+    // The SVG placeholder stands until the frame arrives — but the request IS issued.
+    expect(container.querySelector("svg")).not.toBeNull();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
+    });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(
+      (vi.mocked(globalThis.fetch).mock.calls[0][1] as RequestInit).body as string,
+    ) as { cell: { canvas: unknown } };
+    expect(body.cell.canvas).toEqual({ size: "728x90" });
+    // The real frame replaces the placeholder — the dock's acceptance for a size.
+    expect(container.querySelector("img")).not.toBeNull();
+    expect(container.querySelector("svg")).toBeNull();
+  });
+
   test("the cell request carries the anchor only when one is set", async () => {
     vi.useFakeTimers();
     vi.mocked(globalThis.fetch).mockResolvedValue(pngResponse());

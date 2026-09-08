@@ -2,7 +2,16 @@ import { describe, test, expect } from "vitest";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { AspectRatio } from "../AspectRatio.vo.js";
-import { RATIO_VALUES, resolveCanvas, type CanvasSpec } from "../aspect-ratios.js";
+import {
+  RATIO_VALUES,
+  nearestSocialRatio,
+  resolveCanvas,
+  scaleBasis,
+  scaleBasisPx,
+  widthTermBasis,
+  type CanvasSpec,
+} from "../aspect-ratios.js";
+import { DISPLAY_SIZE_VALUES } from "../display-sizes.js";
 
 describe("resolveCanvas (D113)", () => {
   test("a social ratio resolves to the 1080/1920 canvas", () => {
@@ -45,22 +54,46 @@ describe("resolveCanvas (D113)", () => {
   });
 });
 
-// The readers under apps/web (ReviewStep, CreativePreview, PolicySection,
-// LayoutSection) still index RATIO_DIMENSIONS directly. They are out of scope
-// until A4; this scan is packages/*/src only so those files cannot fail it.
+describe("scaleBasis (D114)", () => {
+  test("the ratio family is width, so 16:9 stays D55", () => {
+    expect(scaleBasis({ ratio: "16:9" }, 1920, 1080)).toBe(1920);
+    expect(scaleBasis({ ratio: "1:1" }, 1080, 1080)).toBe(1080);
+    expect(scaleBasis({ ratio: "9:16" }, 1080, 1920)).toBe(1080);
+  });
+
+  test("the size family is the short side", () => {
+    expect(scaleBasis({ size: "728x90" }, 728, 90)).toBe(90);
+    expect(scaleBasis({ size: "160x600" }, 160, 600)).toBe(160);
+  });
+});
+
+describe("scaleBasisPx — the editor readout", () => {
+  test("a social layout is sizeScale × width", () => {
+    expect(scaleBasisPx({ ratio: "16:9" }, 0.08)).toBe(154);
+    expect(scaleBasisPx({ ratio: "1:1" }, 0.08)).toBe(86);
+  });
+
+  test("a 728x90 layout is sizeScale × 90 — the same number the compositor uses", () => {
+    expect(scaleBasisPx({ size: "728x90" }, 0.08)).toBe(7);
+    expect(widthTermBasis({ size: "728x90" }, 728, 90)).toBe(728);
+  });
+});
+
 // Tests and aspect-ratios.ts (the resolver itself) are the only exclusions —
 // widening the exclusion to all files would make the assertion unable to fail.
 const DIRECT_DIMENSION_READ = /RATIO_DIMENSIONS\[|DISPLAY_SIZES\[/;
 
 const packagesRoot = resolve(import.meta.dirname, "../../../../../../packages");
+const webSrc = resolve(import.meta.dirname, "../../../../../../apps/web/src");
+const repoRoot = resolve(import.meta.dirname, "../../../../../../");
 
-function listPackageSources(dir: string): string[] {
+function listSources(dir: string): string[] {
   const names: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.name === "__tests__") continue;
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
-      names.push(...listPackageSources(full));
+      names.push(...listSources(full));
     } else if (/\.(ts|tsx)$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
       names.push(full);
     }
@@ -69,18 +102,44 @@ function listPackageSources(dir: string): string[] {
 }
 
 describe("the resolver is the only reader of pixel dimensions", () => {
-  test("no package source indexes RATIO_DIMENSIONS[ or DISPLAY_SIZES[ outside the resolver", () => {
+  test("no package or apps/web/src source indexes RATIO_DIMENSIONS[ or DISPLAY_SIZES[ outside the resolver", () => {
     const hits: string[] = [];
     for (const pkg of readdirSync(packagesRoot, { withFileTypes: true })) {
       if (!pkg.isDirectory()) continue;
       const src = join(packagesRoot, pkg.name, "src");
       if (!existsSync(src)) continue;
-      for (const file of listPackageSources(src)) {
+      for (const file of listSources(src)) {
         if (file.endsWith("/aspect-ratios.ts")) continue;
         const source = readFileSync(file, "utf8");
-        if (DIRECT_DIMENSION_READ.test(source)) hits.push(relative(packagesRoot, file));
+        if (DIRECT_DIMENSION_READ.test(source)) hits.push(relative(repoRoot, file));
       }
     }
+    for (const file of listSources(webSrc)) {
+      const source = readFileSync(file, "utf8");
+      if (DIRECT_DIMENSION_READ.test(source)) hits.push(relative(repoRoot, file));
+    }
     expect(hits, hits.length ? `direct dimension reads in ${hits.join(", ")}` : "").toEqual([]);
+  });
+});
+
+describe("nearestSocialRatio — the background port's vocabulary", () => {
+  test("a ratio-family spec is itself", () => {
+    for (const ratio of RATIO_VALUES) {
+      expect(nearestSocialRatio({ ratio })).toBe(ratio);
+    }
+  });
+
+  test("each display size resolves to the social orientation it actually looks like", () => {
+    expect(nearestSocialRatio({ size: "300x250" })).toBe("1:1");
+    expect(nearestSocialRatio({ size: "728x90" })).toBe("16:9");
+    expect(nearestSocialRatio({ size: "320x50" })).toBe("16:9");
+    expect(nearestSocialRatio({ size: "160x600" })).toBe("9:16");
+    expect(nearestSocialRatio({ size: "300x600" })).toBe("9:16");
+  });
+
+  test("every member of the union is answered — a sixth size cannot fall through", () => {
+    for (const size of DISPLAY_SIZE_VALUES) {
+      expect(RATIO_VALUES).toContain(nearestSocialRatio({ size }));
+    }
   });
 });

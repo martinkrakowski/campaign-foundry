@@ -107,6 +107,18 @@ describe("ReviewStep — summary rows", () => {
     expect(row("layout")).toBeNull();
   });
 
+  test("a 728x90 layout shows short-side pixels, not width (A2/A4)", () => {
+    renderRows({
+      ...classic,
+      output: { formats: ["static"], platforms: ["linkedin"], sizes: ["728x90"] },
+      style: { sizeScale: 0.08 },
+    });
+    // 0.08 × 90 (short side), not 0.08 × 728.
+    expect(row("layout")?.textContent).toContain(messages.styleSizeReadout(7, "Leaderboard"));
+    expect(row("layout")?.textContent).not.toContain(messages.styleSizeReadout(58, "Leaderboard"));
+    expect(row("layout")?.textContent).not.toContain("728x90");
+  });
+
   test("the template row carries only the fields the block declares", () => {
     renderRows({ ...classic, style: { sizeScale: 0.08, align: "right" } });
     const template = row("layout");

@@ -7,6 +7,16 @@ describe("PosterFrame", () => {
     expect(frameSize("1:1", 96)).toEqual({ width: 96, height: 96 });
     expect(frameSize("9:16", 96)).toEqual({ width: 54, height: 96 });
     expect(frameSize("16:9", 96)).toEqual({ width: 96, height: 54 });
+    expect(frameSize({ size: "728x90" }, 728)).toEqual({ width: 728, height: 90 });
+  });
+
+  test("a 728x90 poster is a very wide, very short rectangle (F4)", () => {
+    const { container } = render(<PosterFrame spec={{ size: "728x90" }} variant="pA" />);
+    const svg = container.querySelector("svg") as SVGSVGElement;
+    const width = Number(svg.getAttribute("width"));
+    const height = Number(svg.getAttribute("height"));
+    expect(width / height).toBeCloseTo(728 / 90);
+    expect(svg.getAttribute("viewBox")).toBe(`0 0 ${width} ${height}`);
   });
 
   test("draws each ratio at its true proportion from the long side", () => {

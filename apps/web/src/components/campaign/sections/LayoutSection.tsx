@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, type ReactNode } from "react";
-import { RATIO_DIMENSIONS } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import { scaleBasisPx } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import {
   ALIGN_VALUES,
   DEFAULT_STYLE,
@@ -19,12 +19,12 @@ import {
 } from "@campaignfoundry/CampaignOrchestration/creative-style";
 import { ChipGroup, Slider } from "@/components/ui";
 import { toBrief, type EditorState } from "@/components/campaign/editor-state";
-import { derivePreviewRatio } from "@/components/campaign/PreviewDock";
+import { derivePreviewSpec } from "@/components/campaign/PreviewDock";
 import { PreviewFrame } from "@/components/campaign/PreviewFrame";
 import { previewLook } from "@/components/campaign/preview-props";
 import {
+  canvasDisplayName,
   platformDisplayName,
-  ratioDisplayName,
   TEXT_EFFECT_META,
   textEffectDisplayName,
 } from "@/components/campaign/display-names";
@@ -110,14 +110,15 @@ export function LayoutSection({ state, dispatch, errors, preview = false }: Sect
   const look = previewLook(state);
   // One derivation, once (§6 question 4): the platform's own ratio wins, a
   // square otherwise — the same answer the dock and the Review figure give.
-  const ratio = derivePreviewRatio(look?.platformId, undefined);
+  const spec = derivePreviewSpec(look?.platformId, undefined, brief.output?.sizes);
   const style = state.style;
   const sizeScale = style.sizeScale ?? DEFAULT_STYLE.sizeScale;
   const lineHeight = style.lineHeight ?? DEFAULT_STYLE.lineHeight;
   const letterSpacing = style.letterSpacing ?? DEFAULT_STYLE.letterSpacing;
-  // D55: the size is stored as a fraction of the canvas width and DISPLAYED as
-  // the pixels it means at the previewed ratio — derived text, never stored.
-  const sizePx = Math.round(sizeScale * RATIO_DIMENSIONS[ratio].width);
+  // Social keeps D55 (width); a display size uses A2's short-side basis — one
+  // helper, so this readout cannot disagree with the compositor.
+  const sizePx = scaleBasisPx(spec, sizeScale);
+  const canvasLabel = canvasDisplayName(spec);
   const platformLabel =
     look?.platformId !== undefined ? platformDisplayName(look.platformId) : messages.previewNoPlatform;
   // The caption names the effect when the template carries one (T6, the D50
@@ -126,11 +127,11 @@ export function LayoutSection({ state, dispatch, errors, preview = false }: Sect
   const caption =
     brief.style?.textEffect !== undefined
       ? messages.previewCaptionTextEffect(
-          ratioDisplayName(ratio),
+          canvasLabel,
           platformLabel,
           textEffectDisplayName(brief.style.textEffect),
         )
-      : messages.previewCaption(ratioDisplayName(ratio), platformLabel);
+      : messages.previewCaption(canvasLabel, platformLabel);
   const captionText = briefBackgroundIsStandIn(brief)
     ? `${caption} · ${messages.previewFrameStandInBackground}`
     : caption;
@@ -148,7 +149,7 @@ export function LayoutSection({ state, dispatch, errors, preview = false }: Sect
           primaryColor={look.primaryColor}
           headline={look.headline}
           motion={look.motion}
-          ratio={ratio}
+          spec={spec}
           className="block h-auto w-full"
         />
         <figcaption className="font-mono text-[11px] text-text-muted">{captionText}</figcaption>
@@ -213,7 +214,7 @@ export function LayoutSection({ state, dispatch, errors, preview = false }: Sect
                 max={MAX_SIZE_SCALE}
                 step={0.005}
                 value={sizeScale}
-                readout={<Readout>{messages.styleSizeReadout(sizePx, ratioDisplayName(ratio))}</Readout>}
+                readout={<Readout>{messages.styleSizeReadout(sizePx, canvasLabel)}</Readout>}
                 onChange={(value) => dispatch({ type: "setStyle", patch: { sizeScale: value } })}
               />
             </Field>

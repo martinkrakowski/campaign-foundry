@@ -1,5 +1,6 @@
 import { describe, test, expect } from "vitest";
 import { render } from "@testing-library/react";
+import { canvasSpecOf, frameBox } from "../preview-layers";
 import { RatioFrame } from "../ratio-frame";
 
 describe("RatioFrame", () => {
@@ -17,6 +18,22 @@ describe("RatioFrame", () => {
       expect(svg.getAttribute("viewBox")).toBe(`0 0 ${width} ${height}`);
       unmount();
     }
+  });
+
+  test("a 728x90 frame is a very wide, very short rectangle (F4)", () => {
+    const { container } = render(<RatioFrame spec={{ size: "728x90" }} />);
+    const svg = container.querySelector("svg") as SVGSVGElement;
+    const width = Number(svg.getAttribute("width"));
+    const height = Number(svg.getAttribute("height"));
+    expect(width / height).toBeCloseTo(728 / 90);
+    expect(svg.getAttribute("viewBox")).toBe(`0 0 ${width} ${height}`);
+  });
+
+  test("canvasSpecOf prefers spec, then ratio, then the square", () => {
+    expect(canvasSpecOf({ size: "728x90" }, "1:1")).toEqual({ size: "728x90" });
+    expect(canvasSpecOf(undefined, "9:16")).toEqual({ ratio: "9:16" });
+    expect(canvasSpecOf(undefined, undefined)).toEqual({ ratio: "1:1" });
+    expect(frameBox({ size: "728x90" }, 728)).toEqual({ width: 728, height: 90 });
   });
 
   test("scales the frame by its long side", () => {

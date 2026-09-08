@@ -4217,6 +4217,32 @@ runner artifact byte for byte.
 **Next:** A2 (short-side scaling for the size family, display goldens on both platforms) alone;
 then A3 ‖ A4; then A5.
 
+---
+
+## 2026-09-08 — A4 kit union (`feat/a4-kit-union`)
+
+- **Mode:** Implementer
+- **Changes:**
+  - Kit frames (`RatioFrame`, `PosterFrame`, `PosterStack`) take `spec: CanvasSpec`; proportions come from `resolveCanvas` via `frameBox`, never a local `PROPORTIONS` table. A 728×90 frame is a very wide, very short rectangle (F4).
+  - Kept `ratio` as a deprecated social-ratio shorthand: `tsc` enumerated `ratio-frame.tsx`, `poster-frame.tsx`, `poster-stack.tsx`, `platform-card.tsx` as the kit sites of the old required `ratio` prop; existing `{ ratio: "9:16" }` tests pass unedited.
+  - `CreativePreview` / `PreviewFrame` / `PreviewDock` accept `CanvasSpec` and size the SVG through `resolveCanvas`. Type size and logo width use A2's `scaleBasis` (moved from the compositor adapter into `aspect-ratios.ts` so `lint:arch` stays clean).
+  - Editor readouts (`LayoutSection`, `ReviewStep`) import `scaleBasisPx`: social stays D55 (width); a 728×90 layout shows `sizeScale × 90`.
+  - Removed `RATIO_DIMENSIONS[` reads from `apps/web/src` (PolicySection now spreads `resolveCanvas`). A1's grep test now scans `apps/web/src` too.
+- **Decisions:**
+  - `ratio` alias kept for one release rather than touching the compiler-enumerated call sites (and the web sites that still pass a social ratio).
+  - `scaleBasis` / `widthTermBasis` / `scaleBasisPx` live next to `resolveCanvas`, not in the compositor adapter. The compositor re-exports so A2's tests keep compiling.
+  - Zero `as CanvasSpec` / `as DisplaySize` / `as AspectRatioValue` at union sites (`git diff | grep -c` is 0).
+- **Mutations (compiled, ran, failed the named test, reverted):**
+  1. `PROPORTIONS` restored in `ratio-frame.tsx` → `a 728x90 frame is a very wide, very short rectangle (F4)` failed (ratio 1 vs 728/90).
+  2. Readout used width for a display size → `a 728x90 layout shows short-side pixels, not width (A2/A4)` failed (`~58 px` vs `~7 px`).
+  3. `RATIO_DIMENSIONS[` re-added in `CreativePreview.tsx` → the widened grep test failed naming `apps/web/src/components/campaign/CreativePreview.tsx`.
+- **Left open:**
+  - A3 owns display platform profiles; until those land, LayoutSection still derives a social canvas unless `brief.output.sizes` is present (ReviewStep already reads it).
+  - A5 adds the `display-ad` create option that would mount a `PosterFrame` at a display size.
+
+## 2026-09-08 — A4 remediation (`feat/a4-kit-union`, PR #249)
+
+- **Mode:** Remediator — display previews now request the real frame (`PreviewCellSelection` carries `canvas: CanvasSpec`; size cells borrow `nearestSocialRatio` for the background and pass no insets; route and use case validate both families), and `canvasDisplayName` reuses `resolveCanvas`'s exclusive-family guard so a dual-key spec fails closed. Mutations: ratio gate re-added → the 728×90 request test failed; guard dropped → the dual-key test failed. Gate 100 % × 4.
 ## 2026-09-08 — Display advertising, wave 2: A2 merged (#246) — readable type on a 90 px canvas, no social pixel moved
 
 **Mode:** Orchestrator. Record written at merge time (stage 6).

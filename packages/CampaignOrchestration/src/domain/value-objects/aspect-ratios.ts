@@ -41,3 +41,68 @@ export function resolveCanvas(spec: CanvasSpec): { readonly width: number; reado
   if ("ratio" in exclusive) return RATIO_DIMENSIONS[exclusive.ratio];
   return DISPLAY_SIZES[exclusive.size];
 }
+
+/** The social family: a spec that names a ratio, not a display size. */
+function isRatioFamily(spec: CanvasSpec): spec is { readonly ratio: AspectRatioValue; readonly size?: never } {
+  return spec.ratio !== undefined;
+}
+
+/**
+ * Scale basis for type and logo width (D114).
+ *
+ * - **ratio family:** `w` — D55 width-proportional, so 1:1 / 9:16 / 16:9 stay
+ *   byte-identical by construction.
+ * - **size family:** the short side `min(w, h)`. Type size never takes the long
+ *   side: a 728×90 headline is `90 × sizeScale`, not `728 × sizeScale`.
+ *
+ * Wrap width and logo margin are not this function — they are width-genuine
+ * terms and go through {@link widthTermBasis}.
+ */
+export function scaleBasis(spec: CanvasSpec, w: number, h: number): number {
+  if (isRatioFamily(spec)) return w;
+  return Math.min(w, h);
+}
+
+/**
+ * Wrap width and logo margin are width terms: they use `w` for both families
+ * (D114). A 728×90 wraps across the leaderboard; a 160×600 wraps at 160 px,
+ * not 600. Type size is not a width term — it stays on {@link scaleBasis}.
+ */
+export function widthTermBasis(_spec: CanvasSpec, w: number, _h: number): number {
+  return w;
+}
+
+/**
+ * The type-size readout in pixels: `sizeScale` times {@link scaleBasis} at
+ * the spec's resolved canvas, rounded the same way the compositor rounds.
+ * One helper, so the editor cannot re-derive a different number than A2.
+ */
+export function scaleBasisPx(spec: CanvasSpec, sizeScale: number): number {
+  const { width, height } = resolveCanvas(spec);
+  return Math.round(sizeScale * scaleBasis(spec, width, height));
+}
+
+/**
+ * The social ratio whose canvas aspect is nearest the spec's — the vocabulary
+ * the background port speaks (`ImageGeneratorPort` takes an `AspectRatio`, and
+ * the social family is all it can name). A size-family preview resolves its
+ * background at this orientation; the compositor then stretches it over the
+ * exact display canvas, so a leaderboard asks for a wide background, not a
+ * square one. A ratio-family spec is itself.
+ */
+export function nearestSocialRatio(spec: CanvasSpec): AspectRatioValue {
+  if (spec.ratio !== undefined) return spec.ratio;
+  const { width, height } = resolveCanvas(spec);
+  const aspect = width / height;
+  let nearest: AspectRatioValue = RATIO_VALUES[0];
+  let nearestDiff = Number.POSITIVE_INFINITY;
+  for (const ratio of RATIO_VALUES) {
+    const { width: w, height: h } = RATIO_DIMENSIONS[ratio];
+    const diff = Math.abs(aspect - w / h);
+    if (diff < nearestDiff) {
+      nearestDiff = diff;
+      nearest = ratio;
+    }
+  }
+  return nearest;
+}

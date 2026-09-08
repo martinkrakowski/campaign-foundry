@@ -82,7 +82,15 @@ export function usePreviewFrame(
   // so a parent re-render cannot re-fire the effect for an unchanged look.
   const request = useMemo(
     () => (brief !== undefined && cell !== undefined ? { brief, cell } : null),
-    [brief, cell?.productId, cell?.ratio, cell?.layout, cell?.tone, cell?.anchor],
+    [
+      brief,
+      cell?.productId,
+      cell?.canvas.ratio,
+      cell?.canvas.size,
+      cell?.layout,
+      cell?.tone,
+      cell?.anchor,
+    ],
   );
 
   useEffect(() => {
@@ -125,7 +133,9 @@ export function usePreviewFrame(
       : [
           request.brief.id,
           request.cell.productId,
-          request.cell.ratio,
+          // The canvas identity is whichever family the spec carries (join
+          // renders an absent key as the empty string, as `anchor ?? ""` did).
+          request.cell.canvas.ratio ?? request.cell.canvas.size,
           request.cell.layout,
           request.cell.tone,
           request.cell.anchor ?? "",

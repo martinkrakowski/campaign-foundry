@@ -3,14 +3,17 @@ import {
   alignDisplayName,
   anchorDisplayName,
   campaignTypeOf,
+  canvasDisplayName,
   formatDisplayName,
   modeDisplayName,
   platformDisplayName,
   ratioDisplayName,
+  sizeDisplayName,
   textEffectDisplayName,
   typeDisplayName,
   weightDisplayName,
 } from "../display-names";
+import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { ANCHOR_VALUES } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import { TEXT_EFFECT_VALUES } from "@campaignfoundry/CampaignOrchestration/creative-style";
@@ -34,6 +37,31 @@ describe("display names", () => {
     expect(ratioDisplayName("9:16")).toBe("Tall");
     expect(ratioDisplayName("16:9")).toBe("Wide");
     expect(ratioDisplayName("21:9")).toBe("21:9");
+  });
+
+  test("every display size the domain knows has a plain-English name (A4)", () => {
+    for (const size of DISPLAY_SIZE_VALUES) {
+      expect(sizeDisplayName(size)).not.toBe(size);
+    }
+    expect(sizeDisplayName("728x90")).toBe("Leaderboard");
+    expect(sizeDisplayName("300x250")).toBe("Medium rectangle");
+    expect(sizeDisplayName("160x600")).toBe("Wide skyscraper");
+    expect(sizeDisplayName("320x50")).toBe("Mobile banner");
+    expect(sizeDisplayName("300x600")).toBe("Half page");
+    expect(sizeDisplayName("banner")).toBe("banner");
+  });
+
+  test("canvasDisplayName speaks a ratio or a size, never a raw key", () => {
+    expect(canvasDisplayName({ ratio: "9:16" })).toBe("Tall");
+    expect(canvasDisplayName({ size: "728x90" })).toBe("Leaderboard");
+    // @ts-expect-error an empty object is not a canvas
+    expect(() => canvasDisplayName({})).toThrow("CanvasSpec must carry exactly one of ratio/size");
+    // A dual-key spec throws the same guard the compositor applies (resolveCanvas),
+    // not a silent "Square" for a leaderboard.
+    // @ts-expect-error a canvas carrying both keys is not a spec
+    expect(() => canvasDisplayName({ ratio: "1:1", size: "728x90" })).toThrow(
+      "CanvasSpec must carry exactly one of ratio/size",
+    );
   });
 
   test("platforms use the profile's own label, never a second table", () => {
