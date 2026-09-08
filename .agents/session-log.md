@@ -3781,3 +3781,19 @@ follow-up: hit-test by the smallest containing footprint, independent of paint o
   - `yarn typecheck` is turbo-per-workspace; `tools/` is typechecked by vitest and `tsc -p tools/wave-status --noEmit`.
 - **Remediation:** five verified findings (gate-exit, observed no-PR, closed-unmerged, EXIT trailing space, istanbul indent); four mutations compiled, ran, failed the named test, reverted. PR-Agent trim/Set refuted (D103).
 
+---
+
+## 2026-09-07 — Identity map after first paint (`fix/identity-map-after-first-paint`)
+
+- **Mode:** Implementer (hotfix)
+- **Changes:**
+  - `IdentitySection.tsx`: `mapReady` starts false and flips true in a mount `useEffect`; the memoised `WorldMap` renders only then. Before that, a same-height `aria-hidden` placeholder (the map's 960×500 box, no content). Chips stay on the first commit. Memoisation untouched. Kit, dialog, `BriefEditor` untouched.
+  - `identity-section.test.tsx`: map queries wait with `findByText` (fallback hint); render-count still one across three unrelated patches after `mapReady`; new first-paint test (layout-effect probe: map absent, chips present; after flush, map present).
+- **Decisions:**
+  - Product fix, not a test stub: first paint no longer waits on the dot matrix, and the editor suite stays honest about the remaining mount cost.
+  - First-paint assertion uses a sibling `useLayoutEffect` probe (after commit, before the map's `useEffect`) so initialising `mapReady` to `true` fails the test.
+- **Mutation:** `useState(false)` → `useState(true)`. Compiled, ran, failed `on first render the map is absent…` (`expected true to be false` at `firstPaint.map`). Reverted.
+- **Timing** (`yarn vitest run apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx`, file Duration, three runs, medians): before 51.57 / 51.62 / 52.80 → **51.62s**; after 49.03 / 50.04 / 49.31 → **49.31s**. Local isolated-file times were already in the pre-#225 CI ballpark (~65s); CI's 126–146s is runner load on a synchronous first paint.
+- **Gate:** `yarn build && yarn typecheck && yarn lint && yarn lint:arch` (compliant) && `yarn test:cov` — 196 files / 3308 tests, **Statements 100% · Branches 100% · Functions 100% · Lines 100%**. `sync:check` after commit.
+- **Left open:**
+  - RTL `act()` still flushes the map before `render()` returns, so isolated-file wall time only dropped ~2s. The CI win is first paint no longer blocking waitFor under contention; if #229/#230-class timeouts persist, the next lever is deferring past `act` (not a stub).
