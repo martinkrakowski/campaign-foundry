@@ -8,9 +8,11 @@ import {
   type CampaignType,
 } from "../campaign-types.js";
 
-describe("campaign types (D108–D112)", () => {
-  test("the vocabulary is exactly the three types, in display order", () => {
-    expect(CAMPAIGN_TYPES).toEqual(["social-post", "paid-social", "short-video"]);
+describe("campaign types (D108–D112, A5/D117)", () => {
+  test("the vocabulary is exactly the four types, in display order", () => {
+    // display-ad joined last (D117) — after the sizes render, so the option
+    // cannot exist before its campaigns can.
+    expect(CAMPAIGN_TYPES).toEqual(["social-post", "paid-social", "short-video", "display-ad"]);
   });
 
   test("the default is a member of the vocabulary (D112)", () => {
@@ -32,7 +34,7 @@ describe("campaign types (D108–D112)", () => {
     }
   });
 
-  test("each preset matches the plan's §2.1 table", () => {
+  test("each preset matches the plan's table — the type plan's §2.1 and the display plan's A5 row", () => {
     expect(CAMPAIGN_TYPE_PRESETS["social-post"]).toEqual({
       platforms: ["instagram-feed", "linkedin", "x"],
       formats: ["static"],
@@ -48,6 +50,11 @@ describe("campaign types (D108–D112)", () => {
       formats: ["motion"],
       mode: "variation",
     });
+    expect(CAMPAIGN_TYPE_PRESETS["display-ad"]).toEqual({
+      platforms: ["google-display", "meta-audience-network", "display-web"],
+      formats: ["static"],
+      mode: "brief",
+    });
   });
 
   test("presets only ever request the two known formats and the two known modes", () => {
@@ -59,9 +66,9 @@ describe("campaign types (D108–D112)", () => {
     }
   });
 
-  test("the union is compile-locked: a fourth type is a type error until added", () => {
+  test("the union is compile-locked: a fifth type is a type error until added", () => {
     const names: readonly CampaignType[] = CAMPAIGN_TYPES;
-    expect(names).toHaveLength(3);
+    expect(names).toHaveLength(4);
   });
 
   test("each type has a distinct prompt hint; short-video is not the social-post phrase", () => {
@@ -71,6 +78,7 @@ describe("campaign types (D108–D112)", () => {
       "paid social advertising across feeds, stories and reels",
     );
     expect(CAMPAIGN_TYPE_PROMPT_HINTS["short-video"]).toBe("short-form video for social feeds");
+    expect(CAMPAIGN_TYPE_PROMPT_HINTS["display-ad"]).toBe("static display advertising in IAB banner sizes");
     expect(CAMPAIGN_TYPE_PROMPT_HINTS["short-video"]).not.toBe(CAMPAIGN_TYPE_PROMPT_HINTS["social-post"]);
     expect(CAMPAIGN_TYPE_PROMPT_HINTS["paid-social"]).not.toBe(CAMPAIGN_TYPE_PROMPT_HINTS["social-post"]);
   });
@@ -83,6 +91,9 @@ describe("campaign types (D108–D112)", () => {
     );
     expect(campaignTypePromptSentence("short-video")).toBe(
       "Campaign type: short-form video for social feeds.",
+    );
+    expect(campaignTypePromptSentence("display-ad")).toBe(
+      "Campaign type: static display advertising in IAB banner sizes.",
     );
   });
 

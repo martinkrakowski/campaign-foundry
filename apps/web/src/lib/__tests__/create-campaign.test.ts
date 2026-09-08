@@ -137,7 +137,8 @@ describe("takeSeed — the baton is spent by a read", () => {
     ["a half-old seed carrying an audience only", { name: "Summer Spark", targetAudience: "trail runners", mode: "brief" }],
     ["a non-string field", { name: 42, type: "social-post" }],
     ["a missing type", { name: "Summer Spark" }],
-    ["an unknown type", { name: "Summer Spark", type: "display-ad" }],
+    // "display-ad" joined the vocabulary in A5 (D117); "banner" is still outside it.
+    ["an unknown type", { name: "Summer Spark", type: "banner" }],
     ["both the new type and the retired mode", { name: "Summer Spark", type: "social-post", mode: "variation" }],
     ["a JSON array", ["Summer Spark", "EU"]],
     ["a bare string", "Summer Spark"],

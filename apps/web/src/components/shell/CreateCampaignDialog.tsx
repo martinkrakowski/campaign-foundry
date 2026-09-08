@@ -28,7 +28,7 @@ import { createCampaign } from "@/lib/create-campaign";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 import { hasRecoverableDraft } from "@/components/campaign/editor-state";
-import { formatDisplayName, modeDisplayName, typeDisplayName } from "@/components/campaign/display-names";
+import { formatDisplayName, modeDisplayName, platformDisplayName, typeDisplayName } from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
 
 /**
@@ -53,10 +53,19 @@ const MIXED_FRAMES: readonly { readonly ratio: RatioOption; readonly variant: Po
 /**
  * The type's picture (plan §2.2): PosterFrames at the still-capable ratios, or
  * PosterStack + ScrubBar when the preset is video-only. Wholly decorative — the
- * tile's accessible name is the raw type id.
+ * tile's accessible name is the raw type id. The display-ad tile is A4's union
+ * at work: its frame is a CanvasSpec at a display size (D113), so the preview
+ * is a 6:5 medium-rectangle, not a social ratio.
  */
 function TypePreview({ type }: { type: CampaignType }): ReactNode {
   const { formats } = CAMPAIGN_TYPE_PRESETS[type];
+  if (type === "display-ad") {
+    return (
+      <span className="flex items-end justify-center gap-1.5">
+        <PosterFrame spec={{ size: "300x250" }} variant="pA" size={44} />
+      </span>
+    );
+  }
   const hasStill = formats.includes("static");
   const hasVideo = formats.includes("motion");
   if (hasVideo && !hasStill) {
@@ -87,13 +96,18 @@ function typeTileBlurb(type: CampaignType): string {
 
 /**
  * What assistive tech hears: `tag`/`blurb`/`meta` are aria-hidden, so the
- * display name, the gives line, and the D110 sentence (short-video) go through
- * `description` → `aria-describedby`. Same formatters as the visible text.
+ * display name, the gives line, the display placements (display-ad), and the
+ * D110 sentence (short-video) go through `description` → `aria-describedby`.
+ * Same formatters as the visible text.
  */
 function typeTileDescription(type: CampaignType): string {
+  const preset = CAMPAIGN_TYPE_PRESETS[type];
   const parts = [typeDisplayName(type), typeTileBlurb(type)];
   if (type === "short-video") {
     parts.push(messages.typeTileRunsAs(modeDisplayName("variation")));
+  }
+  if (type === "display-ad") {
+    parts.push(messages.typeTilePlacements(messages.joinList(preset.platforms.map(platformDisplayName))));
   }
   return messages.joinList(parts);
 }
