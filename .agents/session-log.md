@@ -4170,3 +4170,4 @@ dispatched.
 - **Left open:**
   - Do not merge. CI Build on the PR is the linux proof for the new display cells (push CI at `744f384` failed closed: no `linux-x64` display map yet).
   - A3 ‖ A4 next; A5 last.
+- **Remediator (PR #246):** `compositeRequestFingerprint` includes `pixelSize` when present; `widthTermBasis` returns `w` (the long-side cap was `min(w, max(w, h))` ≡ `w`).

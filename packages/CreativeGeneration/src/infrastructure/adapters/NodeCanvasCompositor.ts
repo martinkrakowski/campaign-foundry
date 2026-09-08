@@ -423,16 +423,12 @@ export function scaleBasis(spec: CanvasSpec, w: number, h: number): number {
 }
 
 /**
- * Wrap width and logo margin are genuinely about width: they may use `w` so a
- * 728×90 wraps across the leaderboard, but they are capped by the long side so
- * a 160×600 cannot wrap at 600 px (`Math.min(w, longSide)`). Type size is not a
- * width term — it stays on {@link scaleBasis}. Ratio family: `w`, identical to
- * today.
+ * Wrap width and logo margin are width terms: they use `w` for both families
+ * (D114). A 728×90 wraps across the leaderboard; a 160×600 wraps at 160 px,
+ * not 600. Type size is not a width term — it stays on {@link scaleBasis}.
  */
-export function widthTermBasis(spec: CanvasSpec, w: number, h: number): number {
-  if (isRatioFamily(spec)) return w;
-  const longSide = Math.max(w, h);
-  return Math.min(w, longSide);
+export function widthTermBasis(_spec: CanvasSpec, w: number, _h: number): number {
+  return w;
 }
 
 function easeOutCubic(t: number): number {

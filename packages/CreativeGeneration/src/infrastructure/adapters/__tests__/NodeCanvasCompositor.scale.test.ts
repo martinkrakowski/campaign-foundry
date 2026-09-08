@@ -3,6 +3,7 @@ import { createCanvas } from "@napi-rs/canvas";
 import {
   DEFAULT_STYLE,
   DISPLAY_SIZE_VALUES,
+  RATIO_VALUES,
   resolveCanvas,
   type CompositeRequest,
   type DisplaySize,
@@ -118,17 +119,16 @@ describe("scaleBasis (D114, size family vs ratio family)", () => {
   });
 });
 
-describe("widthTermBasis — wrap/margin may use w, capped by the long side (size family only)", () => {
-  test("ratio family is width, matching scaleBasis", () => {
-    expect(widthTermBasis({ ratio: "16:9" }, 1920, 1080)).toBe(1920);
-  });
-
-  test("a 728×90 wraps across its width (the long side equals w)", () => {
-    expect(widthTermBasis({ size: "728x90" }, 728, 90)).toBe(728);
-  });
-
-  test("a 160×600 is capped at w so wrap cannot use the 600 px long side", () => {
-    expect(widthTermBasis({ size: "160x600" }, 160, 600)).toBe(160);
+describe("widthTermBasis — wrap/margin use w for both families", () => {
+  test("widthTermBasis === w for every ratio and every display size", () => {
+    for (const ratio of RATIO_VALUES) {
+      const { width, height } = resolveCanvas({ ratio });
+      expect(widthTermBasis({ ratio }, width, height)).toBe(width);
+    }
+    for (const size of DISPLAY_SIZE_VALUES) {
+      const { width, height } = resolveCanvas({ size });
+      expect(widthTermBasis({ size }, width, height)).toBe(width);
+    }
   });
 });
 

@@ -100,6 +100,7 @@ export function compositeRequestFingerprint(
       ...(request.anchor !== undefined ? { anchor: request.anchor } : {}),
       ...(request.style !== undefined ? { style: request.style } : {}),
       ...(request.safeInsets !== undefined ? { safeInsets: request.safeInsets } : {}),
+      ...(request.pixelSize !== undefined ? { pixelSize: request.pixelSize } : {}),
     }),
   );
 }
