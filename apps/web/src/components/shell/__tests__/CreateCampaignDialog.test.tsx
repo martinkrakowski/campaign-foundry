@@ -225,11 +225,12 @@ describe("CreateCampaignDialog", () => {
     // dialog no longer answers Identity, and both its fields are required by
     // `validateIdentity`.
     expect(localStorage.getItem("cf:step-handoff")).toBe("identity");
-    // D97 — the seed carries the name and the mode only. targetRegion and
-    // targetAudience left the contract; the editor answers them in Identity.
+    // D108 — the seed carries the name and the campaign type. The dialog's mode
+    // panel is the T2 bridge (Randomized maps to paid-social); T3 replaces it
+    // with the type field itself.
     expect(JSON.parse(localStorage.getItem(CREATE_SEED_KEY) as string)).toEqual({
       name: "Summer Spark",
-      mode: "brief",
+      type: "social-post",
     });
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull(),
@@ -249,7 +250,7 @@ describe("CreateCampaignDialog", () => {
     expect(localStorage.getItem("cf:step-handoff")).toBeNull();
   });
 
-  test("the mode choice rides the seed", async () => {
+  test("the mode choice rides the seed as its bridged campaign type", async () => {
     const user = userEvent.setup();
     renderDialog();
     await openDialog(user);
@@ -258,7 +259,8 @@ describe("CreateCampaignDialog", () => {
     await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
 
     await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new"));
-    expect(JSON.parse(localStorage.getItem(CREATE_SEED_KEY) as string).mode).toBe("variation");
+    // The T2 bridge: Randomized maps to the paid-social type until T3's field.
+    expect(JSON.parse(localStorage.getItem(CREATE_SEED_KEY) as string).type).toBe("paid-social");
   });
 
   test("a blocked store keeps the dialog open, says so, and neither navigates nor leaves a seed", async () => {

@@ -5,7 +5,7 @@ import { BriefsApiError } from "../briefs-api";
 import { API } from "@/lib/run-context";
 import { EMPTY_REPORT, json, mockPipelineApi } from "@/__tests__/helpers";
 
-const seed = { name: "Summer Spark", mode: "brief" as const };
+const seed = { name: "Summer Spark", type: "social-post" as const };
 
 afterEach(() => {
   localStorage.clear();
@@ -128,15 +128,17 @@ describe("takeSeed — the baton is spent by a read", () => {
 
   // A parse is not a check: syntactically valid JSON that is not a seed must
   // still spend the key, so a bad baton cannot poison the next mount. F5 — the
-  // first two entries are the old-shape seeds the deployed build writes; a
+  // first three entries are the old-shape seeds the deployed builds write; a
   // half-applied seed would be a brief with a name and nothing else, silently,
   // so the guard discards them wholesale.
   test.each([
     ["an old-shape seed from the previous build", { name: "Summer Spark", targetRegion: "EU", targetAudience: "trail runners", mode: "brief" }],
+    ["the #217 two-field seed carrying the retired mode", { name: "Summer Spark", mode: "variation" }],
     ["a half-old seed carrying an audience only", { name: "Summer Spark", targetAudience: "trail runners", mode: "brief" }],
-    ["a non-string field", { name: 42, mode: "brief" }],
-    ["a missing mode", { name: "Summer Spark" }],
-    ["an unknown mode", { name: "Summer Spark", mode: "classic" }],
+    ["a non-string field", { name: 42, type: "social-post" }],
+    ["a missing type", { name: "Summer Spark" }],
+    ["an unknown type", { name: "Summer Spark", type: "display-ad" }],
+    ["both the new type and the retired mode", { name: "Summer Spark", type: "social-post", mode: "variation" }],
     ["a JSON array", ["Summer Spark", "EU"]],
     ["a bare string", "Summer Spark"],
   ] as const)("answers null on %s and still spends the key", (_label, value) => {
@@ -156,11 +158,15 @@ describe("takeSeed — the baton is spent by a read", () => {
     expect(takeSeed()).toBeNull();
     expect(localStorage.getItem("cf:step-handoff")).toBe("copy");
 
-    localStorage.setItem(
-      CREATE_SEED_KEY,
-      JSON.stringify({ name: "Summer Spark", targetRegion: "EU", targetAudience: "trail runners", mode: "brief" }),
-    );
-    expect(takeSeed()).toBeNull();
-    expect(localStorage.getItem("cf:step-handoff")).toBeNull();
+    const refuse = (value: unknown) => {
+      stashStep("identity");
+      localStorage.setItem(CREATE_SEED_KEY, JSON.stringify(value));
+      expect(takeSeed()).toBeNull();
+      expect(localStorage.getItem("cf:step-handoff")).toBeNull();
+    };
+    // The four-field seed the oldest deployed build wrote…
+    refuse({ name: "Summer Spark", targetRegion: "EU", targetAudience: "trail runners", mode: "brief" });
+    // …and the #217 two-field one D108 retired — same discard, same baton spend.
+    refuse({ name: "Summer Spark", mode: "variation" });
   });
 });

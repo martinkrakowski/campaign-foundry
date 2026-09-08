@@ -2695,3 +2695,113 @@ describe("setMode and the mode-incompatible format (S4/D99)", () => {
     expect(flipped.timeline.beats).toHaveLength(1);
   });
 });
+
+describe("the campaign type preset (T2 / D108–D112)", () => {
+  // The same gate the run paths hit: motion output needs the ffmpeg capability.
+  const RUN = { enforceCapabilities: true, capabilities: { motion: true } };
+  const filled = (over: Partial<EditorState> = {}): EditorState => ({
+    ...base(),
+    briefId: "camp",
+    targetRegion: "DE",
+    targetAudience: "a",
+    campaignMessage: "Hi",
+    ...over,
+  });
+
+  test("applyPreset seeds the preset's platforms, formats and mode, and records the type", () => {
+    const paid = reduce(base(), { type: "applyPreset", campaignType: "paid-social" });
+    expect(paid.type).toBe("paid-social");
+    expect(paid.platforms).toEqual([
+      "instagram-feed",
+      "linkedin",
+      "x",
+      "instagram-story",
+      "instagram-reel",
+      "tiktok",
+      "youtube-short",
+    ]);
+    expect(paid.formats).toEqual(["static", "motion"]);
+    expect(paid.mode).toBe("variation");
+  });
+
+  test("applying the same preset twice yields the same state (idempotent)", () => {
+    const once = reduce(base(), { type: "applyPreset", campaignType: "short-video" });
+    const twice = reduce(once, { type: "applyPreset", campaignType: "short-video" });
+    expect(twice).toEqual(once);
+  });
+
+  test("a preset is a preset, not a policy — the user's platform change stands", () => {
+    const paid = reduce(base(), { type: "applyPreset", campaignType: "paid-social" });
+    const off = reduce(paid, { type: "togglePlatform", value: "tiktok" });
+    expect(off.platforms).not.toContain("tiktok");
+    expect(off.type).toBe("paid-social");
+  });
+
+  test("a motion preset seeds the motion defaults the way Video-on always has (D9)", () => {
+    // Without this, a seeded short-video campaign opens an editor whose Save is
+    // blocked by an empty motion axis the user never saw a control for.
+    const short = reduce(base(), { type: "applyPreset", campaignType: "short-video" });
+    expect(short.motion.length).toBeGreaterThan(0);
+    expect(short.duration).toEqual([DEFAULT_DURATION_SEC]);
+    // A still-only preset afterwards leaves no orphaned kinds behind.
+    const back = reduce(short, { type: "applyPreset", campaignType: "social-post" });
+    expect(back.motion).toEqual([]);
+    expect(back.duration).toEqual([]);
+    expect(back.mode).toBe("brief");
+  });
+
+  test("D110 — a short-video seed is Randomized, motion-only, and parses on the run path", () => {
+    const short = reduce(
+      base(),
+      { type: "patch", patch: { campaignName: "camp", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi" } },
+      { type: "setProduct", key: 1, patch: { name: "A" } },
+      { type: "applyPreset", campaignType: "short-video" },
+    );
+    expect(short.mode).toBe("variation");
+    expect(short.formats).toEqual(["motion"]);
+    expect(() => parseBrief(toBrief(short), RUN)).not.toThrow();
+  });
+
+  test("a blank draft never grows a type key (D112)", () => {
+    expect(toBrief(filled())).not.toHaveProperty("type");
+  });
+
+  test("an explicitly spelled default type round-trips", () => {
+    const loaded = fromBrief(savedBrief({ type: "social-post" }), { file: "camp.yaml" });
+    expect(loaded.type).toBe("social-post");
+    expect(toBrief(loaded).type).toBe("social-post");
+  });
+
+  test("a non-default type round-trips", () => {
+    const loaded = fromBrief(savedBrief({ type: "paid-social" }), { file: "camp.yaml" });
+    expect(toBrief(loaded).type).toBe("paid-social");
+  });
+
+  test("a freshly loaded typed brief is not dirty", () => {
+    // Qodo flagged #224: without `type` on the state, the lossy projection
+    // compared unequal to the snapshot and every typed brief read dirty on load.
+    const loaded = fromBrief(savedBrief({ type: "paid-social" }), { file: "camp.yaml" });
+    expect(isDirtySinceSave(loaded)).toBe(false);
+  });
+
+  test("a pre-T2 draft carries no type and normalises to the default (D112)", () => {
+    // What the previous build wrote: a state with no type keys at all.
+    const stored: Record<string, unknown> = JSON.parse(JSON.stringify(initialEditorState()));
+    delete stored.type;
+    delete stored.typeExplicit;
+    const restored = normalizeDraftState(stored);
+    expect(restored.type).toBe("social-post");
+    expect(restored.typeExplicit).toBe(false);
+    expect(toBrief(restored)).not.toHaveProperty("type");
+  });
+
+  test("a draft with an out-of-vocabulary type falls back to the default", () => {
+    const raw = JSON.parse(JSON.stringify(initialEditorState())) as Record<string, unknown>;
+    raw.type = "display-ad";
+    raw.typeExplicit = true;
+    const restored = normalizeDraftState(raw);
+    expect(restored.type).toBe("social-post");
+    expect(restored.typeExplicit).toBe(false);
+    expect(toBrief(restored)).not.toHaveProperty("type");
+  });
+});

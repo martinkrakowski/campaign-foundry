@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { renderWithRun as renderWithShell, json, nextMock, ShellProviders } from "@/__tests__/helpers";
 import { API, useRun } from "@/lib/run-context";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
-import { CREATE_SEED_KEY, createCampaign } from "@/lib/create-campaign";
+import { CREATE_SEED_KEY, createCampaign, takeSeed } from "@/lib/create-campaign";
 import { stashStep } from "@/lib/use-step-navigation";
 import { CreateCampaignDialog } from "@/components/shell/CreateCampaignDialog";
 import { BrowseBriefsButton } from "@/components/shell/Sidebar";
@@ -3664,7 +3664,7 @@ describe("the create seed (W1)", () => {
     // What the dialog's Create does from another route (verified in its own suite):
     // publish the seed, stash the landing step, then push.
     await act(async () => {
-      await createCampaign({ name: "Summer Spark", mode: "brief" });
+      await createCampaign({ name: "Summer Spark", type: "social-post" });
     });
     stashStep("identity");
 
@@ -3680,10 +3680,12 @@ describe("the create seed (W1)", () => {
     expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark");
   });
 
-  test("a Randomized seed sets the editor's mode and the Randomized section list", async () => {
+  test("a paid-social seed sets the editor's mode and the Randomized section list", async () => {
     routes({});
+    // The T2 dialog bridge maps the mode panel's Randomized choice to the
+    // paid-social type (D108); T3 replaces the panel with the type field.
     await act(async () => {
-      await createCampaign({ name: "Summer Spark", mode: "variation" });
+      await createCampaign({ name: "Summer Spark", type: "paid-social" });
     });
     stashStep("identity");
 
@@ -3748,6 +3750,60 @@ describe("the create seed (W1)", () => {
     expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe("");
   });
 
+  test("the #217 {name, mode} seed is discarded, not half-applied, and spends its baton (D108)", async () => {
+    routes({});
+    // What the previously deployed build wrote: the two-field seed. It is
+    // refused whole — no name seeded, the mode stays Classic — and the
+    // companion baton is spent, so the editor lands on Identity instead of a
+    // leftover "copy" moving it one step past two empty required fields (D98).
+    localStorage.setItem(CREATE_SEED_KEY, JSON.stringify({ name: "Summer Spark", mode: "variation" }));
+    localStorage.setItem("cf:step-handoff", "copy");
+    nextMock().nav.pathname = "/brief/new";
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /: Identity, current step/ })).toBeTruthy());
+    expect(screen.queryByRole("button", { name: /: Copy, current step/ })).toBeNull();
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("");
+    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe("false");
+    // Both keys cleared: a refused baton cannot poison the next mount either.
+    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    expect(localStorage.getItem("cf:step-handoff")).toBeNull();
+  });
+
+  test("a paid-social seed is applied once — a platform toggled off stays off (D109)", async () => {
+    // Everything presentation: the Output section's platform toggles are mounted.
+    localStorage.setItem("cf:presentation", "everything");
+    routes({});
+    localStorage.setItem(CREATE_SEED_KEY, JSON.stringify({ name: "Summer Spark", type: "paid-social" }));
+    nextMock().nav.pathname = "/brief/new";
+    const user = userEvent.setup();
+    const view = renderWithRun(<NewEditor />);
+    await waitFor(() =>
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark"),
+    );
+    // The preset arrived: the paid platforms are on, mode is Randomized.
+    expect(screen.getByRole("button", { name: "instagram-story" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("false");
+    // The user's change: one platform off.
+    await user.click(screen.getByRole("button", { name: "tiktok" }));
+    expect(screen.getByRole("button", { name: "tiktok" }).getAttribute("aria-pressed")).toBe("false");
+    // A presentation switch remounts the sections — the preset does not re-apply.
+    await user.click(screen.getByRole("button", { name: messages.presentationGuided }));
+    await user.click(screen.getByRole("button", { name: messages.presentationEverything }));
+    expect(screen.getByRole("button", { name: "tiktok" }).getAttribute("aria-pressed")).toBe("false");
+    // And neither does a full remount (the reload case): the seed was spent by
+    // its one read, so the user's toggled-off platform survives the return.
+    view.unmount();
+    renderWithRun(<NewEditor />);
+    await waitFor(() =>
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Summer Spark"),
+    );
+    expect(screen.getByRole("button", { name: "tiktok" }).getAttribute("aria-pressed")).toBe("false");
+    // Nothing is left to re-apply.
+    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
+    expect(takeSeed()).toBeNull();
+  });
+
   test("a malformed seed leaves a working blank editor rather than throwing", async () => {
     routes({});
     // Syntactically valid, structurally not a seed — takeSeed must spend it as null.
@@ -3768,7 +3824,7 @@ describe("the create seed (W1)", () => {
     await waitFor(() => expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("camp"));
 
     await act(async () => {
-      await createCampaign({ name: "Other", mode: "variation" });
+      await createCampaign({ name: "Other", type: "paid-social" });
     });
     // The gate is the route: the named brief stays on screen, and the seed waits in
     // the store for a blank-route mount to spend it.
@@ -4142,5 +4198,40 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
     expect(screen.queryByText(messages.briefNotFound("copy-1"))).toBeNull();
     expect(screen.queryByText(messages.briefNotFoundNew)).toBeNull();
     error.mockRestore();
+  });
+});
+
+describe("the pre-type draft (T2 / D112)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.removeItem("cf:presentation");
+  });
+
+  test("a draft saved before the type existed restores with the default (D112)", async () => {
+    routes({});
+    // What the previous build wrote: a state with no type keys at all — the
+    // saved draft must normalise, not crash the mount or lose the name.
+    saveDraftToStorage({ ...initialEditorState(), campaignName: "Restored" });
+    const stored = JSON.parse(localStorage.getItem("cf:draft:new") as string) as {
+      state: Record<string, unknown>;
+    };
+    delete stored.state.type;
+    delete stored.state.typeExplicit;
+    localStorage.setItem("cf:draft:new", JSON.stringify(stored));
+
+    nextMock().nav.pathname = "/brief/new";
+    renderWithRun(<NewEditor />);
+    await waitFor(() =>
+      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("Restored"),
+    );
+    // The editor path, not only the unit: a restored pre-type draft must carry
+    // the default on the state the autosave writes, not merely keep the name.
+    await waitFor(() => {
+      const restored = JSON.parse(localStorage.getItem("cf:draft:new") as string) as {
+        state: { type?: string };
+      };
+      expect(restored.state.type).toBe("social-post");
+    });
   });
 });
