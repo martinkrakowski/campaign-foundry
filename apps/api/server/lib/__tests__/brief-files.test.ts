@@ -12,12 +12,18 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { dumpBrief, hashFile, hashBytes, isErrno, isExistsError, serializeBrief, SYMLINK_WRITE_ERROR } from "../brief-files.js";
 import { parseBriefText } from "../load-brief.js";
-import { BRIEF_SCHEMA_VERSION, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import {
+  BRIEF_SCHEMA_VERSION,
+  DEFAULT_CAMPAIGN_TYPE,
+  templateFromCanonical,
+  type CampaignBrief,
+} from "@campaignfoundry/CampaignOrchestration";
 
 const origRoot = process.env.PROJECT_ROOT;
 
 const minimal: CampaignBrief = {
   schemaVersion: BRIEF_SCHEMA_VERSION,
+  template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
   id: "camp",
   targetRegion: "DE",
   targetAudience: "a",
@@ -33,6 +39,7 @@ describe("dumpBrief", () => {
     const dumped = dumpBrief(minimal);
     expect([...dumped.matchAll(/^([a-zA-Z]+):/gm)].map((m) => m[1])).toEqual([
       "schemaVersion",
+      "template",
       "id",
       "targetRegion",
       "targetAudience",
@@ -54,6 +61,7 @@ describe("dumpBrief", () => {
     });
     expect([...dumped.matchAll(/^([a-zA-Z]+):/gm)].map((m) => m[1])).toEqual([
       "schemaVersion",
+      "template",
       "id",
       "targetRegion",
       "targetAudience",
@@ -71,6 +79,7 @@ describe("dumpBrief", () => {
     const dumped = dumpBrief({ ...minimal, notes: "keep-me" } as CampaignBrief);
     expect([...dumped.matchAll(/^([a-zA-Z]+):/gm)].map((m) => m[1])).toEqual([
       "schemaVersion",
+      "template",
       "id",
       "targetRegion",
       "targetAudience",

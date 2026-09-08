@@ -13,6 +13,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
+import {
+  DEFAULT_CAMPAIGN_TYPE,
+  templateFromCanonical,
+  type CampaignType,
+} from "@campaignfoundry/CampaignOrchestration";
 import { loadBrief } from "../../../lib/load-brief.js";
 
 type Method = "get" | "post" | "put";
@@ -50,6 +55,7 @@ const validBrief =
 
 const brief = (over: Record<string, unknown> = {}) => ({
   schemaVersion: 1,
+  template: templateFromCanonical((over.type as CampaignType) ?? DEFAULT_CAMPAIGN_TYPE),
   id: "camp",
   targetRegion: "DE",
   targetAudience: "a",
@@ -208,6 +214,7 @@ describe("authoring briefs", () => {
     const dumped = readFileSync(campYaml(), "utf8");
     expect([...dumped.matchAll(/^([a-zA-Z]+):/gm)].map((m) => m[1])).toEqual([
       "schemaVersion",
+      "template",
       "id",
       "targetRegion",
       "targetAudience",

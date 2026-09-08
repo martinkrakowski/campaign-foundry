@@ -8,7 +8,11 @@ import {
   hasAllowedImageMagic,
   assetRelPath,
 } from "../asset-files.js";
-import { BRIEF_SCHEMA_VERSION } from "@campaignfoundry/CampaignOrchestration";
+import {
+  BRIEF_SCHEMA_VERSION,
+  DEFAULT_CAMPAIGN_TYPE,
+  templateFromCanonical,
+} from "@campaignfoundry/CampaignOrchestration";
 
 const origRoot = process.env.PROJECT_ROOT;
 const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -135,6 +139,7 @@ describe("rewriteAssetPath and rewriteAssetPaths", () => {
     const { rewriteAssetPaths } = await import("../asset-files.js");
     const brief = {
       schemaVersion: BRIEF_SCHEMA_VERSION,
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
       id: "new-camp",
       targetRegion: "US",
       targetAudience: "all",
@@ -168,6 +173,7 @@ describe("rewriteAssetPath and rewriteAssetPaths", () => {
     const { extractSourceAssetBriefIds } = await import("../asset-files.js");
     const brief = {
       schemaVersion: BRIEF_SCHEMA_VERSION,
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
       id: "target-camp",
       targetRegion: "US",
       targetAudience: "all",

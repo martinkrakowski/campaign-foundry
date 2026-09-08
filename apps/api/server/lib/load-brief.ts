@@ -3,7 +3,13 @@ import { extname, isAbsolute, resolve } from "node:path";
 import { projectRoot } from "@campaignfoundry/shared";
 import { parse as parseYaml } from "yaml";
 import {
+  ADVERTISING_UNITS,
   BRIEF_SCHEMA_VERSION,
+  CANONICAL_TEMPLATE_IDS,
+  CANONICAL_TEMPLATES,
+  CREATIVE_TYPES,
+  CREATIVE_TYPE_RULES,
+  DEFAULT_CAMPAIGN_TYPE,
   HEADLINE_POOL_REF,
   ANCHOR_VALUES,
   CAMPAIGN_TYPES,
@@ -18,9 +24,16 @@ import {
   isPaletteShift,
   isSupportedBriefSchemaVersion,
   styleProblem,
+  templateFromCanonical,
   timelineProblem,
+  type AdvertisingUnit,
+  type BriefTemplate,
   type CampaignBrief,
+  type CampaignType,
+  type CanonicalTemplateId,
   type CopyTimeline,
+  type CreativeTemplateLayer,
+  type CreativeType,
   type RegenerationTarget,
 } from "@campaignfoundry/CampaignOrchestration";
 import { isPlatformVisible, platformProfile, type PlatformProfile } from "@campaignfoundry/Distribution";
@@ -127,6 +140,101 @@ function validateType(value: unknown): void {
       `Campaign brief field "type" must be one of ${CAMPAIGN_TYPES.map((t) => `"${t}"`).join(", ")}; got ${JSON.stringify(value)}.`,
     );
   }
+}
+
+/**
+ * The creative template (D120, D123, D124).
+ *
+ * Structural, never lenient: checked in authoring mode too (`enforceCapabilities: false`).
+ * Compatibility is a declared table, validated at the boundary (D124).
+ * Absent → defaults to the campaign type's canonical template (D120: type before template).
+ */
+export function validateTemplate(value: unknown, type?: CampaignType): BriefTemplate {
+  const resolvedType = (CAMPAIGN_TYPES as readonly string[]).includes(type as string)
+    ? (type as CampaignType)
+    : DEFAULT_CAMPAIGN_TYPE;
+  if (value === undefined) {
+    return templateFromCanonical(resolvedType);
+  }
+  if (!isPlainObject(value)) {
+    throw new Error(`Campaign brief field "template" must be an object; got ${JSON.stringify(value)}.`);
+  }
+  if (typeof value.id !== "string" || !(CANONICAL_TEMPLATE_IDS as readonly string[]).includes(value.id)) {
+    throw new Error(
+      `Campaign brief field "template.id" must be one of ${CANONICAL_TEMPLATE_IDS.map((t) => `"${t}"`).join(", ")}; got ${JSON.stringify(value.id)}.`,
+    );
+  }
+  if (typeof value.creativeType !== "string" || !(CREATIVE_TYPES as readonly string[]).includes(value.creativeType)) {
+    throw new Error(
+      `Campaign brief field "template.creativeType" must be one of ${CREATIVE_TYPES.map((t) => `"${t}"`).join(", ")}; got ${JSON.stringify(value.creativeType)}.`,
+    );
+  }
+  const canonical = CANONICAL_TEMPLATES[value.creativeType as CreativeType];
+  if (canonical.id !== value.id) {
+    throw new Error(
+      `Campaign brief field "template.creativeType" must match canonical template "${value.id}"; got ${JSON.stringify(value.creativeType)}.`,
+    );
+  }
+  if (typeof value.unit !== "string" || !(ADVERTISING_UNITS as readonly string[]).includes(value.unit)) {
+    throw new Error(
+      `Campaign brief field "template.unit" must be one of ${ADVERTISING_UNITS.map((u) => `"${u}"`).join(", ")}; got ${JSON.stringify(value.unit)}.`,
+    );
+  }
+  if (!isFiniteInteger(value.version) || value.version <= 0) {
+    throw new Error(
+      `Campaign brief field "template.version" must be a positive integer; got ${JSON.stringify(value.version)}.`,
+    );
+  }
+  if (!Array.isArray(value.layers) || value.layers.length === 0) {
+    throw new Error(
+      `Campaign brief field "template.layers" must be a non-empty array; got ${JSON.stringify(value.layers)}.`,
+    );
+  }
+
+  const rules = CREATIVE_TYPE_RULES[value.creativeType as CreativeType];
+  const seenIds = new Set<string>();
+  const presentKinds = new Set<string>();
+
+  for (let i = 0; i < value.layers.length; i++) {
+    const layer = value.layers[i];
+    if (!isPlainObject(layer)) {
+      throw new Error(`Campaign brief field "template.layers[${i}]" must be an object; got ${JSON.stringify(layer)}.`);
+    }
+    if (typeof layer.id !== "string" || layer.id.length === 0) {
+      throw new Error(
+        `Campaign brief field "template.layers[${i}].id" must be a non-empty string; got ${JSON.stringify(layer.id)}.`,
+      );
+    }
+    if (seenIds.has(layer.id)) {
+      throw new Error(
+        `Campaign brief field "template.layers" must not contain duplicate layer ids; "${layer.id}" appears more than once.`,
+      );
+    }
+    seenIds.add(layer.id);
+
+    if (typeof layer.kind !== "string" || !(rules.accepts as readonly string[]).includes(layer.kind)) {
+      throw new Error(
+        `Campaign brief field "template.layers[${i}].kind" must be one of [${rules.accepts.map((k) => `"${k}"`).join(", ")}]; got ${JSON.stringify(layer.kind)}.`,
+      );
+    }
+    presentKinds.add(layer.kind);
+  }
+
+  for (const req of rules.required) {
+    if (!presentKinds.has(req)) {
+      throw new Error(
+        `Campaign brief field "template.layers" must include required layer kind "${req}" for creative type "${value.creativeType}".`,
+      );
+    }
+  }
+
+  return {
+    id: value.id as CanonicalTemplateId,
+    version: value.version as number,
+    creativeType: value.creativeType as CreativeType,
+    unit: value.unit as AdvertisingUnit,
+    layers: value.layers as readonly CreativeTemplateLayer[],
+  };
 }
 
 /**
@@ -661,6 +769,7 @@ export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): Campaig
   validateStyle(record.style);
   validateMode(record.mode);
   validateType(record.type);
+  const template = validateTemplate(record.template, record.type as CampaignType);
   validateVariation(record.variation, effectiveCapabilities);
   validateOutput(record.output, effectiveCapabilities);
   validateMotionAxisRequested(record);
@@ -688,7 +797,8 @@ export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): Campaig
   }
   const rest = { ...record };
   delete rest.schemaVersion;
-  return { schemaVersion, ...rest } as unknown as CampaignBrief;
+  delete rest.template;
+  return { schemaVersion, template, ...rest } as unknown as CampaignBrief;
 }
 
 /**
