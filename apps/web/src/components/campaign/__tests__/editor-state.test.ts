@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, vi, afterEach } from "vitest";
 import type { CampaignBrief, CopyPool } from "@campaignfoundry/CampaignOrchestration";
+import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import { timelineProblem } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import { axisProductSize } from "../validate";
 import { platformsToFormats } from "../derive";
@@ -10,6 +11,7 @@ import {
   TONE_OPTIONS,
   PALETTE_SHIFT_OPTIONS,
   STATIC_PLATFORMS,
+  PLATFORM_ORDER,
   HEADLINE_POOL_REF,
   emptyProduct,
   slugify,
@@ -1765,6 +1767,11 @@ describe("motionPackagedRatios", () => {
     const ratios = motionPackagedRatios(["instagram-reel", "instagram-feed"]);
     expect(Array.from(ratios)).toEqual(["9:16"]);
   });
+
+  test("a display profile contributes no motion ratio", () => {
+    expect(Array.from(motionPackagedRatios(["google-display"]))).toEqual([]);
+    expect(Array.from(motionPackagedRatios(["google-display", "tiktok"]))).toEqual(["9:16"]);
+  });
 });
 
 
@@ -2803,5 +2810,64 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
     expect(restored.type).toBe("social-post");
     expect(restored.typeExplicit).toBe(false);
     expect(toBrief(restored)).not.toHaveProperty("type");
+  });
+});
+
+describe("display platforms (D116)", () => {
+  const SOCIAL_ONLY_OUTPUT = {
+    formats: ["static"],
+    platforms: ["instagram-feed", "linkedin", "x"],
+  } as const;
+
+  test("PLATFORM_ORDER lists the three display ids after the seven social ones", () => {
+    expect(PLATFORM_ORDER).toEqual([
+      "instagram-feed",
+      "linkedin",
+      "x",
+      "instagram-story",
+      "instagram-reel",
+      "tiktok",
+      "youtube-short",
+      "google-display",
+      "meta-audience-network",
+      "display-web",
+    ]);
+  });
+
+  test("toggling google-display on adds it to platforms and toBrief emits its five sizes", () => {
+    const on = reduce(base(), { type: "togglePlatform", value: "google-display" });
+    expect(on.platforms).toEqual([...STATIC_PLATFORMS, "google-display"]);
+    expect(toBrief(on).output?.platforms).toEqual([...STATIC_PLATFORMS, "google-display"]);
+    expect(toBrief(on).output?.sizes).toEqual([...DISPLAY_SIZE_VALUES]);
+  });
+
+  test("toggling google-display off removes sizes again", () => {
+    const on = reduce(base(), { type: "togglePlatform", value: "google-display" });
+    const off = reduce(on, { type: "togglePlatform", value: "google-display" });
+    expect(off.platforms).toEqual([...STATIC_PLATFORMS]);
+    expect(toBrief(off).output).toBeUndefined();
+    expect(toBrief(off)).not.toHaveProperty("output");
+  });
+
+  test("a social-only brief's toBrief is byte-identical to main's (no sizes key)", () => {
+    const declared = fromBrief(
+      savedBrief({ output: { formats: ["static"], platforms: [...STATIC_PLATFORMS] } }),
+    );
+    const serialised = toBrief(declared);
+    expect(JSON.stringify(serialised.output)).toBe(JSON.stringify(SOCIAL_ONLY_OUTPUT));
+    expect(serialised.output).not.toHaveProperty("sizes");
+  });
+
+  test("fromBrief reads output.sizes back by restoring the display platforms that derive them", () => {
+    const stored: CampaignBrief = savedBrief({
+      output: {
+        formats: ["static"],
+        platforms: ["google-display"],
+        sizes: [...DISPLAY_SIZE_VALUES],
+      },
+    });
+    const loaded = fromBrief(stored, { file: "camp.yaml" });
+    expect(loaded.platforms).toEqual(["google-display"]);
+    expect(toBrief(loaded).output?.sizes).toEqual([...DISPLAY_SIZE_VALUES]);
   });
 });

@@ -2,7 +2,44 @@ import { useId, type ReactNode } from "react";
 import { cn } from "./cn";
 import { RatioFrame } from "./ratio-frame";
 import { PreviewFrame } from "./PreviewFrame";
-import type { PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
+import type { DisplaySizeSlot, PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
+
+/**
+ * A4 widens RatioFrame to CanvasSpec; until then a display profile's first
+ * size is drawn at true proportion so the card does not lie with a square.
+ * Dimensions come from the size id (`300x250`); A1's resolver is the only
+ * reader of the display-size table.
+ */
+function DisplaySizeGlyph({ sizes }: { readonly sizes: readonly DisplaySizeSlot[] }): ReactNode {
+  const slot = sizes[0];
+  if (slot === undefined) return null;
+  const [wStr, hStr] = slot.size.split("x");
+  const w = Number(wStr);
+  const h = Number(hStr);
+  const long = Math.max(w, h);
+  const width = (w / long) * 36;
+  const height = (h / long) * 36;
+  return (
+    <svg
+      width={width}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      aria-hidden="true"
+      focusable="false"
+      className="shrink-0"
+    >
+      <rect
+        x={0.75}
+        y={0.75}
+        width={width - 1.5}
+        height={height - 1.5}
+        rx={1.5}
+        strokeWidth={1.5}
+        className="fill-surface-2 stroke-border"
+      />
+    </svg>
+  );
+}
 
 export interface PlatformCardProps {
   /** The platform profile — its id is the button's accessible name verbatim. */
@@ -79,7 +116,11 @@ export function PlatformCard({
         )}
       >
         <PreviewFrame>
-          <RatioFrame ratio={profile.ratio} size={36} />
+          {profile.ratio !== undefined ? (
+            <RatioFrame ratio={profile.ratio} size={36} />
+          ) : profile.sizes !== undefined ? (
+            <DisplaySizeGlyph sizes={profile.sizes} />
+          ) : null}
         </PreviewFrame>
       </span>
       <span className={cn("text-[15px] font-bold leading-tight", selected ? "text-text-emphasis" : "text-text-primary")}>

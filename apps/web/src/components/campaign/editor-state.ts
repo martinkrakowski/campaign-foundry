@@ -61,8 +61,8 @@ export {
   MIN_DWELL_SEC,
 };
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
-import { PLATFORM_PROFILES, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
-import { platformsToFormats, platformsToRatios } from "./derive";
+import { PLATFORM_PROFILES, isRatioProfile, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
+import { platformsToFormats, platformsToRatios, platformsToSizes } from "./derive";
 
 
 export const LAYOUT_OPTIONS = ["headline-top", "headline-bottom"] as const;
@@ -494,6 +494,7 @@ export function motionPackagedRatios(state: EditorState | readonly string[]): Se
     platforms
       .map((id: string) => PLATFORM_PROFILES[id])
       .filter((profile): profile is PlatformProfile => profile !== undefined)
+      .filter(isRatioProfile)
       .filter((profile) => (profile.formats as readonly string[]).includes("motion"))
       .map((profile) => profile.ratio),
   );
@@ -1217,6 +1218,7 @@ export function toBrief(state: EditorState): CampaignBrief {
   // only what the classic pipeline can actually render, while the draft keeps
   // the user's own list (a flip back to Randomized has it again, unchanged).
   const formats = serialisedFormats(state);
+  const sizes = platformsToSizes(state.platforms);
   // `mode` and `output` are optional in CampaignBrief — absent means the classic
   // static pipeline, which is exactly what a fresh draft holds. Writing them
   // unconditionally grew every classic brief on save (and made a freshly loaded
@@ -1242,7 +1244,15 @@ export function toBrief(state: EditorState): CampaignBrief {
     // while a non-default type or an explicitly spelled default is written.
     ...(state.type !== DEFAULT_CAMPAIGN_TYPE || state.typeExplicit ? { type: state.type } : {}),
     ...(state.outputExplicit || !isDefaultOutput(state)
-      ? { output: { formats: [...formats], platforms: [...state.platforms] } }
+      ? {
+          output: {
+            formats: [...formats],
+            platforms: [...state.platforms],
+            // Display sizes are derived from the selected platforms the way
+            // formats are (D116); a social-only selection emits no key.
+            ...(sizes.length > 0 ? { sizes } : {}),
+          },
+        }
       : {}),
   };
   const localized = state.localizedMessage.trim();
@@ -1339,6 +1349,9 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
   const treatments = brief.treatments?.map((t) => ({ id: t.id, layout: t.layout, tone: t.tone })) ?? [];
   const formats = [...(brief.output?.formats ?? ["static"])];
   const platforms = [...(brief.output?.platforms ?? [...STATIC_PLATFORMS])];
+  // `output.sizes` is not a draft field of its own: it is derived from the
+  // selected display platforms on save (`platformsToSizes`), so restoring
+  // `platforms` is what reads the sizes back (D116).
   // Carry the persisted variation policy back into the draft. Defaulting these would
   // silently rewrite a randomized brief's policy the first time it was saved, even
   // though E1 renders no controls for them yet (they arrive in E2.2 / E2.3).

@@ -95,4 +95,31 @@ describe("PlatformCard", () => {
 
     expect((screen.getByRole("button", { name: "instagram-feed" }) as HTMLButtonElement).disabled).toBe(true);
   });
+
+  test("a display profile renders its label and a size glyph, never a social ratio frame", () => {
+    const display = platformProfile("google-display")!;
+    render(<PlatformCard profile={display} selected={false} onToggle={vi.fn()} />);
+    expect(screen.getByText("Google Display")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "google-display" })).toBeTruthy();
+  });
+
+  test("a display profile with no sizes still renders the card", () => {
+    const display = platformProfile("google-display")!;
+    render(
+      <PlatformCard profile={{ ...display, sizes: [] }} selected={false} onToggle={vi.fn()} />,
+    );
+    expect(screen.getByRole("button", { name: "google-display" })).toBeTruthy();
+  });
+
+  test("a profile with neither ratio nor sizes still renders the card", () => {
+    const display = platformProfile("google-display")!;
+    render(
+      <PlatformCard
+        profile={{ ...display, sizes: undefined }}
+        selected={false}
+        onToggle={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "google-display" })).toBeTruthy();
+  });
 });
