@@ -448,14 +448,27 @@ describe("parseBrief display sizes (D113)", () => {
 
   test("a string size is refused — sizes must be an array of strings", () => {
     expect(() => parseBrief({ ...valid, output: { sizes: "728x90" } })).toThrow(
-      'Campaign brief field "output.sizes" must be an array of strings; got "728x90".',
+      'Campaign brief field "output.sizes" must be a non-empty array of strings; got "728x90".',
     );
   });
 
   test("a non-string member is refused as not an array of strings", () => {
     expect(() => parseBrief({ ...valid, output: { sizes: [728] } })).toThrow(
-      'Campaign brief field "output.sizes" must be an array of strings; got [728].',
+      'Campaign brief field "output.sizes" must be a non-empty array of strings; got [728].',
     );
+  });
+
+  test("an empty sizes array is refused in both modes", () => {
+    const empty = { ...valid, output: { sizes: [] } };
+    expect(() => parseBrief(empty)).toThrow(
+      'Campaign brief field "output.sizes" must be a non-empty array of strings; got [].',
+    );
+    expect(() => parseBrief(empty, { enforceCapabilities: false })).toThrow(
+      'Campaign brief field "output.sizes" must be a non-empty array of strings; got [].',
+    );
+    expect(() =>
+      parseBrief(empty, { capabilities: { motion: true }, enforceCapabilities: true }),
+    ).toThrow('Campaign brief field "output.sizes" must be a non-empty array of strings; got [].');
   });
 });
 

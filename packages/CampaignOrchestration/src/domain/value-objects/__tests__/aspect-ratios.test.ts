@@ -2,7 +2,7 @@ import { describe, test, expect } from "vitest";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { AspectRatio } from "../AspectRatio.vo.js";
-import { RATIO_VALUES, resolveCanvas } from "../aspect-ratios.js";
+import { RATIO_VALUES, resolveCanvas, type CanvasSpec } from "../aspect-ratios.js";
 
 describe("resolveCanvas (D113)", () => {
   test("a social ratio resolves to the 1080/1920 canvas", () => {
@@ -13,6 +13,18 @@ describe("resolveCanvas (D113)", () => {
 
   test("a display size resolves to its exact pixels, never scaled", () => {
     expect(resolveCanvas({ size: "728x90" })).toEqual({ width: 728, height: 90 });
+  });
+
+  test("resolveCanvas throws when both keys are present", () => {
+    expect(() => resolveCanvas({ ratio: "1:1", size: "300x250" } as unknown as CanvasSpec)).toThrow(
+      "CanvasSpec must carry exactly one of ratio/size",
+    );
+  });
+
+  test("CanvasSpec is exclusive at the type level", () => {
+    // @ts-expect-error a spec cannot carry both ratio and size
+    const both: CanvasSpec = { ratio: "1:1", size: "300x250" };
+    expect(both).toEqual({ ratio: "1:1", size: "300x250" });
   });
 
   test("AspectRatio.create reads width/height through resolveCanvas", () => {
@@ -64,7 +76,7 @@ describe("the resolver is the only reader of pixel dimensions", () => {
       const src = join(packagesRoot, pkg.name, "src");
       if (!existsSync(src)) continue;
       for (const file of listPackageSources(src)) {
-        if (file.endsWith("aspect-ratios.ts")) continue;
+        if (file.endsWith("/aspect-ratios.ts")) continue;
         const source = readFileSync(file, "utf8");
         if (DIRECT_DIMENSION_READ.test(source)) hits.push(relative(packagesRoot, file));
       }

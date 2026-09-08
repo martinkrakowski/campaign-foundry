@@ -382,6 +382,18 @@ describe("authoring briefs", () => {
     expect(existsSync(campYaml())).toBe(false);
   });
 
+  test("POST rejects an empty sizes array with 400 (D113)", async () => {
+    const { create } = await api();
+    const res = await create()(
+      jsonReq("http://x/campaigns/briefs", "POST", brief({ output: { sizes: [] } })),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(
+      /"output.sizes" must be a non-empty array of strings/,
+    );
+    expect(existsSync(campYaml())).toBe(false);
+  });
+
   // D68 — shape, not just presence. Without the parser's scalar check this route
   // answers 201 and persists a brief that crashes the editor on reload, so the
   // status alone is a real assertion; the message pins which check refused it.

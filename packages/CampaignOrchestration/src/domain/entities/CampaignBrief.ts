@@ -2,6 +2,7 @@ import type { Treatment } from "../value-objects/Treatment.vo.js";
 import type { CopyTimeline } from "../value-objects/CopyTimeline.vo.js";
 import type { Style } from "../value-objects/creative-style.js";
 import type { CampaignType } from "../value-objects/campaign-types.js";
+import type { DisplaySize } from "../value-objects/display-sizes.js";
 import type { Product } from "./Product.js";
 
 /**
@@ -103,6 +104,6 @@ export interface CampaignBrief {
   readonly output?: {
     readonly formats?: readonly string[];
     readonly platforms?: readonly string[];
-    readonly sizes?: readonly string[];
+    readonly sizes?: readonly DisplaySize[];
   };
 }

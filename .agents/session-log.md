@@ -4128,6 +4128,7 @@ dispatched.
   M3 → skip the membership check → `["banner"]` throw test failed (did not throw).
   M4 → `RATIO_DIMENSIONS["1:1"].width` in `AspectRatio.vo.ts` → grep test failed naming that file;
   widening the exclusion to all files made the same mutant pass.
+- **Remediator (PR #243):** tuple written out; exclusive CanvasSpec; empty sizes rejected; `output.sizes` is `readonly DisplaySize[]`; Exhaustive lock; grep exclusion anchored to `/aspect-ratios.ts`.
 - **Left open:**
   - A0 (linux-x64 inset goldens) runs concurrently and owns the golden fixtures/test/workflow.
   - A2 needs this join point before `fitText` can size by the short side.

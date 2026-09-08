@@ -135,9 +135,9 @@ function validateType(value: unknown): void {
  */
 function validateSizes(value: unknown): void {
   if (value === undefined) return;
-  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+  if (!Array.isArray(value) || value.length === 0 || value.some((entry) => typeof entry !== "string")) {
     throw new Error(
-      `Campaign brief field "output.sizes" must be an array of strings; got ${JSON.stringify(value)}.`,
+      `Campaign brief field "output.sizes" must be a non-empty array of strings; got ${JSON.stringify(value)}.`,
     );
   }
   for (const entry of value) {

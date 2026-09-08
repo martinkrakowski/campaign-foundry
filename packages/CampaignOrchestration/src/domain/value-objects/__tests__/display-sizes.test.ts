@@ -7,6 +7,10 @@ describe("display sizes (D113)", () => {
     expect(DISPLAY_SIZE_VALUES).toEqual(["300x250", "728x90", "160x600", "320x50", "300x600"]);
   });
 
+  test("the tuple and the table cannot drift", () => {
+    expect([...DISPLAY_SIZE_VALUES]).toEqual(Object.keys(DISPLAY_SIZES));
+  });
+
   test("the five sizes resolve to exactly the plan's §0 table", () => {
     const table = [
       ["300x250", 300, 250],
@@ -23,6 +27,10 @@ describe("display sizes (D113)", () => {
 
   test("the union is compile-locked: a sixth size is a type error until added", () => {
     const names: readonly DisplaySize[] = DISPLAY_SIZE_VALUES;
+    type Exhaustive<T extends U, U> = T;
+    type _DisplaySizeCoversTuple = Exhaustive<DisplaySize, (typeof DISPLAY_SIZE_VALUES)[number]>;
+    const _covers: _DisplaySizeCoversTuple = DISPLAY_SIZE_VALUES[0];
     expect(names).toHaveLength(5);
+    expect(_covers).toBe("300x250");
   });
 });

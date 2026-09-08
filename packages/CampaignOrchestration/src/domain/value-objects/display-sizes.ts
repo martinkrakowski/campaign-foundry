@@ -17,13 +17,7 @@ export type DisplaySize = keyof typeof DISPLAY_SIZES;
 
 /**
  * Table order — a tuple so the order is a compile-time fact, not
- * `Object.keys`' runtime iteration. The keys still come from `DISPLAY_SIZES`
- * so deleting a unit from the table drops it from the vocabulary too.
+ * `Object.keys`' runtime iteration. Locked to `DISPLAY_SIZES` by a type-level
+ * equality check and a deep-equals test; neither side is derived from the other.
  */
-export const DISPLAY_SIZE_VALUES = Object.keys(DISPLAY_SIZES) as unknown as readonly [
-  "300x250",
-  "728x90",
-  "160x600",
-  "320x50",
-  "300x600",
-];
+export const DISPLAY_SIZE_VALUES = ["300x250", "728x90", "160x600", "320x50", "300x600"] as const;

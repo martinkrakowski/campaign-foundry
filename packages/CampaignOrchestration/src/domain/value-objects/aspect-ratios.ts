@@ -23,13 +23,21 @@ export const RATIO_DIMENSIONS: Record<AspectRatioValue, { readonly width: number
 };
 
 /** A canvas is either a social ratio or an IAB display size — never both, never a third family. */
-export type CanvasSpec = { readonly ratio: AspectRatioValue } | { readonly size: DisplaySize };
+export type CanvasSpec =
+  | { readonly ratio: AspectRatioValue; readonly size?: never }
+  | { readonly size: DisplaySize; readonly ratio?: never };
 
 /**
  * The only function that turns a spec into pixels. Social ratios stay
  * 1080/1920; display sizes are exact, never scaled (D113).
  */
 export function resolveCanvas(spec: CanvasSpec): { readonly width: number; readonly height: number } {
-  if ("ratio" in spec) return RATIO_DIMENSIONS[spec.ratio];
-  return DISPLAY_SIZES[spec.size];
+  if ("ratio" in spec && "size" in spec) {
+    throw new Error("CanvasSpec must carry exactly one of ratio/size");
+  }
+  // Exclusive `never` keeps both keys on the type, so `in` cannot narrow; the
+  // runtime check above already refused a both-keys spec.
+  const exclusive = spec as { readonly ratio: AspectRatioValue } | { readonly size: DisplaySize };
+  if ("ratio" in exclusive) return RATIO_DIMENSIONS[exclusive.ratio];
+  return DISPLAY_SIZES[exclusive.size];
 }
