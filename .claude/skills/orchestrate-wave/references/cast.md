@@ -69,6 +69,24 @@ the problem. These rules are, in order of what they save:
    repository. The same rule covers any file over ~50 KB: `DESIGN.md` (46 KB), `README.md` (29 KB),
    a long planning document. Quote what the agent needs; never send it to open one.
 
+**A persistent "master" agy feeding sub-threads: measured, and it does not pay.** The mechanisms
+exist — `--conversation <id>` resumes by id, `-c/--continue` takes the most recent, and
+`--input-format stream-json` reads NDJSON from stdin and runs a turn per line, which is literally
+one process held open. Measured on 2026-09-08 against a conversation whose entire history was
+*"Say OK." → "OK."*:
+
+| | input | cache read | duration |
+|---|---|---|---|
+| fresh run | 15 005 | 0 | 1.1 s |
+| resumed (turn 2) | 13 937 | 16 265 | 223 s |
+
+Resuming a ten-token conversation still cost **93 %** of a fresh boot. The ~15 k floor is the
+system prompt and tool schema, not conversation history, and it is already cached — so there is
+little to amortise. Worse, the resumed turn re-pays the whole prior transcript as input: on a real
+lane, turn 2 would carry turn 1's file reads and gate output and cost *more* than a fresh boot, not
+less. **Keep agents short-lived and their context small; the orchestrator holds continuity.** The
+levers that actually move the number are rules 1, 3 and 8, not session reuse.
+
 **Why grok is out.** It exhausted a weekly quota in two days because it drifted from reviewer and
 fixer into default implementer (nine lane implementations on 09-07/08, every role at high effort,
 reviewer briefs that re-ran the full gate). Reviewer briefs now carry the diff excerpt for the
