@@ -129,11 +129,18 @@ export function IdentitySection({
     [],
   );
 
-  // The matrix is hundreds of SVG nodes. Paint it after the first commit so the
-  // chips — the accessible control — are on screen before happy-dom (and the
-  // user) wait on the dots.
+  // The matrix is hundreds of SVG nodes. Paint it after the first frame, not in
+  // this effect's body: a layout-effect dispatch (the create seed) flushes
+  // pending passive effects before paint, which would otherwise build the map
+  // on the first frame the chips were meant to own.
   useEffect(() => {
-    setMapReady(true);
+    const show = () => setMapReady(true);
+    if (typeof requestAnimationFrame === "function") {
+      const frame = requestAnimationFrame(show);
+      return () => cancelAnimationFrame(frame);
+    }
+    const timer = setTimeout(show, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   const copyBriefId = async () => {

@@ -3798,6 +3798,8 @@ follow-up: hit-test by the smallest containing footprint, independent of paint o
 - **Left open:**
   - RTL `act()` still flushes the map before `render()` returns, so isolated-file wall time only dropped ~2s. The CI win is first paint no longer blocking waitFor under contention; if #229/#230-class timeouts persist, the next lever is deferring past `act` (not a stub).
 - **Round 2:** stubbed `WorldMap` in `brief-editor.test.tsx` (no product change); medians 27.90s (pre-#225 `4546bfb`) / 49.31s (before) / 25.22s (after). Mutation: delete `vi.mock` → stub assertion fails, 57.24s. `kit-boundaries.test.ts` green.
+- **Follow-up:** `mapReady` flips after the first frame (`requestAnimationFrame`, else `setTimeout(0)`), cancelled on unmount, so a layout-effect seed dispatch cannot flush the map into the first paint. Mutation: sync `setMapReady(true)` in the effect body failed the new test (`expected SVGGElement to be null` after `render`). Round 2's editor-suite stub is unaffected. Gate: 199 files / 3394 tests, 100% × 4.
+- **Remediation (PR #235):** unmount-cancel of the deferred map was implemented and unasserted; `return () => {}` on both cleanups survived 100 %. Two tests now pin `cancel(id)` and that `show` never fires. Mutant compiled, ran, failed both named tests; reverted. Gate: 199 files / 3396 tests, 100% × 4. `sync:check` after commit.
 
 ## 2026-09-07 — Campaign type, wave B (T2 merged as #228); wave-status W1 merged as #229
 
