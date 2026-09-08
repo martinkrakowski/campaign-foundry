@@ -6,6 +6,7 @@ import {
   HEADLINE_POOL_REF,
   ANCHOR_VALUES,
   CAMPAIGN_TYPES,
+  DISPLAY_SIZE_VALUES,
   LAYOUT_VALUES,
   MAX_BEATS,
   MAX_WEIGHT,
@@ -123,6 +124,28 @@ function validateType(value: unknown): void {
     throw new Error(
       `Campaign brief field "type" must be one of ${CAMPAIGN_TYPES.map((t) => `"${t}"`).join(", ")}; got ${JSON.stringify(value)}.`,
     );
+  }
+}
+
+/**
+ * Display sizes (D113) are structural, never lenient: unlike the motion rules
+ * they are checked in authoring mode too, so an unknown size cannot be saved
+ * and surface as an unrenderable canvas later. Absent means the social ratios
+ * as today — existing briefs never name them.
+ */
+function validateSizes(value: unknown): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    throw new Error(
+      `Campaign brief field "output.sizes" must be an array of strings; got ${JSON.stringify(value)}.`,
+    );
+  }
+  for (const entry of value) {
+    if (!(DISPLAY_SIZE_VALUES as readonly string[]).includes(entry)) {
+      throw new Error(
+        `Campaign brief field "output.sizes" must be one of ${DISPLAY_SIZE_VALUES.map((s) => `"${s}"`).join(", ")}; got ${JSON.stringify(entry)}.`,
+      );
+    }
   }
 }
 
@@ -383,6 +406,7 @@ function validateOutput(value: unknown, capabilities: Capabilities): void {
       profiles,
     );
   }
+  validateSizes(value.sizes);
 }
 
 /**

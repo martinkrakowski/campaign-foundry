@@ -423,6 +423,42 @@ describe("parseBrief campaign type (D108–D112)", () => {
   });
 });
 
+const SIZES_VOCABULARY =
+  '"300x250", "728x90", "160x600", "320x50", "300x600"';
+
+describe("parseBrief display sizes (D113)", () => {
+  test("a known size parses and is carried on the parsed brief verbatim", () => {
+    expect(parseBrief({ ...valid, output: { sizes: ["728x90"] } }).output?.sizes).toEqual(["728x90"]);
+  });
+
+  test("an unknown size throws with the vocabulary spelled out", () => {
+    expect(() => parseBrief({ ...valid, output: { sizes: ["banner"] } })).toThrow(
+      `Campaign brief field "output.sizes" must be one of ${SIZES_VOCABULARY}; got "banner".`,
+    );
+  });
+
+  test("an unknown size is structural, never lenient — refused in enforcing mode too", () => {
+    expect(() => parseBrief({ ...valid, output: { sizes: ["banner"] } }, { enforceCapabilities: false })).toThrow(
+      new RegExp(`must be one of ${SIZES_VOCABULARY}`),
+    );
+    expect(() =>
+      parseBrief({ ...valid, output: { sizes: ["banner"] } }, { capabilities: { motion: true }, enforceCapabilities: true }),
+    ).toThrow(new RegExp(`must be one of ${SIZES_VOCABULARY}`));
+  });
+
+  test("a string size is refused — sizes must be an array of strings", () => {
+    expect(() => parseBrief({ ...valid, output: { sizes: "728x90" } })).toThrow(
+      'Campaign brief field "output.sizes" must be an array of strings; got "728x90".',
+    );
+  });
+
+  test("a non-string member is refused as not an array of strings", () => {
+    expect(() => parseBrief({ ...valid, output: { sizes: [728] } })).toThrow(
+      'Campaign brief field "output.sizes" must be an array of strings; got [728].',
+    );
+  });
+});
+
 const MOTION_ON = { motion: true } as const;
 const MOTION_OFF = { motion: false, reason: "ffmpeg -version exited 1" } as const;
 
@@ -921,6 +957,9 @@ describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
         // No fixture predates the campaign type (D112): none names it, so
         // every one keeps meaning "social-post" without an edit.
         expect(loaded.type).toBeUndefined();
+        // No fixture predates the display family (D113): none names sizes, so
+        // every one keeps meaning the social ratios without an edit.
+        expect(loaded.output?.sizes).toBeUndefined();
       }
     });
 

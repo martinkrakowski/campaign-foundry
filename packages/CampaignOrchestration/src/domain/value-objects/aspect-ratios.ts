@@ -1,9 +1,15 @@
+import { DISPLAY_SIZES, type DisplaySize } from "./display-sizes.js";
+
 /**
- * The ratio axis' fixed vocabulary and each ratio's canvas dimensions. Pure
- * data with no imports, so the web client can pull it through the package's
- * `./aspect-ratios` subpath the way it pulls `./motion-kinds` — the VO that
- * wraps it cannot cross that line (its Result idiom imports
- * @campaignfoundry/shared, whose root reaches node:fs).
+ * The ratio axis' fixed vocabulary and each ratio's canvas dimensions. The
+ * web client can pull this leaf through the package's `./aspect-ratios`
+ * subpath the way it pulls `./motion-kinds` — the VO that wraps it cannot
+ * cross that line (its Result idiom imports @campaignfoundry/shared, whose
+ * root reaches node:fs).
+ *
+ * `resolveCanvas` is the join point with the display family (D113): the one
+ * function that turns a `CanvasSpec` into pixels. `RATIO_VALUES` and
+ * `RATIO_DIMENSIONS` stay the social family.
  */
 export const RATIO_VALUES = ["1:1", "9:16", "16:9"] as const;
 
@@ -15,3 +21,15 @@ export const RATIO_DIMENSIONS: Record<AspectRatioValue, { readonly width: number
   "9:16": { width: 1080, height: 1920 },
   "16:9": { width: 1920, height: 1080 },
 };
+
+/** A canvas is either a social ratio or an IAB display size — never both, never a third family. */
+export type CanvasSpec = { readonly ratio: AspectRatioValue } | { readonly size: DisplaySize };
+
+/**
+ * The only function that turns a spec into pixels. Social ratios stay
+ * 1080/1920; display sizes are exact, never scaled (D113).
+ */
+export function resolveCanvas(spec: CanvasSpec): { readonly width: number; readonly height: number } {
+  if ("ratio" in spec) return RATIO_DIMENSIONS[spec.ratio];
+  return DISPLAY_SIZES[spec.size];
+}

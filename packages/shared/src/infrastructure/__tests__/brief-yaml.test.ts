@@ -112,4 +112,18 @@ describe("dumpBrief", () => {
     expect(yaml).not.toContain("type:");
     expect(yaml.indexOf("mode:")).toBeLessThan(yaml.indexOf("variation:"));
   });
+
+  test("round-trips output.sizes (D113 — nested under output, already in key order)", () => {
+    const withSizes = { ...brief, output: { ...brief.output, sizes: ["728x90"] } };
+    const dumped = dumpBrief(withSizes);
+    expect(parse(dumped)).toEqual(withSizes);
+    expect(dumped).toContain("sizes:");
+    expect(dumped).toContain("728x90");
+  });
+
+  test("a brief without output.sizes emits no sizes: line", () => {
+    const yaml = dumpBrief(brief);
+    expect(yaml).not.toMatch(/^\s*sizes:/m);
+    expect(parse(yaml).output.sizes).toBeUndefined();
+  });
 });

@@ -95,9 +95,14 @@ export interface CampaignBrief {
   };
   /**
    * Optional output request. Absent formats keep today's static pipeline.
+   * `sizes` is the display family's optional axis (D113): absent means the
+   * social ratios as today, so existing briefs are unchanged (D112's
+   * optional-with-default precedent). Validated at the API boundary by
+   * `validateSizes` in load-brief.ts.
    */
   readonly output?: {
     readonly formats?: readonly string[];
     readonly platforms?: readonly string[];
+    readonly sizes?: readonly string[];
   };
 }
