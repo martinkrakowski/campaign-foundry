@@ -4216,3 +4216,36 @@ runner artifact byte for byte.
 
 **Next:** A2 (short-side scaling for the size family, display goldens on both platforms) alone;
 then A3 ‖ A4; then A5.
+
+## 2026-09-08 — Display advertising, wave 2: A2 merged (#246) — readable type on a 90 px canvas, no social pixel moved
+
+**Mode:** Orchestrator. Record written at merge time (stage 6).
+
+| Lane | PR | Commit | What |
+|---|---|---|---|
+| A2 | #246 | `d3d6a57` | `scaleBasis`: the social ratios keep D55 (width), the five display sizes scale by the short side; the compositor takes a `CanvasSpec`; display goldens recorded on both platforms (20 cells + 1 inset); D114 amended "for the size family" |
+
+### The byte-identity proof, three ways
+
+The social fixtures show a **zero-line diff** against `main` — the display goldens live in their
+own two fixture files, so identity holds by construction, not by re-recording. The reviewer
+compared all 26 social cells and the 68 artifact cells byte for byte. The orchestrator's single
+mutation (short side for the ratio family) failed the 16:9 cells by name — the exact redesign the
+owner declined.
+
+### What the round fixed
+
+- The preview cache fingerprint omitted the new `pixelSize` override (Qodo): two previews
+  differing only in output size shared a key. Fixed with a difference test and a pinned hash.
+- `widthTermBasis` computed `min(w, max(w, h))`, which is `w` for every real pair — the "long-side
+  cap" was vacuous and its mutation had tested a different change (reviewer). Made honest: width
+  terms use width; the docstring and the D114 amendment say so; every golden stayed identical.
+
+### Process, under the owner's 2026-09-08 feedback
+
+One model review (A2 changes rendering), one orchestrator mutation with its diff printed before
+the run, Qodo verified, PR-Agent bulk-resolved, no nit rounds. A2's first run exited while waiting
+on the Linux recording; a continuation finished it in one pass. The lane monitor had missed that
+exit because it keyed on lane name across re-runs; it now keys on marker plus mtime.
+
+**Next:** A3 (display profiles) ‖ A4 (the kit resolves the union); then A5.
