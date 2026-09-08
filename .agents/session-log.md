@@ -4113,3 +4113,4 @@ dispatched.
 - **Left open:**
   - `gh workflow run record-goldens.yml` still 404s until that file exists on `main`. Until then: `gh workflow run ci.yml --ref <branch> -f record_goldens=true`.
   - Display lanes A1+ can now measure against both platform maps.
+- **Remediation:** record job has its own `record-goldens-${{ github.ref }}` group (`cancel-in-progress: false`); workflow-level `ci-${{ github.ref }}` moved onto the Build job keyed by `event_name` so a dispatch never cancels a push. `recordGoldenMap` re-reads the fixture, then asserts 12/1 cells and a round-trip re-read. Byte-identity goes through `goldenRun` (`COMPOSITOR_GOLDEN_KEY_OVERRIDE=nowhere-none` fails, does not skip).

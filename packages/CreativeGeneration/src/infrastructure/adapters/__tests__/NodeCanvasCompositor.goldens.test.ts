@@ -8,6 +8,8 @@ import { AspectRatio, MOTION_KINDS, restT, type CompositeRequest, type LayoutKin
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 import { ProceduralBackgroundGenerator } from "../ProceduralBackgroundGenerator.js";
 import {
+  BASE_GOLDEN_CELL_COUNT,
+  INSET_GOLDEN_CELL_COUNT,
   compositorGoldenKey,
   goldenRun,
   isRecordingGoldens,
@@ -50,13 +52,13 @@ const fixture = JSON.parse(readFileSync(goldensPath, "utf8")) as GoldenFixture;
 
 const finishGolden = (
   path: string,
-  existing: GoldenFixture,
   key: string,
   observed: Record<string, string>,
   run: GoldenRun,
+  expectedCellCount: number,
 ): void => {
   if (run.kind === "record") {
-    recordGoldenMap(path, existing, key, observed);
+    recordGoldenMap(path, key, observed, expectedCellCount);
     return;
   }
   expect(observed).toEqual(run.map);
@@ -97,7 +99,7 @@ describe("NodeCanvasCompositor goldens", () => {
           }
         }
       }
-      finishGolden(goldensPath, fixture, key, observed, run);
+      finishGolden(goldensPath, key, observed, run, BASE_GOLDEN_CELL_COUNT);
     },
   );
 
@@ -180,6 +182,6 @@ describe("NodeCanvasCompositor inset goldens", () => {
       safeInsets: { ...INSET_INSETS },
     };
     const out = await compositor.compositeAsset(request);
-    finishGolden(insetsPath, insetFixture, key, { [INSET_CELL]: sha256(out.image) }, run);
+    finishGolden(insetsPath, key, { [INSET_CELL]: sha256(out.image) }, run, INSET_GOLDEN_CELL_COUNT);
   });
 });

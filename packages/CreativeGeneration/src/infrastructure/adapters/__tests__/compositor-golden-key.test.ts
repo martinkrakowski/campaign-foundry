@@ -4,11 +4,16 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  BASE_GOLDEN_CELL_COUNT,
+  INSET_GOLDEN_CELL_COUNT,
+  assertRecordedMap,
   compositorGoldenKey,
+  goldenMapsEqual,
   goldenRun,
   isRecordingGoldens,
   mergeGoldenFixture,
   missingGoldenMapMessage,
+  readGoldenFixture,
   recordGoldenMap,
   resolveGoldenMap,
   serializeGoldenFixture,
@@ -169,11 +174,12 @@ describe("writeGoldenFixture / recordGoldenMap", () => {
     const parsed = JSON.parse(committed) as GoldenFixture;
     const darwin = parsed["darwin-arm64"];
     if (darwin === undefined) throw new Error("committed fixture missing darwin-arm64");
+    expect(Object.keys(darwin).length).toBe(BASE_GOLDEN_CELL_COUNT);
     const dir = mkdtempSync(join(tmpdir(), "cf-goldens-"));
     const dest = join(dir, "compositor-goldens.json");
     try {
       writeFileSync(dest, committed);
-      recordGoldenMap(dest, JSON.parse(readFileSync(dest, "utf8")) as GoldenFixture, "darwin-arm64", darwin);
+      recordGoldenMap(dest, "darwin-arm64", darwin, BASE_GOLDEN_CELL_COUNT);
       const written = readFileSync(dest, "utf8");
       expect(written).toBe(committed);
       const writtenParsed = JSON.parse(written) as GoldenFixture;
@@ -196,5 +202,70 @@ describe("writeGoldenFixture / recordGoldenMap", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test("two sequential records into a temp fixture keep both keys", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cf-goldens-two-"));
+    const dest = join(dir, "out.json");
+    try {
+      writeGoldenFixture(dest, {});
+      recordGoldenMap(dest, "darwin-arm64", { cell: "a" }, INSET_GOLDEN_CELL_COUNT);
+      recordGoldenMap(dest, "linux-x64", { cell: "b" }, INSET_GOLDEN_CELL_COUNT);
+      const parsed = readGoldenFixture(dest);
+      expect(parsed["darwin-arm64"]).toEqual({ cell: "a" });
+      expect(parsed["linux-x64"]).toEqual({ cell: "b" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("re-reading the fixture after recordGoldenMap returns the map written at the expected cell count", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cf-goldens-reread-"));
+    const dest = join(dir, "out.json");
+    const cells = { "headline-top/bold/9:16": "abc" };
+    try {
+      writeGoldenFixture(dest, {});
+      recordGoldenMap(dest, "linux-x64", cells, INSET_GOLDEN_CELL_COUNT);
+      const reread = readGoldenFixture(dest)["linux-x64"];
+      expect(reread).toEqual(cells);
+      expect(Object.keys(reread ?? {}).length).toBe(INSET_GOLDEN_CELL_COUNT);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("assertRecordedMap", () => {
+  const cells = { a: "1", b: "2" };
+
+  test("passes when the written map matches cells at the expected count", () => {
+    expect(() => assertRecordedMap(cells, cells, 2, "linux-x64")).not.toThrow();
+  });
+
+  test("throws when the written map has the wrong cell count", () => {
+    expect(() => assertRecordedMap({ a: "1" }, cells, 2, "linux-x64")).toThrow(
+      /expected 2 cells, wrote 1/,
+    );
+  });
+
+  test("throws when a missing map is counted as zero cells", () => {
+    expect(() => assertRecordedMap(undefined, cells, 2, "linux-x64")).toThrow(
+      /expected 2 cells, wrote 0/,
+    );
+  });
+
+  test("throws when the re-read map does not match the map written", () => {
+    expect(() => assertRecordedMap({ a: "1", b: "other" }, cells, 2, "linux-x64")).toThrow(
+      /re-read map does not match the map written/,
+    );
+  });
+});
+
+describe("goldenMapsEqual", () => {
+  test("is false for undefined and for a length or value mismatch", () => {
+    expect(goldenMapsEqual(undefined, { a: "1" })).toBe(false);
+    expect(goldenMapsEqual({ a: "1" }, { a: "1", b: "2" })).toBe(false);
+    expect(goldenMapsEqual({ a: "1" }, { a: "2" })).toBe(false);
+    expect(goldenMapsEqual({ a: "1" }, { a: "1" })).toBe(true);
   });
 });

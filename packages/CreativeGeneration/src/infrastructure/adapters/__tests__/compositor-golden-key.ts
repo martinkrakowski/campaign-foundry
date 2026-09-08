@@ -2,7 +2,12 @@
  * PNG goldens are keyed by `${platform}-${arch}` because Skia prebuilds
  * rasterize differently across OS and CPU architecture.
  */
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+
+/** 2 layouts × 2 tones × 3 ratios — the base still matrix. */
+export const BASE_GOLDEN_CELL_COUNT = 12;
+/** The inset suite records one cell (`headline-top/bold/9:16`). */
+export const INSET_GOLDEN_CELL_COUNT = 1;
 
 export function compositorGoldenKey(
   platform: string = process.platform,
@@ -85,14 +90,56 @@ export function writeGoldenFixture(path: string, fixture: GoldenFixture): void {
   writeFileSync(path, serializeGoldenFixture(fixture));
 }
 
-/** Write `cells` under `key` and print the key and cell count. */
+export function readGoldenFixture(path: string): GoldenFixture {
+  return JSON.parse(readFileSync(path, "utf8")) as GoldenFixture;
+}
+
+export function goldenMapsEqual(a: GoldenMap | undefined, b: GoldenMap): boolean {
+  if (a === undefined) return false;
+  const keys = Object.keys(b);
+  if (Object.keys(a).length !== keys.length) return false;
+  return keys.every((k) => a[k] === b[k]);
+}
+
+/**
+ * After a record write: the on-disk map has `expectedCellCount` cells and
+ * round-trips to `cells`. Count is a caller constant (12 base / 1 inset), not
+ * `Object.keys(cells).length`, so a writer that drops a cell cannot pass.
+ */
+export function assertRecordedMap(
+  written: GoldenMap | undefined,
+  cells: GoldenMap,
+  expectedCellCount: number,
+  key: string,
+): void {
+  const count = written === undefined ? 0 : Object.keys(written).length;
+  if (count !== expectedCellCount) {
+    throw new Error(
+      `recorded compositor goldens for ${key}: expected ${expectedCellCount} cells, wrote ${count}`,
+    );
+  }
+  if (!goldenMapsEqual(written, cells)) {
+    throw new Error(
+      `recorded compositor goldens for ${key}: re-read map does not match the map written`,
+    );
+  }
+}
+
+/**
+ * Write `cells` under `key`. Always re-reads the fixture from disk before
+ * merging so a second recording in the same file cannot clobber a sibling key
+ * via a stale module-scoped parse.
+ */
 export function recordGoldenMap(
   path: string,
-  existing: GoldenFixture,
   key: string,
   cells: GoldenMap,
+  expectedCellCount: number,
 ): void {
+  const existing = readGoldenFixture(path);
   writeGoldenFixture(path, mergeGoldenFixture(existing, key, cells));
+  const reread = readGoldenFixture(path);
+  assertRecordedMap(reread[key], cells, expectedCellCount, key);
   process.stdout.write(
     `recorded compositor goldens for ${key}: ${Object.keys(cells).length} cells\n`,
   );
