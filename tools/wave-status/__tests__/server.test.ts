@@ -456,7 +456,8 @@ describe("the server over real HTTP", () => {
     }
   });
 
-  test.skipIf(process.env.CI)(
+  // Platform watchers are load-sensitive; the injected-watcher test is the contract; run with WAVE_STATUS_REAL_WATCH=1 to smoke a real watcher.
+  test.skipIf(process.env.WAVE_STATUS_REAL_WATCH !== "1")(
     "fs.watch on a real wave dir pushes a status event (smoke)",
     async () => {
       const root = await makeFixture();
