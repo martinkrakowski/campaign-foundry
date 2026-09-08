@@ -11,7 +11,7 @@
 # wait returns at once. This script prints each log's failure lines at the end — always
 # read the body, never just the marker.
 set -u
-MODEL="${MODEL:-opencode-go/glm-5.3-flash}"
+MODEL="${MODEL:-opencode/big-pickle}"
 VARIANT="${VARIANT:-high}"
 STAGGER="${STAGGER:-45}"
 
