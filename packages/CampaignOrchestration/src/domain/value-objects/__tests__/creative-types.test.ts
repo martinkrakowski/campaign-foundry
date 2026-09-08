@@ -60,12 +60,22 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
     }
   });
 
-  test("every rule names a valid advertising unit and output family", () => {
+  test("every rule names a valid advertising unit and valid, non-empty, duplicate-free output families", () => {
     const validUnits = new Set<string>(ADVERTISING_UNITS);
     const validFamilies = new Set(["static", "motion", "html"]);
-    for (const rule of Object.values(CREATIVE_TYPE_RULES)) {
+    for (const [type, rule] of Object.entries(CREATIVE_TYPE_RULES)) {
       expect(validUnits.has(rule.unit)).toBe(true);
-      expect(validFamilies.has(rule.outputFamily)).toBe(true);
+      expect(rule.outputFamilies.length, `outputFamilies for ${type} must be non-empty`).toBeGreaterThan(0);
+      expect(
+        new Set(rule.outputFamilies).size,
+        `outputFamilies for ${type} must not contain duplicates`,
+      ).toBe(rule.outputFamilies.length);
+      for (const family of rule.outputFamilies) {
+        expect(
+          validFamilies.has(family),
+          `creative type "${type}" names unknown output family "${family}"`,
+        ).toBe(true);
+      }
     }
   });
 
@@ -74,21 +84,21 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
       unit: "standard-web",
       accepts: ["image", "shade", "accent", "static-text", "animated-text", "logo"],
       required: ["image", "static-text"],
-      outputFamily: "static",
+      outputFamilies: ["static", "motion"],
     });
 
     expect(CREATIVE_TYPE_RULES["image-html"]).toEqual({
       unit: "standard-web",
       accepts: ["image", "html", "logo"],
       required: ["image", "html"],
-      outputFamily: "html",
+      outputFamilies: ["html"],
     });
 
     expect(CREATIVE_TYPE_RULES["video"]).toEqual({
       unit: "standard-web",
       accepts: ["video", "shade", "animated-text", "logo"],
       required: ["video"],
-      outputFamily: "motion",
+      outputFamilies: ["motion"],
     });
   });
 });

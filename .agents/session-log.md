@@ -4511,4 +4511,5 @@ D118) remain deferred.
 - **Left open:**
   - Lane L1b: `CampaignBrief`, `load-brief.ts`, and `brief-yaml.ts` carrying `template` and defaulting at load time.
 - **Remediation (PR #260 finding):** tightened `CampaignTypePreset.template` from `string` to `CanonicalTemplateId` via `import type`, verified no cycle with `creative-templates.ts`, added `CANONICAL_TEMPLATE_IDS` / preset template consistency test, and verified `"canonical-vidyo"` mutation fails `yarn typecheck` with TS2820.
+- **Remediation (PR #260 fix round 2):** replaced scalar `outputFamily` with non-empty list `outputFamilies` on `CreativeTypeRule` (`image-text` has `["static", "motion"]` per §2.1), asserted preset formats are a subset of `outputFamilies`, loosened `CreativeTemplate.version` to `number` (tested positive integer), and removed duplicate loop in `campaign-types.test.ts`.
 

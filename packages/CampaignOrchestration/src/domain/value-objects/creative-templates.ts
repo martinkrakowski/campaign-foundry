@@ -24,7 +24,7 @@ export interface CreativeTemplateLayer {
 
 export interface CreativeTemplate {
   readonly id: string;
-  readonly version: 1;
+  readonly version: number;
   readonly name: string;
   readonly unit: AdvertisingUnit;
   readonly creativeType: CreativeType;

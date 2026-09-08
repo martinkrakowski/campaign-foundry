@@ -5,6 +5,7 @@ import {
   CANONICAL_TEMPLATES,
   CANONICAL_TEMPLATE_IDS,
   type CanonicalTemplateId,
+  type CreativeTemplate,
 } from "../creative-templates.js";
 
 describe("canonical creative templates (D123, D128)", () => {
@@ -25,12 +26,26 @@ describe("canonical creative templates (D123, D128)", () => {
     expect(Object.keys(CANONICAL_TEMPLATES).sort()).toEqual([...CREATIVE_TYPES].sort());
   });
 
-  test("every template entry has version 1 and a non-empty name", () => {
+  test("every canonical template's version is a positive integer", () => {
     for (const template of Object.values(CANONICAL_TEMPLATES)) {
+      expect(Number.isInteger(template.version), `canonical template "${template.id}" version must be an integer`).toBe(true);
+      expect(template.version, `canonical template "${template.id}" version must be positive`).toBeGreaterThan(0);
       expect(template.version).toBe(1);
       expect(typeof template.name).toBe("string");
       expect(template.name.length).toBeGreaterThan(0);
     }
+  });
+
+  test("templates with version > 1 can be expressed (D123)", () => {
+    const v2Template: CreativeTemplate = {
+      id: "custom-template-v2",
+      version: 2,
+      name: "Custom V2",
+      unit: "standard-web",
+      creativeType: "image-text",
+      layers: [{ id: "img", kind: "image" }],
+    };
+    expect(v2Template.version).toBe(2);
   });
 
   test("every CANONICAL_TEMPLATES entry's creativeType matches its key, its unit is an ADVERTISING_UNITS member, and every layer kind is in that type's accepts", () => {

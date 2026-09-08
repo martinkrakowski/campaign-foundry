@@ -95,7 +95,6 @@ describe("campaign types (D108–D112, A5/D117)", () => {
 
   test("CANONICAL_TEMPLATE_IDS and CAMPAIGN_TYPE_PRESETS template values are consistent", () => {
     const canonicalSet = new Set<string>(CANONICAL_TEMPLATE_IDS);
-    const presetTemplateIds = new Set(Object.values(CAMPAIGN_TYPE_PRESETS).map((p) => p.template));
 
     // Every preset id is a canonical id
     for (const [type, preset] of Object.entries(CAMPAIGN_TYPE_PRESETS)) {
@@ -104,28 +103,28 @@ describe("campaign types (D108–D112, A5/D117)", () => {
         `preset "${type}" names template "${preset.template}" which is not in CANONICAL_TEMPLATE_IDS`,
       ).toBe(true);
     }
-
-    // The union covers what the presets use
-    for (const templateId of presetTemplateIds) {
-      expect((CANONICAL_TEMPLATE_IDS as readonly string[]).includes(templateId)).toBe(true);
-    }
   });
 
-  test("each preset's creativeType agrees with its formats via CREATIVE_TYPE_RULES.outputFamily (fails on mis-paired row)", () => {
+  test("each preset's formats are a subset of its creativeType's outputFamilies (subset rule)", () => {
+    for (const rule of Object.values(CREATIVE_TYPE_RULES)) {
+      expect(rule.outputFamilies.length).toBeGreaterThan(0);
+      expect(new Set(rule.outputFamilies).size).toBe(rule.outputFamilies.length);
+    }
+
     for (const [type, preset] of Object.entries(CAMPAIGN_TYPE_PRESETS)) {
-      const rule = CREATIVE_TYPE_RULES[preset.creativeType];
-      if (rule.outputFamily === "motion") {
-        expect(type).toBe("short-video");
-        expect(preset.formats).toContain("motion");
-      } else if (rule.outputFamily === "static") {
-        expect(["social-post", "paid-social", "display-ad"]).toContain(type);
-        expect(preset.formats).toContain("static");
+      const allowedFamilies = new Set<string>(CREATIVE_TYPE_RULES[preset.creativeType].outputFamilies);
+      for (const format of preset.formats) {
+        expect(
+          allowedFamilies.has(format),
+          `preset "${type}" format "${format}" is not allowed by creative type "${preset.creativeType}" outputFamilies`,
+        ).toBe(true);
       }
     }
-    expect(CREATIVE_TYPE_RULES[CAMPAIGN_TYPE_PRESETS["short-video"].creativeType].outputFamily).toBe("motion");
-    expect(CREATIVE_TYPE_RULES[CAMPAIGN_TYPE_PRESETS["social-post"].creativeType].outputFamily).toBe("static");
-    expect(CREATIVE_TYPE_RULES[CAMPAIGN_TYPE_PRESETS["paid-social"].creativeType].outputFamily).toBe("static");
-    expect(CREATIVE_TYPE_RULES[CAMPAIGN_TYPE_PRESETS["display-ad"].creativeType].outputFamily).toBe("static");
+
+    expect(CREATIVE_TYPE_RULES[CAMPAIGN_TYPE_PRESETS["short-video"].creativeType].outputFamilies).toEqual(["motion"]);
+    expect(CREATIVE_TYPE_RULES[CAMPAIGN_TYPE_PRESETS["social-post"].creativeType].outputFamilies).toEqual(["static", "motion"]);
+    expect(CREATIVE_TYPE_RULES[CAMPAIGN_TYPE_PRESETS["paid-social"].creativeType].outputFamilies).toEqual(["static", "motion"]);
+    expect(CREATIVE_TYPE_RULES[CAMPAIGN_TYPE_PRESETS["display-ad"].creativeType].outputFamilies).toEqual(["static", "motion"]);
   });
 
   test("presets only ever request the two known formats and the two known modes", () => {
