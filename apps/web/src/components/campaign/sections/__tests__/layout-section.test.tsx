@@ -1,7 +1,9 @@
 import { describe, test, expect, vi, afterEach } from "vitest";
 import { render, screen, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { scaleBasisPx } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { emptyProduct, initialEditorState, type EditorState } from "@/components/campaign/editor-state";
+import { derivePreviewSpec } from "@/components/campaign/PreviewDock";
 import { LayoutSection } from "../LayoutSection";
 import { PREVIEW_FRAME_DEBOUNCE_MS } from "@/lib/preview-frame";
 import * as messages from "../../messages";
@@ -146,6 +148,17 @@ describe("LayoutSection — the type controls (T5/T7)", () => {
       />,
     );
     expect(screen.getByText(messages.styleSizeReadout(154, "Wide"))).toBeTruthy();
+  });
+
+  test("a 728x90 layout readout is sizeScale × 90, the compositor's short-side number (A4)", () => {
+    const spec = derivePreviewSpec(undefined, undefined, ["728x90"]);
+    const sizeScale = 0.08;
+    const sizePx = scaleBasisPx(spec, sizeScale);
+    expect(spec).toEqual({ size: "728x90" });
+    expect(sizePx).toBe(7);
+    expect(messages.styleSizeReadout(sizePx, "Leaderboard")).toBe("~7 px at Leaderboard");
+    // Width-based would be 58 — the number this test exists to refuse.
+    expect(sizePx).not.toBe(Math.round(sizeScale * 728));
   });
 });
 

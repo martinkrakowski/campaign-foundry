@@ -1,24 +1,17 @@
 import type { ReactNode } from "react";
-import type { RatioOption } from "./ratio-frame";
+import type { CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import { canvasSpecOf, frameBox } from "./preview-layers";
+import type { CanvasFrameProps, RatioOption } from "./ratio-frame";
 
 export type PosterVariant = "pA" | "pB" | "pC";
 
-export interface PosterFrameProps {
-  /** The ratio's true proportion — union-keyed like `RatioFrame`, so a fourth is a compile error. */
-  readonly ratio: RatioOption;
+export type PosterFrameProps = CanvasFrameProps & {
   /** The layout variant: image-top, image-left, or centred. */
   readonly variant: PosterVariant;
   /** The frame's long side in px; the short side follows the true proportion. */
   readonly size?: number;
   /** The "start blank" card: a dashed empty frame, no content layers. */
   readonly blank?: boolean;
-}
-
-/** Union-keyed proportions, copied from `RatioFrame` — one source, no drift. */
-const PROPORTIONS: Record<RatioOption, { width: number; height: number }> = {
-  "1:1": { width: 1, height: 1 },
-  "9:16": { width: 9, height: 16 },
-  "16:9": { width: 16, height: 9 },
 };
 
 /**
@@ -82,11 +75,10 @@ const LAYOUTS: Record<PosterVariant, (w: number, h: number) => readonly Layer[]>
 
 const AVATAR_FRACTION = 0.055;
 
-/** Pixel box of a `PosterFrame` at `ratio` whose long side is `size`. */
-export function frameSize(ratio: RatioOption, size: number): { width: number; height: number } {
-  const { width: rw, height: rh } = PROPORTIONS[ratio];
-  const long = Math.max(rw, rh);
-  return { width: (rw / long) * size, height: (rh / long) * size };
+/** Pixel box of a `PosterFrame` at `spec` (or a social-ratio shorthand) whose long side is `size`. */
+export function frameSize(specOrRatio: CanvasSpec | RatioOption, size: number): { width: number; height: number } {
+  const spec = typeof specOrRatio === "string" ? { ratio: specOrRatio } : specOrRatio;
+  return frameBox(spec, size);
 }
 
 /**
@@ -95,8 +87,8 @@ export function frameSize(ratio: RatioOption, size: number): { width: number; he
  * decorative (`aria-hidden`): the tile's accessible name carries the meaning,
  * never the picture. Static by construction — no animation classes anywhere.
  */
-export function PosterFrame({ ratio, variant, size = 96, blank = false }: PosterFrameProps): ReactNode {
-  const { width: w, height: h } = frameSize(ratio, size);
+export function PosterFrame({ spec, ratio, variant, size = 96, blank = false }: PosterFrameProps): ReactNode {
+  const { width: w, height: h } = frameSize(canvasSpecOf(spec, ratio), size);
   const layers = blank ? [] : LAYOUTS[variant](w, h);
   return (
     <svg

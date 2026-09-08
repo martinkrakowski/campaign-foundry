@@ -3,9 +3,16 @@ import type { LayoutKind, ToneKind } from "@campaignfoundry/CampaignOrchestratio
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import { DEFAULT_STYLE, type Style } from "@campaignfoundry/CampaignOrchestration/creative-style";
 import type { AnchorKind } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
-import { RATIO_DIMENSIONS, type AspectRatioValue } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import {
+  resolveCanvas,
+  scaleBasis,
+  scaleBasisPx,
+  widthTermBasis,
+  type AspectRatioValue,
+  type CanvasSpec,
+} from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
-import { LAYERS, times } from "@/components/ui/preview-layers";
+import { LAYERS, times, canvasSpecOf } from "@/components/ui/preview-layers";
 import { cn } from "@/lib/cn";
 
 export type LayoutOption = LayoutKind;
@@ -26,6 +33,12 @@ export interface CreativePreviewProps {
    * drift from the render on the constants it mirrors.
    */
   readonly style?: Style;
+  /** The canvas to preview. When present, wins over `ratio`. */
+  readonly spec?: CanvasSpec;
+  /**
+   * @deprecated Prefer `spec`. Social-ratio shorthand kept so existing
+   * `{ ratio: "16:9" }` call sites type-check.
+   */
   readonly ratio?: AspectRatioValue;
   readonly className?: string;
 }
@@ -33,10 +46,9 @@ export interface CreativePreviewProps {
 /** A headline text crams at most this many lines; what does not fit shrinks. */
 export const PREVIEW_MAX_LINES = 3;
 /**
- * The headline starts at this fraction of the canvas WIDTH — the compositor's
- * `fitText` model, not the height (C1: the divergence's sign flipped with ratio
- * precisely because the two engines scaled off different axes). Reference, not
- * a copy: the domain leaf is the single source of truth.
+ * The headline starts at this fraction of the canvas scale basis — width for
+ * the social family (D55), the short side for a display size (D114). Reference,
+ * not a copy: the domain leaf is the single source of truth.
  */
 export const PREVIEW_FONT_RATIO = CREATIVE_GEOMETRY.headlineTypeWidthFraction;
 /** The headline never shrinks below this fraction of its starting size (`fitText`'s floor). */
@@ -195,6 +207,7 @@ export function CreativePreview({
   headline,
   motion,
   style,
+  spec,
   ratio = "1:1",
   className,
 }: CreativePreviewProps): ReactNode {
@@ -219,7 +232,8 @@ export function CreativePreview({
   const lineHeightRatio = style?.lineHeight ?? DEFAULT_STYLE.lineHeight;
   const letterSpacingEm = style?.letterSpacing ?? DEFAULT_STYLE.letterSpacing;
   const align = style?.align ?? DEFAULT_STYLE.align;
-  const { width: W, height: H } = RATIO_DIMENSIONS[ratio];
+  const canvas = canvasSpecOf(spec, ratio);
+  const { width: W, height: H } = resolveCanvas(canvas);
   const shadeAlpha = bold ? CREATIVE_GEOMETRY.shadeAlpha.bold : CREATIVE_GEOMETRY.shadeAlpha.subtle;
   const shadeId = `creative-preview-shade-${useId()}`;
   const fadeId = `creative-preview-fade-${useId()}`;
@@ -232,7 +246,7 @@ export function CreativePreview({
   // the same fractions that place the block — so the anchor changes where the
   // fitted block sits, never its planned size.
   const maxHeight = previewFitMaxHeight(H);
-  const startFontSize = Math.round(W * sizeScale);
+  const startFontSize = scaleBasisPx(canvas, sizeScale);
   const minFontSize = Math.round(startFontSize * PREVIEW_FONT_FLOOR_FRACTION);
   const { fontSize, lines } = fitHeadline(
     headline ?? "",
@@ -260,8 +274,8 @@ export function CreativePreview({
   // layout (prepare: top headline → bottom-left, bottom headline → top-right).
   // The real logo's height follows its image's aspect; the preview has no
   // access to those pixels, so a square neutral block stands in (D26).
-  const logoW = W * CREATIVE_GEOMETRY.logoWidthFraction;
-  const logoMargin = W * CREATIVE_GEOMETRY.logoMarginFraction;
+  const logoW = scaleBasis(canvas, W, H) * CREATIVE_GEOMETRY.logoWidthFraction;
+  const logoMargin = widthTermBasis(canvas, W, H) * CREATIVE_GEOMETRY.logoMarginFraction;
   const logoX = top ? logoMargin : W - logoW - logoMargin;
 
   // The compositor's logo overlap snap, mirrored with this SVG's own line

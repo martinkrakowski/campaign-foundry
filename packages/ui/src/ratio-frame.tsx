@@ -1,37 +1,33 @@
 import type { ReactNode } from "react";
-import type { AspectRatioValue } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import type { AspectRatioValue, CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import { canvasSpecOf, frameBox } from "./preview-layers";
 
 export type RatioOption = AspectRatioValue;
 
-export interface RatioFrameProps {
-  readonly ratio: RatioOption;
+/**
+ * `spec` is the canvas. `ratio` is a deprecated social-ratio shorthand: the
+ * compiler enumerated platform-card, poster-stack, poster-frame and this
+ * file's own tests as call sites of the old required `ratio` prop, and
+ * existing `{ ratio: "9:16" }` tests must pass unedited.
+ */
+export type CanvasFrameProps =
+  | { readonly spec: CanvasSpec; readonly ratio?: RatioOption }
+  | { readonly spec?: never; readonly ratio: RatioOption };
+
+export type RatioFrameProps = CanvasFrameProps & {
   /** The frame's long side in px; the short side follows the true proportion. */
   readonly size?: number;
-}
-
-/**
- * Union-keyed lookups rather than `=== "9:16"` comparisons: a Record over the
- * domain union makes a new member a *compile* error instead of a branch that
- * cannot be covered under the 100 % gate. Same idiom as `TOP_EDGE` in
- * `creative-glyph.tsx`.
- */
-const PROPORTIONS: Record<RatioOption, { width: number; height: number }> = {
-  "1:1": { width: 1, height: 1 },
-  "9:16": { width: 9, height: 16 },
-  "16:9": { width: 16, height: 9 },
 };
 
 /**
- * A frame drawn at the ratio's true proportion — the square, tall and wide
- * canvases the compositor renders — at theme-token colours so it reads in both
- * themes. Purely decorative (`aria-hidden`): the ratio's name beside it carries
- * the meaning, never the picture.
+ * A frame drawn at the canvas's true proportion — social ratios and IAB
+ * display sizes alike — at theme-token colours so it reads in both themes.
+ * Proportions come from `resolveCanvas` via `frameBox`, never a local table:
+ * a 728×90 frame is a very wide, very short rectangle (F4). Purely decorative
+ * (`aria-hidden`): the name beside it carries the meaning, never the picture.
  */
-export function RatioFrame({ ratio, size = 48 }: RatioFrameProps): ReactNode {
-  const { width: w, height: h } = PROPORTIONS[ratio];
-  const long = Math.max(w, h);
-  const width = (w / long) * size;
-  const height = (h / long) * size;
+export function RatioFrame({ spec, ratio, size = 48 }: RatioFrameProps): ReactNode {
+  const { width, height } = frameBox(canvasSpecOf(spec, ratio), size);
   return (
     <svg
       width={width}

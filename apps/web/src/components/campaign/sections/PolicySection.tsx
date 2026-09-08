@@ -2,7 +2,7 @@
 
 import { useId } from "react";
 import type { Dispatch, ReactNode } from "react";
-import { RATIO_DIMENSIONS, RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import { RATIO_VALUES, resolveCanvas } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import {
   AxisCard,
   Button,
@@ -175,7 +175,7 @@ function RatioAxis({
         {RATIO_VALUES.map((value) => (
           <RatioPanel
             key={value}
-            ratio={{ value, ...RATIO_DIMENSIONS[value] }}
+            ratio={{ value, ...resolveCanvas({ ratio: value }) }}
             selected={state.variation.ratio.includes(value)}
             excluded={motionOnly && !packaged.has(value)}
             floor={floor}

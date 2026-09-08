@@ -7,7 +7,7 @@ export { Button, type ButtonProps } from "./button";
 export { Card, CardHeader, CardContent, type CardProps } from "./card";
 export { CreativeGlyph, type CreativeGlyphProps, type LayoutOption, type ToneOption } from "./creative-glyph";
 export { Input, type InputProps } from "./input";
-export { RatioFrame, type RatioFrameProps, type RatioOption } from "./ratio-frame";
+export { RatioFrame, type RatioFrameProps, type RatioOption, type CanvasFrameProps } from "./ratio-frame";
 export { Slider, type SliderProps } from "./slider";
 export { Stepper, type StepperProps } from "./stepper";
 export { Disclosure } from "./disclosure";
@@ -73,4 +73,4 @@ export { PosterFrame, frameSize, type PosterFrameProps, type PosterVariant } fro
 export { PreviewPanel, type PreviewPanelProps } from "./preview-panel";
 export { PosterStack, type PosterStackProps } from "./poster-stack";
 export { ScrubBar } from "./scrub-bar";
-export { LAYERS, times, PREVIEW_BOX, fractionOfBox, type BoxFraction } from "./preview-layers";
+export { LAYERS, times, PREVIEW_BOX, fractionOfBox, canvasSpecOf, frameBox, type BoxFraction } from "./preview-layers";

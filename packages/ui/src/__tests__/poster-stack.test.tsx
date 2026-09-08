@@ -48,4 +48,14 @@ describe("PosterStack", () => {
     expect(stack.style.width).toBe(`${width + GAPS * OFFSET_X}px`);
     expect(stack.style.height).toBe(`${height + GAPS * OFFSET_Y}px`);
   });
+
+  test("a display spec sizes the stack from resolveCanvas", () => {
+    const size = 84;
+    const { width, height } = frameSize({ size: "728x90" }, size);
+    const { container } = render(<PosterStack spec={{ size: "728x90" }} size={size} />);
+    const stack = container.firstElementChild as HTMLElement;
+    expect(parseFloat(stack.style.width)).toBeCloseTo(width + GAPS * OFFSET_X);
+    expect(parseFloat(stack.style.height)).toBeCloseTo(height + GAPS * OFFSET_Y);
+    expect(width / height).toBeCloseTo(728 / 90);
+  });
 });

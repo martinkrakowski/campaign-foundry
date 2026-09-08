@@ -18,7 +18,29 @@
  * the same double as the literal `2.3`, while `(46 × 1) / 20` does. `times`
  * multiplies numerator-first for exactly that reason.
  */
+import { resolveCanvas, type AspectRatioValue, type CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
+
+/**
+ * Prefer `spec` when the caller already has a CanvasSpec; otherwise wrap a
+ * social-ratio shorthand. Neither → the square the kit has always defaulted to.
+ */
+export function canvasSpecOf(spec: CanvasSpec | undefined, ratio: AspectRatioValue | undefined): CanvasSpec {
+  if (spec !== undefined) return spec;
+  if (ratio !== undefined) return { ratio };
+  return { ratio: "1:1" };
+}
+
+/**
+ * Pixel box of a canvas whose long side is `longSide`. Proportions come from
+ * `resolveCanvas` — never a local table — so a 728×90 frame is a very wide,
+ * very short rectangle (F4).
+ */
+export function frameBox(spec: CanvasSpec, longSide: number): { width: number; height: number } {
+  const { width: w, height: h } = resolveCanvas(spec);
+  const long = Math.max(w, h);
+  return { width: (w / long) * longSide, height: (h / long) * longSide };
+}
 
 /** The unit box the miniature draws in — a 46 px square. */
 export const PREVIEW_BOX = 46;

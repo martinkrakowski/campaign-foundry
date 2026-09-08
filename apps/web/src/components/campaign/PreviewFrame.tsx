@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, type ReactNode } from "react";
-import type { AspectRatioValue } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import type { AspectRatioValue, CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import { canvasSpecOf } from "@/components/ui/preview-layers";
 import type { CampaignBrief, PreviewCellSelection } from "@campaignfoundry/CampaignOrchestration";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import type { AnchorOption, LayoutOption, ToneOption } from "./CreativePreview";
@@ -29,6 +30,7 @@ export function PreviewFrame({
   primaryColor,
   headline,
   motion,
+  spec,
   ratio,
   className,
 }: {
@@ -40,27 +42,34 @@ export function PreviewFrame({
   readonly primaryColor: string;
   readonly headline?: string;
   readonly motion?: MotionKind;
-  readonly ratio: AspectRatioValue;
+  readonly spec?: CanvasSpec;
+  /**
+   * @deprecated Prefer `spec`. Social-ratio shorthand kept so existing
+   * `{ ratio }` call sites type-check.
+   */
+  readonly ratio?: AspectRatioValue;
   readonly className: string;
 }): ReactNode {
+  const canvas = canvasSpecOf(spec, ratio);
   const cell = useMemo<PreviewCellSelection | undefined>(() => {
     const product = brief?.products[0];
     if (
       product === undefined ||
       product.id.length === 0 ||
       layout === undefined ||
-      tone === undefined
+      tone === undefined ||
+      canvas.ratio === undefined
     ) {
       return undefined;
     }
     return {
       productId: product.id,
-      ratio,
+      ratio: canvas.ratio,
       layout,
       tone,
       ...(anchor !== undefined ? { anchor } : {}),
     };
-  }, [brief, layout, tone, anchor, ratio]);
+  }, [brief, layout, tone, anchor, canvas.ratio]);
   const { frame } = usePreviewFrame(brief, cell);
 
   if (frame !== null) {
@@ -80,7 +89,7 @@ export function PreviewFrame({
       primaryColor={primaryColor}
       headline={headline}
       motion={motion}
-      ratio={ratio}
+      spec={canvas}
       className={className}
     />
   );

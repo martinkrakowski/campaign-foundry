@@ -1,15 +1,15 @@
 import type { ReactNode } from "react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
-import { RATIO_DIMENSIONS, type AspectRatioValue } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import { scaleBasisPx, type CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import type { LayoutOption, ToneOption, AnchorOption } from "./CreativePreview";
-import { derivePreviewRatio } from "./PreviewDock";
+import { derivePreviewSpec } from "./PreviewDock";
 import { PreviewFrame } from "./PreviewFrame";
 import {
   alignDisplayName,
+  canvasDisplayName,
   formatDisplayName,
   platformDisplayName,
-  ratioDisplayName,
   weightDisplayName,
 } from "./display-names";
 import { briefBackgroundIsStandIn } from "@/lib/preview-frame";
@@ -35,7 +35,7 @@ interface SummaryRow {
  * The rows walk `sectionOrder` of the brief's own mode, and every row title is the
  * one `SECTION_TITLES` vocabulary — no second list lives here.
  */
-function summaryRows(brief: CampaignBrief, ratio: AspectRatioValue): SummaryRow[] {
+function summaryRows(brief: CampaignBrief, spec: CanvasSpec): SummaryRow[] {
   const rows: SummaryRow[] = [];
   for (const section of sectionOrder(brief.mode ?? "brief")) {
     switch (section) {
@@ -112,7 +112,7 @@ function summaryRows(brief: CampaignBrief, ratio: AspectRatioValue): SummaryRow[
               ? [messages.reviewStyleWeight(weightDisplayName(style.fontWeight))]
               : []),
             ...(style.sizeScale !== undefined
-              ? [messages.styleSizeReadout(Math.round(style.sizeScale * RATIO_DIMENSIONS[ratio].width), ratioDisplayName(ratio))]
+              ? [messages.styleSizeReadout(scaleBasisPx(spec, style.sizeScale), canvasDisplayName(spec))]
               : []),
             ...(style.lineHeight !== undefined ? [messages.reviewStyleLineHeight(style.lineHeight.toFixed(2))] : []),
             ...(style.letterSpacing !== undefined
@@ -156,8 +156,8 @@ export function ReviewStep({
   const platformId = firstOf(brief.output?.platforms);
   // Derived once, here (§6 question 4) — and handed to the row generation, so
   // the template row's derived px (D55) and the figure cannot disagree.
-  const ratio = derivePreviewRatio(platformId, undefined);
-  const rows = summaryRows(brief, ratio);
+  const spec = derivePreviewSpec(platformId, undefined, brief.output?.sizes);
+  const rows = summaryRows(brief, spec);
   const layout: LayoutOption | undefined =
     treatment !== undefined ? treatment.layout : (firstOf(axes?.layout) as LayoutOption | undefined);
   const tone: ToneOption | undefined =
@@ -170,7 +170,7 @@ export function ReviewStep({
   // D52: a non-procedural background axis names the frame's background a stand-in —
   // the caption says so, in words, never a raw axis id.
   const caption = messages.previewCaption(
-    ratioDisplayName(ratio),
+    canvasDisplayName(spec),
     platformId !== undefined ? platformDisplayName(platformId) : messages.previewNoPlatform,
   );
   const figcaptionText = briefBackgroundIsStandIn(brief)
@@ -222,7 +222,7 @@ export function ReviewStep({
             primaryColor={product.primaryColor}
             headline={brief.campaignMessage}
             motion={motion}
-            ratio={ratio}
+            spec={spec}
             className="block h-auto w-full"
           />
           <figcaption className="font-mono text-[11px] text-text-muted">{figcaptionText}</figcaption>

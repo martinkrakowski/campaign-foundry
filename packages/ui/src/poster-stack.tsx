@@ -1,9 +1,16 @@
 import type { ReactNode } from "react";
+import type { CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { PosterFrame, frameSize, type PosterVariant } from "./poster-frame";
+import { canvasSpecOf } from "./preview-layers";
 import type { RatioOption } from "./ratio-frame";
 
 export interface PosterStackProps {
-  /** The ratio every frame in the stack shares. */
+  /** The canvas every frame in the stack shares. Wins over `ratio`. */
+  readonly spec?: CanvasSpec;
+  /**
+   * @deprecated Prefer `spec`. Social-ratio shorthand kept so existing
+   * `{ ratio: "9:16" }` call sites type-check.
+   */
   readonly ratio?: RatioOption;
   /** Each frame's long side in px. */
   readonly size?: number;
@@ -21,8 +28,9 @@ const OFFSET_Y = 6;
  * *set* of layouts a mode can produce, all visible at once. Wholly decorative
  * and purely static — no animation classes anywhere (D88).
  */
-export function PosterStack({ ratio = "1:1", size = 84 }: PosterStackProps): ReactNode {
-  const { width, height } = frameSize(ratio, size);
+export function PosterStack({ spec, ratio = "1:1", size = 84 }: PosterStackProps): ReactNode {
+  const canvas = canvasSpecOf(spec, ratio);
+  const { width, height } = frameSize(canvas, size);
   return (
     <span
       aria-hidden="true"
@@ -38,7 +46,7 @@ export function PosterStack({ ratio = "1:1", size = 84 }: PosterStackProps): Rea
           className="absolute"
           style={{ left: index * OFFSET_X, top: index * OFFSET_Y }}
         >
-          <PosterFrame ratio={ratio} variant={variant} size={size} />
+          <PosterFrame spec={canvas} variant={variant} size={size} />
         </span>
       ))}
     </span>

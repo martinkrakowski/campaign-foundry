@@ -1,6 +1,7 @@
 // The leaf subpath, never the package barrel: the barrel re-exports the
 // infrastructure adapters, which pull node:fs/path/crypto into the browser bundle.
-import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import { RATIO_VALUES, type CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import { DISPLAY_SIZE_VALUES, type DisplaySize } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import { ANCHOR_VALUES } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import { ALIGN_VALUES, FONT_WEIGHT_VALUES, type TextEffectKind } from "@campaignfoundry/CampaignOrchestration/creative-style";
 import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
@@ -35,6 +36,33 @@ const RATIO_LABELS: Record<(typeof RATIO_VALUES)[number], string> = {
 
 export function ratioDisplayName(ratio: string): string {
   return RATIO_LABELS[ratio as (typeof RATIO_VALUES)[number]] ?? ratio;
+}
+
+/**
+ * Display name for an IAB size key ("728x90" → "Leaderboard"). Keyed by the
+ * domain's own values so a sixth size is a compile error rather than a raw
+ * id on screen (D18).
+ */
+const SIZE_LABELS: Record<DisplaySize, string> = {
+  "300x250": "Medium rectangle",
+  "728x90": "Leaderboard",
+  "160x600": "Wide skyscraper",
+  "320x50": "Mobile banner",
+  "300x600": "Half page",
+};
+
+export function sizeDisplayName(size: string): string {
+  for (const known of DISPLAY_SIZE_VALUES) {
+    if (known === size) return SIZE_LABELS[known];
+  }
+  return size;
+}
+
+/** Display name for a canvas spec — a social ratio or an IAB size, never a raw key. */
+export function canvasDisplayName(spec: CanvasSpec): string {
+  if (spec.ratio !== undefined) return ratioDisplayName(spec.ratio);
+  if (spec.size !== undefined) return sizeDisplayName(spec.size);
+  throw new Error("CanvasSpec must carry exactly one of ratio/size");
 }
 
 /**
