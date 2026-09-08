@@ -13,6 +13,10 @@ import {
   DEFAULT_CAMPAIGN_TYPE,
   type CampaignType,
 } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import {
+  BRIEF_SCHEMA_VERSION,
+  isSupportedBriefSchemaVersion,
+} from "@campaignfoundry/CampaignOrchestration/brief-schema-version";
 // The leaf, never the barrel: the barrel re-exports the infrastructure adapters, which
 // pull node:fs/path/crypto into the browser bundle.
 import {
@@ -214,6 +218,7 @@ export type EditorSource =
   | { kind: "file"; file: string; loadedId: string; savedSnapshot: CampaignBrief | null; revision: string | undefined };
 
 export interface EditorState {
+  schemaVersion: number;
   source: EditorSource;
   mode: CampaignMode;
   /**
@@ -414,6 +419,7 @@ function generateTempId(): string {
 export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
   const tempId = generateTempId();
   return {
+    schemaVersion: BRIEF_SCHEMA_VERSION,
     source: { kind: "new", tempId },
     mode,
     type: DEFAULT_CAMPAIGN_TYPE,
@@ -1271,6 +1277,7 @@ export function toBrief(state: EditorState): CampaignBrief {
   // keep zero insets (D11) — same discipline the ratio axis already follows.
   const style = briefStyle(state);
   const brief: CampaignBrief = {
+    schemaVersion: state.schemaVersion,
     id: state.briefId,
     targetRegion: state.targetRegion,
     targetAudience: state.targetAudience,
@@ -1435,6 +1442,7 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
     : { beats: [], transition: "fade", keyBeat: 1 };
 
   return {
+    schemaVersion: brief.schemaVersion,
     source,
     nextBeatKey: timeline.beats.length + 1,
     mode: brief.mode ?? "brief",
@@ -1566,7 +1574,14 @@ export function getDraftKey(state: EditorState): string {
  * `id` is the marker: nothing can be saved, listed or run under it.
  */
 export function blankBrief(): CampaignBrief {
-  return { id: "", targetRegion: "", targetAudience: "", campaignMessage: "", products: [] } as CampaignBrief;
+  return {
+    schemaVersion: BRIEF_SCHEMA_VERSION,
+    id: "",
+    targetRegion: "",
+    targetAudience: "",
+    campaignMessage: "",
+    products: [],
+  };
 }
 
 export function saveDraftToStorage(state: EditorState): void {
@@ -1805,10 +1820,14 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   // otherwise believed, subset included.
   const normalizedTimeline = normalizeTimelineDraft(raw.timeline);
   const style = normalizeStyleDraft(raw.style);
+  const schemaVersion = isSupportedBriefSchemaVersion(raw.schemaVersion)
+    ? raw.schemaVersion
+    : BRIEF_SCHEMA_VERSION;
 
   return {
     ...initial,
     ...raw,
+    schemaVersion,
     source,
     mode,
     type,

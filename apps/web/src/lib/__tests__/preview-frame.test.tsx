@@ -4,6 +4,7 @@ import type { CampaignBrief, PreviewCellSelection } from "@campaignfoundry/Campa
 import { PREVIEW_FRAME_DEBOUNCE_MS, usePreviewFrame, briefBackgroundIsStandIn } from "../preview-frame";
 
 const brief = (over: Partial<CampaignBrief> = {}): CampaignBrief => ({
+  schemaVersion: 1,
   id: "camp",
   targetRegion: "DE",
   targetAudience: "a",

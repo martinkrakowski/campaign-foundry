@@ -1,6 +1,7 @@
 # Corpus fixture — leading comment block.
 # A save must keep every line of this file byte for byte when nothing changed.
 
+schemaVersion: 1
 campaignMessage: Stay wild. Stay hydrated.
 # A hand-written note about the audience.
 targetAudience: Trail runners, 25-40

@@ -4412,3 +4412,40 @@ Refuted, as existing contract: `PlatformCard` announces `profile.id` for the soc
 
 **Next:** nothing dispatched. The deferred rows in §5 of the plan (rich-media/video display,
 D118) remain deferred.
+
+---
+
+## 2026-09-08 — lane L12: brief document declares its schema version (D133)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `packages/CampaignOrchestration/src/domain/value-objects/brief-schema-version.ts`: Added `BRIEF_SCHEMA_VERSION = 1 as const` and `isSupportedBriefSchemaVersion(value: unknown): value is number`.
+  - `packages/CampaignOrchestration/src/domain/value-objects/index.ts`: Exported `brief-schema-version.js` via `@hexagen/sync`.
+  - `packages/CampaignOrchestration/package.json`: Added `"./brief-schema-version"` subpath export.
+  - `packages/CampaignOrchestration/src/domain/entities/CampaignBrief.ts`: Added required `readonly schemaVersion: number;` first in interface.
+  - `apps/api/server/lib/load-brief.ts`: Added `validateSchemaVersion(value: unknown): number` enforcing integer in `1 <= n <= BRIEF_SCHEMA_VERSION` (structural check before `REQUIRED_FIELDS`, defaults to `BRIEF_SCHEMA_VERSION` if absent, throws matching exact error format).
+  - `packages/shared/src/infrastructure/brief-yaml.ts`: Added `"schemaVersion"` as the first key in `BRIEF_KEY_ORDER`.
+  - `apps/web/src/components/campaign/editor-state.ts`: Added `schemaVersion: number` to `EditorState`, set `BRIEF_SCHEMA_VERSION` in `initialEditorState()` and `blankBrief()`, preserved it in `toBrief(state)` and `fromBrief(brief)`, and defaulted absent or unsupported versions to `BRIEF_SCHEMA_VERSION` in `normalizeDraftState(raw)`.
+  - `apps/api/server/lib/__tests__/fixtures/brief-corpus/`: Added `schemaVersion: 1` to the 5 golden corpus fixtures to ensure byte-for-byte fidelity in round-trip tests without modifying any `briefs/` sample files.
+  - Updated typed call sites and unit tests in `CampaignOrchestration`, `CreativeGeneration`, `api`, and `web`.
+- **Decisions:**
+  - Followed D133: `schemaVersion` is structural and defaulted at load; refuses unsupported versions even when `enforceCapabilities: false`.
+  - Preserved `briefs/` sample files completely untouched (`briefs/sample-*.yaml` continue to omit `schemaVersion` and parse unedited with `schemaVersion: 1`).
+  - Added mutation testing verifying failure when upper-bound check (`value <= BRIEF_SCHEMA_VERSION`) is removed.
+- **Mutation Testing:**
+  - Mutation diff:
+    ```diff
+    --- a/packages/CampaignOrchestration/src/domain/value-objects/brief-schema-version.ts
+    +++ b/packages/CampaignOrchestration/src/domain/value-objects/brief-schema-version.ts
+    @@ -8,4 +8,4 @@ export const BRIEF_SCHEMA_VERSION = 1 as const;
+     export function isSupportedBriefSchemaVersion(value: unknown): value is number {
+    -  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= BRIEF_SCHEMA_VERSION;
+    +  return typeof value === "number" && Number.isInteger(value) && value >= 1;
+     }
+    ```
+  - Command: `yarn test packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-schema-version.test.ts apps/api/server/lib/__tests__/load-brief.test.ts apps/web/src/components/campaign/__tests__/editor-state.test.ts`
+  - Output: 4 tests failed across 3 test files (`isSupportedBriefSchemaVersion boundaries: 0 false, 1 true, 2 false, 1.5 false`, `a brief with schemaVersion: 2 throws the expected error message`, `the refusal holds when enforceCapabilities: false`, and `normalizeDraftState({ schemaVersion: 99 }) resets schemaVersion to 1`).
+  - Reverted mutation and re-verified all tests pass (498/498).
+- **Left open:**
+  - Lane L1 (the vocabulary: advertising units, creative types, layer kinds) follows L12.
+

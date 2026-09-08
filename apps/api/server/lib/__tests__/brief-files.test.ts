@@ -12,11 +12,12 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { dumpBrief, hashFile, hashBytes, isErrno, isExistsError, serializeBrief, SYMLINK_WRITE_ERROR } from "../brief-files.js";
 import { parseBriefText } from "../load-brief.js";
-import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { BRIEF_SCHEMA_VERSION, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 
 const origRoot = process.env.PROJECT_ROOT;
 
 const minimal: CampaignBrief = {
+  schemaVersion: BRIEF_SCHEMA_VERSION,
   id: "camp",
   targetRegion: "DE",
   targetAudience: "a",
@@ -31,6 +32,7 @@ describe("dumpBrief", () => {
   test("emits sample-campaign key order and omits absent optionals", () => {
     const dumped = dumpBrief(minimal);
     expect([...dumped.matchAll(/^([a-zA-Z]+):/gm)].map((m) => m[1])).toEqual([
+      "schemaVersion",
       "id",
       "targetRegion",
       "targetAudience",
@@ -51,6 +53,7 @@ describe("dumpBrief", () => {
       output: { formats: ["static"] },
     });
     expect([...dumped.matchAll(/^([a-zA-Z]+):/gm)].map((m) => m[1])).toEqual([
+      "schemaVersion",
       "id",
       "targetRegion",
       "targetAudience",
@@ -67,6 +70,7 @@ describe("dumpBrief", () => {
   test("emits unknown keys after the sample order", () => {
     const dumped = dumpBrief({ ...minimal, notes: "keep-me" } as CampaignBrief);
     expect([...dumped.matchAll(/^([a-zA-Z]+):/gm)].map((m) => m[1])).toEqual([
+      "schemaVersion",
       "id",
       "targetRegion",
       "targetAudience",

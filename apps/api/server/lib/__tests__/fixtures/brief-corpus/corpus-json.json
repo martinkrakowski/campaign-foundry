@@ -1,4 +1,5 @@
 {
+  "schemaVersion": 1,
   "id": "corpus-json",
   "targetRegion": "DE",
   "targetAudience": "JSON readers",

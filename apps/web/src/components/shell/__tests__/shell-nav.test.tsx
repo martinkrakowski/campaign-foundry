@@ -169,6 +169,7 @@ describe("Sidebar", () => {
             type="button"
             onClick={() =>
               setBrief({
+                schemaVersion: 1,
                 id: "winter-hydration-2026",
                 targetRegion: "US",
                 targetAudience: "all",

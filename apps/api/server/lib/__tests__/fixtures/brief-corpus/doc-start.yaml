@@ -1,5 +1,6 @@
 ---
 # A leading document start marker must survive a save.
+schemaVersion: 1
 id: corpus-doc-start
 campaignMessage: Documented.
 targetAudience: Marker check

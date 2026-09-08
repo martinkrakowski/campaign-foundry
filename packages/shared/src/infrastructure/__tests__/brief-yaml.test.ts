@@ -46,6 +46,12 @@ const brief = {
 };
 
 describe("dumpBrief", () => {
+  test("emits schemaVersion as the first key in canonical order (D133)", () => {
+    const yaml = dumpBrief({ schemaVersion: 1, ...brief });
+    expect(yaml.startsWith("schemaVersion: 1\n")).toBe(true);
+    expect(yaml.indexOf("schemaVersion:")).toBeLessThan(yaml.indexOf("id:"));
+  });
+
   test("emits canonical key order and quotes unsafe strings", () => {
     const yaml = dumpBrief(brief);
     expect(yaml.indexOf("id:")).toBeLessThan(yaml.indexOf("targetRegion:"));
