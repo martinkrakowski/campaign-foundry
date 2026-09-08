@@ -72,13 +72,6 @@ describe("CreateCampaignDialog", () => {
     expect(within(dialog).getAllByRole("status")).toHaveLength(1);
   });
 
-  test("the retired rail's count formatter still has both plural arms (messages.ts is append-only)", () => {
-    // T3 deleted the rail; startFromCampaignCount stays because messages.ts may
-    // only append. The jargon scanner hits the plural arm; the singular is this pin.
-    expect(messages.startFromCampaignCount(1)).toBe("1 campaign");
-    expect(messages.startFromCampaignCount(2)).toBe("2 campaigns");
-  });
-
   test("each type tile resolves by raw id, with the display words in textContent", async () => {
     const user = userEvent.setup();
     renderDialog();
@@ -109,6 +102,23 @@ describe("CreateCampaignDialog", () => {
     const dialog = await openDialog(user);
     const tile = within(dialog).getByRole("button", { name: "short-video" });
     expect(tile.textContent).toContain(messages.typeTileRunsAs(modeDisplayName("variation")));
+  });
+
+  test("each type tile's aria-describedby carries the display name, and short-video's carries the D110 sentence", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    const dialog = await openDialog(user);
+
+    for (const type of CAMPAIGN_TYPES) {
+      const tile = within(dialog).getByRole("button", { name: type });
+      const describedBy = tile.getAttribute("aria-describedby");
+      expect(describedBy).toBeTruthy();
+      const target = document.getElementById(describedBy as string);
+      expect(target?.textContent).toContain(typeDisplayName(type));
+      if (type === "short-video") {
+        expect(target?.textContent).toContain(messages.typeTileRunsAs(modeDisplayName("variation")));
+      }
+    }
   });
 
   test("Create with an empty name is refused in the status line, and the dialog stays open", async () => {
@@ -500,7 +510,7 @@ describe("the inline discard guard (W2(a) / D90)", () => {
     // The question replaces the row in place: same dialog, same scrim, form intact.
     expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
     expect(screen.getByText(messages.discardGuardTitle)).toBeTruthy();
-    expect(screen.getByText("Closing now discards a name from this draft.")).toBeTruthy();
+    expect(screen.getByText(messages.discardGuardDetail(true))).toBeTruthy();
     // The row it replaced is gone while it shows.
     expect(screen.queryByRole("button", { name: messages.confirmCancel })).toBeNull();
     expect(screen.queryByRole("button", { name: messages.createCampaignConfirm })).toBeNull();

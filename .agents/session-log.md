@@ -3874,4 +3874,4 @@ the campaign-type wave-C record, the wave-status close-out, and P1 alone.
 - **Left open:**
   - T4 (optional): MiniChip on the grid/picker; type sentence in generator prompts.
   - P1: `packages/ui`, after every campaign-type lane.
-  - Stale `createCampaignDescription` remains in `messages.ts` under the append-only rule.
+- **Remediation:** dropped `campaignNameNotSluggable`, `createCampaignDescription`, `startFromCampaignCount` (and the pin test); `discardGuardDetail(hasName)` (dialog-only caller); type tiles pass `description` for AT; dirty-cancel queries the formatter. Mutation: re-add `startFromCampaignCount` → coverage fails (branches 99.98%, uncovered `count === 1` arm); jargon suite stays green.

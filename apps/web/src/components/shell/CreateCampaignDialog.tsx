@@ -86,6 +86,19 @@ function typeTileBlurb(type: CampaignType): string {
 }
 
 /**
+ * What assistive tech hears: `tag`/`blurb`/`meta` are aria-hidden, so the
+ * display name, the gives line, and the D110 sentence (short-video) go through
+ * `description` → `aria-describedby`. Same formatters as the visible text.
+ */
+function typeTileDescription(type: CampaignType): string {
+  const parts = [typeDisplayName(type), typeTileBlurb(type)];
+  if (type === "short-video") {
+    parts.push(messages.typeTileRunsAs(modeDisplayName("variation")));
+  }
+  return messages.joinList(parts);
+}
+
+/**
  * The create moment (T3): a name and a campaign type (D108), on the shared
  * dialog kit. Region, audience, the map, the start-from rail, the mode panel,
  * the numbered sections and the jump strip all left with S1/T3 — they already
@@ -229,8 +242,7 @@ export function CreateCampaignDialog() {
 
   const handleCreate = async () => {
     // The refusal ladder collapsed with the Identity fields: only the name can
-    // be missing. Type has a default (D108). campaignNameNotSluggable lived on
-    // the start-from path, which D98 retired — that rung is gone.
+    // be missing. Type has a default (D108).
     if (name.trim() === "") {
       setNameInvalid(true);
       setRefusal(messages.campaignNameRequired);
@@ -317,6 +329,7 @@ export function CreateCampaignDialog() {
                         ? messages.typeTileRunsAs(modeDisplayName("variation"))
                         : undefined
                     }
+                    description={typeTileDescription(option)}
                     selected={type === option}
                     onToggle={(value) => setType(value as CampaignType)}
                   >
@@ -366,7 +379,7 @@ export function CreateCampaignDialog() {
               <div ref={guardRef}>
                 <GuardBar
                   title={messages.discardGuardTitle}
-                  detail={messages.discardGuardDetail(name.trim() !== "", false, false, false)}
+                  detail={messages.discardGuardDetail(name.trim() !== "")}
                   actions={[
                     { label: messages.discardGuardKeepEditing, onAct: dismissGuard },
                     {
