@@ -4564,3 +4564,30 @@ D118) remain deferred.
 - **Left open:**
   - Lane L1c / L2 / L3: compositor reading layers and web editor supporting template authoring.
 
+
+---
+
+## 2026-09-08 — Creative templates arc, wave 1 close-out: L1a and L1b (stage 6)
+
+**Mode:** Orchestrator.
+
+**Merged.** #260 `feat(campaign): the creative vocabulary — units, types, layers, canonical templates (L1a)` and #263 `feat(brief): every campaign carries its creative template (L1b)`, main at `b8f9648`. L1 was split into two PRs because the plan's single lane would have been a ~40-file diff. L1a: `advertising-units.ts`, `layer-kinds.ts`, `creative-types.ts` with the D124 compatibility table, `creative-templates.ts` with the three canonical templates, and the four campaign-type presets gaining `unit`/`creativeType`/`template` with their existing values untouched. L1b: `brief-template.ts`, `validateTemplate` at the boundary, `template` first in `BRIEF_KEY_ORDER`. Seat: agy `gemini-3.8-flash-high` throughout (8 min, 20 min; two fix rounds of 5 and 6 min).
+
+**Three defects caught before merge, two of them the orchestrator's own plan or brief.**
+1. *L1a, from the diff:* the preset's `template` was typed `string` while the union `CanonicalTemplateId` already existed in the same package — a typo passed `yarn typecheck` (8/8 tasks) and was caught only at runtime. D119's stated rationale is that the union key makes a mistake a compile error. Fixed; the same mutation is now `error TS2820`.
+2. *L1a, from Qodo:* `outputFamily` was a scalar where the plan's own §2.1 says `image-text` is "static, **or** motion when a layer animates". The test that should have caught the mismatch only asked whether formats *contained* static, so the `paid-social` row passed while carrying motion. Now `outputFamilies`, a non-empty deduplicated list, with the subset rule as the invariant. **The plan was wrong and its test was weaker than it looked.**
+3. *L1a, from Qodo:* `version: 1` as a literal type made a v2 template impossible to write, against D123. Now `number`.
+
+**One deviation, and it was the brief's fault.** L1b's brief demanded `CampaignBrief.template` be required *and* fenced off `apps/web`. Those cannot both hold — L12 proved a required brief field forces web edits. The lane shipped `template?` and named the trade-off honestly. Behaviour is unaffected (`parseBrief` populates it on every path, `validateTemplate` runs outside any capability branch). **D120 and L3 are amended in the same commit as this record:** the field becomes required in L3, where the editor is in scope.
+
+**Refuted.** 7 PR-Agent findings across both PRs, all false on the code — four claimed `isPlainObject`/`isFiniteInteger` were undefined and would throw, when both are defined at `load-brief.ts:92` and `:96`; one asked for a null guard the helper performs; one asked for a `delete` the line above already does; one rested on the parser stripping `type`, which it does not. 1 CodeRabbit finding refuted by mutation (deleting the `BRIEF_KEY_ORDER` entry fails the test it called vacuous). 1 Qodo finding refuted in practice (no caller builds briefs with inherited properties).
+
+**Accepted and deferred, with the reason.** Qodo on #263: `toBrief` does not emit `template`, so an editor save drops it. Not a live defect while templates are canonical-only and re-derived from the campaign type; a data-loss defect the moment a user edits layers. `editor-state.ts` is L3's file and was fenced off from L1b, so **L3's DoD now carries the round-trip assertion** (amended in this commit).
+
+**What the review layer bought.** Qodo found two real modelling defects against the plan's own tables; PR-Agent found nothing true in seven attempts. That is the ratio the verification-budget mode predicted, and it held.
+
+**Orchestrator mutations, each with its diff shown first.** L1a: preset template typo → `TS2820` (was 8/8 green); drop a required layer from a canonical template → 2 tests fail incl. the draw-order pin; `image-text` drops `motion` → subset rule fails on `paid-social`; `short-video` re-paired to `image-text` → 2 tests fail. L1b: empty the required-kinds loop in `validateTemplate` → the test named for it fails, 1 of 224. One L1a mutant was **equivalent and discarded** (dropping `Number.isInteger` under a 1..1 range proves nothing).
+
+**Deferred.** Qodo on #255 (a draft carrying a *future* `schemaVersion` is downgraded rather than left untouched) — no build writes another version today; the rule lands with the first v2 normaliser.
+
+**Next.** L2 — the stack becomes data, goldens unedited. Not dispatched.
