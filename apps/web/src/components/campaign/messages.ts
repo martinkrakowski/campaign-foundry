@@ -1090,3 +1090,30 @@ export function startFromCampaignCount(count: number): string {
  */
 export const modeDroppedVideo =
   "Switching to Classic turned Video off — switch back to Randomized to turn it on again.";
+
+// T3 — the two-field create
+
+/**
+ * The two-line lead under the create dialog's title (T3): name and type, then
+ * the editor. Replaces the W1 sentence at the call site; that export stays so
+ * this block remains append-only.
+ */
+export const createCampaignLead =
+  "Give the campaign a name and pick a type. Create opens the editor so you can fill in the rest.";
+/** The type field's group label, over the three type tiles. */
+export const createTypeLabel = "Campaign type";
+/**
+ * One line on each type tile: how many platforms the preset seeds, and which
+ * formats, as display words the caller already converted (D18). Never a raw
+ * format id — the jargon gate forbids those here.
+ */
+export function typeTileGives(platformCount: number, formats: string): string {
+  return `${Number(platformCount) || 0} platforms · ${formats}`;
+}
+/**
+ * D110 — the short-video tile's extra line: the type must run as Randomized or
+ * the API refuses it. `mode` is the display word (`modeDisplayName("variation")`).
+ */
+export function typeTileRunsAs(mode: string): string {
+  return `Runs as a ${mode} campaign.`;
+}
