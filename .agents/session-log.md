@@ -3986,3 +3986,50 @@ merge unless the named test is the one that failed* — earned its keep twice to
 
 **Next:** P1 (`packages/ui`) alone; the wave-status close-out when #232 and #238 land; then the
 display-advertising plan awaits the owner's go.
+
+## 2026-09-07 — Wave status server: the plan closed (W1 #229, W3 #232, W2 #238)
+
+**Mode:** Orchestrator. Record written at merge time (stage 6). Every lane of
+`2026-09-07_wave-status-server.md` is on `main`: `yarn wave:status` serves the read-only window on
+127.0.0.1:4317 (D105–D106), `AGENTS.md` carries the *Wave Observability* section verbatim (D107),
+and `scripts/wave-event.sh` plus the skill's emission points give the orchestrator the pen (D103).
+
+### What merged
+
+| Lane | PR | Commit | What |
+|---|---|---|---|
+| W1 | #229 | `0176547` | the pure core — `readEvents` / `deriveLane` / `mergeStatus`, in the 100 % gate |
+| W3 | #232 | `bb25982` | `emit.ts`, POSIX `wave-event.sh`, per-lane events from `dispatch-lane.sh`, the skill's emission points |
+| W2 | #238 | `271a2f5` | the `node:http` server, the collector, the one-file page, the `AGENTS.md` section, the `wave:status` script |
+
+### Three lanes, six seats, and what the bots found that the reviews did not
+
+W1 took three seats (glm silent twice, gemini drafted then died on transport, grok finished); W2's
+first run was killed with the orchestrator's stopped waits and grok finished it; W3 shipped first
+try. Across the three, the model reviews verified every briefed claim and the **bots found the
+bugs the briefs had not imagined**: three disagreement rules missing from the merge (gate exit,
+unobserved "no PR", closed-unmerged PRs); terminal lane events emitted only after every lane
+finished; a wave-level `dispatch settled` the per-lane reader would have overwritten a lane with;
+unescaped interpolation into the event log; and, on W2, **two tests that specified defects** (the
+gate-log pick that preferred round 1, and a dropped PR record on a transient API error), plus a
+watcher refresh that waited on remote `gh` calls — the exact split the plan had drawn.
+
+### Two ways a local gate lied today
+
+- **CI has no zsh.** W3's tests spawned `zsh`; every macOS gate was green and both Linux runs
+  failed with `spawnSync zsh ENOENT`. `wave-event.sh` is POSIX `sh` now; the zsh-only dispatch
+  script's tests skip where zsh is absent and say so. (And macOS's `/bin/sh` is bash, so a `[[ ]]`
+  mutant proves nothing here — `dash` and `shellcheck` do exist on this machine, contrary to what
+  the orchestrator first claimed.)
+- **A real `fs.watch` in a test is load-sensitive.** The SSE-on-change test raced a platform
+  watcher and failed under the full coverage run twice while passing alone; the injected-watcher
+  contract test is the test now, and the real-watch smoke is opt-in.
+
+### Deferred
+
+- `/tokens.css` — the page copies the token values; serving the app's own token file would remove
+  the second palette.
+- A typecheck job for `tools/` is in the root `typecheck` script now; a separate CI job if D102's
+  accepted cost (a broken dev tool blocks a product PR) ever bites.
+
+**Next:** with the observability plan closed, the display-advertising plan awaits the owner's go.
