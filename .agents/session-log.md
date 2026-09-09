@@ -4591,3 +4591,52 @@ D118) remain deferred.
 **Deferred.** Qodo on #255 (a draft carrying a *future* `schemaVersion` is downgraded rather than left untouched) — no build writes another version today; the rule lands with the first v2 normaliser.
 
 **Next.** L2 — the stack becomes data, goldens unedited. Not dispatched.
+
+---
+
+## 2026-09-08 — Creative templates arc, wave 2 close-out: L2a, L2b, L3a (stage 6)
+
+**Mode:** Orchestrator.
+
+**Merged.** #269 + #270 (D134, the props vocabulary), #265 `refactor(compositor): the draw order becomes a layer list (L2a, D121)`, #266 `refactor(ui): the preview iterates the compositor's layer order (L2b, D121)`, #268 `feat(brief): the creative template is required and survives the editor (L3a, D120/D123)`. Plus #267 `chore(skills): the gate is a subset of CI` — see *Corrections*. L2 and L3 were each split in two because the plan's single lanes would have been 40-file diffs; L2b and L3a ran **in parallel** on different seats after deriving that they shared no file.
+
+**What the arc bought.** The compositor's draw order lived in three places that agreed only because people kept them in step. It now lives in one — `CANONICAL_TEMPLATES["image-text"].layers` — and two tests enforce it: swapping two layers there fails the preview's order test, and planting a second hardcoded ordering anywhere in the kit fails a boundary test. **D26's promise that the preview shows what the compositor draws is now checkable rather than maintained by hand.** The brief's `template` is required, and `toBrief` emits it, closing the two items L1b handed forward.
+
+**Findings that were real (6 of 14 raised).**
+- *L2a:* `image-text` accepts `animated-text` while the dispatch table had no drawer, so a brief legal at the boundary aborted the render. Fixed per D127 — the still path draws the rest pose.
+- *L2a:* `logoApplied` was set when the logo **file loaded**, while the draw loop paints it only if the resolved list contains a logo layer, which is optional. A regression this refactor introduced: before it, the logo always drew, so the two could not disagree.
+- *L2a:* `drawTimeline` ignores the resolved list (CodeRabbit **and** Qodo, independently). True, and **the brief's design** under D10, which requires motion bytes to stay identical. Named in the code and pinned by a test rather than changed.
+- *L3a:* `normalizeDraftState` cast any non-undefined stored value straight to `BriefTemplate`, so a corrupt draft could reach `toBrief`. **The exposure was this lane's own making** — before it the field was optional and unread. What made it convincing: `template` was the only field in that file cast without the shape guard its neighbours all use.
+- *L3a, second round:* the guard was **incomplete** — my fix brief specified a "minimum shape" of a canonical `id` plus a `layers` array, on a type with **five** required fields, and the lane implemented exactly that. `isStoredBrief` was also still narrowing to `CampaignBrief` without checking the newly-required field, so a predicate asserted what it had not verified. Both fixed by extracting **one** `isBriefTemplate` beside the type, used at both storage boundaries.
+- *L2b:* `groupRuns` coalesces only *consecutive* kinds sharing a group, so a reorder splitting a group yields duplicate React keys. **Unreachable today** (this lane reads only the canonical order, whose ground kinds are adjacent) — deferred to **L8** with the mutation named.
+
+**Refuted (8).** PR-Agent ×6 across the three PRs, none true: two claimed helpers were undefined that are defined in the same file; one asked for a `null` guard the helper performs; one asked for a `delete` the line above already does; one rested on the parser stripping a field it does not strip; one asked for exclusions the boundary test already has. Qodo ×1 (a guard the file already had), CodeRabbit ×1 (a "vacuous" key-order test, refuted by deleting the entry and watching it fail).
+
+**Corrections to the plan and the process.**
+0. **A brief that states a floor gets the floor.** Twice: L1b's brief demanded a required field *and* fenced off the files a required field forces the compiler to visit (impossible — the lane shipped `template?` and said so); L3a's fix brief asked for a "minimum shape" check and got the minimum. Both times the lane complied exactly and the brief was wrong. **Say the whole contract, or expect the smallest thing that satisfies the words.**
+0b. **Two of the orchestrator's own mutations were bad before they were good.** Dropping `typeof raw.version === "number"` was **equivalent** (`Number.isInteger` already excludes non-numbers). A regex meant to strip the `isBriefTemplate` clause **never applied**, because the `&&` sits at a line end. Both looked like passes — a green suite after a mutation is only evidence if the mutation compiled *and* changed behaviour. Recorded because this is the failure this repo's own memory warns about, now committed by the orchestrator.
+1. **The gate was a subset of CI** (#267). Found by the hexagen-monaco orchestrator, which ran the stated gate, passed, and reddened its `main` on a step the gate never named. The same hole existed here: `ci.yml` also runs `check:env` and a Nitro route-scan guard whose own comment says it catches a fault the build and coverage gate cannot see. Named in the skill, the runbook and the cast, with the extra command a lane must run. **First real use:** L3a touched a test file under `apps/api/server/` and the guard passed — a check the old gate could not have made.
+2. **A repository's own documentation can be stale evidence.** Two reviewers there independently argued a change was safe by citing an audit item that was the *problem statement* a fix had already addressed. Recorded in the cast: check the workflow file, not the note about it.
+
+**Orchestrator mutations, diff shown before each.** L2a: resolver ignores a caller's template → 3 tests fail (the refactor is real, not cosmetic); `logoApplied` reverted to load-time → its own test fails. L2b: swap `shade`/`accent` in the canonical list → 2 tests fail; plant a rival ordering in `poster-frame.tsx` → the boundary guard fails (the test most likely to be decorative, so it was driven rather than trusted). L3a: delete `template` from `toBrief`'s return → the round-trip test fails by name, plus five others.
+
+**Measured** (rule 7 — the first wave that could be costed at all):
+
+| Lane | billed in / out | cache read | steps | peak ctx |
+|---|---|---|---|---|
+| L2a implement | 74,900 / 55,858 | 3,997,888 | 50 | 114,486 |
+| L2a fix | 95,101 / 29,730 | 3,743,936 | 50 | 110,274 |
+| L2b | 336,814 / 23,507 | 2,030,720 | 52 | 67,975 |
+| L3a | 235,252 / 73,952 | 14,986,752 | 181 | 140,218 |
+| L3a fix 1 | 60,046 / 15,321 | 1,266,432 | 33 | 69,964 |
+| L3a fix 2 | 229,156 / 77,362 | 9,067,520 | 116 | 140,979 |
+
+**What that changed.** A lane bills ~130 k and re-reads **millions** from cache, because the transcript grows and every step re-reads all of it. This **overturned** the earlier claim that an extra round is expensive because of the ~15 k boot: the boot is noise, transcript accumulation is the cost. It makes rule 8 (never send an agent into the 498 KB session log) quantitative rather than prudent, and it disproves the held-open "master session" idea at lane scale rather than probe scale. The hexagen orchestrator independently reproduced the cache figure within 2.5 % on a different repo and task, which is what makes it structural rather than a property of this compositor. L3a's 15 M over 181 steps is the counterexample that proves the lever: a 21-site sweep across 10 files is exploration, and exploration is what step count measures.
+
+**Deferred, each against a named lane.** L8: the duplicate-key fix, with its mutation. First v2 normaliser: the rule that a draft carrying a *future* `schemaVersion` is left untouched rather than downgraded (Qodo, #255).
+
+**A plan gap closed mid-wave.** L3b could not be briefed: the plan said layers carry `props` and typed the field, but never said what any kind's props *are*. **D134** (#269) takes the vocabulary from what each layer already reads — shade alpha, accent heights, logo width and margin, text anchor and type floor — every prop optional, absent meaning today's resolved value. Grounded, inert on arrival (so the goldens hold), and the shape D130's frames extend rather than replace.
+
+**Process misses, recorded rather than tidied away.** #269 was merged with an open review thread — the bot's diagnosis was wrong (a stray `+` that does not exist) but its conclusion was right (the table was broken by a blank line I introduced), so sweeping would have caught my own defect. Fixed in #270, then over-corrected by removing the blank line the table needs before its closing rule, caught only by comparing against the display plan.
+
+**Next.** L3b — per-layer props against D134. Not dispatched.
