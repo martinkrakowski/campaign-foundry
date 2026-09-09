@@ -23,6 +23,23 @@ export interface CreativeTypeRule {
   readonly unit: AdvertisingUnit;
   readonly accepts: readonly LayerKind[];   // every kind this type may hold
   readonly required: readonly LayerKind[];  // a subset of accepts; cannot be removed or disabled
+  /**
+   * How many layers of a kind the type may hold (D124): the compositor draws at
+   * most one of each decorated kind. A kind missing from the map — or the field
+   * absent — is unbounded.
+   */
+  readonly maxOf?: Partial<Record<LayerKind, number>>;
+  /**
+   * Budgets spanning several kinds (D124): the members TOGETHER may not exceed
+   * `max`. `maxOf` cannot say "these two kinds share a budget of one" — per-kind
+   * caps of 1 would admit `static-text` + `animated-text` (1 + 1) where the
+   * compositor draws one headline block — so the shared form is its own field
+   * rather than a pretence. Declared data, read by the same boundary as `maxOf`.
+   */
+  readonly sharedBudgets?: readonly {
+    readonly kinds: readonly LayerKind[];
+    readonly max: number;
+  }[];
   readonly outputFamilies: readonly ["static" | "motion" | "html", ...("static" | "motion" | "html")[]];
 }
 
@@ -31,18 +48,22 @@ export const CREATIVE_TYPE_RULES: Readonly<Record<CreativeType, CreativeTypeRule
     unit: "standard-web",
     accepts: ["image", "shade", "accent", "static-text", "animated-text", "logo"],
     required: ["image", "static-text"],
+    maxOf: { logo: 1, shade: 1, accent: 1 },
+    sharedBudgets: [{ kinds: ["static-text", "animated-text"], max: 1 }],
     outputFamilies: ["static", "motion"],
   },
   "image-html": {
     unit: "standard-web",
     accepts: ["image", "html", "logo"],
     required: ["image", "html"],
+    maxOf: { logo: 1 },
     outputFamilies: ["html"],
   },
   "video": {
     unit: "standard-web",
     accepts: ["video", "shade", "animated-text", "logo"],
     required: ["video"],
+    maxOf: { logo: 1, shade: 1 },
     outputFamilies: ["motion"],
   },
 };

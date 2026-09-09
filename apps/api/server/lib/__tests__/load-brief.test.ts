@@ -259,6 +259,62 @@ describe("parseBrief", () => {
         templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
       );
     });
+
+    test("a second logo layer is refused, in both modes; one is accepted (D124)", () => {
+      const base = templateFromCanonical("social-post");
+      const twoLogos = {
+        ...base,
+        layers: [...base.layers, { id: "logo-2", kind: "logo" }],
+      };
+      const refusal =
+        'Campaign brief field "template.layers" must contain at most 1 layer(s) of kind "logo" for creative type "image-text"; got 2.';
+      expect(() => parseBrief({ ...valid, template: twoLogos })).toThrow(refusal);
+      // Authoring mode too (the `validateSizes` convention): the boundary is
+      // structural, never lenient, wherever the brief is parsed.
+      expect(() => parseBrief({ ...valid, template: twoLogos }, { enforceCapabilities: false })).toThrow(refusal);
+      expect(parseBrief({ ...valid, template: base }).template.layers).toHaveLength(5);
+    });
+
+    test("a capped kind may be absent entirely (D124)", () => {
+      const base = templateFromCanonical("social-post");
+      const noLogo = { ...base, layers: base.layers.filter((l) => l.kind !== "logo") };
+      expect(parseBrief({ ...valid, template: noLogo }).template.layers).toHaveLength(4);
+    });
+
+    test("each creative type is measured against its own table row (D124)", () => {
+      // video caps logo and shade, and declares no shared budget — the canonical
+      // video template (one of each capped kind) parses, so the caps are read
+      // per type, not baked into the boundary.
+      expect(parseBrief({ ...valid, template: templateFromCanonical("short-video") }).template.creativeType).toBe("video");
+    });
+
+    test("the two text kinds share one budget in image-text: both together are refused (D124)", () => {
+      const base = templateFromCanonical("social-post");
+      const bothTexts = {
+        ...base,
+        layers: [...base.layers, { id: "headline-anim", kind: "animated-text" }],
+      };
+      expect(() => parseBrief({ ...valid, template: bothTexts })).toThrow(
+        'Campaign brief field "template.layers" must contain at most 1 layer(s) of kind "static-text" or "animated-text" for creative type "image-text"; got 2.',
+      );
+    });
+
+    test("either text kind alone clears the shared budget (D124)", () => {
+      const base = templateFromCanonical("social-post");
+      // static-text alone: the canonical template, which parses.
+      expect(parseBrief({ ...valid, template: base }).template.layers).toHaveLength(5);
+      // animated-text alone: `static-text` is required (the done half of D124),
+      // so no full image-text template can hold animated-text as its only text
+      // layer — but the throw must be the REQUIRED refusal, proving the shared
+      // budget itself accepted the single animated-text and did not refuse first.
+      const animatedOnly = {
+        ...base,
+        layers: [...base.layers.filter((l) => l.kind !== "static-text"), { id: "headline-anim", kind: "animated-text" }],
+      };
+      expect(() => parseBrief({ ...valid, template: animatedOnly })).toThrow(
+        'Campaign brief field "template.layers" must include required layer kind "static-text" for creative type "image-text".',
+      );
+    });
   });
 
   describe("layer props (L3b, D134)", () => {
