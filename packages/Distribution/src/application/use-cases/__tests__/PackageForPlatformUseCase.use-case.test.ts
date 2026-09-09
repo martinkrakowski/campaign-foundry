@@ -3,7 +3,7 @@ import type { GeneratedAsset } from "@campaignfoundry/CampaignOrchestration";
 import type { DisplaySize } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import { PackageForPlatformUseCase, withoutAbsolutePaths } from "../PackageForPlatformUseCase.use-case.js";
 import type { PackageManifest, PackageStorePort } from "../../ports/out/PackageStorePort.js";
-import { platformProfile } from "../../../domain/value-objects/PlatformProfile.vo.js";
+import { platformProfile, type PlatformProfile } from "../../../domain/value-objects/PlatformProfile.vo.js";
 
 const PACKAGED_AT = "2026-08-25T12:00:00.000Z";
 
@@ -58,15 +58,23 @@ const exec = (
     skipped: number;
     include: string[];
     capabilities: { motion: boolean };
+    /**
+     * Profile lookup override for platforms `platformProfile` does not know —
+     * how a test registers a profile that declares `html` (none ships one yet,
+     * D122). Unknown ids fall through to the real table.
+     */
+    profiles: Record<string, PlatformProfile>;
   }> = {},
-) =>
-  new PackageForPlatformUseCase(store).execute({
+) => {
+  const { profiles, ...input } = over;
+  return new PackageForPlatformUseCase(store, (id) => profiles?.[id] ?? platformProfile(id)).execute({
     campaignId: "camp",
     assets: [asset()],
     platforms: ["instagram-feed"],
     packagedAt: PACKAGED_AT,
-    ...over,
+    ...input,
   });
+};
 
 describe("withoutAbsolutePaths", () => {
   test("strips POSIX and Windows absolute paths, quoted or bare", () => {
@@ -431,5 +439,111 @@ describe("PackageForPlatformUseCase — motion", () => {
     if (!result.success) return;
     expect(result.value.platforms[0].items.map((i) => i.source)).toEqual(["alpha/9x16/v2.mp4"]);
     expect(result.value.platforms[0].excluded).toBe(1);
+  });
+});
+
+describe("PackageForPlatformUseCase — html (D122)", () => {
+  /** A 1:1 social-shaped profile that declares `html` — no shipped profile does yet; the test registers it. */
+  const HTML_PROFILE: PlatformProfile = {
+    id: "html-banner",
+    label: "HTML Banner",
+    ratio: "1:1",
+    formats: ["html"],
+    safeInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    maxBytes: 8 * 1024 * 1024,
+  };
+  const html = (over: Partial<GeneratedAsset> = {}): GeneratedAsset =>
+    asset({
+      productId: "alpha",
+      aspectRatio: "1:1",
+      outputPath: "alpha/1x1.png",
+      format: "html",
+      htmlBundlePath: "alpha/1x1/index.html",
+      htmlFallbackPath: "alpha/1x1/fallback.png",
+      variantIndex: 1,
+      ...over,
+    });
+
+  test("refuses an html asset without a fallback rendition, naming the field; nothing is written", async () => {
+    const store = fakeStore();
+    const result = await exec(store, {
+      assets: [html({ htmlFallbackPath: undefined })],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": HTML_PROFILE },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toContain('"htmlFallbackPath"');
+      expect(result.error.message).toContain("alpha/v1");
+    }
+    expect(store.writePackaged).not.toHaveBeenCalled();
+    expect(store.writeManifest).not.toHaveBeenCalled();
+  });
+
+  test("a profile whose formats include html packages the bundle and its raster fallback, recording format: html", async () => {
+    const store = fakeStore();
+    const result = await exec(store, {
+      assets: [html()],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": HTML_PROFILE },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const [banner] = result.value.platforms;
+    expect(banner.items).toEqual([
+      {
+        productId: "alpha",
+        aspectRatio: "1:1",
+        treatment: "default",
+        format: "html",
+        source: "alpha/1x1/index.html",
+        packagedPath: "packages/camp/html-banner/alpha/1x1/index.html",
+        fallbackPath: "packages/camp/html-banner/alpha/1x1/fallback.png",
+        bytes: SMALL.length,
+        checks: { size: "pass" },
+      },
+    ]);
+    // Both the bundle and its fallback ride along — nothing else is read.
+    expect(store.reads).toEqual(["alpha/1x1/index.html", "alpha/1x1/fallback.png"]);
+    expect(store.manifests[0].manifest.items[0].format).toBe("html");
+  });
+
+  test("a profile that does not declare html skips an html asset, exactly as a static profile skips motion", async () => {
+    const store = fakeStore();
+    const result = await exec(store, {
+      assets: [html(), html({ variantIndex: 2, htmlBundlePath: "alpha/1x1/v2/index.html" })],
+      platforms: ["instagram-feed"],
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.platforms[0].items).toEqual([]);
+    expect(result.value.platforms[0].included).toBe(0);
+    expect(store.reads).toEqual([]);
+  });
+
+  test("records no pixel hash for an html asset — markup is verified structurally, never rasterised (D122/D125)", async () => {
+    const store = fakeStore();
+    const result = await exec(store, {
+      assets: [html()],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": HTML_PROFILE },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const item = result.value.platforms[0].items[0];
+    expect(JSON.stringify(item)).not.toContain("hash");
+    expect(item.checks).toEqual({ size: "pass" });
+  });
+
+  test("an html bundle over the profile cap records a size fail but is still packaged", async () => {
+    const store = fakeStore(new Uint8Array(HTML_PROFILE.maxBytes + 1));
+    const result = await exec(store, {
+      assets: [html()],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": HTML_PROFILE },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.platforms[0].items[0].checks).toEqual({ size: "fail" });
   });
 });

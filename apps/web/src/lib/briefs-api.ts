@@ -349,10 +349,12 @@ export interface PackageItem {
   /** The display family's canvas (the `728x90` form); ratio items omit it. */
   size?: string;
   treatment: string;
-  format?: "static" | "motion";
+  format?: "static" | "motion" | "html";
   source: string;
   packagedPath: string;
   posterPath?: string;
+  /** Packaged raster fallback of an html item (D122). */
+  fallbackPath?: string;
   durationSec?: number;
   bytes: number;
   checks: { size: "pass" | "fail"; duration?: "pass" | "fail" };

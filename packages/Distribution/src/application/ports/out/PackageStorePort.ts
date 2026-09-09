@@ -1,6 +1,6 @@
 import type { PlatformProfile } from "../../../domain/value-objects/PlatformProfile.vo.js";
 
-/** One copied creative in a platform package. Motion items copy the mp4 and its poster. */
+/** One copied creative in a platform package. Motion items copy the mp4 and its poster; html items the bundle and its raster fallback (D122). */
 export interface PackageManifestItem {
   readonly productId: string;
   /** The social canvas. Display items carry `size` instead (D113) — exactly one of the two. */
@@ -8,12 +8,14 @@ export interface PackageManifestItem {
   /** The display family's canvas (the `728x90` form); ratio items omit it. */
   readonly size?: string;
   readonly treatment: string;
-  readonly format: "static" | "motion";
-  /** The PNG (static) or the mp4 (motion), relative to the output root. */
+  readonly format: "static" | "motion" | "html";
+  /** The PNG (static), the mp4 (motion) or the HTML bundle (html), relative to the output root. */
   readonly source: string;
   readonly packagedPath: string;
   /** Packaged poster PNG — motion items only. */
   readonly posterPath?: string;
+  /** Packaged raster fallback — html items only (D122). Never hashed: markup is verified structurally, not pixel-wise. */
+  readonly fallbackPath?: string;
   /** Clip length in seconds — motion items only. */
   readonly durationSec?: number;
   readonly bytes: number;

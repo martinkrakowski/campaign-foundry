@@ -28,7 +28,7 @@ export interface CampaignTypePreset {
   readonly creativeType: CreativeType;
   readonly template: CanonicalTemplateId;
   readonly platforms: readonly string[];
-  readonly formats: readonly ("static" | "motion")[];
+  readonly formats: readonly ("static" | "motion" | "html")[];
   readonly mode: "brief" | "variation";
 }
 

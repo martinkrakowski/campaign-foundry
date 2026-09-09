@@ -47,7 +47,7 @@ const stopPlayback = (video: HTMLVideoElement): void => {
 
 const PAGE_SIZE = 24;
 
-const formatOf = (a: Asset): "static" | "motion" => a.format ?? "static";
+const formatOf = (a: Asset): "static" | "motion" | "html" => a.format ?? "static";
 
 const uniqueSorted = (values: string[]): string[] => [...new Set(values)].sort();
 
