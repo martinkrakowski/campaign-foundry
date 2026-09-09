@@ -1,7 +1,9 @@
 import { describe, test, expect, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
 import { WorldMap } from "../world-map";
-import { REGION_FOOTPRINTS } from "../geo/footprints";
+import { REGION_FOOTPRINTS, type Footprint } from "../geo/footprints";
+import * as footprints from "../geo/footprints";
+import type { Pt } from "../geo/chaikin";
 
 // The map is painted from the kit's own footprint table (§2.3). Labels are
 // caller-supplied — the distinctive prefix proves the hub and caption read
@@ -28,6 +30,26 @@ const regionOf = (container: HTMLElement, value: string) =>
   container.querySelector(`[data-region="${value}"]`) as SVGGElement;
 const SELECTED_FILL = "fill-brand-primary/20";
 
+// Hit-testing is geometric: a click is a point on the 960×500 viewBox. happy-dom
+// performs no layout, so the SVG's rect is stubbed to a 1:1 box — after this,
+// clientX/clientY *are* the map point the footprint resolver sees. The chosen
+// points are pip-verified against the raw polygon fixtures:
+const MAP_RECT = {
+  left: 0, top: 0, right: 960, bottom: 500, width: 960, height: 500, x: 0, y: 0, toJSON: () => {},
+};
+function stubMapGeometry(container: HTMLElement): SVGSVGElement {
+  const svg = svgOf(container);
+  vi.spyOn(svg, "getBoundingClientRect").mockReturnValue({ ...MAP_RECT });
+  return svg;
+}
+
+// Inside DE (and therefore inside EU and GLOBAL); on no other footprint.
+const DE_CLICK = { clientX: 532, clientY: 118 };
+// Inside EU's EUR polygon but outside DE, UK and APAC's ASIA.
+const EU_OPEN_CLICK = { clientX: 520, clientY: 160 };
+// On the ocean — no footprint contains it.
+const OCEAN_CLICK = { clientX: 100, clientY: 400 };
+
 describe("WorldMap", () => {
   test("renders one g per footprint with its smoothed paths and a graticule", () => {
     const { container } = renderMap();
@@ -38,42 +60,122 @@ describe("WorldMap", () => {
     expect(svgOf(container).querySelectorAll("line").length).toBe(11);
   });
 
-  test("clicking a footprint's g calls onSelect with its value", () => {
+  test("clicking a point in a footprint's landmass calls onSelect with its value", () => {
     const { onSelect, container } = renderMap();
-    fireEvent.click(regionOf(container, "EU"));
+    const svg = stubMapGeometry(container);
+    fireEvent.click(svg, { ...EU_OPEN_CLICK });
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith("EU");
   });
 
-  test("value=GLOBAL, clicking DE reaches DE — the selected footprint is not a pointer target", () => {
-    const { onSelect, container } = renderMap({ value: "GLOBAL" });
-    // GLOBAL paints last (so its fill is visible) but must not swallow the hit:
-    // its whole group is hit-transparent, so the event falls through to DE.
-    expect(regionOf(container, "GLOBAL").getAttribute("pointer-events")).toBe("none");
-    expect(regionOf(container, "DE").getAttribute("pointer-events")).not.toBe("none");
-    fireEvent.click(regionOf(container, "DE"));
-    expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(onSelect).toHaveBeenCalledWith("DE");
+  test("select the world, click a country, click it again: the selection does not move (H2)", () => {
+    const onSelect = vi.fn();
+    const shared = { footprints: REGION_FOOTPRINTS, fallbackHint: HINT, labelFor, onSelect };
+    const { container, rerender } = render(<WorldMap {...shared} value="GLOBAL" />);
+    const svg = stubMapGeometry(container);
+    // The world is selected; clicking Germany once selects DE…
+    fireEvent.click(svg, { ...DE_CLICK });
+    expect(onSelect).toHaveBeenLastCalledWith("DE");
+    // …and clicking it again — now that DE is selected and paints on top — must
+    // re-select DE. The old paint-order hit-test passed the click through to EU,
+    // the region containing the point. Geometry resolves the same point the same
+    // way whatever is selected.
+    rerender(<WorldMap {...shared} value="DE" />);
+    fireEvent.click(svg, { ...DE_CLICK });
+    expect(onSelect).toHaveBeenCalledTimes(2);
+    expect(onSelect).toHaveBeenLastCalledWith("DE");
   });
 
-  test("value=EU, clicking DE reaches DE — overlapping selected paint does not swallow the hit", () => {
+  test("clicking a point inside DE selects DE, not EU, not GLOBAL", () => {
     const { onSelect, container } = renderMap({ value: "EU" });
-    expect(regionOf(container, "EU").getAttribute("pointer-events")).toBe("none");
-    expect(regionOf(container, "DE").getAttribute("pointer-events")).not.toBe("none");
-    fireEvent.click(regionOf(container, "DE"));
+    const svg = stubMapGeometry(container);
+    fireEvent.click(svg, { ...DE_CLICK });
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith("DE");
   });
 
-  test("value=null, every footprint is a pointer target", () => {
-    const { onSelect, container } = renderMap({ value: null });
-    for (const g of container.querySelectorAll("[data-region]")) {
-      expect(g.getAttribute("pointer-events")).not.toBe("none");
+  test("clicking a point inside EU but outside any country selects EU", () => {
+    const { onSelect, container } = renderMap({ value: "GLOBAL" });
+    const svg = stubMapGeometry(container);
+    fireEvent.click(svg, { ...EU_OPEN_CLICK });
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith("EU");
+  });
+
+  test("clicking the ocean selects nothing", () => {
+    const { onSelect, container } = renderMap();
+    const svg = stubMapGeometry(container);
+    fireEvent.click(svg, { ...OCEAN_CLICK });
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  test("selection state does not change hit-testing: the same point picks the same footprint", () => {
+    const selected = renderMap({ value: "DE" });
+    const selectedSvg = stubMapGeometry(selected.container);
+    fireEvent.click(selectedSvg, { ...DE_CLICK });
+    expect(selected.onSelect).toHaveBeenCalledTimes(1);
+    expect(selected.onSelect).toHaveBeenLastCalledWith("DE");
+
+    const unselected = renderMap({ value: "EU" });
+    const unselectedSvg = stubMapGeometry(unselected.container);
+    fireEvent.click(unselectedSvg, { ...DE_CLICK });
+    expect(unselected.onSelect).toHaveBeenCalledTimes(1);
+    expect(unselected.onSelect).toHaveBeenLastCalledWith("DE");
+  });
+
+  test("no footprint carries a pointer-events attribute — selection never switches hit-testing off", () => {
+    for (const value of ["GLOBAL", "EU", "DE", null] as const) {
+      const { container } = renderMap({ value });
+      for (const g of container.querySelectorAll("[data-region]")) {
+        expect(g.getAttribute("pointer-events")).toBeNull();
+      }
     }
-    fireEvent.click(regionOf(container, "GLOBAL"));
-    expect(onSelect).toHaveBeenCalledWith("GLOBAL");
-    fireEvent.click(regionOf(container, "DE"));
-    expect(onSelect).toHaveBeenCalledWith("DE");
+  });
+
+  test("an exact area tie goes to the footprint declared later", () => {
+    const equal: readonly Pt[] = [[0, 0], [10, 0], [0, 10]];
+    const tied: readonly Footprint[] = [
+      { value: "A", polys: [equal] },
+      { value: "B", polys: [equal] },
+    ];
+    const { onSelect, container } = renderMap({ footprints: tied });
+    const svg = stubMapGeometry(container);
+    fireEvent.click(svg, { clientX: 2, clientY: 2 });
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith("B");
+  });
+
+  test("a smaller footprint declared earlier still beats a larger one declared later", () => {
+    const small: readonly Pt[] = [[0, 0], [10, 0], [0, 10]];
+    const big: readonly Pt[] = [[0, 0], [50, 0], [0, 50]];
+    const footprints: readonly Footprint[] = [
+      { value: "small", polys: [small] },
+      { value: "big", polys: [big] },
+    ];
+    const { onSelect, container } = renderMap({ footprints });
+    const svg = stubMapGeometry(container);
+    fireEvent.click(svg, { clientX: 2, clientY: 2 });
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith("small");
+  });
+
+  test("areas are computed once, not per click (memo identity)", () => {
+    // Areas and the dot matrix are built by the same useMemo — one call per
+    // footprint per footprints change. dotMatrix is the member visible across the
+    // module boundary (a same-module helper cannot be spied on), so its call count
+    // is the memo's build count — and with it, the area pass inside it. Selection
+    // and clicks must never rebuild that memo.
+    const dotSpy = vi.spyOn(footprints, "dotMatrix");
+    const { container, rerender } = renderMap({ value: "DE" });
+    expect(dotSpy.mock.calls.length).toBe(REGION_FOOTPRINTS.length);
+    rerender(
+      <WorldMap footprints={REGION_FOOTPRINTS} value={null} onSelect={() => {}} fallbackHint={HINT} labelFor={labelFor} />,
+    );
+    const svg = stubMapGeometry(container);
+    fireEvent.click(svg, { ...DE_CLICK });
+    fireEvent.click(svg, { ...EU_OPEN_CLICK });
+    fireEvent.click(svg, { ...OCEAN_CLICK });
+    expect(dotSpy.mock.calls.length).toBe(REGION_FOOTPRINTS.length);
   });
 
   test.each(["EU", "GLOBAL", "DE"] as const)(

@@ -1,7 +1,8 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { cn } from "./cn";
-import { polyPath } from "./geo/chaikin";
-import { dotMatrix, GRATICULE_HORIZONTALS, GRATICULE_VERTICALS, MAP_HEIGHT, MAP_WIDTH, type Footprint } from "./geo/footprints";
+import { polyPath, type Pt } from "./geo/chaikin";
+import { dotMatrix, GRATICULE_HORIZONTALS, GRATICULE_VERTICALS, MAP_HEIGHT, MAP_WIDTH, type Footprint, type MapDot } from "./geo/footprints";
+import { pip } from "./geo/pip";
 
 export interface WorldMapProps {
   /** The footprints to paint, in vocabulary order (§2.3). */
@@ -21,10 +22,51 @@ export interface WorldMapProps {
   readonly className?: string;
 }
 
+/** Shoelace area of one polygon; `Math.abs` so a clockwise or counter-clockwise winding never matters. */
+export function polygonArea(pts: readonly Pt[]): number {
+  let sum = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i];
+    const [xj, yj] = pts[j];
+    sum += xj * yi - xi * yj;
+  }
+  return Math.abs(sum) / 2;
+}
+
+/** A footprint's summed polygon area — its "size" for hit-testing, computed once per footprints prop. */
+export function footprintArea(footprint: Footprint): number {
+  return footprint.polys.reduce((total, poly) => total + polygonArea(poly), 0);
+}
+
+export interface Painted extends Footprint {
+  readonly dots: readonly MapDot[];
+  readonly area: number;
+}
+
+/**
+ * The footprint under a point: every footprint whose polygons contain it, the one
+ * with the smallest summed area winning — the most specific region under the cursor.
+ * An exact tie goes to the footprint declared later: `painted` iterates in
+ * declaration order and `<=` replaces on equality, so the later footprint replaces
+ * the earlier. The rule is arbitrary, but a written-down decision — a silent tie
+ * would flip with iteration order and read as a heisenbug.
+ */
+export function footprintAt(x: number, y: number, painted: readonly Painted[]): Painted | undefined {
+  let hit: Painted | undefined;
+  for (const f of painted) {
+    if (!f.polys.some((poly) => pip(x, y, poly))) continue;
+    if (hit === undefined || f.area <= hit.area) hit = f;
+  }
+  return hit;
+}
+
 /**
  * The world map: one `<g>` per footprint with its dot matrix, in token colours.
  * Single-select (D94) — no `multiple`, no arcs; the hub ripple is refused (D96),
  * the dot reveal is a one-shot transition on selection, which D96 permits.
+ * Hit-testing is geometric — `footprintAt` on the clicked point — never paint
+ * order, so clicking a selected region again re-selects it instead of passing
+ * through to the region containing it (the GLOBAL / EU trap).
  */
 export function WorldMap({
   footprints,
@@ -37,10 +79,10 @@ export function WorldMap({
   const [hovered, setHovered] = useState<string | null>(null);
   const caption = hovered === null ? "" : labelFor(hovered);
 
-  // The dot matrix is generated geometry — compute it once per footprints prop, not
-  // on every hover re-render.
-  const painted = useMemo(
-    () => footprints.map((f) => ({ ...f, dots: dotMatrix(f.polys, f.hub) })),
+  // The dot matrix and the footprint areas are generated geometry — compute them
+  // once per footprints prop, not on every hover or click re-render.
+  const painted = useMemo<Painted[]>(
+    () => footprints.map((f) => ({ ...f, dots: dotMatrix(f.polys, f.hub), area: footprintArea(f) })),
     [footprints],
   );
   // Unselected stay in vocabulary order; the selected footprint paints last so an
@@ -50,6 +92,17 @@ export function WorldMap({
     ? painted
     : [...painted.filter((f) => f.value !== selectedFootprint.value), selectedFootprint];
 
+  // The one true pointer handler. A click's point is resolved geometrically —
+  // the smallest containing footprint wins — regardless of which element is on
+  // top or whether anything is selected, so paint order never decides a hit.
+  const handleSvgClick = (event: ReactMouseEvent<SVGSVGElement>): void => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * MAP_WIDTH;
+    const y = ((event.clientY - rect.top) / rect.height) * MAP_HEIGHT;
+    const hit = footprintAt(x, y, painted);
+    if (hit !== undefined) onSelect(hit.value);
+  };
+
   return (
     <div className={cn("space-y-1", className)}>
       <svg
@@ -57,6 +110,7 @@ export function WorldMap({
         aria-hidden="true"
         focusable="false"
         className="w-full"
+        onClick={handleSvgClick}
         onMouseLeave={() => setHovered(null)}
       >
         {/* The graticule: the mockup's hairline lat/long grid. */}
@@ -77,14 +131,7 @@ export function WorldMap({
                 key={f.value}
                 data-region={f.value}
                 data-selected={selected || undefined}
-                // Paint order and hit-testing are decided separately: the selected
-                // footprint still paints last (so its fill is visible), but it is not
-                // a pointer target — clicking an already-selected region is a no-op,
-                // and the event must reach the footprint underneath (GLOBAL covers
-                // every landmass; EU overlaps DE the same way).
-                pointerEvents={selected ? "none" : undefined}
                 className="group cursor-pointer"
-                onClick={() => onSelect(f.value)}
                 onMouseEnter={() => setHovered(f.value)}
               >
                 {f.polys.map((poly, i) => (
