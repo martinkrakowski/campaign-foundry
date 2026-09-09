@@ -14,6 +14,7 @@ import {
   type CampaignType,
 } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { templateFromCanonical, type BriefTemplate } from "@campaignfoundry/CampaignOrchestration/brief-template";
+import { CANONICAL_TEMPLATE_IDS } from "@campaignfoundry/CampaignOrchestration/creative-templates";
 import {
   BRIEF_SCHEMA_VERSION,
   isSupportedBriefSchemaVersion,
@@ -1777,10 +1778,24 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   const type: CampaignType = typeValid ? (raw.type as CampaignType) : DEFAULT_CAMPAIGN_TYPE;
   // L3a — a draft saved before the template became required writes no key: it
   // normalises to the campaign type's canonical template, exactly what a fresh
-  // draft and an applied preset seed. A draft that does carry one keeps it
-  // verbatim — the template is authored data the editor must never re-derive.
+  // draft and an applied preset seed. A draft that does carry one is held
+  // verbatim — the template is authored data the editor must never re-derive —
+  // but only after a shape guard: anything that is not a non-null, non-array
+  // object with a canonical `id` and a `layers` array (a string, a number,
+  // `null`, or a half-written object) is a corrupt draft and takes the canonical
+  // fallback silently, so a user reopening a damaged draft gets a working
+  // editor, not a brief the API refuses. The guard checks shape, never content:
+  // a valid template keeps any layer order it was saved with.
+  const rawTemplate = raw.template;
   const template: BriefTemplate =
-    raw.template !== undefined ? (raw.template as BriefTemplate) : templateFromCanonical(type);
+    rawTemplate !== null &&
+    typeof rawTemplate === "object" &&
+    !Array.isArray(rawTemplate) &&
+    typeof (rawTemplate as { id?: unknown }).id === "string" &&
+    (CANONICAL_TEMPLATE_IDS as readonly string[]).includes((rawTemplate as { id: string }).id) &&
+    Array.isArray((rawTemplate as { layers?: unknown }).layers)
+      ? (rawTemplate as BriefTemplate)
+      : templateFromCanonical(type);
   const initial = initialEditorState(mode);
   const str = (value: unknown, fallback: string): string => (typeof value === "string" ? value : fallback);
   const rawSource = raw.source as Partial<EditorSource> | null | undefined;

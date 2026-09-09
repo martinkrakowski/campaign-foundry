@@ -860,6 +860,50 @@ describe("draft storage", () => {
     expect(toBrief(restored as EditorState).template).toEqual(template);
   });
 
+  test("a corrupt stored template falls back to the canonical one, never throwing (L3a)", () => {
+    // The exposure is this lane's own making: before L3a the field was optional
+    // and unread, so a string, a number, `null` or a half-written object in a
+    // user's localStorage was inert; now `toBrief` serialises whatever the bare
+    // cast admitted. Every neighbour is shape-guarded — `template` must be too:
+    // anything that is not a non-null, non-array object with a canonical `id`
+    // and a `layers` array is a corrupt draft and takes the fallback silently,
+    // so a user reopening a damaged draft gets a working editor, not a crash.
+    const state: EditorState = { ...base(), briefId: "camp", type: "short-video" };
+    const store = (template: unknown) =>
+      localStorage.setItem(getDraftKey(state), JSON.stringify({ state: { ...state, template }, timestamp: 1 }));
+
+    for (const corrupt of [
+      "not-an-object",
+      null,
+      42,
+      [],
+      { id: "nope", layers: [] },
+      { id: 42, layers: [] },
+      { id: "canonical-image-text" },
+    ]) {
+      store(corrupt);
+      expect(() => loadDraftFromStorage(state)).not.toThrow();
+      expect(loadDraftFromStorage(state)?.template).toEqual(templateFromCanonical("short-video"));
+    }
+  });
+
+  test("a stored template with a non-canonical layer order is kept verbatim (L3a)", () => {
+    // The guard is a shape check, never a content check: a `layers` array whose
+    // order diverges from the canonical template is authored data — array
+    // position IS z-order (D128) — and must survive save → load → save intact
+    // rather than be restored to the canonical order.
+    const canonical = templateFromCanonical("paid-social");
+    const reordered = { ...canonical, layers: [...canonical.layers].reverse() };
+    const state: EditorState = { ...base(), briefId: "camp", type: "display-ad", template: reordered };
+    saveDraftToStorage(state);
+    const restored = loadDraftFromStorage(state);
+    expect(restored?.template).toEqual(reordered);
+    expect(restored?.template.layers.map((layer) => layer.id)).toEqual(
+      [...canonical.layers].reverse().map((layer) => layer.id),
+    );
+    expect(toBrief(restored as EditorState).template).toEqual(reordered);
+  });
+
   test("normalization never overrides a key the draft actually set", () => {
     const state = { ...base(), briefId: "camp" };
     const draft = { ...state, variation: { ...state.variation, ratio: ["9:16"] }, formats: ["motion"] };
