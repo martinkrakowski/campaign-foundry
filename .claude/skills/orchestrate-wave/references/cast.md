@@ -172,6 +172,12 @@ the measurement rule**, so it has no cost figures at all. Three seats, no compar
 | 2, 5, 8, 11 | `opencode-go/glm-5.3-flash` (`--format json`) |
 | 3, 6, 9, 12 | `opencode/big-pickle` (`--format json`) |
 
+**Where the counter lives.** The trial index is **not** per wave — a per-wave counter restarts and
+hands lane 1 to the same seat every time, which recreates the confound this protocol exists to
+remove. Each wave record ends with a line `trial index: N` naming the index the wave finished on,
+and the next wave starts at `N+1`. If no record names one, read back through the records for the
+last that did; if none ever did, the trial has not started and lane 1 is the next dispatch.
+
 **Do not swap a seat because a lane looks risky** — that is exactly the judgement that produced the
 confound. If a lane is too big for any seat, **split the lane**; do not reassign it. Provider
 outages (a retryable 5xx) are re-dispatched to the **same** seat; only an unfunded or unreachable
