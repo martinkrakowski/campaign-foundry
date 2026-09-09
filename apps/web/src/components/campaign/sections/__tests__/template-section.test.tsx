@@ -201,6 +201,50 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
   });
 });
 
+describe("moveLayer (L8a, D128)", () => {
+  test("moving a layer changes only its position, and the brief serialises in the new order", () => {
+    const base = state();
+    const next = editorReducer(base, { type: "moveLayer", from: 0, to: 2 });
+    // Bottom first, the way the list renders: the ground layer re-pointed to
+    // index 2 and nobody else moved — the splice carries the same layer objects,
+    // never copies.
+    expect(next.template.layers.map((layer) => layer.id)).toEqual([
+      "shade",
+      "accent",
+      "image",
+      "static-text",
+      "logo",
+    ]);
+    expect(next.template.layers[2]).toBe(base.template.layers[0]);
+    expect(next.template.layers).toHaveLength(base.template.layers.length);
+    expect(toBrief(next).template.layers.map((layer) => layer.id)).toEqual([
+      "shade",
+      "accent",
+      "image",
+      "static-text",
+      "logo",
+    ]);
+    // And back down again: the from>to splice restores the canonical order.
+    const restored = editorReducer(next, { type: "moveLayer", from: 2, to: 0 });
+    expect(restored.template.layers.map((layer) => layer.id)).toEqual(base.template.layers.map((layer) => layer.id));
+  });
+
+  test("an out-of-range index is a no-op in both directions", () => {
+    const base = state();
+    // A non-integer index is no index at all — the guard `isBeatIndex` states.
+    expect(editorReducer(base, { type: "moveLayer", from: -1, to: 0 })).toBe(base);
+    expect(editorReducer(base, { type: "moveLayer", from: 0, to: -1 })).toBe(base);
+    expect(editorReducer(base, { type: "moveLayer", from: 0.5, to: 0 })).toBe(base);
+    expect(editorReducer(base, { type: "moveLayer", from: 5, to: 0 })).toBe(base);
+    expect(editorReducer(base, { type: "moveLayer", from: 0, to: 5 })).toBe(base);
+  });
+
+  test("moving a layer onto its own index is a no-op", () => {
+    const base = state();
+    expect(editorReducer(base, { type: "moveLayer", from: 2, to: 2 })).toBe(base);
+  });
+});
+
 describe("TemplateSection — the draft and its brief", () => {
   test("adding a kind appends a layer with that kind and a unique id, and the brief serialises with it", () => {
     const added = editorReducer(state(), { type: "addLayer", kind: "image" });

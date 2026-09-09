@@ -182,9 +182,12 @@ export function CreativeGlyph({ layout, tone, motion, size = 46 }: CreativeGlyph
       </defs>
 
       {/* The glyph's painted layers: each run of the compositor's order wrapped in
-          its animation group (see `groupRuns`). */}
-      {groupRuns(painted, paintings).map((run) => (
-        <g key={run.className} className={run.className}>
+          its animation group (see `groupRuns`). Keyed by position, never by the
+          group's className: `groupRuns` coalesces only CONSECUTIVE kinds sharing
+          one group, so an order that splits a group (image, accent, shade) emits
+          two runs with the same className, and className keys would collide. */}
+      {groupRuns(painted, paintings).map((run, index) => (
+        <g key={index} className={run.className}>
           {run.kinds.map((kind) => (
             <Fragment key={kind}>{paintings[kind]!.element}</Fragment>
           ))}
