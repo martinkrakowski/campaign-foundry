@@ -198,6 +198,7 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
   const rules = CREATIVE_TYPE_RULES[value.creativeType as CreativeType];
   const seenIds = new Set<string>();
   const presentKinds = new Set<string>();
+  const kindCounts = new Map<string, number>();
 
   for (let i = 0; i < value.layers.length; i++) {
     const layer = value.layers[i];
@@ -222,6 +223,7 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
       );
     }
     presentKinds.add(layer.kind);
+    kindCounts.set(layer.kind, (kindCounts.get(layer.kind) ?? 0) + 1);
 
     // D134 — a layer's own props, when present, must be its kind's. Structural,
     // never lenient (the `validateSizes` convention): the decision is the
@@ -231,6 +233,33 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
     if (propsProblem !== undefined) {
       throw new Error(
         `Campaign brief field "template.layers[${i}].props${propsProblem.path}" must ${propsProblem.must}; got ${JSON.stringify(propsProblem.value)}.`,
+      );
+    }
+  }
+
+  // D124 — cardinality is compatibility: how many of a kind the compositor draws
+  // is declared in the same table that declares what the type accepts, so the
+  // boundary reads `maxOf`/`sharedBudgets` the way it reads `accepts` —
+  // structural, never lenient, authoring mode included (the `validateSizes`
+  // convention). Per-kind caps walk `accepts` itself — a kind's cap, or the
+  // absence of one, is table data. Shared budgets are checked after per-kind
+  // caps: a single layer of a capped kind can never overdraw its budget, and
+  // together they refuse every overdraw the table declares.
+  for (const kind of rules.accepts) {
+    const max = rules.maxOf?.[kind];
+    if (max === undefined) continue;
+    const got = kindCounts.get(kind) ?? 0;
+    if (got > max) {
+      throw new Error(
+        `Campaign brief field "template.layers" must contain at most ${max} layer(s) of kind "${kind}" for creative type "${value.creativeType}"; got ${got}.`,
+      );
+    }
+  }
+  for (const budget of rules.sharedBudgets ?? []) {
+    const got = budget.kinds.reduce((sum, kind) => sum + (kindCounts.get(kind) ?? 0), 0);
+    if (got > budget.max) {
+      throw new Error(
+        `Campaign brief field "template.layers" must contain at most ${budget.max} layer(s) of kind ${budget.kinds.map((k) => `"${k}"`).join(" or ")} for creative type "${value.creativeType}"; got ${got}.`,
       );
     }
   }

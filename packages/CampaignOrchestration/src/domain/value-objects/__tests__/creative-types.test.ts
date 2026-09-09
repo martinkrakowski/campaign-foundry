@@ -84,6 +84,8 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
       unit: "standard-web",
       accepts: ["image", "shade", "accent", "static-text", "animated-text", "logo"],
       required: ["image", "static-text"],
+      maxOf: { logo: 1, shade: 1, accent: 1 },
+      sharedBudgets: [{ kinds: ["static-text", "animated-text"], max: 1 }],
       outputFamilies: ["static", "motion"],
     });
 
@@ -91,6 +93,7 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
       unit: "standard-web",
       accepts: ["image", "html", "logo"],
       required: ["image", "html"],
+      maxOf: { logo: 1 },
       outputFamilies: ["html"],
     });
 
@@ -98,6 +101,7 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
       unit: "standard-web",
       accepts: ["video", "shade", "animated-text", "logo"],
       required: ["video"],
+      maxOf: { logo: 1, shade: 1 },
       outputFamilies: ["motion"],
     });
   });
