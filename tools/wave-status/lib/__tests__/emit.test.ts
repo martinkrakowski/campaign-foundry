@@ -434,4 +434,160 @@ describe("scripts/dispatch-lane.sh emits its events", () => {
     },
     20_000,
   );
+
+  const gitExplicit = (
+    args: readonly string[],
+    cwd: string,
+    options: { encoding?: "utf8"; stdio?: "ignore" | "pipe" } = { stdio: "ignore" },
+  ): string =>
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "init.defaultBranch=main",
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        ...args,
+      ],
+      { cwd, encoding: "utf8", ...options },
+    );
+
+  test.skipIf(!hasZsh)(
+    zshSkip ?? "reports commits since recorded tip and plainly says none when a lane committed nothing",
+    () => {
+      const logdir = join(tempDir(), "waveTip");
+      const wtCommitted = tempDir();
+      const wtEmpty = tempDir();
+      const brief = join(tempDir(), "brief.md");
+      writeFileSync(brief, "work\n");
+
+      // Setup git worktree for wtCommitted
+      gitExplicit(["init"], wtCommitted);
+      gitExplicit(["config", "commit.gpgsign", "false"], wtCommitted);
+      gitExplicit(["config", "user.name", "Test"], wtCommitted);
+      gitExplicit(["config", "user.email", "test@example.com"], wtCommitted);
+      writeFileSync(join(wtCommitted, "init.txt"), "initial\n");
+      gitExplicit(["add", "."], wtCommitted);
+      gitExplicit(["commit", "-m", "initial commit"], wtCommitted);
+      const tipCommitted = gitExplicit(["rev-parse", "HEAD"], wtCommitted, { stdio: "pipe" }).trim();
+
+      // Setup git worktree for wtEmpty with earlier commits to verify it does not compare to origin/main
+      gitExplicit(["init"], wtEmpty);
+      gitExplicit(["config", "commit.gpgsign", "false"], wtEmpty);
+      gitExplicit(["config", "user.name", "Test"], wtEmpty);
+      gitExplicit(["config", "user.email", "test@example.com"], wtEmpty);
+      writeFileSync(join(wtEmpty, "earlier1.txt"), "1\n");
+      gitExplicit(["add", "."], wtEmpty);
+      gitExplicit(["commit", "-m", "earlier 1"], wtEmpty);
+      writeFileSync(join(wtEmpty, "earlier2.txt"), "2\n");
+      gitExplicit(["add", "."], wtEmpty);
+      gitExplicit(["commit", "-m", "earlier 2"], wtEmpty);
+      const tipEmpty = gitExplicit(["rev-parse", "HEAD"], wtEmpty, { stdio: "pipe" }).trim();
+
+      // Lane 1 makes a commit during execution; Lane 2 runs true without committing
+      writeFileSync(
+        join(wtCommitted, "lane.sh"),
+        'echo "new change" >> init.txt && git add init.txt && git commit -m "new commit"\n',
+      );
+
+      const stdout = execFileSync(
+        "zsh",
+        [
+          dispatchLaneSh,
+          logdir,
+          `committed:${wtCommitted}:${brief}`,
+          `uncommitted:${wtEmpty}:${brief}`,
+        ],
+        {
+          timeout: 20_000,
+          env: {
+            ...process.env,
+            STAGGER: "0",
+            POLL: "1",
+            WAVE: "W3T",
+            LANE_CMD: "if [[ -f lane.sh ]]; then zsh lane.sh; else true; fi",
+          },
+          encoding: "utf8",
+        },
+      );
+
+      expect(stdout).toContain(`commits since tip (${tipCommitted.slice(0, 7)}): 1`);
+      expect(stdout).toContain(`commits since tip (${tipEmpty.slice(0, 7)}): none`);
+    },
+    20_000,
+  );
+
+  test.skipIf(!hasZsh)(
+    zshSkip ?? "reports unknown (tip missing) when starting tip was not recorded",
+    () => {
+      const logdir = join(tempDir(), "waveTipMissing");
+      const wtNoTip = tempDir();
+      const brief = join(tempDir(), "brief.md");
+      writeFileSync(brief, "work\n");
+
+      const stdout = execFileSync(
+        "zsh",
+        [dispatchLaneSh, logdir, `notip:${wtNoTip}:${brief}`],
+        {
+          timeout: 20_000,
+          env: {
+            ...process.env,
+            STAGGER: "0",
+            POLL: "1",
+            WAVE: "W3T",
+            LANE_CMD: "true",
+          },
+          encoding: "utf8",
+        },
+      );
+
+      expect(stdout).toContain("commits since tip: unknown (tip missing)");
+    },
+    20_000,
+  );
+
+  test.skipIf(!hasZsh)(
+    zshSkip ?? "reports unknown (rev-list failed) when git rev-list fails in worktree",
+    () => {
+      const logdir = join(tempDir(), "waveRevListFailed");
+      const wtCorrupt = tempDir();
+      const brief = join(tempDir(), "brief.md");
+      writeFileSync(brief, "work\n");
+
+      gitExplicit(["init"], wtCorrupt);
+      gitExplicit(["config", "commit.gpgsign", "false"], wtCorrupt);
+      gitExplicit(["config", "user.name", "Test"], wtCorrupt);
+      gitExplicit(["config", "user.email", "test@example.com"], wtCorrupt);
+      writeFileSync(join(wtCorrupt, "init.txt"), "initial\n");
+      gitExplicit(["add", "."], wtCorrupt);
+      gitExplicit(["commit", "-m", "initial commit"], wtCorrupt);
+      const tip = gitExplicit(["rev-parse", "HEAD"], wtCorrupt, { stdio: "pipe" }).trim();
+
+      // Lane script removes .git so rev-list fails when dispatch-lane checks after execution
+      writeFileSync(join(wtCorrupt, "lane.sh"), "rm -rf .git\n");
+
+      const stdout = execFileSync(
+        "zsh",
+        [dispatchLaneSh, logdir, `corrupt:${wtCorrupt}:${brief}`],
+        {
+          timeout: 20_000,
+          env: {
+            ...process.env,
+            STAGGER: "0",
+            POLL: "1",
+            WAVE: "W3T",
+            LANE_CMD: "if [[ -f lane.sh ]]; then zsh lane.sh; else true; fi",
+          },
+          encoding: "utf8",
+        },
+      );
+
+      expect(stdout).toContain(`commits since tip (${tip.slice(0, 7)}): unknown (rev-list failed)`);
+    },
+    20_000,
+  );
 });
