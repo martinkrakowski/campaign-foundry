@@ -309,7 +309,14 @@ async function serveLog(
         "content-length": st.size,
         "content-disposition": `attachment; filename="${wave}-${lane}.log"`,
       });
-      createReadStream(logPath).pipe(res);
+      const stream = createReadStream(logPath);
+      stream.on("error", () => {
+        res.destroy();
+      });
+      res.on("close", () => {
+        stream.destroy();
+      });
+      stream.pipe(res);
     } catch {
       res.writeHead(404);
       res.end();

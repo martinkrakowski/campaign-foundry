@@ -502,31 +502,16 @@
     }, 1500);
   });
 
-  downloadBtn.addEventListener("click", async () => {
-    if (!activeWave || !activeLane) return;
-    const url = `/api/log/${activeWave}/${activeLane}?full=1`;
-    const res = await fetch(url);
-    if (!res.ok) return;
-    const blob = await res.blob();
-    const win = typeof window !== "undefined" ? window : document.defaultView;
-    const urlApi = (win && win.URL) || URL;
-    let objectUrl = "";
-    if (urlApi && typeof urlApi.createObjectURL === "function") {
-      try {
-        objectUrl = urlApi.createObjectURL(blob);
-      } catch {
-        objectUrl = "";
-      }
-    }
+  downloadBtn.addEventListener("click", () => {
+    const wave = activeWave;
+    const lane = activeLane;
+    if (!wave || !lane) return;
     const a = document.createElement("a");
-    a.href = objectUrl || url;
-    a.download = `${activeWave}-${activeLane}.log`;
+    a.href = `/api/log/${wave}/${lane}?full=1`;
+    a.download = `${wave}-${lane}.log`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    if (objectUrl && urlApi && typeof urlApi.revokeObjectURL === "function") {
-      setTimeout(() => urlApi.revokeObjectURL(objectUrl), 1000);
-    }
   });
 
   closeBtn.addEventListener("click", closeLog);

@@ -131,6 +131,7 @@ function get(
       res.on("end", () =>
         succeed({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) }),
       );
+      res.on("error", (error) => fail(error instanceof Error ? error : new Error(String(error))));
     });
     req.setTimeout(timeoutMs, () => {
       req.destroy();
@@ -650,6 +651,24 @@ describe("the server over real HTTP", () => {
     const handle = await start({ port: 0, root, collect: async () => statusAt(0) });
     expect((await get(handle.port, "/api/log/T/missing?full=1")).status).toBe(404);
     expect((await get(handle.port, "/api/log/ZZ/zz?full=1")).status).toBe(404);
+  });
+
+  test("a read that fails after the headers are sent leaves the server still answering the next request", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wave-status-stream-error-"));
+    roots.push(root);
+    await mkdir(join(root, "waveT"));
+    // A directory at t1.log stats successfully (so 200 headers are sent),
+    // but reading it as a stream fails asynchronously with EISDIR.
+    await mkdir(join(root, "waveT", "t1.log"));
+    await writeFile(join(root, "waveT", "t2.log"), "survived\n");
+
+    const handle = await start({ port: 0, root, collect: async () => statusAt(0) });
+
+    await expect(get(handle.port, "/api/log/T/t1?full=1")).rejects.toThrow();
+
+    const res = await get(handle.port, "/api/log/T/t2?full=1");
+    expect(res.status).toBe(200);
+    expect(res.body.toString("utf8")).toBe("survived\n");
   });
 
   test("a log smaller than the tail, a missing tail param and a bad tail param all work", async () => {

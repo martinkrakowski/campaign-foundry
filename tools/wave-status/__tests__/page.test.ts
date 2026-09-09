@@ -381,12 +381,15 @@ describe("the status page", () => {
 
     const expandBtn = toolbar?.querySelector('button[aria-label="expand"]');
     const copyBtn = toolbar?.querySelector('button[aria-label="copy"]');
+    const downloadBtn = toolbar?.querySelector('button[aria-label="download"]');
     const closeBtn = toolbar?.querySelector('button[aria-label="close"]');
 
     expect(expandBtn).not.toBeNull();
     expect(expandBtn?.textContent).toBe("expand");
     expect(copyBtn).not.toBeNull();
     expect(copyBtn?.textContent).toBe("copy");
+    expect(downloadBtn).not.toBeNull();
+    expect(downloadBtn?.textContent).toBe("download");
     expect(closeBtn).not.toBeNull();
     expect(closeBtn?.textContent).toBe("close");
   });
@@ -695,41 +698,26 @@ describe("the status page", () => {
     );
   });
 
-  test("the download control exists with its accessible name and takes the control token", async () => {
-    const page = await loadPage(statusAt());
-    const doc = page.window.document;
-    const downloadBtn = doc.querySelector('button[aria-label="download"]') as HTMLElement | null;
-    expect(downloadBtn).not.toBeNull();
-    expect(downloadBtn?.textContent).toBe("download");
-
-    const sheet = doc.styleSheets[0];
-    interface StyleRuleLike {
-      readonly selectorText: string;
-      readonly style: {
-        readonly borderColor?: string;
-        readonly borderBottomColor?: string;
-        readonly border?: string;
-      };
-    }
-    const rules = Array.from(sheet.cssRules) as unknown as readonly StyleRuleLike[];
-    const matching = rules.filter(
-      (r) =>
-        r.selectorText !== undefined &&
-        !r.selectorText.includes(":") &&
-        downloadBtn?.matches(r.selectorText) &&
-        Boolean(r.style.borderColor || r.style.border),
-    );
-    expect(matching.length).toBeGreaterThan(0);
-    for (const rule of matching) {
-      expect(rule.style.borderColor).toBe("var(--color-border-control)");
-    }
-  });
-
-  test("pressing download requests the current lane's log with full=1 and switching lanes requests the new lane", async () => {
+  test("pressing download targets the current lane's full=1 URL, performs no fetch, and names the same lane in the download attribute", async () => {
     const page = await loadPage(mixedStatus);
     const doc = page.window.document;
     const rows = doc.querySelectorAll("tr.lane");
     expect(rows.length).toBeGreaterThanOrEqual(2);
+
+    const downloads: Array<{ href: string; download: string }> = [];
+    const origCreateElement = doc.createElement.bind(doc);
+    vi.spyOn(doc, "createElement").mockImplementation((tagName: string, ...args) => {
+      const el = origCreateElement(tagName, ...args);
+      if (tagName.toLowerCase() === "a") {
+        vi.spyOn(el, "click").mockImplementation(() => {
+          downloads.push({
+            href: el.getAttribute("href") ?? (el as unknown as { href: string }).href,
+            download: el.getAttribute("download") ?? (el as unknown as { download: string }).download,
+          });
+        });
+      }
+      return el;
+    });
 
     // Open first lane: T/t1
     rows[0]?.dispatchEvent(
@@ -743,10 +731,12 @@ describe("the status page", () => {
     const downloadBtn = doc.querySelector('button[aria-label="download"]') as HTMLElement | null;
     expect(downloadBtn).not.toBeNull();
 
+    const fetchesAfterLane1 = page.fetches.length;
     downloadBtn?.click();
-    await vi.waitFor(() => {
-      expect(page.fetches).toContain("/api/log/T/t1?full=1");
-    });
+
+    expect(downloads).toEqual([{ href: "/api/log/T/t1?full=1", download: "T-t1.log" }]);
+    expect(page.fetches.length).toBe(fetchesAfterLane1);
+    expect(page.fetches.filter((url) => url.includes("full=1"))).toHaveLength(0);
 
     // Switch to second lane: T/t2
     rows[1]?.dispatchEvent(
@@ -756,13 +746,15 @@ describe("the status page", () => {
       expect(doc.getElementById("log-lane")?.textContent).toBe("T/t2");
     });
 
+    const fetchesAfterLane2 = page.fetches.length;
     downloadBtn?.click();
-    await vi.waitFor(() => {
-      expect(page.fetches).toContain("/api/log/T/t2?full=1");
-    });
 
-    const fullFetches = page.fetches.filter((url) => url.includes("full=1"));
-    expect(fullFetches).toEqual(["/api/log/T/t1?full=1", "/api/log/T/t2?full=1"]);
+    expect(downloads).toEqual([
+      { href: "/api/log/T/t1?full=1", download: "T-t1.log" },
+      { href: "/api/log/T/t2?full=1", download: "T-t2.log" },
+    ]);
+    expect(page.fetches.length).toBe(fetchesAfterLane2);
+    expect(page.fetches.filter((url) => url.includes("full=1"))).toHaveLength(0);
   });
 });
 
