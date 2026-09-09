@@ -305,7 +305,7 @@ describe("CreateCampaignDialog", () => {
     expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe("false");
     // A3's three display profiles start selected — the editor lands on Identity,
     // so the Output step's platform cards need the walk there first.
-    await user.click(screen.getByRole("button", { name: /Step 6 of 7: Output/ }));
+    await user.click(screen.getByRole("button", { name: /Step 7 of 8: Output/ }));
     for (const id of ["google-display", "meta-audience-network", "display-web"]) {
       expect(screen.getByRole("button", { name: id }).getAttribute("aria-pressed")).toBe("true");
     }

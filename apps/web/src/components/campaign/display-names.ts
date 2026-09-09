@@ -4,6 +4,9 @@ import { RATIO_VALUES, resolveCanvas, type CanvasSpec } from "@campaignfoundry/C
 import { DISPLAY_SIZE_VALUES, type DisplaySize } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import { ANCHOR_VALUES } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import { ALIGN_VALUES, FONT_WEIGHT_VALUES, type TextEffectKind } from "@campaignfoundry/CampaignOrchestration/creative-style";
+// The leaf, never the barrel: the type vocabulary rides the same rule as its
+// siblings above.
+import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
 
 import type { CampaignMode } from "./editor-state";
@@ -124,6 +127,29 @@ export const TEXT_EFFECT_META: Record<TextEffectKind, string> = {
 
 export function textEffectDisplayName(effect: string): string {
   return TEXT_EFFECT_META[effect as TextEffectKind] ?? effect;
+}
+
+/**
+ * Display labels for the creative layer kinds (L5) — the TEXT_EFFECT_META
+ * pattern, keyed by the domain's own vocabulary, so a new kind is a compile
+ * error rather than a raw kind id on screen (D18). The kind's raw id stays the
+ * accessible name of every control that offers it (the kit contract); these
+ * are the words the eye reads and the description carries.
+ */
+export const LAYER_KIND_META: Record<LayerKind, string> = {
+  image: "Image",
+  fill: "Fill",
+  "static-text": "Static text",
+  "animated-text": "Animated text",
+  html: "HTML",
+  video: "Video",
+  logo: "Logo",
+  accent: "Accent",
+  shade: "Shade",
+};
+
+export function layerKindDisplayName(kind: string): string {
+  return LAYER_KIND_META[kind as LayerKind] ?? kind;
 }
 
 /** Display name for a platform id (from PlatformProfile.label). */

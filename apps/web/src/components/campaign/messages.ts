@@ -1099,3 +1099,47 @@ export function typeTileRunsAs(mode: string): string {
 export function typeTilePlacements(placements: string): string {
   return `Runs on ${placements}.`;
 }
+
+/* ── The Template step (L5, D124) ─────────────────────────────────────────── */
+
+/**
+ * The ordered layer list's name, said above it and used as its accessible
+ * name: the order is the depth of the picture, bottom first (D128).
+ */
+export const templateListLabel = "Layers, bottom first";
+
+/**
+ * Why some layers carry no remove control (D124): the kinds every creative of
+ * this type is made of — display names the caller already converted (D18).
+ * One sentence, said once under the list.
+ */
+export function templateRequiredNote(names: string[]): string {
+  return `${joinList(names)} ${names.length === 1 ? "is" : "are"} part of every creative and cannot be removed.`;
+}
+
+/** The add row's group name. */
+export const templateAddLabel = "Add a layer";
+
+/**
+ * An add control's description: the control's accessible name is the raw kind
+ * id (the kit contract, as `PlatformCard` pins it) — the words live here,
+ * reached through `aria-describedby`, never inside the name. `name` is a
+ * display label (`layerKindDisplayName`), never a raw id (D18).
+ */
+export function templateAddDescription(name: string): string {
+  return `Add ${name}`;
+}
+
+/** A remove control's description — the same contract, the layer's words. */
+export function templateRemoveDescription(name: string): string {
+  return `Remove ${name}`;
+}
+
+/** The review step's template row: how many layers the brief will carry. */
+export function reviewTemplateLayers(count: number): string {
+  return `${count} ${count === 1 ? "layer" : "layers"}`;
+}
+
+/** The Template step's subtitle. */
+export const stepSubtitleTemplate =
+  "Choose what every creative is made of — add or remove layers.";

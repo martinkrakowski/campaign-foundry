@@ -2100,6 +2100,8 @@ describe("BriefPage — guided presentation (W6)", () => {
     await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Treatments"));
     await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Template"));
+    await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
     await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
@@ -2126,7 +2128,7 @@ describe("BriefPage — guided presentation (W6)", () => {
     renderWithRun(<Editor id="ok" />);
     await adopt(user, "ok");
 
-    // Identity (step 1 of 7) -> Copy; the heading is the focus handoff target.
+    // Identity (step 1 of 8) -> Copy; the heading is the focus handoff target.
     await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Copy"));
     expect(document.activeElement).toBe(stepHeading());
@@ -2136,6 +2138,8 @@ describe("BriefPage — guided presentation (W6)", () => {
     await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
     await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Treatments"));
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Template"));
     await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
     await user.click(next());
@@ -2186,10 +2190,13 @@ describe("BriefPage — guided presentation (W6)", () => {
     expect(screen.getByRole("heading", { level: 3, name: "Headline Pool" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /Close/ }));
 
-    // Copy -> Products -> Layout -> Output -> Policy: the variation order skips
-    // treatments, and the Layout step (T7) carries the template before Output.
+    // Copy -> Products -> Template -> Layout -> Output: the variation order
+    // skips treatments, the Template step (L5) carries the layer list, and the
+    // Layout step (T7) carries the type — both before Output.
     await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
+    await user.click(next());
+    await waitFor(() => expect(stepHeading().textContent).toBe("Template"));
     await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
     await user.click(next());
@@ -2938,7 +2945,7 @@ describe("BriefPage — the preview rail (R7)", () => {
     // The dock's own words live inside the landmark: the caption names the platform
     // as a display label, and the step readout is the walk's cursor.
     expect(within(rail).getByText("Square · LinkedIn")).toBeTruthy();
-    expect(within(rail).getByText(messages.previewStep(1, 7))).toBeTruthy();
+    expect(within(rail).getByText(messages.previewStep(1, 8))).toBeTruthy();
     // D44: the rail is a sibling of the walk's card — never a copy inside it, where a
     // step change would render two live copies and the card's transform would trap it.
     expect(screen.getByTestId("step-card").contains(rail)).toBe(false);
@@ -3123,7 +3130,7 @@ describe("BriefPage — the Layout step (T7)", () => {
     },
   };
 
-  test("the classic walk carries the Layout step after Treatments, and Next/Back traverse it", async () => {
+  test("the classic walk carries the Layout step after the Template step, and Next/Back traverse it", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [okEntry] }) });
     renderWithRun(<Editor id="ok" />);
@@ -3131,15 +3138,16 @@ describe("BriefPage — the Layout step (T7)", () => {
 
     await user.click(seg(/: Layout,/));
     await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
+    // Layout's neighbours: the Template step (L5) before it, Output after.
     await user.click(back());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Treatments"));
+    await waitFor(() => expect(stepHeading().textContent).toBe("Template"));
     await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
     await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Output"));
   });
 
-  test("randomized places the Layout step between Products and Output (T7)", async () => {
+  test("randomized places the Layout step between the Template step and Output (T7)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [randEntry] }) });
     renderWithRun(<Editor id="rand" />);
@@ -3148,7 +3156,7 @@ describe("BriefPage — the Layout step (T7)", () => {
     await user.click(seg(/: Layout,/));
     await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
     await user.click(back());
-    await waitFor(() => expect(stepHeading().textContent).toBe("Products"));
+    await waitFor(() => expect(stepHeading().textContent).toBe("Template"));
     await user.click(next());
     await waitFor(() => expect(stepHeading().textContent).toBe("Layout"));
     await user.click(next());

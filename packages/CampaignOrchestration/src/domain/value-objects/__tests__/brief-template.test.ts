@@ -1,6 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { CAMPAIGN_TYPES, CAMPAIGN_TYPE_PRESETS } from "../campaign-types.js";
 import { CANONICAL_TEMPLATES } from "../creative-templates.js";
+import type { LayerKind } from "../layer-kinds.js";
 import { isBriefTemplate, layerPropsProblem, templateFromCanonical, type BriefTemplate } from "../brief-template.js";
 
 describe("BriefTemplate and templateFromCanonical (D120, D123, D128)", () => {
@@ -142,11 +143,56 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
 
   test("a template whose layers carry no props parses exactly as before", () => {
     expect(isBriefTemplate(templateFromCanonical("social-post"))).toBe(true);
-    // A non-object layer entry stays out of the props check's scope — the same
-    // leniency the `layers` array itself has always had; the API's message is
-    // where a junk entry gets named.
-    expect(withLayer("junk")).toBe(true);
     expect(withLayer({ id: "image", kind: "image" })).toBe(true);
+  });
+
+  test("refuses a layers entry that is not a layer (L5)", () => {
+    // The per-layer guard is the one check a stored draft's entries face, so it
+    // carries the whole entry contract: `countKinds` dereferences `layer.kind`
+    // the moment a corrupt draft's section mounts, and `null` — which used to
+    // pass as "no props problem" — has no kind to read. A layer that is not a
+    // non-null, non-array object with a string id and a vocabulary kind is not
+    // a layer, whatever else it may be.
+    expect(withLayer(null)).toBe(false);
+    expect(withLayer("junk")).toBe(false);
+    expect(withLayer(42)).toBe(false);
+    expect(withLayer([{ id: "image", kind: "image" }])).toBe(false);
+    expect(withLayer({})).toBe(false);
+    expect(withLayer({ id: "image" })).toBe(false);
+    expect(withLayer({ kind: "image" })).toBe(false);
+    expect(withLayer({ id: 42, kind: "image" })).toBe(false);
+  });
+
+  test("refuses a layers entry whose kind is outside the vocabulary (L5)", () => {
+    // A kind the vocabulary does not name is as dereference-hostile as a
+    // missing one: the editor's add/remove offers and the API's compatibility
+    // table both read the kind against their own vocabularies.
+    expect(withLayer({ id: "x", kind: "bogus" })).toBe(false);
+    expect(withLayer({ id: "x", kind: "bogus", props: { alpha: 0.5 } })).toBe(false);
+  });
+
+  test("refuses duplicate layer ids, the rule the API already applies (L5)", () => {
+    const layer = { id: "shade", kind: "shade" as const };
+    expect(
+      isBriefTemplate({
+        id: "canonical-image-text",
+        version: 1,
+        creativeType: "image-text",
+        unit: "standard-web",
+        layers: [layer, { ...layer }],
+      }),
+    ).toBe(false);
+    // The ids clash even when the kinds differ — the id is the row's identity,
+    // and one remove click must name exactly one row.
+    expect(
+      isBriefTemplate({
+        id: "canonical-image-text",
+        version: 1,
+        creativeType: "image-text",
+        unit: "standard-web",
+        layers: [layer, { id: "shade", kind: "logo" }],
+      }),
+    ).toBe(false);
   });
 
   test("accepts each kind's own props, and 0 and 1 are legal fractions", () => {
@@ -207,8 +253,20 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
     expect(withLayer({ id: "shade", kind: "shade", props: null })).toBe(false);
   });
 
-  test("refuses props on an unknown kind, while a propless unknown-kind layer stays in scope as before", () => {
-    expect(withLayer({ id: "x", kind: "bogus", props: { alpha: 0.5 } })).toBe(false);
-    expect(withLayer({ id: "x", kind: "bogus" })).toBe(true);
+  test("refuses props on an unknown kind directly — the shared decision, not the guard's kind check", () => {
+    // `layerPropsProblem` is the per-kind props decision both boundaries read;
+    // the entry guard checks the kind *before* reaching it, so this branch is
+    // the function's own contract, exercised directly (the API calls it after
+    // its own `accepts` check, never with an unknown kind).
+    expect(layerPropsProblem("bogus" as LayerKind, { alpha: 0.5 })).toEqual({
+      path: "",
+      must: 'be absent for layer kind "bogus"',
+      value: { alpha: 0.5 },
+    });
+    expect(layerPropsProblem("bogus" as LayerKind, {})).toEqual({
+      path: "",
+      must: 'be absent for layer kind "bogus"',
+      value: {},
+    });
   });
 });
