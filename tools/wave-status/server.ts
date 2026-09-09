@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { watch as fsWatch, type FSWatcher } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
+import { createReadStream, watch as fsWatch, type FSWatcher } from "node:fs";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -286,7 +286,7 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
   };
 }
 
-/** `/api/log/:wave/:lane?tail=N` — the last N KB of the lane log, text/plain. */
+/** `/api/log/:wave/:lane` — tail of the lane log or a full export with `?full=1`. */
 async function serveLog(
   res: ServerResponse,
   root: string,
@@ -295,6 +295,35 @@ async function serveLog(
   search: URLSearchParams,
   open: (path: string) => Promise<TailHandle>,
 ): Promise<void> {
+  if (search.get("full") === "1") {
+    const logPath = await resolveLogPath(root, wave, lane);
+    if (logPath === undefined) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    try {
+      const st = await stat(logPath);
+      res.writeHead(200, {
+        "content-type": "text/plain; charset=utf-8",
+        "content-length": st.size,
+        "content-disposition": `attachment; filename="${wave}-${lane}.log"`,
+      });
+      const stream = createReadStream(logPath);
+      stream.on("error", () => {
+        res.destroy();
+      });
+      res.on("close", () => {
+        stream.destroy();
+      });
+      stream.pipe(res);
+    } catch {
+      res.writeHead(404);
+      res.end();
+    }
+    return;
+  }
+
   const kb = tailKb(search.get("tail"));
   if (kb === undefined) {
     res.writeHead(400);
