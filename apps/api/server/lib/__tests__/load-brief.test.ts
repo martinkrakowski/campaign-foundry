@@ -298,6 +298,14 @@ describe("parseBrief", () => {
       );
     });
 
+    test("an empty props object on a propless kind is refused too; on shade it is legal", () => {
+      expect(() => parseBrief({ ...valid, template: withProps("image", {}) })).toThrow(
+        'Campaign brief field "template.layers[0].props" must be absent for layer kind "image"; got {}.',
+      );
+      // Shade's props are all optional, so the empty object stays legal there.
+      expect(() => parseBrief({ ...valid, template: withProps("shade", {}) })).not.toThrow();
+    });
+
     test("a logo layer carrying accent's solidHeight is refused (wrong kind's props)", () => {
       expect(() => parseBrief({ ...valid, template: withProps("logo", { solidHeight: 0.05 }) })).toThrow(
         'Campaign brief field "template.layers[4].props.solidHeight" must be one of "width", "margin" for layer kind "logo"; got 0.05.',

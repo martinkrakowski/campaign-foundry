@@ -1,7 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { CAMPAIGN_TYPES, CAMPAIGN_TYPE_PRESETS } from "../campaign-types.js";
 import { CANONICAL_TEMPLATES } from "../creative-templates.js";
-import { isBriefTemplate, templateFromCanonical, type BriefTemplate } from "../brief-template.js";
+import { isBriefTemplate, layerPropsProblem, templateFromCanonical, type BriefTemplate } from "../brief-template.js";
 
 describe("BriefTemplate and templateFromCanonical (D120, D123, D128)", () => {
   test("templateFromCanonical returns the preset's template for all four campaign types", () => {
@@ -160,12 +160,19 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
     expect(withLayer({ id: "motion", kind: "animated-text", props: { anchor: "top" } })).toBe(true);
   });
 
-  test("refuses props on a kind that carries none", () => {
+  test("refuses props on a kind that carries none, the empty object included", () => {
     expect(withLayer({ id: "image", kind: "image", props: { alpha: 0.5 } })).toBe(false);
     expect(withLayer({ id: "html", kind: "html", props: { alpha: 0.5 } })).toBe(false);
     expect(withLayer({ id: "fill", kind: "fill", props: { alpha: 0.5 } })).toBe(false);
-    // An empty props object names no prop — the inert shape absence spells.
-    expect(withLayer({ id: "video", kind: "video", props: {} })).toBe(true);
+    // The empty object names no prop, but it is still props on a kind that
+    // carries none: the "must be absent" verdict is reached before any
+    // entries are walked.
+    expect(withLayer({ id: "video", kind: "video", props: {} })).toBe(false);
+    expect(layerPropsProblem("image", {})).toEqual({
+      path: "",
+      must: 'be absent for layer kind "image"',
+      value: {},
+    });
   });
 
   test("refuses another kind's props (a logo carrying accent's solidHeight)", () => {

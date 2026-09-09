@@ -89,7 +89,9 @@ export interface LayerPropsProblem {
  * refuses on a defined problem, and the API's `validateTemplate` formats the
  * same problem into its message shape — the two cannot drift, the way
  * `styleProblem` is shared between the domain and the parser (T5). Absent
- * props are always fine: absence is the resolved-default behaviour.
+ * props are always fine: absence is the resolved-default behaviour. A kind
+ * that carries no props refuses any defined `props` — the empty object
+ * included — before any entries are walked.
  */
 export function layerPropsProblem(kind: LayerKind, props: unknown): LayerPropsProblem | undefined {
   if (props === undefined) return undefined;
@@ -100,15 +102,16 @@ export function layerPropsProblem(kind: LayerKind, props: unknown): LayerPropsPr
     return { path: "", must: "be an object", value: props };
   }
   const allowed = LAYER_PROPS[kind];
+  if (allowed.length === 0) {
+    return { path: "", must: `be absent for layer kind "${kind}"`, value: props };
+  }
   for (const [field, value] of Object.entries(props as Record<string, unknown>)) {
     if (!allowed.includes(field)) {
-      return allowed.length === 0
-        ? { path: "", must: `be absent for layer kind "${kind}"`, value: props }
-        : {
-            path: `.${field}`,
-            must: `be one of ${allowed.map((key) => `"${key}"`).join(", ")} for layer kind "${kind}"`,
-            value,
-          };
+      return {
+        path: `.${field}`,
+        must: `be one of ${allowed.map((key) => `"${key}"`).join(", ")} for layer kind "${kind}"`,
+        value,
+      };
     }
     if (field === "anchor") {
       if (typeof value !== "string" || !(ANCHOR_VALUES as readonly string[]).includes(value)) {

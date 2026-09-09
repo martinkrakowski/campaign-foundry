@@ -50,7 +50,9 @@ function orderedKeys(source: Record<string, unknown>, order: readonly string[]):
     if (value !== undefined) out[key] = value;
   }
   for (const key of Object.keys(source)) {
-    if (!(key in out) && source[key] !== undefined) out[key] = source[key];
+    // Ownership, never `key in out`: an own key named `constructor`, `toString`
+    // or `valueOf` is also an inherited member of `out`, and `in` would drop it.
+    if (!Object.prototype.hasOwnProperty.call(out, key) && source[key] !== undefined) out[key] = source[key];
   }
   return out;
 }

@@ -192,6 +192,24 @@ describe("dumpBrief layer and props order (L3b, D134)", () => {
     expect(parsed.template.layers[1]).toEqual({ kind: "shade", id: "tint", props: { alpha: 0.5 } });
   });
 
+  test("a layer key named after an Object.prototype member survives the dump", () => {
+    // `constructor` is also an inherited member of the writer's accumulator;
+    // an own layer key of that name must still be emitted (L3b review).
+    const withPrototypeKey = {
+      ...brief,
+      template: {
+        id: "canonical-image-text",
+        version: 1,
+        creativeType: "image-text",
+        unit: "standard-web",
+        layers: [{ id: "bg", kind: "image", constructor: "x" }],
+      },
+    };
+    const yaml = dumpBrief(withPrototypeKey);
+    expect(yaml).toContain("constructor: x");
+    expect(parse(yaml)).toEqual(withPrototypeKey);
+  });
+
   test("a template whose layers carry no props dumps and reparses exactly as today", () => {
     const propless = {
       ...brief,
