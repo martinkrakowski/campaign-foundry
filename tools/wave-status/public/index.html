@@ -25,25 +25,51 @@
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    padding: var(--space-6);
     background: var(--color-background);
     color: var(--color-text-primary);
     font-family: var(--font-sans);
     font-size: 14px;
     line-height: 1.5;
   }
-  h1 { font-size: 18px; margin: 0 0 var(--space-2); }
+  /* The page is a full-height grid: the header is auto-sized, the area below
+     it splits evenly between the table pane and the log pane — and with no
+     log open the table takes the whole area. Sizing is CSS only; a resize is
+     handled by the layout, never by a listener. */
+  #page {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    gap: var(--space-4);
+    height: 100vh;
+    height: 100dvh;
+    padding: var(--space-6);
+  }
+  #page.with-log { grid-template-rows: auto 1fr 1fr; }
+  h1 { font-size: 18px; margin: 0; }
+  #title-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2) var(--space-6); }
+  #metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-4);
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+  .metric .value { font-weight: bold; }
+  .metric .label { color: var(--color-text-muted); }
   #connection {
-    margin: 0 0 var(--space-4);
+    margin: var(--space-2) 0 0;
     color: var(--color-text-muted);
     font-family: var(--font-mono);
     font-size: 12px;
   }
   #connection.live { color: var(--color-success); }
   #connection.polling { color: var(--color-warning); }
+  #table-pane { overflow-y: auto; min-height: 0; }
+  /* Separate borders so the sticky thead keeps its underline while scrolled
+     (collapse would let it be painted away by the rows beneath). */
   table {
     width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
@@ -53,6 +79,12 @@
     text-align: left;
     border-bottom: 1px solid var(--color-border);
     vertical-align: top;
+  }
+  thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--color-surface);
   }
   th {
     color: var(--color-text-secondary);
@@ -78,7 +110,7 @@
     font-size: 12px;
   }
   #log {
-    margin: var(--space-4) 0 0;
+    margin: 0;
     padding: var(--space-3);
     background: var(--color-surface);
     border: 1px solid var(--color-border);
@@ -86,36 +118,60 @@
     color: var(--color-text-secondary);
     font-family: var(--font-mono);
     font-size: 12px;
-    max-height: 40vh;
     overflow: auto;
+    min-height: 0;
     white-space: pre-wrap;
     word-break: break-all;
   }
 </style>
 </head>
 <body>
-<h1>Wave status</h1>
-<p id="connection">connecting…</p>
-<table>
-  <thead>
-    <tr>
-      <th>lane</th>
-      <th>stage</th>
-      <th>liveness</th>
-      <th>log (bytes · mtime · EXIT)</th>
-      <th>PR · checks</th>
-      <th>gate (exit · coverage)</th>
-      <th>fixed / refuted / mutations</th>
-    </tr>
-  </thead>
-  <tbody id="lanes"></tbody>
-</table>
-<pre id="log" hidden></pre>
+<div id="page">
+  <header>
+    <div id="title-row">
+      <h1>Wave status</h1>
+      <div id="metrics">
+        <span class="metric" data-metric="lanes"><span class="value">—</span> <span class="label">lanes</span></span>
+        <span class="metric" data-metric="alive"><span class="value">—</span> <span class="label">alive</span></span>
+        <span class="metric" data-metric="settled"><span class="value">—</span> <span class="label">settled</span></span>
+        <span class="metric" data-metric="failed"><span class="value">—</span> <span class="label">failed</span></span>
+        <span class="metric" data-metric="running"><span class="value">—</span> <span class="label">running</span></span>
+        <span class="metric" data-metric="open"><span class="value">—</span> <span class="label">PRs open</span></span>
+        <span class="metric" data-metric="merged"><span class="value">—</span> <span class="label">PRs merged</span></span>
+        <span class="metric" data-metric="failing"><span class="value">—</span> <span class="label">checks failing</span></span>
+        <span class="metric" data-metric="waves"><span class="value">—</span> <span class="label">waves</span></span>
+      </div>
+    </div>
+    <p id="connection">connecting…</p>
+  </header>
+  <section id="table-pane">
+    <table>
+      <thead>
+        <tr>
+          <th>lane</th>
+          <th>stage</th>
+          <th>liveness</th>
+          <th>log (bytes · mtime · EXIT)</th>
+          <th>PR · checks</th>
+          <th>gate (exit · coverage)</th>
+          <th>fixed / refuted / mutations</th>
+        </tr>
+      </thead>
+      <tbody id="lanes"></tbody>
+    </table>
+  </section>
+  <pre id="log" hidden></pre>
+</div>
 <script>
   "use strict";
   const lanesBody = document.getElementById("lanes");
   const connection = document.getElementById("connection");
   const logView = document.getElementById("log");
+  const pageGrid = document.getElementById("page");
+  const metricValues = {};
+  for (const metric of document.querySelectorAll("#metrics [data-metric]")) {
+    metricValues[metric.getAttribute("data-metric")] = metric.querySelector(".value");
+  }
 
   function esc(value) {
     return String(value).replace(/[&<>"']/g, (c) => ({
@@ -174,6 +230,51 @@
       + (detail.mutationsBit === undefined ? "" : ` <span class="dim">(${esc(detail.mutationsBit)} bit)</span>`);
   }
 
+  function setMetric(name, value) {
+    // An unknown value shows —, never 0 — the same rule the cells follow:
+    // "no failures" and "we don't know" are different answers.
+    metricValues[name].textContent = value === undefined ? "—" : String(value);
+  }
+
+  function metricsOf(status) {
+    let lanes = 0;
+    let alive = 0;
+    let waves = 0;
+    let events = 0;
+    let prs = 0;
+    let settled;
+    let failed;
+    let running;
+    let open;
+    let merged;
+    let failing;
+    for (const wave of status.waves) {
+      waves++;
+      for (const lane of wave.lanes) {
+        lanes++;
+        if (lane.derived.alive) alive++;
+        if (lane.reported !== undefined) {
+          events++;
+          if (lane.reported.event === "settled") settled = (settled ?? 0) + 1;
+          else if (lane.reported.event === "failed") failed = (failed ?? 0) + 1;
+          else if (lane.reported.event === "started") running = (running ?? 0) + 1;
+        }
+        const pr = lane.derived.pr;
+        if (pr !== undefined) {
+          prs++;
+          if (pr.state === "open") open = (open ?? 0) + 1;
+          else if (pr.state === "merged") merged = (merged ?? 0) + 1;
+          if (pr.checks === "fail") failing = (failing ?? 0) + 1;
+        }
+      }
+    }
+    // With no reported events at all (or no observed PR at all) the outcomes
+    // are unknown; once any observation exists, a zero is a real answer.
+    if (events > 0) { settled ??= 0; failed ??= 0; running ??= 0; }
+    if (prs > 0) { open ??= 0; merged ??= 0; failing ??= 0; }
+    return { lanes, alive, waves, settled, failed, running, open, merged, failing };
+  }
+
   function render(status) {
     const rows = [];
     for (const wave of status.waves) {
@@ -198,6 +299,16 @@
       }
     }
     lanesBody.innerHTML = rows.join("");
+    const m = metricsOf(status);
+    setMetric("lanes", m.lanes);
+    setMetric("alive", m.alive);
+    setMetric("settled", m.settled);
+    setMetric("failed", m.failed);
+    setMetric("running", m.running);
+    setMetric("open", m.open);
+    setMetric("merged", m.merged);
+    setMetric("failing", m.failing);
+    setMetric("waves", m.waves);
   }
 
   async function refresh() {
@@ -212,9 +323,16 @@
   async function openLog(row) {
     const res = await fetch(`/api/log/${row.dataset.wave}/${row.dataset.lane}?tail=16`);
     logView.hidden = false;
+    // State flip only; the grid itself does the sizing.
+    pageGrid.classList.add("with-log");
     logView.textContent = res.ok
       ? `--- ${row.dataset.wave}/${row.dataset.lane} (last 16 KB) ---\n` + (await res.text())
       : `no log for ${row.dataset.wave}/${row.dataset.lane}`;
+  }
+
+  function closeLog() {
+    logView.hidden = true;
+    pageGrid.classList.remove("with-log");
   }
 
   lanesBody.addEventListener("click", (event) => {
@@ -230,6 +348,8 @@
     event.preventDefault();
     void openLog(row);
   });
+
+  logView.addEventListener("click", closeLog);
 
   // Live updates over SSE; if the stream drops, fall back to a 10 s poll.
   const source = new EventSource("/api/stream");
