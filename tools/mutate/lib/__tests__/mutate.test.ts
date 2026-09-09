@@ -148,12 +148,30 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["--because", "--", "test"])).toThrow(/missing required flag --because/);
   });
 
+  test("refuses a --because value starting with '-'", () => {
+    expect(() =>
+      parseArgs(["--file", "a", "--before", "b", "--after", "c", "--because", "-flag", "--", "test"]),
+    ).toThrow(/--because value cannot start with '-'/);
+    expect(() =>
+      parseArgs(["--file", "a", "--before", "b", "--after", "c", "--because", "--other-flag", "--", "test"]),
+    ).toThrow(/--because value cannot start with '-'/);
+    expect(() =>
+      parseArgs(["--file", "a", "--before", "b", "--after", "c", "--because=-flag", "--", "test"]),
+    ).toThrow(/--because value cannot start with '-'/);
+  });
+
   test("refuses empty or whitespace-only --because", () => {
     expect(() =>
       parseArgs(["--file", "a", "--before", "b", "--after", "c", "--because", "", "--", "test"]),
     ).toThrow(/--because cannot be empty/);
     expect(() =>
       parseArgs(["--file", "a", "--before", "b", "--after", "c", "--because", "   ", "--", "test"]),
+    ).toThrow(/--because cannot be empty/);
+    expect(() =>
+      parseArgs(["--file", "a", "--before", "b", "--after", "c", "--because=", "--", "test"]),
+    ).toThrow(/--because cannot be empty/);
+    expect(() =>
+      parseArgs(["--file", "a", "--before", "b", "--after", "c", "--because=   ", "--", "test"]),
     ).toThrow(/--because cannot be empty/);
   });
 

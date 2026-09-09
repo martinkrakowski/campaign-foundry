@@ -497,4 +497,73 @@ describe("scripts/dispatch-lane.sh emits its events", () => {
     },
     20_000,
   );
+
+  test.skipIf(!hasZsh)(
+    zshSkip ?? "reports unknown (tip missing) when starting tip was not recorded",
+    () => {
+      const logdir = join(tempDir(), "waveTipMissing");
+      const wtNoTip = tempDir();
+      const brief = join(tempDir(), "brief.md");
+      writeFileSync(brief, "work\n");
+
+      const stdout = execFileSync(
+        "zsh",
+        [dispatchLaneSh, logdir, `notip:${wtNoTip}:${brief}`],
+        {
+          timeout: 20_000,
+          env: {
+            ...process.env,
+            STAGGER: "0",
+            POLL: "1",
+            WAVE: "W3T",
+            LANE_CMD: "true",
+          },
+          encoding: "utf8",
+        },
+      );
+
+      expect(stdout).toContain("commits since tip: unknown (tip missing)");
+    },
+    20_000,
+  );
+
+  test.skipIf(!hasZsh)(
+    zshSkip ?? "reports unknown (rev-list failed) when git rev-list fails in worktree",
+    () => {
+      const logdir = join(tempDir(), "waveRevListFailed");
+      const wtCorrupt = tempDir();
+      const brief = join(tempDir(), "brief.md");
+      writeFileSync(brief, "work\n");
+
+      execFileSync("git", ["init"], { cwd: wtCorrupt, stdio: "ignore" });
+      execFileSync("git", ["config", "user.name", "Test"], { cwd: wtCorrupt, stdio: "ignore" });
+      execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: wtCorrupt, stdio: "ignore" });
+      writeFileSync(join(wtCorrupt, "init.txt"), "initial\n");
+      execFileSync("git", ["add", "."], { cwd: wtCorrupt, stdio: "ignore" });
+      execFileSync("git", ["commit", "-m", "initial commit"], { cwd: wtCorrupt, stdio: "ignore" });
+      const tip = execFileSync("git", ["rev-parse", "HEAD"], { cwd: wtCorrupt, encoding: "utf8" }).trim();
+
+      // Lane script removes .git so rev-list fails when dispatch-lane checks after execution
+      writeFileSync(join(wtCorrupt, "lane.sh"), "rm -rf .git\n");
+
+      const stdout = execFileSync(
+        "zsh",
+        [dispatchLaneSh, logdir, `corrupt:${wtCorrupt}:${brief}`],
+        {
+          timeout: 20_000,
+          env: {
+            ...process.env,
+            STAGGER: "0",
+            POLL: "1",
+            WAVE: "W3T",
+            LANE_CMD: "if [[ -f lane.sh ]]; then zsh lane.sh; else true; fi",
+          },
+          encoding: "utf8",
+        },
+      );
+
+      expect(stdout).toContain(`commits since tip (${tip.slice(0, 7)}): unknown (rev-list failed)`);
+    },
+    20_000,
+  );
 });

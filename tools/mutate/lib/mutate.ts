@@ -62,9 +62,12 @@ export function parseArgs(argv: readonly string[]): ParsedMutateArgs {
     } else if (arg === "--because") {
       const next = flagArgs[++i];
       if (next === undefined) throw new RefusalError("Rule 5", "Refusal (Rule 5): missing required flag --because");
+      if (next.startsWith("-")) throw new RefusalError("Rule 5", "Refusal (Rule 5): --because value cannot start with '-'");
       because = next;
     } else if (arg.startsWith("--because=")) {
-      because = arg.slice("--because=".length);
+      const val = arg.slice("--because=".length);
+      if (val.startsWith("-")) throw new RefusalError("Rule 5", "Refusal (Rule 5): --because value cannot start with '-'");
+      because = val;
     } else {
       throw new RefusalError("usage", `Refusal: unknown argument: ${JSON.stringify(arg)}`);
     }

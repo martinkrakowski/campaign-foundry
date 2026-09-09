@@ -118,14 +118,17 @@ for lane in "${lanes[@]}"; do
   wt="${lane_wt[$lane]:-}"
   tip="${lane_tip[$lane]:-}"
   if [[ -n "$tip" ]]; then
-    commit_count=$(git -C "$wt" rev-list "${tip}..HEAD" --count 2>/dev/null || echo 0)
-    if (( commit_count > 0 )); then
-      print "    commits since tip (${tip[1,7]}): $commit_count"
+    if commit_count=$(git -C "$wt" rev-list "${tip}..HEAD" --count 2>/dev/null); then
+      if (( commit_count > 0 )); then
+        print "    commits since tip (${tip[1,7]}): $commit_count"
+      else
+        print "    commits since tip (${tip[1,7]}): none"
+      fi
     else
-      print "    commits since tip (${tip[1,7]}): none"
+      print "    commits since tip (${tip[1,7]}): unknown (rev-list failed)"
     fi
   else
-    print "    commits since tip: none"
+    print "    commits since tip: unknown (tip missing)"
   fi
   sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -iE 'insufficient balance|database is locked|^Error:' | head -3 | sed 's/^/    /'
 done
