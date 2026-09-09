@@ -23,6 +23,7 @@ import {
   TONE_VALUES,
   isPaletteShift,
   isSupportedBriefSchemaVersion,
+  layerPropsProblem,
   styleProblem,
   templateFromCanonical,
   timelineProblem,
@@ -34,6 +35,7 @@ import {
   type CopyTimeline,
   type CreativeTemplateLayer,
   type CreativeType,
+  type LayerKind,
   type RegenerationTarget,
 } from "@campaignfoundry/CampaignOrchestration";
 import { isPlatformVisible, platformProfile, type PlatformProfile } from "@campaignfoundry/Distribution";
@@ -146,7 +148,9 @@ function validateType(value: unknown): void {
  * The creative template (D120, D123, D124).
  *
  * Structural, never lenient: checked in authoring mode too (`enforceCapabilities: false`).
- * Compatibility is a declared table, validated at the boundary (D124).
+ * Compatibility is a declared table, validated at the boundary (D124). A layer's own
+ * props, when present, must be its kind's (D134) — same key set, every number a
+ * fraction in [0, 1], the anchor a vocabulary member.
  * Absent → defaults to the campaign type's canonical template (D120: type before template).
  */
 export function validateTemplate(value: unknown, type?: CampaignType): BriefTemplate {
@@ -218,6 +222,17 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
       );
     }
     presentKinds.add(layer.kind);
+
+    // D134 — a layer's own props, when present, must be its kind's. Structural,
+    // never lenient (the `validateSizes` convention): the decision is the
+    // domain's `layerPropsProblem`, shared with `isBriefTemplate` so the two
+    // boundaries cannot drift — only the message shape is local.
+    const propsProblem = layerPropsProblem(layer.kind as LayerKind, layer.props);
+    if (propsProblem !== undefined) {
+      throw new Error(
+        `Campaign brief field "template.layers[${i}].props${propsProblem.path}" must ${propsProblem.must}; got ${JSON.stringify(propsProblem.value)}.`,
+      );
+    }
   }
 
   for (const req of rules.required) {

@@ -261,6 +261,91 @@ describe("parseBrief", () => {
     });
   });
 
+  describe("layer props (L3b, D134)", () => {
+    /** The canonical social-post template with `props` swapped onto one kind's layer. */
+    const withProps = (kind: string, props: unknown) => {
+      const base = templateFromCanonical(DEFAULT_CAMPAIGN_TYPE);
+      return {
+        ...base,
+        layers: base.layers.map((layer) => (layer.kind === kind ? { ...layer, props } : layer)),
+      };
+    };
+
+    test("a shade layer with props { alpha: 0.5 } parses and carries the props verbatim", () => {
+      const parsed = parseBrief({ ...valid, template: withProps("shade", { alpha: 0.5 }) });
+      expect(parsed.template.layers.find((layer) => layer.kind === "shade")).toEqual({
+        id: "shade",
+        kind: "shade",
+        props: { alpha: 0.5 },
+      });
+    });
+
+    test("0 is a legal fraction: props { alpha: 0 } and { width: 0 } parse", () => {
+      const withZeroAlpha = parseBrief({ ...valid, template: withProps("shade", { alpha: 0 }) });
+      expect(withZeroAlpha.template.layers.find((layer) => layer.kind === "shade")?.props).toEqual({ alpha: 0 });
+      const withZeroWidth = parseBrief({ ...valid, template: withProps("logo", { width: 0 }) });
+      expect(withZeroWidth.template.layers.find((layer) => layer.kind === "logo")?.props).toEqual({ width: 0 });
+    });
+
+    test("props { anchor: 'top' } on the text layer parses", () => {
+      const parsed = parseBrief({ ...valid, template: withProps("static-text", { anchor: "top" }) });
+      expect(parsed.template.layers.find((layer) => layer.kind === "static-text")?.props).toEqual({ anchor: "top" });
+    });
+
+    test("props on an image layer are refused — the kind has none", () => {
+      expect(() => parseBrief({ ...valid, template: withProps("image", { alpha: 0.5 }) })).toThrow(
+        'Campaign brief field "template.layers[0].props" must be absent for layer kind "image"; got {"alpha":0.5}.',
+      );
+    });
+
+    test("an empty props object on a propless kind is refused too; on shade it is legal", () => {
+      expect(() => parseBrief({ ...valid, template: withProps("image", {}) })).toThrow(
+        'Campaign brief field "template.layers[0].props" must be absent for layer kind "image"; got {}.',
+      );
+      // Shade's props are all optional, so the empty object stays legal there.
+      expect(() => parseBrief({ ...valid, template: withProps("shade", {}) })).not.toThrow();
+    });
+
+    test("a logo layer carrying accent's solidHeight is refused (wrong kind's props)", () => {
+      expect(() => parseBrief({ ...valid, template: withProps("logo", { solidHeight: 0.05 }) })).toThrow(
+        'Campaign brief field "template.layers[4].props.solidHeight" must be one of "width", "margin" for layer kind "logo"; got 0.05.',
+      );
+    });
+
+    test.each([
+      ["alpha 1.4 on shade", withProps("shade", { alpha: 1.4 }), 1, "alpha", "1.4"],
+      ["width -0.1 on logo", withProps("logo", { width: -0.1 }), 4, "width", "-0.1"],
+      ["a non-numeric alpha", withProps("shade", { alpha: "0.5" }), 1, "alpha", '"0.5"'],
+    ])("refuses %s", (_label, template, index, field, repr) => {
+      expect(() => parseBrief({ ...valid, template })).toThrow(
+        `Campaign brief field "template.layers[${index}].props.${field}" must be a number in [0, 1]; got ${repr}.`,
+      );
+    });
+
+    test("an anchor outside the vocabulary is refused", () => {
+      expect(() => parseBrief({ ...valid, template: withProps("static-text", { anchor: "sideways" }) })).toThrow(
+        'Campaign brief field "template.layers[3].props.anchor" must be one of "top", "middle", "bottom"; got "sideways".',
+      );
+    });
+
+    test("props that are not an object are refused", () => {
+      expect(() => parseBrief({ ...valid, template: withProps("shade", 5) })).toThrow(
+        'Campaign brief field "template.layers[1].props" must be an object; got 5.',
+      );
+    });
+
+    test("the refusal holds with enforceCapabilities: false (authoring mode too)", () => {
+      expect(() =>
+        parseBrief({ ...valid, template: withProps("image", { alpha: 0.5 }) }, { enforceCapabilities: false }),
+      ).toThrow(
+        'Campaign brief field "template.layers[0].props" must be absent for layer kind "image"; got {"alpha":0.5}.',
+      );
+      expect(() =>
+        parseBrief({ ...valid, template: withProps("shade", { alpha: 1.4 }) }, { enforceCapabilities: false }),
+      ).toThrow('Campaign brief field "template.layers[1].props.alpha" must be a number in [0, 1]; got 1.4.');
+    });
+  });
+
   describe("scalar shape checks (D68 — shape, not just presence)", () => {
     test.each([
       ["a list-typed targetRegion", { ...valid, targetRegion: ["DE", "US"] }, '"targetRegion" must be a string or null; got ["DE","US"]'],

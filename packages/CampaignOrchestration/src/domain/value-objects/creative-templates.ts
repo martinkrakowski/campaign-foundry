@@ -6,6 +6,7 @@
  * order field.
  */
 import type { AdvertisingUnit } from "./advertising-units.js";
+import type { LayerProps } from "./brief-template.js";
 import type { CreativeType } from "./creative-types.js";
 import type { LayerKind } from "./layer-kinds.js";
 
@@ -20,6 +21,13 @@ export type CanonicalTemplateId = (typeof CANONICAL_TEMPLATE_IDS)[number];
 export interface CreativeTemplateLayer {
   readonly id: string;
   readonly kind: LayerKind;
+  /**
+   * The layer's own props (D134): overrides of the geometry this layer already
+   * reads. Optional, and absent means the resolved defaults — the canonical
+   * library's own layers never carry props; only a brief's materialised copy
+   * can.
+   */
+  readonly props?: LayerProps;
 }
 
 export interface CreativeTemplate {
