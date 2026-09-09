@@ -93,6 +93,44 @@ describe("FsTemplateStore", () => {
     expect(await store.exists("canonical-image-text", 99)).toBe(false);
   });
 
+  test("a returned template is frozen: mutating it throws and a second read still sees the original", async () => {
+    const store = new FsTemplateStore();
+    const template = await store.findTemplate("canonical-image-text");
+    expect(template).toBeDefined();
+
+    // The template object, its layers array, and each layer are all frozen,
+    // so a mutation throws in strict mode and is impossible in TypeScript.
+    const mutable = template as unknown as { name: string; layers: unknown[] };
+    expect(() => {
+      mutable.name = "mutated";
+    }).toThrow();
+    expect(() => {
+      mutable.layers.push({ id: "sneaky" });
+    }).toThrow();
+    const firstLayer = template?.layers[0] as unknown as { id: string };
+    expect(() => {
+      firstLayer.id = "overwritten";
+    }).toThrow();
+
+    const second = await store.findTemplate("canonical-image-text");
+    expect(second?.layers.map((l) => l.id)).toEqual([
+      "image",
+      "shade",
+      "accent",
+      "static-text",
+      "logo",
+    ]);
+  });
+
+  test("constructing with two records sharing an id and version throws, naming both", () => {
+    const v1a = CANONICAL_TEMPLATES["image-text"];
+    const v1b = { ...v1a, name: "same id, same version" };
+
+    expect(() => new FsTemplateStore([v1a, v1b])).toThrow(
+      'Duplicate template record for ("canonical-image-text", version 1).',
+    );
+  });
+
   test("the store is registered as a lazily-created singleton", () => {
     resetTemplateStore();
     try {
