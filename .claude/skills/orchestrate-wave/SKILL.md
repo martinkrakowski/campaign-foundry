@@ -53,6 +53,11 @@ placeholder rather than the runtime fallback; a test file that did not contain t
 claimed; and two mutants that were genuinely equivalent. A mutation that fails to apply, or that
 changes nothing observable, **is not evidence** — redo it, or record it as equivalent and say why.
 
+**Then read the right signal.** A mutation can be caught by the *run* rather than by a named test:
+removing a stream's `error` handler left every test in the file passing and the run exited `1` on an
+unhandled `EISDIR`. Grepping the output for failing test names read that as surviving. **Take the
+command's exit code**, and treat a green-looking test list with a non-zero exit as caught.
+
 **A fix round is verified to have landed before its PR merges.** Check for the commit, not the exit
 code — and **record the tip before you dispatch**, because `origin/main..HEAD` also lists the
 implementation commits and so stays non-empty for a round that did nothing:
