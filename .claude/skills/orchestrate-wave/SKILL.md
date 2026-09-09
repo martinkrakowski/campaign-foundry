@@ -25,6 +25,21 @@ where they differ; it deliberately does not copy them, so they cannot drift apar
 - Verified CLI invocations, model ids and each model's track record: [references/cast.md](references/cast.md)
 - Staggered dispatch + blocking wait: `${CLAUDE_SKILL_DIR}/scripts/dispatch-lane.sh`
 
+## Naming waves and lanes
+
+`wave-event.sh` accepts `[A-Za-z0-9_-]+` for both, so an identifier can carry the plan's id **and**
+say what the lane does. Use both — the id is what a PR, a record and the plan agree on; the name is
+what a human reads on the status page at a glance.
+
+```
+wave:  <plan-slug>-w<N>        creative-templates-w3
+lane:  <plan-id>-<what-it-does>  L3b-layer-props   L7a-template-library
+```
+
+**Not** `ct-3/L3b`, and not `waveT/fix-a4`. A reader six weeks out has no idea what `A4` was, and
+the id alone makes the status page a lookup table against a planning document. Keep the id first so
+sorting still groups a plan's lanes in order.
+
 ## The rule everything else rests on
 
 **Lane status is derived, never asserted.** Before believing any progress report — an
