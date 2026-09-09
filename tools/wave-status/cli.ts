@@ -33,8 +33,8 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     } else if (arg === ROOT_FLAG) {
       const next = argv[i + 1];
       if (next === undefined) throw new Error("--root requires a path");
-      if (next.startsWith("-"))
-        throw new Error(`--root requires a path, not a flag: ${JSON.stringify(next)}`);
+      if (next === "" || next.startsWith("-"))
+        throw new Error(`--root requires a path, not ${JSON.stringify(next)}`);
       root = next;
       i += 1;
     } else if (arg.startsWith(ROOT_PREFIX)) {
@@ -56,6 +56,7 @@ export interface CliIo {
   readonly isTTY: boolean;
   readonly noColor: boolean;
   readonly log: (text: string) => void;
+  readonly logError: (text: string) => void;
   readonly collect: (root: string) => Promise<WaveStatus>;
   readonly schedule: (fn: () => void, ms: number) => unknown;
 }
@@ -80,7 +81,11 @@ export async function runCli(io: CliIo): Promise<void> {
       await new Promise<void>((resolve) =>
         io.schedule(() => resolve(), (args.watch as number) * 1000),
       );
-      await print();
+      try {
+        await print();
+      } catch (error: unknown) {
+        io.logError(error instanceof Error ? error.message : String(error));
+      }
       void tick();
     };
     void tick();
@@ -95,6 +100,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     isTTY: process.stdout.isTTY === true,
     noColor: process.env.NO_COLOR !== undefined,
     log: (text) => console.log(text),
+    logError: (text) => console.error(text),
     collect: (root) => collect(realDeps, root, new Date().toISOString()),
     schedule: (fn, ms) => setTimeout(fn, ms),
   }).catch((error: unknown) => {

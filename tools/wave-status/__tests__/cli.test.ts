@@ -12,10 +12,11 @@ const status: WaveStatus = {
 
 function makeIo(argv: readonly string[], overrides: Partial<CliIo> = {}) {
   const log = vi.fn((_text: string): void => undefined);
+  const logError = vi.fn((_text: string): void => undefined);
   const collect = vi.fn(async (_root: string): Promise<WaveStatus> => status);
   const schedule = vi.fn((_fn: () => void, _ms: number): void => undefined);
-  const io: CliIo = { argv, isTTY: true, noColor: false, log, collect, schedule, ...overrides };
-  return { io, log, collect, schedule };
+  const io: CliIo = { argv, isTTY: true, noColor: false, log, logError, collect, schedule, ...overrides };
+  return { io, log, logError, collect, schedule };
 }
 
 describe("parseArgs", () => {
@@ -51,6 +52,7 @@ describe("parseArgs", () => {
   test("--root refuses a value that begins with '-' (e.g. a later flag) and an empty value", () => {
     expect(() => parseArgs(["--root", "--watch=2"])).toThrow(/--root requires a path/);
     expect(() => parseArgs(["--root="])).toThrow(/--root requires a path/);
+    expect(() => parseArgs(["--root", ""])).toThrow(/--root requires a path/);
   });
 
   test("--root refuses a path that begins with '-' and the = form too", () => {
@@ -144,5 +146,27 @@ describe("runCli", () => {
   test("an unknown argument rejects", async () => {
     const { io } = makeIo(["--nope"]);
     await expect(runCli(io)).rejects.toThrow(/unknown argument/);
+  });
+
+  test("a failed collect reports the error and the next tick still prints", async () => {
+    let calls = 0;
+    const collect = vi.fn(async (_root: string): Promise<WaveStatus> => {
+      calls += 1;
+      if (calls === 2) throw new Error("gh failed");
+      if (calls === 3) throw "log file vanished";
+      return status;
+    });
+    const { io, log, logError, schedule } = makeIo(["--watch=1"], { collect });
+    await runCli(io);
+    expect(log).toHaveBeenCalledTimes(1);
+    const [fn] = schedule.mock.calls[0] as [() => void, number];
+    fn();
+    await vi.waitFor(() => expect(logError).toHaveBeenCalledWith("gh failed"));
+    const [fn2] = schedule.mock.calls[1] as [() => void, number];
+    fn2();
+    await vi.waitFor(() => expect(logError).toHaveBeenCalledWith("log file vanished"));
+    const [fn3] = schedule.mock.calls[2] as [() => void, number];
+    fn3();
+    await vi.waitFor(() => expect(log).toHaveBeenCalledTimes(2));
   });
 });
