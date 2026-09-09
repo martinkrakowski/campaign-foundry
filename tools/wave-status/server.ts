@@ -346,7 +346,9 @@ async function serveTokens(res: ServerResponse, tokensCssPath: string): Promise<
 /**
  * Extract the `.dark { … }` block from a CSS file, balancing braces while
  * skipping comments and strings so a brace inside them cannot cut the match
- * short. Returns undefined when there is no `.dark` block.
+ * short. The returned rule carries its `.dark` selector — a faithful copy of
+ * the app's block, not a headless `{ … }` body a browser would discard.
+ * Returns undefined when there is no `.dark` block.
  */
 export function extractDarkBlock(css: string): string | undefined {
   const start = css.indexOf(".dark");
@@ -385,7 +387,7 @@ export function extractDarkBlock(css: string): string | undefined {
     if (ch === "{") depth++;
     else if (ch === "}") {
       depth--;
-      if (depth === 0) return css.slice(open, i + 1);
+      if (depth === 0) return css.slice(start, i + 1);
     }
   }
   return undefined;

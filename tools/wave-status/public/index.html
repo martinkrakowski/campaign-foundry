@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,6 +9,8 @@
   /* The colour tokens (--color-*) come from /tokens.css, which the server
      serves by extracting the dark "Firefly" block from apps/web/src/styles/tokens.css.
      This page never redeclares them, so an app token change cannot silently drift.
+     The served block is scoped to `.dark`, so <html> carries that class — the same
+     opt-in apps/web uses; without it the served rules match nothing.
      Only the non-colour tokens are defined here. */
   :root {
     --space-1: 4px;
