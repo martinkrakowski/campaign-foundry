@@ -40,6 +40,8 @@ emit_event() {
 LANE_CMD="${LANE_CMD:-}"
 
 lanes=()
+typeset -A lane_wt
+typeset -A lane_tip
 first=1
 for spec in "$@"; do
   lane="${spec%%:*}"; rest="${spec#*:}"; wt="${rest%%:*}"; brief="${rest#*:}"
@@ -49,6 +51,8 @@ for spec in "$@"; do
   [ -d "$wt" ]    || { print -u2 "no worktree: $wt";   exit 2; }
   [ -f "$brief" ] || { print -u2 "no brief: $brief";   exit 2; }
   [ -d "$wt/node_modules" ] || print -u2 "warning: $wt has no node_modules — run yarn install first"
+  lane_wt[$lane]="$wt"
+  lane_tip[$lane]=$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)
   log="$LOGDIR/$lane.log"; : > "$log"; lanes+=("$lane")
   emit_event "$lane" dispatch started
   [ $first -eq 1 ] || sleep "$STAGGER"
@@ -111,6 +115,18 @@ for lane in "${lanes[@]}"; do
   marker=$(grep -E '^EXIT [0-9]+$' "$log" | tail -1)
   [[ "$marker" == "EXIT 0" ]] || (( failed++ ))
   print "$lane: ${marker:-<no marker>}, $(wc -c < "$log" | tr -d ' ') bytes"
+  wt="${lane_wt[$lane]:-}"
+  tip="${lane_tip[$lane]:-}"
+  if [[ -n "$tip" ]]; then
+    commit_count=$(git -C "$wt" rev-list "${tip}..HEAD" --count 2>/dev/null || echo 0)
+    if (( commit_count > 0 )); then
+      print "    commits since tip (${tip[1,7]}): $commit_count"
+    else
+      print "    commits since tip (${tip[1,7]}): none"
+    fi
+  else
+    print "    commits since tip: none"
+  fi
   sed 's/\x1b\[[0-9;]*m//g' "$log" | grep -iE 'insufficient balance|database is locked|^Error:' | head -3 | sed 's/^/    /'
 done
 print "\nNow derive each lane's real status: gh pr list --head <branch>; the gate in the worktree; git diff --stat (read deletions)."

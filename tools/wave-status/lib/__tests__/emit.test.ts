@@ -434,4 +434,67 @@ describe("scripts/dispatch-lane.sh emits its events", () => {
     },
     20_000,
   );
+
+  test.skipIf(!hasZsh)(
+    zshSkip ?? "reports commits since recorded tip and plainly says none when a lane committed nothing",
+    () => {
+      const logdir = join(tempDir(), "waveTip");
+      const wtCommitted = tempDir();
+      const wtEmpty = tempDir();
+      const brief = join(tempDir(), "brief.md");
+      writeFileSync(brief, "work\n");
+
+      // Setup git worktree for wtCommitted
+      execFileSync("git", ["init"], { cwd: wtCommitted, stdio: "ignore" });
+      execFileSync("git", ["config", "user.name", "Test"], { cwd: wtCommitted, stdio: "ignore" });
+      execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: wtCommitted, stdio: "ignore" });
+      writeFileSync(join(wtCommitted, "init.txt"), "initial\n");
+      execFileSync("git", ["add", "."], { cwd: wtCommitted, stdio: "ignore" });
+      execFileSync("git", ["commit", "-m", "initial commit"], { cwd: wtCommitted, stdio: "ignore" });
+      const tipCommitted = execFileSync("git", ["rev-parse", "HEAD"], { cwd: wtCommitted, encoding: "utf8" }).trim();
+
+      // Setup git worktree for wtEmpty with earlier commits to verify it does not compare to origin/main
+      execFileSync("git", ["init"], { cwd: wtEmpty, stdio: "ignore" });
+      execFileSync("git", ["config", "user.name", "Test"], { cwd: wtEmpty, stdio: "ignore" });
+      execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: wtEmpty, stdio: "ignore" });
+      writeFileSync(join(wtEmpty, "earlier1.txt"), "1\n");
+      execFileSync("git", ["add", "."], { cwd: wtEmpty, stdio: "ignore" });
+      execFileSync("git", ["commit", "-m", "earlier 1"], { cwd: wtEmpty, stdio: "ignore" });
+      writeFileSync(join(wtEmpty, "earlier2.txt"), "2\n");
+      execFileSync("git", ["add", "."], { cwd: wtEmpty, stdio: "ignore" });
+      execFileSync("git", ["commit", "-m", "earlier 2"], { cwd: wtEmpty, stdio: "ignore" });
+      const tipEmpty = execFileSync("git", ["rev-parse", "HEAD"], { cwd: wtEmpty, encoding: "utf8" }).trim();
+
+      // Lane 1 makes a commit during execution; Lane 2 runs true without committing
+      writeFileSync(
+        join(wtCommitted, "lane.sh"),
+        'echo "new change" >> init.txt && git add init.txt && git commit -m "new commit"\n',
+      );
+
+      const stdout = execFileSync(
+        "zsh",
+        [
+          dispatchLaneSh,
+          logdir,
+          `committed:${wtCommitted}:${brief}`,
+          `uncommitted:${wtEmpty}:${brief}`,
+        ],
+        {
+          timeout: 20_000,
+          env: {
+            ...process.env,
+            STAGGER: "0",
+            POLL: "1",
+            WAVE: "W3T",
+            LANE_CMD: "if [[ -f lane.sh ]]; then zsh lane.sh; else true; fi",
+          },
+          encoding: "utf8",
+        },
+      );
+
+      expect(stdout).toContain(`commits since tip (${tipCommitted.slice(0, 7)}): 1`);
+      expect(stdout).toContain(`commits since tip (${tipEmpty.slice(0, 7)}): none`);
+    },
+    20_000,
+  );
 });
