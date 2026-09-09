@@ -44,6 +44,27 @@ sorting still groups a plan's lanes in order.
 
 ## Two preconditions that cost the most when skipped
 
+**Run mutations through `yarn mutate`, not by hand.** The tool takes the before- and after-text
+from **files**, so no shell quoting can alter them; matches **literal text with no regex**; refuses
+unless the text occurs exactly once; refuses a no-op; confirms the file holds the **intended**
+mutation before running anything; restores unconditionally, loudly if the restore itself fails; and
+reports the command's **exit code first**, with the verdict in words:
+
+```sh
+yarn mutate --file <path> --before <before.txt> --after <after.txt> \
+  --because "<the input whose behaviour this changes>" -- <test command…>
+# exit 0 = caught · 1 = survived · 2 = refused (it says which rule)
+```
+
+`--because` is required on purpose: stating the prediction **before** seeing the result is the only
+guard against an equivalent mutant, and two of this repository's were exactly that. Each rule the
+tool enforces exists because the same mistake was made by hand — a pattern that missed an `&&` at a
+line end, a character class terminated by a semicolon inside a string, and a green-looking test list
+read as a survival when the run had exited `1`.
+
+**If you mutate by hand anyway, the rest of this section is the checklist you are now keeping
+yourself.**
+
 **A mutation is read from the file, never written from memory.** Copy the literal text you intend
 to change, apply it, then **confirm the edit landed** — `git diff` non-empty *and* the intended line
 actually different — before you run anything. Five mutations misfired in one session and **four of
@@ -57,6 +78,10 @@ changes nothing observable, **is not evidence** — redo it, or record it as equ
 removing a stream's `error` handler left every test in the file passing and the run exited `1` on an
 unhandled `EISDIR`. Grepping the output for failing test names read that as surviving. **Take the
 command's exit code**, and treat a green-looking test list with a non-zero exit as caught.
+
+**The dispatch wrapper now reports commits per lane** against the tip it recorded before dispatch,
+and distinguishes *no commits* from *could not tell*. Read that line; it is the mechanical form of
+the rule below.
 
 **A fix round is verified to have landed before its PR merges.** Check for the commit, not the exit
 code — and **record the tip before you dispatch**, because `origin/main..HEAD` also lists the
