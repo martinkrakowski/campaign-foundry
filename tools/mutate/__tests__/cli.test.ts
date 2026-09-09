@@ -212,7 +212,8 @@ describe("realDeps integration", () => {
       "--",
       process.execPath,
       "-e",
-      "process.exit(1)",
+      'const fs = require("node:fs"); const content = fs.readFileSync(process.argv[1], "utf8"); process.exit(content.includes("return a - b;") ? 1 : 0);',
+      targetFile,
     ]);
 
     const code = await runCli(io);
@@ -223,6 +224,43 @@ describe("realDeps integration", () => {
     const printed = log.mock.calls[0]?.[0] as string;
     expect(printed).toContain("exit code: 1");
     expect(printed).toContain("verdict: caught");
+  });
+
+  test("executes real command, reporting survived when child exits 0 upon observing mutation", async () => {
+    const dir = tempDir();
+    const targetFile = join(dir, "target.ts");
+    const beforeFile = join(dir, "before.txt");
+    const afterFile = join(dir, "after.txt");
+
+    const originalContent = "export function add(a: number, b: number) { return a + b; }\n";
+    writeFileSync(targetFile, originalContent);
+    writeFileSync(beforeFile, "return a + b;");
+    writeFileSync(afterFile, "return a - b;");
+
+    const { io, log } = makeCliIo([
+      "--file",
+      targetFile,
+      "--before",
+      beforeFile,
+      "--after",
+      afterFile,
+      "--because",
+      "operator mutation changes addition to subtraction",
+      "--",
+      process.execPath,
+      "-e",
+      'const fs = require("node:fs"); const content = fs.readFileSync(process.argv[1], "utf8"); process.exit(content.includes("return a - b;") ? 0 : 1);',
+      targetFile,
+    ]);
+
+    const code = await runCli(io);
+    expect(code).toBe(EXIT_SURVIVED);
+
+    // Target file must be byte-identical to original
+    expect(readFileSync(targetFile, "utf8")).toBe(originalContent);
+    const printed = log.mock.calls[0]?.[0] as string;
+    expect(printed).toContain("exit code: 0");
+    expect(printed).toContain("verdict: survived");
   });
 
   test("realDeps execute handles child process error when command cannot be spawned", async () => {
@@ -267,6 +305,17 @@ describe("realDeps integration", () => {
     expect(res.exitCode).toBe(0);
     expect(res.stdout).toBe("hello stdout\n");
     expect(res.stderr).toBe("hello stderr\n");
+  });
+
+  test("realDeps execute preserves multi-byte characters split across chunk boundaries intact", async () => {
+    const res = await realDeps.execute([
+      process.execPath,
+      "-e",
+      'process.stdout.write(Buffer.from([0xf0, 0x9f])); setTimeout(() => { process.stdout.write(Buffer.from([0x98, 0x80])); process.stderr.write(Buffer.from([0xf0, 0x9f])); setTimeout(() => { process.stderr.write(Buffer.from([0x99, 0x82])); process.exit(0); }, 10); }, 10);',
+    ]);
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).toBe("😀");
+    expect(res.stderr).toBe("🙂");
   });
 
   test("realDeps execute defaults null exit code to 1 when killed by signal", async () => {

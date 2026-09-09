@@ -435,6 +435,27 @@ describe("scripts/dispatch-lane.sh emits its events", () => {
     20_000,
   );
 
+  const gitExplicit = (
+    args: readonly string[],
+    cwd: string,
+    options: { encoding?: "utf8"; stdio?: "ignore" | "pipe" } = { stdio: "ignore" },
+  ): string =>
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "init.defaultBranch=main",
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        ...args,
+      ],
+      { cwd, encoding: "utf8", ...options },
+    );
+
   test.skipIf(!hasZsh)(
     zshSkip ?? "reports commits since recorded tip and plainly says none when a lane committed nothing",
     () => {
@@ -445,25 +466,27 @@ describe("scripts/dispatch-lane.sh emits its events", () => {
       writeFileSync(brief, "work\n");
 
       // Setup git worktree for wtCommitted
-      execFileSync("git", ["init"], { cwd: wtCommitted, stdio: "ignore" });
-      execFileSync("git", ["config", "user.name", "Test"], { cwd: wtCommitted, stdio: "ignore" });
-      execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: wtCommitted, stdio: "ignore" });
+      gitExplicit(["init"], wtCommitted);
+      gitExplicit(["config", "commit.gpgsign", "false"], wtCommitted);
+      gitExplicit(["config", "user.name", "Test"], wtCommitted);
+      gitExplicit(["config", "user.email", "test@example.com"], wtCommitted);
       writeFileSync(join(wtCommitted, "init.txt"), "initial\n");
-      execFileSync("git", ["add", "."], { cwd: wtCommitted, stdio: "ignore" });
-      execFileSync("git", ["commit", "-m", "initial commit"], { cwd: wtCommitted, stdio: "ignore" });
-      const tipCommitted = execFileSync("git", ["rev-parse", "HEAD"], { cwd: wtCommitted, encoding: "utf8" }).trim();
+      gitExplicit(["add", "."], wtCommitted);
+      gitExplicit(["commit", "-m", "initial commit"], wtCommitted);
+      const tipCommitted = gitExplicit(["rev-parse", "HEAD"], wtCommitted, { stdio: "pipe" }).trim();
 
       // Setup git worktree for wtEmpty with earlier commits to verify it does not compare to origin/main
-      execFileSync("git", ["init"], { cwd: wtEmpty, stdio: "ignore" });
-      execFileSync("git", ["config", "user.name", "Test"], { cwd: wtEmpty, stdio: "ignore" });
-      execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: wtEmpty, stdio: "ignore" });
+      gitExplicit(["init"], wtEmpty);
+      gitExplicit(["config", "commit.gpgsign", "false"], wtEmpty);
+      gitExplicit(["config", "user.name", "Test"], wtEmpty);
+      gitExplicit(["config", "user.email", "test@example.com"], wtEmpty);
       writeFileSync(join(wtEmpty, "earlier1.txt"), "1\n");
-      execFileSync("git", ["add", "."], { cwd: wtEmpty, stdio: "ignore" });
-      execFileSync("git", ["commit", "-m", "earlier 1"], { cwd: wtEmpty, stdio: "ignore" });
+      gitExplicit(["add", "."], wtEmpty);
+      gitExplicit(["commit", "-m", "earlier 1"], wtEmpty);
       writeFileSync(join(wtEmpty, "earlier2.txt"), "2\n");
-      execFileSync("git", ["add", "."], { cwd: wtEmpty, stdio: "ignore" });
-      execFileSync("git", ["commit", "-m", "earlier 2"], { cwd: wtEmpty, stdio: "ignore" });
-      const tipEmpty = execFileSync("git", ["rev-parse", "HEAD"], { cwd: wtEmpty, encoding: "utf8" }).trim();
+      gitExplicit(["add", "."], wtEmpty);
+      gitExplicit(["commit", "-m", "earlier 2"], wtEmpty);
+      const tipEmpty = gitExplicit(["rev-parse", "HEAD"], wtEmpty, { stdio: "pipe" }).trim();
 
       // Lane 1 makes a commit during execution; Lane 2 runs true without committing
       writeFileSync(
@@ -535,13 +558,14 @@ describe("scripts/dispatch-lane.sh emits its events", () => {
       const brief = join(tempDir(), "brief.md");
       writeFileSync(brief, "work\n");
 
-      execFileSync("git", ["init"], { cwd: wtCorrupt, stdio: "ignore" });
-      execFileSync("git", ["config", "user.name", "Test"], { cwd: wtCorrupt, stdio: "ignore" });
-      execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: wtCorrupt, stdio: "ignore" });
+      gitExplicit(["init"], wtCorrupt);
+      gitExplicit(["config", "commit.gpgsign", "false"], wtCorrupt);
+      gitExplicit(["config", "user.name", "Test"], wtCorrupt);
+      gitExplicit(["config", "user.email", "test@example.com"], wtCorrupt);
       writeFileSync(join(wtCorrupt, "init.txt"), "initial\n");
-      execFileSync("git", ["add", "."], { cwd: wtCorrupt, stdio: "ignore" });
-      execFileSync("git", ["commit", "-m", "initial commit"], { cwd: wtCorrupt, stdio: "ignore" });
-      const tip = execFileSync("git", ["rev-parse", "HEAD"], { cwd: wtCorrupt, encoding: "utf8" }).trim();
+      gitExplicit(["add", "."], wtCorrupt);
+      gitExplicit(["commit", "-m", "initial commit"], wtCorrupt);
+      const tip = gitExplicit(["rev-parse", "HEAD"], wtCorrupt, { stdio: "pipe" }).trim();
 
       // Lane script removes .git so rev-list fails when dispatch-lane checks after execution
       writeFileSync(join(wtCorrupt, "lane.sh"), "rm -rf .git\n");

@@ -31,11 +31,14 @@ export const realDeps: MutationDeps = {
       let stdout = "";
       let stderr = "";
 
-      child.stdout.on("data", (data: Buffer) => {
-        stdout += data.toString("utf8");
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+
+      child.stdout.on("data", (data: string) => {
+        stdout += data;
       });
-      child.stderr.on("data", (data: Buffer) => {
-        stderr += data.toString("utf8");
+      child.stderr.on("data", (data: string) => {
+        stderr += data;
       });
 
       child.on("error", (err) => {
