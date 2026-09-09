@@ -7,6 +7,7 @@ export { OutputSection } from "./OutputSection";
 export { PolicySection } from "./PolicySection";
 
 export { LayoutSection } from "./LayoutSection";
+export { TemplateSection } from "./TemplateSection";
 
 /**
  * The display name for each section, keyed by its id. This is the one vocabulary the
@@ -14,7 +15,7 @@ export { LayoutSection } from "./LayoutSection";
  * name the same thing from here rather than each spelling its own list.
  */
 /** The section ids, as a closed set — so a lookup keyed by one is total (no fallback). */
-export type SectionId = "identity" | "copy" | "products" | "treatments" | "output" | "policy" | "layout";
+export type SectionId = "identity" | "copy" | "products" | "treatments" | "output" | "policy" | "layout" | "template";
 
 export const SECTION_TITLES: Record<SectionId, string> = {
   identity: "Identity",
@@ -24,22 +25,24 @@ export const SECTION_TITLES: Record<SectionId, string> = {
   output: "Output",
   policy: "Variation Policy",
   layout: "Layout",
+  template: "Template",
 };
 
 /**
  * Section order by mode (D17).
  *
- * The Layout step (T7 — D62/D63) is the template's home: the brief-level type every
- * creative inherits, hosted with the real-ratio preview. It follows the content and
- * the look steps — identity, copy, products, and the per-look choices (Treatments in
- * Classic; the lock-or-vary cards stay on Variation Policy in Randomized) — and
- * immediately precedes Output in BOTH modes: the template is the last word on what
- * the creatives look like, and Output and Policy are the delivery and planning steps
- * that consume it.
+ * The Template step (L5 — D124) is the campaign's layer list: what every
+ * creative is made of, bottom first, with the add and remove offers the
+ * compatibility table permits. It immediately precedes the Layout step
+ * (T7 — D62/D63), the template's home — the brief-level type every creative
+ * inherits, hosted with the real-ratio preview — whose type the layers carry,
+ * and Layout still immediately precedes Output in BOTH modes: the template is
+ * the last word on what the creatives look like, and Output and Policy are the
+ * delivery and planning steps that consume it.
  */
 export function sectionOrder(mode: "brief" | "variation"): SectionId[] {
   if (mode === "variation") {
-    return ["identity", "copy", "products", "layout", "output", "policy"];
+    return ["identity", "copy", "products", "template", "layout", "output", "policy"];
   }
-  return ["identity", "copy", "products", "treatments", "layout", "output"];
+  return ["identity", "copy", "products", "treatments", "template", "layout", "output"];
 }

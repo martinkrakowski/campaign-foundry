@@ -100,6 +100,12 @@ function summaryRows(brief: CampaignBrief, spec: CanvasSpec): SummaryRow[] {
           rows.push({ section, lines: [messages.reviewPolicyValue(brief.variation.count)] });
         }
         break;
+      case "template":
+        // The layer list the brief will carry, as a count (L5): the ids are
+        // the editor's own vocabulary, never review copy (D18) — the count is
+        // the fact worth one line here.
+        rows.push({ section, lines: [messages.reviewTemplateLayers(brief.template.layers.length)] });
+        break;
       case "layout": {
         // The template row (T7): the brief's authored type, in display labels
         // (D18), the size in derived px at this row's own canvas (D55 width for

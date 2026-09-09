@@ -4,12 +4,13 @@ import { SectionOutline } from "../section-outline";
 
 /**
  * The outline's rows come straight from `sectionOrder(mode)` — the one ordered
- * list of sections (GB-D18) — so the two modes' six rows differ only where the
+ * list of sections (GB-D18) — so the two modes' rows differ only where the
  * plan says: classic gets Treatments, randomized gets Variation Policy. The
- * Layout step (T7) is the template's home, in both modes' orders.
+ * Template step (L5) is the layer list and the Layout step (T7) the template's
+ * home, in both modes' orders, Template immediately before Layout.
  */
-const briefRows = ["Identity", "Copy", "Products", "Treatments", "Layout", "Output"];
-const variationRows = ["Identity", "Copy", "Products", "Layout", "Output", "Variation Policy"];
+const briefRows = ["Identity", "Copy", "Products", "Treatments", "Template", "Layout", "Output"];
+const variationRows = ["Identity", "Copy", "Products", "Template", "Layout", "Output", "Variation Policy"];
 
 describe("SectionOutline", () => {
   test("the legend renders through Eyebrow on the tracking token", () => {
@@ -20,7 +21,7 @@ describe("SectionOutline", () => {
     expect(legend.className).not.toContain("tracking-widest");
   });
 
-  test("a classic outline lists the six classic sections in order", () => {
+  test("a classic outline lists the classic sections in order", () => {
     render(<SectionOutline mode="brief" visibleErrors={{}} />);
     const buttons = screen.getAllByRole("button");
     expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual(briefRows);
