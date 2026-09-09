@@ -33,10 +33,15 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     } else if (arg === ROOT_FLAG) {
       const next = argv[i + 1];
       if (next === undefined) throw new Error("--root requires a path");
+      if (next === "" || next.startsWith("-"))
+        throw new Error(`--root requires a path, not ${JSON.stringify(next)}`);
       root = next;
       i += 1;
     } else if (arg.startsWith(ROOT_PREFIX)) {
-      root = arg.slice(ROOT_PREFIX.length);
+      const value = arg.slice(ROOT_PREFIX.length);
+      if (value === "" || value.startsWith("-"))
+        throw new Error(`--root requires a path, not ${JSON.stringify(value)}`);
+      root = value;
     } else {
       throw new Error(`unknown argument: ${JSON.stringify(arg)}`);
     }
@@ -51,6 +56,7 @@ export interface CliIo {
   readonly isTTY: boolean;
   readonly noColor: boolean;
   readonly log: (text: string) => void;
+  readonly logError: (text: string) => void;
   readonly collect: (root: string) => Promise<WaveStatus>;
   readonly schedule: (fn: () => void, ms: number) => unknown;
 }
@@ -69,7 +75,20 @@ export async function runCli(io: CliIo): Promise<void> {
   };
   await print();
   if (args.watch !== false) {
-    io.schedule(() => void print(), args.watch * 1000);
+    // A self-scheduling loop: each refresh is awaited before the next is armed,
+    // so a slow collection delays the interval instead of racing a new print.
+    const tick = async (): Promise<void> => {
+      await new Promise<void>((resolve) =>
+        io.schedule(() => resolve(), (args.watch as number) * 1000),
+      );
+      try {
+        await print();
+      } catch (error: unknown) {
+        io.logError(error instanceof Error ? error.message : String(error));
+      }
+      void tick();
+    };
+    void tick();
   }
 }
 
@@ -81,8 +100,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     isTTY: process.stdout.isTTY === true,
     noColor: process.env.NO_COLOR !== undefined,
     log: (text) => console.log(text),
+    logError: (text) => console.error(text),
     collect: (root) => collect(realDeps, root, new Date().toISOString()),
-    schedule: (fn, ms) => setInterval(fn, ms),
+    schedule: (fn, ms) => setTimeout(fn, ms),
   }).catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

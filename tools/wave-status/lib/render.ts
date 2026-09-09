@@ -22,12 +22,23 @@ const ABSENT = "—";
 /** A complete SGR sequence; `^` anchors it, so `exec` only matches at index 0. */
 const SGR_PREFIX = /^\x1b\[[0-9;]*m/;
 
+/** A complete non-SGR escape run — e.g. `\x1b[2J` — which the renderer never paints. */
+const FOREIGN_ESCAPE = /^\x1b(?:\[[\x20-\x3f]*[\x40-\x7e]|(?!\[)[\x20-\x2f]*[\x40-\x7e])/;
+
 export interface RenderOptions {
   readonly width?: number;
   readonly color?: boolean;
 }
 
 const withCode = (code: string, text: string): string => `${code}${text}${RESET}`;
+
+/** C0 control bytes (0x00–0x1F) and DEL (0x7F) are terminal control, never text. */
+const CONTROL = /[\x00-\x1f\x7f]/g;
+
+/** Identifiers come from filenames on disk; never let their bytes reprogram the terminal. */
+function sanitize(identifier: string): string {
+  return identifier.replace(CONTROL, "");
+}
 
 /** A table column: its plain text, and how that text is painted when colour is on. */
 interface Column {
@@ -37,7 +48,7 @@ interface Column {
 }
 
 function laneCell(lane: LaneStatus): string {
-  return `${lane.wave}/${lane.lane}`;
+  return `${sanitize(lane.wave)}/${sanitize(lane.lane)}`;
 }
 
 function stageCell(lane: LaneStatus): string {
@@ -123,10 +134,11 @@ const COLUMNS: readonly Column[] = [
 ];
 
 /**
- * Cut a line to `width` visible characters — never wrapped, never cut inside an
- * escape sequence, and re-balanced with a reset when a painted span was cut.
+ * Cut a line to `width` visible characters — never wrapped, and re-balanced with
+ * a reset when a painted span was cut. Only the renderer's own SGR sequences
+ * survive: any other escape run is dropped whole, never emitted half a sequence.
  */
-function truncate(line: string, width: number): string {
+export function truncate(line: string, width: number): string {
   if (!line.includes("\x1b")) return line.slice(0, width);
   let out = "";
   let visible = 0;
@@ -135,6 +147,21 @@ function truncate(line: string, width: number): string {
     if (sgr !== null) {
       out += sgr[0];
       i += sgr[0].length;
+      continue;
+    }
+    if (line[i] === "\x1b") {
+      // An escape the renderer did not paint — or one it cannot complete — is
+      // dropped in full so the terminal never lands in an unknown state.
+      const foreign = FOREIGN_ESCAPE.exec(line.slice(i));
+      if (foreign !== null) {
+        i += foreign[0].length;
+        continue;
+      }
+      i += 1;
+      if (line[i] === "[") i += 1;
+      while (i < line.length && /[\x20-\x3f]/.test(line[i])) i += 1;
+      // The byte that stopped the run never completed a sequence; drop it too.
+      if (i < line.length) i += 1;
       continue;
     }
     out += line[i];
@@ -178,7 +205,7 @@ export function renderStatus(status: WaveStatus, opts?: RenderOptions): string {
   );
 
   const blocks = waves.map((wave) => {
-    const block: string[] = [`wave ${wave.id}`];
+    const block: string[] = [`wave ${sanitize(wave.id)}`];
     if (wave.rows.length > 0) {
       block.push(
         ROW_INDENT +
