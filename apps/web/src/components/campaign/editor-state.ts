@@ -397,6 +397,10 @@ export type EditorAction =
   // and a new layer carries no props.
   | { type: "addLayer"; kind: LayerKind }
   | { type: "removeLayer"; id: string }
+  // The order the list already holds is z-order (D128): a move re-points one
+  // layer's position, every other layer untouched. An out-of-range end is a
+  // no-op, the way `removeLayer`'s unremovable id is.
+  | { type: "moveLayer"; from: number; to: number }
   | { type: "addBeat"; text?: string }
   | { type: "removeBeat"; index: number }
   | { type: "moveBeat"; from: number; to: number }
@@ -696,6 +700,11 @@ function isBeatIndex(index: number, beatCount: number): boolean {
   return Number.isInteger(index) && index >= 0 && index < beatCount;
 }
 
+/** A usable 0-based layer index: an integer inside the current list. */
+function isLayerIndex(index: number, layerCount: number): boolean {
+  return Number.isInteger(index) && index >= 0 && index < layerCount;
+}
+
 function reduceEditor(state: EditorState, action: EditorAction): EditorState {
   switch (action.type) {
     case "setMode": {
@@ -848,6 +857,30 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         template: {
           ...state.template,
           layers: state.template.layers.filter((_, i) => i !== index),
+        },
+      };
+    }
+    case "moveLayer": {
+      // Array position is z-order (D128): a move re-orders the list in place,
+      // every other layer untouched. An out-of-range end is a no-op the way
+      // `removeLayer`'s unremovable id is — the draft never leaves what the
+      // boundary offered — and moving a layer onto its own index says nothing.
+      const layerCount = state.template.layers.length;
+      if (
+        action.from === action.to ||
+        !isLayerIndex(action.from, layerCount) ||
+        !isLayerIndex(action.to, layerCount)
+      ) {
+        return state;
+      }
+      const layers = [...state.template.layers];
+      const [moved] = layers.splice(action.from, 1);
+      layers.splice(action.to, 0, moved);
+      return {
+        ...state,
+        template: {
+          ...state.template,
+          layers,
         },
       };
     }
