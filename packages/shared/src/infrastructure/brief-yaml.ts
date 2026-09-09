@@ -26,6 +26,51 @@ export const BRIEF_KEY_ORDER = [
   "output",
 ] as const;
 
+/** A template layer's canonical key order (L3b, D134): identity, kind, then its props. */
+const LAYER_KEY_ORDER = ["id", "kind", "props"] as const;
+
+/**
+ * The props' canonical key order: the order the domain's `LayerProps` union
+ * declares its members (D134) — shade's `alpha`, accent's heights, logo's
+ * widths, then the text layers' `anchor` and `typeFloor`. A valid props object
+ * carries one kind's keys only, so one flat list orders them all; keys the
+ * union does not name keep their written order at the end.
+ */
+const PROPS_KEY_ORDER = ["alpha", "solidHeight", "fadeHeight", "width", "margin", "anchor", "typeFloor"] as const;
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Re-emit `source` with `order`'s keys first (present, in order), then any remaining keys. */
+function orderedKeys(source: Record<string, unknown>, order: readonly string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of order) {
+    const value = source[key];
+    if (value !== undefined) out[key] = value;
+  }
+  for (const key of Object.keys(source)) {
+    if (!(key in out) && source[key] !== undefined) out[key] = source[key];
+  }
+  return out;
+}
+
+/** Reorder a layer's keys (id, kind, props) and, when it carries props, the props' keys in union order. */
+function orderedLayer(layer: unknown): unknown {
+  if (!isPlainRecord(layer)) return layer;
+  const ordered = orderedKeys(layer, LAYER_KEY_ORDER);
+  if (isPlainRecord(ordered.props)) {
+    ordered.props = orderedKeys(ordered.props, PROPS_KEY_ORDER);
+  }
+  return ordered;
+}
+
+/** Reorder a template's layers; a template that is not an object with a layers array passes through. */
+function orderedTemplate(template: unknown): unknown {
+  if (!isPlainRecord(template) || !Array.isArray(template.layers)) return template;
+  return { ...template, layers: template.layers.map(orderedLayer) };
+}
+
 /**
  * Serialize a brief with the canonical key order, then any remaining keys.
  *
@@ -35,18 +80,16 @@ export const BRIEF_KEY_ORDER = [
  * same object, and `flowCollectionPadding: false` keeps flow collections in the
  * unpadded form js-yaml wrote (`[static, motion]`, not `[ static, motion ]`).
  * Keys whose value is `undefined` are omitted, matching the previous js-yaml
- * dump byte for byte on the briefs this project writes.
+ * dump byte for byte on the briefs this project writes. A template's layers
+ * dump with the layer's own canonical order — `id`, `kind`, `props`, and the
+ * props keys in the union's order (L3b, D134) — so a save serialises a
+ * hand-written layer deterministically too.
  */
 export function dumpBrief(brief: object): string {
   const source = brief as Record<string, unknown>;
-  const ordered: Record<string, unknown> = {};
-  for (const key of BRIEF_KEY_ORDER) {
-    const value = source[key];
-    if (value !== undefined) ordered[key] = value;
-  }
-  for (const key of Object.keys(source)) {
-    if (!(key in ordered) && source[key] !== undefined) ordered[key] = source[key];
-  }
+  const ordered = orderedKeys(source, BRIEF_KEY_ORDER);
+  const template = orderedTemplate(ordered.template);
+  if (template !== undefined) ordered.template = template;
   return stringify(ordered, {
     lineWidth: 0,
     aliasDuplicateObjects: false,
