@@ -212,8 +212,9 @@ describe("resolvePort (D105)", () => {
 });
 
 describe("routeFor — the route table, enumerated (D106)", () => {
-  test("the table is exactly {GET /, GET /api/status, GET /api/stream, GET /api/log/:wave/:lane}", () => {
+  test("the table is exactly {GET /, GET /tokens.css, GET /api/status, GET /api/stream, GET /api/log/:wave/:lane}", () => {
     expect(routeFor("GET", "/")).toEqual({ kind: "index" });
+    expect(routeFor("GET", "/tokens.css")).toEqual({ kind: "tokens" });
     expect(routeFor("GET", "/api/status")).toEqual({ kind: "status" });
     expect(routeFor("GET", "/api/stream")).toEqual({ kind: "stream" });
     expect(routeFor("GET", "/api/log/T/t1")).toEqual({
@@ -267,7 +268,7 @@ describe("the server over real HTTP", () => {
     expect(res.headers["content-type"]).toContain("text/html");
     const html = res.body.toString("utf8");
     expect(html).toContain("<table");
-    expect(html).toContain("--color-background");
+    expect(html).toContain('<link rel="stylesheet" href="/tokens.css">');
     expect(html).toContain("stage");
     expect(html).toContain("liveness");
     expect(html).toContain('role="button"');
@@ -284,6 +285,89 @@ describe("the server over real HTTP", () => {
       indexHtmlPath: "/definitely/missing/index.html",
     });
     expect((await get(handle.port, "/")).status).toBe(500);
+  });
+
+  test("GET /tokens.css serves the app's dark block as text/css", async () => {
+    const root = await makeFixture();
+    const tokensPath = join(root, "tokens.css");
+    await writeFile(
+      tokensPath,
+      [
+        ":root {",
+        "  --color-background: #ffffff;",
+        "  --color-surface-2: #f1f5f9;",
+        "}",
+        ".dark {",
+        "  --color-background: #0f0f0f;",
+        "  --color-surface-2: #262626;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const handle = await start({
+      port: 0,
+      root,
+      collect: async () => statusAt(0),
+      tokensCssPath: tokensPath,
+    });
+    const res = await get(handle.port, "/tokens.css");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/css");
+    const body = res.body.toString("utf8");
+    expect(body).toContain("--color-background");
+    expect(body).toContain("--color-surface-2");
+    // The body carries the dark values, not the light ones — a change that
+    // serves the wrong block fails here.
+    expect(body).toContain("--color-background: #0f0f0f");
+    expect(body).not.toContain("--color-background: #ffffff");
+    // Only the dark block is served, never the light `:root`.
+    expect(body).not.toContain("#f1f5f9");
+  });
+
+  test("GET /tokens.css is 500 naming the file when it cannot be read", async () => {
+    const root = await makeFixture();
+    const missing = join(root, "does-not-exist", "tokens.css");
+    const handle = await start({
+      port: 0,
+      root,
+      collect: async () => statusAt(0),
+      tokensCssPath: missing,
+    });
+    const res = await get(handle.port, "/tokens.css");
+    expect(res.status).toBe(500);
+    expect(res.headers["content-type"]).toContain("text/plain");
+    expect(res.body.toString("utf8")).toContain(missing);
+  });
+
+  test("GET /tokens.css is 500 naming the file when it has no dark block", async () => {
+    const root = await makeFixture();
+    const tokensPath = join(root, "tokens.css");
+    await writeFile(tokensPath, ":root { --color-background: #ffffff; }\n");
+    const handle = await start({
+      port: 0,
+      root,
+      collect: async () => statusAt(0),
+      tokensCssPath: tokensPath,
+    });
+    const res = await get(handle.port, "/tokens.css");
+    expect(res.status).toBe(500);
+    expect(res.body.toString("utf8")).toContain(tokensPath);
+  });
+
+  test("the page declares no --color-* custom property of its own", async () => {
+    const handle = await start({
+      port: 0,
+      root: await makeFixture(),
+      collect: async () => statusAt(0),
+    });
+    const res = await get(handle.port, "/");
+    expect(res.status).toBe(200);
+    const html = res.body.toString("utf8");
+    // A copied token value would recreate the drift; any --color-* declaration
+    // in the page fails this build.
+    expect(html).not.toMatch(/--color-[a-z0-9-]+:/);
+    // And yet the page does link the served tokens.
+    expect(html).toContain('href="/tokens.css"');
   });
 
   test("GET /api/status returns the collected WaveStatus as JSON", async () => {
