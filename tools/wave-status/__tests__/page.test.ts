@@ -639,4 +639,58 @@ describe("the status page", () => {
       expect(page.window.getComputedStyle(btn!).display).not.toBe("none");
     }
   });
+
+  test("every control in the toolbar resolves its border to the control token and frames keep the frame token", async () => {
+    const page = await loadPage(statusAt());
+    const doc = page.window.document;
+    const sheet = doc.styleSheets[0];
+    const style = await pageStyle();
+
+    interface StyleRuleLike {
+      readonly selectorText: string;
+      readonly style: {
+        readonly borderColor?: string;
+        readonly borderBottomColor?: string;
+        readonly border?: string;
+      };
+    }
+
+    const rules = Array.from(sheet.cssRules) as unknown as readonly StyleRuleLike[];
+
+    const controls = doc.querySelectorAll("#log-toolbar button");
+    expect(controls.length).toBeGreaterThan(0);
+
+    for (const control of controls) {
+      const rule = rules.find(
+        (r) =>
+          r.selectorText !== undefined &&
+          !r.selectorText.includes(":") &&
+          control.matches(r.selectorText) &&
+          Boolean(r.style.borderColor || r.style.border),
+      );
+      expect(rule?.style.borderColor).toBe("var(--color-border-control)");
+    }
+
+    const hoverRule = rules.find((r) => r.selectorText === "#log-toolbar button:hover");
+    expect(hoverRule?.style.borderColor).toBe("var(--color-border-control-hover)");
+
+    // At least one frame still resolves to the frame token
+    const frame = doc.getElementById("log-pane");
+    expect(frame).not.toBeNull();
+    const frameRule = rules.find(
+      (r) =>
+        r.selectorText !== undefined &&
+        !r.selectorText.includes(":") &&
+        frame!.matches(r.selectorText) &&
+        Boolean(r.style.borderColor || r.style.border),
+    );
+    expect(frameRule?.style.borderColor).toBe("var(--color-border)");
+
+    expect(style).toMatch(
+      /#log-toolbar button\s*\{[^}]*border:\s*1px solid var\(--color-border-control\)/,
+    );
+    expect(style).toMatch(
+      /#log-toolbar button:hover\s*\{[^}]*border-color:\s*var\(--color-border-control-hover\)/,
+    );
+  });
 });
