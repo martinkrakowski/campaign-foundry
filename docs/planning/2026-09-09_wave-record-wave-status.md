@@ -79,5 +79,10 @@ the coverage of actual clipping is not there and should not be counted.
 
 ## Next
 
-**L8b** in `2026-09-08_creative-templates-and-units.md` — the occlusion guards (D135/D136), the
-move control, and the run key. A different plan and a different arc; it needs its own go-ahead.
+**L8** in `2026-09-08_creative-templates-and-units.md` — reorder (D128) with the occlusion guard
+(D135/D136) emitting an advisory `ComplianceResult` through the existing compliance channel, plus
+the duplicate-React-key fix deferred from L2b. That plan's wave order puts **L9** (toggle) after it,
+and then its own re-planning point, which it places deliberately after L9 because frames and regions
+turned out to be model changes rather than surface ones.
+
+A different plan and a different arc; it needs its own go-ahead.
