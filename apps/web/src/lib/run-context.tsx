@@ -2,7 +2,7 @@
 
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { BRIEF_SCHEMA_VERSION } from "@campaignfoundry/CampaignOrchestration/brief-schema-version";
-import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
+import { isBriefTemplate, templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import {
   createContext,
@@ -313,7 +313,14 @@ const BRIEF_PICKED_KEY = "cf:brief-picked";
  */
 export const BRIEF_KEY = "cf:brief";
 
-/** Minimal shape guard for a brief restored from storage (don't trust hand-edited JSON). */
+/**
+ * Minimal shape guard for a brief restored from storage (don't trust hand-edited
+ * JSON). Since L3a the template is required on `CampaignBrief`, so a stored
+ * record that predates it (valid id/products, no template) is refused: restoring
+ * it as a `CampaignBrief` would hand the shell a brief the pipeline rejects.
+ * The template must satisfy the same five-field contract the editor's draft
+ * guard applies — `isBriefTemplate` is the one check at both storage boundaries.
+ */
 export function isStoredBrief(value: unknown): value is CampaignBrief {
   if (typeof value !== "object" || value === null) return false;
   const b = value as Partial<CampaignBrief>;
@@ -324,7 +331,8 @@ export function isStoredBrief(value: unknown): value is CampaignBrief {
     b.products.length > 0 &&
     b.products.every(
       (p) => p && typeof p.id === "string" && typeof p.name === "string" && typeof p.primaryColor === "string",
-    )
+    ) &&
+    isBriefTemplate(b.template)
   );
 }
 

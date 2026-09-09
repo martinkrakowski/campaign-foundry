@@ -11,6 +11,7 @@ import {
   mockPipelineApi,
   jobOk,
   json,
+  storedTemplate,
 } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import GridPage from "../page";
@@ -265,6 +266,7 @@ describe("GridPage", () => {
         targetRegion: "DE",
         targetAudience: "a",
         campaignMessage: "Stay wild",
+        template: storedTemplate,
         products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
         mode: "variation",
         variation: { count: 2 },
@@ -329,6 +331,7 @@ describe("GridPage", () => {
         targetRegion: "DE",
         targetAudience: "a",
         campaignMessage: "Hi",
+        template: storedTemplate,
         products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
         // a variation run (variantIndex assets) can only exist under a randomized brief
         mode: "variation",
@@ -424,7 +427,7 @@ describe("GridPage", () => {
       report: { halted: false, assets: [makeAsset()], log: { entries: [], campaignId: "seed" } },
     });
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:brief", JSON.stringify({ id: "seed", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }] }));
+    localStorage.setItem("cf:brief", JSON.stringify({ id: "seed", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", template: storedTemplate, products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }] }));
     renderWithRun(<Harness />);
     await screen.findByText("Approve"); // run restored
     await user.click(screen.getByText("regen"));

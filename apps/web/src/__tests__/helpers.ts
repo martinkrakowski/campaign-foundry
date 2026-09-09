@@ -4,6 +4,8 @@ import { vi, type Mock } from "vitest";
 import { API, RunProvider, type Asset } from "@/lib/run-context";
 import { EditorDirtyProvider } from "@/lib/editor-dirty-context";
 import { EditorPanelsProvider, EditorPanelsOutlet } from "@/lib/editor-panels-context";
+import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
+import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 
 /**
  * Drive a modal's focus trap through every branch: forward-Tab wrap from the last
@@ -40,6 +42,9 @@ export const ShellProviders = ({ children }: { children: ReactNode }) =>
   );
 
 export const renderWithRun = (ui: ReactElement) => render(createElement(ShellProviders, null, ui));
+
+/** The canonical creative template a stored-brief fixture must carry (required since L3a). */
+export const storedTemplate = templateFromCanonical(DEFAULT_CAMPAIGN_TYPE);
 
 export const makeAsset = (over: Partial<Asset> = {}): Asset => ({
   productId: "alpha",
@@ -167,6 +172,7 @@ export const seedPersistedRun = (
       targetAudience: "a",
       campaignMessage: "Stay wild",
       localizedMessage: "Bleib wild",
+      template: storedTemplate,
       products: [
         { id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" },
         { id: "beta", name: "Beta", primaryColor: "#E0218A", logoPath: "b.png" },

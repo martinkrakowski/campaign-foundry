@@ -865,9 +865,15 @@ describe("draft storage", () => {
     // and unread, so a string, a number, `null` or a half-written object in a
     // user's localStorage was inert; now `toBrief` serialises whatever the bare
     // cast admitted. Every neighbour is shape-guarded — `template` must be too:
-    // anything that is not a non-null, non-array object with a canonical `id`
-    // and a `layers` array is a corrupt draft and takes the fallback silently,
-    // so a user reopening a damaged draft gets a working editor, not a crash.
+    // anything that is not a non-null, non-array object satisfying the full
+    // five-field contract (`id` a canonical member, `version` a positive
+    // integer, `creativeType` and `unit` vocabulary members, `layers` an array)
+    // is a corrupt draft and takes the fallback silently, so a user reopening a
+    // damaged draft gets a working editor, not a brief the API refuses. That
+    // means `{ id: "canonical-image-text", layers: [] }` is still corrupt: a
+    // canonical id and an array `layers` without `version`/`creativeType`/`unit`
+    // is the exact shape that used to sail through the old id+layers guard and
+    // get refused by the API's validateTemplate at `toBrief`.
     const state: EditorState = { ...base(), briefId: "camp", type: "short-video" };
     const store = (template: unknown) =>
       localStorage.setItem(getDraftKey(state), JSON.stringify({ state: { ...state, template }, timestamp: 1 }));
@@ -880,6 +886,11 @@ describe("draft storage", () => {
       { id: "nope", layers: [] },
       { id: 42, layers: [] },
       { id: "canonical-image-text" },
+      { id: "canonical-image-text", layers: [] },
+      // Same five-field contract from the other side: every field valid except
+      // `version` — the clause that makes the check complete is the one that
+      // must be load-bearing, so a guard that forgot it still admits this.
+      { id: "canonical-image-text", creativeType: "image-text", unit: "standard-web", layers: [] },
     ]) {
       store(corrupt);
       expect(() => loadDraftFromStorage(state)).not.toThrow();
