@@ -10,6 +10,7 @@
   "scripts": {
     "generate": "tsx apps/api/bin/generate.ts",
     "wave:status": "tsx tools/wave-status/bin.ts",
+    "wave:status:print": "tsx tools/wave-status/cli.ts",
     "build": "turbo build",
     "dev": "turbo dev",
     "lint": "turbo lint",
