@@ -954,21 +954,40 @@ describe("draft storage", () => {
     }
   });
 
-  test("a stored template with a non-canonical layer order is kept verbatim (L3a)", () => {
-    // The guard is a shape check, never a content check: a `layers` array whose
-    // order diverges from the canonical template is authored data — array
-    // position IS z-order (D128) — and must survive save → load → save intact
-    // rather than be restored to the canonical order.
+  test("a stored template with an obeying non-canonical layer order is kept verbatim (L3a, L8)", () => {
+    // Authored layer order that satisfies the type's ordering constraints (D128)
+    // must survive save → load → save intact rather than be restored to the canonical order.
     const canonical = templateFromCanonical("paid-social");
-    const reordered = { ...canonical, layers: [...canonical.layers].reverse() };
+    // Swap accent (index 2) and static-text (index 3): obeys shade directly above image and logo above image.
+    const reordered = {
+      ...canonical,
+      layers: [
+        canonical.layers[0]!,
+        canonical.layers[1]!,
+        canonical.layers[3]!,
+        canonical.layers[2]!,
+        canonical.layers[4]!,
+      ],
+    };
     const state: EditorState = { ...base(), briefId: "camp", type: "display-ad", template: reordered };
     saveDraftToStorage(state);
     const restored = loadDraftFromStorage(state);
     expect(restored?.template).toEqual(reordered);
     expect(restored?.template.layers.map((layer) => layer.id)).toEqual(
-      [...canonical.layers].reverse().map((layer) => layer.id),
+      reordered.layers.map((layer) => layer.id),
     );
     expect(toBrief(restored as EditorState).template).toEqual(reordered);
+  });
+
+  test("a stored template with an illegal layer order falls back to canonical (L8, D128)", () => {
+    // An illegal order (e.g. logo below image) is refused by isBriefTemplate
+    // and falls back to the canonical template rather than corrupting the editor.
+    const canonical = templateFromCanonical("paid-social");
+    const illegal = { ...canonical, layers: [...canonical.layers].reverse() };
+    const state: EditorState = { ...base(), briefId: "camp", type: "display-ad", template: illegal };
+    saveDraftToStorage(state);
+    const restored = loadDraftFromStorage(state);
+    expect(restored?.template).toEqual(templateFromCanonical("display-ad"));
   });
 
   test("normalization never overrides a key the draft actually set", () => {

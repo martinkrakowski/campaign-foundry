@@ -2,18 +2,39 @@ import { describe, test, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
-import { CREATIVE_TYPE_RULES } from "@campaignfoundry/CampaignOrchestration/creative-types";
-import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
-import { LAYER_KINDS, type LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
+import {
+  CREATIVE_TYPES,
+  CREATIVE_TYPE_RULES,
+} from "@campaignfoundry/CampaignOrchestration/creative-types";
+import {
+  CANONICAL_TEMPLATES,
+  type CanonicalTemplateId,
+} from "@campaignfoundry/CampaignOrchestration/creative-templates";
+import {
+  isBriefTemplate,
+  templateFromCanonical,
+} from "@campaignfoundry/CampaignOrchestration/brief-template";
+import {
+  LAYER_KINDS,
+  type LayerKind,
+} from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 import {
   addableKinds,
+  canMoveLayer,
+  findLegalInsertionIndex,
+  layerMoveDirections,
   platformsToFormats,
   platformsToRatios,
   platformsToSizes,
   clampPolicy,
   removableLayerIds,
 } from "../derive";
-import { initialEditorState, axisProductSize } from "../editor-state";
+import {
+  initialEditorState,
+  editorReducer,
+  axisProductSize,
+  type EditorState,
+} from "../editor-state";
 
 describe("derive.ts", () => {
   describe("platformsToFormats", () => {
@@ -23,19 +44,28 @@ describe("derive.ts", () => {
     });
 
     test("derives static for photo-only platforms in canonical order", () => {
-      expect(platformsToFormats(["instagram-feed", "linkedin"])).toEqual(["static"]);
+      expect(platformsToFormats(["instagram-feed", "linkedin"])).toEqual([
+        "static",
+      ]);
     });
 
     test("derives motion for video-only platforms", () => {
-      expect(platformsToFormats(["instagram-story", "tiktok"])).toEqual(["motion"]);
+      expect(platformsToFormats(["instagram-story", "tiktok"])).toEqual([
+        "motion",
+      ]);
     });
 
     test("derives static and motion for mixed platforms in canonical order", () => {
-      expect(platformsToFormats(["tiktok", "instagram-feed"])).toEqual(["static", "motion"]);
+      expect(platformsToFormats(["tiktok", "instagram-feed"])).toEqual([
+        "static",
+        "motion",
+      ]);
     });
 
     test("a mixed social+display selection stays static when no motion platform is selected", () => {
-      expect(platformsToFormats(["instagram-feed", "google-display"])).toEqual(["static"]);
+      expect(platformsToFormats(["instagram-feed", "google-display"])).toEqual([
+        "static",
+      ]);
     });
   });
 
@@ -47,15 +77,25 @@ describe("derive.ts", () => {
 
     test("derives canonical ratios from platforms", () => {
       expect(platformsToRatios(["instagram-feed"])).toEqual(["1:1"]);
-      expect(platformsToRatios(["instagram-feed", "x"])).toEqual(["1:1", "16:9"]);
-      expect(platformsToRatios(["instagram-story", "linkedin"])).toEqual(["1:1", "9:16"]);
-      expect(platformsToRatios(["instagram-reel", "x", "instagram-feed"])).toEqual(["1:1", "9:16", "16:9"]);
+      expect(platformsToRatios(["instagram-feed", "x"])).toEqual([
+        "1:1",
+        "16:9",
+      ]);
+      expect(platformsToRatios(["instagram-story", "linkedin"])).toEqual([
+        "1:1",
+        "9:16",
+      ]);
+      expect(
+        platformsToRatios(["instagram-reel", "x", "instagram-feed"]),
+      ).toEqual(["1:1", "9:16", "16:9"]);
     });
 
     test("a display profile contributes no ratio, even in a mixed selection", () => {
       // Treating a display profile as "1:1" would make the empty case below fail.
       expect(platformsToRatios(["google-display"])).toEqual([]);
-      expect(platformsToRatios(["instagram-feed", "google-display"])).toEqual(["1:1"]);
+      expect(platformsToRatios(["instagram-feed", "google-display"])).toEqual([
+        "1:1",
+      ]);
     });
   });
 
@@ -67,8 +107,12 @@ describe("derive.ts", () => {
     });
 
     test("dedupes in DISPLAY_SIZE_VALUES order, not insertion order", () => {
-      expect(platformsToSizes(["google-display", "meta-audience-network"])).toEqual([...DISPLAY_SIZE_VALUES]);
-      expect(platformsToSizes(["meta-audience-network", "google-display"])).toEqual([...DISPLAY_SIZE_VALUES]);
+      expect(
+        platformsToSizes(["google-display", "meta-audience-network"]),
+      ).toEqual([...DISPLAY_SIZE_VALUES]);
+      expect(
+        platformsToSizes(["meta-audience-network", "google-display"]),
+      ).toEqual([...DISPLAY_SIZE_VALUES]);
     });
   });
 
@@ -139,7 +183,9 @@ describe("derive.ts", () => {
   });
 
   describe("layer cardinality derivations (D124)", () => {
-    const stateWithLayers = (layers: readonly { id: string; kind: LayerKind }[]) => {
+    const stateWithLayers = (
+      layers: readonly { id: string; kind: LayerKind }[],
+    ) => {
       const state = initialEditorState();
       return { ...state, template: { ...state.template, layers } };
     };
@@ -151,7 +197,9 @@ describe("derive.ts", () => {
       const state = initialEditorState();
       expect(addableKinds(state)).toEqual(["image"]);
       // Below the cap: dropping the shade frees the single slot the table declares.
-      const noShade = stateWithLayers(state.template.layers.filter((l) => l.kind !== "shade"));
+      const noShade = stateWithLayers(
+        state.template.layers.filter((l) => l.kind !== "shade"),
+      );
       expect(addableKinds(noShade)).toContain("shade");
     });
 
@@ -163,7 +211,9 @@ describe("derive.ts", () => {
       expect(addableKinds(state)).not.toContain("animated-text");
       // With the text layer gone the budget is free again: either text kind is
       // offered (and the boundary will still hold the template to `required`).
-      const noTexts = stateWithLayers(state.template.layers.filter((l) => l.kind !== "static-text"));
+      const noTexts = stateWithLayers(
+        state.template.layers.filter((l) => l.kind !== "static-text"),
+      );
       expect(addableKinds(noTexts)).toContain("static-text");
       expect(addableKinds(noTexts)).toContain("animated-text");
     });
@@ -174,7 +224,9 @@ describe("derive.ts", () => {
       expect(kinds.length).toBeGreaterThan(0);
       const accepts = CREATIVE_TYPE_RULES["image-text"].accepts;
       for (let i = 1; i < kinds.length; i++) {
-        expect(accepts.indexOf(kinds[i])).toBeGreaterThan(accepts.indexOf(kinds[i - 1]));
+        expect(accepts.indexOf(kinds[i])).toBeGreaterThan(
+          accepts.indexOf(kinds[i - 1]),
+        );
       }
     });
 
@@ -191,7 +243,10 @@ describe("derive.ts", () => {
 
     test("removableLayerIds includes a required kind still present twice", () => {
       const state = initialEditorState();
-      const doubled = [...state.template.layers, { id: "image-2", kind: "image" as const }];
+      const doubled = [
+        ...state.template.layers,
+        { id: "image-2", kind: "image" as const },
+      ];
       const removable = removableLayerIds(stateWithLayers(doubled));
       expect(removable).toContain("image");
       expect(removable).toContain("image-2");
@@ -205,7 +260,10 @@ describe("derive.ts", () => {
       // while the uncapped kinds remain — the fallback for an absent shared
       // budget is table data too, not editor logic.
       const state = initialEditorState();
-      const videoState = { ...state, template: templateFromCanonical("short-video") };
+      const videoState = {
+        ...state,
+        template: templateFromCanonical("short-video"),
+      };
       expect(addableKinds(videoState)).toContain("animated-text");
       expect(addableKinds(videoState)).toContain("video");
       expect(addableKinds(videoState)).not.toContain("logo");
@@ -228,7 +286,9 @@ describe("derive.ts", () => {
     const literalKindLists = (source: string): string[] => {
       const offenders: string[] = [];
       for (const list of source.matchAll(LITERAL_KIND_LIST)) {
-        const members = [...list[0].matchAll(/"([^"]*)"|'([^']*)'/g)].map((m) => m[1] ?? m[2]);
+        const members = [...list[0].matchAll(/"([^"]*)"|'([^']*)'/g)].map(
+          (m) => m[1] ?? m[2],
+        );
         const named = members.filter((member) => kinds.has(member));
         if (named.length >= 2) offenders.push(list[0]);
       }
@@ -256,7 +316,8 @@ describe("derive.ts", () => {
 
     test("the D121 scanner flags a list naming two or more layer kinds, in either quote style", () => {
       const doubleQuoted = "[" + '"image", "logo"' + "]";
-      const singleQuoted = "[" + "'static-text', 'animated-text', \"headline-top\"" + "]";
+      const singleQuoted =
+        "[" + "'static-text', 'animated-text', \"headline-top\"" + "]";
       expect(literalKindLists(doubleQuoted)).toHaveLength(1);
       expect(literalKindLists(singleQuoted)).toHaveLength(1);
     });
@@ -264,7 +325,169 @@ describe("derive.ts", () => {
     test("the D121 scanner ignores a single kind, non-kind strings, and non-list syntax", () => {
       const oneKind = "[" + '"image", "static"' + "]";
       expect(literalKindLists(oneKind)).toEqual([]);
-      expect(literalKindLists('const kind = "shade"; { kind: "accent" }')).toEqual([]);
+      expect(
+        literalKindLists('const kind = "shade"; { kind: "accent" }'),
+      ).toEqual([]);
+    });
+  });
+
+  describe("layer move derivations (D128)", () => {
+    test("the first layer offers no down and the last offers no up", () => {
+      // Rebuilt on a template where the boundary check is the only thing under test (L8m-fix):
+      // an unconstrained creative type (image-html) whose layers have no ordering constraints.
+      // In canonical image-text, the move down of layer 0 was already forbidden by
+      // "shade directly above image", masking the boundary check (index > 0). With an
+      // unconstrained first and last layer, removing the index checks (index > 0 / index < length - 1)
+      // in layerMoveDirections makes these assertions fail (verified by mutation).
+      const unconstrainedState: EditorState = {
+        ...initialEditorState(),
+        template: {
+          id: "canonical-image-html",
+          version: 1,
+          creativeType: "image-html",
+          unit: "standard-web",
+          layers: [
+            { id: "layer-image", kind: "image" },
+            { id: "layer-html", kind: "html" },
+            { id: "layer-logo", kind: "logo" },
+          ],
+        },
+      };
+
+      expect(canMoveLayer(unconstrainedState, 0, "down")).toBe(false);
+      expect(layerMoveDirections(unconstrainedState, 0)).not.toContain("down");
+
+      const lastIndex = unconstrainedState.template.layers.length - 1;
+      expect(canMoveLayer(unconstrainedState, lastIndex, "up")).toBe(false);
+      expect(layerMoveDirections(unconstrainedState, lastIndex)).not.toContain(
+        "up",
+      );
+    });
+
+    test("out of bounds index yields no move directions", () => {
+      const state = initialEditorState();
+      expect(layerMoveDirections(state, -1)).toEqual([]);
+      expect(layerMoveDirections(state, 100)).toEqual([]);
+    });
+
+    test("a move blocked by an ordering constraint is not offered", () => {
+      const state = initialEditorState();
+      // Canonical image-text has layers: image (0), shade (1), accent (2), static-text (3), logo (4)
+      // Constraints: logo above image, shade directly above image.
+      // - shade (index 1) moving down (to 0) or up (to 2) violates "shade directly above image"
+      expect(layerMoveDirections(state, 1)).toEqual([]);
+      expect(canMoveLayer(state, 1, "down")).toBe(false);
+      expect(canMoveLayer(state, 1, "up")).toBe(false);
+
+      // - image (index 0) moving up (to 1) violates "shade directly above image"
+      expect(canMoveLayer(state, 0, "up")).toBe(false);
+
+      // - accent (index 2) moving down (to 1) would separate shade from image
+      expect(canMoveLayer(state, 2, "down")).toBe(false);
+    });
+
+    test("legal moves that satisfy constraints are offered", () => {
+      const state = initialEditorState();
+      // - accent (index 2) moving up (to 3): swap with static-text is legal
+      expect(layerMoveDirections(state, 2)).toEqual(["up"]);
+      expect(canMoveLayer(state, 2, "up")).toBe(true);
+
+      // - static-text (index 3) can move down (to 2) or up (to 4)
+      expect(layerMoveDirections(state, 3)).toContain("down");
+      expect(layerMoveDirections(state, 3)).toContain("up");
+
+      // - logo (index 4) can move down (to 3)
+      expect(layerMoveDirections(state, 4)).toEqual(["down"]);
+      expect(canMoveLayer(state, 4, "down")).toBe(true);
+    });
+  });
+
+  describe("addableKinds and addLayer agreement (D124, D128, L8m-fix)", () => {
+    test("adding each offered kind to a valid template of each creative type yields a template isBriefTemplate accepts", () => {
+      for (const creativeType of CREATIVE_TYPES) {
+        const canonical = CANONICAL_TEMPLATES[creativeType];
+        const state: EditorState = {
+          ...initialEditorState(),
+          template: {
+            id: canonical.id as CanonicalTemplateId,
+            version: canonical.version,
+            creativeType: canonical.creativeType,
+            unit: canonical.unit,
+            layers: canonical.layers,
+          },
+        };
+
+        // 1. Driven over canonical template offers:
+        for (const kind of addableKinds(state)) {
+          const next = editorReducer(state, { type: "addLayer", kind });
+          expect(isBriefTemplate(next.template)).toBe(true);
+        }
+
+        // 2. Driven over minimal valid template (required kinds only):
+        const requiredKinds = CREATIVE_TYPE_RULES[creativeType].required;
+        const minimalState: EditorState = {
+          ...state,
+          template: {
+            ...state.template,
+            layers: canonical.layers.filter((l) =>
+              requiredKinds.includes(l.kind),
+            ),
+          },
+        };
+        for (const kind of addableKinds(minimalState)) {
+          const next = editorReducer(minimalState, { type: "addLayer", kind });
+          expect(isBriefTemplate(next.template)).toBe(true);
+        }
+
+        // 3. Driven over partial states, e.g. image-text with image and logo
+        // (the motivating case where shade directly-above image):
+        if (creativeType === "image-text") {
+          const imageLogoState: EditorState = {
+            ...state,
+            template: {
+              ...state.template,
+              layers: [
+                { id: "image", kind: "image" },
+                { id: "logo", kind: "logo" },
+              ],
+            },
+          };
+          const imageLogoOffered = addableKinds(imageLogoState);
+          expect(imageLogoOffered).toContain("shade");
+          for (const kind of imageLogoOffered) {
+            const next = editorReducer(imageLogoState, {
+              type: "addLayer",
+              kind,
+            });
+            expect(isBriefTemplate(next.template)).toBe(true);
+          }
+          // Verify shade was placed directly above image (index 1), not appended at index 2
+          const withShade = editorReducer(imageLogoState, {
+            type: "addLayer",
+            kind: "shade",
+          });
+          expect(withShade.template.layers[0].kind).toBe("image");
+          expect(withShade.template.layers[1].kind).toBe("shade");
+          expect(withShade.template.layers[2].kind).toBe("logo");
+        }
+      }
+    });
+
+    test("findLegalInsertionIndex finds the highest legal index preferring topmost", () => {
+      // In canonical image-text without logo:
+      const noLogoLayers = CANONICAL_TEMPLATES["image-text"].layers.filter(
+        (l) => l.kind !== "logo",
+      );
+      expect(findLegalInsertionIndex("image-text", noLogoLayers, "logo")).toBe(
+        noLogoLayers.length,
+      );
+
+      // In image-text with image and logo, shade cannot be topmost (2) but can be at 1:
+      const imageLogo = [
+        { id: "image", kind: "image" as const },
+        { id: "logo", kind: "logo" as const },
+      ];
+      expect(findLegalInsertionIndex("image-text", imageLogo, "shade")).toBe(1);
     });
   });
 });

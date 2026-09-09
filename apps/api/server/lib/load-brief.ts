@@ -24,6 +24,7 @@ import {
   isPaletteShift,
   isSupportedBriefSchemaVersion,
   layerPropsProblem,
+  satisfiesOrderConstraints,
   styleProblem,
   templateFromCanonical,
   timelineProblem,
@@ -38,10 +39,20 @@ import {
   type LayerKind,
   type RegenerationTarget,
 } from "@campaignfoundry/CampaignOrchestration";
-import { isPlatformVisible, platformProfile, type PlatformProfile } from "@campaignfoundry/Distribution";
+import {
+  isPlatformVisible,
+  platformProfile,
+  type PlatformProfile,
+} from "@campaignfoundry/Distribution";
 import { getCapabilities, type Capabilities } from "./capabilities.js";
 
-const REQUIRED_FIELDS = ["id", "targetRegion", "targetAudience", "campaignMessage", "products"] as const;
+const REQUIRED_FIELDS = [
+  "id",
+  "targetRegion",
+  "targetAudience",
+  "campaignMessage",
+  "products",
+] as const;
 
 /**
  * Explicit cap on YAML alias expansion (a billion-laughs bomb is a brief with
@@ -53,7 +64,10 @@ const REQUIRED_FIELDS = ["id", "targetRegion", "targetAudience", "campaignMessag
 export const YAML_ALIAS_CAP = 100;
 
 /** Throw unless `value` is a path-safe slug. `label` names the field in the error. */
-export function assertSafeId(value: unknown, label: string): asserts value is string {
+export function assertSafeId(
+  value: unknown,
+  label: string,
+): asserts value is string {
   if (typeof value !== "string" || !SAFE_ID_PATTERN.test(value)) {
     throw new Error(
       `${label} must be a path-safe slug (lowercase letters, digits, hyphens; max 64 chars); got ${JSON.stringify(value)}.`,
@@ -103,26 +117,41 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function assertFiniteIntegerAtLeast(value: unknown, field: string, min: number): void {
+function assertFiniteIntegerAtLeast(
+  value: unknown,
+  field: string,
+  min: number,
+): void {
   if (!isFiniteInteger(value) || value < min) {
-    throw new Error(`Campaign brief field "${field}" must be a finite integer >= ${min}.`);
+    throw new Error(
+      `Campaign brief field "${field}" must be a finite integer >= ${min}.`,
+    );
   }
 }
 
-function assertAllowedStringArray(value: unknown, field: string, allowed: readonly string[]): void {
+function assertAllowedStringArray(
+  value: unknown,
+  field: string,
+  allowed: readonly string[],
+): void {
   if (!Array.isArray(value)) {
     throw new Error(`Campaign brief field "${field}" must be an array.`);
   }
   for (const entry of value) {
     if (typeof entry !== "string" || !allowed.includes(entry)) {
-      throw new Error(`Campaign brief field "${field}" has unsupported value ${JSON.stringify(entry)}.`);
+      throw new Error(
+        `Campaign brief field "${field}" has unsupported value ${JSON.stringify(entry)}.`,
+      );
     }
   }
 }
 
 function validateMode(value: unknown): void {
   if (value === undefined) return;
-  if (typeof value !== "string" || !(BRIEF_MODES as readonly string[]).includes(value)) {
+  if (
+    typeof value !== "string" ||
+    !(BRIEF_MODES as readonly string[]).includes(value)
+  ) {
     throw new Error(
       `Campaign brief field "mode" must be "brief" or "variation"; got ${JSON.stringify(value)}.`,
     );
@@ -137,7 +166,10 @@ function validateMode(value: unknown): void {
  */
 function validateType(value: unknown): void {
   if (value === undefined) return;
-  if (typeof value !== "string" || !(CAMPAIGN_TYPES as readonly string[]).includes(value)) {
+  if (
+    typeof value !== "string" ||
+    !(CAMPAIGN_TYPES as readonly string[]).includes(value)
+  ) {
     throw new Error(
       `Campaign brief field "type" must be one of ${CAMPAIGN_TYPES.map((t) => `"${t}"`).join(", ")}; got ${JSON.stringify(value)}.`,
     );
@@ -153,22 +185,35 @@ function validateType(value: unknown): void {
  * fraction in [0, 1], the anchor a vocabulary member.
  * Absent → defaults to the campaign type's canonical template (D120: type before template).
  */
-export function validateTemplate(value: unknown, type?: CampaignType): BriefTemplate {
-  const resolvedType = (CAMPAIGN_TYPES as readonly string[]).includes(type as string)
+export function validateTemplate(
+  value: unknown,
+  type?: CampaignType,
+): BriefTemplate {
+  const resolvedType = (CAMPAIGN_TYPES as readonly string[]).includes(
+    type as string,
+  )
     ? (type as CampaignType)
     : DEFAULT_CAMPAIGN_TYPE;
   if (value === undefined) {
     return templateFromCanonical(resolvedType);
   }
   if (!isPlainObject(value)) {
-    throw new Error(`Campaign brief field "template" must be an object; got ${JSON.stringify(value)}.`);
+    throw new Error(
+      `Campaign brief field "template" must be an object; got ${JSON.stringify(value)}.`,
+    );
   }
-  if (typeof value.id !== "string" || !(CANONICAL_TEMPLATE_IDS as readonly string[]).includes(value.id)) {
+  if (
+    typeof value.id !== "string" ||
+    !(CANONICAL_TEMPLATE_IDS as readonly string[]).includes(value.id)
+  ) {
     throw new Error(
       `Campaign brief field "template.id" must be one of ${CANONICAL_TEMPLATE_IDS.map((t) => `"${t}"`).join(", ")}; got ${JSON.stringify(value.id)}.`,
     );
   }
-  if (typeof value.creativeType !== "string" || !(CREATIVE_TYPES as readonly string[]).includes(value.creativeType)) {
+  if (
+    typeof value.creativeType !== "string" ||
+    !(CREATIVE_TYPES as readonly string[]).includes(value.creativeType)
+  ) {
     throw new Error(
       `Campaign brief field "template.creativeType" must be one of ${CREATIVE_TYPES.map((t) => `"${t}"`).join(", ")}; got ${JSON.stringify(value.creativeType)}.`,
     );
@@ -179,7 +224,10 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
       `Campaign brief field "template.creativeType" must match canonical template "${value.id}"; got ${JSON.stringify(value.creativeType)}.`,
     );
   }
-  if (typeof value.unit !== "string" || !(ADVERTISING_UNITS as readonly string[]).includes(value.unit)) {
+  if (
+    typeof value.unit !== "string" ||
+    !(ADVERTISING_UNITS as readonly string[]).includes(value.unit)
+  ) {
     throw new Error(
       `Campaign brief field "template.unit" must be one of ${ADVERTISING_UNITS.map((u) => `"${u}"`).join(", ")}; got ${JSON.stringify(value.unit)}.`,
     );
@@ -203,7 +251,9 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
   for (let i = 0; i < value.layers.length; i++) {
     const layer = value.layers[i];
     if (!isPlainObject(layer)) {
-      throw new Error(`Campaign brief field "template.layers[${i}]" must be an object; got ${JSON.stringify(layer)}.`);
+      throw new Error(
+        `Campaign brief field "template.layers[${i}]" must be an object; got ${JSON.stringify(layer)}.`,
+      );
     }
     if (typeof layer.id !== "string" || layer.id.length === 0) {
       throw new Error(
@@ -217,7 +267,10 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
     }
     seenIds.add(layer.id);
 
-    if (typeof layer.kind !== "string" || !(rules.accepts as readonly string[]).includes(layer.kind)) {
+    if (
+      typeof layer.kind !== "string" ||
+      !(rules.accepts as readonly string[]).includes(layer.kind)
+    ) {
       throw new Error(
         `Campaign brief field "template.layers[${i}].kind" must be one of [${rules.accepts.map((k) => `"${k}"`).join(", ")}]; got ${JSON.stringify(layer.kind)}.`,
       );
@@ -229,7 +282,10 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
     // never lenient (the `validateSizes` convention): the decision is the
     // domain's `layerPropsProblem`, shared with `isBriefTemplate` so the two
     // boundaries cannot drift — only the message shape is local.
-    const propsProblem = layerPropsProblem(layer.kind as LayerKind, layer.props);
+    const propsProblem = layerPropsProblem(
+      layer.kind as LayerKind,
+      layer.props,
+    );
     if (propsProblem !== undefined) {
       throw new Error(
         `Campaign brief field "template.layers[${i}].props${propsProblem.path}" must ${propsProblem.must}; got ${JSON.stringify(propsProblem.value)}.`,
@@ -256,7 +312,10 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
     }
   }
   for (const budget of rules.sharedBudgets ?? []) {
-    const got = budget.kinds.reduce((sum, kind) => sum + (kindCounts.get(kind) ?? 0), 0);
+    const got = budget.kinds.reduce(
+      (sum, kind) => sum + (kindCounts.get(kind) ?? 0),
+      0,
+    );
     if (got > budget.max) {
       throw new Error(
         `Campaign brief field "template.layers" must contain at most ${budget.max} layer(s) of kind ${budget.kinds.map((k) => `"${k}"`).join(" or ")} for creative type "${value.creativeType}"; got ${got}.`,
@@ -268,6 +327,25 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
     if (!presentKinds.has(req)) {
       throw new Error(
         `Campaign brief field "template.layers" must include required layer kind "${req}" for creative type "${value.creativeType}".`,
+      );
+    }
+  }
+
+  // D128 — array position is z-order: a template whose layer order violates
+  // any declared order constraint for its creative type is refused at the
+  // boundary, in authoring mode too (the `validateSizes` convention). Reuses
+  // the domain's `satisfiesOrderConstraints` so the boundary and the editor's
+  // move derivation cannot disagree on what constitutes a legal order.
+  for (const constraint of rules.orderConstraints ?? []) {
+    if (
+      !satisfiesOrderConstraints(
+        value.creativeType as CreativeType,
+        value.layers as readonly CreativeTemplateLayer[],
+        constraint,
+      )
+    ) {
+      throw new Error(
+        `Campaign brief field "template.layers" must satisfy order constraint "${constraint.kind} ${constraint.relation} ${constraint.target}" for creative type "${value.creativeType}".`,
       );
     }
   }
@@ -289,7 +367,11 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
  */
 function validateSizes(value: unknown): void {
   if (value === undefined) return;
-  if (!Array.isArray(value) || value.length === 0 || value.some((entry) => typeof entry !== "string")) {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.some((entry) => typeof entry !== "string")
+  ) {
     throw new Error(
       `Campaign brief field "output.sizes" must be a non-empty array of strings; got ${JSON.stringify(value)}.`,
     );
@@ -315,28 +397,46 @@ function validateSizes(value: unknown): void {
 
 function validateCoverage(value: unknown): void {
   if (!isPlainObject(value)) {
-    throw new Error('Campaign brief field "variation.coverage" must be an object.');
+    throw new Error(
+      'Campaign brief field "variation.coverage" must be an object.',
+    );
   }
   if (value.perProduct !== undefined) {
-    assertFiniteIntegerAtLeast(value.perProduct, "variation.coverage.perProduct", 0);
+    assertFiniteIntegerAtLeast(
+      value.perProduct,
+      "variation.coverage.perProduct",
+      0,
+    );
   }
   if (value.perRatio !== undefined) {
-    assertFiniteIntegerAtLeast(value.perRatio, "variation.coverage.perRatio", 0);
+    assertFiniteIntegerAtLeast(
+      value.perRatio,
+      "variation.coverage.perRatio",
+      0,
+    );
   }
 }
 
 function validateBackground(value: unknown): void {
   if (!isPlainObject(value)) {
-    throw new Error('Campaign brief field "variation.axes.background" must be an object.');
+    throw new Error(
+      'Campaign brief field "variation.axes.background" must be an object.',
+    );
   }
   if (value.source !== undefined) {
-    assertAllowedStringArray(value.source, "variation.axes.background.source", BACKGROUND_SOURCES);
+    assertAllowedStringArray(
+      value.source,
+      "variation.axes.background.source",
+      BACKGROUND_SOURCES,
+    );
   }
 }
 
 function validatePaletteShift(value: unknown): void {
   if (!Array.isArray(value)) {
-    throw new Error('Campaign brief field "variation.axes.paletteShift" must be an array.');
+    throw new Error(
+      'Campaign brief field "variation.axes.paletteShift" must be an array.',
+    );
   }
   for (const entry of value) {
     // A shift is a hue rotation in TURNS, so 1 is a whole circle and means exactly what 0
@@ -361,7 +461,9 @@ function validatePaletteShift(value: unknown): void {
  */
 function validateRatioAxis(value: unknown): void {
   if (!Array.isArray(value)) {
-    throw new Error('Campaign brief field "variation.axes.ratio" must be an array.');
+    throw new Error(
+      'Campaign brief field "variation.axes.ratio" must be an array.',
+    );
   }
   if (value.length === 0) {
     throw new Error(
@@ -370,8 +472,13 @@ function validateRatioAxis(value: unknown): void {
   }
   const seen = new Set<string>();
   for (const entry of value) {
-    if (typeof entry !== "string" || !(RATIO_VALUES as readonly string[]).includes(entry)) {
-      throw new Error(`Campaign brief field "variation.axes.ratio" has unsupported value ${JSON.stringify(entry)}.`);
+    if (
+      typeof entry !== "string" ||
+      !(RATIO_VALUES as readonly string[]).includes(entry)
+    ) {
+      throw new Error(
+        `Campaign brief field "variation.axes.ratio" has unsupported value ${JSON.stringify(entry)}.`,
+      );
     }
     if (seen.has(entry)) {
       // The planner de-duplicates this axis, so a repeat would draw nothing.
@@ -392,21 +499,36 @@ function motionUnavailable(capabilities: Capabilities): string {
  * `motion` (⊆ MOTION_KINDS) and `duration` (integers in [2, 30] s) — accepted only
  * while the ffmpeg probe reports motion; otherwise rejected with the probe's reason.
  */
-function validateMotionAxes(value: Record<string, unknown>, capabilities: Capabilities): void {
+function validateMotionAxes(
+  value: Record<string, unknown>,
+  capabilities: Capabilities,
+): void {
   const present = MOTION_AXES.filter((axis) => axis in value);
   if (present.length === 0) return;
   if (!capabilities.motion) {
-    throw new Error(`Unsupported variation axis "${present[0]}": ${motionUnavailable(capabilities)}.`);
+    throw new Error(
+      `Unsupported variation axis "${present[0]}": ${motionUnavailable(capabilities)}.`,
+    );
   }
   if (value.motion !== undefined) {
-    assertAllowedStringArray(value.motion, "variation.axes.motion", MOTION_KINDS);
+    assertAllowedStringArray(
+      value.motion,
+      "variation.axes.motion",
+      MOTION_KINDS,
+    );
   }
   if (value.duration !== undefined) {
     if (!Array.isArray(value.duration)) {
-      throw new Error('Campaign brief field "variation.axes.duration" must be an array.');
+      throw new Error(
+        'Campaign brief field "variation.axes.duration" must be an array.',
+      );
     }
     for (const entry of value.duration) {
-      if (!isFiniteInteger(entry) || entry < MIN_DURATION_SEC || entry > MAX_DURATION_SEC) {
+      if (
+        !isFiniteInteger(entry) ||
+        entry < MIN_DURATION_SEC ||
+        entry > MAX_DURATION_SEC
+      ) {
         throw new Error(
           `Campaign brief field "variation.axes.duration" must contain integers between ${MIN_DURATION_SEC} and ${MAX_DURATION_SEC} seconds.`,
         );
@@ -443,13 +565,21 @@ function validateAxes(value: unknown, capabilities: Capabilities): void {
   validateMotionAxes(value, capabilities);
   validateHeadlineAxis(value.headline);
   if (value.layout !== undefined) {
-    assertAllowedStringArray(value.layout, "variation.axes.layout", LAYOUT_VALUES);
+    assertAllowedStringArray(
+      value.layout,
+      "variation.axes.layout",
+      LAYOUT_VALUES,
+    );
   }
   if (value.tone !== undefined) {
     assertAllowedStringArray(value.tone, "variation.axes.tone", TONE_VALUES);
   }
   if (value.anchor !== undefined) {
-    assertAllowedStringArray(value.anchor, "variation.axes.anchor", ANCHOR_VALUES);
+    assertAllowedStringArray(
+      value.anchor,
+      "variation.axes.anchor",
+      ANCHOR_VALUES,
+    );
   }
   if (value.ratio !== undefined) {
     validateRatioAxis(value.ratio);
@@ -472,7 +602,9 @@ function validateVariation(value: unknown, capabilities: Capabilities): void {
   }
   if (value.seed !== undefined) {
     if (!isFiniteNumber(value.seed)) {
-      throw new Error('Campaign brief field "variation.seed" must be a finite number.');
+      throw new Error(
+        'Campaign brief field "variation.seed" must be a finite number.',
+      );
     }
   }
   if (value.minDistance !== undefined) {
@@ -489,23 +621,33 @@ function validateVariation(value: unknown, capabilities: Capabilities): void {
 /** `static` always; `motion` only while the ffmpeg capability is on (D8). */
 function validateFormats(value: unknown, capabilities: Capabilities): void {
   if (!Array.isArray(value) || value.length === 0) {
-    throw new Error('Campaign brief field "output.formats" must be a non-empty array.');
+    throw new Error(
+      'Campaign brief field "output.formats" must be a non-empty array.',
+    );
   }
   for (const entry of value) {
     if (entry === MOTION_FORMAT) {
       if (!capabilities.motion) {
-        throw new Error(`Unsupported output format "${MOTION_FORMAT}": ${motionUnavailable(capabilities)}.`);
+        throw new Error(
+          `Unsupported output format "${MOTION_FORMAT}": ${motionUnavailable(capabilities)}.`,
+        );
       }
       continue;
     }
-    if (typeof entry !== "string" || !(SUPPORTED_FORMATS as readonly string[]).includes(entry)) {
+    if (
+      typeof entry !== "string" ||
+      !(SUPPORTED_FORMATS as readonly string[]).includes(entry)
+    ) {
       throw new Error(`Unsupported output format ${JSON.stringify(entry)}.`);
     }
   }
 }
 
 /** Every PLATFORM_PROFILES id whose formats this host can produce (motion ones need the capability). */
-function validatePlatforms(value: unknown, capabilities: Capabilities): PlatformProfile[] {
+function validatePlatforms(
+  value: unknown,
+  capabilities: Capabilities,
+): PlatformProfile[] {
   const profiles: PlatformProfile[] = [];
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error(
@@ -523,7 +665,9 @@ function validatePlatforms(value: unknown, capabilities: Capabilities): Platform
       throw new Error(`Unknown output platform ${JSON.stringify(entry)}.`);
     }
     if (!isPlatformVisible(profile, capabilities)) {
-      throw new Error(`Unsupported output platform "${entry}": ${motionUnavailable(capabilities)}.`);
+      throw new Error(
+        `Unsupported output platform "${entry}": ${motionUnavailable(capabilities)}.`,
+      );
     }
     profiles.push(profile);
   }
@@ -537,7 +681,10 @@ function validatePlatforms(value: unknown, capabilities: Capabilities): Platform
  * or lists a platform that would package nothing (`formats: [motion]` + `instagram-feed`).
  * `formats` defaults to `[static]`, as the planner does.
  */
-function validateFormatPlatformCompatibility(formats: readonly string[], platforms: readonly PlatformProfile[]): void {
+function validateFormatPlatformCompatibility(
+  formats: readonly string[],
+  platforms: readonly PlatformProfile[],
+): void {
   const list = (values: readonly string[]): string => `[${values.join(", ")}]`;
   for (const { id, formats: packaged } of platforms) {
     if (!packaged.some((format) => formats.includes(format))) {
@@ -547,7 +694,11 @@ function validateFormatPlatformCompatibility(formats: readonly string[], platfor
     }
   }
   for (const format of formats) {
-    if (!platforms.some((profile) => (profile.formats as readonly string[]).includes(format))) {
+    if (
+      !platforms.some((profile) =>
+        (profile.formats as readonly string[]).includes(format),
+      )
+    ) {
       throw new Error(
         `Output format "${format}" is requested but none of output.platforms ${list(platforms.map((p) => p.id))} can package it.`,
       );
@@ -578,9 +729,11 @@ function validateOutput(value: unknown, capabilities: Capabilities): void {
  * brief asks for clips but forbids every kind. An absent axis means all kinds.
  */
 function validateMotionAxisRequested(record: Record<string, unknown>): void {
-  const formats = (record.output as Record<string, unknown> | undefined)?.formats;
+  const formats = (record.output as Record<string, unknown> | undefined)
+    ?.formats;
   if (!Array.isArray(formats) || !formats.includes(MOTION_FORMAT)) return;
-  const axes = (record.variation as Record<string, unknown> | undefined)?.axes as Record<string, unknown> | undefined;
+  const axes = (record.variation as Record<string, unknown> | undefined)
+    ?.axes as Record<string, unknown> | undefined;
   if (Array.isArray(axes?.motion) && axes.motion.length === 0) {
     throw new Error(
       `Campaign brief field "variation.axes.motion" must select at least one motion kind when output.formats includes "${MOTION_FORMAT}".`,
@@ -599,14 +752,20 @@ function validateTreatments(value: unknown): void {
     const rec = t as Record<string, unknown>;
     assertSafeId(rec?.id, "Treatment id");
     if (seen.has(rec.id)) {
-      throw new Error(`Duplicate treatment id "${rec.id}" — ids must be unique within a brief.`);
+      throw new Error(
+        `Duplicate treatment id "${rec.id}" — ids must be unique within a brief.`,
+      );
     }
     seen.add(rec.id);
     if (!LAYOUT_VALUES.includes(rec.layout as (typeof LAYOUT_VALUES)[number])) {
-      throw new Error(`Treatment "${rec.id}" has invalid layout (expected one of ${LAYOUT_VALUES.join(", ")}).`);
+      throw new Error(
+        `Treatment "${rec.id}" has invalid layout (expected one of ${LAYOUT_VALUES.join(", ")}).`,
+      );
     }
     if (!TONE_VALUES.includes(rec.tone as (typeof TONE_VALUES)[number])) {
-      throw new Error(`Treatment "${rec.id}" has invalid tone (expected one of ${TONE_VALUES.join(", ")}).`);
+      throw new Error(
+        `Treatment "${rec.id}" has invalid tone (expected one of ${TONE_VALUES.join(", ")}).`,
+      );
     }
   }
 }
@@ -619,7 +778,10 @@ function validateTreatments(value: unknown): void {
  * the running paths so invalid/unrunnable timelines remain persistable and fixable in the
  * editor (D11/D15).
  */
-function validateCopy(record: Record<string, unknown>, enforceCapabilities: boolean): void {
+function validateCopy(
+  record: Record<string, unknown>,
+  enforceCapabilities: boolean,
+): void {
   if (record.copy === undefined) return;
   if (!isPlainObject(record.copy)) {
     throw new Error('Campaign brief field "copy" must be an object.');
@@ -633,7 +795,9 @@ function validateCopy(record: Record<string, unknown>, enforceCapabilities: bool
   if (
     timeline.transition !== undefined &&
     (typeof timeline.transition !== "string" ||
-      !(TIMELINE_TRANSITIONS as readonly string[]).includes(timeline.transition))
+      !(TIMELINE_TRANSITIONS as readonly string[]).includes(
+        timeline.transition,
+      ))
   ) {
     throw new Error(
       `Campaign brief field "copy.timeline.transition" must be "cut" or "fade"; got ${JSON.stringify(timeline.transition)}.`,
@@ -641,26 +805,36 @@ function validateCopy(record: Record<string, unknown>, enforceCapabilities: bool
   }
 
   if (!Array.isArray(timeline.beats)) {
-    throw new Error('Campaign brief field "copy.timeline.beats" must be an array.');
+    throw new Error(
+      'Campaign brief field "copy.timeline.beats" must be an array.',
+    );
   }
   if (timeline.beats.length === 0) {
     throw new Error("copy.timeline.beats must not be empty.");
   }
   if (timeline.beats.length > MAX_BEATS) {
-    throw new Error(`copy.timeline.beats holds more than ${MAX_BEATS} beats (max ${MAX_BEATS}).`);
+    throw new Error(
+      `copy.timeline.beats holds more than ${MAX_BEATS} beats (max ${MAX_BEATS}).`,
+    );
   }
 
   for (let i = 0; i < timeline.beats.length; i += 1) {
     const beat = timeline.beats[i];
     if (!isPlainObject(beat)) {
-      throw new Error(`Campaign brief field "copy.timeline.beats[${i}]" must be an object.`);
+      throw new Error(
+        `Campaign brief field "copy.timeline.beats[${i}]" must be an object.`,
+      );
     }
     if (typeof beat.text !== "string") {
-      throw new Error(`Campaign brief field "copy.timeline.beats[${i}].text" must be a string.`);
+      throw new Error(
+        `Campaign brief field "copy.timeline.beats[${i}].text" must be a string.`,
+      );
     }
     const weight = beat.weight;
     if (!isFiniteInteger(weight) || weight < 1 || weight > MAX_WEIGHT) {
-      throw new Error(`copy.timeline.beats[${i}].weight must be an integer in [1, ${MAX_WEIGHT}].`);
+      throw new Error(
+        `copy.timeline.beats[${i}].weight must be an integer in [1, ${MAX_WEIGHT}].`,
+      );
     }
   }
 
@@ -677,9 +851,8 @@ function validateCopy(record: Record<string, unknown>, enforceCapabilities: bool
   }
 
   // D5: copy.timeline together with axes.headline: pool://copy is invalid.
-  const axes = (record.variation as Record<string, unknown> | undefined)?.axes as
-    | Record<string, unknown>
-    | undefined;
+  const axes = (record.variation as Record<string, unknown> | undefined)
+    ?.axes as Record<string, unknown> | undefined;
   if (axes?.headline !== undefined) {
     throw new Error(
       'Campaign brief cannot combine "copy.timeline" with "variation.axes.headline" — motion copy sequences are fixed across variants.',
@@ -687,9 +860,12 @@ function validateCopy(record: Record<string, unknown>, enforceCapabilities: bool
   }
 
   // D5: copy.timeline on any brief that cannot render motion (classic mode or formats without motion).
-  const formats = (record.output as Record<string, unknown> | undefined)?.formats;
+  const formats = (record.output as Record<string, unknown> | undefined)
+    ?.formats;
   const canRenderMotion =
-    record.mode === "variation" && Array.isArray(formats) && formats.includes(MOTION_FORMAT);
+    record.mode === "variation" &&
+    Array.isArray(formats) &&
+    formats.includes(MOTION_FORMAT);
   if (!canRenderMotion) {
     throw new Error(
       `Campaign brief field "copy.timeline" requires motion output (mode "variation" and output.formats including "${MOTION_FORMAT}").`,
@@ -700,12 +876,16 @@ function validateCopy(record: Record<string, unknown>, enforceCapabilities: bool
   // same record as a CampaignBrief, and CopyTimeline declares `transition` and `keyBeat`
   // required — defaulting them only for the check below hands every caller a value the
   // domain says cannot exist, and `timelineProblem` rejects it on the round trip.
-  timeline.transition = (timeline.transition as "cut" | "fade" | undefined) ?? "fade";
+  timeline.transition =
+    (timeline.transition as "cut" | "fade" | undefined) ?? "fade";
   timeline.keyBeat = (timeline.keyBeat as number | undefined) ?? 1;
 
   if (enforceCapabilities) {
     const durations = (axes?.duration as readonly number[] | undefined) ?? [];
-    const problem = timelineProblem(timeline as unknown as CopyTimeline, durations);
+    const problem = timelineProblem(
+      timeline as unknown as CopyTimeline,
+      durations,
+    );
     if (problem) {
       throw new Error(problem);
     }
@@ -762,12 +942,17 @@ export function validateSchemaVersion(value: unknown): number {
  * valid everywhere, so it can be listed and saved on a host with no ffmpeg (D7/D12/D15).
  * The run paths — plan and generate — pass `true` and refuse what this host cannot make.
  */
-export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): CampaignBrief {
+export function parseBrief(
+  data: unknown,
+  opts: ParseBriefOptions = {},
+): CampaignBrief {
   const capabilities = opts.capabilities ?? getCapabilities();
   const enforceCapabilities = opts.enforceCapabilities ?? false;
 
   // When not enforcing capabilities, pretend motion is available to skip capability checks
-  const effectiveCapabilities: Capabilities = enforceCapabilities ? capabilities : { motion: true };
+  const effectiveCapabilities: Capabilities = enforceCapabilities
+    ? capabilities
+    : { motion: true };
 
   if (typeof data !== "object" || data === null) {
     throw new Error("Campaign brief must be an object.");
@@ -785,7 +970,12 @@ export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): Campaig
   // stay legal: a YAML `targetAudience:` with no value parses to null, and listBriefs
   // skips any file whose parse throws, so rejecting null would make an operator's
   // half-written brief vanish from the picker (D15 leniency). Both parse modes.
-  for (const field of ["targetRegion", "targetAudience", "campaignMessage", "localizedMessage"] as const) {
+  for (const field of [
+    "targetRegion",
+    "targetAudience",
+    "campaignMessage",
+    "localizedMessage",
+  ] as const) {
     const value = record[field];
     if (typeof value !== "string" && value != null) {
       throw new Error(
@@ -813,7 +1003,10 @@ export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): Campaig
   validateStyle(record.style);
   validateMode(record.mode);
   validateType(record.type);
-  const template = validateTemplate(record.template, record.type as CampaignType);
+  const template = validateTemplate(
+    record.template,
+    record.type as CampaignType,
+  );
   validateVariation(record.variation, effectiveCapabilities);
   validateOutput(record.output, effectiveCapabilities);
   validateMotionAxisRequested(record);
@@ -824,7 +1017,8 @@ export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): Campaig
   // paths. Authoring mode still accepts it so the file stays listed and can be fixed
   // in the editor rather than vanishing from the picker (the D15 split, applied here).
   if (enforceCapabilities && record.mode !== "variation") {
-    const formats = (record.output as Record<string, unknown> | undefined)?.formats;
+    const formats = (record.output as Record<string, unknown> | undefined)
+      ?.formats;
     if (Array.isArray(formats) && formats.includes(MOTION_FORMAT)) {
       throw new Error(
         `Output format "${MOTION_FORMAT}" requires mode "variation" — a classic campaign renders stills only.`,
@@ -836,7 +1030,9 @@ export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): Campaig
   if (record.mode === "variation") {
     const variation = record.variation as Record<string, unknown> | undefined;
     if (variation?.count === undefined) {
-      throw new Error('Campaign brief field "variation.count" is required when mode is "variation".');
+      throw new Error(
+        'Campaign brief field "variation.count" is required when mode is "variation".',
+      );
     }
   }
   const rest = { ...record };
@@ -851,19 +1047,27 @@ export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): Campaig
  * membership in the use case — never path construction — but we validate shape so a
  * malformed payload fails fast with a clear 400 instead of a runtime error.
  */
-export function parseRegenerateOnly(value: unknown): RegenerationTarget[] | undefined {
+export function parseRegenerateOnly(
+  value: unknown,
+): RegenerationTarget[] | undefined {
   if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value)) {
-    throw new Error('"regenerateOnly" must be an array of { productId, aspectRatio | size, treatment }.');
+    throw new Error(
+      '"regenerateOnly" must be an array of { productId, aspectRatio | size, treatment }.',
+    );
   }
   // An empty list would enable selective mode yet target nothing — a silent no-op
   // run. Reject it so the contract fails fast instead (omit the field for a full run).
   if (value.length === 0) {
-    throw new Error('"regenerateOnly" must contain at least one target (omit it for a full run).');
+    throw new Error(
+      '"regenerateOnly" must contain at least one target (omit it for a full run).',
+    );
   }
   return value.map((entry) => {
     const rec =
-      typeof entry === "object" && entry !== null ? (entry as Record<string, unknown>) : {};
+      typeof entry === "object" && entry !== null
+        ? (entry as Record<string, unknown>)
+        : {};
     if (rec.variantIndex !== undefined) {
       if (typeof rec.productId !== "string") {
         throw new Error(
@@ -871,17 +1075,31 @@ export function parseRegenerateOnly(value: unknown): RegenerationTarget[] | unde
         );
       }
       if (!isFiniteInteger(rec.variantIndex) || rec.variantIndex < 0) {
-        throw new Error('"regenerateOnly" variantIndex must be an integer >= 0.');
+        throw new Error(
+          '"regenerateOnly" variantIndex must be an integer >= 0.',
+        );
       }
-      if (rec.attempt !== undefined && (!isFiniteInteger(rec.attempt) || rec.attempt < 0)) {
+      if (
+        rec.attempt !== undefined &&
+        (!isFiniteInteger(rec.attempt) || rec.attempt < 0)
+      ) {
         throw new Error('"regenerateOnly" attempt must be an integer >= 0.');
       }
       return rec.attempt === undefined
         ? { productId: rec.productId, variantIndex: rec.variantIndex }
-        : { productId: rec.productId, variantIndex: rec.variantIndex, attempt: rec.attempt };
+        : {
+            productId: rec.productId,
+            variantIndex: rec.variantIndex,
+            attempt: rec.attempt,
+          };
     }
-    if (typeof rec.productId !== "string" || typeof rec.treatment !== "string") {
-      throw new Error('"regenerateOnly" entries require string productId and treatment.');
+    if (
+      typeof rec.productId !== "string" ||
+      typeof rec.treatment !== "string"
+    ) {
+      throw new Error(
+        '"regenerateOnly" entries require string productId and treatment.',
+      );
     }
     // The canvas is a social ratio or a display size (D113) — exactly one of the two,
     // the same identity the run keys the cell on and the review UI sends back.
@@ -889,7 +1107,11 @@ export function parseRegenerateOnly(value: unknown): RegenerationTarget[] | unde
       throw new Error('"regenerateOnly" entries must carry exactly one canvas');
     }
     if (typeof rec.aspectRatio === "string") {
-      return { productId: rec.productId, aspectRatio: rec.aspectRatio, treatment: rec.treatment };
+      return {
+        productId: rec.productId,
+        aspectRatio: rec.aspectRatio,
+        treatment: rec.treatment,
+      };
     }
     if (typeof rec.size === "string") {
       if (!(DISPLAY_SIZE_VALUES as readonly string[]).includes(rec.size)) {
@@ -897,7 +1119,11 @@ export function parseRegenerateOnly(value: unknown): RegenerationTarget[] | unde
           `"regenerateOnly" size must be one of ${DISPLAY_SIZE_VALUES.map((s) => `"${s}"`).join(", ")}; got ${JSON.stringify(rec.size)}.`,
         );
       }
-      return { productId: rec.productId, size: rec.size, treatment: rec.treatment };
+      return {
+        productId: rec.productId,
+        size: rec.size,
+        treatment: rec.treatment,
+      };
     }
     throw new Error(
       '"regenerateOnly" entries require a canvas: string aspectRatio (social) or size (display).',
@@ -910,7 +1136,11 @@ export function parseRegenerateOnly(value: unknown): RegenerationTarget[] | unde
  * (.json vs .yaml/.yml). Validation follows `opts` — authoring by default.
  */
 
-export function parseBriefText(path: string, raw: string, opts: ParseBriefOptions = {}): CampaignBrief {
+export function parseBriefText(
+  path: string,
+  raw: string,
+  opts: ParseBriefOptions = {},
+): CampaignBrief {
   const data =
     extname(path).toLowerCase() === ".json"
       ? JSON.parse(raw)
@@ -919,7 +1149,10 @@ export function parseBriefText(path: string, raw: string, opts: ParseBriefOption
 }
 
 /** Load and parse a brief from a .yaml / .yml / .json file. */
-export async function loadBrief(path: string, opts: ParseBriefOptions = {}): Promise<CampaignBrief> {
+export async function loadBrief(
+  path: string,
+  opts: ParseBriefOptions = {},
+): Promise<CampaignBrief> {
   const filePath = isAbsolute(path) ? path : resolve(projectRoot(), path);
   const raw = await readFile(filePath, "utf8");
   return parseBriefText(filePath, raw, opts);

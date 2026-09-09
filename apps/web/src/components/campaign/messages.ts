@@ -1135,6 +1135,16 @@ export function templateRemoveDescription(name: string): string {
   return `Remove ${name}`;
 }
 
+/** A move-up control's description (D18, D128): moves toward the top of the stack. */
+export function templateMoveUpDescription(name: string): string {
+  return `Move ${name} up`;
+}
+
+/** A move-down control's description (D18, D128): moves toward the bottom of the stack. */
+export function templateMoveDownDescription(name: string): string {
+  return `Move ${name} down`;
+}
+
 /** The review step's template row: how many layers the brief will carry. */
 export function reviewTemplateLayers(count: number): string {
   return `${count} ${count === 1 ? "layer" : "layers"}`;

@@ -70,17 +70,24 @@ export {
   MIN_DWELL_SEC,
 };
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
-import { DISPLAY_SIZE_VALUES, type DisplaySize } from "@campaignfoundry/CampaignOrchestration/display-sizes";
+import {
+  DISPLAY_SIZE_VALUES,
+  type DisplaySize,
+} from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
-import { PLATFORM_PROFILES, isRatioProfile, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
+import {
+  PLATFORM_PROFILES,
+  isRatioProfile,
+  type PlatformProfile,
+} from "@campaignfoundry/Distribution/platform-profiles";
 import {
   addableKinds,
+  findLegalInsertionIndex,
   platformsToFormats,
   platformsToRatios,
   platformsToSizes,
   removableLayerIds,
 } from "./derive";
-
 
 export const LAYOUT_OPTIONS = ["headline-top", "headline-bottom"] as const;
 export const TONE_OPTIONS = ["bold", "subtle"] as const;
@@ -96,7 +103,11 @@ export const ANCHOR_OPTIONS: readonly string[] = ANCHOR_VALUES;
  * other divergence) is what makes the axis real.
  */
 export const DERIVED_ANCHOR_OPTIONS: readonly string[] = ["top", "bottom"];
-export const BACKGROUND_OPTIONS = ["procedural", "asset-pool", "genai"] as const;
+export const BACKGROUND_OPTIONS = [
+  "procedural",
+  "asset-pool",
+  "genai",
+] as const;
 export const PALETTE_SHIFT_OPTIONS = [0, 0.1, 0.2] as const;
 /** The two campaign modes in panel order (D4) — `brief` (Classic) first. */
 export const MODE_OPTIONS: readonly CampaignMode[] = ["brief", "variation"];
@@ -122,7 +133,10 @@ export interface ProductDraft {
 import { SWATCH_PALETTE } from "../ui/swatch-picker";
 export { SWATCH_PALETTE };
 
-export function emptyProduct(key: number, primaryColor = "#1473E6"): ProductDraft {
+export function emptyProduct(
+  key: number,
+  primaryColor = "#1473E6",
+): ProductDraft {
   return {
     key,
     id: "",
@@ -135,7 +149,9 @@ export function emptyProduct(key: number, primaryColor = "#1473E6"): ProductDraf
 }
 
 export function nextKeyAfter(products: ProductDraft[]): number {
-  const numericKeys = products.map((p) => p.key).filter((k): k is number => typeof k === "number" && k > 0);
+  const numericKeys = products
+    .map((p) => p.key)
+    .filter((k): k is number => typeof k === "number" && k > 0);
   return numericKeys.length > 0 ? Math.max(...numericKeys) + 1 : 1;
 }
 
@@ -144,7 +160,10 @@ export function nextKeyAfter(products: ProductDraft[]): number {
  */
 export function nextUnusedSwatch(products: readonly ProductDraft[]): string {
   const used = new Set(products.map((p) => p.primaryColor.toUpperCase()));
-  return SWATCH_PALETTE.find((c) => !used.has(c.toUpperCase())) ?? SWATCH_PALETTE[products.length % SWATCH_PALETTE.length];
+  return (
+    SWATCH_PALETTE.find((c) => !used.has(c.toUpperCase())) ??
+    SWATCH_PALETTE[products.length % SWATCH_PALETTE.length]
+  );
 }
 
 /**
@@ -227,7 +246,13 @@ export interface TimelineDraft {
 
 export type EditorSource =
   | { kind: "new"; tempId: string }
-  | { kind: "file"; file: string; loadedId: string; savedSnapshot: CampaignBrief | null; revision: string | undefined };
+  | {
+      kind: "file";
+      file: string;
+      loadedId: string;
+      savedSnapshot: CampaignBrief | null;
+      revision: string | undefined;
+    };
 
 export interface EditorState {
   schemaVersion: number;
@@ -293,7 +318,7 @@ export interface EditorState {
    * load → save byte-identically (D58), and the preview must read exactly what
    * the saved brief will carry.
    */
-  style: Style,
+  style: Style;
   /**
    * True only when the loaded brief declared a `style` block — the D11
    * preservation rule, the `anchorExplicit`/`copyExplicit` lesson: an
@@ -385,7 +410,20 @@ export interface EditorState {
 export type EditorAction =
   | { type: "setMode"; mode: CampaignMode }
   | { type: "applyPreset"; campaignType: CampaignType }
-  | { type: "patch"; patch: Partial<Pick<EditorState, "campaignName" | "briefId" | "targetRegion" | "targetAudience" | "campaignMessage" | "localizedMessage">> }
+  | {
+      type: "patch";
+      patch: Partial<
+        Pick<
+          EditorState,
+          | "campaignName"
+          | "briefId"
+          | "targetRegion"
+          | "targetAudience"
+          | "campaignMessage"
+          | "localizedMessage"
+        >
+      >;
+    }
   | { type: "setProduct"; key: number; patch: Partial<ProductDraft> }
   | { type: "addProduct" }
   | { type: "removeProduct"; key: number }
@@ -408,7 +446,11 @@ export type EditorAction =
   | { type: "setBeatWeight"; index: number; weight: number }
   | { type: "setKeyBeat"; index: number }
   | { type: "setTransition"; transition: "cut" | "fade" }
-  | { type: "setVariation"; field: "count" | "seed" | "minDistance" | "perProduct" | "perRatio"; value: string }
+  | {
+      type: "setVariation";
+      field: "count" | "seed" | "minDistance" | "perProduct" | "perRatio";
+      value: string;
+    }
   | { type: "toggleLayout"; value: string }
   | { type: "toggleTone"; value: string }
   | { type: "toggleAnchor"; value: string }
@@ -426,12 +468,23 @@ export type EditorAction =
   | { type: "togglePlatform"; value: string }
   | { type: "setPool"; briefId: string; pool: CopyPool | null }
   | { type: "loadPool"; briefId: string; pool: CopyPool | null }
-  | { type: "load"; brief: CampaignBrief; entry?: { file: string; revision?: string } }
+  | {
+      type: "load";
+      brief: CampaignBrief;
+      entry?: { file: string; revision?: string };
+    }
   | { type: "apply"; applied?: CampaignBrief }
-  | { type: "save"; saved?: CampaignBrief; entry?: { file: string; revision?: string } }
+  | {
+      type: "save";
+      saved?: CampaignBrief;
+      entry?: { file: string; revision?: string };
+    }
   | { type: "restore"; state: EditorState }
   | { type: "discard" }
-  | { type: "setCapabilities"; capabilities: { motion: boolean; reason?: string } };
+  | {
+      type: "setCapabilities";
+      capabilities: { motion: boolean; reason?: string };
+    };
 
 /**
  * H6/D37: the one draft key an unnamed draft uses. It was a per-mount temp id, which
@@ -501,8 +554,14 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
   };
 }
 
-function toggleOrdered<T>(list: readonly T[], value: T, order: readonly T[]): T[] {
-  const next = list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
+function toggleOrdered<T>(
+  list: readonly T[],
+  value: T,
+  order: readonly T[],
+): T[] {
+  const next = list.includes(value)
+    ? list.filter((item) => item !== value)
+    : [...list, value];
   return order.filter((item) => next.includes(item));
 }
 
@@ -527,9 +586,10 @@ function isDerivedAnchorSelection(selection: readonly string[]): boolean {
  * the axis exactly as `toBrief` writes it.
  */
 export function anchorAxisActive(state: EditorState): boolean {
-  return state.anchorExplicit || !isDerivedAnchorSelection(state.variation.anchor);
+  return (
+    state.anchorExplicit || !isDerivedAnchorSelection(state.variation.anchor)
+  );
 }
-
 
 /*
  * How big the draw is. These three live here rather than in `validate.ts` because the
@@ -539,14 +599,20 @@ export function anchorAxisActive(state: EditorState): boolean {
  */
 
 /** Ratios the requested platforms package motion at — the motion filter's allowlist. */
-export function motionPackagedRatios(state: EditorState | readonly string[]): Set<string> {
-  const platforms: readonly string[] = Array.isArray(state) ? (state as readonly string[]) : (state as EditorState).platforms;
+export function motionPackagedRatios(
+  state: EditorState | readonly string[],
+): Set<string> {
+  const platforms: readonly string[] = Array.isArray(state)
+    ? (state as readonly string[])
+    : (state as EditorState).platforms;
   return new Set(
     platforms
       .map((id: string) => PLATFORM_PROFILES[id])
       .filter((profile): profile is PlatformProfile => profile !== undefined)
       .filter(isRatioProfile)
-      .filter((profile) => (profile.formats as readonly string[]).includes("motion"))
+      .filter((profile) =>
+        (profile.formats as readonly string[]).includes("motion"),
+      )
       .map((profile) => profile.ratio),
   );
 }
@@ -574,10 +640,14 @@ export function drawableRatios(state: EditorState): string[] {
  * slider's bound, so the editor cannot author a count the planner will refuse.
  */
 export function axisProductSize(state: EditorState): number {
-  const motionEnabled = state.formats.includes("motion") && state.motion.length > 0;
+  const motionEnabled =
+    state.formats.includes("motion") && state.motion.length > 0;
   const mixStatic = motionEnabled && state.formats.includes("static");
   return (
-    Math.max(1, state.products.filter((product) => product.id.length > 0).length) *
+    Math.max(
+      1,
+      state.products.filter((product) => product.id.length > 0).length,
+    ) *
     Math.max(1, drawableRatios(state).length) *
     Math.max(1, state.variation.layout.length) *
     Math.max(1, state.variation.tone.length) *
@@ -587,7 +657,10 @@ export function axisProductSize(state: EditorState): number {
     // The anchor axis (T4) multiplies only when the saved brief will carry it:
     // the absent axis derives top/bottom from `layout`, adding no combination.
     (anchorAxisActive(state) ? Math.max(1, state.variation.anchor.length) : 1) *
-    (motionEnabled ? state.motion.length * Math.max(1, state.duration.length) + (mixStatic ? 1 : 0) : 1)
+    (motionEnabled
+      ? state.motion.length * Math.max(1, state.duration.length) +
+        (mixStatic ? 1 : 0)
+      : 1)
   );
 }
 
@@ -620,11 +693,15 @@ function withCountClamp(state: EditorState): EditorState {
  * alone. Emptying the list resets `keyBeat` to 1, which no path serialises because an
  * empty timeline has no `keyBeat` to write.
  */
-function removeTimelineBeat(timeline: TimelineDraft, index: number): TimelineDraft {
+function removeTimelineBeat(
+  timeline: TimelineDraft,
+  index: number,
+): TimelineDraft {
   const beats = timeline.beats.filter((_, i) => i !== index);
   let nextKeyIndex = timeline.keyBeat - 1;
   if (index < timeline.keyBeat - 1) nextKeyIndex = timeline.keyBeat - 2;
-  else if (index === timeline.keyBeat - 1) nextKeyIndex = Math.min(timeline.keyBeat - 1, beats.length - 1);
+  else if (index === timeline.keyBeat - 1)
+    nextKeyIndex = Math.min(timeline.keyBeat - 1, beats.length - 1);
   return {
     beats,
     transition: timeline.transition,
@@ -639,16 +716,25 @@ function removeTimelineBeat(timeline: TimelineDraft, index: number): TimelineDra
  * would — left when a beat ahead of it is carried forward past it, right when a beat
  * behind it is carried back across it. The result is always in [1, beats.length].
  */
-function moveTimelineBeat(timeline: TimelineDraft, from: number, to: number): TimelineDraft {
+function moveTimelineBeat(
+  timeline: TimelineDraft,
+  from: number,
+  to: number,
+): TimelineDraft {
   const next = [...timeline.beats];
   const [moved] = next.splice(from, 1);
   next.splice(to, 0, moved);
   const keyIndex = timeline.keyBeat - 1;
   let nextKeyIndex = keyIndex;
   if (keyIndex === from) nextKeyIndex = to;
-  else if (keyIndex > from) nextKeyIndex = to <= keyIndex - 1 ? keyIndex : keyIndex - 1;
+  else if (keyIndex > from)
+    nextKeyIndex = to <= keyIndex - 1 ? keyIndex : keyIndex - 1;
   else nextKeyIndex = to <= keyIndex ? keyIndex + 1 : keyIndex;
-  return { beats: next, transition: timeline.transition, keyBeat: nextKeyIndex + 1 };
+  return {
+    beats: next,
+    transition: timeline.transition,
+    keyBeat: nextKeyIndex + 1,
+  };
 }
 
 /**
@@ -665,7 +751,11 @@ export function timelineDurations(state: EditorState): readonly number[] {
 
 /** The draft's timeline as the domain sees it. */
 export function asCopyTimeline(timeline: TimelineDraft): CopyTimeline {
-  return { beats: timeline.beats, transition: timeline.transition, keyBeat: timeline.keyBeat };
+  return {
+    beats: timeline.beats,
+    transition: timeline.transition,
+    keyBeat: timeline.keyBeat,
+  };
 }
 
 /**
@@ -681,10 +771,15 @@ export function asCopyTimeline(timeline: TimelineDraft): CopyTimeline {
  */
 export type AddBeatBlock =
   | { readonly kind: "max"; readonly max: number }
-  | { readonly kind: "floor"; readonly shortestSec: number; readonly floorSec: number };
+  | {
+      readonly kind: "floor";
+      readonly shortestSec: number;
+      readonly floorSec: number;
+    };
 
 export function addBeatBlockedBy(state: EditorState): AddBeatBlock | undefined {
-  if (state.timeline.beats.length >= MAX_BEATS) return { kind: "max", max: MAX_BEATS };
+  if (state.timeline.beats.length >= MAX_BEATS)
+    return { kind: "max", max: MAX_BEATS };
   const durations = timelineDurations(state);
   const withOneMore: CopyTimeline = {
     beats: [...state.timeline.beats, { text: "", weight: 1 }],
@@ -692,7 +787,11 @@ export function addBeatBlockedBy(state: EditorState): AddBeatBlock | undefined {
     keyBeat: state.timeline.keyBeat,
   };
   if (timelineProblem(withOneMore, durations) === undefined) return undefined;
-  return { kind: "floor", shortestSec: Math.min(...durations), floorSec: MIN_DWELL_SEC };
+  return {
+    kind: "floor",
+    shortestSec: Math.min(...durations),
+    floorSec: MIN_DWELL_SEC,
+  };
 }
 
 /** A usable 0-based beat index: an integer inside the current list. */
@@ -723,19 +822,31 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // Nothing re-applies a preset — no remount, no load, no presentation
       // switch; the seed is spent by the one dispatch the seed effect makes.
       const preset = CAMPAIGN_TYPE_PRESETS[action.campaignType];
-      const withMode = reduceEditor(state, { type: "setMode", mode: preset.mode });
+      const withMode = reduceEditor(state, {
+        type: "setMode",
+        mode: preset.mode,
+      });
       // D9 — the same seeding rule the `toggleFormat` and `togglePlatform`
       // cases run whenever Video turns on: a fresh draft gains the motion
       // defaults, or a seeded motion preset would open an editor whose Save is
       // blocked by an empty motion axis the user never saw a control for. The
       // retraction mirrors it the same way, so switching to a still-only
       // preset leaves no orphaned kinds behind.
-      const videoTurningOn = preset.formats.includes("motion") && !withMode.formats.includes("motion");
-      const videoTurningOff = !preset.formats.includes("motion") && withMode.formats.includes("motion");
+      const videoTurningOn =
+        preset.formats.includes("motion") &&
+        !withMode.formats.includes("motion");
+      const videoTurningOff =
+        !preset.formats.includes("motion") &&
+        withMode.formats.includes("motion");
       let motion = withMode.motion;
       let duration = withMode.duration;
       let motionSeeded = withMode.motionSeeded;
-      if (videoTurningOn && motion.length === 0 && duration.length === 0 && !withMode.motionTouched) {
+      if (
+        videoTurningOn &&
+        motion.length === 0 &&
+        duration.length === 0 &&
+        !withMode.motionTouched
+      ) {
         motion = [...MOTION_KINDS];
         duration = [DEFAULT_DURATION_SEC];
         motionSeeded = true;
@@ -774,7 +885,8 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         };
       }
       const next = { ...state, ...patch };
-      if (patch.briefId === undefined || patch.briefId === state.briefId) return next;
+      if (patch.briefId === undefined || patch.briefId === state.briefId)
+        return next;
       return {
         ...next,
         pool: null,
@@ -789,15 +901,24 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
           if (product.key !== action.key) return product;
           const next = { ...product, ...action.patch };
           if (action.patch.id !== undefined) next.idTouched = true;
-          else if (action.patch.name !== undefined && !product.idTouched) next.id = slugify(action.patch.name);
+          else if (action.patch.name !== undefined && !product.idTouched)
+            next.id = slugify(action.patch.name);
           return next;
         }),
       };
     }
     case "addProduct":
-      return { ...state, ...allocateProduct(state.products, state.nextProductKey) };
+      return {
+        ...state,
+        ...allocateProduct(state.products, state.nextProductKey),
+      };
     case "removeProduct":
-      return { ...state, products: state.products.filter((product) => product.key !== action.key) };
+      return {
+        ...state,
+        products: state.products.filter(
+          (product) => product.key !== action.key,
+        ),
+      };
     case "setTreatment": {
       return {
         ...state,
@@ -810,33 +931,51 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
     case "addTreatment":
       return {
         ...state,
-        treatments: [...state.treatments, { id: "", layout: LAYOUT_OPTIONS[0], tone: TONE_OPTIONS[0] }],
+        treatments: [
+          ...state.treatments,
+          { id: "", layout: LAYOUT_OPTIONS[0], tone: TONE_OPTIONS[0] },
+        ],
       };
     case "removeTreatment":
       return {
         ...state,
-        treatments: state.treatments.filter((_, index) => index !== action.index),
+        treatments: state.treatments.filter(
+          (_, index) => index !== action.index,
+        ),
       };
     case "addLayer": {
-      // D124 — the editor's offer IS the boundary's rule: a kind the Template
-      // section could not offer (outside `accepts`, at its own cap, or filling
-      // a shared budget) is refused here exactly as the API refuses it, so the
-      // two cannot drift. A refused dispatch stays identity-equal, like every
-      // guarded case above.
+      // D124, D128 — the editor's offer IS the boundary's rule: a kind the Template
+      // section could not offer (outside `accepts`, at its own cap, filling a shared
+      // budget, or with no legal order placement) is refused here exactly as the API
+      // refuses it, so the two cannot drift. A refused dispatch stays identity-equal,
+      // like every guarded case above.
       if (!addableKinds(state).includes(action.kind)) return state;
+      // `as number`: `addableKinds` already verified that a legal insertion index exists.
+      const insertionIndex = findLegalInsertionIndex(
+        state.template.creativeType,
+        state.template.layers,
+        action.kind,
+      ) as number;
+
       // A new layer carries no props (L5): `{ id, kind }` only, the id derived
       // from the kind and deduplicated against the ids the list already holds
       // (`image`, then `image-2`, `image-3`, …).
       const taken = new Set(state.template.layers.map((layer) => layer.id));
       let id: string = action.kind;
       for (let n = 2; taken.has(id); n += 1) id = `${action.kind}-${n}`;
+      const newLayer = { id, kind: action.kind };
+      const nextLayers = [
+        ...state.template.layers.slice(0, insertionIndex),
+        newLayer,
+        ...state.template.layers.slice(insertionIndex),
+      ];
       return {
         ...state,
         template: {
           ...state.template,
-          // Appended: array position is z-order (D128), so a new layer is
-          // topmost, and the order of everything already there is untouched.
-          layers: [...state.template.layers, { id, kind: action.kind }],
+          // Placed at the derived legal index (highest index satisfying constraints,
+          // defaulting to topmost), so an offered add always yields a legal order (D128).
+          layers: nextLayers,
         },
       };
     }
@@ -851,7 +990,9 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // could still carry a pair: filtering by id would strip both at once —
       // the duplicated kind required, Save would then fail for a layer the
       // user never touched. The first match goes; the duplicate stays.
-      const index = state.template.layers.findIndex((layer) => layer.id === action.id);
+      const index = state.template.layers.findIndex(
+        (layer) => layer.id === action.id,
+      );
       return {
         ...state,
         template: {
@@ -957,32 +1098,57 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
     case "setKeyBeat":
       // keyBeat is 1-based and must point at a beat that exists; the action is 0-based.
       if (!isBeatIndex(action.index, state.timeline.beats.length)) return state;
-      return { ...state, timeline: { ...state.timeline, keyBeat: action.index + 1 } };
+      return {
+        ...state,
+        timeline: { ...state.timeline, keyBeat: action.index + 1 },
+      };
     case "setTransition":
-      return { ...state, timeline: { ...state.timeline, transition: action.transition } };
+      return {
+        ...state,
+        timeline: { ...state.timeline, transition: action.transition },
+      };
     case "setVariation": {
       // Setting the count by hand answers the notice — it has said its one thing.
       if (action.field === "count") {
-        return { ...state, countNotice: null, variation: { ...state.variation, count: action.value } };
+        return {
+          ...state,
+          countNotice: null,
+          variation: { ...state.variation, count: action.value },
+        };
       }
-      return { ...state, variation: { ...state.variation, [action.field]: action.value } };
+      return {
+        ...state,
+        variation: { ...state.variation, [action.field]: action.value },
+      };
     }
     case "toggleLayout": {
       // Min-one guard (D6): the last selected value cannot be deselected — the click
       // is a no-op, which deletes the "select at least one" error by construction.
-      const layout = toggleOrdered(state.variation.layout, action.value, LAYOUT_OPTIONS);
+      const layout = toggleOrdered(
+        state.variation.layout,
+        action.value,
+        LAYOUT_OPTIONS,
+      );
       if (layout.length === 0) return state;
       return { ...state, variation: { ...state.variation, layout } };
     }
     case "toggleTone": {
-      const tone = toggleOrdered(state.variation.tone, action.value, TONE_OPTIONS);
+      const tone = toggleOrdered(
+        state.variation.tone,
+        action.value,
+        TONE_OPTIONS,
+      );
       if (tone.length === 0) return state;
       return { ...state, variation: { ...state.variation, tone } };
     }
     case "toggleAnchor": {
       // Min-one guard (D6): the last selected value cannot be deselected — the click
       // is a no-op, which deletes the "select at least one" error by construction.
-      const anchor = toggleOrdered(state.variation.anchor, action.value, ANCHOR_OPTIONS);
+      const anchor = toggleOrdered(
+        state.variation.anchor,
+        action.value,
+        ANCHOR_OPTIONS,
+      );
       if (anchor.length === 0) return state;
       return {
         ...state,
@@ -1000,7 +1166,11 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       };
     }
     case "toggleRatio": {
-      const nextRatioSelection = toggleOrdered(state.variation.ratio, action.value, RATIO_OPTIONS);
+      const nextRatioSelection = toggleOrdered(
+        state.variation.ratio,
+        action.value,
+        RATIO_OPTIONS,
+      );
       return {
         ...state,
         variation: { ...state.variation, ratio: nextRatioSelection },
@@ -1008,23 +1178,37 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         // to what the platforms derive, and a flag stuck at true would freeze it there —
         // the next platform change would leave the ratios behind, still showing the old
         // platform's shapes.
-        ratioOverridden: differsFrom(nextRatioSelection, platformsToRatios(state.platforms)),
+        ratioOverridden: differsFrom(
+          nextRatioSelection,
+          platformsToRatios(state.platforms),
+        ),
       };
     }
     case "toggleBackground": {
       // Same guard as layout and tone. The domain multiplies these axes by their raw
       // length, so an empty one makes a policy that can produce nothing at all.
-      const background = toggleOrdered(state.variation.background, action.value, BACKGROUND_OPTIONS);
+      const background = toggleOrdered(
+        state.variation.background,
+        action.value,
+        BACKGROUND_OPTIONS,
+      );
       if (background.length === 0) return state;
       return { ...state, variation: { ...state.variation, background } };
     }
     case "togglePalette": {
-      const paletteShift = toggleOrdered(state.variation.paletteShift, action.value, PALETTE_SHIFT_OPTIONS);
+      const paletteShift = toggleOrdered(
+        state.variation.paletteShift,
+        action.value,
+        PALETTE_SHIFT_OPTIONS,
+      );
       if (paletteShift.length === 0) return state;
       return { ...state, variation: { ...state.variation, paletteShift } };
     }
     case "toggleHeadline":
-      return { ...state, variation: { ...state.variation, headline: !state.variation.headline } };
+      return {
+        ...state,
+        variation: { ...state.variation, headline: !state.variation.headline },
+      };
     case "setStyle": {
       // The domain's own validator is the contract here, the way `setBeatWeight`'s
       // bounds are: a patch that would leave the block outside the Style VO's
@@ -1065,11 +1249,21 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // took it away, which is the opposite of what the button says.
       //
       // Idempotent by construction: pressing it twice is pressing it once.
-      const formats = state.formats.includes("static") ? state.formats : [...state.formats, "static"];
-      const platforms = state.platforms.some((id) => platformsToFormats([id]).includes("static"))
+      const formats = state.formats.includes("static")
+        ? state.formats
+        : [...state.formats, "static"];
+      const platforms = state.platforms.some((id) =>
+        platformsToFormats([id]).includes("static"),
+      )
         ? state.platforms
         : [...state.platforms, PHOTO_PLATFORM];
-      return withCountClamp({ ...state, formats, platforms, formatsOverridden: true, outputExplicit: true });
+      return withCountClamp({
+        ...state,
+        formats,
+        platforms,
+        formatsOverridden: true,
+        outputExplicit: true,
+      });
     }
     case "addDuration": {
       // A click lands on a particular second of the reel, and that is the length the user
@@ -1082,18 +1276,32 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // to the next unused length.
       const asked = action.value;
       const next =
-        asked !== undefined && !state.duration.includes(asked) ? asked : nextFreeDuration(state.duration);
-      return next === undefined ? state : { ...state, duration: [...state.duration, next], motionTouched: true };
+        asked !== undefined && !state.duration.includes(asked)
+          ? asked
+          : nextFreeDuration(state.duration);
+      return next === undefined
+        ? state
+        : {
+            ...state,
+            duration: [...state.duration, next],
+            motionTouched: true,
+          };
     }
     case "removeDuration":
-      return { ...state, duration: state.duration.filter((_, index) => index !== action.index), motionTouched: true };
+      return {
+        ...state,
+        duration: state.duration.filter((_, index) => index !== action.index),
+        motionTouched: true,
+      };
     case "toggleFormat": {
       const nextFormats = state.formats.includes(action.value)
         ? state.formats.filter((f) => f !== action.value)
         : [...state.formats, action.value];
 
-      const videoTurningOn = action.value === "motion" && nextFormats.includes("motion");
-      const videoTurningOff = action.value === "motion" && !nextFormats.includes("motion");
+      const videoTurningOn =
+        action.value === "motion" && nextFormats.includes("motion");
+      const videoTurningOff =
+        action.value === "motion" && !nextFormats.includes("motion");
 
       let motion = state.motion;
       let duration = state.duration;
@@ -1102,7 +1310,12 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // Seeding domain defaults on Video-on (D9):
       // When Video is turned on on a fresh draft with no motion/duration set,
       // seed all motion kinds and 6s duration.
-      if (videoTurningOn && motion.length === 0 && duration.length === 0 && !state.motionTouched) {
+      if (
+        videoTurningOn &&
+        motion.length === 0 &&
+        duration.length === 0 &&
+        !state.motionTouched
+      ) {
         motion = [...MOTION_KINDS];
         duration = [DEFAULT_DURATION_SEC];
         motionSeeded = true;
@@ -1129,13 +1342,24 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         // Recomputed for the same reason as the ratio axis: turning Video on and off again
         // leaves the formats equal to what the platforms derive, and latching the flag
         // would stop a later platform change updating them.
-        formatsOverridden: differsFrom(nextFormats, platformsToFormats(state.platforms)),
+        formatsOverridden: differsFrom(
+          nextFormats,
+          platformsToFormats(state.platforms),
+        ),
       };
     }
     case "togglePlatform": {
-      const nextPlatforms = toggleOrdered(state.platforms, action.value, PLATFORM_ORDER);
-      const nextFormats = state.formatsOverridden ? state.formats : platformsToFormats(nextPlatforms);
-      const nextRatio = state.ratioOverridden ? state.variation.ratio : platformsToRatios(nextPlatforms);
+      const nextPlatforms = toggleOrdered(
+        state.platforms,
+        action.value,
+        PLATFORM_ORDER,
+      );
+      const nextFormats = state.formatsOverridden
+        ? state.formats
+        : platformsToFormats(nextPlatforms);
+      const nextRatio = state.ratioOverridden
+        ? state.variation.ratio
+        : platformsToRatios(nextPlatforms);
       // `sizes` is authored state, so a toggle edits it rather than re-deriving:
       // adding a display platform contributes the sizes it offers that are not
       // already present (the user's subset survives), removing one drops the
@@ -1143,10 +1367,14 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // nothing — both branches degenerate to the list that is already there.
       const removing = state.platforms.includes(action.value);
       const nextSizes = removing
-        ? state.sizes.filter((size) => platformsToSizes(nextPlatforms).includes(size))
+        ? state.sizes.filter((size) =>
+            platformsToSizes(nextPlatforms).includes(size),
+          )
         : orderedDisplaySizes([
             ...state.sizes,
-            ...(PLATFORM_PROFILES[action.value]?.sizes ?? []).map((slot) => slot.size),
+            ...(PLATFORM_PROFILES[action.value]?.sizes ?? []).map(
+              (slot) => slot.size,
+            ),
           ]);
 
       let motion = state.motion;
@@ -1154,9 +1382,16 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       let motionSeeded = state.motionSeeded;
 
       if (!state.formatsOverridden) {
-        const videoTurningOn = nextFormats.includes("motion") && !state.formats.includes("motion");
-        const videoTurningOff = !nextFormats.includes("motion") && state.formats.includes("motion");
-        if (videoTurningOn && motion.length === 0 && duration.length === 0 && !state.motionTouched) {
+        const videoTurningOn =
+          nextFormats.includes("motion") && !state.formats.includes("motion");
+        const videoTurningOff =
+          !nextFormats.includes("motion") && state.formats.includes("motion");
+        if (
+          videoTurningOn &&
+          motion.length === 0 &&
+          duration.length === 0 &&
+          !state.motionTouched
+        ) {
           motion = [...MOTION_KINDS];
           duration = [DEFAULT_DURATION_SEC];
           motionSeeded = true;
@@ -1187,8 +1422,12 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       return {
         ...state,
         pool: action.pool,
-        headlineAxisDropped: none && (state.headlineAxisDropped || state.variation.headline),
-        variation: { ...state.variation, headline: state.variation.headline && !none },
+        headlineAxisDropped:
+          none && (state.headlineAxisDropped || state.variation.headline),
+        variation: {
+          ...state.variation,
+          headline: state.variation.headline && !none,
+        },
       };
     }
     case "loadPool": {
@@ -1201,7 +1440,10 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
     case "load": {
       // Capabilities describe the host, not the brief — a brief switch (including
       // the run-context sync re-adopting the active brief) must not forget them.
-      return { ...fromBrief(action.brief, action.entry), capabilities: state.capabilities };
+      return {
+        ...fromBrief(action.brief, action.entry),
+        capabilities: state.capabilities,
+      };
     }
     case "apply": {
       // Snapshot what was actually applied, not whatever the reducer holds when the
@@ -1214,7 +1456,10 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // A draft persisted before the probe answered (or by an older editor) carries
       // stale capabilities. Keep the verdict this session already has, or restoring
       // would re-enable motion on a host that has said it cannot produce it.
-      return { ...action.state, capabilities: state.capabilities ?? action.state.capabilities };
+      return {
+        ...action.state,
+        capabilities: state.capabilities ?? action.state.capabilities,
+      };
     case "save": {
       // Snapshot what was actually persisted, not whatever the reducer holds when the
       // response lands — edits made during the request must stay dirty. The draft
@@ -1250,11 +1495,17 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
     case "discard": {
       if (state.source.kind === "file" && state.source.savedSnapshot) {
         return {
-          ...fromBrief(state.source.savedSnapshot, { file: state.source.file, revision: state.source.revision }),
+          ...fromBrief(state.source.savedSnapshot, {
+            file: state.source.file,
+            revision: state.source.revision,
+          }),
           capabilities: state.capabilities,
         };
       }
-      return { ...initialEditorState(state.mode), capabilities: state.capabilities };
+      return {
+        ...initialEditorState(state.mode),
+        capabilities: state.capabilities,
+      };
     }
     case "setCapabilities":
       return { ...state, capabilities: action.capabilities };
@@ -1276,9 +1527,13 @@ export function approvedHeadlines(pool: CopyPool | null): number {
  * Order is the pool's own, and duplicates are dropped: the same line approved twice is one
  * choice to a person, and offering it twice reads as a bug.
  */
-export function approvedHeadlineTexts(pool: CopyPool | null): readonly string[] {
+export function approvedHeadlineTexts(
+  pool: CopyPool | null,
+): readonly string[] {
   if (pool === null) return [];
-  const texts = pool.entries.filter((entry) => entry.status === "approved").map((entry) => entry.text);
+  const texts = pool.entries
+    .filter((entry) => entry.status === "approved")
+    .map((entry) => entry.text);
   return [...new Set(texts)];
 }
 
@@ -1294,7 +1549,11 @@ function toProduct(draft: ProductDraft): Product {
 }
 
 function toTreatment(draft: TreatmentDraft): Treatment {
-  return { id: draft.id, layout: draft.layout as Treatment["layout"], tone: draft.tone as Treatment["tone"] };
+  return {
+    id: draft.id,
+    layout: draft.layout as Treatment["layout"],
+    tone: draft.tone as Treatment["tone"],
+  };
 }
 
 /**
@@ -1307,7 +1566,11 @@ function toTreatment(draft: TreatmentDraft): Treatment {
  * the authored work returns the moment Video does.
  */
 export function canSerializeTimeline(state: EditorState): boolean {
-  return state.mode === "variation" && state.formats.includes("motion") && !state.variation.headline;
+  return (
+    state.mode === "variation" &&
+    state.formats.includes("motion") &&
+    !state.variation.headline
+  );
 }
 
 /**
@@ -1319,7 +1582,9 @@ export function canSerializeTimeline(state: EditorState): boolean {
  * a style the brief would not save (D45).
  */
 export function briefStyle(state: EditorState): Style | undefined {
-  return state.styleExplicit || styleDiverges(state.style) ? { ...state.style } : undefined;
+  return state.styleExplicit || styleDiverges(state.style)
+    ? { ...state.style }
+    : undefined;
 }
 
 /**
@@ -1394,12 +1659,16 @@ export function toBrief(state: EditorState): CampaignBrief {
     // The brief's style (T5) applies in both modes; emitted only when it says
     // something the absent key does not (see briefStyle).
     ...(style !== undefined ? { style } : {}),
-    ...(state.mode === "variation" || state.modeExplicit ? { mode: state.mode } : {}),
+    ...(state.mode === "variation" || state.modeExplicit
+      ? { mode: state.mode }
+      : {}),
     // D112 — `type` follows `mode`'s rule one line above: absent means
     // social-post, so a draft still on the default never grows the key (the
     // corpus round-trip and the freshly-loaded-clean check depend on it),
     // while a non-default type or an explicitly spelled default is written.
-    ...(state.type !== DEFAULT_CAMPAIGN_TYPE || state.typeExplicit ? { type: state.type } : {}),
+    ...(state.type !== DEFAULT_CAMPAIGN_TYPE || state.typeExplicit
+      ? { type: state.type }
+      : {}),
     ...(state.outputExplicit || !isDefaultOutput(state)
       ? {
           output: {
@@ -1413,7 +1682,9 @@ export function toBrief(state: EditorState): CampaignBrief {
       : {}),
   };
   const localized = state.localizedMessage.trim();
-  const withLocalized = localized ? { ...brief, localizedMessage: localized } : brief;
+  const withLocalized = localized
+    ? { ...brief, localizedMessage: localized }
+    : brief;
   // Sequenced copy for motion clips (E5). The block is written only when the state may
   // carry one — the D5 gate `canSerializeTimeline` mirrors the parser's — and only when
   // beats exist: an empty list is "no timeline", and a loaded brief with no `copy` block
@@ -1425,7 +1696,10 @@ export function toBrief(state: EditorState): CampaignBrief {
   const timeline =
     canSerializeTimeline(state) && state.timeline.beats.length > 0
       ? {
-          beats: state.timeline.beats.map((beat) => ({ text: beat.text, weight: beat.weight })),
+          beats: state.timeline.beats.map((beat) => ({
+            text: beat.text,
+            weight: beat.weight,
+          })),
           transition: state.timeline.transition,
           keyBeat: state.timeline.keyBeat,
         }
@@ -1434,9 +1708,12 @@ export function toBrief(state: EditorState): CampaignBrief {
     timeline !== undefined || state.copyExplicit
       ? { ...(timeline !== undefined ? { timeline } : {}) }
       : undefined;
-  const withCopy = copy !== undefined ? { ...withLocalized, copy } : withLocalized;
+  const withCopy =
+    copy !== undefined ? { ...withLocalized, copy } : withLocalized;
   if (state.mode === "brief") {
-    return state.treatments.length > 0 ? { ...withCopy, treatments: state.treatments.map(toTreatment) } : withCopy;
+    return state.treatments.length > 0
+      ? { ...withCopy, treatments: state.treatments.map(toTreatment) }
+      : withCopy;
   }
   const count = parseInt(state.variation.count, 10) || 0;
   const seed = parseInt(state.variation.seed, 10);
@@ -1450,7 +1727,9 @@ export function toBrief(state: EditorState): CampaignBrief {
     ...(perRatio > 0 ? { perRatio } : {}),
   };
   const coverage =
-    Object.keys(coverageFields).length > 0 ? (coverageFields as VariationPolicy["coverage"]) : undefined;
+    Object.keys(coverageFields).length > 0
+      ? (coverageFields as VariationPolicy["coverage"])
+      : undefined;
   const axes = {
     layout: [...state.variation.layout],
     tone: [...state.variation.tone],
@@ -1464,7 +1743,9 @@ export function toBrief(state: EditorState): CampaignBrief {
     // The ratio axis is written only when it constrains: absent means every
     // ratio, so a full selection round-trips a brief without the key
     // byte-identically instead of growing a redundant `ratio: [all]`.
-    ...(state.variation.ratio.length < RATIO_OPTIONS.length ? { ratio: [...state.variation.ratio] } : {}),
+    ...(state.variation.ratio.length < RATIO_OPTIONS.length
+      ? { ratio: [...state.variation.ratio] }
+      : {}),
     background: { source: [...state.variation.background] },
     paletteShift: [...state.variation.paletteShift],
     ...(state.variation.headline ? { headline: HEADLINE_POOL_REF } : {}),
@@ -1492,18 +1773,39 @@ export function toBrief(state: EditorState): CampaignBrief {
  * disk or the API) and `normalizeDraftState` (a draft from localStorage) — so
  * every reducer that calls `.filter`/`.includes` on a list can trust it is one.
  */
-const list = <T,>(value: unknown, fallback: T[]): T[] => (Array.isArray(value) ? [...(value as T[])] : fallback);
+const list = <T>(value: unknown, fallback: T[]): T[] =>
+  Array.isArray(value) ? [...(value as T[])] : fallback;
 
-export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision?: string }): EditorState {
+export function fromBrief(
+  brief: CampaignBrief,
+  entry?: { file: string; revision?: string },
+): EditorState {
   const tempId = generateTempId();
   const source: EditorSource = entry
-    ? { kind: "file", file: entry.file, loadedId: brief.id, savedSnapshot: brief, revision: entry.revision }
+    ? {
+        kind: "file",
+        file: entry.file,
+        loadedId: brief.id,
+        savedSnapshot: brief,
+        revision: entry.revision,
+      }
     : { kind: "new", tempId };
-  const products = brief.products.length > 0
-    ? brief.products.map((p, i) => ({ ...emptyProduct(i + 1, p.primaryColor), ...p, idTouched: true }))
-    : [emptyProduct(1)];
-  const nextProductKey = brief.products.length > 0 ? brief.products.length + 1 : 2;
-  const treatments = brief.treatments?.map((t) => ({ id: t.id, layout: t.layout, tone: t.tone })) ?? [];
+  const products =
+    brief.products.length > 0
+      ? brief.products.map((p, i) => ({
+          ...emptyProduct(i + 1, p.primaryColor),
+          ...p,
+          idTouched: true,
+        }))
+      : [emptyProduct(1)];
+  const nextProductKey =
+    brief.products.length > 0 ? brief.products.length + 1 : 2;
+  const treatments =
+    brief.treatments?.map((t) => ({
+      id: t.id,
+      layout: t.layout,
+      tone: t.tone,
+    })) ?? [];
   const formats = [...(brief.output?.formats ?? ["static"])];
   const platforms = [...(brief.output?.platforms ?? [...STATIC_PLATFORMS])];
   // The brief's size subset is authored state (D116): absent means the union of
@@ -1516,19 +1818,29 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
   // though E1 renders no controls for them yet (they arrive in E2.2 / E2.3).
   const variation = brief.variation;
   const axes = variation?.axes as Record<string, unknown> | undefined;
-  const num = (value: unknown): string => (typeof value === "number" ? String(value) : "");
-  const coverage = variation?.coverage as { perProduct?: number; perRatio?: number } | undefined;
+  const num = (value: unknown): string =>
+    typeof value === "number" ? String(value) : "";
+  const coverage = variation?.coverage as
+    | { perProduct?: number; perRatio?: number }
+    | undefined;
   const derivedFormats = platformsToFormats(platforms);
-  const sizes = brief.output?.sizes !== undefined ? [...brief.output.sizes] : platformsToSizes(platforms);
+  const sizes =
+    brief.output?.sizes !== undefined
+      ? [...brief.output.sizes]
+      : platformsToSizes(platforms);
   // One comparison for both paths. This used to be an inline set test while the draft
   // path used `differsFrom`, so the same brief got a different verdict depending on
   // whether it arrived from disk or from a restored draft — and the load path, the one
   // that reads other people's briefs, was the lenient of the two.
   const storedFormats = brief.output?.formats;
-  const formatsOverridden = storedFormats !== undefined && differsFrom(storedFormats, derivedFormats);
+  const formatsOverridden =
+    storedFormats !== undefined && differsFrom(storedFormats, derivedFormats);
 
   const derivedRatios = platformsToRatios(platforms);
-  const storedRatios = axes?.ratio !== undefined ? list(axes.ratio, [...RATIO_OPTIONS]) : [...RATIO_OPTIONS];
+  const storedRatios =
+    axes?.ratio !== undefined
+      ? list(axes.ratio, [...RATIO_OPTIONS])
+      : [...RATIO_OPTIONS];
   const ratioOverridden = differsFrom(storedRatios, derivedRatios);
 
   const motionList = list(axes?.motion, []);
@@ -1543,7 +1855,11 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
   const copyTimeline = brief.copy?.timeline;
   const timeline: TimelineDraft = copyTimeline
     ? {
-        beats: copyTimeline.beats.map((beat, index) => ({ key: index + 1, text: beat.text, weight: beat.weight })),
+        beats: copyTimeline.beats.map((beat, index) => ({
+          key: index + 1,
+          text: beat.text,
+          weight: beat.weight,
+        })),
         transition: copyTimeline.transition,
         keyBeat: copyTimeline.keyBeat,
       }
@@ -1579,14 +1895,22 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
     variation: {
       count: variation ? String(variation.count) : "12",
       seed: num(variation?.seed),
-      minDistance: variation?.minDistance === undefined ? (variation ? "" : "2") : String(variation.minDistance),
+      minDistance:
+        variation?.minDistance === undefined
+          ? variation
+            ? ""
+            : "2"
+          : String(variation.minDistance),
       perProduct: coverage ? num(coverage.perProduct) : variation ? "" : "1",
       perRatio: coverage ? num(coverage.perRatio) : variation ? "" : "1",
       layout: list(axes?.layout, [...LAYOUT_OPTIONS]),
       tone: list(axes?.tone, [...TONE_OPTIONS]),
       anchor: list(axes?.anchor, [...DERIVED_ANCHOR_OPTIONS]),
       ratio: storedRatios,
-      background: list((axes?.background as { source?: unknown } | undefined)?.source, [...DEFAULT_BACKGROUND_SOURCES]),
+      background: list(
+        (axes?.background as { source?: unknown } | undefined)?.source,
+        [...DEFAULT_BACKGROUND_SOURCES],
+      ),
       paletteShift: list(axes?.paletteShift, [...PALETTE_SHIFT_OPTIONS]),
       headline: axes?.headline === HEADLINE_POOL_REF,
     },
@@ -1620,8 +1944,12 @@ export function isPristine(state: EditorState): boolean {
   // entirely of characters the slug strips ("!!!") leaves the brief identical to a blank
   // one, and comparing briefs alone would call that pristine: the draft would never be
   // autosaved and leaving would not prompt, so the typed name would vanish without a word.
-  if (state.campaignName !== initialEditorState(state.mode).campaignName) return false;
-  return JSON.stringify(toBrief(state)) === JSON.stringify(toBrief(initialEditorState(state.mode)));
+  if (state.campaignName !== initialEditorState(state.mode).campaignName)
+    return false;
+  return (
+    JSON.stringify(toBrief(state)) ===
+    JSON.stringify(toBrief(initialEditorState(state.mode)))
+  );
 }
 
 /**
@@ -1654,7 +1982,8 @@ function canonicalKeys(value: unknown): unknown {
   if (value !== null && typeof value === "object") {
     const source = value as Record<string, unknown>;
     const sorted: Record<string, unknown> = {};
-    for (const key of Object.keys(source).sort()) sorted[key] = canonicalKeys(source[key]);
+    for (const key of Object.keys(source).sort())
+      sorted[key] = canonicalKeys(source[key]);
     return sorted;
   }
   return value;
@@ -1676,7 +2005,8 @@ export function draftKeyFor(id: string): string {
 }
 
 export function getDraftKey(state: EditorState): string {
-  const id = state.source.kind === "file" ? state.source.loadedId : state.source.tempId;
+  const id =
+    state.source.kind === "file" ? state.source.loadedId : state.source.tempId;
   return draftKeyFor(id);
 }
 
@@ -1768,8 +2098,14 @@ export function hasRecoverableDraft(): boolean {
  * `output.formats` of a brief nobody edited. The corpus round-trip is a merge gate, and
  * "same values, different order" is not the same bytes.
  */
-function differsFrom(stored: readonly string[], derived: readonly string[]): boolean {
-  return stored.length !== derived.length || stored.some((value, index) => value !== derived[index]);
+function differsFrom(
+  stored: readonly string[],
+  derived: readonly string[],
+): boolean {
+  return (
+    stored.length !== derived.length ||
+    stored.some((value, index) => value !== derived[index])
+  );
 }
 
 /**
@@ -1781,29 +2117,44 @@ function differsFrom(stored: readonly string[], derived: readonly string[]): boo
  * has no valid value at all and is reset to its never-serialised sentinel 1.
  */
 function normalizeTimelineDraft(value: unknown): TimelineDraft {
-  const rawTimeline = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+  const rawTimeline =
+    typeof value === "object" && value !== null
+      ? (value as Record<string, unknown>)
+      : null;
   // The key is never serialised, so a restored draft has none: mint by position. That is
   // safe precisely because the list has just been read whole — no reorder has happened yet.
-  const beats: TimelineBeatDraft[] = (Array.isArray(rawTimeline?.beats) ? rawTimeline.beats : []).map(
-    (entry, index) => {
-      if (typeof entry !== "object" || entry === null) return { key: index + 1, text: "", weight: 1 };
-      const beat = entry as Partial<TimelineBeatDraft>;
-      const weight =
-        typeof beat.weight === "number" && Number.isInteger(beat.weight) && beat.weight >= 1 && beat.weight <= MAX_WEIGHT
-          ? beat.weight
-          : 1;
-      return { key: index + 1, text: typeof beat.text === "string" ? beat.text : "", weight };
-    },
-  );
+  const beats: TimelineBeatDraft[] = (
+    Array.isArray(rawTimeline?.beats) ? rawTimeline.beats : []
+  ).map((entry, index) => {
+    if (typeof entry !== "object" || entry === null)
+      return { key: index + 1, text: "", weight: 1 };
+    const beat = entry as Partial<TimelineBeatDraft>;
+    const weight =
+      typeof beat.weight === "number" &&
+      Number.isInteger(beat.weight) &&
+      beat.weight >= 1 &&
+      beat.weight <= MAX_WEIGHT
+        ? beat.weight
+        : 1;
+    return {
+      key: index + 1,
+      text: typeof beat.text === "string" ? beat.text : "",
+      weight,
+    };
+  });
   const transition =
-    rawTimeline !== null && (rawTimeline.transition === "cut" || rawTimeline.transition === "fade")
+    rawTimeline !== null &&
+    (rawTimeline.transition === "cut" || rawTimeline.transition === "fade")
       ? rawTimeline.transition
       : "fade";
   const storedKeyBeat =
-    rawTimeline !== null && typeof rawTimeline.keyBeat === "number" && Number.isInteger(rawTimeline.keyBeat)
+    rawTimeline !== null &&
+    typeof rawTimeline.keyBeat === "number" &&
+    Number.isInteger(rawTimeline.keyBeat)
       ? rawTimeline.keyBeat
       : 1;
-  const keyBeat = beats.length === 0 ? 1 : Math.min(Math.max(1, storedKeyBeat), beats.length);
+  const keyBeat =
+    beats.length === 0 ? 1 : Math.min(Math.max(1, storedKeyBeat), beats.length);
   return { beats, transition, keyBeat };
 }
 
@@ -1816,15 +2167,22 @@ function normalizeTimelineDraft(value: unknown): TimelineDraft {
  * the parser would refuse.
  */
 function normalizeStyleDraft(value: unknown): Style {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return {};
   const raw = value as Record<string, unknown>;
   const style: {
     -readonly [K in keyof Style]: Style[K];
   } = {};
-  if (typeof raw.fontFamily === "string" && (FONT_FAMILY_VALUES as readonly string[]).includes(raw.fontFamily)) {
+  if (
+    typeof raw.fontFamily === "string" &&
+    (FONT_FAMILY_VALUES as readonly string[]).includes(raw.fontFamily)
+  ) {
     style.fontFamily = raw.fontFamily as Style["fontFamily"];
   }
-  if (typeof raw.fontWeight === "number" && (FONT_WEIGHT_VALUES as readonly number[]).includes(raw.fontWeight)) {
+  if (
+    typeof raw.fontWeight === "number" &&
+    (FONT_WEIGHT_VALUES as readonly number[]).includes(raw.fontWeight)
+  ) {
     style.fontWeight = raw.fontWeight as Style["fontWeight"];
   }
   if (
@@ -1851,10 +2209,16 @@ function normalizeStyleDraft(value: unknown): Style {
   ) {
     style.letterSpacing = raw.letterSpacing;
   }
-  if (typeof raw.align === "string" && (ALIGN_VALUES as readonly string[]).includes(raw.align)) {
+  if (
+    typeof raw.align === "string" &&
+    (ALIGN_VALUES as readonly string[]).includes(raw.align)
+  ) {
     style.align = raw.align as Style["align"];
   }
-  if (typeof raw.textEffect === "string" && (TEXT_EFFECT_VALUES as readonly string[]).includes(raw.textEffect)) {
+  if (
+    typeof raw.textEffect === "string" &&
+    (TEXT_EFFECT_VALUES as readonly string[]).includes(raw.textEffect)
+  ) {
     style.textEffect = raw.textEffect as Style["textEffect"];
   }
   return style;
@@ -1865,8 +2229,12 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   // D112 — a draft saved before the type existed carries no `type`, and a
   // hand-edited one may carry anything: the enum is checked against its legal
   // vocabulary, never believed, and the absent key means the default.
-  const typeValid = (CAMPAIGN_TYPES as readonly string[]).includes(raw.type as string);
-  const type: CampaignType = typeValid ? (raw.type as CampaignType) : DEFAULT_CAMPAIGN_TYPE;
+  const typeValid = (CAMPAIGN_TYPES as readonly string[]).includes(
+    raw.type as string,
+  );
+  const type: CampaignType = typeValid
+    ? (raw.type as CampaignType)
+    : DEFAULT_CAMPAIGN_TYPE;
   // L3a — a draft saved before the template became required writes no key: it
   // normalises to the campaign type's canonical template, exactly what a fresh
   // draft and an applied preset seed. A draft that does carry one is held
@@ -1880,9 +2248,12 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   // with the persisted-brief guard. It checks shape, never content: a valid
   // template keeps any layer order it was saved with.
   const rawTemplate = raw.template;
-  const template: BriefTemplate = isBriefTemplate(rawTemplate) ? rawTemplate : templateFromCanonical(type);
+  const template: BriefTemplate = isBriefTemplate(rawTemplate)
+    ? rawTemplate
+    : templateFromCanonical(type);
   const initial = initialEditorState(mode);
-  const str = (value: unknown, fallback: string): string => (typeof value === "string" ? value : fallback);
+  const str = (value: unknown, fallback: string): string =>
+    typeof value === "string" ? value : fallback;
   const rawSource = raw.source as Partial<EditorSource> | null | undefined;
   const source: EditorSource =
     rawSource !== null &&
@@ -1890,19 +2261,23 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     (rawSource.kind === "new" || rawSource.kind === "file")
       ? (rawSource as EditorSource)
       : initial.source;
-  const v = (typeof raw.variation === "object" && raw.variation !== null ? raw.variation : {}) as Record<
-    string,
-    unknown
-  >;
+  const v = (
+    typeof raw.variation === "object" && raw.variation !== null
+      ? raw.variation
+      : {}
+  ) as Record<string, unknown>;
   // `list` proves an array, not its members: a hand-edited draft's `anchor:
   // ["diagonal"]` (the #169 `[null]` pattern) would otherwise ride the
   // `as AnchorOption` cast preview-props makes into CreativePreview's leaf
   // lookups. Only the axis' own vocabulary survives, and min-one holds — a
   // filter that empties falls back to the pair the absent axis behaves as.
-  const anchorSelection = list(v.anchor, initial.variation.anchor).filter((value) =>
-    ANCHOR_OPTIONS.includes(value),
+  const anchorSelection = list(v.anchor, initial.variation.anchor).filter(
+    (value) => ANCHOR_OPTIONS.includes(value),
   );
-  const anchor = anchorSelection.length > 0 ? anchorSelection : [...initial.variation.anchor];
+  const anchor =
+    anchorSelection.length > 0
+      ? anchorSelection
+      : [...initial.variation.anchor];
   const variation: EditorState["variation"] = {
     count: str(v.count, initial.variation.count),
     seed: str(v.seed, initial.variation.seed),
@@ -1915,25 +2290,40 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     ratio: list(v.ratio, initial.variation.ratio),
     background: list(v.background, initial.variation.background),
     paletteShift: list(v.paletteShift, initial.variation.paletteShift),
-    headline: typeof v.headline === "boolean" ? v.headline : initial.variation.headline,
+    headline:
+      typeof v.headline === "boolean" ? v.headline : initial.variation.headline,
   };
   // A persisted array can hold anything: `list` only proves it is an array, so an
   // entry that is not a usable object (a `null` from a hand-edited draft, a bare
   // string) is replaced rather than dereferenced — reading `.key` off it would
   // throw inside the loader's try/catch and silently discard the whole draft,
   // losing every recovered edit D11 exists to keep.
-  const products = (list(raw.products, initial.products) as unknown[]).map((entry, i) => {
-    if (typeof entry !== "object" || entry === null) return emptyProduct(i + 1);
-    const draft = entry as ProductDraft;
-    return typeof draft.key === "number" && draft.key > 0 ? draft : { ...draft, key: i + 1 };
-  });
-  const storedNextProductKey = typeof raw.nextProductKey === "number" && raw.nextProductKey > 0 ? raw.nextProductKey : undefined;
+  const products = (list(raw.products, initial.products) as unknown[]).map(
+    (entry, i) => {
+      if (typeof entry !== "object" || entry === null)
+        return emptyProduct(i + 1);
+      const draft = entry as ProductDraft;
+      return typeof draft.key === "number" && draft.key > 0
+        ? draft
+        : { ...draft, key: i + 1 };
+    },
+  );
+  const storedNextProductKey =
+    typeof raw.nextProductKey === "number" && raw.nextProductKey > 0
+      ? raw.nextProductKey
+      : undefined;
   // A stored counter is trusted only above the keys it must outlive: a stale one
   // (≤ an existing key) would make addProduct mint a duplicate and removeProduct
   // delete two products — the very collision D16 exists to prevent. A counter
   // burned past the keys still wins; product keys only need to be unique.
-  const nextProductKey = Math.max(storedNextProductKey ?? 0, nextKeyAfter(products));
-  const campaignName = str(raw.campaignName, typeof raw.briefId === "string" ? raw.briefId : "");
+  const nextProductKey = Math.max(
+    storedNextProductKey ?? 0,
+    nextKeyAfter(products),
+  );
+  const campaignName = str(
+    raw.campaignName,
+    typeof raw.briefId === "string" ? raw.briefId : "",
+  );
   const motion = list(raw.motion, initial.motion);
   const duration = list(raw.duration, initial.duration);
   const formats = list(raw.formats, initial.formats);
@@ -1978,7 +2368,10 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     // A pre-T5 draft wrote neither key: inferred from the data like the sibling
     // overrides — a block that diverges from the defaults was authored, a
     // declared flag is believed.
-    styleExplicit: raw.styleExplicit === undefined ? styleDiverges(style) : raw.styleExplicit === true,
+    styleExplicit:
+      raw.styleExplicit === undefined
+        ? styleDiverges(style)
+        : raw.styleExplicit === true,
     variation,
     motion,
     duration,
@@ -2035,10 +2428,16 @@ export const PHOTO_PLATFORM = "instagram-feed";
  * The next whole second in range that this list does not already hold, or undefined
  * when every one is taken. Duplicates are meaningless — the planner collapses them.
  */
-export function nextFreeDuration(duration: readonly number[]): number | undefined {
+export function nextFreeDuration(
+  duration: readonly number[],
+): number | undefined {
   const taken = new Set(duration);
   if (!taken.has(DEFAULT_DURATION_SEC)) return DEFAULT_DURATION_SEC;
-  for (let seconds = MIN_DURATION_SEC; seconds <= MAX_DURATION_SEC; seconds += 1) {
+  for (
+    let seconds = MIN_DURATION_SEC;
+    seconds <= MAX_DURATION_SEC;
+    seconds += 1
+  ) {
     if (!taken.has(seconds)) return seconds;
   }
   return undefined;
@@ -2067,7 +2466,10 @@ export function canPlan(state: EditorState): boolean {
  * state), and the user setting the count by hand, which is them answering the notice
  * rather than provoking a new one.
  */
-export function editorReducer(state: EditorState, action: EditorAction): EditorState {
+export function editorReducer(
+  state: EditorState,
+  action: EditorAction,
+): EditorState {
   const next = reduceEditor(state, action);
   if (next === state) return state;
   if (action.type === "setVariation" && action.field === "count") return next;
