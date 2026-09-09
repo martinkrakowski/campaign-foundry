@@ -54,11 +54,18 @@ claimed; and two mutants that were genuinely equivalent. A mutation that fails t
 changes nothing observable, **is not evidence** — redo it, or record it as equivalent and say why.
 
 **A fix round is verified to have landed before its PR merges.** Check for the commit, not the exit
-code:
+code — and **record the tip before you dispatch**, because `origin/main..HEAD` also lists the
+implementation commits and so stays non-empty for a round that did nothing:
 
 ```bash
-git -C "<worktree>" log --oneline origin/main..HEAD    # the fix commit must be here
+BEFORE=$(git -C "<worktree>" rev-parse HEAD)      # BEFORE the fix round runs
+# … dispatch the fix round, wait for its EXIT marker …
+git -C "<worktree>" log --oneline "$BEFORE"..HEAD  # empty ⇒ the round committed NOTHING
 ```
+
+PR #287 is the case that makes this concrete: its branch carried the earlier round's commit as well
+as the fix, so `origin/main..HEAD` would have looked healthy even if the second round had written
+nothing at all.
 
 Four lanes in one session exited `0` having written nothing — two answered with a plan, two read
 files and stopped. **PR #282 was merged with four verified defects still in it** because its fix
