@@ -6,7 +6,10 @@
  * Each layer may carry its own `props` (D134): overrides of the geometry that layer already
  * reads — nothing invented — where every absent prop means the value the layer resolves today.
  */
-import { ADVERTISING_UNITS, type AdvertisingUnit } from "./advertising-units.js";
+import {
+  ADVERTISING_UNITS,
+  type AdvertisingUnit,
+} from "./advertising-units.js";
 import type { CampaignType } from "./campaign-types.js";
 import { CAMPAIGN_TYPE_PRESETS } from "./campaign-types.js";
 import {
@@ -15,7 +18,12 @@ import {
   type CanonicalTemplateId,
   type CreativeTemplateLayer,
 } from "./creative-templates.js";
-import { CREATIVE_TYPES, CREATIVE_TYPE_RULES, type CreativeType } from "./creative-types.js";
+import {
+  CREATIVE_TYPES,
+  CREATIVE_TYPE_RULES,
+  type CreativeType,
+  type OrderConstraint,
+} from "./creative-types.js";
 import { LAYER_KINDS, type LayerKind } from "./layer-kinds.js";
 import { ANCHOR_VALUES, type AnchorKind } from "./variation-defaults.js";
 
@@ -93,19 +101,32 @@ export interface LayerPropsProblem {
  * that carries no props refuses any defined `props` — the empty object
  * included — before any entries are walked.
  */
-export function layerPropsProblem(kind: LayerKind, props: unknown): LayerPropsProblem | undefined {
+export function layerPropsProblem(
+  kind: LayerKind,
+  props: unknown,
+): LayerPropsProblem | undefined {
   if (props === undefined) return undefined;
   if (!(LAYER_KINDS as readonly string[]).includes(kind)) {
-    return { path: "", must: `be absent for layer kind "${kind}"`, value: props };
+    return {
+      path: "",
+      must: `be absent for layer kind "${kind}"`,
+      value: props,
+    };
   }
   if (typeof props !== "object" || props === null || Array.isArray(props)) {
     return { path: "", must: "be an object", value: props };
   }
   const allowed = LAYER_PROPS[kind];
   if (allowed.length === 0) {
-    return { path: "", must: `be absent for layer kind "${kind}"`, value: props };
+    return {
+      path: "",
+      must: `be absent for layer kind "${kind}"`,
+      value: props,
+    };
   }
-  for (const [field, value] of Object.entries(props as Record<string, unknown>)) {
+  for (const [field, value] of Object.entries(
+    props as Record<string, unknown>,
+  )) {
     if (!allowed.includes(field)) {
       return {
         path: `.${field}`,
@@ -114,7 +135,10 @@ export function layerPropsProblem(kind: LayerKind, props: unknown): LayerPropsPr
       };
     }
     if (field === "anchor") {
-      if (typeof value !== "string" || !(ANCHOR_VALUES as readonly string[]).includes(value)) {
+      if (
+        typeof value !== "string" ||
+        !(ANCHOR_VALUES as readonly string[]).includes(value)
+      ) {
         return {
           path: `.${field}`,
           must: `be one of ${ANCHOR_VALUES.map((anchor) => `"${anchor}"`).join(", ")}`,
@@ -123,7 +147,12 @@ export function layerPropsProblem(kind: LayerKind, props: unknown): LayerPropsPr
       }
       continue;
     }
-    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
+    if (
+      typeof value !== "number" ||
+      !Number.isFinite(value) ||
+      value < 0 ||
+      value > 1
+    ) {
       return { path: `.${field}`, must: "be a number in [0, 1]", value };
     }
   }
@@ -170,9 +199,10 @@ export function templateFromCanonical(type: CampaignType): BriefTemplate {
 export function satisfiesOrderConstraints(
   creativeType: CreativeType,
   layers: readonly { readonly kind: LayerKind }[],
+  constraint?: OrderConstraint,
 ): boolean {
   const rules = CREATIVE_TYPE_RULES[creativeType];
-  const constraints = rules?.orderConstraints;
+  const constraints = constraint ? [constraint] : rules?.orderConstraints;
   if (!constraints || constraints.length === 0) return true;
 
   for (const c of constraints) {
@@ -229,7 +259,8 @@ export function satisfiesOrderConstraints(
  * boundaries cannot disagree about a draft's shape.
  */
 export function isBriefTemplate(value: unknown): value is BriefTemplate {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return false;
   const raw = value as Record<string, unknown>;
   return (
     typeof raw.id === "string" &&
@@ -243,8 +274,12 @@ export function isBriefTemplate(value: unknown): value is BriefTemplate {
     (ADVERTISING_UNITS as readonly string[]).includes(raw.unit) &&
     Array.isArray(raw.layers) &&
     raw.layers.every(isLayerEntry) &&
-    new Set(raw.layers.map((layer) => (layer as LayerEntry).id)).size === raw.layers.length &&
-    satisfiesOrderConstraints(raw.creativeType as CreativeType, raw.layers as readonly LayerEntry[])
+    new Set(raw.layers.map((layer) => (layer as LayerEntry).id)).size ===
+      raw.layers.length &&
+    satisfiesOrderConstraints(
+      raw.creativeType as CreativeType,
+      raw.layers as readonly LayerEntry[],
+    )
   );
 }
 

@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 vi.mock("@campaignfoundry/CampaignOrchestration", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@campaignfoundry/CampaignOrchestration")>();
+  const actual =
+    await importOriginal<
+      typeof import("@campaignfoundry/CampaignOrchestration")
+    >();
   return {
     ...actual,
     templateFromCanonical: vi.fn(actual.templateFromCanonical),
@@ -48,8 +51,12 @@ describe("assertSafeId", () => {
   });
 
   test("rejects a non-slug with the field label", () => {
-    expect(() => assertSafeId("Bad", "Campaign id")).toThrow(/Campaign id must be a path-safe/);
-    expect(() => assertSafeId(1, "briefId")).toThrow(/briefId must be a path-safe/);
+    expect(() => assertSafeId("Bad", "Campaign id")).toThrow(
+      /Campaign id must be a path-safe/,
+    );
+    expect(() => assertSafeId(1, "briefId")).toThrow(
+      /briefId must be a path-safe/,
+    );
   });
 });
 
@@ -61,10 +68,31 @@ describe("parseBrief", () => {
   test.each([
     ["a non-object", 42, /must be an object/],
     ["null", null, /must be an object/],
-    ["a missing required field (campaignMessage)", { id: "camp", targetRegion: "DE", targetAudience: "a", products: valid.products }, /missing required field/],
-    ["a non-slug id", { ...valid, id: "Bad Id" }, /Campaign id must be a path-safe/],
-    ["non-array products", { ...valid, products: "x" }, /"products" must be an array/],
-    ["a non-slug product id", { ...valid, products: [{ id: "Alpha" }, { id: "beta" }] }, /Product id must be a path-safe/],
+    [
+      "a missing required field (campaignMessage)",
+      {
+        id: "camp",
+        targetRegion: "DE",
+        targetAudience: "a",
+        products: valid.products,
+      },
+      /missing required field/,
+    ],
+    [
+      "a non-slug id",
+      { ...valid, id: "Bad Id" },
+      /Campaign id must be a path-safe/,
+    ],
+    [
+      "non-array products",
+      { ...valid, products: "x" },
+      /"products" must be an array/,
+    ],
+    [
+      "a non-slug product id",
+      { ...valid, products: [{ id: "Alpha" }, { id: "beta" }] },
+      /Product id must be a path-safe/,
+    ],
   ])("rejects %s", (_label, input, message) => {
     expect(() => parseBrief(input)).toThrow(message);
   });
@@ -87,20 +115,28 @@ describe("parseBrief", () => {
     });
 
     test.each([
-      ["string \"1\"", "1", '"1"'],
+      ['string "1"', "1", '"1"'],
       ["zero", 0, "0"],
       ["float 1.5", 1.5, "1.5"],
       ["negative -1", -1, "-1"],
       ["null", null, "null"],
       ["empty object", {}, "{}"],
-    ])("rejects non-integer / invalid schemaVersion (%s)", (_label, value, repr) => {
-      expect(() => parseBrief({ ...valid, schemaVersion: value })).toThrow(
-        `Campaign brief field "schemaVersion" must be an integer between 1 and ${BRIEF_SCHEMA_VERSION}; got ${repr}.`,
-      );
-    });
+    ])(
+      "rejects non-integer / invalid schemaVersion (%s)",
+      (_label, value, repr) => {
+        expect(() => parseBrief({ ...valid, schemaVersion: value })).toThrow(
+          `Campaign brief field "schemaVersion" must be an integer between 1 and ${BRIEF_SCHEMA_VERSION}; got ${repr}.`,
+        );
+      },
+    );
 
     test("the refusal holds when enforceCapabilities: false (authoring mode refuses future schemas too)", () => {
-      expect(() => parseBrief({ ...valid, schemaVersion: 2 }, { enforceCapabilities: false })).toThrow(
+      expect(() =>
+        parseBrief(
+          { ...valid, schemaVersion: 2 },
+          { enforceCapabilities: false },
+        ),
+      ).toThrow(
         `Campaign brief field "schemaVersion" must be an integer between 1 and ${BRIEF_SCHEMA_VERSION}; got 2.`,
       );
     });
@@ -120,13 +156,17 @@ describe("parseBrief", () => {
         { id: "static-text", kind: "static-text" },
         { id: "logo", kind: "logo" },
       ]);
-      expect(vi.mocked(templateFromCanonical)).toHaveBeenCalledWith("display-ad");
+      expect(vi.mocked(templateFromCanonical)).toHaveBeenCalledWith(
+        "display-ad",
+      );
       expect(parsed.template).toEqual(templateFromCanonical("display-ad"));
     });
 
     test("a brief with no template and no type returns social-post's template (D112 fallback)", () => {
       const parsed = parseBrief(valid);
-      expect(parsed.template).toEqual(templateFromCanonical(DEFAULT_CAMPAIGN_TYPE));
+      expect(parsed.template).toEqual(
+        templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      );
       expect(parsed.template.id).toBe("canonical-image-text");
       expect(parsed.template.creativeType).toBe("image-text");
       expect(parsed.template.layers).toHaveLength(5);
@@ -235,7 +275,9 @@ describe("parseBrief", () => {
         ...base,
         layers: [...base.layers, { id: "bg-fill", kind: "fill" }],
       };
-      expect(() => parseBrief({ ...valid, template }, { enforceCapabilities: false })).toThrow(
+      expect(() =>
+        parseBrief({ ...valid, template }, { enforceCapabilities: false }),
+      ).toThrow(
         'Campaign brief field "template.layers[5].kind" must be one of ["image", "shade", "accent", "static-text", "animated-text", "logo"]; got "fill".',
       );
     });
@@ -245,19 +287,28 @@ describe("parseBrief", () => {
         'Campaign brief field "template" must be an object; got "invalid".',
       );
       const base = templateFromCanonical("social-post");
-      expect(() => parseBrief({ ...valid, template: { ...base, layers: ["not-an-obj"] } })).toThrow(
+      expect(() =>
+        parseBrief({ ...valid, template: { ...base, layers: ["not-an-obj"] } }),
+      ).toThrow(
         'Campaign brief field "template.layers[0]" must be an object; got "not-an-obj".',
       );
-      expect(() => parseBrief({ ...valid, template: { ...base, layers: [{ id: "", kind: "image" }] } })).toThrow(
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: { ...base, layers: [{ id: "", kind: "image" }] },
+        }),
+      ).toThrow(
         'Campaign brief field "template.layers[0].id" must be a non-empty string; got "".',
       );
     });
 
     test("validateTemplate defaults to social-post when type is invalid or absent", () => {
-      expect(validateTemplate(undefined)).toEqual(templateFromCanonical(DEFAULT_CAMPAIGN_TYPE));
-      expect(validateTemplate(undefined, "invalid-type" as unknown as CampaignType)).toEqual(
+      expect(validateTemplate(undefined)).toEqual(
         templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
       );
+      expect(
+        validateTemplate(undefined, "invalid-type" as unknown as CampaignType),
+      ).toEqual(templateFromCanonical(DEFAULT_CAMPAIGN_TYPE));
     });
 
     test("a second logo layer is refused, in both modes; one is accepted (D124)", () => {
@@ -268,31 +319,51 @@ describe("parseBrief", () => {
       };
       const refusal =
         'Campaign brief field "template.layers" must contain at most 1 layer(s) of kind "logo" for creative type "image-text"; got 2.';
-      expect(() => parseBrief({ ...valid, template: twoLogos })).toThrow(refusal);
+      expect(() => parseBrief({ ...valid, template: twoLogos })).toThrow(
+        refusal,
+      );
       // Authoring mode too (the `validateSizes` convention): the boundary is
       // structural, never lenient, wherever the brief is parsed.
-      expect(() => parseBrief({ ...valid, template: twoLogos }, { enforceCapabilities: false })).toThrow(refusal);
-      expect(parseBrief({ ...valid, template: base }).template.layers).toHaveLength(5);
+      expect(() =>
+        parseBrief(
+          { ...valid, template: twoLogos },
+          { enforceCapabilities: false },
+        ),
+      ).toThrow(refusal);
+      expect(
+        parseBrief({ ...valid, template: base }).template.layers,
+      ).toHaveLength(5);
     });
 
     test("a capped kind may be absent entirely (D124)", () => {
       const base = templateFromCanonical("social-post");
-      const noLogo = { ...base, layers: base.layers.filter((l) => l.kind !== "logo") };
-      expect(parseBrief({ ...valid, template: noLogo }).template.layers).toHaveLength(4);
+      const noLogo = {
+        ...base,
+        layers: base.layers.filter((l) => l.kind !== "logo"),
+      };
+      expect(
+        parseBrief({ ...valid, template: noLogo }).template.layers,
+      ).toHaveLength(4);
     });
 
     test("each creative type is measured against its own table row (D124)", () => {
       // video caps logo and shade, and declares no shared budget — the canonical
       // video template (one of each capped kind) parses, so the caps are read
       // per type, not baked into the boundary.
-      expect(parseBrief({ ...valid, template: templateFromCanonical("short-video") }).template.creativeType).toBe("video");
+      expect(
+        parseBrief({ ...valid, template: templateFromCanonical("short-video") })
+          .template.creativeType,
+      ).toBe("video");
     });
 
     test("the two text kinds share one budget in image-text: both together are refused (D124)", () => {
       const base = templateFromCanonical("social-post");
       const bothTexts = {
         ...base,
-        layers: [...base.layers, { id: "headline-anim", kind: "animated-text" }],
+        layers: [
+          ...base.layers,
+          { id: "headline-anim", kind: "animated-text" },
+        ],
       };
       expect(() => parseBrief({ ...valid, template: bothTexts })).toThrow(
         'Campaign brief field "template.layers" must contain at most 1 layer(s) of kind "static-text" or "animated-text" for creative type "image-text"; got 2.',
@@ -302,18 +373,81 @@ describe("parseBrief", () => {
     test("either text kind alone clears the shared budget (D124)", () => {
       const base = templateFromCanonical("social-post");
       // static-text alone: the canonical template, which parses.
-      expect(parseBrief({ ...valid, template: base }).template.layers).toHaveLength(5);
+      expect(
+        parseBrief({ ...valid, template: base }).template.layers,
+      ).toHaveLength(5);
       // animated-text alone: `static-text` is required (the done half of D124),
       // so no full image-text template can hold animated-text as its only text
       // layer — but the throw must be the REQUIRED refusal, proving the shared
       // budget itself accepted the single animated-text and did not refuse first.
       const animatedOnly = {
         ...base,
-        layers: [...base.layers.filter((l) => l.kind !== "static-text"), { id: "headline-anim", kind: "animated-text" }],
+        layers: [
+          ...base.layers.filter((l) => l.kind !== "static-text"),
+          { id: "headline-anim", kind: "animated-text" },
+        ],
       };
       expect(() => parseBrief({ ...valid, template: animatedOnly })).toThrow(
         'Campaign brief field "template.layers" must include required layer kind "static-text" for creative type "image-text".',
       );
+    });
+
+    test("a brief whose template order violates an order constraint is refused (D128, L8m-fix)", () => {
+      const base = templateFromCanonical("social-post");
+      // Logo below image: [logo, image, shade, accent, static-text]
+      const logoBelowImage = {
+        ...base,
+        layers: [
+          base.layers[4]!, // logo
+          base.layers[0]!, // image
+          base.layers[1]!, // shade
+          base.layers[2]!, // accent
+          base.layers[3]!, // static-text
+        ],
+      };
+      const refusalLogo =
+        'Campaign brief field "template.layers" must satisfy order constraint "logo above image" for creative type "image-text".';
+      expect(() => parseBrief({ ...valid, template: logoBelowImage })).toThrow(
+        refusalLogo,
+      );
+      // Authoring mode too: structural, never lenient (the validateSizes convention)
+      expect(() =>
+        parseBrief(
+          { ...valid, template: logoBelowImage },
+          { enforceCapabilities: false },
+        ),
+      ).toThrow(refusalLogo);
+
+      // Shade not directly above image (accent between image and shade):
+      const shadeNotDirectlyAbove = {
+        ...base,
+        layers: [
+          base.layers[0]!, // image
+          base.layers[2]!, // accent
+          base.layers[1]!, // shade
+          base.layers[3]!, // static-text
+          base.layers[4]!, // logo
+        ],
+      };
+      const refusalShade =
+        'Campaign brief field "template.layers" must satisfy order constraint "shade directly-above image" for creative type "image-text".';
+      expect(() =>
+        parseBrief({ ...valid, template: shadeNotDirectlyAbove }),
+      ).toThrow(refusalShade);
+    });
+
+    test("a brief whose template order obeys declared order constraints loads successfully (D128, L8m-fix)", () => {
+      const base = templateFromCanonical("social-post");
+      // Canonical order: [image, shade, accent, static-text, logo]
+      const parsed = parseBrief({ ...valid, template: base });
+      expect(parsed.template.layers).toHaveLength(5);
+      expect(parsed.template.layers.map((l) => l.kind)).toEqual([
+        "image",
+        "shade",
+        "accent",
+        "static-text",
+        "logo",
+      ]);
     });
   });
 
@@ -323,13 +457,20 @@ describe("parseBrief", () => {
       const base = templateFromCanonical(DEFAULT_CAMPAIGN_TYPE);
       return {
         ...base,
-        layers: base.layers.map((layer) => (layer.kind === kind ? { ...layer, props } : layer)),
+        layers: base.layers.map((layer) =>
+          layer.kind === kind ? { ...layer, props } : layer,
+        ),
       };
     };
 
     test("a shade layer with props { alpha: 0.5 } parses and carries the props verbatim", () => {
-      const parsed = parseBrief({ ...valid, template: withProps("shade", { alpha: 0.5 }) });
-      expect(parsed.template.layers.find((layer) => layer.kind === "shade")).toEqual({
+      const parsed = parseBrief({
+        ...valid,
+        template: withProps("shade", { alpha: 0.5 }),
+      });
+      expect(
+        parsed.template.layers.find((layer) => layer.kind === "shade"),
+      ).toEqual({
         id: "shade",
         kind: "shade",
         props: { alpha: 0.5 },
@@ -337,41 +478,88 @@ describe("parseBrief", () => {
     });
 
     test("0 is a legal fraction: props { alpha: 0 } and { width: 0 } parse", () => {
-      const withZeroAlpha = parseBrief({ ...valid, template: withProps("shade", { alpha: 0 }) });
-      expect(withZeroAlpha.template.layers.find((layer) => layer.kind === "shade")?.props).toEqual({ alpha: 0 });
-      const withZeroWidth = parseBrief({ ...valid, template: withProps("logo", { width: 0 }) });
-      expect(withZeroWidth.template.layers.find((layer) => layer.kind === "logo")?.props).toEqual({ width: 0 });
+      const withZeroAlpha = parseBrief({
+        ...valid,
+        template: withProps("shade", { alpha: 0 }),
+      });
+      expect(
+        withZeroAlpha.template.layers.find((layer) => layer.kind === "shade")
+          ?.props,
+      ).toEqual({ alpha: 0 });
+      const withZeroWidth = parseBrief({
+        ...valid,
+        template: withProps("logo", { width: 0 }),
+      });
+      expect(
+        withZeroWidth.template.layers.find((layer) => layer.kind === "logo")
+          ?.props,
+      ).toEqual({ width: 0 });
     });
 
     test("props { anchor: 'top' } on the text layer parses", () => {
-      const parsed = parseBrief({ ...valid, template: withProps("static-text", { anchor: "top" }) });
-      expect(parsed.template.layers.find((layer) => layer.kind === "static-text")?.props).toEqual({ anchor: "top" });
+      const parsed = parseBrief({
+        ...valid,
+        template: withProps("static-text", { anchor: "top" }),
+      });
+      expect(
+        parsed.template.layers.find((layer) => layer.kind === "static-text")
+          ?.props,
+      ).toEqual({ anchor: "top" });
     });
 
     test("props on an image layer are refused — the kind has none", () => {
-      expect(() => parseBrief({ ...valid, template: withProps("image", { alpha: 0.5 }) })).toThrow(
+      expect(() =>
+        parseBrief({ ...valid, template: withProps("image", { alpha: 0.5 }) }),
+      ).toThrow(
         'Campaign brief field "template.layers[0].props" must be absent for layer kind "image"; got {"alpha":0.5}.',
       );
     });
 
     test("an empty props object on a propless kind is refused too; on shade it is legal", () => {
-      expect(() => parseBrief({ ...valid, template: withProps("image", {}) })).toThrow(
+      expect(() =>
+        parseBrief({ ...valid, template: withProps("image", {}) }),
+      ).toThrow(
         'Campaign brief field "template.layers[0].props" must be absent for layer kind "image"; got {}.',
       );
       // Shade's props are all optional, so the empty object stays legal there.
-      expect(() => parseBrief({ ...valid, template: withProps("shade", {}) })).not.toThrow();
+      expect(() =>
+        parseBrief({ ...valid, template: withProps("shade", {}) }),
+      ).not.toThrow();
     });
 
     test("a logo layer carrying accent's solidHeight is refused (wrong kind's props)", () => {
-      expect(() => parseBrief({ ...valid, template: withProps("logo", { solidHeight: 0.05 }) })).toThrow(
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: withProps("logo", { solidHeight: 0.05 }),
+        }),
+      ).toThrow(
         'Campaign brief field "template.layers[4].props.solidHeight" must be one of "width", "margin" for layer kind "logo"; got 0.05.',
       );
     });
 
     test.each([
-      ["alpha 1.4 on shade", withProps("shade", { alpha: 1.4 }), 1, "alpha", "1.4"],
-      ["width -0.1 on logo", withProps("logo", { width: -0.1 }), 4, "width", "-0.1"],
-      ["a non-numeric alpha", withProps("shade", { alpha: "0.5" }), 1, "alpha", '"0.5"'],
+      [
+        "alpha 1.4 on shade",
+        withProps("shade", { alpha: 1.4 }),
+        1,
+        "alpha",
+        "1.4",
+      ],
+      [
+        "width -0.1 on logo",
+        withProps("logo", { width: -0.1 }),
+        4,
+        "width",
+        "-0.1",
+      ],
+      [
+        "a non-numeric alpha",
+        withProps("shade", { alpha: "0.5" }),
+        1,
+        "alpha",
+        '"0.5"',
+      ],
     ])("refuses %s", (_label, template, index, field, repr) => {
       expect(() => parseBrief({ ...valid, template })).toThrow(
         `Campaign brief field "template.layers[${index}].props.${field}" must be a number in [0, 1]; got ${repr}.`,
@@ -379,72 +567,144 @@ describe("parseBrief", () => {
     });
 
     test("an anchor outside the vocabulary is refused", () => {
-      expect(() => parseBrief({ ...valid, template: withProps("static-text", { anchor: "sideways" }) })).toThrow(
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: withProps("static-text", { anchor: "sideways" }),
+        }),
+      ).toThrow(
         'Campaign brief field "template.layers[3].props.anchor" must be one of "top", "middle", "bottom"; got "sideways".',
       );
     });
 
     test("props that are not an object are refused", () => {
-      expect(() => parseBrief({ ...valid, template: withProps("shade", 5) })).toThrow(
+      expect(() =>
+        parseBrief({ ...valid, template: withProps("shade", 5) }),
+      ).toThrow(
         'Campaign brief field "template.layers[1].props" must be an object; got 5.',
       );
     });
 
     test("the refusal holds with enforceCapabilities: false (authoring mode too)", () => {
       expect(() =>
-        parseBrief({ ...valid, template: withProps("image", { alpha: 0.5 }) }, { enforceCapabilities: false }),
+        parseBrief(
+          { ...valid, template: withProps("image", { alpha: 0.5 }) },
+          { enforceCapabilities: false },
+        ),
       ).toThrow(
         'Campaign brief field "template.layers[0].props" must be absent for layer kind "image"; got {"alpha":0.5}.',
       );
       expect(() =>
-        parseBrief({ ...valid, template: withProps("shade", { alpha: 1.4 }) }, { enforceCapabilities: false }),
-      ).toThrow('Campaign brief field "template.layers[1].props.alpha" must be a number in [0, 1]; got 1.4.');
+        parseBrief(
+          { ...valid, template: withProps("shade", { alpha: 1.4 }) },
+          { enforceCapabilities: false },
+        ),
+      ).toThrow(
+        'Campaign brief field "template.layers[1].props.alpha" must be a number in [0, 1]; got 1.4.',
+      );
     });
   });
 
   describe("scalar shape checks (D68 — shape, not just presence)", () => {
     test.each([
-      ["a list-typed targetRegion", { ...valid, targetRegion: ["DE", "US"] }, '"targetRegion" must be a string or null; got ["DE","US"]'],
-      ["a numeric targetRegion", { ...valid, targetRegion: 1 }, '"targetRegion" must be a string or null; got 1'],
-      ["a boolean targetRegion", { ...valid, targetRegion: true }, '"targetRegion" must be a string or null; got true'],
-      ["an object targetRegion", { ...valid, targetRegion: { code: "DE" } }, '"targetRegion" must be a string or null; got {"code":"DE"}'],
-      ["a numeric targetAudience", { ...valid, targetAudience: 7 }, '"targetAudience" must be a string or null; got 7'],
-      ["an array campaignMessage", { ...valid, campaignMessage: ["Hi"] }, '"campaignMessage" must be a string or null; got ["Hi"]'],
-      ["a numeric localizedMessage", { ...valid, localizedMessage: 3 }, '"localizedMessage" must be a string or null; got 3'],
+      [
+        "a list-typed targetRegion",
+        { ...valid, targetRegion: ["DE", "US"] },
+        '"targetRegion" must be a string or null; got ["DE","US"]',
+      ],
+      [
+        "a numeric targetRegion",
+        { ...valid, targetRegion: 1 },
+        '"targetRegion" must be a string or null; got 1',
+      ],
+      [
+        "a boolean targetRegion",
+        { ...valid, targetRegion: true },
+        '"targetRegion" must be a string or null; got true',
+      ],
+      [
+        "an object targetRegion",
+        { ...valid, targetRegion: { code: "DE" } },
+        '"targetRegion" must be a string or null; got {"code":"DE"}',
+      ],
+      [
+        "a numeric targetAudience",
+        { ...valid, targetAudience: 7 },
+        '"targetAudience" must be a string or null; got 7',
+      ],
+      [
+        "an array campaignMessage",
+        { ...valid, campaignMessage: ["Hi"] },
+        '"campaignMessage" must be a string or null; got ["Hi"]',
+      ],
+      [
+        "a numeric localizedMessage",
+        { ...valid, localizedMessage: 3 },
+        '"localizedMessage" must be a string or null; got 3',
+      ],
     ])("rejects %s in authoring mode", (_label, input, message) => {
       expect(() => parseBrief(input)).toThrow(message);
     });
 
     test("rejects a list-typed targetRegion in enforcing mode too", () => {
       expect(() =>
-        parseBrief({ ...valid, targetRegion: ["DE", "US"] }, { enforceCapabilities: true }),
+        parseBrief(
+          { ...valid, targetRegion: ["DE", "US"] },
+          { enforceCapabilities: true },
+        ),
       ).toThrow('"targetRegion" must be a string or null; got ["DE","US"]');
     });
 
     test("a numeric targetRegion is refused in enforcing mode — array-only narrowing would leave the .trim() crash open", () => {
-      expect(() => parseBrief({ ...valid, targetRegion: 1 }, { enforceCapabilities: true })).toThrow(
-        '"targetRegion" must be a string or null; got 1',
-      );
+      expect(() =>
+        parseBrief(
+          { ...valid, targetRegion: 1 },
+          { enforceCapabilities: true },
+        ),
+      ).toThrow('"targetRegion" must be a string or null; got 1');
     });
 
     test("null and empty string stay legal — the D15 authoring leniency", () => {
-      expect(parseBrief({ ...valid, targetAudience: null }).targetAudience).toBeNull();
-      expect(parseBrief({ ...valid, targetAudience: "" }).targetAudience).toBe("");
-      expect(parseBrief({ ...valid, localizedMessage: null }).localizedMessage).toBeNull();
+      expect(
+        parseBrief({ ...valid, targetAudience: null }).targetAudience,
+      ).toBeNull();
+      expect(parseBrief({ ...valid, targetAudience: "" }).targetAudience).toBe(
+        "",
+      );
+      expect(
+        parseBrief({ ...valid, localizedMessage: null }).localizedMessage,
+      ).toBeNull();
       // A brief with no localizedMessage key parses exactly as before.
       expect(parseBrief(valid).localizedMessage).toBeUndefined();
     });
 
     test.each([
-      ["a string entry", ["hydra"], 'products[0]" must be an object; got "hydra"'],
+      [
+        "a string entry",
+        ["hydra"],
+        'products[0]" must be an object; got "hydra"',
+      ],
       ["a null entry", [null], 'products[0]" must be an object; got null'],
       ["a numeric entry", [1], 'products[0]" must be an object; got 1'],
-      ["an array entry", [["hydra"]], 'products[0]" must be an object; got ["hydra"]'],
-      ["a later non-object entry", [{ id: "alpha" }, "hydra"], 'products[1]" must be an object; got "hydra"'],
-    ])("products with %s names the entry and its index, not the missing id", (_label, products, message) => {
-      expect(() => parseBrief({ ...valid, products })).toThrow(message);
-      expect(() => parseBrief({ ...valid, products })).toThrow(/products\[\d+\]" must be an object/);
-    });
+      [
+        "an array entry",
+        [["hydra"]],
+        'products[0]" must be an object; got ["hydra"]',
+      ],
+      [
+        "a later non-object entry",
+        [{ id: "alpha" }, "hydra"],
+        'products[1]" must be an object; got "hydra"',
+      ],
+    ])(
+      "products with %s names the entry and its index, not the missing id",
+      (_label, products, message) => {
+        expect(() => parseBrief({ ...valid, products })).toThrow(message);
+        expect(() => parseBrief({ ...valid, products })).toThrow(
+          /products\[\d+\]" must be an object/,
+        );
+      },
+    );
 
     test("an empty products array still parses — the run path refuses it at MINIMUM_PRODUCTS", () => {
       expect(parseBrief({ ...valid, products: [] }).products).toEqual([]);
@@ -452,15 +712,26 @@ describe("parseBrief", () => {
   });
 
   test("validates optional treatments structurally", () => {
-    expect(() => parseBrief({ ...valid, treatments: "x" })).toThrow(/"treatments" must be an array/);
-    expect(() => parseBrief({ ...valid, treatments: [{ id: "Bad", layout: "headline-top", tone: "bold" }] })).toThrow(
-      /Treatment id must be a path-safe/,
+    expect(() => parseBrief({ ...valid, treatments: "x" })).toThrow(
+      /"treatments" must be an array/,
     );
     expect(() =>
-      parseBrief({ ...valid, treatments: [{ id: "t", layout: "sideways", tone: "bold" }] }),
+      parseBrief({
+        ...valid,
+        treatments: [{ id: "Bad", layout: "headline-top", tone: "bold" }],
+      }),
+    ).toThrow(/Treatment id must be a path-safe/);
+    expect(() =>
+      parseBrief({
+        ...valid,
+        treatments: [{ id: "t", layout: "sideways", tone: "bold" }],
+      }),
     ).toThrow(/invalid layout/);
     expect(() =>
-      parseBrief({ ...valid, treatments: [{ id: "t", layout: "headline-top", tone: "loud" }] }),
+      parseBrief({
+        ...valid,
+        treatments: [{ id: "t", layout: "headline-top", tone: "loud" }],
+      }),
     ).toThrow(/invalid tone/);
     expect(() =>
       parseBrief({
@@ -472,7 +743,12 @@ describe("parseBrief", () => {
       }),
     ).toThrow(/Duplicate treatment id/);
     // A valid treatments array passes.
-    expect(parseBrief({ ...valid, treatments: [{ id: "t", layout: "headline-top", tone: "bold" }] }).treatments).toHaveLength(1);
+    expect(
+      parseBrief({
+        ...valid,
+        treatments: [{ id: "t", layout: "headline-top", tone: "bold" }],
+      }).treatments,
+    ).toHaveLength(1);
   });
 });
 
@@ -518,22 +794,34 @@ describe("parseBrief v2 fields", () => {
   });
 
   test("html is always available: accepted as an output format even with the ffmpeg probe off", () => {
-    expect(parseBrief({ ...valid, output: { formats: ["html"] } }, { capabilities: MOTION_OFF, enforceCapabilities: true }).output?.formats).toEqual([
-      "html",
-    ]);
+    expect(
+      parseBrief(
+        { ...valid, output: { formats: ["html"] } },
+        { capabilities: MOTION_OFF, enforceCapabilities: true },
+      ).output?.formats,
+    ).toEqual(["html"]);
     // The flip side: the same probe rejects motion.
-    expect(() => parseBrief({ ...valid, output: { formats: ["motion"] } }, { capabilities: MOTION_OFF, enforceCapabilities: true })).toThrow(
-      /format "motion": motion output is unavailable/,
-    );
+    expect(() =>
+      parseBrief(
+        { ...valid, output: { formats: ["motion"] } },
+        { capabilities: MOTION_OFF, enforceCapabilities: true },
+      ),
+    ).toThrow(/format "motion": motion output is unavailable/);
   });
 
   test("accepts headline: pool://copy — the only supported pool reference", () => {
-    const parsed = parseBrief({ ...valid, variation: { axes: { headline: "pool://copy" } } });
+    const parsed = parseBrief({
+      ...valid,
+      variation: { axes: { headline: "pool://copy" } },
+    });
     expect(parsed.variation?.axes?.headline).toBe("pool://copy");
   });
 
   test("accepts a requested ratio subset and preserves it verbatim", () => {
-    const parsed = parseBrief({ ...valid, variation: { count: 2, axes: { ratio: ["16:9", "1:1"] } } });
+    const parsed = parseBrief({
+      ...valid,
+      variation: { count: 2, axes: { ratio: ["16:9", "1:1"] } },
+    });
     expect(parsed.variation?.axes?.ratio).toEqual(["16:9", "1:1"]);
   });
 
@@ -547,11 +835,31 @@ describe("parseBrief v2 fields", () => {
   });
 
   test.each([
-    ["a non-array ratio", { ...valid, variation: { axes: { ratio: "1:1" } } }, /variation\.axes\.ratio.*must be an array/],
-    ["an empty ratio list", { ...valid, variation: { axes: { ratio: [] } } }, /variation\.axes\.ratio.*at least one/],
-    ["an unsupported ratio value", { ...valid, variation: { axes: { ratio: ["4:5"] } } }, /variation\.axes\.ratio.*"4:5"/],
-    ["a non-string ratio value", { ...valid, variation: { axes: { ratio: [1] } } }, /variation\.axes\.ratio.*1/],
-    ["a repeated ratio", { ...valid, variation: { axes: { ratio: ["9:16", "9:16"] } } }, /variation\.axes\.ratio.*"9:16".*once/],
+    [
+      "a non-array ratio",
+      { ...valid, variation: { axes: { ratio: "1:1" } } },
+      /variation\.axes\.ratio.*must be an array/,
+    ],
+    [
+      "an empty ratio list",
+      { ...valid, variation: { axes: { ratio: [] } } },
+      /variation\.axes\.ratio.*at least one/,
+    ],
+    [
+      "an unsupported ratio value",
+      { ...valid, variation: { axes: { ratio: ["4:5"] } } },
+      /variation\.axes\.ratio.*"4:5"/,
+    ],
+    [
+      "a non-string ratio value",
+      { ...valid, variation: { axes: { ratio: [1] } } },
+      /variation\.axes\.ratio.*1/,
+    ],
+    [
+      "a repeated ratio",
+      { ...valid, variation: { axes: { ratio: ["9:16", "9:16"] } } },
+      /variation\.axes\.ratio.*"9:16".*once/,
+    ],
   ])("rejects %s", (_label, input, message) => {
     expect(() => parseBrief(input)).toThrow(message);
   });
@@ -571,15 +879,25 @@ describe("parseBrief v2 fields", () => {
   });
 
   test("accepts the anchor axis as a subset of its three values and preserves it (T4)", () => {
-    const parsed = parseBrief({ ...valid, variation: { count: 4, axes: { anchor: ["top", "middle", "bottom"] } } });
+    const parsed = parseBrief({
+      ...valid,
+      variation: { count: 4, axes: { anchor: ["top", "middle", "bottom"] } },
+    });
     expect(parsed.variation?.axes?.anchor).toEqual(["top", "middle", "bottom"]);
-    expect(parseBrief({ ...valid, variation: { count: 4, axes: { anchor: ["bottom"] } } }).variation?.axes?.anchor).toEqual(["bottom"]);
+    expect(
+      parseBrief({
+        ...valid,
+        variation: { count: 4, axes: { anchor: ["bottom"] } },
+      }).variation?.axes?.anchor,
+    ).toEqual(["bottom"]);
   });
 
   test("accepts mode brief and sparse v2 objects", () => {
     expect(parseBrief({ ...valid, mode: "brief" }).mode).toBe("brief");
     expect(parseBrief({ ...valid, variation: {} }).variation).toEqual({});
-    expect(parseBrief({ ...valid, variation: { coverage: {}, axes: {} } }).variation).toEqual({
+    expect(
+      parseBrief({ ...valid, variation: { coverage: {}, axes: {} } }).variation,
+    ).toEqual({
       coverage: {},
       axes: {},
     });
@@ -604,7 +922,11 @@ describe("parseBrief v2 fields", () => {
     expect(
       parseBrief({
         ...valid,
-        variation: { axes: { background: { source: ["procedural", "asset-pool", "genai"] } } },
+        variation: {
+          axes: {
+            background: { source: ["procedural", "asset-pool", "genai"] },
+          },
+        },
         output: { formats: ["static"], platforms: ["instagram-feed"] },
       }).output?.formats,
     ).toEqual(["static"]);
@@ -613,48 +935,186 @@ describe("parseBrief v2 fields", () => {
   test.each([
     ["an invalid mode", { ...valid, mode: "random" }, /mode/],
     ["a non-string mode", { ...valid, mode: 1 }, /mode/],
-    ["a non-object variation", { ...valid, variation: "x" }, /"variation" must be an object/],
-    ["an array variation", { ...valid, variation: [] }, /"variation" must be an object/],
-    ["a null variation", { ...valid, variation: null }, /"variation" must be an object/],
-    ["a non-integer count", { ...valid, variation: { count: 1.5 } }, /variation.count/],
-    ["a count below 1", { ...valid, variation: { count: 0 } }, /variation.count/],
-    ["a non-number count", { ...valid, variation: { count: "12" } }, /variation.count/],
-    ["a non-finite seed", { ...valid, variation: { seed: Infinity } }, /variation.seed/],
-    ["a NaN seed", { ...valid, variation: { seed: Number.NaN } }, /variation.seed/],
-    ["a non-number seed", { ...valid, variation: { seed: "42" } }, /variation.seed/],
-    ["a non-integer minDistance", { ...valid, variation: { minDistance: 1.5 } }, /variation.minDistance/],
-    ["a negative minDistance", { ...valid, variation: { minDistance: -1 } }, /variation.minDistance/],
-    ["a non-object coverage", { ...valid, variation: { coverage: [] } }, /variation.coverage/],
-    ["a null coverage", { ...valid, variation: { coverage: null } }, /variation.coverage/],
-    ["a negative perProduct", { ...valid, variation: { coverage: { perProduct: -1 } } }, /perProduct/],
-    ["a non-integer perRatio", { ...valid, variation: { coverage: { perRatio: 1.2 } } }, /perRatio/],
-    ["a non-integer perProduct", { ...valid, variation: { coverage: { perProduct: 1.5 } } }, /perProduct/],
-    ["a non-object axes", { ...valid, variation: { axes: [] } }, /variation.axes/],
+    [
+      "a non-object variation",
+      { ...valid, variation: "x" },
+      /"variation" must be an object/,
+    ],
+    [
+      "an array variation",
+      { ...valid, variation: [] },
+      /"variation" must be an object/,
+    ],
+    [
+      "a null variation",
+      { ...valid, variation: null },
+      /"variation" must be an object/,
+    ],
+    [
+      "a non-integer count",
+      { ...valid, variation: { count: 1.5 } },
+      /variation.count/,
+    ],
+    [
+      "a count below 1",
+      { ...valid, variation: { count: 0 } },
+      /variation.count/,
+    ],
+    [
+      "a non-number count",
+      { ...valid, variation: { count: "12" } },
+      /variation.count/,
+    ],
+    [
+      "a non-finite seed",
+      { ...valid, variation: { seed: Infinity } },
+      /variation.seed/,
+    ],
+    [
+      "a NaN seed",
+      { ...valid, variation: { seed: Number.NaN } },
+      /variation.seed/,
+    ],
+    [
+      "a non-number seed",
+      { ...valid, variation: { seed: "42" } },
+      /variation.seed/,
+    ],
+    [
+      "a non-integer minDistance",
+      { ...valid, variation: { minDistance: 1.5 } },
+      /variation.minDistance/,
+    ],
+    [
+      "a negative minDistance",
+      { ...valid, variation: { minDistance: -1 } },
+      /variation.minDistance/,
+    ],
+    [
+      "a non-object coverage",
+      { ...valid, variation: { coverage: [] } },
+      /variation.coverage/,
+    ],
+    [
+      "a null coverage",
+      { ...valid, variation: { coverage: null } },
+      /variation.coverage/,
+    ],
+    [
+      "a negative perProduct",
+      { ...valid, variation: { coverage: { perProduct: -1 } } },
+      /perProduct/,
+    ],
+    [
+      "a non-integer perRatio",
+      { ...valid, variation: { coverage: { perRatio: 1.2 } } },
+      /perRatio/,
+    ],
+    [
+      "a non-integer perProduct",
+      { ...valid, variation: { coverage: { perProduct: 1.5 } } },
+      /perProduct/,
+    ],
+    [
+      "a non-object axes",
+      { ...valid, variation: { axes: [] } },
+      /variation.axes/,
+    ],
     ["a null axes", { ...valid, variation: { axes: null } }, /variation.axes/],
-    ["an unknown axis key", { ...valid, variation: { axes: { flavour: ["x"] } } }, /flavour/],
-    ["axes.headline with another pool", { ...valid, variation: { axes: { headline: "pool://other" } } }, /variation.axes.headline.*"pool:\/\/other"/],
-    ["axes.headline as a list", { ...valid, variation: { axes: { headline: ["pool://copy"] } } }, /variation.axes.headline/],
-    ["a pool:// string under another axis", { ...valid, variation: { axes: { layout: ["pool://copy"] } } }, /variation.axes.layout.*pool/],
-    ["mode variation without a count", { ...valid, mode: "variation", variation: { axes: {} } }, /variation.count.*required/],
-    ["mode variation without a variation block", { ...valid, mode: "variation" }, /variation.count.*required/],
-    ["a non-array layout", { ...valid, variation: { axes: { layout: "headline-top" } } }, /layout/],
-    ["an invalid layout value", { ...valid, variation: { axes: { layout: ["sideways"] } } }, /layout/],
-    ["a non-string layout value", { ...valid, variation: { axes: { layout: [1] } } }, /layout/],
-    ["an invalid tone value", { ...valid, variation: { axes: { tone: ["loud"] } } }, /tone/],
-    ["a non-array tone", { ...valid, variation: { axes: { tone: "bold" } } }, /tone/],
-    ["an invalid anchor value", { ...valid, variation: { axes: { anchor: ["sideways"] } } }, /anchor/],
-    ["a non-array anchor", { ...valid, variation: { axes: { anchor: "top" } } }, /anchor/],
-    ["a non-string anchor value", { ...valid, variation: { axes: { anchor: [1] } } }, /anchor/],
-    ["a non-object background", { ...valid, variation: { axes: { background: [] } } }, /background/],
-    ["a null background", { ...valid, variation: { axes: { background: null } } }, /background/],
+    [
+      "an unknown axis key",
+      { ...valid, variation: { axes: { flavour: ["x"] } } },
+      /flavour/,
+    ],
+    [
+      "axes.headline with another pool",
+      { ...valid, variation: { axes: { headline: "pool://other" } } },
+      /variation.axes.headline.*"pool:\/\/other"/,
+    ],
+    [
+      "axes.headline as a list",
+      { ...valid, variation: { axes: { headline: ["pool://copy"] } } },
+      /variation.axes.headline/,
+    ],
+    [
+      "a pool:// string under another axis",
+      { ...valid, variation: { axes: { layout: ["pool://copy"] } } },
+      /variation.axes.layout.*pool/,
+    ],
+    [
+      "mode variation without a count",
+      { ...valid, mode: "variation", variation: { axes: {} } },
+      /variation.count.*required/,
+    ],
+    [
+      "mode variation without a variation block",
+      { ...valid, mode: "variation" },
+      /variation.count.*required/,
+    ],
+    [
+      "a non-array layout",
+      { ...valid, variation: { axes: { layout: "headline-top" } } },
+      /layout/,
+    ],
+    [
+      "an invalid layout value",
+      { ...valid, variation: { axes: { layout: ["sideways"] } } },
+      /layout/,
+    ],
+    [
+      "a non-string layout value",
+      { ...valid, variation: { axes: { layout: [1] } } },
+      /layout/,
+    ],
+    [
+      "an invalid tone value",
+      { ...valid, variation: { axes: { tone: ["loud"] } } },
+      /tone/,
+    ],
+    [
+      "a non-array tone",
+      { ...valid, variation: { axes: { tone: "bold" } } },
+      /tone/,
+    ],
+    [
+      "an invalid anchor value",
+      { ...valid, variation: { axes: { anchor: ["sideways"] } } },
+      /anchor/,
+    ],
+    [
+      "a non-array anchor",
+      { ...valid, variation: { axes: { anchor: "top" } } },
+      /anchor/,
+    ],
+    [
+      "a non-string anchor value",
+      { ...valid, variation: { axes: { anchor: [1] } } },
+      /anchor/,
+    ],
+    [
+      "a non-object background",
+      { ...valid, variation: { axes: { background: [] } } },
+      /background/,
+    ],
+    [
+      "a null background",
+      { ...valid, variation: { axes: { background: null } } },
+      /background/,
+    ],
     [
       "a non-array background.source",
-      { ...valid, variation: { axes: { background: { source: "procedural" } } } },
+      {
+        ...valid,
+        variation: { axes: { background: { source: "procedural" } } },
+      },
       /background.source/,
     ],
     [
       "an unsupported background source",
-      { ...valid, variation: { axes: { background: { source: ["unsplash"] } } } },
+      {
+        ...valid,
+        variation: { axes: { background: { source: ["unsplash"] } } },
+      },
       /unsplash/,
     ],
     [
@@ -662,27 +1122,83 @@ describe("parseBrief v2 fields", () => {
       { ...valid, variation: { axes: { background: { source: [1] } } } },
       /background.source/,
     ],
-    ["a non-array paletteShift", { ...valid, variation: { axes: { paletteShift: 0 } } }, /paletteShift/],
-    ["a non-finite paletteShift", { ...valid, variation: { axes: { paletteShift: [Infinity] } } }, /paletteShift/],
+    [
+      "a non-array paletteShift",
+      { ...valid, variation: { axes: { paletteShift: 0 } } },
+      /paletteShift/,
+    ],
+    [
+      "a non-finite paletteShift",
+      { ...valid, variation: { axes: { paletteShift: [Infinity] } } },
+      /paletteShift/,
+    ],
     // A shift is a hue rotation in TURNS. 1 is a whole circle and means what 0 means, so
     // accepting it would let a brief ask for a full rotation and silently receive none.
-    ["a whole-turn paletteShift", { ...valid, variation: { axes: { paletteShift: [1] } } }, /turns in \[0, 1\)/],
-    ["a paletteShift past a whole turn", { ...valid, variation: { axes: { paletteShift: [1.25] } } }, /turns in \[0, 1\)/],
+    [
+      "a whole-turn paletteShift",
+      { ...valid, variation: { axes: { paletteShift: [1] } } },
+      /turns in \[0, 1\)/,
+    ],
+    [
+      "a paletteShift past a whole turn",
+      { ...valid, variation: { axes: { paletteShift: [1.25] } } },
+      /turns in \[0, 1\)/,
+    ],
     // A negative shift is what made the editor's preview disagree with the render.
-    ["a negative paletteShift", { ...valid, variation: { axes: { paletteShift: [-0.1] } } }, /turns in \[0, 1\)/],
-    ["a wildly out-of-range paletteShift", { ...valid, variation: { axes: { paletteShift: [1e308] } } }, /turns in \[0, 1\)/],
-    ["a non-number paletteShift entry", { ...valid, variation: { axes: { paletteShift: ["0.1"] } } }, /turns in \[0, 1\)/],
-    ["a non-number paletteShift", { ...valid, variation: { axes: { paletteShift: ["0"] } } }, /paletteShift/],
-    ["a non-object output", { ...valid, output: "x" }, /"output" must be an object/],
+    [
+      "a negative paletteShift",
+      { ...valid, variation: { axes: { paletteShift: [-0.1] } } },
+      /turns in \[0, 1\)/,
+    ],
+    [
+      "a wildly out-of-range paletteShift",
+      { ...valid, variation: { axes: { paletteShift: [1e308] } } },
+      /turns in \[0, 1\)/,
+    ],
+    [
+      "a non-number paletteShift entry",
+      { ...valid, variation: { axes: { paletteShift: ["0.1"] } } },
+      /turns in \[0, 1\)/,
+    ],
+    [
+      "a non-number paletteShift",
+      { ...valid, variation: { axes: { paletteShift: ["0"] } } },
+      /paletteShift/,
+    ],
+    [
+      "a non-object output",
+      { ...valid, output: "x" },
+      /"output" must be an object/,
+    ],
     ["an array output", { ...valid, output: [] }, /"output" must be an object/],
     ["a null output", { ...valid, output: null }, /"output" must be an object/],
     ["empty output.formats", { ...valid, output: { formats: [] } }, /formats/],
-    ["a non-array output.formats", { ...valid, output: { formats: "static" } }, /formats/],
+    [
+      "a non-array output.formats",
+      { ...valid, output: { formats: "static" } },
+      /formats/,
+    ],
     ["a non-string format", { ...valid, output: { formats: [1] } }, /format/],
-    ["empty output.platforms", { ...valid, output: { platforms: [] } }, /platforms/],
-    ["a non-array output.platforms", { ...valid, output: { platforms: "instagram-feed" } }, /platforms/],
-    ["an empty-string platform", { ...valid, output: { platforms: [""] } }, /platforms/],
-    ["a non-string platform", { ...valid, output: { platforms: [1] } }, /platforms/],
+    [
+      "empty output.platforms",
+      { ...valid, output: { platforms: [] } },
+      /platforms/,
+    ],
+    [
+      "a non-array output.platforms",
+      { ...valid, output: { platforms: "instagram-feed" } },
+      /platforms/,
+    ],
+    [
+      "an empty-string platform",
+      { ...valid, output: { platforms: [""] } },
+      /platforms/,
+    ],
+    [
+      "a non-string platform",
+      { ...valid, output: { platforms: [1] } },
+      /platforms/,
+    ],
   ])("rejects %s", (_label, input, message) => {
     // Structural rules only. The motion axis, duration axis and motion format are
     // capability rules, not structural ones: since D15 they parse cleanly in authoring
@@ -703,31 +1219,50 @@ describe("parseRegenerateOnly", () => {
   });
 
   test("rejects entries with non-string fields", () => {
-    expect(() => parseRegenerateOnly([{ productId: "p", aspectRatio: "1:1" }])).toThrow(/require string/);
+    expect(() =>
+      parseRegenerateOnly([{ productId: "p", aspectRatio: "1:1" }]),
+    ).toThrow(/require string/);
     expect(() => parseRegenerateOnly([null])).toThrow(/require string/);
   });
 
   test("maps valid targets", () => {
-    expect(parseRegenerateOnly([{ productId: "p", aspectRatio: "1:1", treatment: "default" }])).toEqual([
-      { productId: "p", aspectRatio: "1:1", treatment: "default" },
-    ]);
+    expect(
+      parseRegenerateOnly([
+        { productId: "p", aspectRatio: "1:1", treatment: "default" },
+      ]),
+    ).toEqual([{ productId: "p", aspectRatio: "1:1", treatment: "default" }]);
   });
 
   test("maps a display cell target by size, and rejects a canvas-less one (D113)", () => {
-    expect(parseRegenerateOnly([{ productId: "p", size: "728x90", treatment: "default" }])).toEqual([
-      { productId: "p", size: "728x90", treatment: "default" },
-    ]);
-    expect(() => parseRegenerateOnly([{ productId: "p", treatment: "default" }])).toThrow(/require a canvas/);
+    expect(
+      parseRegenerateOnly([
+        { productId: "p", size: "728x90", treatment: "default" },
+      ]),
+    ).toEqual([{ productId: "p", size: "728x90", treatment: "default" }]);
+    expect(() =>
+      parseRegenerateOnly([{ productId: "p", treatment: "default" }]),
+    ).toThrow(/require a canvas/);
   });
 
   test("rejects an entry carrying both canvases — exactly one of the two (D113)", () => {
     expect(() =>
-      parseRegenerateOnly([{ productId: "p", aspectRatio: "1:1", size: "728x90", treatment: "default" }]),
+      parseRegenerateOnly([
+        {
+          productId: "p",
+          aspectRatio: "1:1",
+          size: "728x90",
+          treatment: "default",
+        },
+      ]),
     ).toThrow(/must carry exactly one canvas/);
   });
 
   test("rejects a size outside the display-size vocabulary (D113)", () => {
-    expect(() => parseRegenerateOnly([{ productId: "p", size: "999x999", treatment: "default" }])).toThrow(
+    expect(() =>
+      parseRegenerateOnly([
+        { productId: "p", size: "999x999", treatment: "default" },
+      ]),
+    ).toThrow(
       /must be one of "300x250", "728x90", "160x600", "320x50", "300x600"/,
     );
   });
@@ -736,17 +1271,27 @@ describe("parseRegenerateOnly", () => {
     expect(parseRegenerateOnly([{ productId: "p", variantIndex: 0 }])).toEqual([
       { productId: "p", variantIndex: 0 },
     ]);
-    expect(parseRegenerateOnly([{ productId: "p", variantIndex: 2, attempt: 1 }])).toEqual([
-      { productId: "p", variantIndex: 2, attempt: 1 },
-    ]);
+    expect(
+      parseRegenerateOnly([{ productId: "p", variantIndex: 2, attempt: 1 }]),
+    ).toEqual([{ productId: "p", variantIndex: 2, attempt: 1 }]);
   });
 
   test("rejects invalid variantIndex and attempt", () => {
-    expect(() => parseRegenerateOnly([{ productId: "p", variantIndex: -1 }])).toThrow(/variantIndex/);
-    expect(() => parseRegenerateOnly([{ productId: "p", variantIndex: 1.5 }])).toThrow(/variantIndex/);
-    expect(() => parseRegenerateOnly([{ variantIndex: 0 }])).toThrow(/productId/);
-    expect(() => parseRegenerateOnly([{ productId: "p", variantIndex: 0, attempt: -1 }])).toThrow(/attempt/);
-    expect(() => parseRegenerateOnly([{ productId: "p", variantIndex: 0, attempt: 1.2 }])).toThrow(/attempt/);
+    expect(() =>
+      parseRegenerateOnly([{ productId: "p", variantIndex: -1 }]),
+    ).toThrow(/variantIndex/);
+    expect(() =>
+      parseRegenerateOnly([{ productId: "p", variantIndex: 1.5 }]),
+    ).toThrow(/variantIndex/);
+    expect(() => parseRegenerateOnly([{ variantIndex: 0 }])).toThrow(
+      /productId/,
+    );
+    expect(() =>
+      parseRegenerateOnly([{ productId: "p", variantIndex: 0, attempt: -1 }]),
+    ).toThrow(/attempt/);
+    expect(() =>
+      parseRegenerateOnly([{ productId: "p", variantIndex: 0, attempt: 1.2 }]),
+    ).toThrow(/attempt/);
   });
 });
 
@@ -764,7 +1309,10 @@ describe("loadBrief", () => {
   test("loads a YAML brief", async () => {
     dir = mkdtempSync(join(tmpdir(), "cf-brief-"));
     const path = join(dir, "c.yaml");
-    writeFileSync(path, "id: camp\ntargetRegion: DE\ntargetAudience: a\ncampaignMessage: Hi\nproducts:\n  - id: alpha\n  - id: beta\n");
+    writeFileSync(
+      path,
+      "id: camp\ntargetRegion: DE\ntargetAudience: a\ncampaignMessage: Hi\nproducts:\n  - id: alpha\n  - id: beta\n",
+    );
     expect((await loadBrief(path)).products).toHaveLength(2);
   });
 });
@@ -776,9 +1324,15 @@ describe("parseBrief campaign type (D108–D112)", () => {
   });
 
   test("a known type parses and is carried on the parsed brief verbatim", () => {
-    expect(parseBrief({ ...valid, type: "short-video" }).type).toBe("short-video");
-    expect(parseBrief({ ...valid, type: "paid-social" }).type).toBe("paid-social");
-    expect(parseBrief({ ...valid, type: "social-post" }).type).toBe("social-post");
+    expect(parseBrief({ ...valid, type: "short-video" }).type).toBe(
+      "short-video",
+    );
+    expect(parseBrief({ ...valid, type: "paid-social" }).type).toBe(
+      "paid-social",
+    );
+    expect(parseBrief({ ...valid, type: "social-post" }).type).toBe(
+      "social-post",
+    );
   });
 
   test("an unknown type throws with the vocabulary spelled out", () => {
@@ -791,11 +1345,14 @@ describe("parseBrief campaign type (D108–D112)", () => {
   test("an unknown type is structural, never lenient — refused in enforcing mode too", () => {
     // Unlike the motion rules (authoring accepts what this host cannot run),
     // the type vocabulary has no capability behind it: both parse modes refuse.
-    expect(() => parseBrief({ ...valid, type: "banner" }, { enforceCapabilities: false })).toThrow(
-      /must be one of "social-post", "paid-social", "short-video"/,
-    );
     expect(() =>
-      parseBrief({ ...valid, type: "banner" }, { capabilities: { motion: true }, enforceCapabilities: true }),
+      parseBrief({ ...valid, type: "banner" }, { enforceCapabilities: false }),
+    ).toThrow(/must be one of "social-post", "paid-social", "short-video"/);
+    expect(() =>
+      parseBrief(
+        { ...valid, type: "banner" },
+        { capabilities: { motion: true }, enforceCapabilities: true },
+      ),
     ).toThrow(/must be one of "social-post", "paid-social", "short-video"/);
   });
 
@@ -806,26 +1363,35 @@ describe("parseBrief campaign type (D108–D112)", () => {
   });
 });
 
-const SIZES_VOCABULARY =
-  '"300x250", "728x90", "160x600", "320x50", "300x600"';
+const SIZES_VOCABULARY = '"300x250", "728x90", "160x600", "320x50", "300x600"';
 
 describe("parseBrief display sizes (D113)", () => {
   test("a known size parses and is carried on the parsed brief verbatim", () => {
-    expect(parseBrief({ ...valid, output: { sizes: ["728x90"] } }).output?.sizes).toEqual(["728x90"]);
+    expect(
+      parseBrief({ ...valid, output: { sizes: ["728x90"] } }).output?.sizes,
+    ).toEqual(["728x90"]);
   });
 
   test("an unknown size throws with the vocabulary spelled out", () => {
-    expect(() => parseBrief({ ...valid, output: { sizes: ["banner"] } })).toThrow(
+    expect(() =>
+      parseBrief({ ...valid, output: { sizes: ["banner"] } }),
+    ).toThrow(
       `Campaign brief field "output.sizes" must be one of ${SIZES_VOCABULARY}; got "banner".`,
     );
   });
 
   test("an unknown size is structural, never lenient — refused in enforcing mode too", () => {
-    expect(() => parseBrief({ ...valid, output: { sizes: ["banner"] } }, { enforceCapabilities: false })).toThrow(
-      new RegExp(`must be one of ${SIZES_VOCABULARY}`),
-    );
     expect(() =>
-      parseBrief({ ...valid, output: { sizes: ["banner"] } }, { capabilities: { motion: true }, enforceCapabilities: true }),
+      parseBrief(
+        { ...valid, output: { sizes: ["banner"] } },
+        { enforceCapabilities: false },
+      ),
+    ).toThrow(new RegExp(`must be one of ${SIZES_VOCABULARY}`));
+    expect(() =>
+      parseBrief(
+        { ...valid, output: { sizes: ["banner"] } },
+        { capabilities: { motion: true }, enforceCapabilities: true },
+      ),
     ).toThrow(new RegExp(`must be one of ${SIZES_VOCABULARY}`));
   });
 
@@ -842,7 +1408,10 @@ describe("parseBrief display sizes (D113)", () => {
   });
 
   test("a repeated size is refused in both modes, naming the duplicate", () => {
-    const dup = { ...valid, output: { sizes: ["728x90", "300x250", "728x90"] } };
+    const dup = {
+      ...valid,
+      output: { sizes: ["728x90", "300x250", "728x90"] },
+    };
     expect(() => parseBrief(dup)).toThrow(
       'Campaign brief field "output.sizes" must not repeat a size; "728x90" appears more than once.',
     );
@@ -860,75 +1429,215 @@ describe("parseBrief display sizes (D113)", () => {
       'Campaign brief field "output.sizes" must be a non-empty array of strings; got [].',
     );
     expect(() =>
-      parseBrief(empty, { capabilities: { motion: true }, enforceCapabilities: true }),
-    ).toThrow('Campaign brief field "output.sizes" must be a non-empty array of strings; got [].');
+      parseBrief(empty, {
+        capabilities: { motion: true },
+        enforceCapabilities: true,
+      }),
+    ).toThrow(
+      'Campaign brief field "output.sizes" must be a non-empty array of strings; got [].',
+    );
   });
 });
 
 const MOTION_ON = { motion: true } as const;
-const MOTION_OFF = { motion: false, reason: "ffmpeg -version exited 1" } as const;
+const MOTION_OFF = {
+  motion: false,
+  reason: "ffmpeg -version exited 1",
+} as const;
 
 const motionBrief = (over: Record<string, unknown> = {}) => ({
   ...v2Brief,
-  variation: { ...v2Brief.variation, axes: { ...staticAxes, motion: ["ken-burns-in", "headline-rise"], duration: [6] } },
-  output: { formats: ["static", "motion"], platforms: ["instagram-feed", "instagram-reel"] },
+  variation: {
+    ...v2Brief.variation,
+    axes: {
+      ...staticAxes,
+      motion: ["ken-burns-in", "headline-rise"],
+      duration: [6],
+    },
+  },
+  output: {
+    formats: ["static", "motion"],
+    platforms: ["instagram-feed", "instagram-reel"],
+  },
   ...over,
 });
 
 describe("parseBrief motion allowlist (D8, gated on the ffmpeg capability)", () => {
   test("accepts motion, duration, formats: motion, and motion platforms when the capability is on", () => {
-    const brief = parseBrief(motionBrief(), { capabilities: MOTION_ON, enforceCapabilities: true });
-    expect(brief.variation?.axes?.motion).toEqual(["ken-burns-in", "headline-rise"]);
+    const brief = parseBrief(motionBrief(), {
+      capabilities: MOTION_ON,
+      enforceCapabilities: true,
+    });
+    expect(brief.variation?.axes?.motion).toEqual([
+      "ken-burns-in",
+      "headline-rise",
+    ]);
     expect(brief.variation?.axes?.duration).toEqual([6]);
     expect(brief.output?.formats).toEqual(["static", "motion"]);
-    expect(brief.output?.platforms).toEqual(["instagram-feed", "instagram-reel"]);
+    expect(brief.output?.platforms).toEqual([
+      "instagram-feed",
+      "instagram-reel",
+    ]);
     // Either axis alone is fine (duration defaults in the planner).
-    expect(parseBrief(motionBrief({ variation: { count: 2, axes: { motion: ["accent-wipe"] } } }), { capabilities: MOTION_ON, enforceCapabilities: true }).variation?.axes?.duration).toBeUndefined();
+    expect(
+      parseBrief(
+        motionBrief({
+          variation: { count: 2, axes: { motion: ["accent-wipe"] } },
+        }),
+        { capabilities: MOTION_ON, enforceCapabilities: true },
+      ).variation?.axes?.duration,
+    ).toBeUndefined();
     for (const id of ["instagram-story", "tiktok", "youtube-short"]) {
-      expect(parseBrief(motionBrief({ output: { formats: ["motion"], platforms: [id] } }), { capabilities: MOTION_ON, enforceCapabilities: true }).output?.platforms).toEqual([id]);
+      expect(
+        parseBrief(
+          motionBrief({ output: { formats: ["motion"], platforms: [id] } }),
+          { capabilities: MOTION_ON, enforceCapabilities: true },
+        ).output?.platforms,
+      ).toEqual([id]);
     }
   });
 
   test.each([
-    ["the motion axis", { ...valid, variation: { axes: { motion: ["ken-burns-in"] } } }, /axis "motion": motion output is unavailable \(ffmpeg -version exited 1\)/],
-    ["the duration axis", { ...valid, variation: { axes: { duration: [6] } } }, /axis "duration": motion output is unavailable/],
-    ["the motion format", { ...valid, output: { formats: ["motion"] } }, /format "motion": motion output is unavailable \(ffmpeg -version exited 1\)/],
-    ["a motion platform", { ...valid, output: { platforms: ["instagram-reel"] } }, /platform "instagram-reel": motion output is unavailable/],
-  ])("rejects %s with the probe reason when the capability is off", (_label, input, message) => {
-    expect(() => parseBrief(input, { capabilities: MOTION_OFF, enforceCapabilities: true })).toThrow(message);
-  });
+    [
+      "the motion axis",
+      { ...valid, variation: { axes: { motion: ["ken-burns-in"] } } },
+      /axis "motion": motion output is unavailable \(ffmpeg -version exited 1\)/,
+    ],
+    [
+      "the duration axis",
+      { ...valid, variation: { axes: { duration: [6] } } },
+      /axis "duration": motion output is unavailable/,
+    ],
+    [
+      "the motion format",
+      { ...valid, output: { formats: ["motion"] } },
+      /format "motion": motion output is unavailable \(ffmpeg -version exited 1\)/,
+    ],
+    [
+      "a motion platform",
+      { ...valid, output: { platforms: ["instagram-reel"] } },
+      /platform "instagram-reel": motion output is unavailable/,
+    ],
+  ])(
+    "rejects %s with the probe reason when the capability is off",
+    (_label, input, message) => {
+      expect(() =>
+        parseBrief(input, {
+          capabilities: MOTION_OFF,
+          enforceCapabilities: true,
+        }),
+      ).toThrow(message);
+    },
+  );
 
   test("the default accessor is the boot probe snapshot (not probed → off) and a reasonless flag has a fallback", () => {
-    expect(() => parseBrief(motionBrief(), { enforceCapabilities: true })).toThrow(/motion output is unavailable \(not probed\)/);
-    expect(() => parseBrief(motionBrief(), { capabilities: { motion: false }, enforceCapabilities: true })).toThrow(/\(ffmpeg capability is off\)/);
+    expect(() =>
+      parseBrief(motionBrief(), { enforceCapabilities: true }),
+    ).toThrow(/motion output is unavailable \(not probed\)/);
+    expect(() =>
+      parseBrief(motionBrief(), {
+        capabilities: { motion: false },
+        enforceCapabilities: true,
+      }),
+    ).toThrow(/\(ffmpeg capability is off\)/);
   });
 
   test.each([
-    ["an unknown motion kind", motionBrief({ variation: { count: 2, axes: { motion: ["spin"] } } }), /variation.axes.motion.*"spin"/],
-    ["a non-array duration", motionBrief({ variation: { count: 2, axes: { duration: 6 } } }), /duration" must be an array/],
-    ["a duration below 2", motionBrief({ variation: { count: 2, axes: { duration: [1] } } }), /between 2 and 30/],
-    ["a duration above 30", motionBrief({ variation: { count: 2, axes: { duration: [31] } } }), /between 2 and 30/],
-    ["a fractional duration", motionBrief({ variation: { count: 2, axes: { duration: [2.5] } } }), /between 2 and 30/],
-    ["an unknown platform", motionBrief({ output: { platforms: ["myspace"] } }), /Unknown output platform "myspace"/],
-    ["an unknown format", motionBrief({ output: { formats: ["gif"] } }), /Unsupported output format "gif"/],
+    [
+      "an unknown motion kind",
+      motionBrief({ variation: { count: 2, axes: { motion: ["spin"] } } }),
+      /variation.axes.motion.*"spin"/,
+    ],
+    [
+      "a non-array duration",
+      motionBrief({ variation: { count: 2, axes: { duration: 6 } } }),
+      /duration" must be an array/,
+    ],
+    [
+      "a duration below 2",
+      motionBrief({ variation: { count: 2, axes: { duration: [1] } } }),
+      /between 2 and 30/,
+    ],
+    [
+      "a duration above 30",
+      motionBrief({ variation: { count: 2, axes: { duration: [31] } } }),
+      /between 2 and 30/,
+    ],
+    [
+      "a fractional duration",
+      motionBrief({ variation: { count: 2, axes: { duration: [2.5] } } }),
+      /between 2 and 30/,
+    ],
+    [
+      "an unknown platform",
+      motionBrief({ output: { platforms: ["myspace"] } }),
+      /Unknown output platform "myspace"/,
+    ],
+    [
+      "an unknown format",
+      motionBrief({ output: { formats: ["gif"] } }),
+      /Unsupported output format "gif"/,
+    ],
   ])("rejects %s even with the capability on", (_label, input, message) => {
-    expect(() => parseBrief(input, { capabilities: MOTION_ON, enforceCapabilities: true })).toThrow(message);
+    expect(() =>
+      parseBrief(input, { capabilities: MOTION_ON, enforceCapabilities: true }),
+    ).toThrow(message);
   });
 
   test.each([
-    ["[static] + a motion-only platform", { formats: ["static"], platforms: ["instagram-reel"] }, /platform "instagram-reel" packages only \[motion\], which output.formats \[static\] does not request/],
-    ["[motion] + a static-only platform", { formats: ["motion"], platforms: ["instagram-feed"] }, /platform "instagram-feed" packages only \[static\], which output.formats \[motion\] does not request/],
-    ["no formats (static) + a motion-only platform", { platforms: ["instagram-reel"] }, /platform "instagram-reel" packages only \[motion\], which output.formats \[static\] does not request/],
-    ["a format no requested platform packages", { formats: ["static", "motion"], platforms: ["instagram-reel"] }, /format "static" is requested but none of output.platforms \[instagram-reel\] can package it/],
-  ])("rejects incompatible formats/platforms: %s", (_label, output, message) => {
-    expect(() => parseBrief(motionBrief({ output }), { capabilities: MOTION_ON, enforceCapabilities: true })).toThrow(message);
-  });
+    [
+      "[static] + a motion-only platform",
+      { formats: ["static"], platforms: ["instagram-reel"] },
+      /platform "instagram-reel" packages only \[motion\], which output.formats \[static\] does not request/,
+    ],
+    [
+      "[motion] + a static-only platform",
+      { formats: ["motion"], platforms: ["instagram-feed"] },
+      /platform "instagram-feed" packages only \[static\], which output.formats \[motion\] does not request/,
+    ],
+    [
+      "no formats (static) + a motion-only platform",
+      { platforms: ["instagram-reel"] },
+      /platform "instagram-reel" packages only \[motion\], which output.formats \[static\] does not request/,
+    ],
+    [
+      "a format no requested platform packages",
+      { formats: ["static", "motion"], platforms: ["instagram-reel"] },
+      /format "static" is requested but none of output.platforms \[instagram-reel\] can package it/,
+    ],
+  ])(
+    "rejects incompatible formats/platforms: %s",
+    (_label, output, message) => {
+      expect(() =>
+        parseBrief(motionBrief({ output }), {
+          capabilities: MOTION_ON,
+          enforceCapabilities: true,
+        }),
+      ).toThrow(message);
+    },
+  );
 
   test("accepts formats/platforms that agree: static, mixed, and motion-only", () => {
-    const parse = (output: Record<string, unknown>) => parseBrief(motionBrief({ output }), { capabilities: MOTION_ON, enforceCapabilities: true }).output;
-    expect(parse({ formats: ["static"], platforms: ["instagram-feed"] })?.formats).toEqual(["static"]);
-    expect(parse({ formats: ["static", "motion"], platforms: ["instagram-feed", "tiktok"] })?.formats).toEqual(["static", "motion"]);
-    expect(parse({ formats: ["motion"], platforms: ["instagram-reel", "youtube-short"] })?.formats).toEqual(["motion"]);
+    const parse = (output: Record<string, unknown>) =>
+      parseBrief(motionBrief({ output }), {
+        capabilities: MOTION_ON,
+        enforceCapabilities: true,
+      }).output;
+    expect(
+      parse({ formats: ["static"], platforms: ["instagram-feed"] })?.formats,
+    ).toEqual(["static"]);
+    expect(
+      parse({
+        formats: ["static", "motion"],
+        platforms: ["instagram-feed", "tiktok"],
+      })?.formats,
+    ).toEqual(["static", "motion"]);
+    expect(
+      parse({
+        formats: ["motion"],
+        platforms: ["instagram-reel", "youtube-short"],
+      })?.formats,
+    ).toEqual(["motion"]);
     // Platforms without formats keep the static default.
     expect(parse({ platforms: ["linkedin"] })?.platforms).toEqual(["linkedin"]);
   });
@@ -938,25 +1647,46 @@ describe("parseBrief motion allowlist (D8, gated on the ffmpeg capability)", () 
       variation: { ...v2Brief.variation, axes: { ...staticAxes, motion: [] } },
       output: { formats: ["motion"], platforms: ["instagram-reel"] },
     });
-    expect(() => parseBrief(empty, { capabilities: MOTION_ON, enforceCapabilities: true })).toThrow(
+    expect(() =>
+      parseBrief(empty, { capabilities: MOTION_ON, enforceCapabilities: true }),
+    ).toThrow(
       /"variation.axes.motion" must select at least one motion kind when output.formats includes "motion"/,
     );
     const absent = motionBrief({
       variation: { ...v2Brief.variation, axes: staticAxes },
       output: { formats: ["motion"], platforms: ["instagram-reel"] },
     });
-    expect(parseBrief(absent, { capabilities: MOTION_ON, enforceCapabilities: true }).variation?.axes?.motion).toBeUndefined();
+    expect(
+      parseBrief(absent, { capabilities: MOTION_ON, enforceCapabilities: true })
+        .variation?.axes?.motion,
+    ).toBeUndefined();
     // Without the motion format an empty axis is merely inert.
     const inert = motionBrief({
       variation: { ...v2Brief.variation, axes: { ...staticAxes, motion: [] } },
       output: { formats: ["static"], platforms: ["instagram-feed"] },
     });
-    expect(parseBrief(inert, { capabilities: MOTION_ON, enforceCapabilities: true }).output?.formats).toEqual(["static"]);
+    expect(
+      parseBrief(inert, { capabilities: MOTION_ON, enforceCapabilities: true })
+        .output?.formats,
+    ).toEqual(["static"]);
   });
 
   test("static platforms are accepted regardless of the capability; unknown ids are not", () => {
-    expect(parseBrief({ ...valid, output: { platforms: ["instagram-feed", "linkedin", "x"] } }, { capabilities: MOTION_OFF, enforceCapabilities: true }).output?.platforms).toHaveLength(3);
-    expect(() => parseBrief({ ...valid, output: { platforms: ["myspace"] } }, { capabilities: MOTION_OFF, enforceCapabilities: true })).toThrow(/Unknown output platform/);
+    expect(
+      parseBrief(
+        {
+          ...valid,
+          output: { platforms: ["instagram-feed", "linkedin", "x"] },
+        },
+        { capabilities: MOTION_OFF, enforceCapabilities: true },
+      ).output?.platforms,
+    ).toHaveLength(3);
+    expect(() =>
+      parseBrief(
+        { ...valid, output: { platforms: ["myspace"] } },
+        { capabilities: MOTION_OFF, enforceCapabilities: true },
+      ),
+    ).toThrow(/Unknown output platform/);
   });
 
   test("loadBrief forwards the capability", async () => {
@@ -964,8 +1694,17 @@ describe("parseBrief motion allowlist (D8, gated on the ffmpeg capability)", () 
     try {
       const path = join(dir, "motion.json");
       writeFileSync(path, JSON.stringify(motionBrief()));
-      await expect(loadBrief(path, { enforceCapabilities: true })).rejects.toThrow(/motion output is unavailable/);
-      expect((await loadBrief(path, { capabilities: MOTION_ON, enforceCapabilities: true })).output?.formats).toEqual(["static", "motion"]);
+      await expect(
+        loadBrief(path, { enforceCapabilities: true }),
+      ).rejects.toThrow(/motion output is unavailable/);
+      expect(
+        (
+          await loadBrief(path, {
+            capabilities: MOTION_ON,
+            enforceCapabilities: true,
+          })
+        ).output?.formats,
+      ).toEqual(["static", "motion"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -974,61 +1713,111 @@ describe("parseBrief motion allowlist (D8, gated on the ffmpeg capability)", () 
 
 describe("parseBrief D15 authoring vs enforcing mode", () => {
   const MOTION_OFF: Capabilities = { motion: false, reason: "test off" };
-  const motionBriefWithAxis = motionBrief({ variation: { ...v2Brief.variation, axes: { motion: ["accent-wipe"] } } });
-  const motionBriefWithFormat = motionBrief({ variation: { ...v2Brief.variation }, output: { formats: ["motion"] } });
+  const motionBriefWithAxis = motionBrief({
+    variation: { ...v2Brief.variation, axes: { motion: ["accent-wipe"] } },
+  });
+  const motionBriefWithFormat = motionBrief({
+    variation: { ...v2Brief.variation },
+    output: { formats: ["motion"] },
+  });
   const motionPlatform = "instagram-reel"; // requires motion
-  const motionBriefWithPlatform = motionBrief({ variation: { ...v2Brief.variation }, output: { formats: ["motion"], platforms: [motionPlatform] } });
+  const motionBriefWithPlatform = motionBrief({
+    variation: { ...v2Brief.variation },
+    output: { formats: ["motion"], platforms: [motionPlatform] },
+  });
 
   test("authoring mode (default) allows motion axis when capability is off", () => {
-    const parsed = parseBrief(motionBriefWithAxis, { enforceCapabilities: false });
+    const parsed = parseBrief(motionBriefWithAxis, {
+      enforceCapabilities: false,
+    });
     expect(parsed.variation?.axes?.motion).toEqual(["accent-wipe"]);
   });
 
   test("authoring mode allows motion format when capability is off", () => {
-    const parsed = parseBrief(motionBriefWithFormat, { enforceCapabilities: false });
+    const parsed = parseBrief(motionBriefWithFormat, {
+      enforceCapabilities: false,
+    });
     expect(parsed.output?.formats).toContain("motion");
   });
 
   test("authoring mode allows motion platform when capability is off", () => {
-    const parsed = parseBrief(motionBriefWithPlatform, { enforceCapabilities: false });
+    const parsed = parseBrief(motionBriefWithPlatform, {
+      enforceCapabilities: false,
+    });
     expect(parsed.output?.platforms).toContain(motionPlatform);
   });
 
   test("enforcing mode throws for motion axis when capability is off", () => {
-    expect(() => parseBrief(motionBriefWithAxis, { capabilities: MOTION_OFF, enforceCapabilities: true })).toThrow(/Unsupported variation axis "motion": motion output is unavailable/);
-  });
-
-  test("enforcing mode throws for motion format when capability is off", () => {
-    expect(() => parseBrief(motionBriefWithFormat, { capabilities: MOTION_OFF, enforceCapabilities: true })).toThrow(/Unsupported output format "motion": motion output is unavailable/);
-  });
-
-  test("enforcing mode throws for motion platform when capability is off", () => {
-    expect(() => parseBrief(motionBriefWithPlatform, { capabilities: MOTION_OFF, enforceCapabilities: true })).toThrow(/Unsupported output format "motion": motion output is unavailable/);
-  });
-
-describe("motion requires a randomized campaign", () => {
-  const classicMotion = { ...valid, output: { formats: ["motion"], platforms: ["instagram-reel"] } };
-
-  test("run paths refuse a classic brief that requests motion — it would render stills", () => {
-    expect(() => parseBrief(classicMotion, { capabilities: { motion: true }, enforceCapabilities: true })).toThrow(
-      /requires mode "variation" — a classic campaign renders stills only/,
+    expect(() =>
+      parseBrief(motionBriefWithAxis, {
+        capabilities: MOTION_OFF,
+        enforceCapabilities: true,
+      }),
+    ).toThrow(
+      /Unsupported variation axis "motion": motion output is unavailable/,
     );
   });
 
-  test("authoring mode still accepts it, so the file stays listed and fixable", () => {
-    expect(parseBrief(classicMotion).output?.formats).toEqual(["motion"]);
+  test("enforcing mode throws for motion format when capability is off", () => {
+    expect(() =>
+      parseBrief(motionBriefWithFormat, {
+        capabilities: MOTION_OFF,
+        enforceCapabilities: true,
+      }),
+    ).toThrow(
+      /Unsupported output format "motion": motion output is unavailable/,
+    );
   });
 
-  test("a randomized brief requesting motion is unaffected", () => {
-    const randomized = {
-      ...classicMotion,
-      mode: "variation",
-      variation: { count: 1, axes: { motion: ["ken-burns-in"], duration: [4] } },
+  test("enforcing mode throws for motion platform when capability is off", () => {
+    expect(() =>
+      parseBrief(motionBriefWithPlatform, {
+        capabilities: MOTION_OFF,
+        enforceCapabilities: true,
+      }),
+    ).toThrow(
+      /Unsupported output format "motion": motion output is unavailable/,
+    );
+  });
+
+  describe("motion requires a randomized campaign", () => {
+    const classicMotion = {
+      ...valid,
+      output: { formats: ["motion"], platforms: ["instagram-reel"] },
     };
-    expect(parseBrief(randomized, { capabilities: { motion: true }, enforceCapabilities: true }).mode).toBe("variation");
-  });
-});
 
+    test("run paths refuse a classic brief that requests motion — it would render stills", () => {
+      expect(() =>
+        parseBrief(classicMotion, {
+          capabilities: { motion: true },
+          enforceCapabilities: true,
+        }),
+      ).toThrow(
+        /requires mode "variation" — a classic campaign renders stills only/,
+      );
+    });
+
+    test("authoring mode still accepts it, so the file stays listed and fixable", () => {
+      expect(parseBrief(classicMotion).output?.formats).toEqual(["motion"]);
+    });
+
+    test("a randomized brief requesting motion is unaffected", () => {
+      const randomized = {
+        ...classicMotion,
+        mode: "variation",
+        variation: {
+          count: 1,
+          axes: { motion: ["ken-burns-in"], duration: [4] },
+        },
+      };
+      expect(
+        parseBrief(randomized, {
+          capabilities: { motion: true },
+          enforceCapabilities: true,
+        }).mode,
+      ).toBe("variation");
+    });
+  });
 });
 
 const validTimeline = {
@@ -1086,27 +1875,65 @@ describe("parseBrief style block (T5)", () => {
   });
 
   test("unknown style fields are rejected — style is validated, not tolerated", () => {
-    expect(() => parseBrief({ ...valid, style: { famiy: "Lora" } })).toThrow(/Unsupported style field "famiy"/);
+    expect(() => parseBrief({ ...valid, style: { famiy: "Lora" } })).toThrow(
+      /Unsupported style field "famiy"/,
+    );
   });
 
   test("a non-object style block is rejected", () => {
-    expect(() => parseBrief({ ...valid, style: "Lora" })).toThrow(/"style" must be an object/);
+    expect(() => parseBrief({ ...valid, style: "Lora" })).toThrow(
+      /"style" must be an object/,
+    );
   });
 
   test.each([
-    ["fontFamily", "Comic Sans", /"style\.fontFamily" must be one of Inter, Lora/],
+    [
+      "fontFamily",
+      "Comic Sans",
+      /"style\.fontFamily" must be one of Inter, Lora/,
+    ],
     ["fontWeight", 500, /"style\.fontWeight" must be one of 400, 700/],
     ["fontWeight", "bold", /"style\.fontWeight" must be one of 400, 700/],
-    ["sizeScale", 0.01, /"style\.sizeScale" must be a finite number in \[0\.02, 0\.12\]/],
-    ["sizeScale", 0.5, /"style\.sizeScale" must be a finite number in \[0\.02, 0\.12\]/],
-    ["sizeScale", "big", /"style\.sizeScale" must be a finite number in \[0\.02, 0\.12\]/],
-    ["lineHeight", 0.9, /"style\.lineHeight" must be a finite number in \[1, 1\.8\]/],
-    ["lineHeight", 2.5, /"style\.lineHeight" must be a finite number in \[1, 1\.8\]/],
-    ["letterSpacing", 0.5, /"style\.letterSpacing" must be a finite number in \[-0\.05, 0\.2\]/],
-    ["letterSpacing", -0.5, /"style\.letterSpacing" must be a finite number in \[-0\.05, 0\.2\]/],
+    [
+      "sizeScale",
+      0.01,
+      /"style\.sizeScale" must be a finite number in \[0\.02, 0\.12\]/,
+    ],
+    [
+      "sizeScale",
+      0.5,
+      /"style\.sizeScale" must be a finite number in \[0\.02, 0\.12\]/,
+    ],
+    [
+      "sizeScale",
+      "big",
+      /"style\.sizeScale" must be a finite number in \[0\.02, 0\.12\]/,
+    ],
+    [
+      "lineHeight",
+      0.9,
+      /"style\.lineHeight" must be a finite number in \[1, 1\.8\]/,
+    ],
+    [
+      "lineHeight",
+      2.5,
+      /"style\.lineHeight" must be a finite number in \[1, 1\.8\]/,
+    ],
+    [
+      "letterSpacing",
+      0.5,
+      /"style\.letterSpacing" must be a finite number in \[-0\.05, 0\.2\]/,
+    ],
+    [
+      "letterSpacing",
+      -0.5,
+      /"style\.letterSpacing" must be a finite number in \[-0\.05, 0\.2\]/,
+    ],
     ["align", "justified", /"style\.align" must be one of left, center, right/],
   ])("rejects style.%s = %p", (field, value, message) => {
-    expect(() => parseBrief({ ...valid, style: { [field]: value } })).toThrow(message);
+    expect(() => parseBrief({ ...valid, style: { [field]: value } })).toThrow(
+      message,
+    );
   });
 });
 
@@ -1186,12 +2013,17 @@ describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
       });
 
       // Authoring mode (default / enforceCapabilities: false) allows it to save
-      const parsed = parseBrief(shortBeatsBrief, { enforceCapabilities: false });
+      const parsed = parseBrief(shortBeatsBrief, {
+        enforceCapabilities: false,
+      });
       expect(parsed.copy?.timeline?.beats).toHaveLength(3);
 
       // Running mode (enforceCapabilities: true) refuses it with dwell floor message from timelineProblem
       expect(() =>
-        parseBrief(shortBeatsBrief, { capabilities: MOTION_ON, enforceCapabilities: true }),
+        parseBrief(shortBeatsBrief, {
+          capabilities: MOTION_ON,
+          enforceCapabilities: true,
+        }),
       ).toThrow(/readability floor/);
     });
 
@@ -1248,49 +2080,186 @@ describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
     test("D11: authoring mode allows timeline when motion capability is off; running mode refuses", () => {
       const brief = validMotionTimelineBrief();
       // Authoring mode: passes
-      expect(parseBrief(brief, { capabilities: MOTION_OFF, enforceCapabilities: false }).copy?.timeline).toBeDefined();
+      expect(
+        parseBrief(brief, {
+          capabilities: MOTION_OFF,
+          enforceCapabilities: false,
+        }).copy?.timeline,
+      ).toBeDefined();
 
       // Running mode: fails
       expect(() =>
-        parseBrief(brief, { capabilities: MOTION_OFF, enforceCapabilities: true }),
+        parseBrief(brief, {
+          capabilities: MOTION_OFF,
+          enforceCapabilities: true,
+        }),
       ).toThrow(/motion output is unavailable/);
     });
   });
 
   describe("E4.2: rejects structural violations naming offending path", () => {
     test.each([
-      ["a non-object copy", { ...validMotionTimelineBrief(), copy: "invalid" }, /Campaign brief field "copy" must be an object/],
-      ["a non-object copy.timeline", { ...validMotionTimelineBrief(), copy: { timeline: "invalid" } }, /Campaign brief field "copy.timeline" must be an object/],
-      ["an unknown transition", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, transition: "slide" } } }), /Campaign brief field "copy.timeline.transition" must be "cut" or "fade"/],
-      ["a non-string transition", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, transition: 123 } } }), /Campaign brief field "copy.timeline.transition" must be "cut" or "fade"/],
-      ["non-array beats", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, beats: "invalid" } } }), /Campaign brief field "copy.timeline.beats" must be an array/],
-      ["empty beats", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, beats: [] } } }), /copy\.timeline\.beats must not be empty/],
+      [
+        "a non-object copy",
+        { ...validMotionTimelineBrief(), copy: "invalid" },
+        /Campaign brief field "copy" must be an object/,
+      ],
+      [
+        "a non-object copy.timeline",
+        { ...validMotionTimelineBrief(), copy: { timeline: "invalid" } },
+        /Campaign brief field "copy.timeline" must be an object/,
+      ],
+      [
+        "an unknown transition",
+        validMotionTimelineBrief({
+          copy: { timeline: { ...validTimeline, transition: "slide" } },
+        }),
+        /Campaign brief field "copy.timeline.transition" must be "cut" or "fade"/,
+      ],
+      [
+        "a non-string transition",
+        validMotionTimelineBrief({
+          copy: { timeline: { ...validTimeline, transition: 123 } },
+        }),
+        /Campaign brief field "copy.timeline.transition" must be "cut" or "fade"/,
+      ],
+      [
+        "non-array beats",
+        validMotionTimelineBrief({
+          copy: { timeline: { ...validTimeline, beats: "invalid" } },
+        }),
+        /Campaign brief field "copy.timeline.beats" must be an array/,
+      ],
+      [
+        "empty beats",
+        validMotionTimelineBrief({
+          copy: { timeline: { ...validTimeline, beats: [] } },
+        }),
+        /copy\.timeline\.beats must not be empty/,
+      ],
       [
         `more than MAX_BEATS (${MAX_BEATS}) beats`,
         validMotionTimelineBrief({
           copy: {
             timeline: {
               ...validTimeline,
-              beats: Array.from({ length: MAX_BEATS + 1 }, (_, i) => ({ text: `Beat ${i + 1}`, weight: 1 })),
+              beats: Array.from({ length: MAX_BEATS + 1 }, (_, i) => ({
+                text: `Beat ${i + 1}`,
+                weight: 1,
+              })),
             },
           },
         }),
         /copy\.timeline\.beats holds more than 8 beats/,
       ],
-      ["a non-object beat entry", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, beats: [null] } } }), /Campaign brief field "copy\.timeline\.beats\[0\]" must be an object/],
-      ["a non-string beat text", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, beats: [{ text: 123, weight: 1 }] } } }), /Campaign brief field "copy\.timeline\.beats\[0\]\.text" must be a string/],
-      ["a non-integer weight", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, beats: [{ text: "A", weight: 1.5 }] } } }), /copy\.timeline\.beats\[0\]\.weight must be an integer in \[1, 20\]/],
-      ["a non-number weight", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, beats: [{ text: "A", weight: "2" }] } } }), /copy\.timeline\.beats\[0\]\.weight must be an integer in \[1, 20\]/],
-      ["a weight below 1", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, beats: [{ text: "A", weight: 0 }] } } }), /copy\.timeline\.beats\[0\]\.weight must be an integer in \[1, 20\]/],
-      ["a negative weight", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, beats: [{ text: "A", weight: -1 }] } } }), /copy\.timeline\.beats\[0\]\.weight must be an integer in \[1, 20\]/],
-      ["a weight above MAX_WEIGHT", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, beats: [{ text: "A", weight: MAX_WEIGHT + 1 }] } } }), /copy\.timeline\.beats\[0\]\.weight must be an integer in \[1, 20\]/],
-      ["an astronomical weight (1e308 overflow boundary)", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, beats: [{ text: "A", weight: 1e308 }] } } }), /copy\.timeline\.beats\[0\]\.weight must be an integer in \[1, 20\]/],
-      ["a keyBeat below 1", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, keyBeat: 0 } } }), /copy\.timeline\.keyBeat must be an integer in \[1, 3\]/],
-      ["a keyBeat above beats.length", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, keyBeat: 4 } } }), /copy\.timeline\.keyBeat must be an integer in \[1, 3\]/],
-      ["a non-integer keyBeat", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, keyBeat: 1.5 } } }), /copy\.timeline\.keyBeat must be an integer in \[1, 3\]/],
-      ["a non-number keyBeat", validMotionTimelineBrief({ copy: { timeline: { ...validTimeline, keyBeat: "1" } } }), /copy\.timeline\.keyBeat must be an integer in \[1, 3\]/],
+      [
+        "a non-object beat entry",
+        validMotionTimelineBrief({
+          copy: { timeline: { ...validTimeline, beats: [null] } },
+        }),
+        /Campaign brief field "copy\.timeline\.beats\[0\]" must be an object/,
+      ],
+      [
+        "a non-string beat text",
+        validMotionTimelineBrief({
+          copy: {
+            timeline: { ...validTimeline, beats: [{ text: 123, weight: 1 }] },
+          },
+        }),
+        /Campaign brief field "copy\.timeline\.beats\[0\]\.text" must be a string/,
+      ],
+      [
+        "a non-integer weight",
+        validMotionTimelineBrief({
+          copy: {
+            timeline: { ...validTimeline, beats: [{ text: "A", weight: 1.5 }] },
+          },
+        }),
+        /copy\.timeline\.beats\[0\]\.weight must be an integer in \[1, 20\]/,
+      ],
+      [
+        "a non-number weight",
+        validMotionTimelineBrief({
+          copy: {
+            timeline: { ...validTimeline, beats: [{ text: "A", weight: "2" }] },
+          },
+        }),
+        /copy\.timeline\.beats\[0\]\.weight must be an integer in \[1, 20\]/,
+      ],
+      [
+        "a weight below 1",
+        validMotionTimelineBrief({
+          copy: {
+            timeline: { ...validTimeline, beats: [{ text: "A", weight: 0 }] },
+          },
+        }),
+        /copy\.timeline\.beats\[0\]\.weight must be an integer in \[1, 20\]/,
+      ],
+      [
+        "a negative weight",
+        validMotionTimelineBrief({
+          copy: {
+            timeline: { ...validTimeline, beats: [{ text: "A", weight: -1 }] },
+          },
+        }),
+        /copy\.timeline\.beats\[0\]\.weight must be an integer in \[1, 20\]/,
+      ],
+      [
+        "a weight above MAX_WEIGHT",
+        validMotionTimelineBrief({
+          copy: {
+            timeline: {
+              ...validTimeline,
+              beats: [{ text: "A", weight: MAX_WEIGHT + 1 }],
+            },
+          },
+        }),
+        /copy\.timeline\.beats\[0\]\.weight must be an integer in \[1, 20\]/,
+      ],
+      [
+        "an astronomical weight (1e308 overflow boundary)",
+        validMotionTimelineBrief({
+          copy: {
+            timeline: {
+              ...validTimeline,
+              beats: [{ text: "A", weight: 1e308 }],
+            },
+          },
+        }),
+        /copy\.timeline\.beats\[0\]\.weight must be an integer in \[1, 20\]/,
+      ],
+      [
+        "a keyBeat below 1",
+        validMotionTimelineBrief({
+          copy: { timeline: { ...validTimeline, keyBeat: 0 } },
+        }),
+        /copy\.timeline\.keyBeat must be an integer in \[1, 3\]/,
+      ],
+      [
+        "a keyBeat above beats.length",
+        validMotionTimelineBrief({
+          copy: { timeline: { ...validTimeline, keyBeat: 4 } },
+        }),
+        /copy\.timeline\.keyBeat must be an integer in \[1, 3\]/,
+      ],
+      [
+        "a non-integer keyBeat",
+        validMotionTimelineBrief({
+          copy: { timeline: { ...validTimeline, keyBeat: 1.5 } },
+        }),
+        /copy\.timeline\.keyBeat must be an integer in \[1, 3\]/,
+      ],
+      [
+        "a non-number keyBeat",
+        validMotionTimelineBrief({
+          copy: { timeline: { ...validTimeline, keyBeat: "1" } },
+        }),
+        /copy\.timeline\.keyBeat must be an integer in \[1, 3\]/,
+      ],
     ])("rejects %s in authoring mode", (_label, input, message) => {
-      expect(() => parseBrief(input, { enforceCapabilities: false })).toThrow(message);
+      expect(() => parseBrief(input, { enforceCapabilities: false })).toThrow(
+        message,
+      );
     });
   });
 
@@ -1305,7 +2274,9 @@ describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
           },
         },
       });
-      expect(() => parseBrief(conflictBrief, { enforceCapabilities: false })).toThrow(
+      expect(() =>
+        parseBrief(conflictBrief, { enforceCapabilities: false }),
+      ).toThrow(
         /Campaign brief cannot combine "copy\.timeline" with "variation\.axes\.headline"/,
       );
     });
@@ -1316,9 +2287,9 @@ describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
         copy: { timeline: validTimeline },
         output: { formats: ["motion"], platforms: ["instagram-reel"] },
       };
-      expect(() => parseBrief(classicWithTimeline, { enforceCapabilities: false })).toThrow(
-        /Campaign brief field "copy\.timeline" requires motion output/,
-      );
+      expect(() =>
+        parseBrief(classicWithTimeline, { enforceCapabilities: false }),
+      ).toThrow(/Campaign brief field "copy\.timeline" requires motion output/);
     });
 
     test("rejects copy.timeline on a variation brief without formats: motion", () => {
@@ -1327,9 +2298,9 @@ describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
         copy: { timeline: validTimeline },
         output: { formats: ["static"], platforms: ["instagram-feed"] },
       };
-      expect(() => parseBrief(staticVariationWithTimeline, { enforceCapabilities: false })).toThrow(
-        /Campaign brief field "copy\.timeline" requires motion output/,
-      );
+      expect(() =>
+        parseBrief(staticVariationWithTimeline, { enforceCapabilities: false }),
+      ).toThrow(/Campaign brief field "copy\.timeline" requires motion output/);
     });
 
     test("rejects copy.timeline on a variation brief with omitted output.formats (defaults to static)", () => {
@@ -1338,9 +2309,11 @@ describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
         copy: { timeline: validTimeline },
         output: { platforms: ["instagram-feed"] },
       };
-      expect(() => parseBrief(noFormatsVariationWithTimeline, { enforceCapabilities: false })).toThrow(
-        /Campaign brief field "copy\.timeline" requires motion output/,
-      );
+      expect(() =>
+        parseBrief(noFormatsVariationWithTimeline, {
+          enforceCapabilities: false,
+        }),
+      ).toThrow(/Campaign brief field "copy\.timeline" requires motion output/);
     });
   });
 
@@ -1376,7 +2349,9 @@ describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
     test("a brief with no copy.timeline parses and serializes byte-for-byte as before", () => {
       const parsedClassic = parseBrief(valid);
       expect(parsedClassic.copy).toBeUndefined();
-      expect(parsedClassic.template).toEqual(templateFromCanonical(DEFAULT_CAMPAIGN_TYPE));
+      expect(parsedClassic.template).toEqual(
+        templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      );
 
       const parsedV2 = parseBrief(v2Brief);
       expect(parsedV2.copy).toBeUndefined();

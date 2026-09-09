@@ -7,7 +7,10 @@ import {
   PLATFORM_PROFILES,
   formatsFor,
 } from "@campaignfoundry/Distribution/platform-profiles";
-import { CREATIVE_TYPE_RULES } from "@campaignfoundry/CampaignOrchestration/creative-types";
+import {
+  CREATIVE_TYPE_RULES,
+  type CreativeType,
+} from "@campaignfoundry/CampaignOrchestration/creative-types";
 import { satisfiesOrderConstraints } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 import type { EditorState } from "./editor-state";
@@ -90,12 +93,16 @@ export function classicAdCount(
   // substitutes DEFAULT_TREATMENT when the list is absent *or* empty
   // (GenerateCampaignUseCase.use-case.ts:163). `?? 1` only catches undefined, so an
   // empty array would otherwise multiply the whole estimate to zero.
-  return products * (RATIO_VALUES.length + sizes) * Math.max(1, treatments ?? 1);
+  return (
+    products * (RATIO_VALUES.length + sizes) * Math.max(1, treatments ?? 1)
+  );
 }
 
 /** Kind → layer count for a template's layer list — the arithmetic both
  * cardinality derivations and the boundary agree on (D124). */
-function countKinds(layers: readonly { readonly kind: LayerKind }[]): Map<string, number> {
+function countKinds(
+  layers: readonly { readonly kind: LayerKind }[],
+): Map<string, number> {
   const counts = new Map<string, number>();
   for (const layer of layers) {
     counts.set(layer.kind, (counts.get(layer.kind) ?? 0) + 1);
@@ -104,24 +111,62 @@ function countKinds(layers: readonly { readonly kind: LayerKind }[]): Map<string
 }
 
 /**
- * What the editor may still add to the pinned template (D124), derived from the
+ * Finds the highest legal index (from `layers.length` down to 0) where a new layer
+ * of `kind` can be inserted into `layers` while satisfying all ordering constraints
+ * for `creativeType` (D128).
+ *
+ * Array position is z-order, bottom first (D128):
+ * - Topmost (`layers.length`) is preferred so new layers are topmost whenever legal.
+ * - If topmost violates an order constraint (e.g. adding `shade` when `logo` is on top),
+ *   the highest index that satisfies constraints is derived deterministically.
+ * - Returns `undefined` if no legal insertion position exists.
+ */
+export function findLegalInsertionIndex(
+  creativeType: CreativeType,
+  layers: readonly { readonly kind: LayerKind }[],
+  kind: LayerKind,
+): number | undefined {
+  for (let i = layers.length; i >= 0; i--) {
+    const candidate = [...layers.slice(0, i), { kind }, ...layers.slice(i)];
+    if (satisfiesOrderConstraints(creativeType, candidate)) {
+      return i;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * What the editor may still add to the pinned template (D124, D128), derived from the
  * domain's compatibility table — the same `CREATIVE_TYPE_RULES` the boundary
  * validates against, so the two cannot drift (D121). A kind is addable while one
  * more layer of it would still parse: under its own `maxOf` cap (absent means
- * unbounded) and under every shared budget it belongs to (image-text's
+ * unbounded), under every shared budget it belongs to (image-text's
  * `static-text`/`animated-text` draw one headline block, so either alone fills
- * the budget of one — the other must not be offered). Canonical `accepts` order,
- * so the UI lists the table's order.
+ * the budget of one — the other must not be offered), and where a legal order
+ * placement exists. Canonical `accepts` order, so the UI lists the table's order.
  */
 export function addableKinds(state: EditorState): readonly LayerKind[] {
   const rules = CREATIVE_TYPE_RULES[state.template.creativeType];
   const counts = countKinds(state.template.layers);
   return rules.accepts.filter((kind) => {
-    if ((counts.get(kind) ?? 0) >= (rules.maxOf?.[kind] ?? Infinity)) return false;
+    if ((counts.get(kind) ?? 0) >= (rules.maxOf?.[kind] ?? Infinity))
+      return false;
     for (const budget of rules.sharedBudgets ?? []) {
       if (!budget.kinds.includes(kind)) continue;
-      const used = budget.kinds.reduce((sum, budgeted) => sum + (counts.get(budgeted) ?? 0), 0);
+      const used = budget.kinds.reduce(
+        (sum, budgeted) => sum + (counts.get(budgeted) ?? 0),
+        0,
+      );
       if (used >= budget.max) return false;
+    }
+    if (
+      findLegalInsertionIndex(
+        state.template.creativeType,
+        state.template.layers,
+        kind,
+      ) === undefined
+    ) {
+      return false;
     }
     return true;
   });
@@ -137,11 +182,17 @@ export function addableKinds(state: EditorState): readonly LayerKind[] {
 export function removableLayerIds(state: EditorState): readonly string[] {
   const rules = CREATIVE_TYPE_RULES[state.template.creativeType];
   const counts = countKinds(state.template.layers);
-  return state.template.layers
-    // `as number`: `counts` is built from this same list, so every layer's kind
-    // is present — the lookup cannot miss.
-    .filter((layer) => !rules.required.includes(layer.kind) || (counts.get(layer.kind) as number) > 1)
-    .map((layer) => layer.id);
+  return (
+    state.template.layers
+      // `as number`: `counts` is built from this same list, so every layer's kind
+      // is present — the lookup cannot miss.
+      .filter(
+        (layer) =>
+          !rules.required.includes(layer.kind) ||
+          (counts.get(layer.kind) as number) > 1,
+      )
+      .map((layer) => layer.id)
+  );
 }
 
 export type MoveDirection = "up" | "down";
@@ -204,4 +255,3 @@ export function canMoveLayer(
 ): boolean {
   return layerMoveDirections(state, index).includes(direction);
 }
-
