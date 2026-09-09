@@ -148,6 +148,53 @@ the *problem statement* the step had since been added to fix. A reviewer quoting
 feels authoritative in a way a bare assertion does not. **Check the workflow file, not the note
 about the workflow file.**
 
+## The seat trial (opened 2026-09-09, owner's call)
+
+Seats are being **measured against each other over the next several waves**, then assessed once.
+Until that assessment lands, seat choice follows the protocol below and **not** convenience.
+
+### Why a protocol rather than impressions
+
+Tonight's record is unusable as evidence, and the reason is instructive. `big-pickle` took both
+five-deliverable briefs (`L7a`, `L8`) and **both were killed for reading without writing**;
+`glm-5.3-flash` took only two- and three-deliverable briefs and **shipped all seven**. Seat and
+brief size are perfectly confounded, so the data cannot separate "this seat sprawls" from "that
+brief was too big". `agy gemini-3.8-flash-high` shipped three lanes cleanly but **every one predates
+the measurement rule**, so it has no cost figures at all. Three seats, no comparable numbers.
+
+### Assignment rule
+
+**Round-robin by lane, not by wave**, so no seat collects all the hard ones:
+
+| Lane in trial order | Seat |
+|---|---|
+| 1, 4, 7, 10 | `agy gemini-3.8-flash-high` (`--output-format json`) |
+| 2, 5, 8, 11 | `opencode-go/glm-5.3-flash` (`--format json`) |
+| 3, 6, 9, 12 | `opencode/big-pickle` (`--format json`) |
+
+**Do not swap a seat because a lane looks risky** — that is exactly the judgement that produced the
+confound. If a lane is too big for any seat, **split the lane**; do not reassign it. Provider
+outages (a retryable 5xx) are re-dispatched to the **same** seat; only an unfunded or unreachable
+seat is skipped, and the skip is recorded.
+
+### Record per run, in the wave record
+
+`seat · lane · deliverables · billed in/out · cache read · steps · peak ctx · wall min · outcome`,
+where **deliverables** is the count of distinct changes the brief demands (the normaliser — a
+comparison across different sizes is meaningless without it) and **outcome** is one of
+*shipped clean*, *shipped after N fix rounds*, *killed*, or *provider failure*.
+
+**Also record where each finding originated** — the lane's own work, or the orchestrator's brief.
+Tonight most fix rounds traced to brief defects (a scalar where the plan said a list, a required
+field behind a fence, a minimum-shape check on a five-field type). A seat charged for the
+orchestrator's mistakes will look worse than it is.
+
+### Assessment
+
+After **four lanes per seat**, one comparison table in the wave record and a recommendation per
+task shape — implementer, remediator, reviewer. Until then no seat is declared best, and this
+file's *Track record* section stays a record of what happened, not a ranking.
+
 ## Track record, from waves run in this repo
 
 - **glm-5.3-flash** — strongest implementer here: 17/18 lanes clean, honest reports, real mutation
