@@ -149,3 +149,103 @@ describe("dumpBrief", () => {
     expect(parse(yaml).output.sizes).toBeUndefined();
   });
 });
+
+describe("dumpBrief layer and props order (L3b, D134)", () => {
+  // Layers written with their keys scrambled — and props written in reverse
+  // union order — so the assertions below can only pass if the writer orders
+  // them, not if the fixture happens to be ordered already.
+  const templated = {
+    ...brief,
+    template: {
+      id: "canonical-image-text",
+      version: 1,
+      creativeType: "image-text",
+      unit: "standard-web",
+      layers: [
+        { kind: "image", id: "bg" },
+        { kind: "shade", id: "tint", props: { alpha: 0.5 } },
+        { kind: "accent", id: "band", props: { fadeHeight: 0.06, solidHeight: 0.05 } },
+        { kind: "static-text", id: "head", props: { typeFloor: 0.4, anchor: "top" } },
+        { kind: "logo", id: "mark", props: { margin: 0.04, width: 0 } },
+      ],
+    },
+  };
+
+  test("emits a layer's keys as id, kind, props", () => {
+    const yaml = dumpBrief(templated);
+    expect(yaml.indexOf("id: bg")).toBeLessThan(yaml.indexOf("kind: image"));
+    expect(yaml.indexOf("id: tint")).toBeLessThan(yaml.indexOf("kind: shade"));
+    expect(yaml.indexOf("kind: shade")).toBeLessThan(yaml.indexOf("props:"));
+    expect(yaml.indexOf("props:")).toBeLessThan(yaml.indexOf("alpha: 0.5"));
+  });
+
+  test("emits props keys in the order the LayerProps union declares them", () => {
+    const yaml = dumpBrief(templated);
+    expect(yaml.indexOf("solidHeight:")).toBeLessThan(yaml.indexOf("fadeHeight:"));
+    expect(yaml.indexOf("anchor:")).toBeLessThan(yaml.indexOf("typeFloor:"));
+    expect(yaml.indexOf("width:")).toBeLessThan(yaml.indexOf("margin:"));
+  });
+
+  test("a shade layer's props round-trip through YAML verbatim", () => {
+    const yaml = dumpBrief(templated);
+    const parsed = parse(yaml) as typeof templated;
+    expect(parsed.template.layers[1]).toEqual({ kind: "shade", id: "tint", props: { alpha: 0.5 } });
+  });
+
+  test("a layer key named after an Object.prototype member survives the dump", () => {
+    // `constructor` is also an inherited member of the writer's accumulator;
+    // an own layer key of that name must still be emitted (L3b review).
+    const withPrototypeKey = {
+      ...brief,
+      template: {
+        id: "canonical-image-text",
+        version: 1,
+        creativeType: "image-text",
+        unit: "standard-web",
+        layers: [{ id: "bg", kind: "image", constructor: "x" }],
+      },
+    };
+    const yaml = dumpBrief(withPrototypeKey);
+    expect(yaml).toContain("constructor: x");
+    expect(parse(yaml)).toEqual(withPrototypeKey);
+  });
+
+  test("a template whose layers carry no props dumps and reparses exactly as today", () => {
+    const propless = {
+      ...brief,
+      template: {
+        id: "canonical-video",
+        version: 1,
+        creativeType: "video",
+        unit: "standard-web",
+        layers: [
+          { id: "video", kind: "video" },
+          { id: "shade", kind: "shade" },
+          { id: "animated-text", kind: "animated-text" },
+          { id: "logo", kind: "logo" },
+        ],
+      },
+    };
+    const yaml = dumpBrief(propless);
+    expect(parse(yaml)).toEqual(propless);
+    // Byte-stable: what parse reads back dumps again unchanged.
+    expect(dumpBrief(parse(yaml) as object)).toBe(yaml);
+  });
+
+  test("entries the order cannot name pass through untouched", () => {
+    // A template that is not an object with a layers array, a layer that is
+    // not an object, and a props that is not an object are all emitted as
+    // written — the writer reorders keys, it never validates them.
+    const yaml = dumpBrief({
+      ...brief,
+      template: { id: "x", layers: ["junk", { id: "tint", kind: "shade", props: null }] },
+    });
+    expect(yaml).toContain("template:");
+    expect(yaml).toContain("- junk");
+    expect(yaml).toContain("props: null");
+    expect(parse(yaml)).toEqual({
+      ...brief,
+      template: { id: "x", layers: ["junk", { id: "tint", kind: "shade", props: null }] },
+    });
+  });
+});

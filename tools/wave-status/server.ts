@@ -41,6 +41,7 @@ export type Route =
   | { readonly kind: "index" }
   | { readonly kind: "status" }
   | { readonly kind: "stream" }
+  | { readonly kind: "tokens" }
   | {
       readonly kind: "log";
       readonly wave: string;
@@ -69,6 +70,7 @@ export function routeFor(
   if (path === "/") return { kind: "index" };
   if (path === "/api/status") return { kind: "status" };
   if (path === "/api/stream") return { kind: "stream" };
+  if (path === "/tokens.css") return { kind: "tokens" };
   const log = /^\/api\/log\/([^/]+)\/([^/]+)$/.exec(path);
   if (log !== null && SEGMENT.test(log[1]) && SEGMENT.test(log[2])) {
     return { kind: "log", wave: log[1], lane: log[2], search: parsed.searchParams };
@@ -93,6 +95,11 @@ export interface StartOptions {
   readonly pollMs?: number;
   /** Overridable so tests can point at a missing page. */
   readonly indexHtmlPath?: string;
+  /**
+   * Overridable so tests can point at a missing or malformed tokens file,
+   * and to make a silent fallback the mutation that this lane's tests catch.
+   */
+  readonly tokensCssPath?: string;
   /** Overridable so tests can wrap `fs.watch` without stubbing the whole module. */
   readonly watch?: WatchFn;
 }
@@ -113,6 +120,11 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
   const deps = options.deps ?? realDeps;
   const indexHtmlPath =
     options.indexHtmlPath ?? fileURLToPath(new URL("./public/index.html", import.meta.url));
+  // Follow the same repo-relative resolution as index.html: from this module's
+  // location (`tools/wave-status/server.ts`) the repo root is two levels up.
+  const tokensCssPath =
+    options.tokensCssPath ??
+    fileURLToPath(new URL("../../apps/web/src/styles/tokens.css", import.meta.url));
   const watchPath = options.watch ?? ((path, listener) => fsWatch(path, listener));
 
   const clients = new Set<ServerResponse>();
@@ -208,6 +220,10 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
       }
       return;
     }
+    if (route.kind === "tokens") {
+      await serveTokens(res, tokensCssPath);
+      return;
+    }
     if (route.kind === "status") {
       try {
         const status = await collectNow(true);
@@ -299,6 +315,80 @@ async function serveLog(
     res.writeHead(404);
     res.end();
   }
+}
+
+/**
+ * `/tokens.css` — the app's dark tokens, extracted from tokens.css and served
+ * as CSS. This lane exists so the status page stops copying the values: it links
+ * this route instead of redeclaring them, so a token change in the app cannot
+ * silently drift. Fail loudly on a missing file or missing dark block — the
+ * route 500s and names the file, and the page is visibly unstyled.
+ */
+async function serveTokens(res: ServerResponse, tokensCssPath: string): Promise<void> {
+  let css: string;
+  try {
+    css = await readFile(tokensCssPath, "utf8");
+  } catch {
+    res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+    res.end(`tokens.css missing or unreadable: ${tokensCssPath}`);
+    return;
+  }
+  const dark = extractDarkBlock(css);
+  if (dark === undefined) {
+    res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+    res.end(`tokens.css has no dark block: ${tokensCssPath}`);
+    return;
+  }
+  res.writeHead(200, { "content-type": "text/css; charset=utf-8" });
+  res.end(dark);
+}
+
+/**
+ * Extract the `.dark { … }` block from a CSS file, balancing braces while
+ * skipping comments and strings so a brace inside them cannot cut the match
+ * short. Returns undefined when there is no `.dark` block.
+ */
+export function extractDarkBlock(css: string): string | undefined {
+  const start = css.indexOf(".dark");
+  if (start < 0) return undefined;
+  const open = css.indexOf("{", start);
+  if (open < 0) return undefined;
+  let depth = 0;
+  let inComment = false;
+  let inQuote: "'" | '"' | null = null;
+  for (let i = open; i < css.length; i++) {
+    const ch = css[i];
+    if (inComment) {
+      if (ch === "*" && css[i + 1] === "/") {
+        inComment = false;
+        i++;
+      }
+      continue;
+    }
+    if (inQuote !== null) {
+      if (ch === "\\") {
+        i++;
+      } else if (ch === inQuote) {
+        inQuote = null;
+      }
+      continue;
+    }
+    if (ch === "/" && css[i + 1] === "*") {
+      inComment = true;
+      i++;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      inQuote = ch;
+      continue;
+    }
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return css.slice(open, i + 1);
+    }
+  }
+  return undefined;
 }
 
 /** Map a wave id back to its log directory by re-deriving ids from the root. */

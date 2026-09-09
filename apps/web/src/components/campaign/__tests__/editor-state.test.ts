@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, vi, afterEach } from "vitest";
 import type { CampaignBrief, CampaignType, CopyPool } from "@campaignfoundry/CampaignOrchestration";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
-import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
+import { templateFromCanonical, type LayerProps } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import { timelineProblem } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import { axisProductSize } from "../validate";
@@ -740,6 +740,50 @@ describe("the creative template survives the editor (L3a, D120/D123)", () => {
     expect(short.template).toEqual(templateFromCanonical("short-video"));
     const social = reduce(base(), { type: "applyPreset", campaignType: "social-post" });
     expect(social.template).toEqual(templateFromCanonical("social-post"));
+  });
+});
+
+describe("per-layer props survive the editor (L3b, D134)", () => {
+  beforeEach(() => localStorage.clear());
+
+  /** The canonical template with props swapped onto one kind's layer — no editor UI authors these yet (L5). */
+  const withProps = (type: CampaignType, kind: string, props: LayerProps) => {
+    const canonical = templateFromCanonical(type);
+    return {
+      ...canonical,
+      layers: canonical.layers.map((layer) => (layer.kind === kind ? { ...layer, props } : layer)),
+    };
+  };
+
+  test("fromBrief → toBrief round-trips a shade layer's props verbatim", () => {
+    const template = withProps("social-post", "shade", { alpha: 0.5 });
+    const state = fromBrief(savedBrief({ template }), { file: "camp.yaml" });
+    const emitted = toBrief(state);
+    expect(emitted.template).toEqual(template);
+    expect(emitted.template.layers.find((layer) => layer.kind === "shade")?.props).toEqual({ alpha: 0.5 });
+    // The held layer is the same data the brief carried — never re-derived.
+    expect(emitted.template.layers.find((layer) => layer.kind === "image")?.props).toBeUndefined();
+  });
+
+  test("a stored draft carrying props round-trips through the real storage path", () => {
+    const template = withProps("short-video", "animated-text", { anchor: "middle", typeFloor: 0.4 });
+    const state: EditorState = { ...base(), briefId: "camp", type: "short-video", template };
+    saveDraftToStorage(state);
+    const restored = loadDraftFromStorage(state);
+    expect(restored?.template).toEqual(template);
+    expect(toBrief(restored as EditorState).template).toEqual(template);
+  });
+
+  test("a stored draft whose props are invalid falls back to the canonical template, never throwing", () => {
+    const state: EditorState = {
+      ...base(),
+      briefId: "camp",
+      type: "short-video",
+      template: withProps("short-video", "shade", { alpha: 1.4 }),
+    };
+    saveDraftToStorage(state);
+    expect(() => loadDraftFromStorage(state)).not.toThrow();
+    expect(loadDraftFromStorage(state)?.template).toEqual(templateFromCanonical("short-video"));
   });
 });
 
