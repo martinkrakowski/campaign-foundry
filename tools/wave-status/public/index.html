@@ -124,8 +124,10 @@
   }
   #log-toolbar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
+    gap: var(--space-2);
     padding: var(--space-2) var(--space-3);
     border-bottom: 1px solid var(--color-border);
     font-family: var(--font-mono);
@@ -135,11 +137,13 @@
   }
   #log-toolbar .log-info {
     display: flex;
+    flex-wrap: wrap;
     gap: var(--space-2);
     align-items: baseline;
   }
   #log-toolbar .log-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: var(--space-2);
   }
   #log-toolbar button {
@@ -242,6 +246,7 @@
   const copyBtn = document.getElementById("log-copy");
   const closeBtn = document.getElementById("log-close");
   const pageGrid = document.getElementById("page");
+  let activeLogSeq = 0;
   const metricValues = {};
   for (const metric of document.querySelectorAll("#metrics [data-metric]")) {
     metricValues[metric.getAttribute("data-metric")] = metric.querySelector(".value");
@@ -406,11 +411,16 @@
   }
 
   async function openLog(row) {
+    const seq = ++activeLogSeq;
     const wave = row.dataset.wave;
     const lane = row.dataset.lane;
     const laneKey = `${wave}/${lane}`;
-    logLane.textContent = laneKey;
     const res = await fetch(`/api/log/${wave}/${lane}?tail=16`);
+    let buf = null;
+    if (res.ok) {
+      buf = await res.arrayBuffer();
+    }
+    if (seq !== activeLogSeq) return;
     logPane.hidden = false;
     logView.hidden = false;
     pageGrid.classList.add("with-log");
@@ -421,10 +431,11 @@
       expandBtn.textContent = "expand";
       expandBtn.setAttribute("aria-label", "expand");
     }
-    if (res.ok) {
-      const text = await res.text();
-      const bytes = new TextEncoder().encode(text).length;
+    logLane.textContent = laneKey;
+    if (res.ok && buf !== null) {
+      const bytes = buf.byteLength;
       logSize.textContent = `${bytes.toLocaleString()} B`;
+      const text = new TextDecoder().decode(buf);
       renderLogLines(text);
     } else {
       logSize.textContent = "0 B";
@@ -433,6 +444,7 @@
   }
 
   function closeLog() {
+    activeLogSeq++;
     logPane.hidden = true;
     logView.hidden = true;
     pageGrid.classList.remove("with-log");
@@ -464,16 +476,18 @@
 
   copyBtn.addEventListener("click", async () => {
     const win = typeof window !== "undefined" ? window : document.defaultView;
-    const nodes = Array.from(logView.querySelectorAll(".gutter, .line"));
-    const text = nodes
-      .filter((el) => win.getComputedStyle(el).userSelect !== "none")
-      .map((el) => el.textContent)
-      .join("\n");
-    if (win.navigator?.clipboard?.writeText) {
-      await win.navigator.clipboard.writeText(text);
-    }
+    const lines = Array.from(logView.querySelectorAll(".line"));
+    const text = lines.map((el) => el.textContent).join("\n");
     const prev = copyBtn.textContent;
-    copyBtn.textContent = "copied";
+    try {
+      if (!win.navigator?.clipboard?.writeText) {
+        throw new Error("clipboard unavailable");
+      }
+      await win.navigator.clipboard.writeText(text);
+      copyBtn.textContent = "copied";
+    } catch {
+      copyBtn.textContent = "copy failed";
+    }
     setTimeout(() => {
       copyBtn.textContent = prev;
     }, 1500);

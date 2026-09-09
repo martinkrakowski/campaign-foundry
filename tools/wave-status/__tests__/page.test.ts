@@ -142,12 +142,25 @@ const pageStyle = async (): Promise<string> => {
   return /<style>([\s\S]*?)<\/style>/.exec(html)?.[1] ?? "";
 };
 
-async function loadPage(status: WaveStatus, logText = "log-tail"): Promise<PageHandle> {
+type LogPayload =
+  | string
+  | Uint8Array
+  | ((url: string) => Promise<Response> | Response);
+
+interface LoadPageOptions {
+  width?: number;
+}
+
+async function loadPage(
+  status: WaveStatus,
+  logText: LogPayload = "log-tail",
+  options?: LoadPageOptions,
+): Promise<PageHandle> {
   const html = await readFile(PAGE_PATH, "utf8");
   const scriptMatch = /<script>([\s\S]*?)<\/script>/.exec(html);
   if (scriptMatch === null) throw new Error("page has no script");
 
-  const window = new Window({ url: "http://127.0.0.1/" });
+  const window = new Window({ url: "http://127.0.0.1/", width: options?.width });
   windows.push(window);
   window.document.write(html.replace(/<script>[\s\S]*?<\/script>/, ""));
 
@@ -162,7 +175,16 @@ async function loadPage(status: WaveStatus, logText = "log-tail"): Promise<PageH
       });
     }
     if (url.startsWith("/api/log/")) {
-      return new Response(logText, { status: 200, headers: { "content-type": "text/plain" } });
+      if (typeof logText === "function") {
+        const res = await logText(url);
+        return res instanceof Response
+          ? res
+          : new Response(res, { status: 200, headers: { "content-type": "text/plain" } });
+      }
+      return new Response(logText as unknown as BodyInit, {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      });
     }
     return new Response("not found", { status: 404 });
   };
@@ -442,5 +464,179 @@ describe("the status page", () => {
     const style = await pageStyle();
     expect(style).toMatch(/var\(--color-/); // tokens are consumed, from /tokens.css
     expect(style).not.toMatch(/--color-[\w-]+\s*:/);
+  });
+
+  test("a late log response does not overwrite a newer opened lane's header, size, or body", async () => {
+    const twoLanesStatus: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "T",
+          lanes: [
+            { wave: "T", lane: "t1", derived: { alive: true }, disagreements: [] },
+            { wave: "T", lane: "t2", derived: { alive: true }, disagreements: [] },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    let resolveT1!: (res: Response) => void;
+    const pT1 = new Promise<Response>((resolve) => {
+      resolveT1 = resolve;
+    });
+
+    let resolveT2!: (res: Response) => void;
+    const pT2 = new Promise<Response>((resolve) => {
+      resolveT2 = resolve;
+    });
+
+    const page = await loadPage(twoLanesStatus, (url) => {
+      if (url.includes("/api/log/T/t1")) return pT1;
+      if (url.includes("/api/log/T/t2")) return pT2;
+      return new Response("not found", { status: 404 });
+    });
+
+    const doc = page.window.document;
+    const rows = doc.querySelectorAll("tr.lane");
+    expect(rows.length).toBe(2);
+
+    // 1. Start opening lane T/t1 (pending)
+    rows[0]?.dispatchEvent(
+      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+
+    // 2. Start opening lane T/t2 before T/t1 resolves
+    rows[1]?.dispatchEvent(
+      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+
+    // 3. Resolve the second lane (T/t2) first
+    resolveT2(new Response("log for t2", { status: 200 }));
+
+    await vi.waitFor(() => {
+      expect(doc.getElementById("log-lane")?.textContent).toBe("T/t2");
+      expect(doc.getElementById("log-size")?.textContent).toBe("10 B");
+      expect(doc.getElementById("log")?.textContent).toContain("log for t2");
+    });
+
+    // 4. Now let the first lane (T/t1) resolve later
+    resolveT1(new Response("stale log for t1", { status: 200 }));
+
+    // Give any asynchronous late handling an opportunity to misfire
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Assert header, size and body all remain belonging to the second lane
+    expect(doc.getElementById("log-lane")?.textContent).toBe("T/t2");
+    expect(doc.getElementById("log-size")?.textContent).toBe("10 B");
+    expect(doc.getElementById("log")?.textContent).toContain("log for t2");
+    expect(doc.getElementById("log")?.textContent).not.toContain("stale log for t1");
+  });
+
+  test("copy reports failure and does not claim success when clipboard API is absent or writeText rejects", async () => {
+    const page = await loadPage(statusAt(), "sample log");
+    const doc = page.window.document;
+    const row = doc.querySelector("tr.lane");
+    row?.dispatchEvent(
+      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    await vi.waitFor(() => {
+      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
+    });
+
+    const copyBtn = doc.querySelector('button[aria-label="copy"]') as unknown as HTMLElement;
+
+    // A: navigator.clipboard absent
+    Object.defineProperty(page.window.navigator, "clipboard", {
+      value: undefined,
+      configurable: true,
+    });
+    copyBtn.click();
+    await vi.waitFor(() => {
+      expect(copyBtn.textContent).not.toBe("copied");
+      expect(copyBtn.textContent).toBe("copy failed");
+    });
+
+    // B: writeText rejects
+    Object.defineProperty(page.window.navigator, "clipboard", {
+      value: {
+        writeText: vi.fn().mockRejectedValue(new Error("clipboard permission denied")),
+      },
+      configurable: true,
+    });
+    copyBtn.click();
+    await vi.waitFor(() => {
+      expect(copyBtn.textContent).not.toBe("copied");
+      expect(copyBtn.textContent).toBe("copy failed");
+    });
+  });
+
+  test("copy selects .line nodes directly and ignores gutter even if user-select is auto", async () => {
+    const multiline = "alpha\nbeta\ngamma";
+    const page = await loadPage(statusAt(), multiline);
+    const doc = page.window.document;
+    const row = doc.querySelector("tr.lane");
+    row?.dispatchEvent(
+      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    await vi.waitFor(() => {
+      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
+    });
+
+    // Gutter user-select set to auto (e.g. style change)
+    const gutters = doc.querySelectorAll(".gutter");
+    expect(gutters.length).toBe(3);
+    for (const gutter of gutters) {
+      gutter.setAttribute("style", "user-select: auto");
+      expect(page.window.getComputedStyle(gutter).userSelect).toBe("auto");
+    }
+
+    const copyBtn = doc.querySelector('button[aria-label="copy"]') as unknown as HTMLElement;
+    copyBtn.click();
+
+    await vi.waitFor(async () => {
+      const text = await page.window.navigator.clipboard.readText();
+      expect(text).toBe(multiline);
+    });
+  });
+
+  test("a tail whose first bytes are a split multi-byte character reports the served byte length", async () => {
+    const splitBytes = new Uint8Array([0x80, 0x61, 0x62]);
+    const page = await loadPage(statusAt(), splitBytes);
+    const doc = page.window.document;
+    const row = doc.querySelector("tr.lane");
+    row?.dispatchEvent(
+      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+
+    await vi.waitFor(() => {
+      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
+      expect(doc.getElementById("log-size")?.textContent).toBe("3 B");
+    });
+  });
+
+  test("at a narrow width every toolbar control is still reachable", async () => {
+    const page = await loadPage(statusAt(), "log content", { width: 320 });
+    const doc = page.window.document;
+    const row = doc.querySelector("tr.lane");
+    row?.dispatchEvent(
+      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    await vi.waitFor(() => {
+      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
+    });
+
+    const toolbar = doc.getElementById("log-toolbar");
+    expect(toolbar).not.toBeNull();
+    expect(page.window.getComputedStyle(toolbar!).flexWrap).toBe("wrap");
+
+    const expandBtn = toolbar?.querySelector('button[aria-label="expand"]');
+    const copyBtn = toolbar?.querySelector('button[aria-label="copy"]');
+    const closeBtn = toolbar?.querySelector('button[aria-label="close"]');
+
+    for (const btn of [expandBtn, copyBtn, closeBtn]) {
+      expect(btn).not.toBeNull();
+      expect((btn as unknown as HTMLElement)?.hidden).toBe(false);
+      expect(page.window.getComputedStyle(btn!).display).not.toBe("none");
+    }
   });
 });
