@@ -7,6 +7,8 @@ import {
   PLATFORM_PROFILES,
   formatsFor,
 } from "@campaignfoundry/Distribution/platform-profiles";
+import { CREATIVE_TYPE_RULES } from "@campaignfoundry/CampaignOrchestration/creative-types";
+import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 import type { EditorState } from "./editor-state";
 import { axisProductSize } from "./editor-state";
 
@@ -88,4 +90,55 @@ export function classicAdCount(
   // (GenerateCampaignUseCase.use-case.ts:163). `?? 1` only catches undefined, so an
   // empty array would otherwise multiply the whole estimate to zero.
   return products * (RATIO_VALUES.length + sizes) * Math.max(1, treatments ?? 1);
+}
+
+/** Kind → layer count for a template's layer list — the arithmetic both
+ * cardinality derivations and the boundary agree on (D124). */
+function countKinds(layers: readonly { readonly kind: LayerKind }[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const layer of layers) {
+    counts.set(layer.kind, (counts.get(layer.kind) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/**
+ * What the editor may still add to the pinned template (D124), derived from the
+ * domain's compatibility table — the same `CREATIVE_TYPE_RULES` the boundary
+ * validates against, so the two cannot drift (D121). A kind is addable while one
+ * more layer of it would still parse: under its own `maxOf` cap (absent means
+ * unbounded) and under every shared budget it belongs to (image-text's
+ * `static-text`/`animated-text` draw one headline block, so either alone fills
+ * the budget of one — the other must not be offered). Canonical `accepts` order,
+ * so the UI lists the table's order.
+ */
+export function addableKinds(state: EditorState): readonly LayerKind[] {
+  const rules = CREATIVE_TYPE_RULES[state.template.creativeType];
+  const counts = countKinds(state.template.layers);
+  return rules.accepts.filter((kind) => {
+    if ((counts.get(kind) ?? 0) >= (rules.maxOf?.[kind] ?? Infinity)) return false;
+    for (const budget of rules.sharedBudgets ?? []) {
+      if (!budget.kinds.includes(kind)) continue;
+      const used = budget.kinds.reduce((sum, budgeted) => sum + (counts.get(budgeted) ?? 0), 0);
+      if (used >= budget.max) return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * Which layers of the pinned template the editor may remove (D124), derived from
+ * the same table: a layer is removable when its kind is not required — or when
+ * the kind is required but still present more than once, so removing one cannot
+ * strip the template of a kind the boundary refuses to parse without. Template
+ * order (array position is z-order, D128), so the UI can walk the list it renders.
+ */
+export function removableLayerIds(state: EditorState): readonly string[] {
+  const rules = CREATIVE_TYPE_RULES[state.template.creativeType];
+  const counts = countKinds(state.template.layers);
+  return state.template.layers
+    // `as number`: `counts` is built from this same list, so every layer's kind
+    // is present — the lookup cannot miss.
+    .filter((layer) => !rules.required.includes(layer.kind) || (counts.get(layer.kind) as number) > 1)
+    .map((layer) => layer.id);
 }

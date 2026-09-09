@@ -1,6 +1,18 @@
 import { describe, test, expect } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
-import { platformsToFormats, platformsToRatios, platformsToSizes, clampPolicy } from "../derive";
+import { CREATIVE_TYPE_RULES } from "@campaignfoundry/CampaignOrchestration/creative-types";
+import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
+import { LAYER_KINDS, type LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
+import {
+  addableKinds,
+  platformsToFormats,
+  platformsToRatios,
+  platformsToSizes,
+  clampPolicy,
+  removableLayerIds,
+} from "../derive";
 import { initialEditorState, axisProductSize } from "../editor-state";
 
 describe("derive.ts", () => {
@@ -123,6 +135,136 @@ describe("derive.ts", () => {
       // state is returned unchanged (no spurious clamp, no notice).
       const clamped = clampPolicy(state);
       expect(clamped).toBe(state);
+    });
+  });
+
+  describe("layer cardinality derivations (D124)", () => {
+    const stateWithLayers = (layers: readonly { id: string; kind: LayerKind }[]) => {
+      const state = initialEditorState();
+      return { ...state, template: { ...state.template, layers } };
+    };
+
+    test("addableKinds omits a kind already at its limit and includes one below it", () => {
+      // Canonical image-text: one logo, one shade, one accent, one static-text —
+      // every decorated kind sits at its declared cap, and the shared text budget
+      // is full. Only the uncapped kind remains.
+      const state = initialEditorState();
+      expect(addableKinds(state)).toEqual(["image"]);
+      // Below the cap: dropping the shade frees the single slot the table declares.
+      const noShade = stateWithLayers(state.template.layers.filter((l) => l.kind !== "shade"));
+      expect(addableKinds(noShade)).toContain("shade");
+    });
+
+    test("addableKinds reads the shared text budget from the table", () => {
+      // static-text is present, so the one-slot budget is spent: neither text kind
+      // may be offered — adding the other would be a brief the boundary refuses.
+      const state = initialEditorState();
+      expect(addableKinds(state)).not.toContain("static-text");
+      expect(addableKinds(state)).not.toContain("animated-text");
+      // With the text layer gone the budget is free again: either text kind is
+      // offered (and the boundary will still hold the template to `required`).
+      const noTexts = stateWithLayers(state.template.layers.filter((l) => l.kind !== "static-text"));
+      expect(addableKinds(noTexts)).toContain("static-text");
+      expect(addableKinds(noTexts)).toContain("animated-text");
+    });
+
+    test("addableKinds preserves the canonical accepts order", () => {
+      const state = initialEditorState();
+      const kinds = addableKinds(state);
+      expect(kinds.length).toBeGreaterThan(0);
+      const accepts = CREATIVE_TYPE_RULES["image-text"].accepts;
+      for (let i = 1; i < kinds.length; i++) {
+        expect(accepts.indexOf(kinds[i])).toBeGreaterThan(accepts.indexOf(kinds[i - 1]));
+      }
+    });
+
+    test("removableLayerIds omits a required kind present once", () => {
+      // Canonical image-text: image and static-text are required, each present
+      // once — neither may be offered for removal; the rest may.
+      const removable = removableLayerIds(initialEditorState());
+      expect(removable).not.toContain("image");
+      expect(removable).not.toContain("static-text");
+      expect(removable).toContain("shade");
+      expect(removable).toContain("accent");
+      expect(removable).toContain("logo");
+    });
+
+    test("removableLayerIds includes a required kind still present twice", () => {
+      const state = initialEditorState();
+      const doubled = [...state.template.layers, { id: "image-2", kind: "image" as const }];
+      const removable = removableLayerIds(stateWithLayers(doubled));
+      expect(removable).toContain("image");
+      expect(removable).toContain("image-2");
+      // The other required kind is still present once, so it stays pinned.
+      expect(removable).not.toContain("static-text");
+    });
+
+    test("another creative type's table row drives the same derivations", () => {
+      // video caps logo and shade and declares no shared budget: the canonical
+      // video template holds one of each capped kind, so the two stay unoffered
+      // while the uncapped kinds remain — the fallback for an absent shared
+      // budget is table data too, not editor logic.
+      const state = initialEditorState();
+      const videoState = { ...state, template: templateFromCanonical("short-video") };
+      expect(addableKinds(videoState)).toContain("animated-text");
+      expect(addableKinds(videoState)).toContain("video");
+      expect(addableKinds(videoState)).not.toContain("logo");
+      expect(addableKinds(videoState)).not.toContain("shade");
+      expect(removableLayerIds(videoState)).not.toContain("video");
+      expect(removableLayerIds(videoState)).toContain("logo");
+    });
+
+    // Protects D121: CREATIVE_TYPE_RULES is the single source of what a creative
+    // type accepts and how many of each kind it holds. A literal kind list in
+    // the editor is the second copy the whole arc exists to remove — the guard
+    // refuses any bracketed list of two or more bare layer-kind strings under
+    // this directory; deriving from the imported table is the only sanctioned
+    // spelling. The guard's own test inputs are built by concatenation so this
+    // file's raw text never quotes the syntax it hunts.
+    const LITERAL_KIND_LIST =
+      /\[\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')(?:\s*,\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'))+\s*\]/g;
+    const kinds = new Set<string>(LAYER_KINDS);
+
+    const literalKindLists = (source: string): string[] => {
+      const offenders: string[] = [];
+      for (const list of source.matchAll(LITERAL_KIND_LIST)) {
+        const members = [...list[0].matchAll(/"([^"]*)"|'([^']*)'/g)].map((m) => m[1] ?? m[2]);
+        const named = members.filter((member) => kinds.has(member));
+        if (named.length >= 2) offenders.push(list[0]);
+      }
+      return offenders;
+    };
+
+    test("no campaign file restates the layer vocabulary as a literal list (D121)", () => {
+      const dir = path.resolve(__dirname, "..");
+      const offenders: string[] = [];
+      const walk = (dirPath: string): void => {
+        for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+          const full = path.join(dirPath, entry.name);
+          if (entry.isDirectory()) {
+            walk(full);
+            continue;
+          }
+          for (const list of literalKindLists(fs.readFileSync(full, "utf8"))) {
+            offenders.push(`${path.relative(dir, full)}: ${list}`);
+          }
+        }
+      };
+      walk(dir);
+      expect(offenders).toEqual([]);
+    });
+
+    test("the D121 scanner flags a list naming two or more layer kinds, in either quote style", () => {
+      const doubleQuoted = "[" + '"image", "logo"' + "]";
+      const singleQuoted = "[" + "'static-text', 'animated-text', \"headline-top\"" + "]";
+      expect(literalKindLists(doubleQuoted)).toHaveLength(1);
+      expect(literalKindLists(singleQuoted)).toHaveLength(1);
+    });
+
+    test("the D121 scanner ignores a single kind, non-kind strings, and non-list syntax", () => {
+      const oneKind = "[" + '"image", "static"' + "]";
+      expect(literalKindLists(oneKind)).toEqual([]);
+      expect(literalKindLists('const kind = "shade"; { kind: "accent" }')).toEqual([]);
     });
   });
 });
