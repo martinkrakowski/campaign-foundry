@@ -42,6 +42,37 @@ Zero-pad the wave number: identifiers sort lexicographically, so `w10` lands bef
 the id alone makes the status page a lookup table against a planning document. Keep the id first so
 sorting still groups a plan's lanes in order.
 
+## Two preconditions that cost the most when skipped
+
+**A mutation is read from the file, never written from memory.** Copy the literal text you intend
+to change, apply it, then **confirm the edit landed** — `git diff` non-empty *and* the intended line
+actually different — before you run anything. Five mutations misfired in one session and **four of
+them looked like passes**: a regex that missed an `&&` sitting at a line end; a `[^;]*` class
+terminated by a semicolon inside a string literal; a target that turned out to be a static HTML
+placeholder rather than the runtime fallback; a test file that did not contain the tests being
+claimed; and two mutants that were genuinely equivalent. A mutation that fails to apply, or that
+changes nothing observable, **is not evidence** — redo it, or record it as equivalent and say why.
+
+**A fix round is verified to have landed before its PR merges.** Check for the commit, not the exit
+code:
+
+```bash
+git -C "<worktree>" log --oneline origin/main..HEAD    # the fix commit must be here
+```
+
+Four lanes in one session exited `0` having written nothing — two answered with a plan, two read
+files and stopped. **PR #282 was merged with four verified defects still in it** because its fix
+round reported success and committed nothing. An exit code is not evidence of work, which is the
+same rule this file already applies to lane reports.
+
+**Dispose of a class once, not a thread at a time.** When three or more threads share one premise,
+write the mechanism once, link it from each thread, and resolve them together. Three threads on one
+PR restated a single wrong claim and got three separate replies; the reader needed it once.
+
+**A finding with no mechanism gets a one-line refusal, not an investigation.** "Consider adding…",
+"for robustness", "this could be confusing" — ask for the input that fails and resolve. Reopen if
+one arrives. Verifying a claim nobody has actually made costs the same as verifying a real one.
+
 ## The rule everything else rests on
 
 **Lane status is derived, never asserted.** Before believing any progress report — an
