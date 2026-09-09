@@ -179,13 +179,22 @@ silently wrong** — the string is handed to opencode as a model id. Implementer
 escape hatch:
 
 ```sh
-LANE_CMD='agy --print "$(cat BRIEF)" --dangerously-skip-permissions --effort high \
+BRIEF=/abs/path/to/brief.md
+LANE_CMD='agy --print "$(cat '"$BRIEF"')" --dangerously-skip-permissions --effort high \
   --model gemini-3.8-flash-high --print-timeout 90m --output-format json' \
   dispatch-lane.sh "$LOGDIR" "<lane>:<worktree>:<brief>"
 ```
 
 `LANE_CMD` runs inside the worktree and the wrapper still appends the `EXIT` marker, so the wait
 loop and the wave events work unchanged.
+
+**The single quotes are deliberate and must stay.** They stop `$(cat …)` running in the
+orchestrator's shell, where the working directory is wrong; the wrapper interpolates `LANE_CMD`
+into the string it hands to `zsh -c`, and that shell performs the substitution inside the worktree.
+Two reviewers have independently called this a bug on the grounds that single quotes prevent the
+expansion. **Measured, with the real wrapper line and a stub command: the brief's contents arrive.**
+The expansion is deferred, not lost. Use an absolute path for the brief regardless, so the deferred
+`cat` cannot depend on where the lane's shell starts.
 
 ### Trial results so far
 
