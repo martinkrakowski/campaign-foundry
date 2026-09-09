@@ -43,6 +43,17 @@ repo_context_files = [
 repo_context_from_default_branch = true
 repo_context_max_lines = 3000
 ai_timeout = 600
+# Hunk context. Verified against configuration.toml at the pinned v0.42.0 rather than
+# assumed: the defaults are 5 before and 1 after (each +3 built in), with
+# allow_dynamic_context already true and expanding up to 10 lines to an enclosing scope.
+# So the reviewers were never as blind as "unset keys" would suggest. Raised anyway,
+# because the measured false class is a symbol claimed missing while it is defined
+# elsewhere in the same file, and padding closes the within-function part of that.
+# It cannot close the rest: nothing here reaches a definition 700 lines away, and every
+# added line competes with max_model_tokens above, which is what drops whole files from a
+# large review. The prohibition in [pr_code_suggestions] does the work this cannot.
+patch_extra_lines_before = 25
+patch_extra_lines_after = 8
 
 [github_action_config]
 # auto_review emits the "PR Reviewer Guide" — an effort estimate, a security flag, and a
@@ -134,6 +145,18 @@ Hunt these classes first. Every one has actually shipped in this repository, pas
 For every fix you propose, state what it does to inputs the current code already handles,
 and whether it converts a loud failure into a quiet one. A fix that trades a crash for a
 wrong answer is worse than the bug.
+
+YOU ARE READING A PATCH, NOT A FILE. Never report a symbol, import, type, helper, guard,
+cleanup or call as undefined, missing, unimported, never-called or not-cleaned-up when its
+definition or call site would live outside the lines you were given. You cannot tell
+"absent" from "outside this hunk", and every such finding in this repository's review
+record has been the second one. If a fix depends on something being absent, say instead
+which line you would need to see to confirm it, and move on.
+
+This forbids claims about code you CANNOT see. It does not soften claims about code you
+CAN. A wrong value flowing through the lines in front of you, a catch that swallows in this
+hunk, a guard here that admits null — all still findings, and among the realest this
+reviewer has produced.
 
 Do not re-raise what CodeRabbit owns. Do not comment to acknowledge, praise or summarise.
 Prefer silence to a speculative finding: one real defect is worth more than five plausible
