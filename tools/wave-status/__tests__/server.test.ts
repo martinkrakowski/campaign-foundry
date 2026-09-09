@@ -8,9 +8,10 @@ import { execFile } from "node:child_process";
 
 import { watch as fsWatch } from "node:fs";
 import { request as httpRequest, type IncomingMessage, type RequestOptions } from "node:http";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { extractDarkBlock, resolvePort, routeFor, startServer, type ServerHandle } from "../server.js";
 import { realDeps } from "../lib/collect.js";
 import type { WaveStatus } from "../lib/types.js";
@@ -33,6 +34,11 @@ type ExecCallback = (error: Error | null, stdout: string) => void;
 
 const handles: ServerHandle[] = [];
 const roots: string[] = [];
+
+/** The app's actual tokens file — the default the server serves — not a fixture. */
+const realTokensPath = fileURLToPath(
+  new URL("../../../apps/web/src/styles/tokens.css", import.meta.url),
+);
 
 afterEach(async () => {
   while (handles.length > 0) {
@@ -290,6 +296,42 @@ describe("extractDarkBlock", () => {
     expect(extractDarkBlock(".dark")).toBeUndefined();
     expect(extractDarkBlock(".dark { --color-a: 1;")).toBeUndefined();
     expect(extractDarkBlock(".dark /* no closing brace */")).toBeUndefined();
+  });
+
+  test("a class that merely starts like .dark is not the block", () => {
+    expect(extractDarkBlock(".own { --a: 1; }\n.darkish { --c: 3; }\n.dark { --b: 2; }")).toBe(
+      ".dark { --b: 2; }",
+    );
+  });
+
+  test("a decimal value inside a rule body is not a selector", () => {
+    expect(extractDarkBlock(":root { --x: .5; }\n.dark { --y: .5; }")).toBe(".dark { --y: .5; }");
+  });
+
+  test("the real tokens.css extracts to a .dark block of token declarations (H1b)", async () => {
+    const css = await readFile(realTokensPath, "utf8");
+    // A fixture without comments is what let a comment-blind scan ship: the
+    // real file's first ".dark" sits inside the header comment (line 9), and
+    // the extraction used to start there, serving prose plus the light block.
+    const dark = extractDarkBlock(css) ?? "";
+    const open = dark.indexOf("{");
+    expect(open).toBeGreaterThan(0);
+    // The extracted rule's selector is exactly `.dark`.
+    expect(dark.slice(0, open).trim()).toBe(".dark");
+    // The route serves this extract verbatim. With comments stripped, every
+    // non-empty line must be a `--name: value;` declaration — color-scheme is
+    // the one standard declaration the block carries beside its tokens — so
+    // prose can never again pass as a stylesheet.
+    const lines = dark
+      .slice(open + 1, dark.lastIndexOf("}"))
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "");
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) {
+      expect(line).toMatch(/^(--[A-Za-z0-9-]+|color-scheme)\s*:\s*[^;]+;$/);
+    }
   });
 });
 
