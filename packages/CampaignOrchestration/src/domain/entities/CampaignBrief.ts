@@ -18,8 +18,8 @@ export interface CampaignBrief {
    * The brief schema version (D133: required in the domain, defaulted at the boundary).
    */
   readonly schemaVersion: number;
-  /** The creative template this campaign renders (D120/D123: pinned reference + materialised layers). Required in domain at load; optional on interface until L3 updates web editor. */
-  readonly template?: BriefTemplate;
+  /** The creative template this campaign renders (D120/D123: pinned reference + materialised layers). Required. */
+  readonly template: BriefTemplate;
   readonly id: string;
   readonly targetRegion: string;
   readonly targetAudience: string;

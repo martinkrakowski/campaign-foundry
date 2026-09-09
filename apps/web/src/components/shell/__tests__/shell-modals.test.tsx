@@ -1,7 +1,7 @@
 import { describe, test, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderWithRun, exerciseFocusTrap, json, mockPipelineApi, EMPTY_REPORT } from "@/__tests__/helpers";
+import { renderWithRun, exerciseFocusTrap, json, mockPipelineApi, EMPTY_REPORT, storedTemplate } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
 import { CreateCampaignDialog } from "../CreateCampaignDialog";
@@ -66,7 +66,7 @@ describe("ModelSelector", () => {
   test("flags a reuse brief that may skip the model", async () => {
     localStorage.setItem(
       "cf:brief",
-      JSON.stringify({ id: "reuse", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", products: [{ id: "p", name: "P", primaryColor: "#111111", logoPath: "l.png", inputAsset: "assets/x.png" }] }),
+      JSON.stringify({ id: "reuse", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", template: storedTemplate, products: [{ id: "p", name: "P", primaryColor: "#111111", logoPath: "l.png", inputAsset: "assets/x.png" }] }),
     );
     renderWithRun(<ModelSelector />);
     const note = await screen.findByRole("note");
@@ -139,7 +139,7 @@ describe("TelemetryDrawer", () => {
   const seedLog = () => {
     localStorage.setItem(
       "cf:brief",
-      JSON.stringify({ id: "log", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }] }),
+      JSON.stringify({ id: "log", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", template: storedTemplate, products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }] }),
     );
     mockPipelineApi({
       report: { halted: false, assets: [], log: { campaignId: "log", entries: [{ timestamp: "2026-01-01T10:00:00Z", stage: "Stage", message: "hello", level: "warn" }] } },
@@ -154,7 +154,7 @@ describe("TelemetryDrawer", () => {
   test("renders a placeholder time for an unparseable timestamp", async () => {
     localStorage.setItem(
       "cf:brief",
-      JSON.stringify({ id: "log2", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }] }),
+      JSON.stringify({ id: "log2", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", template: storedTemplate, products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }] }),
     );
     mockPipelineApi({
       report: { halted: false, assets: [], log: { campaignId: "log2", entries: [{ timestamp: "not-a-date", stage: "S", message: "m", level: "info" }] } },

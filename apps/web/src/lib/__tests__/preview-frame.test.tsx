@@ -1,10 +1,13 @@
 import { describe, test, expect, afterEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import type { CampaignBrief, PreviewCellSelection } from "@campaignfoundry/CampaignOrchestration";
+import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { PREVIEW_FRAME_DEBOUNCE_MS, usePreviewFrame, briefBackgroundIsStandIn } from "../preview-frame";
 
 const brief = (over: Partial<CampaignBrief> = {}): CampaignBrief => ({
   schemaVersion: 1,
+  template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
   id: "camp",
   targetRegion: "DE",
   targetAudience: "a",

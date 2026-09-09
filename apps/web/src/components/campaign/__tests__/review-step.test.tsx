@@ -2,6 +2,8 @@ import { describe, test, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { ReviewStep } from "../ReviewStep";
 import { SECTION_TITLES, sectionOrder } from "../sections";
 import * as messages from "../messages";
@@ -16,6 +18,7 @@ import * as messages from "../messages";
 /** A classic brief carrying everything a row can show. */
 const classic: CampaignBrief = {
   schemaVersion: 1,
+  template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
   id: "summer-launch",
   targetRegion: "EU",
   targetAudience: "urban explorers",
@@ -70,6 +73,7 @@ describe("ReviewStep — summary rows", () => {
     // No treatments, default output, classic mode: toBrief drops all three.
     const bare: CampaignBrief = {
       schemaVersion: 1,
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
       id: "bare",
       targetRegion: "EU",
       targetAudience: "urban explorers",

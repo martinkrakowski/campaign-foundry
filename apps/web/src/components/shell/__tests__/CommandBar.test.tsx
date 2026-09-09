@@ -2,7 +2,7 @@ import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, waitFor, within, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, Fragment } from "react";
-import { renderWithRun, seedPersistedRun, makeAsset, exerciseFocusTrap, json, mockPipelineApi } from "@/__tests__/helpers";
+import { renderWithRun, seedPersistedRun, makeAsset, exerciseFocusTrap, json, mockPipelineApi, storedTemplate } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import { CommandBar } from "../CommandBar";
 import { executeNoEstimate, executeStillEstimating } from "@/components/campaign/messages";
@@ -13,6 +13,7 @@ const variationBrief = {
   targetRegion: "DE",
   targetAudience: "a",
   campaignMessage: "Hi",
+  template: storedTemplate,
   products: [
     { id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" },
     { id: "beta", name: "Beta", primaryColor: "#E0218A", logoPath: "b.png" },

@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderWithRun, nextMock } from "@/__tests__/helpers";
+import { renderWithRun, nextMock, storedTemplate } from "@/__tests__/helpers";
 import * as messages from "@/components/campaign/messages";
 import BriefIndexPage from "../page";
 import BriefIdPage from "../[id]/page";
@@ -34,6 +34,7 @@ const storedBrief = (id: string) => ({
   targetRegion: "DE",
   targetAudience: "a",
   campaignMessage: "Hi",
+  template: storedTemplate,
   products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
 });
 

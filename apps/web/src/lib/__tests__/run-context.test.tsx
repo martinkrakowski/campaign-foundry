@@ -4,7 +4,9 @@ import userEvent from "@testing-library/user-event";
 import { createElement, type ReactNode } from "react";
 import { assetIdentity } from "@campaignfoundry/CampaignOrchestration";
 import { BRIEF_SCHEMA_VERSION } from "@campaignfoundry/CampaignOrchestration/brief-schema-version";
-import { RunProvider, useRun, assetKey, assetCanvas, assetLabel, fetchPersistedRun, type Asset } from "@/lib/run-context";
+import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
+import { RunProvider, useRun, assetKey, assetCanvas, assetLabel, fetchPersistedRun, isStoredBrief, type Asset } from "@/lib/run-context";
 import { json, jobOk, mockPipelineApi, EMPTY_REPORT, renderWithRun } from "@/__tests__/helpers";
 import { Header } from "@/components/shell/Header";
 import { CommandBar } from "@/components/shell/CommandBar";
@@ -71,6 +73,39 @@ describe("useRun", () => {
   });
 });
 
+describe("isStoredBrief", () => {
+  test("refuses a stored brief with valid id/products but no template (L3a)", () => {
+    // A `cf:brief` persisted before this lane carries no template — but since
+    // L3a the template is required on CampaignBrief, and the predicate claims
+    // `value is CampaignBrief`: asserting that without verifying the template
+    // would hand the shell a brief the pipeline rejects. The template must pass
+    // the same five-field contract the editor's draft restore applies.
+    expect(
+      isStoredBrief({
+        id: "stored-brief",
+        targetRegion: "FR",
+        targetAudience: "x",
+        campaignMessage: "y",
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+      }),
+    ).toBe(false);
+  });
+
+  test("accepts a stored brief whose template satisfies the full contract", () => {
+    expect(
+      isStoredBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        id: "stored-brief",
+        targetRegion: "FR",
+        targetAudience: "x",
+        campaignMessage: "y",
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+      }),
+    ).toBe(true);
+  });
+});
+
 describe("fetchPersistedRun — could not ask vs there is nothing (D83/F6)", () => {
   test("a rejected fetch is not an absent run", async () => {
     mockPipelineApi({ result: () => Promise.reject(new Error("down")) });
@@ -125,6 +160,7 @@ describe("RunProvider — execute", () => {
     // brief that may never have been written to disk.
     const onScreenDraft = {
       schemaVersion: BRIEF_SCHEMA_VERSION,
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
       id: "on-screen-draft",
       targetRegion: "US",
       targetAudience: "x",
@@ -195,6 +231,7 @@ describe("RunProvider — execute", () => {
     act(() => {
       result.current.setBrief({
         schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
         id: "other-brief",
         targetRegion: "US",
         targetAudience: "x",
@@ -397,6 +434,7 @@ describe("RunProvider — review decisions", () => {
       "cf:brief",
       JSON.stringify({
         id: "seed",
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
         targetRegion: "DE",
         targetAudience: "a",
         campaignMessage: "Hi",
@@ -431,6 +469,7 @@ describe("RunProvider — result-scoped actions key off the brief the run ran (R
   /** The editor's on-screen draft: a brief the shell does not hold (D35). */
   const onScreenDraft = {
     schemaVersion: BRIEF_SCHEMA_VERSION,
+    template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
     id: "on-screen-draft",
     targetRegion: "US",
     targetAudience: "x",
@@ -542,6 +581,7 @@ describe("RunProvider — result-scoped actions key off the brief the run ran (R
     act(() =>
       result.current.setBrief({
         schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
         id: "switched",
         targetRegion: "US",
         targetAudience: "x",
@@ -572,7 +612,7 @@ describe("RunProvider — briefApplied", () => {
     // `blankBrief()` (editor-state.ts): a blank id is the marker for "no campaign" —
     // nothing can be saved, listed or run under it, so nothing has been applied.
     act(() => {
-      result.current.setBrief({ schemaVersion: BRIEF_SCHEMA_VERSION, id: "", targetRegion: "", targetAudience: "", campaignMessage: "", products: [] });
+      result.current.setBrief({ schemaVersion: BRIEF_SCHEMA_VERSION, template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE), id: "", targetRegion: "", targetAudience: "", campaignMessage: "", products: [] });
     });
     expect(result.current.briefApplied).toBe(false);
   });
@@ -610,6 +650,7 @@ describe("RunProvider — brief picker & persistence", () => {
   test("restores the persisted brief on mount", async () => {
     const stored = {
       id: "stored-brief",
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
       targetRegion: "FR",
       targetAudience: "x",
       campaignMessage: "y",
@@ -698,7 +739,14 @@ describe("RunProvider — brief picker & persistence", () => {
   test("restores the persisted run for the stored brief on mount", async () => {
     localStorage.setItem(
       "cf:brief",
-      JSON.stringify({ id: "stored", targetRegion: "FR", targetAudience: "x", campaignMessage: "y", products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }] }),
+      JSON.stringify({
+        id: "stored",
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        targetRegion: "FR",
+        targetAudience: "x",
+        campaignMessage: "y",
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+      }),
     );
     mockPipelineApi({ report: { halted: false, assets: [asset()], log: { entries: [], campaignId: "stored" } } });
     const { result } = setup();
@@ -716,6 +764,7 @@ describe("RunProvider — brief picker & persistence", () => {
     act(() =>
       result.current.setBrief({
         schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
         id: "other",
         targetRegion: "US",
         targetAudience: "x",
@@ -740,6 +789,7 @@ describe("RunProvider — brief picker & persistence", () => {
     act(() =>
       result.current.setBrief({
         schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
         id: "nostore",
         targetRegion: "US",
         targetAudience: "x",
@@ -759,6 +809,7 @@ describe("RunProvider — brief picker & persistence", () => {
 describe("RunProvider — late results after a switch", () => {
   const otherBrief = {
     schemaVersion: BRIEF_SCHEMA_VERSION,
+    template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
     id: "switched",
     targetRegion: "US",
     targetAudience: "x",
@@ -873,7 +924,14 @@ describe("RunProvider — log-only and superseded restores", () => {
   test("restores a halted, log-only run on mount (no assets, no version bump)", async () => {
     localStorage.setItem(
       "cf:brief",
-      JSON.stringify({ id: "halted", targetRegion: "FR", targetAudience: "x", campaignMessage: "y", products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }] }),
+      JSON.stringify({
+        id: "halted",
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        targetRegion: "FR",
+        targetAudience: "x",
+        campaignMessage: "y",
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+      }),
     );
     mockPipelineApi({ report: { halted: true, assets: [], log: { entries: [], campaignId: "halted" } } });
     const { result } = setup();
@@ -889,6 +947,7 @@ describe("RunProvider — log-only and superseded restores", () => {
     act(() =>
       result.current.setBrief({
         schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
         id: "halt2",
         targetRegion: "US",
         targetAudience: "x",
@@ -920,6 +979,7 @@ describe("RunProvider — log-only and superseded restores", () => {
     act(() =>
       result.current.setBrief({
         schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
         id: "sb",
         targetRegion: "US",
         targetAudience: "x",
@@ -958,6 +1018,7 @@ describe("RunProvider — log-only and superseded restores", () => {
     act(() =>
       result.current.setBrief({
         schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
         id: "switched2",
         targetRegion: "US",
         targetAudience: "x",
@@ -985,6 +1046,7 @@ describe("RunProvider — log-only and superseded restores", () => {
     });
     const mk = (id: string) => ({
       schemaVersion: BRIEF_SCHEMA_VERSION,
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
       id,
       targetRegion: "US",
       targetAudience: "x",
@@ -1215,6 +1277,7 @@ describe("RunProvider — job polling", () => {
     act(() =>
       result.current.setBrief({
         schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
         id: "switched",
         targetRegion: "US",
         targetAudience: "x",
@@ -1362,6 +1425,7 @@ describe("RunProvider — job polling", () => {
     act(() =>
       result.current.setBrief({
         schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
         id: "switched",
         targetRegion: "US",
         targetAudience: "x",
@@ -1399,6 +1463,7 @@ describe("RunProvider — job polling", () => {
     act(() =>
       result.current.setBrief({
         schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
         id: "switched",
         targetRegion: "US",
         targetAudience: "x",
@@ -1441,6 +1506,7 @@ describe("RunProvider — job polling", () => {
     act(() =>
       result.current.setBrief({
         schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
         id: "switched",
         targetRegion: "US",
         targetAudience: "x",
@@ -1492,6 +1558,7 @@ describe("RunProvider — job polling", () => {
     act(() =>
       result.current.setBrief({
         schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
         id: "switched",
         targetRegion: "US",
         targetAudience: "x",
@@ -1612,6 +1679,7 @@ describe("RunProvider — estimate and packaging", () => {
     act(() =>
       result.current.setBrief({
         schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
         id: "other-camp",
         targetRegion: "US",
         targetAudience: "x",
@@ -1629,6 +1697,7 @@ describe("RunProvider — estimate and packaging", () => {
 
   const otherBrief = {
     schemaVersion: BRIEF_SCHEMA_VERSION,
+    template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
     id: "other-camp",
     targetRegion: "US",
     targetAudience: "x",
@@ -1814,6 +1883,7 @@ describe("RunProvider — estimate and packaging", () => {
 
   const onScreenDraft = {
     schemaVersion: BRIEF_SCHEMA_VERSION,
+    template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
     id: "on-screen-draft",
     targetRegion: "US",
     targetAudience: "x",
@@ -1868,6 +1938,7 @@ describe("re-roll across a mode change", () => {
   /** A randomized brief on file — the mismatch scenarios restore a run under it. */
   const variationStoredBrief = {
     id: "camp",
+    template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
     mode: "variation",
     variation: { count: 1 },
     targetRegion: "DE",
@@ -1907,7 +1978,14 @@ describe("re-roll across a mode change", () => {
     localStorage.setItem("cf:brief-picked", "1");
     localStorage.setItem(
       "cf:brief",
-      JSON.stringify({ id: "camp", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi", products: variationStoredBrief.products }),
+      JSON.stringify({
+        id: "camp",
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "Hi",
+        products: variationStoredBrief.products,
+      }),
     );
     mockPipelineApi({
       report: {

@@ -4,12 +4,16 @@
  * A campaign renders with no library present because the brief carries the pinned reference
  * and the materialized layer list (D123). Array position is z-order; there is no order field (D128).
  */
-import type { AdvertisingUnit } from "./advertising-units.js";
+import { ADVERTISING_UNITS, type AdvertisingUnit } from "./advertising-units.js";
 import type { CampaignType } from "./campaign-types.js";
 import { CAMPAIGN_TYPE_PRESETS } from "./campaign-types.js";
-import type { CanonicalTemplateId, CreativeTemplateLayer } from "./creative-templates.js";
-import { CANONICAL_TEMPLATES } from "./creative-templates.js";
-import type { CreativeType } from "./creative-types.js";
+import {
+  CANONICAL_TEMPLATES,
+  CANONICAL_TEMPLATE_IDS,
+  type CanonicalTemplateId,
+  type CreativeTemplateLayer,
+} from "./creative-templates.js";
+import { CREATIVE_TYPES, type CreativeType } from "./creative-types.js";
 
 export interface BriefTemplate {
   readonly id: CanonicalTemplateId; // the pinned reference
@@ -32,4 +36,33 @@ export function templateFromCanonical(type: CampaignType): BriefTemplate {
     unit: preset.unit,
     layers: canonical.layers,
   };
+}
+
+/**
+ * The one shape contract a persisted brief's template must satisfy (L3a).
+ *
+ * A type predicate, not a validator: `unknown` becomes a `BriefTemplate` only
+ * through this check, and anything else is not one. `id` is a canonical member,
+ * `version` a positive integer, `creativeType` and `unit` vocabulary members,
+ * and `layers` an array. It is the single guard used at both storage boundaries
+ * — the editor's draft restore and the run context's `cf:brief` restore — so a
+ * half-written template can never be cast through and reach `toBrief`. It checks
+ * shape, never content: a valid template keeps whatever layer order it was
+ * serialised with (array position IS z-order, D128).
+ */
+export function isBriefTemplate(value: unknown): value is BriefTemplate {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const raw = value as Record<string, unknown>;
+  return (
+    typeof raw.id === "string" &&
+    (CANONICAL_TEMPLATE_IDS as readonly string[]).includes(raw.id) &&
+    typeof raw.version === "number" &&
+    Number.isInteger(raw.version) &&
+    raw.version > 0 &&
+    typeof raw.creativeType === "string" &&
+    (CREATIVE_TYPES as readonly string[]).includes(raw.creativeType) &&
+    typeof raw.unit === "string" &&
+    (ADVERTISING_UNITS as readonly string[]).includes(raw.unit) &&
+    Array.isArray(raw.layers)
+  );
 }

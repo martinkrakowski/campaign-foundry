@@ -3,6 +3,8 @@ import { screen } from "@testing-library/react";
 import { createElement } from "react";
 import userEvent from "@testing-library/user-event";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import type { Asset } from "@/lib/run-context";
 import { renderWithRun, seedPersistedRun } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
@@ -13,6 +15,7 @@ const ALL_RATIOS = "1:1, 9:16, 16:9";
 /** A valid classic brief; the per-test spread adds `mode`/`variation` when needed. */
 const BASE: CampaignBrief = {
   schemaVersion: 1,
+  template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
   id: "summer-hydration-2026",
   targetRegion: "DE",
   targetAudience: "Urban outdoor enthusiasts, 25-40",
