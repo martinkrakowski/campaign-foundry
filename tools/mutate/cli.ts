@@ -52,11 +52,19 @@ export const realDeps: MutationDeps = {
     });
   },
   onSignal: (cleanup) => {
-    const handler = async () => {
-      try {
-        await cleanup();
-      } finally {
-        process.exit(130);
+    let cleanPromise: Promise<void> | null = null;
+    const handler = () => {
+      if (!cleanPromise) {
+        cleanPromise = (async () => {
+          try {
+            await cleanup();
+            process.exit(130);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.error(message);
+            process.exit(EXIT_REFUSAL);
+          }
+        })();
       }
     };
     process.on("SIGINT", handler);

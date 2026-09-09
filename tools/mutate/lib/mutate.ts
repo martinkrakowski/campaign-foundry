@@ -162,30 +162,45 @@ export async function runMutation(
   const mutatedContent = applyMutation(originalContent, beforeText, afterText, args.file);
 
   let isMutated = false;
+  let restorePromise: Promise<void> | undefined;
   const restore = async (): Promise<void> => {
-    if (isMutated) {
-      try {
-        await deps.writeFileBuffer(args.file, originalBuffer);
-        isMutated = false;
-      } catch {
-        // preserve restoration attempt
-      }
+    if (!isMutated) return;
+    if (!restorePromise) {
+      restorePromise = (async () => {
+        try {
+          await deps.writeFileBuffer(args.file, originalBuffer);
+          isMutated = false;
+        } catch (error) {
+          const cause = error instanceof Error ? error.message : String(error);
+          throw new RefusalError(
+            "Rule 6",
+            `Refusal (Rule 6): failed to restore ${args.file}: ${cause}. Target file is left mutated; original content was recoverable from the pre-mutation buffer.`,
+          );
+        }
+      })();
     }
+    await restorePromise;
   };
 
   const unregisterSignal = deps.onSignal ? deps.onSignal(restore) : undefined;
 
   try {
     const mutatedBuffer = Buffer.from(mutatedContent, "utf8");
-    await deps.writeFileBuffer(args.file, mutatedBuffer);
     isMutated = true;
+    await deps.writeFileBuffer(args.file, mutatedBuffer);
 
-    // Rule 4: Confirm the file actually changed after writing, and refuse if it did not.
+    // Rule 4: Confirm the file holds the intended mutation after writing, and refuse if it does not.
     const readBack = await deps.readFile(args.file);
     if (readBack === originalContent) {
       throw new RefusalError(
         "Rule 4",
         `Refusal (Rule 4): file ${args.file} did not change after writing mutation`,
+      );
+    }
+    if (readBack !== mutatedContent) {
+      throw new RefusalError(
+        "Rule 4",
+        `Refusal (Rule 4): file ${args.file} does not match intended mutation after writing`,
       );
     }
 

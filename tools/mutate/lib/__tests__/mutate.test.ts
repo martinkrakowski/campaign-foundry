@@ -412,9 +412,55 @@ describe("runMutation", () => {
     await expect(runMutation(baseArgs, depsAfter)).rejects.toThrow("after string error");
   });
 
-  test("handles restore write failure gracefully without throwing unhandled rejection", async () => {
+  test("restore write failure rejects loudly with RefusalError (Rule 6) and does not return verdict", async () => {
     const originalBytes = Buffer.from("export const flag = true;\n");
     let writes = 0;
+    const { deps } = makeFakeDeps(
+      {
+        "target.ts": originalBytes,
+        "before.txt": "flag = true",
+        "after.txt": "flag = false",
+      },
+      { exitCode: 0, stdout: "", stderr: "" },
+      {
+        writeFileBuffer: vi.fn(async (_path: string, _content: Buffer) => {
+          writes++;
+          if (writes > 1) throw new Error("restore disk error");
+        }),
+      },
+    );
+
+    await expect(runMutation(baseArgs, deps)).rejects.toThrow(
+      /Refusal \(Rule 6\): failed to restore target\.ts: restore disk error\. Target file is left mutated; original content was recoverable from the pre-mutation buffer\./,
+    );
+  });
+
+  test("restore write failure with non-Error value rejects loudly", async () => {
+    const originalBytes = Buffer.from("export const flag = true;\n");
+    let writes = 0;
+    const { deps } = makeFakeDeps(
+      {
+        "target.ts": originalBytes,
+        "before.txt": "flag = true",
+        "after.txt": "flag = false",
+      },
+      { exitCode: 0, stdout: "", stderr: "" },
+      {
+        writeFileBuffer: vi.fn(async (_path: string, _content: Buffer) => {
+          writes++;
+          if (writes > 1) throw "raw restore write string error";
+        }),
+      },
+    );
+
+    await expect(runMutation(baseArgs, deps)).rejects.toThrow(
+      /Refusal \(Rule 6\): failed to restore target\.ts: raw restore write string error/,
+    );
+  });
+
+  test("interrupted mutation write still triggers restore path (Rule 6)", async () => {
+    const originalBytes = Buffer.from("export const flag = true;\n");
+    const writes: Buffer[] = [];
     const { deps, store } = makeFakeDeps(
       {
         "target.ts": originalBytes,
@@ -424,15 +470,21 @@ describe("runMutation", () => {
       { exitCode: 0, stdout: "", stderr: "" },
       {
         writeFileBuffer: vi.fn(async (path: string, content: Buffer) => {
-          writes++;
-          if (writes > 1) throw new Error("restore disk error");
+          writes.push(Buffer.from(content));
+          if (writes.length === 1) {
+            // First write: simulated crash/interruption during mutation write
+            throw new Error("interrupted write during mutation");
+          }
           store.set(path, Buffer.from(content));
         }),
       },
     );
 
-    const res = await runMutation(baseArgs, deps);
-    expect(res.verdict).toBe("survived");
+    await expect(runMutation(baseArgs, deps)).rejects.toThrow("interrupted write during mutation");
+    // Restore was still attempted and original file was restored
+    expect(writes.length).toBe(2);
+    expect(writes[1]?.equals(originalBytes)).toBe(true);
+    expect(store.get("target.ts")?.equals(originalBytes)).toBe(true);
   });
 
   test("refusal when file did not change on disk after writing (Rule 4)", async () => {
@@ -453,6 +505,31 @@ describe("runMutation", () => {
 
     await expect(runMutation(baseArgs, deps)).rejects.toThrow(
       /Refusal \(Rule 4\): file target\.ts did not change after writing mutation/,
+    );
+    expect(store.get("target.ts")?.equals(originalBytes)).toBe(true);
+  });
+
+  test("refusal when file on disk differs from both original and intended mutation (Rule 4)", async () => {
+    const originalBytes = Buffer.from("export const flag = true;\n");
+    const { deps, store } = makeFakeDeps(
+      {
+        "target.ts": originalBytes,
+        "before.txt": "flag = true",
+        "after.txt": "flag = false",
+      },
+      { exitCode: 0, stdout: "", stderr: "" },
+      {
+        readFile: vi.fn(async (path: string) => {
+          if (path === "before.txt") return "flag = true";
+          if (path === "after.txt") return "flag = false";
+          // Simulate external formatter or concurrent write producing third content
+          return "export const flag = 'concurrent-lane-write';\n";
+        }),
+      },
+    );
+
+    await expect(runMutation(baseArgs, deps)).rejects.toThrow(
+      /Refusal \(Rule 4\): file target\.ts does not match intended mutation after writing/,
     );
     expect(store.get("target.ts")?.equals(originalBytes)).toBe(true);
   });
@@ -488,6 +565,48 @@ describe("runMutation", () => {
 
     await runMutation(baseArgs, deps);
     expect(store.get("target.ts")?.equals(originalBytes)).toBe(true);
+  });
+
+  test("concurrent restore calls share the same restoration promise", async () => {
+    const originalBytes = Buffer.from("export const flag = true;\n");
+    let triggerSignal: (() => Promise<void>) | undefined;
+    let restoreWrites = 0;
+
+    const { deps, store } = makeFakeDeps(
+      {
+        "target.ts": originalBytes,
+        "before.txt": "flag = true",
+        "after.txt": "flag = false",
+      },
+      { exitCode: 0, stdout: "", stderr: "" },
+      {
+        writeFileBuffer: vi.fn(async (path: string, content: Buffer) => {
+          if (path === "target.ts" && content.equals(originalBytes)) {
+            restoreWrites++;
+            await new Promise((r) => setTimeout(r, 10));
+          }
+          store.set(path, Buffer.from(content));
+        }),
+        onSignal: (cleanup) => {
+          triggerSignal = async () => {
+            await cleanup();
+          };
+          return () => {
+            triggerSignal = undefined;
+          };
+        },
+        execute: vi.fn(async () => {
+          if (triggerSignal) {
+            void triggerSignal();
+          }
+          return { exitCode: 0, stdout: "", stderr: "" };
+        }),
+      },
+    );
+
+    await runMutation(baseArgs, deps);
+    expect(store.get("target.ts")?.equals(originalBytes)).toBe(true);
+    expect(restoreWrites).toBe(1);
   });
 
   test("each refusal path leaves file byte-identical", async () => {

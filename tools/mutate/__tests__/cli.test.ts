@@ -53,7 +53,7 @@ describe("runCli", () => {
           readFile: vi.fn(async (p: string) => {
             if (p === "before.txt") return "orig";
             if (p === "after.txt") return "mut";
-            return "mutated";
+            return "mutinal";
           }),
         },
       },
@@ -89,7 +89,7 @@ describe("runCli", () => {
           readFile: vi.fn(async (p: string) => {
             if (p === "before.txt") return "orig";
             if (p === "after.txt") return "mut";
-            return "mutated";
+            return "mutinal";
           }),
           execute: vi.fn(async () => ({ exitCode: 0, stdout: "ok", stderr: "" })),
         },
@@ -144,6 +144,47 @@ describe("runCli", () => {
     expect(code).toBe(EXIT_REFUSAL);
     expect(log).not.toHaveBeenCalled();
     expect(logError).toHaveBeenCalledWith("generic error");
+  });
+
+  test("returns EXIT_REFUSAL and logs error when restore write rejects", async () => {
+    let writes = 0;
+    const { io, log, logError } = makeCliIo(
+      [
+        "--file",
+        "file.ts",
+        "--before",
+        "before.txt",
+        "--after",
+        "after.txt",
+        "--because",
+        "cause failure",
+        "--",
+        "yarn",
+        "test",
+      ],
+      {
+        deps: {
+          readFileBuffer: vi.fn(async () => Buffer.from("original")),
+          readFile: vi.fn(async (p: string) => {
+            if (p === "before.txt") return "orig";
+            if (p === "after.txt") return "mut";
+            return "mutinal";
+          }),
+          writeFileBuffer: vi.fn(async () => {
+            writes++;
+            if (writes > 1) throw new Error("disk restore failed");
+          }),
+          execute: vi.fn(async () => ({ exitCode: 0, stdout: "ok", stderr: "" })),
+        },
+      },
+    );
+
+    const code = await runCli(io);
+    expect(code).toBe(EXIT_REFUSAL);
+    expect(log).not.toHaveBeenCalled();
+    expect(logError).toHaveBeenCalledWith(
+      expect.stringContaining("Refusal (Rule 6): failed to restore file.ts: disk restore failed"),
+    );
   });
 });
 
@@ -259,6 +300,113 @@ describe("realDeps integration", () => {
     expect(exitSpy).toHaveBeenCalledWith(130);
 
     unregister();
+    exitSpy.mockRestore();
+  });
+
+  test("signal path completes its restore before exit is allowed to proceed", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    let cleanupResolved = false;
+    let resolveCleanup!: () => void;
+    const dummyCleanup = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveCleanup = () => {
+            cleanupResolved = true;
+            resolve();
+          };
+        }),
+    );
+
+    const unregister = realDeps.onSignal!(dummyCleanup);
+
+    process.emit("SIGINT");
+
+    // Cleanup has been called, but not yet resolved
+    expect(dummyCleanup).toHaveBeenCalledTimes(1);
+    expect(cleanupResolved).toBe(false);
+    expect(exitSpy).not.toHaveBeenCalled();
+
+    // Now complete the cleanup
+    resolveCleanup();
+    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(130));
+    expect(cleanupResolved).toBe(true);
+
+    unregister();
+    exitSpy.mockRestore();
+  });
+
+  test("multiple signals do not initiate duplicate cleanups", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    let resolveCleanup!: () => void;
+    const dummyCleanup = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveCleanup = resolve;
+        }),
+    );
+
+    const unregister = realDeps.onSignal!(dummyCleanup);
+
+    process.emit("SIGINT");
+    process.emit("SIGTERM");
+    process.emit("SIGHUP");
+
+    expect(dummyCleanup).toHaveBeenCalledTimes(1);
+    expect(exitSpy).not.toHaveBeenCalled();
+
+    resolveCleanup();
+    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(130));
+
+    unregister();
+    exitSpy.mockRestore();
+  });
+
+  test("signal path handles cleanup failure by logging loudly and exiting non-zero", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const dummyCleanup = vi.fn(async () => {
+      throw new Error("disk restore failed");
+    });
+
+    const unregister = realDeps.onSignal!(dummyCleanup);
+
+    process.emit("SIGINT");
+    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(EXIT_REFUSAL));
+    expect(errSpy).toHaveBeenCalledWith("disk restore failed");
+
+    unregister();
+    exitSpy.mockRestore();
+    errSpy.mockRestore();
+  });
+
+  test("signal path handles cleanup failure with non-Error thrown value", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const dummyCleanup = vi.fn(async () => {
+      throw "raw string restore error";
+    });
+
+    const unregister = realDeps.onSignal!(dummyCleanup);
+
+    process.emit("SIGTERM");
+    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(EXIT_REFUSAL));
+    expect(errSpy).toHaveBeenCalledWith("raw string restore error");
+
+    unregister();
+    exitSpy.mockRestore();
+    errSpy.mockRestore();
+  });
+
+  test("unregister removes signal listeners so subsequent signals do not trigger cleanup", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const dummyCleanup = vi.fn(async () => undefined);
+    const unregister = realDeps.onSignal!(dummyCleanup);
+
+    unregister();
+    process.emit("SIGINT");
+    expect(dummyCleanup).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
+
     exitSpy.mockRestore();
   });
 });
