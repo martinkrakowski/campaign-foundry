@@ -48,6 +48,16 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["--root"])).toThrow(/--root requires a path/);
   });
 
+  test("--root refuses a value that begins with '-' (e.g. a later flag) and an empty value", () => {
+    expect(() => parseArgs(["--root", "--watch=2"])).toThrow(/--root requires a path/);
+    expect(() => parseArgs(["--root="])).toThrow(/--root requires a path/);
+  });
+
+  test("--root refuses a path that begins with '-' and the = form too", () => {
+    expect(() => parseArgs(["--root", "-flag"])).toThrow(/--root/);
+    expect(() => parseArgs(["--root=-flag"])).toThrow(/--root/);
+  });
+
   test("anything else is refused", () => {
     expect(() => parseArgs(["--port=4317"])).toThrow(/unknown argument/);
   });
@@ -109,6 +119,26 @@ describe("runCli", () => {
     const { io, schedule } = makeIo(["--watch"]);
     await runCli(io);
     expect(schedule.mock.calls[0]?.[1]).toBe(10000);
+  });
+
+  test("a collect that outlives the interval never overlaps the next refresh", async () => {
+    const late: Array<() => void> = [];
+    let calls = 0;
+    const collect = vi.fn(async (_root: string): Promise<WaveStatus> => {
+      calls += 1;
+      if (calls >= 2) await new Promise<void>((resolve) => late.push(resolve));
+      return status;
+    });
+    const { io, schedule } = makeIo(["--watch=2"], { collect });
+    await runCli(io);
+    expect(calls).toBe(1);
+    const [fn] = schedule.mock.calls[0] as [() => void, number];
+    fn();
+    await vi.waitFor(() => expect(calls).toBe(2));
+    fn(); // the interval fires again while the previous collect is still held open
+    expect(calls).toBe(2); // no overlapping collect started
+    late.shift()?.();
+    await vi.waitFor(() => expect(schedule).toHaveBeenCalledTimes(2));
   });
 
   test("an unknown argument rejects", async () => {
