@@ -228,6 +228,7 @@
       <div class="log-actions">
         <button type="button" id="log-expand" aria-label="expand">expand</button>
         <button type="button" id="log-copy" aria-label="copy">copy</button>
+        <button type="button" id="log-download" aria-label="download">download</button>
         <button type="button" id="log-close" aria-label="close">close</button>
       </div>
     </header>
@@ -245,9 +246,12 @@
   const logSize = document.getElementById("log-size");
   const expandBtn = document.getElementById("log-expand");
   const copyBtn = document.getElementById("log-copy");
+  const downloadBtn = document.getElementById("log-download");
   const closeBtn = document.getElementById("log-close");
   const pageGrid = document.getElementById("page");
   let activeLogSeq = 0;
+  let activeWave = null;
+  let activeLane = null;
   const metricValues = {};
   for (const metric of document.querySelectorAll("#metrics [data-metric]")) {
     metricValues[metric.getAttribute("data-metric")] = metric.querySelector(".value");
@@ -422,6 +426,8 @@
       buf = await res.arrayBuffer();
     }
     if (seq !== activeLogSeq) return;
+    activeWave = wave;
+    activeLane = lane;
     logPane.hidden = false;
     logView.hidden = false;
     pageGrid.classList.add("with-log");
@@ -446,6 +452,8 @@
 
   function closeLog() {
     activeLogSeq++;
+    activeWave = null;
+    activeLane = null;
     logPane.hidden = true;
     logView.hidden = true;
     pageGrid.classList.remove("with-log");
@@ -492,6 +500,33 @@
     setTimeout(() => {
       copyBtn.textContent = prev;
     }, 1500);
+  });
+
+  downloadBtn.addEventListener("click", async () => {
+    if (!activeWave || !activeLane) return;
+    const url = `/api/log/${activeWave}/${activeLane}?full=1`;
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const win = typeof window !== "undefined" ? window : document.defaultView;
+    const urlApi = (win && win.URL) || URL;
+    let objectUrl = "";
+    if (urlApi && typeof urlApi.createObjectURL === "function") {
+      try {
+        objectUrl = urlApi.createObjectURL(blob);
+      } catch {
+        objectUrl = "";
+      }
+    }
+    const a = document.createElement("a");
+    a.href = objectUrl || url;
+    a.download = `${activeWave}-${activeLane}.log`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    if (objectUrl && urlApi && typeof urlApi.revokeObjectURL === "function") {
+      setTimeout(() => urlApi.revokeObjectURL(objectUrl), 1000);
+    }
   });
 
   closeBtn.addEventListener("click", closeLog);

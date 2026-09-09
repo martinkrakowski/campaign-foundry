@@ -584,6 +584,74 @@ describe("the server over real HTTP", () => {
     expect(capped.status).toBe(400);
   });
 
+  test("a full export returns the entire file, not the tail; carries attachment and Content-Length", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wave-status-full-"));
+    roots.push(root);
+    await mkdir(join(root, "waveT"));
+    // 32 KB payload is larger than the default 16 KB tail
+    const payload = Buffer.concat([Buffer.alloc(32_000, 0x61), Buffer.from("FULL_EXPORT_END\n")]);
+    const logPath = join(root, "waveT", "t1.log");
+    await writeFile(logPath, payload);
+
+    const handle = await start({ port: 0, root, collect: async () => statusAt(0) });
+    const res = await get(handle.port, "/api/log/T/t1?full=1");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/plain");
+    expect(res.headers["content-disposition"]).toBe('attachment; filename="T-t1.log"');
+    expect(res.headers["content-length"]).toBe(String(payload.length));
+    expect(res.body.length).toBe(payload.length);
+    expect(res.body.equals(payload)).toBe(true);
+  });
+
+  test("full=1 and tail=N together: full wins and tail is ignored", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wave-status-full-wins-"));
+    roots.push(root);
+    await mkdir(join(root, "waveT"));
+    const payload = Buffer.concat([Buffer.alloc(32_000, 0x62), Buffer.from("FULL_WINS_END\n")]);
+    await writeFile(join(root, "waveT", "t1.log"), payload);
+
+    const handle = await start({ port: 0, root, collect: async () => statusAt(0) });
+    const res = await get(handle.port, "/api/log/T/t1?full=1&tail=1");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-disposition"]).toBe('attachment; filename="T-t1.log"');
+    expect(res.headers["content-length"]).toBe(String(payload.length));
+    expect(res.body.length).toBe(payload.length);
+    expect(res.body.equals(payload)).toBe(true);
+  });
+
+  test("full=0 and full=yes behave exactly as if full were absent", async () => {
+    const root = await makeFixture();
+    const handle = await start({ port: 0, root, collect: async () => statusAt(0) });
+    const baseline = await get(handle.port, "/api/log/T/t1?tail=1");
+    const full0 = await get(handle.port, "/api/log/T/t1?full=0&tail=1");
+    const fullYes = await get(handle.port, "/api/log/T/t1?full=yes&tail=1");
+
+    expect(full0.status).toBe(200);
+    expect(full0.headers["content-disposition"]).toBeUndefined();
+    expect(full0.body.equals(baseline.body)).toBe(true);
+
+    expect(fullYes.status).toBe(200);
+    expect(fullYes.headers["content-disposition"]).toBeUndefined();
+    expect(fullYes.body.equals(baseline.body)).toBe(true);
+
+    const defaultBaseline = await get(handle.port, "/api/log/U/u2");
+    const defaultFull0 = await get(handle.port, "/api/log/U/u2?full=0");
+    const defaultFullYes = await get(handle.port, "/api/log/U/u2?full=yes");
+    expect(defaultFull0.status).toBe(200);
+    expect(defaultFull0.headers["content-disposition"]).toBeUndefined();
+    expect(defaultFull0.body.equals(defaultBaseline.body)).toBe(true);
+    expect(defaultFullYes.status).toBe(200);
+    expect(defaultFullYes.headers["content-disposition"]).toBeUndefined();
+    expect(defaultFullYes.body.equals(defaultBaseline.body)).toBe(true);
+  });
+
+  test("full export of a missing lane is 404", async () => {
+    const root = await makeFixture();
+    const handle = await start({ port: 0, root, collect: async () => statusAt(0) });
+    expect((await get(handle.port, "/api/log/T/missing?full=1")).status).toBe(404);
+    expect((await get(handle.port, "/api/log/ZZ/zz?full=1")).status).toBe(404);
+  });
+
   test("a log smaller than the tail, a missing tail param and a bad tail param all work", async () => {
     const handle = await start({
       port: 0,

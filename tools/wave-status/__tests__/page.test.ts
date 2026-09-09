@@ -631,9 +631,10 @@ describe("the status page", () => {
 
     const expandBtn = toolbar?.querySelector('button[aria-label="expand"]');
     const copyBtn = toolbar?.querySelector('button[aria-label="copy"]');
+    const downloadBtn = toolbar?.querySelector('button[aria-label="download"]');
     const closeBtn = toolbar?.querySelector('button[aria-label="close"]');
 
-    for (const btn of [expandBtn, copyBtn, closeBtn]) {
+    for (const btn of [expandBtn, copyBtn, downloadBtn, closeBtn]) {
       expect(btn).not.toBeNull();
       expect((btn as unknown as HTMLElement)?.hidden).toBe(false);
       expect(page.window.getComputedStyle(btn!).display).not.toBe("none");
@@ -693,4 +694,75 @@ describe("the status page", () => {
       /#log-toolbar button:hover\s*\{[^}]*border-color:\s*var\(--color-border-control-hover\)/,
     );
   });
+
+  test("the download control exists with its accessible name and takes the control token", async () => {
+    const page = await loadPage(statusAt());
+    const doc = page.window.document;
+    const downloadBtn = doc.querySelector('button[aria-label="download"]') as HTMLElement | null;
+    expect(downloadBtn).not.toBeNull();
+    expect(downloadBtn?.textContent).toBe("download");
+
+    const sheet = doc.styleSheets[0];
+    interface StyleRuleLike {
+      readonly selectorText: string;
+      readonly style: {
+        readonly borderColor?: string;
+        readonly borderBottomColor?: string;
+        readonly border?: string;
+      };
+    }
+    const rules = Array.from(sheet.cssRules) as unknown as readonly StyleRuleLike[];
+    const matching = rules.filter(
+      (r) =>
+        r.selectorText !== undefined &&
+        !r.selectorText.includes(":") &&
+        downloadBtn?.matches(r.selectorText) &&
+        Boolean(r.style.borderColor || r.style.border),
+    );
+    expect(matching.length).toBeGreaterThan(0);
+    for (const rule of matching) {
+      expect(rule.style.borderColor).toBe("var(--color-border-control)");
+    }
+  });
+
+  test("pressing download requests the current lane's log with full=1 and switching lanes requests the new lane", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    const rows = doc.querySelectorAll("tr.lane");
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+
+    // Open first lane: T/t1
+    rows[0]?.dispatchEvent(
+      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    await vi.waitFor(() => {
+      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
+      expect(doc.getElementById("log-lane")?.textContent).toBe("T/t1");
+    });
+
+    const downloadBtn = doc.querySelector('button[aria-label="download"]') as HTMLElement | null;
+    expect(downloadBtn).not.toBeNull();
+
+    downloadBtn?.click();
+    await vi.waitFor(() => {
+      expect(page.fetches).toContain("/api/log/T/t1?full=1");
+    });
+
+    // Switch to second lane: T/t2
+    rows[1]?.dispatchEvent(
+      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    await vi.waitFor(() => {
+      expect(doc.getElementById("log-lane")?.textContent).toBe("T/t2");
+    });
+
+    downloadBtn?.click();
+    await vi.waitFor(() => {
+      expect(page.fetches).toContain("/api/log/T/t2?full=1");
+    });
+
+    const fullFetches = page.fetches.filter((url) => url.includes("full=1"));
+    expect(fullFetches).toEqual(["/api/log/T/t1?full=1", "/api/log/T/t2?full=1"]);
+  });
 });
+
