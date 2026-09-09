@@ -837,11 +837,17 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // no-op, so the draft can never hold a brief the boundary refuses for
       // stripping a kind it will not parse without.
       if (!removableLayerIds(state).includes(action.id)) return state;
+      // Exactly one row per click. The storage guard refuses duplicate layer
+      // ids, but the reducer is the contract and a draft restored before it
+      // could still carry a pair: filtering by id would strip both at once —
+      // the duplicated kind required, Save would then fail for a layer the
+      // user never touched. The first match goes; the duplicate stays.
+      const index = state.template.layers.findIndex((layer) => layer.id === action.id);
       return {
         ...state,
         template: {
           ...state.template,
-          layers: state.template.layers.filter((layer) => layer.id !== action.id),
+          layers: state.template.layers.filter((_, i) => i !== index),
         },
       };
     }

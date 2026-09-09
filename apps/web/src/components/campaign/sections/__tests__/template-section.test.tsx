@@ -2,10 +2,12 @@ import { describe, test, expect, vi } from "vitest";
 import { useReducer } from "react";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import {
   editorReducer,
   fromBrief,
   initialEditorState,
+  normalizeDraftState,
   toBrief,
   type EditorState,
 } from "@/components/campaign/editor-state";
@@ -113,6 +115,41 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
     expect(rows[3].textContent).toContain("logo");
   });
 
+  test("two layers sharing an id: each row carries its remove control (L5)", () => {
+    // A draft restored before the storage guard refused duplicate ids can hold
+    // a pair — the section renders a row for each, so the user sees two rows
+    // and clicks one.
+    const canonical = templateFromCanonical("social-post");
+    const duplicated: EditorState = {
+      ...state(),
+      template: { ...canonical, layers: [...canonical.layers, { id: "shade", kind: "shade" }] },
+    };
+    render(<TemplateSection state={duplicated} dispatch={vi.fn()} errors={{}} />);
+    expect(list().getAllByRole("button", { name: "shade" })).toHaveLength(2);
+  });
+
+  test("removing one of two layers sharing an id removes exactly it, the duplicate stays (L5)", () => {
+    // The contract that click dispatches into: the FIRST match by id goes, and
+    // the duplicate the user did not touch stays. Filtering by id used to take
+    // both — the duplicated kind required, Save then failed for a layer the
+    // user never touched.
+    const canonical = templateFromCanonical("social-post");
+    const duplicated: EditorState = {
+      ...state(),
+      template: { ...canonical, layers: [...canonical.layers, { id: "shade", kind: "shade" }] },
+    };
+    const next = editorReducer(duplicated, { type: "removeLayer", id: "shade" });
+    // One row gone, one still there — and nobody moved but the removed layer
+    // (array position is z-order, D128).
+    expect(next.template.layers.map((layer) => layer.id)).toEqual([
+      "image",
+      "accent",
+      "static-text",
+      "logo",
+      "shade",
+    ]);
+  });
+
   test("a template carrying no required kind says nothing about them, and offers the freed kinds", () => {
     // A template held verbatim may carry any shape the boundary's props guard
     // accepted — including one whose required kinds are absent. Derive the
@@ -183,5 +220,41 @@ describe("TemplateSection — the draft and its brief", () => {
 
   test("an unknown kind's display name is the kind itself — never an empty label", () => {
     expect(layerKindDisplayName("made-up")).toBe("made-up");
+  });
+});
+
+describe("TemplateSection — a corrupt restored draft falls back, never crashes (L5)", () => {
+  test("a draft whose layers hold non-objects falls back to the canonical template, and the section mounts", () => {
+    // The crash this fix closes: `isBriefTemplate`'s per-layer check used to
+    // answer "no props problem" for an entry that is not an object, so a stored
+    // draft holding one rode the guard and `countKinds` threw on `layer.kind`
+    // while the section mounted — the user could not even reach Save to repair
+    // the draft. The restore refuses the template, and the canonical fallback
+    // normalizeDraftState already applies takes over.
+    const restored = normalizeDraftState({
+      type: "social-post",
+      template: {
+        id: "canonical-image-text",
+        version: 1,
+        creativeType: "image-text",
+        unit: "standard-web",
+        layers: [null, "junk", {}],
+      },
+    });
+    expect(restored.template).toEqual(templateFromCanonical("social-post"));
+    render(<TemplateSection state={restored} dispatch={vi.fn()} errors={{}} />);
+    expect(screen.getAllByRole("listitem")).toHaveLength(5);
+  });
+
+  test("a draft whose template carries duplicate layer ids falls back to the canonical template", () => {
+    // The storage boundary now states the rule the API's `validateTemplate`
+    // already applied, so the two guards agree and a draft carrying duplicates
+    // takes the fallback instead of rendering a row per copy.
+    const canonical = templateFromCanonical("social-post");
+    const restored = normalizeDraftState({
+      type: "social-post",
+      template: { ...canonical, layers: [...canonical.layers, { id: "shade", kind: "shade" }] },
+    });
+    expect(restored.template).toEqual(templateFromCanonical("social-post"));
   });
 });

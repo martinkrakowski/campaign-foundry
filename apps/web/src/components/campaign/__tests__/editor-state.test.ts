@@ -935,6 +935,18 @@ describe("draft storage", () => {
       // `version` — the clause that makes the check complete is the one that
       // must be load-bearing, so a guard that forgot it still admits this.
       { id: "canonical-image-text", creativeType: "image-text", unit: "standard-web", layers: [] },
+      // The per-layer half (L5): an entry that is not a layer — a `null`, a
+      // bare string, a kindless object — crashes the first `layer.kind`
+      // dereference, and a duplicated id is the rule the API's
+      // `validateTemplate` already applies. Either corrupts the whole template.
+      { id: "canonical-video", version: 1, creativeType: "video", unit: "standard-web", layers: [null, "junk", {}] },
+      {
+        id: "canonical-video",
+        version: 1,
+        creativeType: "video",
+        unit: "standard-web",
+        layers: [{ id: "shade", kind: "shade" }, { id: "shade", kind: "shade" }],
+      },
     ]) {
       store(corrupt);
       expect(() => loadDraftFromStorage(state)).not.toThrow();

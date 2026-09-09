@@ -167,7 +167,12 @@ export function templateFromCanonical(type: CampaignType): BriefTemplate {
  * present, must be a shape that layer's kind may carry (D134) — same key set,
  * every number a fraction in [0, 1], the anchor a vocabulary member — so an
  * unknown key or a value out of range cannot ride the guard into the editor or
- * the run. Non-object layer entries stay out of scope, exactly as before.
+ * the run. Every `layers` entry must itself be a layer — a non-null, non-array
+ * object naming a string `id` and a vocabulary `kind` (L5): a `null`, a bare
+ * string or a kindless object is not a layer, and admitting one crashes the
+ * first consumer that dereferences `layer.kind`. And ids are unique within the
+ * list, the rule the API's `validateTemplate` already applies, so the two
+ * boundaries cannot disagree about a draft's shape.
  */
 export function isBriefTemplate(value: unknown): value is BriefTemplate {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -183,18 +188,42 @@ export function isBriefTemplate(value: unknown): value is BriefTemplate {
     typeof raw.unit === "string" &&
     (ADVERTISING_UNITS as readonly string[]).includes(raw.unit) &&
     Array.isArray(raw.layers) &&
-    raw.layers.every(layerCarriesNoPropsProblem)
+    raw.layers.every(isLayerEntry) &&
+    new Set(raw.layers.map((layer) => (layer as LayerEntry).id)).size === raw.layers.length
   );
 }
 
+/** The one layer shape every consumer below the guard dereferences. */
+interface LayerEntry {
+  readonly id: string;
+  readonly kind: LayerKind;
+}
+
 /**
- * A layer's `props`, when present, must be its kind's (D134). A layer that is
- * not an object is out of scope here — the same leniency the array itself has
- * always had; the API's `validateTemplate` refuses those with a message.
+ * A `layers` entry is a layer (L5): a non-null, non-array object naming a
+ * string `id` and a vocabulary `kind` — the fields every consumer below the
+ * guard dereferences, and which a `null`, a bare string or a kindless object
+ * names neither of — with `props`, when present, a shape that kind may carry
+ * (D134). This is the per-layer half of `isBriefTemplate`, the one check a
+ * stored draft's entries face, so it carries the whole entry contract, not
+ * only the props half it once was: a corrupt entry used to pass as "no props
+ * problem" and crash the editor's first `layer.kind` dereference on mount,
+ * and a duplicated id used to ride in where the API's `validateTemplate`
+ * refuses. Refusing here sends the whole template to the canonical fallback.
  */
-function layerCarriesNoPropsProblem(layer: unknown): boolean {
-  if (typeof layer !== "object" || layer === null || Array.isArray(layer)) return true;
-  const rec = layer as Record<string, unknown>;
+function isLayerEntry(layer: unknown): layer is LayerEntry {
+  const rec =
+    typeof layer === "object" && layer !== null && !Array.isArray(layer)
+      ? (layer as Record<string, unknown>)
+      : undefined;
+  if (
+    rec === undefined ||
+    typeof rec.id !== "string" ||
+    typeof rec.kind !== "string" ||
+    !(LAYER_KINDS as readonly string[]).includes(rec.kind)
+  ) {
+    return false;
+  }
   if (rec.props === undefined) return true;
   return layerPropsProblem(rec.kind as LayerKind, rec.props) === undefined;
 }
