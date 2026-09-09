@@ -344,21 +344,22 @@ async function serveTokens(res: ServerResponse, tokensCssPath: string): Promise<
 }
 
 /**
- * Extract the `.dark { … }` block from a CSS file, balancing braces while
- * skipping comments and strings so a brace inside them cannot cut the match
- * short. The returned rule carries its `.dark` selector — a faithful copy of
- * the app's block, not a headless `{ … }` body a browser would discard.
- * Returns undefined when there is no `.dark` block.
+ * Extract the top-level `.dark { … }` block from a CSS file. One traversal,
+ * skipping comments and strings throughout: a `.dark` mentioned inside a
+ * comment or a string cannot start the match — the real tokens.css names the
+ * class in its header comment — and a brace inside either cannot cut it short.
+ * The match is taken only in selector position, where the character after the
+ * name cannot continue it, so `.darkish` is not `.dark`. The returned rule
+ * carries its `.dark` selector — a faithful copy of the app's block, not a
+ * headless `{ … }` body a browser would discard. Returns undefined when there
+ * is no `.dark` block.
  */
 export function extractDarkBlock(css: string): string | undefined {
-  const start = css.indexOf(".dark");
-  if (start < 0) return undefined;
-  const open = css.indexOf("{", start);
-  if (open < 0) return undefined;
+  let start = -1;
   let depth = 0;
   let inComment = false;
   let inQuote: "'" | '"' | null = null;
-  for (let i = open; i < css.length; i++) {
+  for (let i = 0; i < css.length; i++) {
     const ch = css[i];
     if (inComment) {
       if (ch === "*" && css[i + 1] === "/") {
@@ -384,10 +385,15 @@ export function extractDarkBlock(css: string): string | undefined {
       inQuote = ch;
       continue;
     }
-    if (ch === "{") depth++;
-    else if (ch === "}") {
+    if (start < 0 && depth === 0 && ch === "." && css.startsWith(".dark", i)) {
+      const after = css[i + 5];
+      if (after === undefined || !/[A-Za-z0-9_-]/.test(after)) start = i;
+    }
+    if (ch === "{") {
+      depth++;
+    } else if (ch === "}") {
       depth--;
-      if (depth === 0) return css.slice(start, i + 1);
+      if (depth === 0 && start >= 0) return css.slice(start, i + 1);
     }
   }
   return undefined;
