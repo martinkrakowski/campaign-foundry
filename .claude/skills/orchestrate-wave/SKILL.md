@@ -53,8 +53,14 @@ reports the command's **exit code first**, with the verdict in words:
 ```sh
 yarn mutate --file <path> --before <before.txt> --after <after.txt> \
   --because "<the input whose behaviour this changes>" -- <test command…>
-# exit 0 = caught · 1 = survived · 2 = refused (it says which rule)
 ```
+
+**Two exit codes are in play; do not confuse them.** The **test command's** code is what decides the
+verdict — non-zero means the mutation was caught, zero means it survived — and the tool prints it as
+the report's first line. **The tool's own** code is the verdict already reduced for a caller to gate
+on: **`0` caught, `1` survived, `2` refused**, and a refusal names the rule that refused. So a
+caught mutation shows `exit code: 1` in the report while `yarn mutate` itself exits `0`. That is
+deliberate: the harness exits zero when it did its job.
 
 `--because` is required on purpose: stating the prediction **before** seeing the result is the only
 guard against an equivalent mutant, and two of this repository's were exactly that. Each rule the
