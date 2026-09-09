@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { renderStatus } from "../render.js";
+import { renderStatus, truncate } from "../render.js";
 import type { LaneStatus, WaveStatus } from "../types.js";
 
 const TS = "2026-09-07T17:00:00Z";
@@ -202,14 +202,50 @@ describe("renderStatus", () => {
     expect(out).toContain("\x1b[0m");
   });
 
-  test("a lane name containing a bare escape character is data, not a colour code", () => {
+  test("a lane name containing a bare escape character is stripped, not treated as a colour code", () => {
     const out = renderStatus(makeStatus([makeLane("e\x1bb", { alive: true })]), {
-      color: true,
       width: 40,
     });
-    expect(out).toContain("e\x1bb");
-    for (const line of out.split("\n")) {
-      expect(visibleLength(line)).toBeLessThanOrEqual(40);
-    }
+    expect(out).not.toContain("\x1b");
+    expect(out).toContain("eb");
+  });
+
+  test("a lane or wave name carrying C0 controls or DEL renders clean, row intact", () => {
+    const status: WaveStatus = {
+      generatedAt: "2026-09-09T00:00:00Z",
+      waves: [
+        {
+          id: "wa\x1bve",
+          lanes: [
+            makeLane("evil\x1b[2Jpassed\x0d", { wave: "wa\x1bve", alive: true }),
+            makeLane("del\x7fete", { wave: "wa\x1bve" }),
+          ],
+        },
+      ],
+    };
+    const out = renderStatus(status);
+    expect(out).not.toContain("\x1b");
+    expect(out).not.toContain("\x0d");
+    expect(out).not.toContain("\x7f");
+    expect(out).toContain("wave wave");
+    expect(out).toContain("wave/evil[2Jpassed");
+    expect(out).toContain("wave/delete");
+    const evilRow = out.split("\n").find((line) => line.includes("wave/evil[2Jpassed"));
+    expect(evilRow).toContain("alive");
+  });
+
+  test("truncating exactly mid-escape yields no partial sequence and the line ends reset", () => {
+    // Width boundary lands at the escape after "ab" — no half a sequence may follow.
+    const out = truncate("ab\x1b[2Jcd", 3);
+    expect(out.endsWith("\x1b[0m")).toBe(true);
+    expect(visibleLength(out)).toBeLessThanOrEqual(3);
+    // Every escape that survives truncate is a complete paint SGR, never a raw ESC.
+    expect(out).not.toMatch(/\x1b(?!\[[0-9;]*m)/);
+    // Incomplete escape at the cut: the ESC and its CSI run are dropped, not echoed.
+    expect(truncate("ab\x1b[3", 3)).toBe("ab\x1b[0m");
+    // A control byte that stops an incomplete run is dropped with it.
+    expect(truncate("ab\x1b[\x7f", 3)).toBe("ab\x1b[0m");
+    // Lone ESC at the end: dropped, not left dangling.
+    expect(truncate("ab\x1b", 3)).toBe("ab\x1b[0m");
   });
 });
