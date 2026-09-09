@@ -44,6 +44,7 @@
     padding: var(--space-6);
   }
   #page.with-log { grid-template-rows: auto 1fr 1fr; }
+  #page.with-log.expanded { grid-template-rows: auto 0 1fr; }
   h1 { font-size: 18px; margin: 0; }
   #title-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2) var(--space-6); }
   #metrics {
@@ -109,19 +110,72 @@
     font-family: var(--font-mono);
     font-size: 12px;
   }
-  #log {
-    margin: 0;
-    padding: var(--space-3);
+  #log-pane {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+  #log-pane[hidden] {
+    display: none;
+  }
+  #log-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--color-border);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: var(--color-surface-2);
+    color: var(--color-text-secondary);
+  }
+  #log-toolbar .log-info {
+    display: flex;
+    gap: var(--space-2);
+    align-items: baseline;
+  }
+  #log-toolbar .log-actions {
+    display: flex;
+    gap: var(--space-2);
+  }
+  #log-toolbar button {
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    color: var(--color-text-primary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: var(--space-1) var(--space-2);
+    cursor: pointer;
+  }
+  #log-toolbar button:hover {
+    background: var(--color-surface);
+  }
+  #log {
+    margin: 0;
+    padding: var(--space-3);
     color: var(--color-text-secondary);
     font-family: var(--font-mono);
     font-size: 12px;
     overflow: auto;
     min-height: 0;
-    white-space: pre-wrap;
-    word-break: break-all;
+    flex: 1;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: var(--space-3);
+    line-height: 1.5;
+  }
+  .gutter {
+    user-select: none;
+    text-align: right;
+    color: var(--color-text-muted);
+  }
+  .line {
+    white-space: pre;
   }
 </style>
 </head>
@@ -160,13 +214,33 @@
       <tbody id="lanes"></tbody>
     </table>
   </section>
-  <pre id="log" hidden></pre>
+  <section id="log-pane" hidden>
+    <header id="log-toolbar">
+      <div class="log-info">
+        <span id="log-lane"></span>
+        <span id="log-size"></span>
+      </div>
+      <div class="log-actions">
+        <button type="button" id="log-expand" aria-label="expand">expand</button>
+        <button type="button" id="log-copy" aria-label="copy">copy</button>
+        <button type="button" id="log-close" aria-label="close">close</button>
+      </div>
+    </header>
+    <div id="log" hidden></div>
+  </section>
 </div>
 <script>
   "use strict";
   const lanesBody = document.getElementById("lanes");
   const connection = document.getElementById("connection");
+  const logPane = document.getElementById("log-pane");
+  const logToolbar = document.getElementById("log-toolbar");
   const logView = document.getElementById("log");
+  const logLane = document.getElementById("log-lane");
+  const logSize = document.getElementById("log-size");
+  const expandBtn = document.getElementById("log-expand");
+  const copyBtn = document.getElementById("log-copy");
+  const closeBtn = document.getElementById("log-close");
   const pageGrid = document.getElementById("page");
   const metricValues = {};
   for (const metric of document.querySelectorAll("#metrics [data-metric]")) {
@@ -320,19 +394,51 @@
     }
   }
 
+  function renderLogLines(text) {
+    const lines = text.split("\n");
+    const fragments = [];
+    for (let i = 0; i < lines.length; i++) {
+      fragments.push(
+        `<span class="gutter">${i + 1}</span><span class="line">${esc(lines[i])}</span>`,
+      );
+    }
+    logView.innerHTML = fragments.join("");
+  }
+
   async function openLog(row) {
-    const res = await fetch(`/api/log/${row.dataset.wave}/${row.dataset.lane}?tail=16`);
+    const wave = row.dataset.wave;
+    const lane = row.dataset.lane;
+    const laneKey = `${wave}/${lane}`;
+    logLane.textContent = laneKey;
+    const res = await fetch(`/api/log/${wave}/${lane}?tail=16`);
+    logPane.hidden = false;
     logView.hidden = false;
-    // State flip only; the grid itself does the sizing.
     pageGrid.classList.add("with-log");
-    logView.textContent = res.ok
-      ? `--- ${row.dataset.wave}/${row.dataset.lane} (last 16 KB) ---\n` + (await res.text())
-      : `no log for ${row.dataset.wave}/${row.dataset.lane}`;
+    if (pageGrid.classList.contains("expanded")) {
+      expandBtn.textContent = "collapse";
+      expandBtn.setAttribute("aria-label", "collapse");
+    } else {
+      expandBtn.textContent = "expand";
+      expandBtn.setAttribute("aria-label", "expand");
+    }
+    if (res.ok) {
+      const text = await res.text();
+      const bytes = new TextEncoder().encode(text).length;
+      logSize.textContent = `${bytes.toLocaleString()} B`;
+      renderLogLines(text);
+    } else {
+      logSize.textContent = "0 B";
+      renderLogLines(`no log for ${laneKey}`);
+    }
   }
 
   function closeLog() {
+    logPane.hidden = true;
     logView.hidden = true;
     pageGrid.classList.remove("with-log");
+    pageGrid.classList.remove("expanded");
+    expandBtn.textContent = "expand";
+    expandBtn.setAttribute("aria-label", "expand");
   }
 
   lanesBody.addEventListener("click", (event) => {
@@ -349,7 +455,31 @@
     void openLog(row);
   });
 
-  logView.addEventListener("click", closeLog);
+  expandBtn.addEventListener("click", () => {
+    const isExpanded = pageGrid.classList.toggle("expanded");
+    const nextAction = isExpanded ? "collapse" : "expand";
+    expandBtn.textContent = nextAction;
+    expandBtn.setAttribute("aria-label", nextAction);
+  });
+
+  copyBtn.addEventListener("click", async () => {
+    const win = typeof window !== "undefined" ? window : document.defaultView;
+    const nodes = Array.from(logView.querySelectorAll(".gutter, .line"));
+    const text = nodes
+      .filter((el) => win.getComputedStyle(el).userSelect !== "none")
+      .map((el) => el.textContent)
+      .join("\n");
+    if (win.navigator?.clipboard?.writeText) {
+      await win.navigator.clipboard.writeText(text);
+    }
+    const prev = copyBtn.textContent;
+    copyBtn.textContent = "copied";
+    setTimeout(() => {
+      copyBtn.textContent = prev;
+    }, 1500);
+  });
+
+  closeBtn.addEventListener("click", closeLog);
 
   // Live updates over SSE; if the stream drops, fall back to a 10 s poll.
   const source = new EventSource("/api/stream");

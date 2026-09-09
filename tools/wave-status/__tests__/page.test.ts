@@ -185,6 +185,7 @@ async function loadPage(status: WaveStatus, logText = "log-tail"): Promise<PageH
     "EventSource",
     "setInterval",
     "clearInterval",
+    "window",
     scriptMatch[1],
   ) as (
     document: Document,
@@ -192,6 +193,7 @@ async function loadPage(status: WaveStatus, logText = "log-tail"): Promise<PageH
     EventSource: typeof FakeEventSource,
     setIntervalFn: (handler: () => void, ms?: number) => number,
     clearIntervalFn: (id: number) => void,
+    window: Window,
   ) => void;
 
   run(
@@ -200,6 +202,7 @@ async function loadPage(status: WaveStatus, logText = "log-tail"): Promise<PageH
     FakeEventSource,
     setIntervalImpl,
     clearIntervalImpl,
+    window,
   );
 
   await vi.waitFor(() => {
@@ -314,8 +317,10 @@ describe("the status page", () => {
     const page = await loadPage(statusAt());
     const doc = page.window.document;
     const container = doc.getElementById("page");
+    const logPane = doc.getElementById("log-pane") as HTMLElement | null;
     const logView = doc.getElementById("log") as HTMLElement | null;
     expect(container?.classList.contains("with-log")).toBe(false);
+    expect(logPane?.hidden).toBe(true);
     expect(logView?.hidden).toBe(true);
 
     const row = doc.querySelector("tr.lane");
@@ -324,13 +329,113 @@ describe("the status page", () => {
     );
     await vi.waitFor(() => {
       expect(page.fetches).toContain("/api/log/T/t1?tail=16");
+      expect(logPane?.hidden).toBe(false);
       expect(logView?.hidden).toBe(false);
       expect(container?.classList.contains("with-log")).toBe(true);
     });
 
-    logView?.dispatchEvent(new page.window.Event("click", { bubbles: true }) as unknown as Event);
+    const closeBtn = doc.querySelector('button[aria-label="close"]') as unknown as HTMLElement | null;
+    closeBtn?.click();
+    expect(logPane?.hidden).toBe(true);
     expect(logView?.hidden).toBe(true);
     expect(container?.classList.contains("with-log")).toBe(false);
+  });
+
+  test("the toolbar renders each control with an accessible name, and the lane name and byte size", async () => {
+    const page = await loadPage(statusAt(), "log-tail");
+    const doc = page.window.document;
+    const row = doc.querySelector("tr.lane");
+    row?.dispatchEvent(
+      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    await vi.waitFor(() => {
+      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
+    });
+
+    const toolbar = doc.getElementById("log-toolbar");
+    expect(toolbar).not.toBeNull();
+    expect(doc.getElementById("log-lane")?.textContent).toBe("T/t1");
+    expect(doc.getElementById("log-size")?.textContent).toBe("8 B");
+
+    const expandBtn = toolbar?.querySelector('button[aria-label="expand"]');
+    const copyBtn = toolbar?.querySelector('button[aria-label="copy"]');
+    const closeBtn = toolbar?.querySelector('button[aria-label="close"]');
+
+    expect(expandBtn).not.toBeNull();
+    expect(expandBtn?.textContent).toBe("expand");
+    expect(copyBtn).not.toBeNull();
+    expect(copyBtn?.textContent).toBe("copy");
+    expect(closeBtn).not.toBeNull();
+    expect(closeBtn?.textContent).toBe("close");
+  });
+
+  test("expand sets the table row to zero and collapse restores it; the toggle's label changes", async () => {
+    const page = await loadPage(statusAt());
+    const doc = page.window.document;
+    const container = doc.getElementById("page");
+    const row = doc.querySelector("tr.lane");
+    row?.dispatchEvent(
+      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    await vi.waitFor(() => {
+      expect(container?.classList.contains("with-log")).toBe(true);
+    });
+
+    const expandBtn = doc.querySelector('button[aria-label="expand"]') as unknown as HTMLElement;
+    expect(expandBtn.textContent).toBe("expand");
+    expect(page.window.getComputedStyle(container!).gridTemplateRows).toBe("auto 1fr 1fr");
+
+    expandBtn.click();
+    expect(container?.classList.contains("expanded")).toBe(true);
+    expect(expandBtn.textContent).toBe("collapse");
+    expect(expandBtn.getAttribute("aria-label")).toBe("collapse");
+    expect(page.window.getComputedStyle(container!).gridTemplateRows).toBe("auto 0 1fr");
+
+    expandBtn.click();
+    expect(container?.classList.contains("expanded")).toBe(false);
+    expect(expandBtn.textContent).toBe("expand");
+    expect(expandBtn.getAttribute("aria-label")).toBe("expand");
+    expect(page.window.getComputedStyle(container!).gridTemplateRows).toBe("auto 1fr 1fr");
+  });
+
+  test("copy writes the body text without line numbers — assert the clipboard payload", async () => {
+    const multiline = "first line\nsecond line\nthird line";
+    const page = await loadPage(statusAt(), multiline);
+    const doc = page.window.document;
+    const row = doc.querySelector("tr.lane");
+    row?.dispatchEvent(
+      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    await vi.waitFor(() => {
+      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
+    });
+
+    const copyBtn = doc.querySelector('button[aria-label="copy"]') as unknown as HTMLElement;
+    copyBtn.click();
+    await vi.waitFor(async () => {
+      const text = await page.window.navigator.clipboard.readText();
+      expect(text).toBe(multiline);
+    });
+  });
+
+  test("the gutter is user-select: none, and the number of gutter entries equals the line count", async () => {
+    const multiline = "alpha\nbeta\ngamma\ndelta";
+    const lineCount = 4;
+    const page = await loadPage(statusAt(), multiline);
+    const doc = page.window.document;
+    const row = doc.querySelector("tr.lane");
+    row?.dispatchEvent(
+      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    await vi.waitFor(() => {
+      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
+    });
+
+    const gutters = doc.querySelectorAll(".gutter");
+    expect(gutters.length).toBe(lineCount);
+    for (const gutter of gutters) {
+      expect(page.window.getComputedStyle(gutter).userSelect).toBe("none");
+    }
   });
 
   test("the page still declares no --color-* custom property of its own", async () => {
