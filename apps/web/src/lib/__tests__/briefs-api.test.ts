@@ -1,5 +1,7 @@
 import { describe, test, expect, vi } from "vitest";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { API } from "@/lib/run-context";
 import {
   BriefsApiError,
@@ -24,6 +26,7 @@ import {
 
 const brief: CampaignBrief = {
   schemaVersion: 1,
+  template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
   id: "camp",
   targetRegion: "DE",
   targetAudience: "a",
@@ -454,6 +457,7 @@ describe("copy pool calls", () => {
   test("generatePool posts the brief inline with count and returns pool + added", async () => {
     const brief = {
       schemaVersion: 1,
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
       id: "camp",
       targetRegion: "DE",
       targetAudience: "a",

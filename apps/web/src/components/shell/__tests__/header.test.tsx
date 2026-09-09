@@ -3,6 +3,8 @@ import { render, screen, within, waitFor, fireEvent } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { createElement, useEffect, useRef, type ReactElement } from "react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { nextMock, renderWithRun, ShellProviders, jobOk, mockPipelineApi } from "@/__tests__/helpers";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { useRun } from "@/lib/run-context";
@@ -265,6 +267,7 @@ describe("Header — Generate's three-way question (D35)", () => {
    */
   const onScreenDraft = {
     schemaVersion: 1,
+    template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
     id: "on-screen-draft",
     targetRegion: "DE",
     targetAudience: "a",

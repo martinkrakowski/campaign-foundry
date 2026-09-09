@@ -2,6 +2,8 @@
 
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { BRIEF_SCHEMA_VERSION } from "@campaignfoundry/CampaignOrchestration/brief-schema-version";
+import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
+import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import {
   createContext,
   useCallback,
@@ -332,6 +334,7 @@ export function isStoredBrief(value: unknown): value is CampaignBrief {
  */
 const DEFAULT_BRIEF: CampaignBrief = {
   schemaVersion: BRIEF_SCHEMA_VERSION,
+  template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
   id: "summer-hydration-2026",
   targetRegion: "DE",
   targetAudience: "Urban outdoor enthusiasts, 25-40",

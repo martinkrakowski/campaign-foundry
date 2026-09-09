@@ -110,10 +110,10 @@ describe("parseBrief", () => {
     test("a brief with no template and type: 'display-ad' parses and returns the canonical image-text template with its five layers in order", () => {
       vi.mocked(templateFromCanonical).mockClear();
       const parsed = parseBrief({ ...valid, type: "display-ad" });
-      expect(parsed.template!.id).toBe("canonical-image-text");
-      expect(parsed.template!.creativeType).toBe("image-text");
-      expect(parsed.template!.unit).toBe("standard-web");
-      expect(parsed.template!.layers).toEqual([
+      expect(parsed.template.id).toBe("canonical-image-text");
+      expect(parsed.template.creativeType).toBe("image-text");
+      expect(parsed.template.unit).toBe("standard-web");
+      expect(parsed.template.layers).toEqual([
         { id: "image", kind: "image" },
         { id: "shade", kind: "shade" },
         { id: "accent", kind: "accent" },
@@ -127,9 +127,9 @@ describe("parseBrief", () => {
     test("a brief with no template and no type returns social-post's template (D112 fallback)", () => {
       const parsed = parseBrief(valid);
       expect(parsed.template).toEqual(templateFromCanonical(DEFAULT_CAMPAIGN_TYPE));
-      expect(parsed.template!.id).toBe("canonical-image-text");
-      expect(parsed.template!.creativeType).toBe("image-text");
-      expect(parsed.template!.layers).toHaveLength(5);
+      expect(parsed.template.id).toBe("canonical-image-text");
+      expect(parsed.template.creativeType).toBe("image-text");
+      expect(parsed.template.layers).toHaveLength(5);
     });
 
     test("an unknown template.id is refused with a 400-shaped throw", () => {
@@ -1215,7 +1215,7 @@ describe("parseBrief copy.timeline (E4.1 – E4.3)", () => {
         // every one keeps meaning the social ratios without an edit.
         expect(loaded.output?.sizes).toBeUndefined();
         // Every sample brief carries a template whose id is a canonical id (D120)
-        expect(CANONICAL_TEMPLATE_IDS).toContain(loaded.template!.id);
+        expect(CANONICAL_TEMPLATE_IDS).toContain(loaded.template.id);
         expect(loaded.template).toEqual(templateFromCanonical("social-post"));
       }
     });

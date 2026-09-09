@@ -1,5 +1,7 @@
 import { describe, test, expect, beforeEach, vi, afterEach } from "vitest";
-import type { CampaignBrief, CopyPool } from "@campaignfoundry/CampaignOrchestration";
+import type { CampaignBrief, CampaignType, CopyPool } from "@campaignfoundry/CampaignOrchestration";
+import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import { timelineProblem } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import { axisProductSize } from "../validate";
@@ -65,6 +67,10 @@ const savedBrief = (over: Partial<CampaignBrief> = {}): CampaignBrief =>
     targetAudience: "a",
     campaignMessage: "Hi",
     products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "l.png" }],
+    // The brief's own type when the fixture names one, never the default blindly
+    // (L3a): every produced brief carries its canonical template, layer list
+    // materialised from the canonical library, never hand-written.
+    template: templateFromCanonical((over.type ?? DEFAULT_CAMPAIGN_TYPE) as CampaignType),
     ...over,
   }) as CampaignBrief;
 
@@ -706,6 +712,37 @@ describe("fromBrief", () => {
   });
 });
 
+describe("the creative template survives the editor (L3a, D120/D123)", () => {
+  test("fromBrief → toBrief round-trips the template deep-equal, layer order included", () => {
+    // The assertion L1b's lane asked Qodo for and never shipped (#263): a save
+    // must carry the brief's pinned template back exactly as it was loaded —
+    // never drop it, never re-derive it, and never reorder its layers, because
+    // array position IS z-order (D128). Deleting the `template` line from
+    // `toBrief`'s returned object makes this fail.
+    const brief = { ...savedBrief({ type: "paid-social" }) };
+    const state = fromBrief(brief, { file: "camp.yaml" });
+    const emitted = toBrief(state);
+    expect(emitted.template).toEqual(brief.template);
+    expect(emitted.template.layers).toEqual(brief.template.layers);
+    // Layer order is the whole point — a reordered layer list is a new template.
+    expect(emitted.template.layers.map((layer) => layer.id)).toEqual(
+      brief.template.layers.map((layer) => layer.id),
+    );
+  });
+
+  test("a fresh draft is seeded with the campaign type's canonical template", () => {
+    expect(initialEditorState("brief").template).toEqual(templateFromCanonical(DEFAULT_CAMPAIGN_TYPE));
+    expect(initialEditorState("variation").template).toEqual(templateFromCanonical(DEFAULT_CAMPAIGN_TYPE));
+  });
+
+  test("applying a preset seeds the preset's canonical template, so type and template agree", () => {
+    const short = reduce(base(), { type: "applyPreset", campaignType: "short-video" });
+    expect(short.template).toEqual(templateFromCanonical("short-video"));
+    const social = reduce(base(), { type: "applyPreset", campaignType: "social-post" });
+    expect(social.template).toEqual(templateFromCanonical("social-post"));
+  });
+});
+
 describe("dirty tracking", () => {
   test("a new draft is always dirty against save", () => {
     expect(isDirtySinceSave(base())).toBe(true);
@@ -791,6 +828,36 @@ describe("draft storage", () => {
     expect(restored?.headlineAxisDropped).toBe(false);
     // What the draft actually specified still wins over the default.
     expect(restored?.campaignMessage).toBe("hi");
+  });
+
+  test("a draft saved before the template existed normalises to its type's canonical template (L3a)", () => {
+    // Pre-L3a builds wrote no `template` key at all (JSON.stringify never wrote
+    // one, because the field did not exist yet) — and the draft may already hold a
+    // non-default type, so the canonical fallback must follow the type, not the
+    // default: a short-video draft must come back with short-video's template.
+    const state: EditorState = { ...base(), briefId: "camp", type: "short-video" };
+    const legacy: Record<string, unknown> = { ...state };
+    delete legacy.template;
+    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: legacy, timestamp: 1 }));
+
+    const restored = loadDraftFromStorage(state);
+    expect(restored?.template).toEqual(templateFromCanonical("short-video"));
+    // And exactly what normalizeDraftState restored is what a save re-emits.
+    expect(toBrief(restored as EditorState).template).toEqual(templateFromCanonical("short-video"));
+  });
+
+  test("a draft saved with a template keeps it verbatim through the real storage round-trip (L3a)", () => {
+    // The editor holds authored template data the save must never re-derive: a
+    // stored template that differs from the draft type's canonical one survives
+    // save → load → save unchanged, word for word.
+    const template = templateFromCanonical("short-video");
+    const state: EditorState = { ...base(), briefId: "camp", type: "paid-social", template };
+    saveDraftToStorage(state);
+    const restored = loadDraftFromStorage(state);
+    expect(restored).not.toBeNull();
+    expect(restored?.template).not.toEqual(templateFromCanonical("paid-social"));
+    expect(restored?.template).toEqual(template);
+    expect(toBrief(restored as EditorState).template).toEqual(template);
   });
 
   test("normalization never overrides a key the draft actually set", () => {

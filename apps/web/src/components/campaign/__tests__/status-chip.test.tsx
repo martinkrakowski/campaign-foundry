@@ -1,12 +1,15 @@
 import { describe, test, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { StatusChip } from "../StatusChip";
 import { editorReducer, initialEditorState, toBrief, type EditorState } from "../editor-state";
 
 const saved = (): CampaignBrief =>
   ({
     schemaVersion: 1,
+    template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
     id: "camp",
     targetRegion: "DE",
     targetAudience: "a",

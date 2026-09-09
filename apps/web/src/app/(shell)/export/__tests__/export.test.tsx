@@ -3,6 +3,8 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithRun, seedPersistedRun, makeAsset, makeMotionAsset, json, mockPipelineApi } from "@/__tests__/helpers";
 import { API, useRun } from "@/lib/run-context";
+import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import ExportPage from "../page";
 
 /** Test-only control: adopt a different brief, as the picker's select does. */
@@ -24,6 +26,7 @@ function RunDraft() {
       onClick={() =>
         execute({
           schemaVersion: 1,
+          template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
           id: "on-screen-draft",
           targetRegion: "US",
           targetAudience: "x",

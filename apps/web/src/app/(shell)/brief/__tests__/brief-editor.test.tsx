@@ -10,6 +10,8 @@ import { stashStep } from "@/lib/use-step-navigation";
 import { CreateCampaignDialog } from "@/components/shell/CreateCampaignDialog";
 import { BrowseBriefsButton } from "@/components/shell/Sidebar";
 import type { BriefEntry } from "@/lib/briefs-api";
+import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { fromBrief, initialEditorState, saveDraftToStorage } from "@/components/campaign/editor-state";
 import { sectionOrder, SECTION_TITLES } from "@/components/campaign/sections";
 import { BriefEditor } from "@/components/campaign/BriefEditor";
@@ -74,6 +76,7 @@ const RunBriefProbe = () => {
 
 const brief = (id: string) => ({
   schemaVersion: 1,
+  template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
   id,
   targetRegion: "DE",
   targetAudience: "a",

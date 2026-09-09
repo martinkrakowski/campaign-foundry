@@ -13,6 +13,7 @@ import {
   DEFAULT_CAMPAIGN_TYPE,
   type CampaignType,
 } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import { templateFromCanonical, type BriefTemplate } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import {
   BRIEF_SCHEMA_VERSION,
   isSupportedBriefSchemaVersion,
@@ -229,6 +230,13 @@ export interface EditorState {
    * classic, so `toBrief` emits it under the same rule `mode` uses.
    */
   type: CampaignType;
+  /**
+   * The brief's pinned creative template (D120/D123): the canonical reference and
+   * the materialised layer list, held verbatim so a save never drops or re-derives
+   * it (L3a). `fromBrief` reads it, `toBrief` writes it back; the canonical
+   * template for `type` seeds a fresh draft and an applied preset.
+   */
+  template: BriefTemplate;
   campaignName: string;
   briefId: string;
   targetRegion: string;
@@ -423,6 +431,7 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
     source: { kind: "new", tempId },
     mode,
     type: DEFAULT_CAMPAIGN_TYPE,
+    template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
     campaignName: "",
     briefId: "",
     targetRegion: "",
@@ -713,6 +722,9 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       return {
         ...withMode,
         type: action.campaignType,
+        // The applied preset's canonical template: the seeded campaign carries the
+        // template its type names, not the default one the fresh draft held (L3a).
+        template: templateFromCanonical(action.campaignType),
         platforms: [...preset.platforms],
         formats: [...preset.formats],
         // A3 — a display preset's output.sizes are derived the same way the
@@ -1278,6 +1290,10 @@ export function toBrief(state: EditorState): CampaignBrief {
   const style = briefStyle(state);
   const brief: CampaignBrief = {
     schemaVersion: state.schemaVersion,
+    // The template is always written (L3a): the domain requires it, and saving
+    // must carry the pinned reference + materialised layers back exactly as
+    // loaded — the editor never re-derives a template the user may have edited.
+    template: state.template,
     id: state.briefId,
     targetRegion: state.targetRegion,
     targetAudience: state.targetAudience,
@@ -1449,6 +1465,9 @@ export function fromBrief(brief: CampaignBrief, entry?: { file: string; revision
     // D112 — absent means the default; a brief that wrote the default
     // explicitly keeps its marker, the way `mode`'s own flag does below.
     type: brief.type ?? DEFAULT_CAMPAIGN_TYPE,
+    // The brief's template is held verbatim (L3a): `toBrief` writes it back so a
+    // load → save round-trip never drops or re-derives the pinned reference.
+    template: brief.template,
     campaignName: brief.id,
     briefId: brief.id,
     targetRegion: brief.targetRegion,
@@ -1576,6 +1595,7 @@ export function getDraftKey(state: EditorState): string {
 export function blankBrief(): CampaignBrief {
   return {
     schemaVersion: BRIEF_SCHEMA_VERSION,
+    template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
     id: "",
     targetRegion: "",
     targetAudience: "",
@@ -1755,6 +1775,12 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   // vocabulary, never believed, and the absent key means the default.
   const typeValid = (CAMPAIGN_TYPES as readonly string[]).includes(raw.type as string);
   const type: CampaignType = typeValid ? (raw.type as CampaignType) : DEFAULT_CAMPAIGN_TYPE;
+  // L3a — a draft saved before the template became required writes no key: it
+  // normalises to the campaign type's canonical template, exactly what a fresh
+  // draft and an applied preset seed. A draft that does carry one keeps it
+  // verbatim — the template is authored data the editor must never re-derive.
+  const template: BriefTemplate =
+    raw.template !== undefined ? (raw.template as BriefTemplate) : templateFromCanonical(type);
   const initial = initialEditorState(mode);
   const str = (value: unknown, fallback: string): string => (typeof value === "string" ? value : fallback);
   const rawSource = raw.source as Partial<EditorSource> | null | undefined;
@@ -1831,6 +1857,7 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     source,
     mode,
     type,
+    template,
     campaignName,
     briefId: str(raw.briefId, initial.briefId),
     products,

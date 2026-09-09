@@ -2,6 +2,8 @@ import { describe, test, expect, beforeEach, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement, useEffect, type ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
+import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { renderWithRun as renderWithShell, seedPersistedRun, nextMock, exerciseFocusTrap, makeAsset, ShellProviders } from "@/__tests__/helpers";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
@@ -170,6 +172,7 @@ describe("Sidebar", () => {
             onClick={() =>
               setBrief({
                 schemaVersion: 1,
+                template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
                 id: "winter-hydration-2026",
                 targetRegion: "US",
                 targetAudience: "all",
