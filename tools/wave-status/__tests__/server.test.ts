@@ -11,7 +11,7 @@ import { request as httpRequest, type IncomingMessage, type RequestOptions } fro
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolvePort, routeFor, startServer, type ServerHandle } from "../server.js";
+import { extractDarkBlock, resolvePort, routeFor, startServer, type ServerHandle } from "../server.js";
 import { realDeps } from "../lib/collect.js";
 import type { WaveStatus } from "../lib/types.js";
 
@@ -253,6 +253,41 @@ describe("routeFor — the route table, enumerated (D106)", () => {
 
   test("an unparseable request target is 404, not a crash", () => {
     expect(routeFor("GET", "http://[")).toEqual({ kind: "notFound" });
+  });
+});
+
+describe("extractDarkBlock", () => {
+  test("returns the .dark block through its matching brace", () => {
+    expect(extractDarkBlock(":root {\n  --color-background: #ffffff;\n}\n.dark {\n  --color-background: #0f0f0f;\n}")).toBe(
+      "{\n  --color-background: #0f0f0f;\n}",
+    );
+  });
+
+  test("a brace inside a comment does not close the block early", () => {
+    // `}` and `*x` inside the comment exercise both comment-closing branches.
+    expect(extractDarkBlock(".dark { /* *x } */ --color-a: 1; }")).toBe("{ /* *x } */ --color-a: 1; }");
+  });
+
+  test("a brace inside a double-quoted string is ignored", () => {
+    expect(extractDarkBlock('.dark { --color-a: "}"; }')).toBe('{ --color-a: "}"; }');
+  });
+
+  test("an escaped quote inside a string does not close it", () => {
+    expect(extractDarkBlock('.dark { --color-a: "\\" }"; --color-b: 2; }')).toBe('{ --color-a: "\\" }"; --color-b: 2; }');
+  });
+
+  test("a brace inside a single-quoted string is ignored", () => {
+    expect(extractDarkBlock(".dark { --color-a: '}'; }")).toBe("{ --color-a: '}'; }");
+  });
+
+  test("nested braces balance before the block closes", () => {
+    expect(extractDarkBlock(".dark { --color-a: {nested}; }")).toBe("{ --color-a: {nested}; }");
+  });
+
+  test("a .dark selector with no brace, or a block that never closes, is undefined", () => {
+    expect(extractDarkBlock(".dark")).toBeUndefined();
+    expect(extractDarkBlock(".dark { --color-a: 1;")).toBeUndefined();
+    expect(extractDarkBlock(".dark /* no closing brace */")).toBeUndefined();
   });
 });
 
