@@ -15,7 +15,7 @@ import {
   type CanonicalTemplateId,
   type CreativeTemplateLayer,
 } from "./creative-templates.js";
-import { CREATIVE_TYPES, type CreativeType } from "./creative-types.js";
+import { CREATIVE_TYPES, CREATIVE_TYPE_RULES, type CreativeType } from "./creative-types.js";
 import { LAYER_KINDS, type LayerKind } from "./layer-kinds.js";
 import { ANCHOR_VALUES, type AnchorKind } from "./variation-defaults.js";
 
@@ -154,17 +154,71 @@ export function templateFromCanonical(type: CampaignType): BriefTemplate {
 }
 
 /**
- * The one shape contract a persisted brief's template must satisfy (L3a, L3b).
+ * Evaluates whether a layer list satisfies the ordering constraints declared for
+ * its creative type in `CREATIVE_TYPE_RULES` (D128).
+ *
+ * Array position is z-order, bottom first (D128):
+ * - Index 0 is the bottom layer.
+ * - Index length - 1 is the topmost layer.
+ *
+ * A constraint { kind, relation, target } applies when `kind` is present in the list
+ * (if `kind` is absent, e.g. an optional layer that was removed, the constraint is satisfied).
+ *
+ * - "above": every layer of `kind` must sit at a higher index than every layer of `target`.
+ * - "directly-above": every layer of `kind` at index k must have k > 0 and layers[k - 1].kind === target.
+ */
+export function satisfiesOrderConstraints(
+  creativeType: CreativeType,
+  layers: readonly { readonly kind: LayerKind }[],
+): boolean {
+  const rules = CREATIVE_TYPE_RULES[creativeType];
+  const constraints = rules?.orderConstraints;
+  if (!constraints || constraints.length === 0) return true;
+
+  for (const c of constraints) {
+    const kIndices: number[] = [];
+    const tIndices: number[] = [];
+    for (let i = 0; i < layers.length; i++) {
+      if (layers[i].kind === c.kind) kIndices.push(i);
+      if (layers[i].kind === c.target) tIndices.push(i);
+    }
+
+    // If either kind or target is not in the layer list, the constraint is unviolated.
+    if (kIndices.length === 0 || tIndices.length === 0) continue;
+
+    switch (c.relation) {
+      case "above": {
+        const minK = Math.min(...kIndices);
+        const maxT = Math.max(...tIndices);
+        if (minK <= maxT) return false;
+        break;
+      }
+      case "directly-above": {
+        for (const k of kIndices) {
+          if (k === 0 || layers[k - 1].kind !== c.target) {
+            return false;
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  return true;
+}
+
+/**
+ * The one shape contract a persisted brief's template must satisfy (L3a, L3b, L8m).
  *
  * A type predicate, not a validator: `unknown` becomes a `BriefTemplate` only
  * through this check, and anything else is not one. `id` is a canonical member,
  * `version` a positive integer, `creativeType` and `unit` vocabulary members,
  * and `layers` an array. It is the single guard used at both storage boundaries
  * — the editor's draft restore and the run context's `cf:brief` restore — so a
- * half-written template can never be cast through and reach `toBrief`. It checks
- * shape, never content: a valid template keeps whatever layer order it was
- * serialised with (array position IS z-order, D128). A layer's `props`, when
- * present, must be a shape that layer's kind may carry (D134) — same key set,
+ * half-written template can never be cast through and reach `toBrief`. Array
+ * position IS z-order (D128): a template whose layer order violates the creative
+ * type's declared `above`/`below` constraints is not a valid template. A layer's `props`,
+ * when present, must be a shape that layer's kind may carry (D134) — same key set,
  * every number a fraction in [0, 1], the anchor a vocabulary member — so an
  * unknown key or a value out of range cannot ride the guard into the editor or
  * the run. Every `layers` entry must itself be a layer — a non-null, non-array
@@ -189,7 +243,8 @@ export function isBriefTemplate(value: unknown): value is BriefTemplate {
     (ADVERTISING_UNITS as readonly string[]).includes(raw.unit) &&
     Array.isArray(raw.layers) &&
     raw.layers.every(isLayerEntry) &&
-    new Set(raw.layers.map((layer) => (layer as LayerEntry).id)).size === raw.layers.length
+    new Set(raw.layers.map((layer) => (layer as LayerEntry).id)).size === raw.layers.length &&
+    satisfiesOrderConstraints(raw.creativeType as CreativeType, raw.layers as readonly LayerEntry[])
   );
 }
 

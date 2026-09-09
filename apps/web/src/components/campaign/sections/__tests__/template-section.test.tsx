@@ -91,11 +91,36 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
 
   test("a required layer has no remove control; a removable one does — and the sentence says why", () => {
     render(<TemplateSection state={state()} dispatch={vi.fn()} errors={{}} />);
-    expect(list().queryByRole("button", { name: "image" })).toBeNull();
-    expect(list().queryByRole("button", { name: "static-text" })).toBeNull();
-    expect(list().getByRole("button", { name: "shade" })).toBeTruthy();
-    expect(list().getByRole("button", { name: "accent" })).toBeTruthy();
-    expect(list().getByRole("button", { name: "logo" })).toBeTruthy();
+    expect(
+      list().queryByRole("button", {
+        name: "image",
+        description: messages.templateRemoveDescription("Image"),
+      }),
+    ).toBeNull();
+    expect(
+      list().queryByRole("button", {
+        name: "static-text",
+        description: messages.templateRemoveDescription("Static text"),
+      }),
+    ).toBeNull();
+    expect(
+      list().getByRole("button", {
+        name: "shade",
+        description: messages.templateRemoveDescription("Shade"),
+      }),
+    ).toBeTruthy();
+    expect(
+      list().getByRole("button", {
+        name: "accent",
+        description: messages.templateRemoveDescription("Accent"),
+      }),
+    ).toBeTruthy();
+    expect(
+      list().getByRole("button", {
+        name: "logo",
+        description: messages.templateRemoveDescription("Logo"),
+      }),
+    ).toBeTruthy();
     expect(
       screen.getByText(messages.templateRequiredNote(["Image", "Static text"])),
     ).toBeTruthy();
@@ -242,6 +267,151 @@ describe("moveLayer (L8a, D128)", () => {
   test("moving a layer onto its own index is a no-op", () => {
     const base = state();
     expect(editorReducer(base, { type: "moveLayer", from: 2, to: 2 })).toBe(base);
+  });
+});
+
+describe("TemplateSection — layer reordering (L8, D128)", () => {
+  test("move controls name themselves by raw id and display words live in aria-describedby", () => {
+    render(<TemplateSection state={state()} dispatch={vi.fn()} errors={{}} />);
+    // In canonical image-text, accent (index 2) can move up:
+    const accentUp = list().getByRole("button", {
+      name: "accent",
+      description: messages.templateMoveUpDescription("Accent"),
+    });
+    expect(accentUp).toBeTruthy();
+    expect(accentUp.textContent).toBe("↑");
+    expect(
+      document.getElementById(accentUp.getAttribute("aria-describedby") ?? "")?.textContent,
+    ).toBe(messages.templateMoveUpDescription("Accent"));
+
+    // static-text (index 3) can move down:
+    const textDown = list().getByRole("button", {
+      name: "static-text",
+      description: messages.templateMoveDownDescription("Static text"),
+    });
+    expect(textDown).toBeTruthy();
+    expect(textDown.textContent).toBe("↓");
+    expect(
+      document.getElementById(textDown.getAttribute("aria-describedby") ?? "")?.textContent,
+    ).toBe(messages.templateMoveDownDescription("Static text"));
+  });
+
+  test("a move control dispatches moveLayer with the right indices", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    render(<TemplateSection state={state()} dispatch={dispatch} errors={{}} />);
+
+    // In canonical image-text, accent sits at index 2. Moving it up moves to index 3:
+    const accentUp = list().getByRole("button", {
+      name: "accent",
+      description: messages.templateMoveUpDescription("Accent"),
+    });
+    await user.click(accentUp);
+    expect(dispatch).toHaveBeenCalledWith({ type: "moveLayer", from: 2, to: 3 });
+
+    // static-text sits at index 3. Moving it down moves to index 2:
+    const textDown = list().getByRole("button", {
+      name: "static-text",
+      description: messages.templateMoveDownDescription("Static text"),
+    });
+    await user.click(textDown);
+    expect(dispatch).toHaveBeenCalledWith({ type: "moveLayer", from: 3, to: 2 });
+  });
+
+  test("the list re-renders in the new order after moving a layer", async () => {
+    const user = userEvent.setup();
+    render(<Harness initial={state()} />);
+
+    // Canonical order: image (0), shade (1), accent (2), static-text (3), logo (4)
+    let rows = screen.getAllByRole("listitem");
+    expect(rows[2].textContent).toContain("accent");
+    expect(rows[3].textContent).toContain("static-text");
+
+    // Move accent up (from 2 to 3):
+    const accentUp = within(rows[2]).getByRole("button", {
+      name: "accent",
+      description: messages.templateMoveUpDescription("Accent"),
+    });
+    await user.click(accentUp);
+
+    // List re-renders in new order: image (0), shade (1), static-text (2), accent (3), logo (4)
+    rows = screen.getAllByRole("listitem");
+    expect(rows[2].textContent).toContain("static-text");
+    expect(rows[3].textContent).toContain("accent");
+  });
+
+  test("the list is bottom-first: first layer offers no down toward bottom and last offers no up past top", () => {
+    // Array position is z-order, bottom first (D128, per templateListLabel "Layers, bottom first"):
+    // - Index 0 is the bottom layer (drawn first, behind everything).
+    //   Moving down would mean moving below index 0 (past the bottom) — no down control is offered.
+    // - Index length - 1 is the topmost layer (drawn last, on top of everything).
+    //   Moving up would mean moving above the top — no up control is offered.
+    // - "up" moves toward the top of the stack (from index i to i + 1).
+    // - "down" moves toward the bottom of the stack (from index i to i - 1).
+    render(<TemplateSection state={state()} dispatch={vi.fn()} errors={{}} />);
+    const rows = screen.getAllByRole("listitem");
+
+    // First layer: image at index 0 (bottom).
+    // It offers NO down control:
+    expect(
+      within(rows[0]).queryByRole("button", {
+        name: "image",
+        description: messages.templateMoveDownDescription("Image"),
+      }),
+    ).toBeNull();
+
+    // Last layer: logo at index 4 (top).
+    // It offers NO up control:
+    expect(
+      within(rows[4]).queryByRole("button", {
+        name: "logo",
+        description: messages.templateMoveUpDescription("Logo"),
+      }),
+    ).toBeNull();
+  });
+
+  test("a layer blocked by an ordering constraint offers no control in that direction", () => {
+    // In canonical image-text, CREATIVE_TYPE_RULES declares:
+    // - "logo above image"
+    // - "shade directly above image"
+    render(<TemplateSection state={state()} dispatch={vi.fn()} errors={{}} />);
+    const rows = screen.getAllByRole("listitem");
+
+    // 1. image at index 0: moving up to 1 would place shade below image (or at index 0),
+    // violating "shade directly above image". So image offers no "up" control:
+    expect(
+      within(rows[0]).queryByRole("button", {
+        name: "image",
+        description: messages.templateMoveUpDescription("Image"),
+      }),
+    ).toBeNull();
+
+    // 2. shade at index 1:
+    // - moving down to 0 would place shade below image, violating "shade directly above image".
+    // - moving up to 2 would place accent between image and shade, violating "shade directly above image".
+    // So shade offers NEITHER up NOR down move controls:
+    expect(
+      within(rows[1]).queryByRole("button", {
+        name: "shade",
+        description: messages.templateMoveDownDescription("Shade"),
+      }),
+    ).toBeNull();
+    expect(
+      within(rows[1]).queryByRole("button", {
+        name: "shade",
+        description: messages.templateMoveUpDescription("Shade"),
+      }),
+    ).toBeNull();
+
+    // 3. accent at index 2:
+    // - moving down to 1 would separate shade from image, violating "shade directly above image".
+    // So accent offers NO down control:
+    expect(
+      within(rows[2]).queryByRole("button", {
+        name: "accent",
+        description: messages.templateMoveDownDescription("Accent"),
+      }),
+    ).toBeNull();
   });
 });
 

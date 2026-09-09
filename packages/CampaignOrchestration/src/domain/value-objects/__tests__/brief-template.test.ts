@@ -2,7 +2,13 @@ import { describe, test, expect } from "vitest";
 import { CAMPAIGN_TYPES, CAMPAIGN_TYPE_PRESETS } from "../campaign-types.js";
 import { CANONICAL_TEMPLATES } from "../creative-templates.js";
 import type { LayerKind } from "../layer-kinds.js";
-import { isBriefTemplate, layerPropsProblem, templateFromCanonical, type BriefTemplate } from "../brief-template.js";
+import {
+  isBriefTemplate,
+  layerPropsProblem,
+  satisfiesOrderConstraints,
+  templateFromCanonical,
+  type BriefTemplate,
+} from "../brief-template.js";
 
 describe("BriefTemplate and templateFromCanonical (D120, D123, D128)", () => {
   test("templateFromCanonical returns the preset's template for all four campaign types", () => {
@@ -124,10 +130,79 @@ describe("isBriefTemplate (L3a)", () => {
     ).toBe(false);
   });
 
-  test("checks shape, never content: a reordered layer list is still a valid template", () => {
+  test("canonical templates in CANONICAL_TEMPLATES all satisfy their own type's constraints (D128)", () => {
+    for (const [type, template] of Object.entries(CANONICAL_TEMPLATES)) {
+      expect(
+        satisfiesOrderConstraints(template.creativeType, template.layers),
+        `canonical template "${type}" violates its own type's constraints`,
+      ).toBe(true);
+      expect(isBriefTemplate(template)).toBe(true);
+    }
+  });
+
+  test("an obeying layer order is accepted by isBriefTemplate (D128)", () => {
     const canonical = templateFromCanonical("social-post");
-    const reordered = { ...canonical, layers: [...canonical.layers].reverse() };
-    expect(isBriefTemplate(reordered)).toBe(true);
+    // Swap accent (index 2) and static-text (index 3):
+    // [image, shade, static-text, accent, logo]
+    // shade is still directly above image (0 -> 1), logo is still above image (0 -> 4).
+    const obeying = {
+      ...canonical,
+      layers: [
+        canonical.layers[0]!,
+        canonical.layers[1]!,
+        canonical.layers[3]!,
+        canonical.layers[2]!,
+        canonical.layers[4]!,
+      ],
+    };
+    expect(isBriefTemplate(obeying)).toBe(true);
+  });
+
+  test("a violating layer order is refused by isBriefTemplate (D128)", () => {
+    const canonical = templateFromCanonical("social-post");
+    // 1. Reversed canonical: logo below image, shade not directly above image
+    const reversed = { ...canonical, layers: [...canonical.layers].reverse() };
+    expect(isBriefTemplate(reversed)).toBe(false);
+
+    // 2. Logo below image: [logo, image, shade, accent, static-text]
+    const logoBelowImage = {
+      ...canonical,
+      layers: [
+        canonical.layers[4]!, // logo
+        canonical.layers[0]!, // image
+        canonical.layers[1]!, // shade
+        canonical.layers[2]!, // accent
+        canonical.layers[3]!, // static-text
+      ],
+    };
+    expect(isBriefTemplate(logoBelowImage)).toBe(false);
+
+    // 3. Shade not directly above image (accent between image and shade):
+    // [image, accent, shade, static-text, logo]
+    const shadeNotDirectlyAbove = {
+      ...canonical,
+      layers: [
+        canonical.layers[0]!, // image
+        canonical.layers[2]!, // accent
+        canonical.layers[1]!, // shade
+        canonical.layers[3]!, // static-text
+        canonical.layers[4]!, // logo
+      ],
+    };
+    expect(isBriefTemplate(shadeNotDirectlyAbove)).toBe(false);
+
+    // 4. Shade below image: [shade, image, accent, static-text, logo]
+    const shadeBelowImage = {
+      ...canonical,
+      layers: [
+        canonical.layers[1]!, // shade
+        canonical.layers[0]!, // image
+        canonical.layers[2]!, // accent
+        canonical.layers[3]!, // static-text
+        canonical.layers[4]!, // logo
+      ],
+    };
+    expect(isBriefTemplate(shadeBelowImage)).toBe(false);
   });
 });
 

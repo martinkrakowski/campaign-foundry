@@ -86,6 +86,10 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
       required: ["image", "static-text"],
       maxOf: { logo: 1, shade: 1, accent: 1 },
       sharedBudgets: [{ kinds: ["static-text", "animated-text"], max: 1 }],
+      orderConstraints: [
+        { kind: "logo", relation: "above", target: "image" },
+        { kind: "shade", relation: "directly-above", target: "image" },
+      ],
       outputFamilies: ["static", "motion"],
     });
 
@@ -104,5 +108,22 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
       maxOf: { logo: 1, shade: 1 },
       outputFamilies: ["motion"],
     });
+  });
+
+  test("declared order constraints only name kinds accepted by their creative type", () => {
+    for (const [type, rule] of Object.entries(CREATIVE_TYPE_RULES)) {
+      if (!rule.orderConstraints) continue;
+      const acceptsSet = new Set(rule.accepts);
+      for (const constraint of rule.orderConstraints) {
+        expect(
+          acceptsSet.has(constraint.kind),
+          `creative type "${type}" constraint names unaccepted kind "${constraint.kind}"`,
+        ).toBe(true);
+        expect(
+          acceptsSet.has(constraint.target),
+          `creative type "${type}" constraint names unaccepted target "${constraint.target}"`,
+        ).toBe(true);
+      }
+    }
   });
 });

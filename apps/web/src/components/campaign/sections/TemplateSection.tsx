@@ -3,29 +3,30 @@
 import { useId } from "react";
 import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 import { Button, IconButton } from "@/components/ui";
-import { addableKinds, removableLayerIds } from "@/components/campaign/derive";
+import { addableKinds, canMoveLayer, removableLayerIds } from "@/components/campaign/derive";
 import { layerKindDisplayName } from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
 import { SectionShell, type SectionProps } from "./IdentitySection";
 
 /**
- * The Template step (L5 — D124): the campaign's layers as an ordered list —
- * array position is z-order, bottom first (D128) — with add and remove offers
- * that ARE the domain's compatibility table. `addableKinds` and
- * `removableLayerIds` are derived from the same `CREATIVE_TYPE_RULES` the
+ * The Template step (L5, L8 — D124, D128): the campaign's layers as an ordered list —
+ * array position is z-order, bottom first (D128) — with add, remove and move offers
+ * that ARE the domain's compatibility table. `addableKinds`, `removableLayerIds`,
+ * and `canMoveLayer` are derived from the same `CREATIVE_TYPE_RULES` the
  * boundary validates against, so this section cannot offer what Save would
  * refuse (the gating defect DESIGN.md §1.5 names): a kind at its cardinality
- * limit is absent from the offer, never present-and-disabled, and a required
- * layer has no remove control — the sentence under the list says why.
+ * limit is absent from the offer, never present-and-disabled, a required
+ * layer has no remove control, and a layer blocked by bounds or constraints has
+ * no move control in that direction.
  *
- * Reordering is not here (L8): the list renders `template.layers`' order and
- * nothing else. New layers carry no props — per-layer prop editing is out of
- * scope — so an add dispatches the kind alone, and the id is the reducer's
- * derivation.
+ * Reordering (L8, D128): each layer offers controls to move it within the list
+ * (up toward top, down toward bottom) when the move is legal. New layers carry no
+ * props — per-layer prop editing is out of scope — so an add dispatches the kind
+ * alone, and the id is the reducer's derivation.
  *
  * The kit's naming contract (D18, as `PlatformCard` pins it): every control's
  * accessible name is its raw id — the kind id on an add control, the layer id
- * on a remove control — and the display words live in the description, wired
+ * on a remove or move control — and the display words live in the description, wired
  * through `aria-describedby` so they never join the name.
  */
 export function TemplateSection({ state, dispatch }: SectionProps) {
@@ -34,7 +35,9 @@ export function TemplateSection({ state, dispatch }: SectionProps) {
   // document — the trap the kit's own cards avoid with `useId`.
   const uid = useId();
   const addDescId = (kind: LayerKind) => `${uid}-add-${kind}`;
-  const removeDescId = (layerId: string) => `${uid}-remove-${layerId}`;
+  const moveDownDescId = (layerId: string, index: number) => `${uid}-move-down-${layerId}-${index}`;
+  const moveUpDescId = (layerId: string, index: number) => `${uid}-move-up-${layerId}-${index}`;
+  const removeDescId = (layerId: string, index: number) => `${uid}-remove-${layerId}-${index}`;
   const listLabelId = `${uid}-list-label`;
 
   // Both offers, consumed — never reimplemented (D124).
@@ -58,8 +61,10 @@ export function TemplateSection({ state, dispatch }: SectionProps) {
         {messages.templateListLabel}
       </p>
       <ol aria-labelledby={listLabelId} className="space-y-2">
-        {state.template.layers.map((layer) => {
+        {state.template.layers.map((layer, index) => {
           const layerRemovable = removable.includes(layer.id);
+          const mayMoveDown = canMoveLayer(state, index, "down");
+          const mayMoveUp = canMoveLayer(state, index, "up");
           return (
             <li
               key={layer.id}
@@ -71,20 +76,50 @@ export function TemplateSection({ state, dispatch }: SectionProps) {
                 </span>
                 <span className="block font-mono text-[11px] text-text-muted">{layer.id}</span>
               </span>
-              {layerRemovable ? (
-                <span className="flex shrink-0 items-center">
-                  <span id={removeDescId(layer.id)} className="sr-only">
-                    {messages.templateRemoveDescription(layerKindDisplayName(layer.kind))}
+              <span className="flex shrink-0 items-center gap-1">
+                {mayMoveDown ? (
+                  <span className="flex shrink-0 items-center">
+                    <span id={moveDownDescId(layer.id, index)} className="sr-only">
+                      {messages.templateMoveDownDescription(layerKindDisplayName(layer.kind))}
+                    </span>
+                    <IconButton
+                      label={layer.id}
+                      aria-describedby={moveDownDescId(layer.id, index)}
+                      onClick={() => dispatch({ type: "moveLayer", from: index, to: index - 1 })}
+                    >
+                      ↓
+                    </IconButton>
                   </span>
-                  <IconButton
-                    label={layer.id}
-                    aria-describedby={removeDescId(layer.id)}
-                    onClick={() => dispatch({ type: "removeLayer", id: layer.id })}
-                  >
-                    ×
-                  </IconButton>
-                </span>
-              ) : null}
+                ) : null}
+                {mayMoveUp ? (
+                  <span className="flex shrink-0 items-center">
+                    <span id={moveUpDescId(layer.id, index)} className="sr-only">
+                      {messages.templateMoveUpDescription(layerKindDisplayName(layer.kind))}
+                    </span>
+                    <IconButton
+                      label={layer.id}
+                      aria-describedby={moveUpDescId(layer.id, index)}
+                      onClick={() => dispatch({ type: "moveLayer", from: index, to: index + 1 })}
+                    >
+                      ↑
+                    </IconButton>
+                  </span>
+                ) : null}
+                {layerRemovable ? (
+                  <span className="flex shrink-0 items-center">
+                    <span id={removeDescId(layer.id, index)} className="sr-only">
+                      {messages.templateRemoveDescription(layerKindDisplayName(layer.kind))}
+                    </span>
+                    <IconButton
+                      label={layer.id}
+                      aria-describedby={removeDescId(layer.id, index)}
+                      onClick={() => dispatch({ type: "removeLayer", id: layer.id })}
+                    >
+                      ×
+                    </IconButton>
+                  </span>
+                ) : null}
+              </span>
             </li>
           );
         })}

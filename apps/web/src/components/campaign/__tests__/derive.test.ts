@@ -7,6 +7,8 @@ import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/br
 import { LAYER_KINDS, type LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 import {
   addableKinds,
+  canMoveLayer,
+  layerMoveDirections,
   platformsToFormats,
   platformsToRatios,
   platformsToSizes,
@@ -265,6 +267,56 @@ describe("derive.ts", () => {
       const oneKind = "[" + '"image", "static"' + "]";
       expect(literalKindLists(oneKind)).toEqual([]);
       expect(literalKindLists('const kind = "shade"; { kind: "accent" }')).toEqual([]);
+    });
+  });
+
+  describe("layer move derivations (D128)", () => {
+    test("the first layer offers no down and the last offers no up", () => {
+      const state = initialEditorState();
+      // Canonical image-text: [image, shade, accent, static-text, logo]
+      expect(canMoveLayer(state, 0, "down")).toBe(false);
+      expect(layerMoveDirections(state, 0)).not.toContain("down");
+
+      const lastIndex = state.template.layers.length - 1;
+      expect(canMoveLayer(state, lastIndex, "up")).toBe(false);
+      expect(layerMoveDirections(state, lastIndex)).not.toContain("up");
+    });
+
+    test("out of bounds index yields no move directions", () => {
+      const state = initialEditorState();
+      expect(layerMoveDirections(state, -1)).toEqual([]);
+      expect(layerMoveDirections(state, 100)).toEqual([]);
+    });
+
+    test("a move blocked by an ordering constraint is not offered", () => {
+      const state = initialEditorState();
+      // Canonical image-text has layers: image (0), shade (1), accent (2), static-text (3), logo (4)
+      // Constraints: logo above image, shade directly above image.
+      // - shade (index 1) moving down (to 0) or up (to 2) violates "shade directly above image"
+      expect(layerMoveDirections(state, 1)).toEqual([]);
+      expect(canMoveLayer(state, 1, "down")).toBe(false);
+      expect(canMoveLayer(state, 1, "up")).toBe(false);
+
+      // - image (index 0) moving up (to 1) violates "shade directly above image"
+      expect(canMoveLayer(state, 0, "up")).toBe(false);
+
+      // - accent (index 2) moving down (to 1) would separate shade from image
+      expect(canMoveLayer(state, 2, "down")).toBe(false);
+    });
+
+    test("legal moves that satisfy constraints are offered", () => {
+      const state = initialEditorState();
+      // - accent (index 2) moving up (to 3): swap with static-text is legal
+      expect(layerMoveDirections(state, 2)).toEqual(["up"]);
+      expect(canMoveLayer(state, 2, "up")).toBe(true);
+
+      // - static-text (index 3) can move down (to 2) or up (to 4)
+      expect(layerMoveDirections(state, 3)).toContain("down");
+      expect(layerMoveDirections(state, 3)).toContain("up");
+
+      // - logo (index 4) can move down (to 3)
+      expect(layerMoveDirections(state, 4)).toEqual(["down"]);
+      expect(canMoveLayer(state, 4, "down")).toBe(true);
     });
   });
 });

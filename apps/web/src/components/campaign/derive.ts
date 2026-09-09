@@ -8,6 +8,7 @@ import {
   formatsFor,
 } from "@campaignfoundry/Distribution/platform-profiles";
 import { CREATIVE_TYPE_RULES } from "@campaignfoundry/CampaignOrchestration/creative-types";
+import { satisfiesOrderConstraints } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 import type { EditorState } from "./editor-state";
 import { axisProductSize } from "./editor-state";
@@ -142,3 +143,65 @@ export function removableLayerIds(state: EditorState): readonly string[] {
     .filter((layer) => !rules.required.includes(layer.kind) || (counts.get(layer.kind) as number) > 1)
     .map((layer) => layer.id);
 }
+
+export type MoveDirection = "up" | "down";
+
+/**
+ * Which directions a layer at `index` may move within the pinned template's
+ * layer list (D128), derived from the domain's compatibility table
+ * (`CREATIVE_TYPE_RULES`).
+ *
+ * Array position is z-order, bottom first (D128):
+ * - Index 0 is the bottom-most layer (offers no "down" toward the bottom).
+ * - Index layers.length - 1 is the topmost layer (offers no "up" past the top).
+ * - "up" moves toward the top of the stack (from index i to i + 1).
+ * - "down" moves toward the bottom of the stack (from index i to i - 1).
+ *
+ * A layer that cannot legally move in a direction has no control for that
+ * direction (D128, DESIGN.md §1.5) — bounds and compatibility constraints
+ * (e.g. "logo above image", "shade directly above image") are enforced here so
+ * the UI never offers what the boundary refuses.
+ */
+export function layerMoveDirections(
+  state: EditorState,
+  index: number,
+): readonly MoveDirection[] {
+  const layers = state.template.layers;
+  if (index < 0 || index >= layers.length) return [];
+
+  const directions: MoveDirection[] = [];
+
+  // Down: toward bottom (index - 1)
+  if (index > 0) {
+    const candidate = [...layers];
+    const [moved] = candidate.splice(index, 1);
+    candidate.splice(index - 1, 0, moved);
+    if (satisfiesOrderConstraints(state.template.creativeType, candidate)) {
+      directions.push("down");
+    }
+  }
+
+  // Up: toward top (index + 1)
+  if (index < layers.length - 1) {
+    const candidate = [...layers];
+    const [moved] = candidate.splice(index, 1);
+    candidate.splice(index + 1, 0, moved);
+    if (satisfiesOrderConstraints(state.template.creativeType, candidate)) {
+      directions.push("up");
+    }
+  }
+
+  return directions;
+}
+
+/**
+ * True when the layer at `index` can legally move in `direction`.
+ */
+export function canMoveLayer(
+  state: EditorState,
+  index: number,
+  direction: MoveDirection,
+): boolean {
+  return layerMoveDirections(state, index).includes(direction);
+}
+
