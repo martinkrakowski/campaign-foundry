@@ -36,6 +36,23 @@ gh pr list --head "<branch>" --json number,url --jq '.[] | "#\(.number) \(.url)"
 (cd "<worktree>" && yarn build && yarn typecheck && yarn lint && yarn lint:arch && yarn sync:check && yarn test:cov)
 git -C "<worktree>" status --porcelain=v1 -b && git -C "<worktree>" diff --stat origin/main...HEAD
 ```
+**The gate is a subset of CI, and the difference is named.** `ci.yml` runs two steps the six
+commands above do not: `check:env` (a conditional no-op here — no such script exists) and the
+**Nitro route-scan guard**, which runs `nitro prepare` and fails if a `*.test.ts` file has been
+registered as an API route. Its own comment in `ci.yml` says it catches "a runtime fault the build
+and coverage gate don't catch". **A lane that adds or moves a test file under `apps/api/server/`
+must also run:**
+
+```bash
+yarn workspace @campaignfoundry/api exec nitro prepare && \
+  ! grep -q "\.test\." apps/api/.nitro/types/nitro-routes.d.ts
+```
+
+A green local gate is not a green CI. Found 2026-09-08 by the hexagen-monaco orchestrator, which
+hit the same class in its own repo: it ran the stated gate, passed, and reddened `main` on
+`typecheck:test` — a step the stated gate never included. **Rule: when you write a gate into a
+brief, diff it against the CI workflow first. Whatever CI runs and the gate does not, name in the
+brief as what a green does not cover.**
 
 Read the diffstat's **deletions**, not just its file count: a tree removing tests whose sources
 still exist is thrashing, not progress. A lane with **no PR has not started stage 2**, and stage 2

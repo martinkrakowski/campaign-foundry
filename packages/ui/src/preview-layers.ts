@@ -19,7 +19,9 @@
  * multiplies numerator-first for exactly that reason.
  */
 import { resolveCanvas, type AspectRatioValue, type CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import { CANONICAL_TEMPLATES } from "@campaignfoundry/CampaignOrchestration/creative-templates";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
+import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 
 /**
  * Prefer `spec` when the caller already has a CanvasSpec; otherwise wrap a
@@ -61,9 +63,21 @@ export const times = ({ n, d }: BoxFraction, size: number): number => (size * n)
 export const fractionOfBox = (fraction: BoxFraction): number => times(fraction, PREVIEW_BOX);
 
 /**
- * The compositor's layers as fractions of the box, in the order
- * `NodeCanvasCompositor.draw` paints them. Every number the two previews draw
- * resolves from here.
+ * The miniature paints the compositor's stack order (D121) — and there is one
+ * source for it: the domain's resolved layer list. The glyph iterates this array
+ * (`creative-glyph.tsx`), so preview and compositor cannot drift apart about
+ * which kind sits where. Renaming or reordering `CANONICAL_TEMPLATES` moves this
+ * output with it; nothing under `packages/ui/src` may hardcode a second ordering
+ * (a boundary test under `__tests__` fails on one).
+ */
+export const PREVIEW_LAYER_ORDER: readonly LayerKind[] =
+  CANONICAL_TEMPLATES["image-text"].layers.map((layer) => layer.kind);
+
+/**
+ * The compositor's layers as fractions of the box, used to *size* the miniature's
+ * kinds as `PREVIEW_LAYER_ORDER` names them. This is a size map, not an order:
+ * the stack order lives in `PREVIEW_LAYER_ORDER` above and is enforced by test.
+ * Every number the two previews draw resolves from here.
  */
 export const LAYERS = {
   /** Layer 3 — the solid accent band: height × 0.05. */

@@ -134,6 +134,20 @@ while ! grep -qE '^EXIT [0-9]+$' /tmp/<lane>.log 2>/dev/null; do sleep 30; done
 - **agy needs `--dangerously-skip-permissions` when detached** — the denial is the permission
   prompt failing with no TTY, not the detachment.
 
+**A brief's gate must be diffed against CI before it is written down** (2026-09-08, found in
+hexagen-monaco and confirmed here). That orchestrator wrote the stated gate into two briefs, ran
+exactly it, passed — and CI went red on `typecheck:test`, a step the gate never named. The same
+hole exists here in smaller form: `ci.yml` runs `check:env` and a **Nitro route-scan guard** that
+the six-command gate does not. **Whatever CI runs and your gate does not, name in the brief as what
+a green does not cover** — otherwise "green and 100 %" is a promise the gate cannot keep.
+
+**A repository's own documentation can be stale evidence, and two reviewers will believe it
+identically.** On hexagen-monaco's first review, `hy4-preview` and Qodo independently argued a
+change was safe by citing an audit item recording that a CI step ran nowhere — when that item was
+the *problem statement* the step had since been added to fix. A reviewer quoting the repo at you
+feels authoritative in a way a bare assertion does not. **Check the workflow file, not the note
+about the workflow file.**
+
 ## Track record, from waves run in this repo
 
 - **glm-5.3-flash** — strongest implementer here: 17/18 lanes clean, honest reports, real mutation
