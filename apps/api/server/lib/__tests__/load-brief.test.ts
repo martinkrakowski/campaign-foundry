@@ -500,7 +500,7 @@ const v2Brief = {
 };
 
 describe("parseBrief v2 fields", () => {
-  test("SUPPORTED_AXES and SUPPORTED_FORMATS lock the P0 allowlist; motion is a gated extension", () => {
+  test("SUPPORTED_AXES and SUPPORTED_FORMATS lock the P0 allowlist; motion is a gated extension, html always available", () => {
     expect(SUPPORTED_AXES).toEqual([
       "layout",
       "tone",
@@ -510,9 +510,21 @@ describe("parseBrief v2 fields", () => {
       "headline",
       "anchor",
     ]);
-    expect(SUPPORTED_FORMATS).toEqual(["static"]);
+    // html is a SUPPORTED_FORMAT ever since D122 — assembling markup needs no
+    // host binary, so (unlike motion) it is never gated on the probe.
+    expect(SUPPORTED_FORMATS).toEqual(["static", "html"]);
     expect(MOTION_AXES).toEqual(["motion", "duration"]);
     expect(MOTION_FORMAT).toBe("motion");
+  });
+
+  test("html is always available: accepted as an output format even with the ffmpeg probe off", () => {
+    expect(parseBrief({ ...valid, output: { formats: ["html"] } }, { capabilities: MOTION_OFF, enforceCapabilities: true }).output?.formats).toEqual([
+      "html",
+    ]);
+    // The flip side: the same probe rejects motion.
+    expect(() => parseBrief({ ...valid, output: { formats: ["motion"] } }, { capabilities: MOTION_OFF, enforceCapabilities: true })).toThrow(
+      /format "motion": motion output is unavailable/,
+    );
   });
 
   test("accepts headline: pool://copy — the only supported pool reference", () => {

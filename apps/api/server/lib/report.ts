@@ -57,8 +57,12 @@ export type PersistedAsset = {
   outputPath: string;
   variantIndex?: number;
   attempt?: number;
-  format?: "static" | "motion";
+  format?: "static" | "motion" | "html";
   videoPath?: string;
+  /** The HTML bundle — html rows only. */
+  htmlBundlePath?: string;
+  /** The required raster fallback rendition (D122) — html rows only. */
+  htmlFallbackPath?: string;
   durationSec?: number;
   /**
    * Planned-axis provenance, on variation rows only — `writeReport` spreads the whole

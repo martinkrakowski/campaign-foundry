@@ -67,6 +67,14 @@ export interface GeneratedAsset {
   readonly outputPath: string;
   /** Relative path of the saved mp4. Motion variants only; static/classic omit it. */
   readonly videoPath?: string;
+  /** Relative path of the assembled HTML bundle. HTML units only; others omit it. */
+  readonly htmlBundlePath?: string;
+  /**
+   * Relative path of the HTML unit's required raster fallback rendition (D122).
+   * Produced by the existing pipeline so an ad server that wants an image always
+   * has one. An HTML asset without it is invalid.
+   */
+  readonly htmlFallbackPath?: string;
   /** Clip length in seconds. Motion variants only. */
   readonly durationSec?: number;
   /** Relative path of the print-proof PDF, when one was generated. */
@@ -96,8 +104,8 @@ export interface GeneratedAsset {
   readonly attempt?: number;
   /** Provenance seed from the plan. Variation assets only. */
   readonly seed?: number;
-  /** Output format. Variation assets set `"static"` or `"motion"`; classic omits it. */
-  readonly format?: "static" | "motion";
+  /** Output format. Variation assets set `"static"`, `"motion"` or `"html"`; classic omits it. */
+  readonly format?: "static" | "motion" | "html";
   /** Planned axes for this slot. Variation assets only. */
   readonly descriptor?: VariantDescriptor;
 }

@@ -7,7 +7,7 @@
  */
 
 export type CanvasRatio = "1:1" | "9:16" | "16:9";
-export type PlatformFormat = "static" | "motion";
+export type PlatformFormat = "static" | "motion" | "html";
 
 /**
  * Mirrors CampaignOrchestration's `DisplaySize`. Domain cannot import that
@@ -187,9 +187,13 @@ export const PLATFORM_PROFILES: Readonly<Record<string, PlatformProfile>> = {
   },
 };
 
-/** A profile is usable when every format it needs is available on this host. */
+/**
+ * A profile is usable when every format it needs is available on this host.
+ * `static` and `html` always are (markup assembly needs no host binary);
+ * `motion` requires the ffmpeg capability.
+ */
 export function isPlatformVisible(profile: PlatformProfile, capabilities: PlatformCapabilities): boolean {
-  return profile.formats.every((format) => format === "static" || capabilities.motion);
+  return profile.formats.every((format) => format === "static" || format === "html" || capabilities.motion);
 }
 
 /** Ids a caller may request: static canvases always, motion ones when the probe says so. */
@@ -218,7 +222,7 @@ export function formatsFor(platformIds: readonly string[]): PlatformFormat[] {
       }
     }
   }
-  const order: readonly PlatformFormat[] = ["static", "motion"];
+  const order: readonly PlatformFormat[] = ["static", "motion", "html"];
   return order.filter((f) => formats.has(f));
 }
 

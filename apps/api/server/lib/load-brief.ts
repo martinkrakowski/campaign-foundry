@@ -75,8 +75,8 @@ export const SUPPORTED_AXES = [
 /** Motion axes — accepted only while the ffmpeg capability is on (D8). */
 export const MOTION_AXES = ["motion", "duration"] as const;
 
-/** P0 output formats — always accepted. */
-export const SUPPORTED_FORMATS = ["static"] as const;
+/** P0 output formats — always accepted. `html` needs no host binary (unlike ffmpeg), so it is gated like `static`, not like `motion` (D122). */
+export const SUPPORTED_FORMATS = ["static", "html"] as const;
 
 /** Output format accepted only while the ffmpeg capability is on (D8). */
 export const MOTION_FORMAT = "motion";
@@ -566,7 +566,7 @@ function validateOutput(value: unknown, capabilities: Capabilities): void {
   if (value.platforms !== undefined) {
     const profiles = validatePlatforms(value.platforms, capabilities);
     validateFormatPlatformCompatibility(
-      (value.formats as readonly string[] | undefined) ?? [...SUPPORTED_FORMATS],
+      (value.formats as readonly string[] | undefined) ?? ["static"],
       profiles,
     );
   }

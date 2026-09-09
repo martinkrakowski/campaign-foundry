@@ -36,6 +36,10 @@ export interface Asset {
   outputPath: string;
   /** The mp4 — motion assets only. */
   videoPath?: string;
+  /** The HTML bundle — html assets only (D122). */
+  htmlBundlePath?: string;
+  /** The required raster fallback rendition — html assets only (D122). */
+  htmlFallbackPath?: string;
   /** Clip length in seconds — motion assets only. */
   durationSec?: number;
   proofPath?: string;
@@ -50,7 +54,7 @@ export interface Asset {
   /** Re-roll counter. Variation originals are 0; omitted on classic assets. */
   attempt?: number;
   seed?: number;
-  format?: "static" | "motion";
+  format?: "static" | "motion" | "html";
   /**
    * Planned axes for this slot — variation assets only.
    *
