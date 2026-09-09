@@ -32,6 +32,9 @@ const SAMPLE_ARGS = {
   platformsUnknown: [["story-tv", "my-tv"]],
   ratioExcludedPackaged: [["Tall"]],
   ratioNoneDrawablePackaged: [["Square"]],
+  // Array-first: GENERIC_ARGS' bare string would throw, and the sample is the
+  // kind of display-name list the production caller passes.
+  templateRequiredNote: [["Image", "Static text"]],
   startFromRatioCaption: [["1:1", "9:16", "16:9"]],
   timelineBeatUnderFloor: [1, 1.8, 2, 6],
   timelineDwell: [1.8],
@@ -173,5 +176,21 @@ describe("startFromRatioCaption", () => {
   test("is a count with both plural arms, never the raw ratio ids", () => {
     expect(messages.startFromRatioCaption(["16:9"])).toBe("1 ratio");
     expect(messages.startFromRatioCaption(["1:1", "9:16", "16:9"])).toBe("3 ratios");
+  });
+});
+
+describe("template messages (L5)", () => {
+  test("templateRequiredNote agrees its verb with the count", () => {
+    expect(messages.templateRequiredNote(["Solo"])).toBe(
+      "Solo is part of every creative and cannot be removed.",
+    );
+    expect(messages.templateRequiredNote(["Solo", "Pair"])).toBe(
+      "Solo and Pair are part of every creative and cannot be removed.",
+    );
+  });
+
+  test("reviewTemplateLayers formats one and many", () => {
+    expect(messages.reviewTemplateLayers(1)).toBe("1 layer");
+    expect(messages.reviewTemplateLayers(3)).toBe("3 layers");
   });
 });

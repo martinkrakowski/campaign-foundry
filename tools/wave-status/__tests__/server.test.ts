@@ -259,29 +259,31 @@ describe("routeFor — the route table, enumerated (D106)", () => {
 describe("extractDarkBlock", () => {
   test("returns the .dark block through its matching brace", () => {
     expect(extractDarkBlock(":root {\n  --color-background: #ffffff;\n}\n.dark {\n  --color-background: #0f0f0f;\n}")).toBe(
-      "{\n  --color-background: #0f0f0f;\n}",
+      ".dark {\n  --color-background: #0f0f0f;\n}",
     );
   });
 
   test("a brace inside a comment does not close the block early", () => {
     // `}` and `*x` inside the comment exercise both comment-closing branches.
-    expect(extractDarkBlock(".dark { /* *x } */ --color-a: 1; }")).toBe("{ /* *x } */ --color-a: 1; }");
+    expect(extractDarkBlock(".dark { /* *x } */ --color-a: 1; }")).toBe(".dark { /* *x } */ --color-a: 1; }");
   });
 
   test("a brace inside a double-quoted string is ignored", () => {
-    expect(extractDarkBlock('.dark { --color-a: "}"; }')).toBe('{ --color-a: "}"; }');
+    expect(extractDarkBlock('.dark { --color-a: "}"; }')).toBe('.dark { --color-a: "}"; }');
   });
 
   test("an escaped quote inside a string does not close it", () => {
-    expect(extractDarkBlock('.dark { --color-a: "\\" }"; --color-b: 2; }')).toBe('{ --color-a: "\\" }"; --color-b: 2; }');
+    expect(extractDarkBlock('.dark { --color-a: "\\" }"; --color-b: 2; }')).toBe(
+      '.dark { --color-a: "\\" }"; --color-b: 2; }',
+    );
   });
 
   test("a brace inside a single-quoted string is ignored", () => {
-    expect(extractDarkBlock(".dark { --color-a: '}'; }")).toBe("{ --color-a: '}'; }");
+    expect(extractDarkBlock(".dark { --color-a: '}'; }")).toBe(".dark { --color-a: '}'; }");
   });
 
   test("nested braces balance before the block closes", () => {
-    expect(extractDarkBlock(".dark { --color-a: {nested}; }")).toBe("{ --color-a: {nested}; }");
+    expect(extractDarkBlock(".dark { --color-a: {nested}; }")).toBe(".dark { --color-a: {nested}; }");
   });
 
   test("a .dark selector with no brace, or a block that never closes, is undefined", () => {
@@ -403,6 +405,46 @@ describe("the server over real HTTP", () => {
     expect(html).not.toMatch(/--color-[a-z0-9-]+:/);
     // And yet the page does link the served tokens.
     expect(html).toContain('href="/tokens.css"');
+  });
+
+  test("the page's root element carries the class the served tokens are scoped to", async () => {
+    const root = await makeFixture();
+    const tokensPath = join(root, "tokens.css");
+    await writeFile(
+      tokensPath,
+      [
+        ":root {",
+        "  --color-background: #ffffff;",
+        "}",
+        ".dark {",
+        "  --color-background: #0f0f0f;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const handle = await start({
+      port: 0,
+      root,
+      collect: async () => statusAt(0),
+      tokensCssPath: tokensPath,
+    });
+    const page = await get(handle.port, "/");
+    const tokens = await get(handle.port, "/tokens.css");
+    expect(page.status).toBe(200);
+    expect(tokens.status).toBe(200);
+    // The two ends of the <link> are asserted together, from what each side
+    // actually serves: the class(es) the served selector requires must be
+    // carried by the page's root element. Neither side is asserted literally,
+    // so a page that loses its class, and a block re-scoped to another class
+    // — or served without any selector at all — each fail here.
+    const css = tokens.body.toString("utf8");
+    const selector = css.slice(0, css.indexOf("{")).trim();
+    const scoped = [...selector.matchAll(/\.([A-Za-z][\w-]*)/g)].map((m) => m[1]);
+    expect(scoped.length).toBeGreaterThan(0);
+    const html = page.body.toString("utf8");
+    const rootTag = html.match(/<html\b[^>]*>/)?.[0] ?? "";
+    const classes = (rootTag.match(/\bclass\s*=\s*["']([^"']*)["']/)?.[1] ?? "").split(/\s+/).filter(Boolean);
+    for (const name of scoped) expect(classes).toContain(name);
   });
 
   test("GET /api/status returns the collected WaveStatus as JSON", async () => {

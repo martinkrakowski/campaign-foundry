@@ -42,7 +42,7 @@ import {
   SAFE_ID_PATTERN,
   type FieldErrors,
 } from "@/components/campaign/validate";
-import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, OutputSection, PolicySection } from "@/components/campaign/sections";
+import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, OutputSection, PolicySection, TemplateSection } from "@/components/campaign/sections";
 import { StatusChip } from "@/components/campaign/StatusChip";
 import { StatusLine } from "@/components/campaign/StatusLine";
 import { ErrorStrip, MOTION_ERROR_KEY, MOTION_HOST_SECTION, sectionForErrorBucket } from "@/components/campaign/ErrorStrip";
@@ -146,6 +146,7 @@ const STEP_SUBTITLES: Record<StepId, string> = {
   copy: messages.stepSubtitleCopy,
   products: messages.stepSubtitleProducts,
   treatments: messages.stepSubtitleTreatments,
+  template: messages.stepSubtitleTemplate,
   layout: messages.stepSubtitleLayout,
   policy: messages.stepSubtitlePolicy,
   output: messages.stepSubtitleOutput,
@@ -1194,8 +1195,8 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   /**
    * A guided step card wraps the same sections the everything stack renders — one at a
    * time, so a step and "the section on that step" are the same thing. The switch is
-   * over the closed six (exhaustive): the review step is handled by the caller, and the
-   * mode-derived step list guarantees this only ever receives one of these six.
+   * over the closed section set (exhaustive): the review step is handled by the caller,
+   * and the mode-derived step list guarantees this only ever receives one of those.
    */
   const renderStepSection = (section: SectionId) => {    switch (section) {
       case "identity":
@@ -1220,6 +1221,10 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
         );
       case "treatments":
         return <TreatmentsSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("treatments")} />;
+      case "template":
+        // The layer list (L5): add and remove, exactly what the compatibility
+        // table offers — the boundary's own offers, never a second list (D124).
+        return <TemplateSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("template")} />;
       case "layout":
         // The template's home (T7): the T5 type block and the step's own
         // compositor frame (D63) — the guided walk mounts the preview.
@@ -1543,10 +1548,12 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
                    <TreatmentsSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("treatments")} />
                  ) : null}
                </div>
-               {/* The template view (T7): the type block, no frame — the Everything
-                   stack has no composed preview surface by design (D43 keeps the
-                   preview Guided-only), so the step-scoped frame stays a step's. */}
-               <LayoutSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("layout")} />
+               {/* The layer list (L5): the offer is the boundary's own (D124). */}
+               <TemplateSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("template")} />
+                {/* The template view (T7): the type block, no frame — the Everything
+                    stack has no composed preview surface by design (D43 keeps the
+                    preview Guided-only), so the step-scoped frame stays a step's. */}
+                <LayoutSection state={state} dispatch={dispatch} errors={sectionErrorsVisible("layout")} />
                <OutputSection
                  state={state}
                  dispatch={dispatch}

@@ -71,8 +71,15 @@ export {
 };
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { DISPLAY_SIZE_VALUES, type DisplaySize } from "@campaignfoundry/CampaignOrchestration/display-sizes";
+import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 import { PLATFORM_PROFILES, isRatioProfile, type PlatformProfile } from "@campaignfoundry/Distribution/platform-profiles";
-import { platformsToFormats, platformsToRatios, platformsToSizes } from "./derive";
+import {
+  addableKinds,
+  platformsToFormats,
+  platformsToRatios,
+  platformsToSizes,
+  removableLayerIds,
+} from "./derive";
 
 
 export const LAYOUT_OPTIONS = ["headline-top", "headline-bottom"] as const;
@@ -385,6 +392,11 @@ export type EditorAction =
   | { type: "setTreatment"; index: number; patch: Partial<TreatmentDraft> }
   | { type: "addTreatment" }
   | { type: "removeTreatment"; index: number }
+  // The template's layer list (L5, D124): the offers the compatibility table
+  // permits. `addLayer` carries the kind only — the id is the reducer's job —
+  // and a new layer carries no props.
+  | { type: "addLayer"; kind: LayerKind }
+  | { type: "removeLayer"; id: string }
   | { type: "addBeat"; text?: string }
   | { type: "removeBeat"; index: number }
   | { type: "moveBeat"; from: number; to: number }
@@ -796,6 +808,49 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         ...state,
         treatments: state.treatments.filter((_, index) => index !== action.index),
       };
+    case "addLayer": {
+      // D124 — the editor's offer IS the boundary's rule: a kind the Template
+      // section could not offer (outside `accepts`, at its own cap, or filling
+      // a shared budget) is refused here exactly as the API refuses it, so the
+      // two cannot drift. A refused dispatch stays identity-equal, like every
+      // guarded case above.
+      if (!addableKinds(state).includes(action.kind)) return state;
+      // A new layer carries no props (L5): `{ id, kind }` only, the id derived
+      // from the kind and deduplicated against the ids the list already holds
+      // (`image`, then `image-2`, `image-3`, …).
+      const taken = new Set(state.template.layers.map((layer) => layer.id));
+      let id: string = action.kind;
+      for (let n = 2; taken.has(id); n += 1) id = `${action.kind}-${n}`;
+      return {
+        ...state,
+        template: {
+          ...state.template,
+          // Appended: array position is z-order (D128), so a new layer is
+          // topmost, and the order of everything already there is untouched.
+          layers: [...state.template.layers, { id, kind: action.kind }],
+        },
+      };
+    }
+    case "removeLayer": {
+      // The same offer discipline, the other direction: a layer the section
+      // could not offer for removal (a required kind's last presence) is a
+      // no-op, so the draft can never hold a brief the boundary refuses for
+      // stripping a kind it will not parse without.
+      if (!removableLayerIds(state).includes(action.id)) return state;
+      // Exactly one row per click. The storage guard refuses duplicate layer
+      // ids, but the reducer is the contract and a draft restored before it
+      // could still carry a pair: filtering by id would strip both at once —
+      // the duplicated kind required, Save would then fail for a layer the
+      // user never touched. The first match goes; the duplicate stays.
+      const index = state.template.layers.findIndex((layer) => layer.id === action.id);
+      return {
+        ...state,
+        template: {
+          ...state.template,
+          layers: state.template.layers.filter((_, i) => i !== index),
+        },
+      };
+    }
     case "addBeat":
       // The domain caps a sequence at MAX_BEATS and the parser refuses more, so the editor
       // must not build a draft it knows Save will reject. A restored draft that already

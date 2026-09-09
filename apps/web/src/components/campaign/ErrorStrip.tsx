@@ -10,7 +10,7 @@ interface ErrorStripProps {
 }
 
 /**
- * An error bucket keys either a section — one of the six in `SECTION_TITLES` — or
+ * An error bucket keys either a section — one of those in `SECTION_TITLES` — or
  * the one exception, `motion`, which validates under its host. The totality test
  * (W6.7) pins this map both ways and declares `MOTION_HOST_SECTION`, so a bucket
  * cannot reach the label lookup without a declared section — the chip label is
@@ -24,6 +24,7 @@ export const SECTION_BY_ERROR_KEY: Record<SectionId, SectionId> = {
   output: "output",
   policy: "policy",
   layout: "layout",
+  template: "template",
 };
 
 /** The one non-section bucket: motion's errors render inside its Output host. */
