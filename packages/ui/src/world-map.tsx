@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { cn } from "./cn";
-import { polyPath } from "./geo/chaikin";
-import { dotMatrix, GRATICULE_HORIZONTALS, GRATICULE_VERTICALS, MAP_HEIGHT, MAP_WIDTH, type Footprint } from "./geo/footprints";
+import { polyPath, type Pt } from "./geo/chaikin";
+import { dotMatrix, GRATICULE_HORIZONTALS, GRATICULE_VERTICALS, MAP_HEIGHT, MAP_WIDTH, type Footprint, type MapDot } from "./geo/footprints";
 
 export interface WorldMapProps {
   /** The footprints to paint, in vocabulary order (§2.3). */
@@ -21,10 +21,34 @@ export interface WorldMapProps {
   readonly className?: string;
 }
 
+/** Shoelace area of one polygon; `Math.abs` so a clockwise or counter-clockwise winding never matters. */
+export function polygonArea(pts: readonly Pt[]): number {
+  let sum = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i];
+    const [xj, yj] = pts[j];
+    sum += xj * yi - xi * yj;
+  }
+  return Math.abs(sum) / 2;
+}
+
+/** A footprint's summed polygon area — its "size" for hit-testing, computed once per footprints prop. */
+export function footprintArea(footprint: Footprint): number {
+  return footprint.polys.reduce((total, poly) => total + polygonArea(poly), 0);
+}
+
+export interface Painted extends Footprint {
+  readonly dots: readonly MapDot[];
+  readonly area: number;
+}
+
 /**
  * The world map: one `<g>` per footprint with its dot matrix, in token colours.
  * Single-select (D94) — no `multiple`, no arcs; the hub ripple is refused (D96),
  * the dot reveal is a one-shot transition on selection, which D96 permits.
+ * Footprints are sorted by descending area so the smallest paints last (topmost).
+ * Each group carries its own `onClick`, so paint order = hit order, and a click
+ * reaches the smallest footprint under the cursor without coordinate arithmetic.
  */
 export function WorldMap({
   footprints,
@@ -37,18 +61,16 @@ export function WorldMap({
   const [hovered, setHovered] = useState<string | null>(null);
   const caption = hovered === null ? "" : labelFor(hovered);
 
-  // The dot matrix is generated geometry — compute it once per footprints prop, not
-  // on every hover re-render.
-  const painted = useMemo(
-    () => footprints.map((f) => ({ ...f, dots: dotMatrix(f.polys, f.hub) })),
+  // The dot matrix and the footprint areas are generated geometry — compute them
+  // once per footprints prop, not on every hover or click re-render.
+  const painted = useMemo<Painted[]>(
+    () => footprints.map((f) => ({ ...f, dots: dotMatrix(f.polys, f.hub), area: footprintArea(f) })),
     [footprints],
   );
-  // Unselected stay in vocabulary order; the selected footprint paints last so an
-  // overlapping later region cannot cover it. Unknown / null values paint as-is.
-  const selectedFootprint = painted.find((f) => f.value === value);
-  const ordered = selectedFootprint === undefined
-    ? painted
-    : [...painted.filter((f) => f.value !== selectedFootprint.value), selectedFootprint];
+  // Descending area: the smallest footprint paints last and is therefore topmost.
+  // Paint order = hit order, so a click on a group element selects that footprint
+  // without coordinate arithmetic.
+  const ordered = useMemo(() => [...painted].sort((a, b) => b.area - a.area), [painted]);
 
   return (
     <div className={cn("space-y-1", className)}>
@@ -77,12 +99,6 @@ export function WorldMap({
                 key={f.value}
                 data-region={f.value}
                 data-selected={selected || undefined}
-                // Paint order and hit-testing are decided separately: the selected
-                // footprint still paints last (so its fill is visible), but it is not
-                // a pointer target — clicking an already-selected region is a no-op,
-                // and the event must reach the footprint underneath (GLOBAL covers
-                // every landmass; EU overlaps DE the same way).
-                pointerEvents={selected ? "none" : undefined}
                 className="group cursor-pointer"
                 onClick={() => onSelect(f.value)}
                 onMouseEnter={() => setHovered(f.value)}

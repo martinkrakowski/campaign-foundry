@@ -1,7 +1,9 @@
 import { describe, test, expect, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
-import { WorldMap } from "../world-map";
-import { REGION_FOOTPRINTS } from "../geo/footprints";
+import { WorldMap, footprintArea } from "../world-map";
+import { REGION_FOOTPRINTS, type Footprint } from "../geo/footprints";
+import * as footprints from "../geo/footprints";
+import type { Pt } from "../geo/chaikin";
 
 // The map is painted from the kit's own footprint table (§2.3). Labels are
 // caller-supplied — the distinctive prefix proves the hub and caption read
@@ -38,52 +40,116 @@ describe("WorldMap", () => {
     expect(svgOf(container).querySelectorAll("line").length).toBe(11);
   });
 
-  test("clicking a footprint's g calls onSelect with its value", () => {
+  test("clicking a footprint element calls onSelect with its value", () => {
     const { onSelect, container } = renderMap();
     fireEvent.click(regionOf(container, "EU"));
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith("EU");
   });
 
-  test("value=GLOBAL, clicking DE reaches DE — the selected footprint is not a pointer target", () => {
-    const { onSelect, container } = renderMap({ value: "GLOBAL" });
-    // GLOBAL paints last (so its fill is visible) but must not swallow the hit:
-    // its whole group is hit-transparent, so the event falls through to DE.
-    expect(regionOf(container, "GLOBAL").getAttribute("pointer-events")).toBe("none");
-    expect(regionOf(container, "DE").getAttribute("pointer-events")).not.toBe("none");
+  test("select the world, click a country, click it again: the selection does not move (H2)", () => {
+    const onSelect = vi.fn();
+    const shared = { footprints: REGION_FOOTPRINTS, fallbackHint: HINT, labelFor, onSelect };
+    const { container, rerender } = render(<WorldMap {...shared} value="GLOBAL" />);
+    // The world is selected; clicking Germany once selects DE…
     fireEvent.click(regionOf(container, "DE"));
-    expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(onSelect).toHaveBeenCalledWith("DE");
+    expect(onSelect).toHaveBeenLastCalledWith("DE");
+    // …and clicking it again — now that DE is selected and paints on top — must
+    // re-select DE. With area-sorted rendering the smallest footprint is topmost,
+    // so a click on its element selects it regardless of selection state.
+    rerender(<WorldMap {...shared} value="DE" />);
+    fireEvent.click(regionOf(container, "DE"));
+    expect(onSelect).toHaveBeenCalledTimes(2);
+    expect(onSelect).toHaveBeenLastCalledWith("DE");
   });
 
-  test("value=EU, clicking DE reaches DE — overlapping selected paint does not swallow the hit", () => {
+  test("clicking DE's element selects DE, not EU, not GLOBAL", () => {
     const { onSelect, container } = renderMap({ value: "EU" });
-    expect(regionOf(container, "EU").getAttribute("pointer-events")).toBe("none");
-    expect(regionOf(container, "DE").getAttribute("pointer-events")).not.toBe("none");
     fireEvent.click(regionOf(container, "DE"));
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith("DE");
   });
 
-  test("value=null, every footprint is a pointer target", () => {
-    const { onSelect, container } = renderMap({ value: null });
-    for (const g of container.querySelectorAll("[data-region]")) {
-      expect(g.getAttribute("pointer-events")).not.toBe("none");
+  test("clicking EU's element selects EU", () => {
+    const { onSelect, container } = renderMap({ value: "GLOBAL" });
+    fireEvent.click(regionOf(container, "EU"));
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith("EU");
+  });
+
+  test("selection state does not change which footprint a click reaches", () => {
+    const selected = renderMap({ value: "DE" });
+    fireEvent.click(regionOf(selected.container, "DE"));
+    expect(selected.onSelect).toHaveBeenCalledTimes(1);
+    expect(selected.onSelect).toHaveBeenLastCalledWith("DE");
+
+    const unselected = renderMap({ value: "EU" });
+    fireEvent.click(regionOf(unselected.container, "DE"));
+    expect(unselected.onSelect).toHaveBeenCalledTimes(1);
+    expect(unselected.onSelect).toHaveBeenLastCalledWith("DE");
+  });
+
+  test("no footprint carries a pointer-events attribute — selection never switches hit-testing off", () => {
+    for (const value of ["GLOBAL", "EU", "DE", null] as const) {
+      const { container } = renderMap({ value });
+      for (const g of container.querySelectorAll("[data-region]")) {
+        expect(g.getAttribute("pointer-events")).toBeNull();
+      }
     }
-    fireEvent.click(regionOf(container, "GLOBAL"));
-    expect(onSelect).toHaveBeenCalledWith("GLOBAL");
+  });
+
+  test("an exact area tie goes to the footprint declared later", () => {
+    const equal: readonly Pt[] = [[0, 0], [10, 0], [0, 10]];
+    const tied: readonly Footprint[] = [
+      { value: "A", polys: [equal] },
+      { value: "B", polys: [equal] },
+    ];
+    const { onSelect, container } = renderMap({ footprints: tied });
+    // Both have the same area; B is declared later so it sorts after A. Both are
+    // in the DOM — clicking B's element selects B.
+    fireEvent.click(regionOf(container, "B"));
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith("B");
+  });
+
+  test("the render order is smallest-area-last — DOM order matches descending area", () => {
+    const { container } = renderMap();
+    const regions = Array.from(container.querySelectorAll("[data-region]")).map(
+      (g) => g.getAttribute("data-region")!,
+    );
+    const areas = regions.map((value) => {
+      const fp = REGION_FOOTPRINTS.find((f) => f.value === value)!;
+      return footprintArea(fp);
+    });
+    for (let i = 1; i < areas.length; i++) {
+      expect(areas[i - 1]!).toBeGreaterThanOrEqual(areas[i]!);
+    }
+  });
+
+  test("areas are computed once, not per click (memo identity)", () => {
+    // Areas and the dot matrix are built by the same useMemo — one call per
+    // footprint per footprints change. dotMatrix is the member visible across the
+    // module boundary (a same-module helper cannot be spied on), so its call count
+    // is the memo's build count — and with it, the area pass inside it. Selection
+    // and clicks must never rebuild that memo.
+    const dotSpy = vi.spyOn(footprints, "dotMatrix");
+    const { container, rerender } = renderMap({ value: "DE" });
+    expect(dotSpy.mock.calls.length).toBe(REGION_FOOTPRINTS.length);
+    rerender(
+      <WorldMap footprints={REGION_FOOTPRINTS} value={null} onSelect={() => {}} fallbackHint={HINT} labelFor={labelFor} />,
+    );
     fireEvent.click(regionOf(container, "DE"));
-    expect(onSelect).toHaveBeenCalledWith("DE");
+    fireEvent.click(regionOf(container, "EU"));
+    expect(dotSpy.mock.calls.length).toBe(REGION_FOOTPRINTS.length);
   });
 
   test.each(["EU", "GLOBAL", "DE"] as const)(
-    "value=%s paints that footprint last and only it carries the selected fill",
+    "value=%s paints that footprint selected and only it carries the selected fill",
     (value) => {
       const { container } = renderMap({ value });
       const selected = container.querySelectorAll("[data-selected]");
       expect(selected.length).toBe(1);
       expect(selected[0]?.getAttribute("data-region")).toBe(value);
-      expect(selected[0]?.parentElement?.lastElementChild).toBe(selected[0]);
       for (const g of container.querySelectorAll("[data-region]")) {
         const region = g.getAttribute("data-region");
         const paths = g.querySelectorAll("path");
