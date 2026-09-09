@@ -3,7 +3,11 @@
 import { useId } from "react";
 import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 import { Button, IconButton } from "@/components/ui";
-import { addableKinds, canMoveLayer, removableLayerIds } from "@/components/campaign/derive";
+import {
+  addableKinds,
+  canMoveLayer,
+  removableLayerIds,
+} from "@/components/campaign/derive";
 import { layerKindDisplayName } from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
 import { SectionShell, type SectionProps } from "./IdentitySection";
@@ -35,9 +39,12 @@ export function TemplateSection({ state, dispatch }: SectionProps) {
   // document — the trap the kit's own cards avoid with `useId`.
   const uid = useId();
   const addDescId = (kind: LayerKind) => `${uid}-add-${kind}`;
-  const moveDownDescId = (layerId: string, index: number) => `${uid}-move-down-${layerId}-${index}`;
-  const moveUpDescId = (layerId: string, index: number) => `${uid}-move-up-${layerId}-${index}`;
-  const removeDescId = (layerId: string, index: number) => `${uid}-remove-${layerId}-${index}`;
+  const moveDownDescId = (layerId: string, index: number) =>
+    `${uid}-move-down-${layerId}-${index}`;
+  const moveUpDescId = (layerId: string, index: number) =>
+    `${uid}-move-up-${layerId}-${index}`;
+  const removeDescId = (layerId: string, index: number) =>
+    `${uid}-remove-${layerId}-${index}`;
   const listLabelId = `${uid}-list-label`;
 
   // Both offers, consumed — never reimplemented (D124).
@@ -74,18 +81,31 @@ export function TemplateSection({ state, dispatch }: SectionProps) {
                 <span className="block text-[13px] text-text-primary">
                   {layerKindDisplayName(layer.kind)}
                 </span>
-                <span className="block font-mono text-[11px] text-text-muted">{layer.id}</span>
+                <span className="block font-mono text-[11px] text-text-muted">
+                  {layer.id}
+                </span>
               </span>
               <span className="flex shrink-0 items-center gap-1">
                 {mayMoveDown ? (
                   <span className="flex shrink-0 items-center">
-                    <span id={moveDownDescId(layer.id, index)} className="sr-only">
-                      {messages.templateMoveDownDescription(layerKindDisplayName(layer.kind))}
+                    <span
+                      id={moveDownDescId(layer.id, index)}
+                      className="sr-only"
+                    >
+                      {messages.templateMoveDownDescription(
+                        layerKindDisplayName(layer.kind),
+                      )}
                     </span>
                     <IconButton
                       label={layer.id}
                       aria-describedby={moveDownDescId(layer.id, index)}
-                      onClick={() => dispatch({ type: "moveLayer", from: index, to: index - 1 })}
+                      onClick={() =>
+                        dispatch({
+                          type: "moveLayer",
+                          from: index,
+                          to: index - 1,
+                        })
+                      }
                     >
                       ↓
                     </IconButton>
@@ -93,13 +113,24 @@ export function TemplateSection({ state, dispatch }: SectionProps) {
                 ) : null}
                 {mayMoveUp ? (
                   <span className="flex shrink-0 items-center">
-                    <span id={moveUpDescId(layer.id, index)} className="sr-only">
-                      {messages.templateMoveUpDescription(layerKindDisplayName(layer.kind))}
+                    <span
+                      id={moveUpDescId(layer.id, index)}
+                      className="sr-only"
+                    >
+                      {messages.templateMoveUpDescription(
+                        layerKindDisplayName(layer.kind),
+                      )}
                     </span>
                     <IconButton
                       label={layer.id}
                       aria-describedby={moveUpDescId(layer.id, index)}
-                      onClick={() => dispatch({ type: "moveLayer", from: index, to: index + 1 })}
+                      onClick={() =>
+                        dispatch({
+                          type: "moveLayer",
+                          from: index,
+                          to: index + 1,
+                        })
+                      }
                     >
                       ↑
                     </IconButton>
@@ -107,13 +138,20 @@ export function TemplateSection({ state, dispatch }: SectionProps) {
                 ) : null}
                 {layerRemovable ? (
                   <span className="flex shrink-0 items-center">
-                    <span id={removeDescId(layer.id, index)} className="sr-only">
-                      {messages.templateRemoveDescription(layerKindDisplayName(layer.kind))}
+                    <span
+                      id={removeDescId(layer.id, index)}
+                      className="sr-only"
+                    >
+                      {messages.templateRemoveDescription(
+                        layerKindDisplayName(layer.kind),
+                      )}
                     </span>
                     <IconButton
                       label={layer.id}
                       aria-describedby={removeDescId(layer.id, index)}
-                      onClick={() => dispatch({ type: "removeLayer", id: layer.id })}
+                      onClick={() =>
+                        dispatch({ type: "removeLayer", id: layer.id })
+                      }
                     >
                       ×
                     </IconButton>
@@ -124,8 +162,13 @@ export function TemplateSection({ state, dispatch }: SectionProps) {
           );
         })}
       </ol>
+      {state.occlusionNotice ? (
+        <p className="text-[12px] text-text-muted">{state.occlusionNotice}</p>
+      ) : null}
       {requiredNames.length > 0 ? (
-        <p className="text-[12px] text-text-muted">{messages.templateRequiredNote(requiredNames)}</p>
+        <p className="text-[12px] text-text-muted">
+          {messages.templateRequiredNote(requiredNames)}
+        </p>
       ) : null}
       {/* The offer rides the group whenever the section is mounted: a kind at
           its limit is absent from the group, and an offered-then-refused

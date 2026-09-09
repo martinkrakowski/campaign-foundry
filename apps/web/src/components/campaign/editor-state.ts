@@ -82,6 +82,7 @@ import {
 } from "@campaignfoundry/Distribution/platform-profiles";
 import {
   addableKinds,
+  checkRepositionOcclusion,
   findLegalInsertionIndex,
   platformsToFormats,
   platformsToRatios,
@@ -403,6 +404,12 @@ export interface EditorState {
    * axis toggle that does not clamp. Derived UI state: never serialized.
    */
   countNotice: number | null;
+  /**
+   * Advisory finding when a layer reposition introduces occlusion (D135, D136).
+   * Populated on `moveLayer` when the new order occludes, cleared when the order
+   * no longer occludes. Derived UI state: never serialized.
+   */
+  occlusionNotice: string | null;
   appliedSnapshot: CampaignBrief | null;
   capabilities: { motion: boolean; reason?: string } | null;
 }
@@ -549,6 +556,7 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
     pool: null,
     headlineAxisDropped: false,
     countNotice: null,
+    occlusionNotice: null,
     appliedSnapshot: null,
     capabilities: null,
   };
@@ -874,6 +882,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         motion,
         duration,
         motionSeeded,
+        occlusionNotice: null,
       };
     }
     case "patch": {
@@ -971,6 +980,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       ];
       return {
         ...state,
+        occlusionNotice: null,
         template: {
           ...state.template,
           // Placed at the derived legal index (highest index satisfying constraints,
@@ -995,6 +1005,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       );
       return {
         ...state,
+        occlusionNotice: null,
         template: {
           ...state.template,
           layers: state.template.layers.filter((_, i) => i !== index),
@@ -1017,8 +1028,14 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       const layers = [...state.template.layers];
       const [moved] = layers.splice(action.from, 1);
       layers.splice(action.to, 0, moved);
+      const occlusion = checkRepositionOcclusion(
+        layers,
+        action.to,
+        action.from,
+      );
       return {
         ...state,
+        occlusionNotice: occlusion.reason ?? null,
         template: {
           ...state.template,
           layers,
@@ -1929,6 +1946,7 @@ export function fromBrief(
     pool: null,
     headlineAxisDropped: false,
     countNotice: null,
+    occlusionNotice: null,
     appliedSnapshot: null,
     capabilities: null,
   };
@@ -2413,6 +2431,8 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     motionSeeded: raw.motionSeeded === true,
     // The count notice is one-time UI, not part of the draft it describes.
     countNotice: null,
+    // The occlusion notice is derived UI from reposition, not persisted state.
+    occlusionNotice: null,
   } as EditorState;
 }
 

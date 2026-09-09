@@ -13,6 +13,7 @@
  * Per D131, `fill` appears in no `accepts` list until L11 draws it.
  */
 import type { AdvertisingUnit } from "./advertising-units.js";
+import type { ComplianceResult } from "./ComplianceResult.vo.js";
 import type { LayerKind } from "./layer-kinds.js";
 
 export const CREATIVE_TYPES = ["image-text", "image-html", "video"] as const;
@@ -50,8 +51,8 @@ export interface OrderConstraint {
 
 export interface CreativeTypeRule {
   readonly unit: AdvertisingUnit;
-  readonly accepts: readonly LayerKind[];   // every kind this type may hold
-  readonly required: readonly LayerKind[];  // a subset of accepts; cannot be removed or disabled
+  readonly accepts: readonly LayerKind[]; // every kind this type may hold
+  readonly required: readonly LayerKind[]; // a subset of accepts; cannot be removed or disabled
   /**
    * How many layers of a kind the type may hold (D124): the compositor draws at
    * most one of each decorated kind. A kind missing from the map — or the field
@@ -74,13 +75,25 @@ export interface CreativeTypeRule {
    * Optional on the rule, absent meaning unconstrained.
    */
   readonly orderConstraints?: readonly OrderConstraint[];
-  readonly outputFamilies: readonly ["static" | "motion" | "html", ...("static" | "motion" | "html")[]];
+  readonly outputFamilies: readonly [
+    "static" | "motion" | "html",
+    ...("static" | "motion" | "html")[],
+  ];
 }
 
-export const CREATIVE_TYPE_RULES: Readonly<Record<CreativeType, CreativeTypeRule>> = {
+export const CREATIVE_TYPE_RULES: Readonly<
+  Record<CreativeType, CreativeTypeRule>
+> = {
   "image-text": {
     unit: "standard-web",
-    accepts: ["image", "shade", "accent", "static-text", "animated-text", "logo"],
+    accepts: [
+      "image",
+      "shade",
+      "accent",
+      "static-text",
+      "animated-text",
+      "logo",
+    ],
     required: ["image", "static-text"],
     maxOf: { logo: 1, shade: 1, accent: 1 },
     sharedBudgets: [{ kinds: ["static-text", "animated-text"], max: 1 }],
@@ -97,7 +110,7 @@ export const CREATIVE_TYPE_RULES: Readonly<Record<CreativeType, CreativeTypeRule
     maxOf: { logo: 1 },
     outputFamilies: ["html"],
   },
-  "video": {
+  video: {
     unit: "standard-web",
     accepts: ["video", "shade", "animated-text", "logo"],
     required: ["video"],
@@ -105,3 +118,212 @@ export const CREATIVE_TYPE_RULES: Readonly<Record<CreativeType, CreativeTypeRule
     outputFamilies: ["motion"],
   },
 };
+
+/**
+ * Occlusion classification and behavior classes (D135).
+ *
+ * - `opaque`: full-bleed opacity; anything below is completely hidden.
+ * - `attenuating`: contrast tint or scrim; text below is muted, not lost.
+ * - `local`: bounded graphic; overlaps only where it sits.
+ * - `none`: transparent or background layer; creates no occlusion over other layers.
+ */
+export type OcclusionBehavior = "opaque" | "attenuating" | "local" | "none";
+
+export interface OcclusionRule {
+  readonly behavior: OcclusionBehavior;
+  /**
+   * Which layer kinds this layer obscures when sitting above them.
+   * "all" means any layer below it is obscured.
+   * A list of kinds restricts occlusion to those specific kinds.
+   * Absent/undefined for behavior "none".
+   */
+  readonly obscures?: "all" | readonly LayerKind[];
+}
+
+/**
+ * Occlusion table (D135) — declared data beside CREATIVE_TYPE_RULES,
+ * readable without interpretation so the editor and compositor cannot drift (D121).
+ *
+ * Verbatim rules from D135:
+ * - `image` and `fill` are opaque — anything below them is hidden;
+ * - `shade` and `accent` are attenuating — text below them is muted, not lost;
+ * - `logo` is local — it overlaps only where it sits.
+ *
+ * Classification of kinds not classified by D135:
+ * - `static-text`: behavior "none" — glyph letterforms are surrounded by transparent counters/interstices,
+ *   so text does not obscure the canvas or imagery beneath it.
+ * - `animated-text`: behavior "none" — animated glyphs similarly composite with transparent background,
+ *   leaving layers below visible.
+ * - `html`: behavior "none" — HTML layers manage their own styled bounds and transparency,
+ *   acting as layout elements rather than full-frame occluders.
+ * - `video`: behavior "none" — video serves as the base motion background plate in video creative types,
+ *   never as an overlay or scrim over other layers.
+ */
+export const OCCLUSION_TABLE: Readonly<Record<LayerKind, OcclusionRule>> = {
+  image: { behavior: "opaque", obscures: "all" },
+  fill: { behavior: "opaque", obscures: "all" },
+  shade: {
+    behavior: "attenuating",
+    obscures: ["static-text", "animated-text"],
+  },
+  accent: {
+    behavior: "attenuating",
+    obscures: ["static-text", "animated-text"],
+  },
+  logo: {
+    behavior: "local",
+    obscures: ["static-text", "animated-text"],
+  },
+  "static-text": { behavior: "none" },
+  "animated-text": { behavior: "none" },
+  html: { behavior: "none" },
+  video: { behavior: "none" },
+};
+
+/**
+ * Formats a specific pair occlusion reason (D135).
+ * Names both layers and the effect:
+ * - opaque: "will hide it"
+ * - attenuating: "will mute it"
+ * - local: "will overlap where it sits"
+ *
+ * Text layers are referred to as "the headline" per D135 verbatim:
+ * "the shade layer now sits above the headline and will mute it".
+ */
+export function formatOcclusionReason(
+  above: LayerKind,
+  below: LayerKind,
+  behavior: OcclusionBehavior,
+): string {
+  const aboveName =
+    above === "static-text" || above === "animated-text"
+      ? "headline"
+      : above === "html"
+        ? "HTML"
+        : above;
+  const belowName =
+    below === "static-text" || below === "animated-text"
+      ? "the headline"
+      : below === "html"
+        ? "the HTML"
+        : `the ${below}`;
+  const verb =
+    behavior === "opaque"
+      ? "hide it"
+      : behavior === "attenuating"
+        ? "mute it"
+        : "overlap where it sits";
+  return `the ${aboveName} layer now sits above ${belowName} and will ${verb}`;
+}
+
+/**
+ * Checks whether layer `above` sitting above layer `below` produces an occlusion (D135, D136).
+ *
+ * Advisory representation in ComplianceResult (D136):
+ * Returns `{ passed: true, reason?: string }`.
+ * An advisory finding never fails a compliance gate (`passed: true`), but conveys
+ * the finding through `reason`. Adding a separate severity field to ComplianceResult
+ * would alter the contract of existing checks (validateLegalCopy, validateBrandColorDensity).
+ * Returning `passed: true` with `reason` preserves type compatibility across all gates.
+ */
+export function checkPairOcclusion(
+  above: LayerKind,
+  below: LayerKind,
+): ComplianceResult {
+  if (above === below) return { passed: true };
+  const rule = OCCLUSION_TABLE[above];
+  if (!rule || rule.behavior === "none" || !rule.obscures) {
+    return { passed: true };
+  }
+  const isObscured =
+    rule.obscures === "all" ||
+    (Array.isArray(rule.obscures) && rule.obscures.includes(below));
+  if (!isObscured) {
+    return { passed: true };
+  }
+  return {
+    passed: true,
+    reason: formatOcclusionReason(above, below, rule.behavior),
+  };
+}
+
+/**
+ * Checks whether repositioning a layer at `to` creates an occlusion (D135).
+ *
+ * Evaluated per layer on every reposition. If the layer was moved, inspects:
+ * - If moved up (or direction unspecified): whether it now sits above a layer it occludes.
+ * - If moved down: whether any layer above it now occludes it, or whether it still occludes a layer below.
+ */
+export function checkRepositionOcclusion(
+  layers: readonly { readonly kind: LayerKind }[],
+  to: number,
+  from?: number,
+): ComplianceResult {
+  if (to < 0 || to >= layers.length || layers.length === 0) {
+    return { passed: true };
+  }
+  const subject = layers[to]!;
+
+  // If moved down (from > to), check if any layer above now occludes subject
+  if (from !== undefined && to < from) {
+    for (let j = to + 1; j < layers.length; j++) {
+      const above = layers[j]!;
+      const result = checkPairOcclusion(above.kind, subject.kind);
+      if (result.reason !== undefined) {
+        return result;
+      }
+    }
+    // Also check if subject occludes anything below it in its new position
+    for (let i = to - 1; i >= 0; i--) {
+      const below = layers[i]!;
+      const result = checkPairOcclusion(subject.kind, below.kind);
+      if (result.reason !== undefined) {
+        return result;
+      }
+    }
+    return { passed: true };
+  }
+
+  // Moved up (or from unspecified): check if subject occludes any layer below it
+  for (let i = to - 1; i >= 0; i--) {
+    const below = layers[i]!;
+    const result = checkPairOcclusion(subject.kind, below.kind);
+    if (result.reason !== undefined) {
+      return result;
+    }
+  }
+
+  // Fallback: if from was not specified, also check if any layer above occludes subject
+  if (from === undefined) {
+    for (let j = to + 1; j < layers.length; j++) {
+      const above = layers[j]!;
+      const result = checkPairOcclusion(above.kind, subject.kind);
+      if (result.reason !== undefined) {
+        return result;
+      }
+    }
+  }
+
+  return { passed: true };
+}
+
+/**
+ * Checks an entire template layer list for any occlusion (D135, D136).
+ * Scans top-down and returns the first advisory occlusion finding encountered,
+ * or `{ passed: true }` if none exists.
+ */
+export function checkTemplateOcclusion(
+  layers: readonly { readonly kind: LayerKind }[],
+): ComplianceResult {
+  for (let i = layers.length - 1; i >= 1; i--) {
+    const above = layers[i]!;
+    for (let j = i - 1; j >= 0; j--) {
+      const below = layers[j]!;
+      const result = checkPairOcclusion(above.kind, below.kind);
+      if (result.reason !== undefined) {
+        return result;
+      }
+    }
+  }
+  return { passed: true };
+}
