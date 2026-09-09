@@ -172,6 +172,34 @@ the measurement rule**, so it has no cost figures at all. Three seats, no compar
 | 2, 5, 8, 11 | `opencode-go/glm-5.3-flash` (`--format json`) |
 | 3, 6, 9, 12 | `opencode/big-pickle` (`--format json`) |
 
+### Dispatching the agy seat
+
+`dispatch-lane.sh` runs `opencode run` unless you give it `LANE_CMD`, so **a `MODEL=agy/...` is
+silently wrong** — the string is handed to opencode as a model id. Implementer 1 goes through the
+escape hatch:
+
+```sh
+LANE_CMD='agy --print "$(cat BRIEF)" --dangerously-skip-permissions --effort high \
+  --model gemini-3.8-flash-high --print-timeout 90m --output-format json' \
+  dispatch-lane.sh "$LOGDIR" "<lane>:<worktree>:<brief>"
+```
+
+`LANE_CMD` runs inside the worktree and the wrapper still appends the `EXIT` marker, so the wait
+loop and the wave events work unchanged.
+
+### Trial results so far
+
+| Lane | Seat | Outcome |
+|---|---|---|
+| W2b, W2b1 | `opencode/big-pickle` | **Two silent no-ops.** The second read two files, made one shell call, then spent 31,974 reasoning tokens against 26 output tokens and stopped on `"reason":"length"`. It committed nothing both times. |
+| W2b1 (retry) | `agy gemini-3.8-flash-high` | Shipped the lane, then **two fix rounds** covering six verified defects, each with its own mutation. 550k total tokens for the first, and every commit landed. |
+
+**What this does and does not say.** The brief was identical across all three attempts and is inside
+the 2–3 deliverable band that has always shipped, so **this is a seat difference, not a brief
+difference** — the one case so far where that can be said cleanly. It is still one lane. A
+`"reason":"length"` stop with a large reasoning count and a negligible output count is the signature
+to watch for: **the run bills in full and produces nothing**, and its exit code is `0`.
+
 **Where the counter lives.** The trial index is **not** per wave — a per-wave counter restarts and
 hands lane 1 to the same seat every time, which recreates the confound this protocol exists to
 remove. Each wave record ends with a line `trial index: N` naming the index the wave finished on,
