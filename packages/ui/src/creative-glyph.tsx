@@ -1,7 +1,7 @@
-import { useId, type ReactNode } from "react";
-import type { LayoutKind, ToneKind } from "@campaignfoundry/CampaignOrchestration";
+import { useId, Fragment, type ReactNode } from "react";
+import type { LayoutKind, LayerKind, ToneKind } from "@campaignfoundry/CampaignOrchestration";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
-import { LAYERS, PREVIEW_BOX, fractionOfBox } from "./preview-layers";
+import { LAYERS, PREVIEW_BOX, PREVIEW_LAYER_ORDER, fractionOfBox } from "./preview-layers";
 
 export type LayoutOption = LayoutKind;
 export type ToneOption = ToneKind;
@@ -40,13 +40,58 @@ const shortBarX = fractionOfBox(LAYERS.shortBar.x);
 const shortBarWidth = fractionOfBox(LAYERS.shortBar.width);
 
 /**
- * A miniature of the creative the compositor will draw, in its layer order
- * (NodeCanvasCompositor.draw): photo ground → contrast shade on the headline
- * edge → brand accent band flush to that edge → text. `layout` picks the edge;
- * `tone` scales the shade and the text weight. `motion` animates the corresponding
- * group via CSS keyframes with an always-present cue glyph fallback for reduced
- * motion and disabled states. The entire SVG is `aria-hidden`: the label carries
- * the meaning, never the picture.
+ * One kind's contribution to the miniature: the animation group its element
+ * draws inside (verbatim class names — the glyph's CSS and tests key on them)
+ * and the element it draws today.
+ *
+ * Kinds the miniature does not paint (`fill`, `html`, `video`, `logo`) have no
+ * entry here, and **absent means skipped, not thrown**: the glyph is a small
+ * still sketch, not the compositor, which throws on an undrawable kind because
+ * a real render must fail loudly (NodeCanvasCompositor.layerDrawers, D127). The
+ * difference is deliberate. `static-text` and `animated-text` share one renderer
+ * — the bars are the copy in miniature — exactly as the compositor landed it
+ * (D127: `"animated-text": drawStaticText`; a still frame of animated text is
+ * its rest pose).
+ */
+interface GlyphPainting {
+  readonly group: string;
+  readonly element: ReactNode;
+}
+
+/** A run of consecutive ordered kinds that the glyph wraps in one animation group. */
+interface GlyphGroupRun {
+  readonly className: string;
+  readonly kinds: LayerKind[];
+}
+
+/**
+ * Consecutive kinds sharing one animation group are wrapped in a single `<g>` so
+ * the markup stays byte-identical to the pre-refactor glyph
+ * (`creative-glyph.byte-identity.test.tsx`); runs derive from the iterated
+ * order, never a second list.
+ */
+function groupRuns(painted: readonly LayerKind[], paintings: Partial<Record<LayerKind, GlyphPainting>>): GlyphGroupRun[] {
+  const runs: { className: string; kinds: LayerKind[] }[] = [];
+  for (const kind of painted) {
+    const className = paintings[kind]!.group;
+    const last = runs[runs.length - 1];
+    if (last?.className === className) {
+      last.kinds.push(kind);
+    } else {
+      runs.push({ className, kinds: [kind] });
+    }
+  }
+  return runs;
+}
+/**
+ * A miniature of the creative the compositor will draw. It paints exactly the
+ * compositor's resolved stack order by iterating `PREVIEW_LAYER_ORDER` (D121),
+ * so the glyph and `NodeCanvasCompositor` cannot drift about which kind sits
+ * where. A kind without a renderer here is skipped — see `GlyphPainting`.
+ * `layout` picks the edge; `tone` scales the shade and the text weight. `motion`
+ * animates the corresponding group via CSS keyframes with an always-present cue
+ * glyph fallback for reduced motion and disabled states. The entire SVG is
+ * `aria-hidden`: the label carries the meaning, never the picture.
  */
 export function CreativeGlyph({ layout, tone, motion, size = 46 }: CreativeGlyphProps): ReactNode {
   // An axis card previews one axis at a time; the omitted prop falls back to a
@@ -63,6 +108,50 @@ export function CreativeGlyph({ layout, tone, motion, size = 46 }: CreativeGlyph
   const fadeGradientId = `creative-glyph-fade-${useId()}`;
   const longBarY = top ? TEXT_EDGE : VIEWBOX - TEXT_EDGE - barHeight;
   const shortBarY = top ? longBarY + barHeight + BAR_GAP : longBarY - BAR_GAP - barHeight;
+  // The message as two bars; tone sets their weight. static-text and animated-text
+  // draw exactly the same still (D127) — the kind names the capability.
+  const textBars: GlyphPainting = {
+    group: "glyph-anim glyph-text",
+    element: (
+      <>
+        <rect x={longBarX} y={longBarY} width={longBarWidth} height={barHeight} rx={barHeight / 2} className="fill-text-primary" />
+        <rect x={shortBarX} y={shortBarY} width={shortBarWidth} height={barHeight} rx={barHeight / 2} className="fill-text-primary" />
+      </>
+    ),
+  };
+  /**
+   * kind → what the miniature paints, verbatim. Only painted kinds have entries;
+   * `logo` (in the order but unrendered here), `fill`, `html` and `video` are
+   * skipped — see `GlyphPainting`.
+   */
+  const paintings: Partial<Record<LayerKind, GlyphPainting>> = {
+    /* Layer 1 — photo ground (text-muted: the neutral placeholder). */
+    image: { group: "glyph-anim glyph-ground", element: <rect x="0" y="0" width={VIEWBOX} height={VIEWBOX} className="fill-text-muted" /> },
+    /* Layer 2 — contrast shade on the headline edge, fading into the image. */
+    shade: { group: "glyph-anim glyph-ground", element: <rect x="0" y="0" width={VIEWBOX} height={VIEWBOX} fill={`url(#${gradientId})`} /> },
+    /* Layer 3 — the soft fade the accent band melts into (the accent-wipe layer),
+       then the brand accent band flush to the headline edge. */
+    accent: {
+      group: "glyph-band-group",
+      element: (
+        <>
+          <rect
+            x="0"
+            y={top ? BAND : VIEWBOX - BAND - fadeHeight}
+            width={VIEWBOX}
+            height={fadeHeight}
+            fill={`url(#${fadeGradientId})`}
+            className="glyph-anim glyph-fade"
+          />
+          <rect x="0" y={top ? 0 : VIEWBOX - BAND} width={VIEWBOX} height={BAND} className="fill-brand-primary" />
+        </>
+      ),
+    },
+    "static-text": textBars,
+    "animated-text": textBars,
+  };
+  // The painted kinds, in the compositor's order — the single source (D121).
+  const painted = PREVIEW_LAYER_ORDER.filter((kind) => paintings[kind] !== undefined);
 
   return (
     <svg
@@ -92,34 +181,15 @@ export function CreativeGlyph({ layout, tone, motion, size = 46 }: CreativeGlyph
         </linearGradient>
       </defs>
 
-      {/* Group 1 — Ground layer (photo ground + shade gradient). */}
-      <g className="glyph-anim glyph-ground">
-        {/* Layer 1 — photo ground (text-muted: the neutral placeholder). */}
-        <rect x="0" y="0" width={VIEWBOX} height={VIEWBOX} className="fill-text-muted" />
-        {/* Layer 2 — contrast shade on the headline edge, fading into the image. */}
-        <rect x="0" y="0" width={VIEWBOX} height={VIEWBOX} fill={`url(#${gradientId})`} />
-      </g>
-
-      {/* Group 2 — Accent band & soft fade layer for accent-wipe. */}
-      <g className="glyph-band-group">
-        <rect
-          x="0"
-          y={top ? BAND : VIEWBOX - BAND - fadeHeight}
-          width={VIEWBOX}
-          height={fadeHeight}
-          fill={`url(#${fadeGradientId})`}
-          className="glyph-anim glyph-fade"
-        />
-        {/* Layer 3 — brand accent band flush to the headline edge. */}
-        <rect x="0" y={top ? 0 : VIEWBOX - BAND} width={VIEWBOX} height={BAND} className="fill-brand-primary" />
-      </g>
-
-      {/* Group 3 — Text bars (headline message). */}
-      <g className="glyph-anim glyph-text">
-        {/* Layer 4 — the message as two bars; tone sets their weight. */}
-        <rect x={longBarX} y={longBarY} width={longBarWidth} height={barHeight} rx={barHeight / 2} className="fill-text-primary" />
-        <rect x={shortBarX} y={shortBarY} width={shortBarWidth} height={barHeight} rx={barHeight / 2} className="fill-text-primary" />
-      </g>
+      {/* The glyph's painted layers: each run of the compositor's order wrapped in
+          its animation group (see `groupRuns`). */}
+      {groupRuns(painted, paintings).map((run) => (
+        <g key={run.className} className={run.className}>
+          {run.kinds.map((kind) => (
+            <Fragment key={kind}>{paintings[kind]!.element}</Fragment>
+          ))}
+        </g>
+      ))}
 
       {/* Group 4 — Directional cue group (always rendered; revealed when reduced-motion/disabled). */}
       <g className="glyph-cue" aria-hidden="true">
