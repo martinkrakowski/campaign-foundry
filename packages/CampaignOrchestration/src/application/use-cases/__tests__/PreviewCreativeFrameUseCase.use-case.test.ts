@@ -295,6 +295,18 @@ describe("PreviewCreativeFrameUseCase — the frame and its cache key", () => {
     expect(a.value.cacheKey).not.toBe(b.value.cacheKey);
   });
 
+  test("a request built with no template field at all (a direct caller, not the use case) still fingerprints, and differently", async () => {
+    const d = deps();
+    const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const request = vi.mocked(d.compositor.compositeAsset).mock.calls[0][0];
+    const withoutTemplate = { ...request, template: undefined };
+    expect(compositeRequestFingerprint(withoutTemplate, sha256)).not.toBe(
+      compositeRequestFingerprint(request, sha256),
+    );
+  });
+
   test("a display-size canvas does not share a fingerprint with the matching social request", async () => {
     const d = deps();
     const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell());
