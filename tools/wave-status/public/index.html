@@ -33,6 +33,17 @@
         font-size: 14px;
         line-height: 1.5;
       }
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+        border: 0;
+      }
       /* The page is a full-height grid: the header is auto-sized, the area below
      it splits evenly between the table pane and the log pane — and with no
      log open the table takes the whole area. Sizing is CSS only; a resize is
@@ -154,6 +165,10 @@
         .conn-dot {
           animation: none !important;
         }
+        tr.lane td,
+        .row-go {
+          transition: none !important;
+        }
       }
       /* Nine numbers are three questions: what is running, how it ended,
      what the PRs are doing. The groups are hairline-separated and wrap as
@@ -208,45 +223,79 @@
         margin-left: 3px;
       }
       #table-pane {
-        overflow-y: auto;
         min-height: 0;
+        overflow: auto; /* wide content scrolls inside its own box; the page never scrolls sideways */
+        scrollbar-gutter: stable;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
       }
       /* Separate borders so the sticky thead keeps its underline while scrolled
      (collapse would let it be painted away by the rows beneath). */
       table {
         width: 100%;
+        min-width: 1080px;
         border-collapse: separate;
         border-spacing: 0;
-        background: var(--color-surface);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-sm);
       }
       th,
       td {
-        padding: var(--space-2) var(--space-3);
+        padding: 7px var(--space-3); /* 7px sits between --space-1 (4px) and --space-2 (8px); the row reads cramped at one step and loose at the other */
         text-align: left;
         border-bottom: 1px solid var(--color-border);
-        vertical-align: top;
+        vertical-align: middle;
+        white-space: nowrap;
+      }
+      td {
+        font-size: 13px;
+      }
+      tbody tr:last-child td {
+        border-bottom: 0;
       }
       thead th {
         position: sticky;
         top: 0;
-        z-index: 1;
-        background: var(--color-surface);
-      }
-      th {
-        color: var(--color-text-secondary);
-        font-size: 11px;
+        z-index: 3;
+        height: 36px; /* pinned so the sticky wave band can sit flush beneath it; falls between no two steps on the local scale, so it stays a literal */
+        padding: 0 var(--space-3);
+        background: var(--color-surface); /* opaque, so scrolled rows cannot paint it away */
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 500;
         text-transform: uppercase;
         letter-spacing: 0.08em;
-        font-weight: normal;
+        color: var(--color-text-muted);
       }
-      tr.wave {
-        cursor: pointer;
+      th.c-lane {
+        width: 200px;
       }
+      th.c-stage {
+        width: 160px;
+      }
+      th.c-live {
+        width: 96px;
+      }
+      th.c-log {
+        width: 190px;
+      }
+      th.c-pr {
+        width: 150px;
+      }
+      th.c-gate {
+        width: 165px;
+      }
+      th.c-find {
+        width: 118px;
+      }
+      /* Wave bands stay on screen under the header while their lanes scroll,
+     and carry a rollup of their own so each block answers at a glance. */
       tr.wave td {
+        position: sticky;
+        top: 36px; /* matches thead th's pinned height above */
+        z-index: 2;
         background: var(--color-surface-2);
-        font-family: var(--font-mono);
+        padding: 5px var(--space-3); /* 5px sits between --space-1 (4px) and --space-2 (8px); the band reads cramped at the higher step and loose at the lower one */
+        cursor: pointer;
       }
       tr.wave:hover td {
         background: var(--color-surface);
@@ -254,11 +303,95 @@
       tr[hidden] {
         display: none;
       }
+      /* tr.wave .wave-band (not a bare .wave-band rule) so this beats the
+     shared button reset below on specificity — both are (0, b, c) tuples
+     and the reset's two type selectors (tr, button) otherwise outrank a
+     single class. */
+      tr.wave .wave-band {
+        display: flex;
+        width: 100%;
+        align-items: baseline;
+        gap: var(--space-2);
+      }
+      .wave-eyebrow {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--color-text-muted);
+      }
+      .wave-id {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--color-text-primary);
+      }
+      .wave-meta {
+        margin-left: auto;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--color-text-muted);
+      }
+      .wave-meta .wm-run {
+        color: var(--color-info);
+      }
+      .wave-meta .wm-ok {
+        color: var(--color-success);
+      }
+      .wave-meta .wm-bad {
+        color: var(--color-error);
+      }
+      /* Lanes open the log on a click anywhere on the row; hover, focus and
+     the open state all say so, because a clickable row that looks like
+     text is not discoverable. The row itself can never be the focus
+     target — HTML-ARIA forbids role="button" on a <tr>, and #299 removed
+     it, so the inner <button> holds focus instead — which is why these
+     use :focus-within rather than :focus-visible: a <tr> can never match
+     :focus-visible directly. */
       tr.lane {
         cursor: pointer;
       }
-      tr.lane:hover td {
+      tr.lane td {
+        transition:
+          background 150ms ease,
+          box-shadow 150ms ease;
+      }
+      tr.lane:hover td,
+      tr.lane:focus-within td {
         background: var(--color-surface-2);
+      }
+      tr.lane:focus-within td:first-child,
+      tr.lane.active td:first-child {
+        box-shadow: inset 2px 0 0 var(--color-brand-on-tint);
+      }
+      tr.lane.active td {
+        background: var(--color-brand-tint);
+      }
+      /* tr.lane .key, for the same specificity reason as tr.wave .wave-band
+     above: it needs to beat the shared button reset's own color/font. */
+      tr.lane .key {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--color-text-primary);
+      }
+      tr.lane:hover .key,
+      tr.lane:focus-within .key {
+        text-decoration: underline;
+        text-decoration-color: var(--color-border-control-hover);
+        text-underline-offset: 3px;
+      }
+      .row-go {
+        width: 12px;
+        height: 12px;
+        margin-left: 6px; /* between --space-1 (4px) and --space-2 (8px); the glyph crowds the text at either step */
+        vertical-align: -1px;
+        color: var(--color-text-muted);
+        opacity: 0;
+        transition: opacity 150ms ease;
+      }
+      tr.lane:hover .row-go,
+      tr.lane:focus-within .row-go {
+        opacity: 1;
       }
       /* The row stays a row (default `row` role) — HTML-ARIA forbids putting
      role="button" on a <tr> inside a table. The actual control is this
@@ -277,10 +410,39 @@
         text-align: left;
         cursor: pointer;
       }
-      td.mono {
+      .c-stage .stage-name {
+        color: var(--color-text-secondary);
+      }
+      .round {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--color-text-muted);
+        margin-left: 6px; /* see .row-go above — same in-between value, same reason */
+      }
+      .c-live {
+        font-size: 12px;
+      }
+      .live-ok {
+        color: var(--color-success);
+      }
+      .c-log,
+      .c-gate {
         font-family: var(--font-mono);
         font-size: 12px;
-        white-space: pre-wrap;
+        color: var(--color-text-secondary);
+      }
+      .c-find {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--color-text-primary);
+      }
+      .sep {
+        color: var(--color-text-muted);
+      }
+      .pr-num {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--color-text-primary);
       }
       .ok {
         color: var(--color-success);
@@ -297,12 +459,61 @@
       .dim {
         color: var(--color-text-muted);
       }
+      /* State is encoded in form as well as colour, never a bare hue: a
+     tinted pill carries a dot and a word, and the word is always the
+     state's name — WCAG 1.4.1 needs more than colour to tell pills apart,
+     and this is the "more". */
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px; /* between --space-1 (4px) and --space-2 (8px); the dot crowds the word at either step */
+        padding: 1px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 1.45;
+      }
+      .pill-dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: currentColor;
+        flex: none;
+      }
+      .pill.ok {
+        color: var(--color-success);
+        background: color-mix(in srgb, var(--color-success) 15%, transparent);
+      }
+      .pill.bad {
+        color: var(--color-error);
+        background: color-mix(in srgb, var(--color-error) 15%, transparent);
+      }
+      .pill.warn {
+        color: var(--color-warning);
+        background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+      }
+      .pill.info {
+        color: var(--color-info);
+        background: color-mix(in srgb, var(--color-info) 15%, transparent);
+      }
+      .pill.dim {
+        color: var(--color-text-secondary);
+        background: var(--color-surface-2);
+      }
       tr.disagreement td {
         background: var(--color-surface);
         border-left: 3px solid var(--color-warning);
         color: var(--color-warning);
         font-family: var(--font-mono);
         font-size: 12px;
+        white-space: normal;
+      }
+      tr.empty td {
+        padding: 32px var(--space-3);
+        text-align: center;
+        color: var(--color-text-muted);
+        font-size: 12px;
+        white-space: normal;
       }
       #sort-switch {
         display: inline-flex;
@@ -484,15 +695,16 @@
       </header>
       <section id="table-pane">
         <table id="status-table">
+          <caption class="visually-hidden">Lane status by wave</caption>
           <thead>
             <tr>
-              <th>lane</th>
-              <th>stage</th>
-              <th>liveness</th>
-              <th>log (bytes · mtime · EXIT)</th>
-              <th>PR · checks</th>
-              <th>gate (exit · coverage)</th>
-              <th>fixed / refuted / mutations</th>
+              <th class="c-lane" scope="col">lane</th>
+              <th class="c-stage" scope="col">stage</th>
+              <th class="c-live" scope="col">liveness</th>
+              <th class="c-log" scope="col">log</th>
+              <th class="c-pr" scope="col">pr · checks</th>
+              <th class="c-gate" scope="col">gate (exit · coverage)</th>
+              <th class="c-find" scope="col">fixed / refuted / mutations</th>
             </tr>
           </thead>
         </table>
@@ -811,15 +1023,21 @@
         );
       }
 
-      function mark(kind, text) {
-        return text === undefined
-          ? '<span class="dim">—</span>'
-          : `<span class="${kind}">${esc(text)}</span>`;
+      // A pill's accessible text is always the state name — the dot and the
+      // tint reinforce it, but WCAG 1.4.1 means colour alone can never be
+      // the only thing telling two pills apart.
+      function pill(tone, text, dot = false) {
+        const dotHtml = dot ? '<span class="pill-dot"></span>' : "";
+        return `<span class="pill ${tone}">${dotHtml}${esc(text)}</span>`;
       }
 
-      function stage(lane) {
-        if (lane.reported === undefined)
-          return '<span class="dim">— (no events)</span>';
+      // Decorative only; the words in the row already carry the meaning —
+      // this just hints, on hover or focus, that the row opens the log.
+      const ROW_GO =
+        '<svg class="row-go" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m5.2 3.6 3.4 3.4-3.4 3.4"/></svg>';
+
+      function stageCell(lane) {
+        if (lane.reported === undefined) return '<span class="dim">no events</span>';
         const tone =
           lane.reported.event === "failed"
             ? "bad"
@@ -829,13 +1047,13 @@
         const round =
           lane.reported.round === undefined
             ? ""
-            : ` (round ${lane.reported.round})`;
-        return `<span class="${tone}">${esc(lane.reported.stage)} ${esc(lane.reported.event)}${esc(round)}</span>`;
+            : `<span class="round">round ${esc(lane.reported.round)}</span>`;
+        return `<span class="stage-name">${esc(lane.reported.stage)}</span> ${pill(tone, lane.reported.event, true)}${round}`;
       }
 
       function liveness(lane) {
         return lane.derived.alive
-          ? '<span class="ok">alive</span>'
+          ? '<span class="live-ok">alive</span>'
           : '<span class="dim">not alive</span>';
       }
 
@@ -849,7 +1067,7 @@
               ? '<span class="ok">EXIT 0</span>'
               : `<span class="bad">EXIT ${esc(lane.derived.exit)}</span>`;
         const age = Math.round((Date.now() - log.mtimeMs) / 1000);
-        return `${log.bytes.toLocaleString()} B · ${age}s ago · ${exit}`;
+        return `${exit}<span class="sep"> · </span>${log.bytes.toLocaleString()} B<span class="sep"> · </span>${age}s ago`;
       }
 
       function prCell(lane) {
@@ -863,7 +1081,7 @@
           pass: "ok",
           fail: "bad",
         }[pr.checks];
-        return `#${pr.number} <span class="${tone}">${esc(pr.state)}</span> · <span class="${checks}">${esc(pr.checks)}</span>`;
+        return `<span class="pr-num">#${esc(pr.number)}</span> ${pill(tone, pr.state)} ${pill(checks, pr.checks)}`;
       }
 
       function gateCell(lane) {
@@ -871,15 +1089,35 @@
         if (gate === undefined) return '<span class="dim">no gate log</span>';
         const exit =
           gate.exit === undefined
-            ? '<span class="dim">—</span>'
+            ? '<span class="dim">exit —</span>'
             : gate.exit === 0
               ? '<span class="ok">exit 0</span>'
               : `<span class="bad">exit ${esc(gate.exit)}</span>`;
         const cov =
           gate.coverage === undefined
             ? ""
-            : ` · ${gate.coverage.statements}/${gate.coverage.branches}/${gate.coverage.functions}/${gate.coverage.lines}%`;
-        return `${exit}${esc(cov)}`;
+            : `<span class="sep"> · </span>${esc(gate.coverage.statements)}/${esc(gate.coverage.branches)}/${esc(gate.coverage.functions)}/${esc(gate.coverage.lines)}%`;
+        return exit + cov;
+      }
+
+      // The wave band's rollup: a lane count, plus a breakdown by outcome —
+      // only the outcomes actually present, so a wave with nothing failed
+      // never shows "0 failed".
+      function waveMeta(lanes) {
+        let settled = 0;
+        let failed = 0;
+        let running = 0;
+        for (const lane of lanes) {
+          const event = lane.reported === undefined ? undefined : lane.reported.event;
+          if (event === "settled") settled++;
+          else if (event === "failed") failed++;
+          else if (event === "started") running++;
+        }
+        let out = `${lanes.length} ${lanes.length === 1 ? "lane" : "lanes"}`;
+        if (running > 0) out += ` · <span class="wm-run">${running} running</span>`;
+        if (settled > 0) out += ` · <span class="wm-ok">${settled} settled</span>`;
+        if (failed > 0) out += ` · <span class="wm-bad">${failed} failed</span>`;
+        return out;
       }
 
       function findingsCell(lane) {
@@ -987,6 +1225,18 @@
           : `lane:${row.dataset.wave}/${row.dataset.lane}`;
       }
 
+      // Marks the one lane row (if any) whose log is currently open — the
+      // only place `.active` is written, so it can never drift from
+      // activeWave/activeLane.
+      function syncActiveRow() {
+        for (const row of table.querySelectorAll("tr.lane")) {
+          row.classList.toggle(
+            "active",
+            row.dataset.wave === activeWave && row.dataset.lane === activeLane,
+          );
+        }
+      }
+
       function render(status) {
         lastStatus = status;
         // A render replaces the table body's contents, and every poll tick or
@@ -1004,13 +1254,14 @@
         const groups = [];
         for (const wave of status.waves) {
           const isExpanded = expandedWaves.has(wave.id) || defaultExpanded;
-          const count = wave.lanes.length;
-          const countLabel = `${count} ${count === 1 ? "lane" : "lanes"}`;
           // One tbody per wave: a group of rows a <tr> could never own, and
           // a single real element for aria-controls to name (a <div> cannot
           // wrap rows inside a table).
           const rowHtml = [
-            `<tr class="wave" data-wave="${esc(wave.id)}"><td colspan="7"><button type="button" tabindex="0" aria-expanded="${isExpanded ? "true" : "false"}" aria-controls="waves-${esc(wave.id)}">wave ${esc(wave.id)} · ${countLabel}</button></td></tr>`,
+            `<tr class="wave" data-wave="${esc(wave.id)}"><td colspan="7">` +
+              `<button type="button" class="wave-band" tabindex="0" aria-expanded="${isExpanded ? "true" : "false"}" aria-controls="waves-${esc(wave.id)}">` +
+              `<span class="wave-eyebrow">wave</span> <span class="wave-id">${esc(wave.id)}</span><span class="wave-meta">${waveMeta(wave.lanes)}</span>` +
+              `</button></td></tr>`,
           ];
           const lanes = sortByRecent
             ? [...wave.lanes].sort(compareLanes)
@@ -1019,13 +1270,13 @@
             const key = `${esc(wave.id)}/${esc(lane.lane)}`;
             rowHtml.push(
               `<tr class="lane" data-wave="${esc(wave.id)}" data-lane="${esc(lane.lane)}"${isExpanded ? "" : " hidden"}>` +
-                `<td class="mono"><button type="button" tabindex="0">${key}</button></td>` +
-                `<td>${stage(lane)}</td>` +
-                `<td>${liveness(lane)}</td>` +
-                `<td class="mono">${logCell(lane)}</td>` +
-                `<td>${prCell(lane)}</td>` +
-                `<td class="mono">${gateCell(lane)}</td>` +
-                `<td>${findingsCell(lane)}</td>` +
+                `<td class="c-lane"><button type="button" class="key" tabindex="0">${key}</button></td>` +
+                `<td class="c-stage">${stageCell(lane)}</td>` +
+                `<td class="c-live">${liveness(lane)}</td>` +
+                `<td class="c-log">${logCell(lane)}${ROW_GO}</td>` +
+                `<td class="c-pr">${prCell(lane)}</td>` +
+                `<td class="c-gate">${gateCell(lane)}</td>` +
+                `<td class="c-find">${findingsCell(lane)}</td>` +
                 "</tr>",
             );
             // A banner per disagreement, in the lane's own words (D103).
@@ -1036,6 +1287,15 @@
             }
           }
           groups.push({ id: wave.id, rowHtml });
+        }
+        // No waves at all — say so, instead of leaving the pane blank.
+        if (groups.length === 0) {
+          groups.push({
+            id: "none",
+            rowHtml: [
+              '<tr class="empty"><td colspan="7">No waves yet — the table fills in as soon as the first status event arrives.</td></tr>',
+            ],
+          });
         }
         for (const old of Array.from(table.tBodies)) old.remove();
         for (const group of groups) {
@@ -1052,6 +1312,7 @@
             }
           }
         }
+        syncActiveRow();
         const m = metricsOf(status);
         setMetric("lanes", m.lanes);
         setMetric("alive", m.alive);
@@ -1127,6 +1388,7 @@
         following = false;
         activeWave = wave;
         activeLane = lane;
+        syncActiveRow();
         logPane.hidden = false;
         logView.hidden = false;
         pageGrid.classList.add("with-log");
@@ -1167,6 +1429,7 @@
         requestSeq++;
         activeWave = null;
         activeLane = null;
+        syncActiveRow();
         following = false;
         logPane.hidden = true;
         logView.hidden = true;
