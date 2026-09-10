@@ -250,11 +250,11 @@ export function checkPairOcclusion(
  * Checks whether repositioning a layer at `to` creates an occlusion (D135).
  *
  * Evaluated per layer on every reposition:
- * - If moved down (from > to): inspects only layers crossed above the subject in its new position
- *   (up to from). Layers beyond from were already above the subject before the move; reporting
- *   them would warn on pre-existing relationships the move did not create (D135).
- * - If moved up (or direction unspecified): inspects whether any layer above now occludes the subject,
- *   or whether the subject now occludes any layer below it.
+ * - When `from` is specified: computes occluding pairs before and after the move,
+ *   reporting only an advisory finding created by the move (present after, absent before).
+ *   Pre-existing occlusions the move did not create are not reported (D135).
+ * - When `from` is undefined: caller cannot say what moved (no before-stack),
+ *   so reports the current state rather than a delta.
  */
 export function checkRepositionOcclusion(
   layers: readonly { readonly kind: LayerKind }[],
@@ -264,30 +264,80 @@ export function checkRepositionOcclusion(
   if (to < 0 || to >= layers.length || layers.length === 0) {
     return { passed: true };
   }
-  if (from !== undefined && to === from) {
+  if (
+    from !== undefined &&
+    (from < 0 || from >= layers.length || to === from)
+  ) {
     return { passed: true };
   }
-  const subject = layers[to]!;
 
-  // If moved down (from > to), scan only layers above that were crossed by the move (up to from).
-  // Layers beyond from were already above the subject before the move; reporting them
-  // would warn on pre-existing relationships the move did not create (D135).
-  const maxScanAbove =
-    from !== undefined && to < from ? from : layers.length - 1;
+  // When from is undefined, the caller cannot say what moved, so there is no before-stack;
+  // report the current state rather than a delta.
+  if (from === undefined) {
+    const subject = layers[to]!;
+    for (let j = to + 1; j < layers.length; j++) {
+      const above = layers[j]!;
+      const result = checkPairOcclusion(above.kind, subject.kind);
+      if (result.reason !== undefined) {
+        return result;
+      }
+    }
+    for (let i = to - 1; i >= 0; i--) {
+      const below = layers[i]!;
+      const result = checkPairOcclusion(subject.kind, below.kind);
+      if (result.reason !== undefined) {
+        return result;
+      }
+    }
+    return { passed: true };
+  }
 
-  for (let j = to + 1; j <= maxScanAbove; j++) {
-    const above = layers[j]!;
-    const result = checkPairOcclusion(above.kind, subject.kind);
-    if (result.reason !== undefined) {
-      return result;
+  // Reconstruct the before-stack by undoing the splice (D135).
+  // Tag layers by their index in the after-stack to identify distinct layer instances.
+  const taggedAfter = layers.map((layer, index) => ({
+    id: index,
+    kind: layer.kind,
+  }));
+  const taggedBefore = [...taggedAfter];
+  const moved = taggedBefore.splice(to, 1)[0]!;
+  taggedBefore.splice(from, 0, moved);
+
+  // Compute occluding pairs of the stack before the move.
+  const beforePairs = new Set<string>();
+  for (let j = 0; j < taggedBefore.length; j++) {
+    const above = taggedBefore[j]!;
+    for (let i = 0; i < j; i++) {
+      const below = taggedBefore[i]!;
+      if (checkPairOcclusion(above.kind, below.kind).reason !== undefined) {
+        beforePairs.add(`${above.id}->${below.id}`);
+      }
     }
   }
+
+  // Compute occluding pairs of the stack after the move, and report
+  // only a pair present in the second and absent from the first.
+  const subject = taggedAfter[to]!;
+  for (let j = to + 1; j < taggedAfter.length; j++) {
+    const above = taggedAfter[j]!;
+    const key = `${above.id}->${subject.id}`;
+    if (!beforePairs.has(key)) {
+      const result = checkPairOcclusion(above.kind, subject.kind);
+      if (result.reason !== undefined) {
+        return result;
+      }
+    }
+  }
+
   for (let i = to - 1; i >= 0; i--) {
-    const below = layers[i]!;
-    const result = checkPairOcclusion(subject.kind, below.kind);
-    if (result.reason !== undefined) {
-      return result;
+    const below = taggedAfter[i]!;
+    const key = `${subject.id}->${below.id}`;
+    if (!beforePairs.has(key)) {
+      const result = checkPairOcclusion(subject.kind, below.kind);
+      if (result.reason !== undefined) {
+        return result;
+      }
     }
   }
+
   return { passed: true };
 }

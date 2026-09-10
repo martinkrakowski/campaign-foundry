@@ -340,27 +340,70 @@ describe("occlusion table and guard checks (D135, D136)", () => {
     const movedUpCleared = checkRepositionOcclusion(threeLayers, 2, 1);
     expect(movedUpCleared).toEqual({ passed: true });
 
-    // D135 worked example: moving a static-text headline up so it lands beneath a shade
+    // D135 worked example: a static-text moved to sit beneath a shade that was not already above it
+    // before: [bg, shade, text] — shade(1) is below text(2)
+    // move text 2 -> 1 puts it beneath shade at 2
     const headlineUnderShade = [
       { id: "bg", kind: "video" as LayerKind },
       { id: "text", kind: "static-text" as LayerKind },
       { id: "shade", kind: "shade" as LayerKind },
     ];
-    // Moving static-text up from 0 to 1 places it directly beneath shade at 2
-    const textMovedUp = checkRepositionOcclusion(headlineUnderShade, 1, 0);
-    expect(textMovedUp.passed).toBe(true);
-    expect(textMovedUp.reason).toBe(
+    const textMovedUnderShade = checkRepositionOcclusion(
+      headlineUnderShade,
+      1,
+      2,
+    );
+    expect(textMovedUnderShade.passed).toBe(true);
+    expect(textMovedUnderShade.reason).toBe(
       "the shade layer now sits above the headline and will mute it",
     );
     // The message names both layers in the pair (D135)
-    expect(textMovedUp.reason).toContain("shade");
-    expect(textMovedUp.reason).toContain("headline");
+    expect(textMovedUnderShade.reason).toContain("shade");
+    expect(textMovedUnderShade.reason).toContain("headline");
 
-    // In videoCanonical, moving animated-text from 1 to 2 places it beneath logo at 3
+    // When shade was already above static-text before the move, moving static-text up (0 -> 1)
+    // produces NO finding because the move did not create the occlusion (L8o-fix3, D135).
+    const textMovedUpPreExisting = checkRepositionOcclusion(
+      headlineUnderShade,
+      1,
+      0,
+    );
+    expect(textMovedUpPreExisting).toEqual({ passed: true });
+
+    // In videoCanonical, moving animated-text from 1 to 2 places it beneath logo at 3;
+    // but logo was already above animated-text before the move, so it produces NO finding (L8o-fix3, D135).
     const movedUpUnderLogo = checkRepositionOcclusion(videoCanonical, 2, 1);
-    expect(movedUpUnderLogo.passed).toBe(true);
-    expect(movedUpUnderLogo.reason).toBe(
-      "the logo layer now sits above the headline and will overlap where it sits",
+    expect(movedUpUnderLogo).toEqual({ passed: true });
+
+    // Regression case: pre-existing shade over a moved-up text produces NO finding (L8o-fix3, D135)
+    const L = (kind: LayerKind) => ({ id: kind, kind });
+    // before: [image, static-text, animated-text, shade]   — shade(3) is already above static-text(1)
+    // move static-text 1 -> 2
+    const after = [
+      L("image"),
+      L("animated-text"),
+      L("static-text"),
+      L("shade"),
+    ];
+    expect(checkRepositionOcclusion(after, 2, 1).reason).toBeUndefined();
+    expect(checkRepositionOcclusion(after, 2, 1)).toEqual({ passed: true });
+
+    // Two stacked images still warn, in both move directions (L8o-fix3)
+    const stackedImages = [
+      { id: "img1", kind: "image" as LayerKind },
+      { id: "img2", kind: "image" as LayerKind },
+    ];
+    // Move img2 from 0 up to 1: img2 now sits above img1
+    const imgMovedUp = checkRepositionOcclusion(stackedImages, 1, 0);
+    expect(imgMovedUp.passed).toBe(true);
+    expect(imgMovedUp.reason).toBe(
+      "the image layer now sits above the image and will hide it",
+    );
+    // Move img1 from 1 down to 0: img2 now sits above img1
+    const imgMovedDown = checkRepositionOcclusion(stackedImages, 0, 1);
+    expect(imgMovedDown.passed).toBe(true);
+    expect(imgMovedDown.reason).toBe(
+      "the image layer now sits above the image and will hide it",
     );
 
     // Out of range or empty layers returns { passed: true }
@@ -371,23 +414,26 @@ describe("occlusion table and guard checks (D135, D136)", () => {
     expect(checkRepositionOcclusion(videoCanonical, 10)).toEqual({
       passed: true,
     });
+    expect(checkRepositionOcclusion(videoCanonical, 1, -1)).toEqual({
+      passed: true,
+    });
+    expect(checkRepositionOcclusion(videoCanonical, 1, 10)).toEqual({
+      passed: true,
+    });
 
-    // Moving a layer down where it occludes a layer below it (and is not occluded by layers above)
+    // Moving shade from 2 down to 1: shade was already above static-text at 0 before the move (2 > 0),
+    // so moving it closer (1 > 0) does not create the occlusion (L8o-fix3, D135).
     const downOccludesBelow = [
       { id: "text", kind: "static-text" as LayerKind },
       { id: "shade", kind: "shade" as LayerKind },
       { id: "video", kind: "video" as LayerKind },
     ];
-    // Moving shade from 2 down to 1: video at 2 does not occlude shade, but shade at 1 occludes static-text at 0
-    const movedDownOccludingBelow = checkRepositionOcclusion(
+    const movedDownPreExisting = checkRepositionOcclusion(
       downOccludesBelow,
       1,
       2,
     );
-    expect(movedDownOccludingBelow.passed).toBe(true);
-    expect(movedDownOccludingBelow.reason).toBe(
-      "the shade layer now sits above the headline and will mute it",
-    );
+    expect(movedDownPreExisting).toEqual({ passed: true });
 
     // Calling without from parameter checks both directions
     expect(checkRepositionOcclusion(reordered, 2).reason).toBe(
@@ -437,6 +483,20 @@ describe("occlusion table and guard checks (D135, D136)", () => {
     expect(
       checkRepositionOcclusion(animatedTextMovedDownPastVideo, 0, 0),
     ).toEqual({ passed: true });
+  });
+
+  test("the pre-existing shade over a moved-up text produces no finding (L8o-fix3, D135)", () => {
+    const L = (kind: LayerKind) => ({ id: kind, kind });
+    // before: [image, static-text, animated-text, shade]   — shade(3) is already above static-text(1)
+    // move static-text 1 -> 2
+    const after = [
+      L("image"),
+      L("animated-text"),
+      L("static-text"),
+      L("shade"),
+    ];
+    expect(checkRepositionOcclusion(after, 2, 1).reason).toBeUndefined();
+    expect(checkRepositionOcclusion(after, 2, 1)).toEqual({ passed: true });
   });
 
   test("an occluding order is still a valid template (D135, D136) — warns and never refuses", () => {
