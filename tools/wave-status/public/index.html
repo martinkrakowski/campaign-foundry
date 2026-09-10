@@ -558,10 +558,12 @@
         display: none;
       }
       /* Focused programmatically on open (see openLog) so the pane, not
-     just a control inside it, is where keyboard attention lands — no
-     visible ring for a container focus, unlike the controls inside it. */
+     just a control inside it, is where keyboard attention lands. Visible
+     2px brand outline so keyboard users can see where focus landed. */
       #log-pane:focus {
-        outline: none;
+        outline: 2px solid;
+        outline-color: var(--color-brand-on-tint);
+        outline-offset: -1px;
       }
       #log-toolbar {
         display: flex;
@@ -667,7 +669,7 @@
       }
       /* The reference mixes the state colour toward transparent (over the
      button's own surface-2 ground); mixed toward border-control instead —
-     the base control edge already the worst-ground floor (§2) clears 3:1,
+     the base control edge already the worst-ground floor (§2 Tokens) clears 3:1,
      and mixing toward transparent would let the 1.6 s feedback edge dip
      under it. This keeps the tint while never falling below the boundary
      the plain state does. */
@@ -847,7 +849,7 @@
               id="log-expand"
               aria-label="expand"
               aria-expanded="false"
-              aria-controls="table-pane"
+              aria-controls="log-pane"
             >
               <svg
                 class="tb-icon"
@@ -1628,6 +1630,13 @@
       }
 
       function closeLog() {
+        if (following) {
+          clearTimeout(followTimer);
+        }
+        clearTimeout(copyTimer);
+        copyLabel.textContent = "copy";
+        copyBtn.setAttribute("aria-label", "copy");
+        copyBtn.classList.remove("ok", "bad");
         requestSeq++;
         activeWave = null;
         activeLane = null;
@@ -1678,12 +1687,15 @@
         } catch {
           // ok stays false; reported below
         }
-        copyLabel.textContent = ok ? "copied" : "copy failed";
+        const feedback = ok ? "copied" : "copy failed";
+        copyLabel.textContent = feedback;
+        copyBtn.setAttribute("aria-label", feedback);
         copyBtn.classList.toggle("ok", ok);
         copyBtn.classList.toggle("bad", !ok);
         clearTimeout(copyTimer);
         copyTimer = setTimeout(() => {
           copyLabel.textContent = "copy";
+          copyBtn.setAttribute("aria-label", "copy");
           copyBtn.classList.remove("ok", "bad");
         }, 1600);
       });
