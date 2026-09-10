@@ -107,6 +107,11 @@ export function compositeRequestFingerprint(
       ...(request.style !== undefined ? { style: request.style } : {}),
       ...(request.safeInsets !== undefined ? { safeInsets: request.safeInsets } : {}),
       ...(request.pixelSize !== undefined ? { pixelSize: request.pixelSize } : {}),
+      // The brief's template (D120/D123, C3): a reordered template must not
+      // share a cache key with the canonical order it replaced (mutation:
+      // drop this line and the new "template alone moves the key" test goes
+      // red).
+      ...(request.template !== undefined ? { template: request.template } : {}),
     }),
   );
 }
@@ -223,6 +228,10 @@ export class PreviewCreativeFrameUseCase {
       // (GenerateCampaignUseCase:261) — a preview that ignores it is D45's failure.
       ...(brief.style !== undefined ? { style: brief.style } : {}),
       ...(safeInsets !== undefined ? { safeInsets } : {}),
+      // The brief's template (D120/D123, C3) rides the frame exactly as it
+      // rides the run: the preview draws the brief's order, not the
+      // canonical fallback.
+      template: brief.template,
     };
     return { request, backgroundSource: background.source };
   }

@@ -2,6 +2,7 @@ import type { CanvasSpec } from "../../../domain/value-objects/aspect-ratios.js"
 import type { LayoutKind, ToneKind } from "../../../domain/value-objects/Treatment.vo.js";
 import type { AnchorKind } from "../../../domain/value-objects/variation-defaults.js";
 import type { Style } from "../../../domain/value-objects/creative-style.js";
+import type { BriefTemplate } from "../../../domain/value-objects/brief-template.js";
 
 /**
  * Platform safe-zone insets in px. All four sides are required when the
@@ -55,6 +56,17 @@ export interface CompositeRequest {
    * request, never the variation policy.
    */
   readonly style?: Style;
+  /**
+   * The brief's template (D120/D123, C3): present → its `layers` ARE the draw
+   * order, both paths, every frame. Absent → the compositor falls back to the
+   * canonical layers for `creativeType` (a direct-caller escape hatch; no
+   * production caller passes `creativeType` either), else the `image-text`
+   * canonical list — byte-identical to the pre-C3 behaviour every existing
+   * caller relies on. `parseBrief` always attaches one (L3), so production
+   * requests never take that fallback; only a hand-built request in a test
+   * can.
+   */
+  readonly template?: BriefTemplate;
 }
 
 /** The rendered creative plus the compositing signals the use case reports. */

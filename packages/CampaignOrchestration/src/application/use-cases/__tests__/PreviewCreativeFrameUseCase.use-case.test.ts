@@ -280,6 +280,33 @@ describe("PreviewCreativeFrameUseCase — the frame and its cache key", () => {
     expect(a.value.cacheKey).not.toBe(b.value.cacheKey);
   });
 
+  test("two requests that differ only in template.layers order never share a key (C3)", async () => {
+    const canonical = templateFromCanonical(DEFAULT_CAMPAIGN_TYPE);
+    const reordered = { ...canonical, layers: [...canonical.layers].reverse() };
+    const a = await new PreviewCreativeFrameUseCase(deps()).execute(baseBrief(), cell());
+    const b = await new PreviewCreativeFrameUseCase(deps()).execute(
+      baseBrief({ template: reordered }),
+      cell(),
+    );
+    expect(a.success && b.success).toBe(true);
+    if (!a.success || !b.success) return;
+    // Absent this, a reordered preview would cache-hit the canonical bytes —
+    // the exact defect C3 exists to close, relocated from render to cache.
+    expect(a.value.cacheKey).not.toBe(b.value.cacheKey);
+  });
+
+  test("a request built with no template field at all (a direct caller, not the use case) still fingerprints, and differently", async () => {
+    const d = deps();
+    const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const request = vi.mocked(d.compositor.compositeAsset).mock.calls[0][0];
+    const withoutTemplate = { ...request, template: undefined };
+    expect(compositeRequestFingerprint(withoutTemplate, sha256)).not.toBe(
+      compositeRequestFingerprint(request, sha256),
+    );
+  });
+
   test("a display-size canvas does not share a fingerprint with the matching social request", async () => {
     const d = deps();
     const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell());
@@ -290,28 +317,31 @@ describe("PreviewCreativeFrameUseCase — the frame and its cache key", () => {
     expect(compositeRequestFingerprint(sized, sha256)).not.toBe(result.value.cacheKey);
   });
 
-  test("a style-less request hashes exactly as it did before style joined the fingerprint", async () => {
+  test("a style-less request hashes exactly as it did before template joined the fingerprint (C3)", async () => {
     const result = await new PreviewCreativeFrameUseCase(deps()).execute(baseBrief(), cell());
     expect(result.success).toBe(true);
     if (!result.success) return;
-    // Pre-fix golden of this suite's style-less fixture (background [1,2,3],
-    // localized "Hallo", no anchor/insets/style). Absent must not move the key.
+    // Golden of this suite's style-less fixture (background [1,2,3], localized
+    // "Hallo", no anchor/insets/style, the canonical image-text template).
+    // Re-pinned once (C3): `template` is required on every brief, so it joined
+    // this hash the same way `style` joined it before — the precedent this
+    // test's own history records.
     expect(result.value.cacheKey).toBe(
-      "0db05026a4f815d53be5b9fefa79f26a775bcfc10ea0c034e25260027826dd52",
+      "63733c642db1292c77c99c457463369452d49cd23fe3d2347d08651641e719ab",
     );
   });
 
-  test("two requests that differ only in pixelSize never share a key; omitting it leaves the style-less hash put", async () => {
+  test("two requests that differ only in pixelSize never share a key; omitting it leaves the golden hash put", async () => {
     const d = deps();
     const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell());
     expect(result.success).toBe(true);
     if (!result.success) return;
     const request = vi.mocked(d.compositor.compositeAsset).mock.calls[0][0];
-    // canvasFingerprint's "style-less hashes stay put" contract: an absent
+    // canvasFingerprint's "absent fields stay put" contract: an absent
     // pixelSize must not move the known key (mutation: drop the field → this
     // still passes; the pair below is the one that fails).
     expect(compositeRequestFingerprint(request, sha256)).toBe(
-      "0db05026a4f815d53be5b9fefa79f26a775bcfc10ea0c034e25260027826dd52",
+      "63733c642db1292c77c99c457463369452d49cd23fe3d2347d08651641e719ab",
     );
     const a = { ...request, pixelSize: { width: 108, height: 192 } };
     const b = { ...request, pixelSize: { width: 216, height: 384 } };
@@ -356,4 +386,12 @@ test("the template's style block rides the frame request exactly as it rides the
   await new PreviewCreativeFrameUseCase(d2).execute(baseBrief(), cell());
   const plainRequest = vi.mocked(d2.compositor.compositeAsset).mock.calls[0][0];
   expect("style" in plainRequest).toBe(false);
+});
+
+test("the brief's template rides the frame request exactly as it rides the run (C3)", async () => {
+  const template = templateFromCanonical("short-video");
+  const d = deps();
+  const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief({ template }), cell());
+  expect(result.success).toBe(true);
+  expect(d.compositor.compositeAsset).toHaveBeenCalledWith(expect.objectContaining({ template }));
 });
