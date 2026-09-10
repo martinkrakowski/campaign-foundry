@@ -493,6 +493,14 @@
               }
             }
           }
+          // The control's checked state must match `following` on every
+          // sync, not only at creation — a reused control that never gets
+          // told follow turned off would keep showing "ticked" while the
+          // view is no longer live.
+          const checkbox = document.getElementById("log-follow");
+          if (checkbox) {
+            checkbox.checked = following;
+          }
         } else {
           following = false;
           if (followControlElement !== null) {
@@ -502,25 +510,51 @@
         }
       }
 
-      async function loadTail(wave, lane, seq) {
-        const res = await fetch(`/api/log/${wave}/${lane}?tail=16`);
-        let buf = null;
-        if (res.ok) {
-          buf = await res.arrayBuffer();
+      // A follow refresh that cannot be trusted — the fetch rejected, or
+      // came back non-ok — must not leave the box ticked over a view that
+      // has stopped updating. Turning follow off and saying so is the
+      // honest minimum; a frozen view with a ticked box claims the opposite
+      // of what is true.
+      function stopFollowOnError() {
+        if (!following) return;
+        following = false;
+        const checkbox = document.getElementById("log-follow");
+        if (checkbox) {
+          checkbox.checked = false;
         }
-        // A newer request — another follow refresh, an open, or a close —
-        // has started since this one did. Its answer is stale; say nothing.
-        if (seq !== requestSeq) return;
-        if (res.ok && buf !== null) {
-          const bytes = buf.byteLength;
-          logSize.textContent = `${bytes.toLocaleString()} B`;
-          const text = new TextDecoder().decode(buf);
-          renderLogLines(text);
-          // Only yank the view to the bottom if the user still wants that —
-          // they may have unchecked follow, or scrolled away to read
-          // history, while this request was in flight.
-          if (following) {
-            logView.scrollTop = logView.scrollHeight;
+        logSize.textContent = "follow stopped: refresh failed";
+      }
+
+      async function loadTail(wave, lane, seq) {
+        // loadTail is only ever called from maybeFollow, for a follow
+        // refresh — so every failure path here, caught or not, is a follow
+        // failure and must be reported rather than left silent.
+        try {
+          const res = await fetch(`/api/log/${wave}/${lane}?tail=16`);
+          let buf = null;
+          if (res.ok) {
+            buf = await res.arrayBuffer();
+          }
+          // A newer request — another follow refresh, an open, or a close —
+          // has started since this one did. Its answer is stale; say nothing.
+          if (seq !== requestSeq) return;
+          if (res.ok && buf !== null) {
+            const bytes = buf.byteLength;
+            logSize.textContent = `${bytes.toLocaleString()} B`;
+            const text = new TextDecoder().decode(buf);
+            renderLogLines(text);
+            // Only yank the view to the bottom if the user still wants
+            // that — they may have unchecked follow, or scrolled away to
+            // read history, while this request was in flight.
+            if (following) {
+              logView.scrollTop = logView.scrollHeight;
+            }
+          } else {
+            stopFollowOnError();
+          }
+        } catch {
+          if (seq === requestSeq) {
+            stopFollowOnError();
           }
         }
       }
@@ -532,7 +566,13 @@
         // without this, two overlapping refreshes for one lane share a
         // sequence and cannot tell which of them is newer.
         const seq = ++requestSeq;
-        await loadTail(activeWave, activeLane, seq);
+        try {
+          await loadTail(activeWave, activeLane, seq);
+        } catch {
+          // loadTail already reports its own failures (see stopFollowOnError).
+          // This only guards the callers below, which invoke maybeFollow with
+          // `void` and so would otherwise leave a rejection unhandled.
+        }
       }
 
       function updateSortSwitch() {
