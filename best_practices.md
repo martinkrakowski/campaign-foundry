@@ -26,7 +26,7 @@ class. A finding whose premise one of these facts disproves should not be posted
 
    **So the line to hold is declared-versus-measured, not class-versus-inline.** A rule's declared
    value is readable; the layout it would produce is not. `getComputedStyle(el).flexWrap === "wrap"`
-   isa tautology — it restates the stylesheet — but it is not *unresolvable*; it simply proves
+   is a tautology — it restates the stylesheet — but it is not *unresolvable*; it simply proves
    nothing about whether anything wrapped. Prefer asserting the state the code controls (`hidden`,
    an ARIA attribute, a class the code toggles) over a computed value it merely declares. D47's ban
    on class-string assertions as *proof of layout* stands for exactly that reason.
