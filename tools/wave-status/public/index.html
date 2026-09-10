@@ -310,7 +310,7 @@
         <p id="connection">connecting…</p>
       </header>
       <section id="table-pane">
-        <table>
+        <table id="status-table">
           <thead>
             <tr>
               <th>lane</th>
@@ -322,7 +322,6 @@
               <th>fixed / refuted / mutations</th>
             </tr>
           </thead>
-          <tbody id="lanes"></tbody>
         </table>
       </section>
       <section id="log-pane" hidden>
@@ -349,7 +348,7 @@
     </div>
     <script>
       "use strict";
-      const lanesBody = document.getElementById("lanes");
+      const table = document.getElementById("status-table");
       const connection = document.getElementById("connection");
       const logPane = document.getElementById("log-pane");
       const logToolbar = document.getElementById("log-toolbar");
@@ -460,7 +459,7 @@
           expandedWaves.add(waveId);
         }
         const isExpanded = expandedWaves.has(waveId);
-        const waveRows = lanesBody.querySelectorAll("tr.wave");
+        const waveRows = table.querySelectorAll("tr.wave");
         for (const waveRow of waveRows) {
           if (waveRow.dataset.wave === waveId) {
             waveRow.setAttribute(
@@ -641,22 +640,52 @@
         };
       }
 
+      function identityOf(row) {
+        // Rows are identified by their wave and lane, never by their index:
+        // sorting re-orders rows, so a position saved before a render may be
+        // a different lane after it.
+        return row.classList.contains("wave")
+          ? `wave:${row.dataset.wave}`
+          : `lane:${row.dataset.wave}/${row.dataset.lane}`;
+      }
+
       function render(status) {
         lastStatus = status;
-        const rows = [];
+        // A render replaces the table body's contents, and every poll tick or
+        // SSE event would otherwise destroy the focused row and drop focus
+        // back to the document. Take the focused row's identity now and give
+        // it back once the rows exist again; if it is gone, do nothing.
+        const active = document.activeElement;
+        let focusKey = null;
+        if (
+          active !== null &&
+          active.tagName === "TR" &&
+          table.contains(active)
+        ) {
+          if (
+            active.classList.contains("wave") ||
+            active.classList.contains("lane")
+          ) {
+            focusKey = identityOf(active);
+          }
+        }
+        const groups = [];
         for (const wave of status.waves) {
           const isExpanded = expandedWaves.has(wave.id) || defaultExpanded;
           const count = wave.lanes.length;
           const countLabel = `${count} ${count === 1 ? "lane" : "lanes"}`;
-          rows.push(
-            `<tr class="wave" data-wave="${esc(wave.id)}" role="button" tabindex="0" aria-expanded="${isExpanded ? "true" : "false"}"><td colspan="7">wave ${esc(wave.id)} · ${countLabel}</td></tr>`,
-          );
+          // One tbody per wave: a group of rows a <tr> could never own, and
+          // a single real element for aria-controls to name (a <div> cannot
+          // wrap rows inside a table).
+          const rowHtml = [
+            `<tr class="wave" data-wave="${esc(wave.id)}" role="button" tabindex="0" aria-expanded="${isExpanded ? "true" : "false"}" aria-controls="waves-${esc(wave.id)}"><td colspan="7">wave ${esc(wave.id)} · ${countLabel}</td></tr>`,
+          ];
           const lanes = sortByRecent
             ? [...wave.lanes].sort(compareLanes)
             : wave.lanes;
           for (const lane of lanes) {
             const key = `${esc(wave.id)}/${esc(lane.lane)}`;
-            rows.push(
+            rowHtml.push(
               `<tr class="lane" data-wave="${esc(wave.id)}" data-lane="${esc(lane.lane)}" role="button" tabindex="0"${isExpanded ? "" : " hidden"}>` +
                 `<td class="mono">${key}</td>` +
                 `<td>${stage(lane)}</td>` +
@@ -669,13 +698,28 @@
             );
             // A banner per disagreement, in the lane's own words (D103).
             for (const disagreement of lane.disagreements) {
-              rows.push(
+              rowHtml.push(
                 `<tr class="disagreement" data-wave="${esc(wave.id)}"${isExpanded ? "" : " hidden"}><td colspan="7">${esc(disagreement)}</td></tr>`,
               );
             }
           }
+          groups.push({ id: wave.id, rowHtml });
         }
-        lanesBody.innerHTML = rows.join("");
+        for (const old of Array.from(table.tBodies)) old.remove();
+        for (const group of groups) {
+          const body = document.createElement("tbody");
+          body.id = `waves-${group.id}`;
+          body.innerHTML = group.rowHtml.join("");
+          table.appendChild(body);
+        }
+        if (focusKey !== null) {
+          for (const row of table.querySelectorAll("tr.wave, tr.lane")) {
+            if (identityOf(row) === focusKey) {
+              row.focus();
+              break;
+            }
+          }
+        }
         const m = metricsOf(status);
         setMetric("lanes", m.lanes);
         setMetric("alive", m.alive);
@@ -755,7 +799,7 @@
         expandBtn.setAttribute("aria-label", "expand");
       }
 
-      lanesBody.addEventListener("click", (event) => {
+      table.addEventListener("click", (event) => {
         const waveRow = event.target.closest("tr.wave");
         if (waveRow !== null) {
           toggleWave(waveRow.dataset.wave);
@@ -766,7 +810,7 @@
         void openLog(row);
       });
 
-      lanesBody.addEventListener("keydown", (event) => {
+      table.addEventListener("keydown", (event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         const waveRow = event.target.closest("tr.wave");
         if (waveRow !== null) {

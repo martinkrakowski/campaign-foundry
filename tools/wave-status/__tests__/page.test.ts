@@ -1080,6 +1080,133 @@ describe("the status page", () => {
     }
   });
 
+  test("a re-render leaves the focused wave row focused, and a vanished row gets nothing back", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    const waveT = doc.querySelector(
+      'tr.wave[data-wave="T"]',
+    ) as unknown as HTMLElement;
+    waveT.focus();
+    expect(doc.activeElement).toBe(waveT);
+
+    page.source.emit("status", JSON.stringify(mixedStatus));
+    const reRendered = doc.querySelector(
+      'tr.wave[data-wave="T"]',
+    ) as unknown as HTMLElement;
+    expect(reRendered).not.toBe(waveT);
+    expect(doc.activeElement).toBe(reRendered);
+
+    // A wave that is gone is gone: do not guess at a neighbour row.
+    const withoutTwo: WaveStatus = {
+      generatedAt: "now",
+      waves: mixedStatus.waves.filter((wave) => wave.id !== "T"),
+    };
+    page.source.emit("status", JSON.stringify(withoutTwo));
+    expect(doc.querySelector('tr.wave[data-wave="T"]')).toBeNull();
+    expect(doc.activeElement).toBe(doc.body);
+  });
+
+  test("with sorting on, focus follows lane identity across a re-render, not row position", async () => {
+    const before: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "W",
+          lanes: [
+            {
+              wave: "W",
+              lane: "l_hot",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 3000, tail: "" },
+              },
+              disagreements: [],
+            },
+            {
+              wave: "W",
+              lane: "l_cold",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 1000, tail: "" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+    const after: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "W",
+          lanes: [
+            {
+              wave: "W",
+              lane: "l_hot",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 1000, tail: "" },
+              },
+              disagreements: [],
+            },
+            {
+              wave: "W",
+              lane: "l_cold",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 3000, tail: "" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    const page = await loadPage(before);
+    const doc = page.window.document;
+    (doc.querySelector("tr.wave") as unknown as HTMLElement).click();
+    const hot = doc.querySelector(
+      'tr.lane[data-lane="l_hot"]',
+    ) as unknown as HTMLElement;
+    hot.focus();
+    expect(doc.activeElement).toBe(hot);
+    expect(
+      (doc.querySelectorAll("tr.lane")[0] as unknown as HTMLElement).dataset
+        .lane,
+    ).toBe("l_hot");
+
+    page.source.emit("status", JSON.stringify(after));
+    const hotAgain = doc.querySelector(
+      'tr.lane[data-lane="l_hot"]',
+    ) as unknown as HTMLElement;
+    expect(hotAgain).not.toBe(hot);
+    expect(doc.activeElement).toBe(hotAgain);
+  });
+
+  test("each wave control names the one element that holds its rows, and the names are unique", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    const waveRows = Array.from(doc.querySelectorAll("tr.wave"));
+    expect(waveRows.length).toBe(2);
+
+    const seen = new Set<string>();
+    for (const waveRow of waveRows) {
+      const control = waveRow.getAttribute("aria-controls");
+      expect(control).toBeTruthy();
+      expect(seen.has(control!)).toBe(false);
+      seen.add(control!);
+      const group = doc.getElementById(control!);
+      expect(group).not.toBeNull();
+      for (const lane of group!.querySelectorAll("tr.lane")) {
+        expect(lane.getAttribute("data-wave")).toBe(
+          waveRow.getAttribute("data-wave"),
+        );
+      }
+    }
+  });
+
   test("with sorting on, a lane whose log.mtimeMs is newest appears first, and a lane with no log is last", async () => {
     const statusWithMtimes: WaveStatus = {
       generatedAt: "now",
