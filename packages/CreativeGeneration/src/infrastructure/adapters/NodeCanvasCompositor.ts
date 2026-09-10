@@ -102,8 +102,9 @@ interface PreparedCreative {
    * first. Resolved once in `prepare` — the request's `template.layers` when
    * the caller passes the L1b brief template, else the canonical layers for
    * its creative type, else the `image-text` canonical list
-   * ({@link resolveLayerList}) — and iterated by `drawLegacy` through the
-   * {@link LAYER_DRAWERS} table.
+   * ({@link resolveLayerList}) — and iterated by both draw paths through the
+   * {@link LAYER_DRAWERS} table: `drawLegacy` over the whole list, `drawTimeline`
+   * (C1) over the {@link GROUND_KINDS} subset only.
    */
   readonly layers: readonly CreativeTemplateLayer[];
   /**
@@ -167,6 +168,14 @@ const LAYER_DRAWERS: Readonly<Partial<Record<LayerKind, LayerDrawer>>> = {
 };
 
 /**
+ * The ground trio's kinds (C1): `drawTimeline` iterates `prepared.layers` but
+ * draws only these, in the list's order, skipping every other kind — the
+ * sequenced copy and logo are drawn explicitly, after, on their own clocks
+ * (see {@link drawTimeline}).
+ */
+const GROUND_KINDS: ReadonlySet<LayerKind> = new Set(["image", "shade", "accent"]);
+
+/**
  * NodeCanvasCompositor — CompositorPort adapter.
  *
  * Renders one creative with deterministic, treatment-driven layer stacking:
@@ -185,9 +194,11 @@ const LAYER_DRAWERS: Readonly<Partial<Record<LayerKind, LayerDrawer>>> = {
  *
  * The draw order is data (D121): `prepare` resolves the layer list (the brief's
  * `template.layers` when present, else the canonical layers for its creative
- * type, else the `image-text` canonical list) and the legacy blit iterates it
+ * type, else the `image-text` canonical list) and both draw paths iterate it
  * through the {@link LAYER_DRAWERS} table — array position is z-order, bottom
- * first (D128).
+ * first (D128). The legacy blit iterates the whole list; the motion path (C1)
+ * iterates it too, for the ground trio only — copy and logo keep their own
+ * sequencing and clocks (see `drawTimeline`).
  *
  * Still path: {@link NodeCanvasCompositor.prepare} (I/O) →
  * {@link NodeCanvasCompositor.draw} at `t = 1` with no `motion`.
@@ -817,7 +828,10 @@ function resolveBeatLayouts(
  * the key beat's mid-time, D7) and that `headline-rise` advances per beat on the
  * pose clock `t` (each beat rises on its own local progress). The text effect
  * keeps that beat-local clock unless the caller passed `effectT` (the poster
- * passes 1 — H4).
+ * passes 1 — H4). The ground trio (layers 1–3) is now read from
+ * `prepared.layers` (C1), the same resolved list `drawLegacy` iterates — see
+ * {@link GROUND_KINDS} — so it matches the legacy blit's trio order exactly,
+ * not merely by coincidence of the two bodies agreeing.
  */
 function drawTimeline(
   ctx: SKRSContext2D,
@@ -836,18 +850,24 @@ function drawTimeline(
   // sequenced copy and logo below keep their own positions; `effectT` is a
   // value no ground drawer reads (`effectT ?? t` matches draw()'s clock shape).
   //
-  // The trio is called BY KIND — not iterated from `prepared.layers` — and
-  // that is the design, not an oversight: D10 freezes motion bytes, and
-  // iterating a list here is exactly the kind of change that risks them. A
-  // template's declared order therefore governs the STILL path only
-  // (drawLegacy); making this motion path list-driven is deferred to the lanes
-  // that teach the compositor `video` and `animated-text` (L6/L11). The
-  // reordered-template test in NodeCanvasCompositor.layer-order pins today's
-  // order, so changing this flips a red test instead of shifting bytes.
+  // The trio is now READ from `prepared.layers`, the same resolved list
+  // `drawLegacy` iterates (C1/D121) — the one-source-of-order fix R-D1 calls
+  // for. Non-ground kinds (`static-text`/`animated-text`, `logo`) are skipped
+  // here, not thrown on: the sequenced copy and logo below keep their own
+  // positions and clocks, drawn explicitly after the trio. This was safe to
+  // do first, byte-for-byte, only because no caller passes `template` yet
+  // (that wiring is C3): `resolveLayerList` always falls through to
+  // `CANONICAL_TEMPLATES["image-text"]`, whose order is already
+  // image → shade → accent, so this list-driven loop produces exactly the
+  // by-kind calls it replaces. The motion-goldens suite proves it; the
+  // reordered-template case in NodeCanvasCompositor.layer-order — which used
+  // to pin the by-kind order deliberately, as the tripwire for this change —
+  // now asserts the new contract instead.
   const ground: LayerDrawContext = { ctx, prepared, motion, eased, effectT: effectT ?? t };
-  drawLayer("image", ground);
-  drawLayer("shade", ground);
-  drawLayer("accent", ground);
+  for (const layer of prepared.layers) {
+    if (!GROUND_KINDS.has(layer.kind)) continue;
+    drawLayer(layer.kind, ground);
+  }
 
   // Layer 4 — sequenced copy: the beat is selected by copyT, crossfaded with any
   // incoming beat, and (for headline-rise) eased on its own local progress.

@@ -154,12 +154,19 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     );
   });
 
-  test("the timeline path draws the ground trio in the fixed image → shade → accent order even when the template reorders them (D10)", async () => {
-    // The motion path calls the trio by kind instead of iterating the resolved
-    // list — deliberate under D10 (motion bytes are frozen; iterating a list
-    // there risks them). A template's declared order governs the STILL path
-    // only. This pins the current behaviour so a future list-driven change is
-    // a red test rather than a silent motion diff.
+  test("the timeline path draws the ground trio in the resolved list's order, even when the template reorders them (C1/D121)", async () => {
+    // This used to pin the OLD behaviour deliberately — the motion path called
+    // the trio by kind, ignoring the template, so that a future list-driven
+    // change would be a red test instead of a silent motion diff (D10). C1 is
+    // that future: it fired as designed (this assertion went red the moment
+    // drawTimeline started iterating `prepared.layers`), and is rewritten here
+    // to assert the new contract instead of being deleted — a lane that
+    // deletes its own tripwire is indistinguishable from one that broke it.
+    // Byte-neutrality for every caller today is proven separately, by
+    // NodeCanvasCompositor.motion-goldens.test.ts: no caller passes `template`
+    // yet (C3), so the resolved list is always the canonical trio order and
+    // this reordering is reachable only through a direct adapter call like
+    // this one.
     const template: BriefTemplate = {
       id: "canonical-image-text",
       version: 1,
@@ -186,6 +193,11 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
     const order = recordDrawOrder();
     NodeCanvasCompositor.draw(ctx, prepared, 0.5, undefined, 0.5);
-    expect(order).toEqual(["image", "shade", "accent"]);
+    // Copy and logo keep their own sequencing (this lane's scope): the
+    // template's static-text/logo entries never reach `LAYER_DRAWERS` on this
+    // path (drawTimeline paints them itself, through drawBeat and its own
+    // drawImage call), so only the ground trio — in the template's order —
+    // is ever recorded here.
+    expect(order).toEqual(["accent", "shade", "image"]);
   });
 });
