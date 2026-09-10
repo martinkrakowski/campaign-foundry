@@ -1,5 +1,11 @@
 # Implementation Plan: Extensible Composition & Layout Engine
 
+> **RETIRED 2026-09-10** — see `2026-09-10_reconciliation.md` §3 and
+> `2026-09-10_review-of-the-sept8-composition-plans.md`. Its built half shipped as
+> `BriefTemplate`, D128 z-order, `LAYER_DRAWERS` and boundary validation; its unbuilt half is
+> L10/L11; its remaining novelties are forbidden (`zIndex` vs D128) or colliding (a second kind
+> vocabulary). The visual-builder idea survives as a note on L10. Do not implement.
+
 **Date:** 2026-09-08
 **Context:** The current composition engine (`NodeCanvasCompositor`) hardcodes layout layers (Background -> Shade -> Headline -> Logo). To meet market expectations for video generation and varied ad units, we must support dynamic, multi-asset composition.
 **Architectural Goal:** Evolve the `CreativeGeneration` domain to be driven by a JSON-Schema Layout Descriptor, enabling user-defined templates without backend code changes.

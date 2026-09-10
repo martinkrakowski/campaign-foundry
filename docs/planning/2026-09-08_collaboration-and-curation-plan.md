@@ -1,5 +1,11 @@
 # Implementation Plan: Collaboration, Drafts & Asset Curation
 
+> **RETIRED 2026-09-10** — see `2026-09-10_reconciliation.md` §3. Phases 1 and 2 had **already
+> shipped before this plan was drafted**: `StoredBrief.revision` with conditional writes and 409
+> adoption (2026-08-28), and the copy-pool drawer with its `/campaigns/pools/*` routes
+> (2026-08-30). The remainder is the **D64(b)** deferral list and **D82**, both open owner
+> decisions. Inline legal linting survives as a lane. Kept for the record; do not implement.
+
 **Date:** 2026-09-08
 **Context:** Current campaigns exist as single-user local files, and copy pools lack curation UI. For market viability as an enterprise tool, Campaign Foundry needs collaborative workflows, revision history, and robust asset management.
 **Architectural Goal:** Enhance the `CampaignOrchestration` domain with a `DraftCampaignService`, and expose `GovernanceAndCompliance` asset pools through a dedicated UI.
