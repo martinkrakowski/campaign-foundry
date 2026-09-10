@@ -1,0 +1,127 @@
+# The Reconciliation — Architecture & Development Plan
+
+**Date:** 2026-09-10 · **Status:** draft, for the owner's approval · **Nothing dispatched.**
+**Verified against:** `main` at `7471bf5`. Every claim below cites code that was read, not recalled.
+**Supersedes nothing on its own** — it says which plans survive, and in what order they run.
+
+---
+
+## 0. The one finding this document exists for
+
+**D121 says there is one source of the layer stack. There are four, and no two agree.**
+
+| Renderer | Where it gets the order | Reads the brief's template? |
+|---|---|---|
+| `NodeCanvasCompositor` **still** path (`drawLegacy`) | iterates `prepared.layers` | **structurally yes, actually no** — nothing passes one |
+| `NodeCanvasCompositor` **motion** path (`drawTimeline`) | `drawLayer("image"/"shade"/"accent")` **by name** | **no, by construction** |
+| `packages/ui/preview-layers.ts` | `PREVIEW_LAYER_ORDER`, derived from `CANONICAL_TEMPLATES` | **no** |
+| `apps/web/CreativePreview.tsx` | its own layer references | **no** |
+
+**They agree today only because all four ignore the brief.** `CompositeRequest` carries no
+`template`, so `resolveLayerList` always falls through to `CANONICAL_TEMPLATES["image-text"]`. The
+reorder control, the ordering constraints and the occlusion guard are validated, stored, and then
+discarded at render.
+
+**This is the reconciliation.** Everything else in this document is ordered around it, because fixing
+any one of the four alone makes the disagreement *visible* rather than fixing it — and a visible
+disagreement between the preview and the delivered asset is worse than a hidden one.
+
+---
+
+## 1. Two further duplications, lower stakes, same shape
+
+#### **Geometry is described twice**
+
+`CREATIVE_GEOMETRY` is read **directly** by the drawers — `accentSolidHeightFraction`,
+`logoWidthFraction`, `logoMarginFraction`. D134's per-layer `props` describe the *same* quantities,
+are validated at both boundaries by `layerPropsProblem`, and are **never read by the compositor**:
+the word `props` appears in `NodeCanvasCompositor.ts` exactly once, in a comment.
+
+So a user can set `shade.props.alpha` today, have it validated, stored, round-tripped through YAML —
+and rendered identically to not setting it. **D134 called this "inert on arrival" deliberately, but
+no lane owns making it live**, and until one does, the vocabulary is a promise the product does not
+keep.
+
+#### **Motion is described three times**
+
+`MOTION_KINDS`, `TextEffectKind` / `TEXT_EFFECT_VALUES`, and `CopyTimeline`'s beat model each
+describe how something moves, at different granularities, with no stated composition rule. The
+retired motion plan proposed keyframes as a **fourth**.
+
+---
+
+## 2. Proposed decisions
+
+| id | Decision | Why |
+|---|---|---|
+| **R-D1** | **One stack, read from the brief, honoured by every renderer.** The order comes from `BriefTemplate.layers` and nothing else derives its own. | D121, finally enforced rather than asserted. |
+| **R-D2** | **Convergence order is fixed and counter-intuitive: make the renderers agree *before* wiring the brief through.** Motion path first, then previews, then the port. | While the template is unwired every renderer draws the canonical list, so each conversion is provably byte-neutral. Wiring first makes the still honour a user's order the video ignores — a regression shipped to delivered assets. |
+| **R-D3** | **`CREATIVE_GEOMETRY` is the default; `props` is the override; the drawer reads one merged value.** No drawer reads the constant directly once the merge exists. | Two descriptions of one quantity is the same defect as two descriptions of one order. |
+| **R-D4** | **No fourth motion vocabulary.** Keyframes, if wanted, extend `MotionKind`/`CopyTimeline` inside the existing ports-and-adapters split. | A new bounded context owning its own ports would be the first in this codebase; `CreativeGeneration` is adapters-only. |
+| **R-D5** | **A plan is retired by an explicit line in this document, not by silence.** | Three plans sat untracked for two days and one was substantially superseded without anyone noticing. |
+| **R-D6** | **Every convergence lane proves byte-neutrality per frame**, through `NodeCanvasCompositor.draw`. | **There is no video byte golden.** D10's "frozen motion bytes" is not backed by a test, so the freeze has to be demonstrated rather than assumed. |
+
+---
+
+## 3. The plan inventory, reconciled
+
+| Plan | Verdict |
+|---|---|
+| `2026-09-08_creative-templates-and-units` | **Live, amended.** Its L1–L8 shipped. Add the wiring gap it never assigned a lane to, correct L7's status, fix L9's ownership list and its DoD wording. |
+| `2026-09-10_the-motion-path-and-l9` (#307) | **Live.** Absorbs the convergence sequence below; M1 and M1b are lanes C1 and C3 here. |
+| `2026-09-08_extensible-composition-plan` (#309) | **Retired.** Shipped under other names; its remainder is forbidden (`zIndex` vs D128), colliding (a second kind vocabulary), or already owned by L10/L11. Keep the visual-builder idea as a note on L10. |
+| `2026-09-08_motion-composition-implementation-plan` (#309) | **Retired as written.** Phase 1 is a re-housing of shipped machinery. If keyframes are wanted, they are a new, smaller plan under R-D4 — and cannot start before C1. |
+| `2026-09-08_collaboration-and-curation-plan` (#309) | **Unreviewed.** Out of scope here; it touches drafts and asset pools, not the render stack. Review before it is dispatched. |
+| `2026-09-10_seat-selection` (#305) | **Live**, independent of this arc. |
+| `2026-09-09_verification-budget` | **Live**, V3 still open. |
+
+---
+
+## 4. Lanes
+
+**Convergence — strictly ordered. Each lane is byte-neutral by construction.**
+
+| Lane | Task | Proof |
+|---|---|---|
+| **C1** | **The motion path iterates the list.** `drawTimeline` stops calling the ground trio by name. The order it produces is unchanged, because the list is still canonical. | Per-frame byte-identity through `draw`. `layer-order.test.ts` pins the by-kind order deliberately and is **expected to go red and be rewritten** — that is not a golden moving. |
+| **C2** | **The previews read one order.** `PREVIEW_LAYER_ORDER` and `CreativePreview.tsx` stop deriving their own and take the same list the compositor takes. Still canonical, so nothing moves. | Preview output unchanged for canonical templates. |
+| **C3** | **Wire `template` onto the port.** `CompositeRequest` gains it; both use cases pass it; the test doubles follow. **Only now does a user's order reach anything.** | A reordered template renders in that order on **both** paths **and** in both previews. |
+| **C4** | **`props` becomes live** under R-D3: one merge of `CREATIVE_GEOMETRY` and per-layer props, read by every drawer. | All-absent props render byte-identical to today. |
+
+**Then the templates arc resumes**, unchanged from #307: **M2** (`enabled` at the boundary) → **M3**
+(the toggle). L9 is meaningful only after C1 and C3.
+
+**Then, and only then, the open questions:** L10 (frames), L11 (fill and region), the template
+library (L7, which never shipped past a port with no consumer), and keyframes if wanted.
+
+**M4** — amend the templates plan per §3 — runs whenever.
+
+---
+
+## 5. Gaps this review found that no plan owned
+
+1. **The port wiring.** The templates plan assigns no lane to putting `template` on `CompositeRequest`. Now **C3**.
+2. **The previews.** No plan noticed that two of the four renderers derive their own order. Now **C2**.
+3. **`props` has no consumer lane.** D134 shipped the vocabulary and validation; nothing owns the read. Now **C4**.
+4. **There is no video byte golden.** D10 freezes bytes that nothing measures. **R-D6** makes each lane prove it; a standing golden is a candidate lane of its own.
+5. **L7 never shipped.** A read-only port with no consumer, no route, no library page, no thumbnails — and two of the three seed thumbnails need drawers (`html`, `video`) the first arc does not build.
+6. **D136 half-shipped.** The occlusion advisory reaches the editor and no further, encoded `{ passed: true, reason }` against a type documenting `reason` as *"populated on failure"*.
+
+---
+
+## 6. Definition of Done
+
+- **C1–C3**: a template whose order differs from canonical renders in **that** order in the still, in
+  every MP4 frame, in the kit preview and in the web preview — or the plan records explicitly which
+  surface stays canonical and why.
+- **C4**: a per-layer prop changes the rendered output; absent props change nothing.
+- **§3**: every retired plan carries a retirement line in its own file, pointing here.
+- **§5**: each gap is either a lane or a written refusal. None stays a gap.
+
+## 7. What this plan refuses
+
+- **It does not fix the four renderers in parallel.** They are sequenced precisely so no intermediate
+  state can ship a disagreement.
+- **It does not rewrite the retired plans.** Retirement is a line in the file, not a rewrite.
+- **It does not treat "the tests pass" as byte-neutrality** (R-D6). Nothing currently measures the
+  bytes D10 freezes.
