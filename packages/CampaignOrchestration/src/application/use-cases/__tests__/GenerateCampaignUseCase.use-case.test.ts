@@ -581,6 +581,49 @@ describe("GenerateCampaignUseCase — variation", () => {
     }
   });
 
+  test("threads the brief's template into every composite request — classic, variation static and motion (C3)", async () => {
+    // A template whose order differs from the canonical image-text list, so
+    // this can only pass if the resolved list came from the brief, not a
+    // canonical fallback that happens to agree.
+    const template = {
+      id: "canonical-image-text" as const,
+      version: 1,
+      creativeType: "image-text" as const,
+      unit: "standard-web" as const,
+      layers: [
+        { id: "image", kind: "image" as const },
+        { id: "accent", kind: "accent" as const },
+        { id: "shade", kind: "shade" as const },
+        { id: "static-text", kind: "static-text" as const },
+        { id: "logo", kind: "logo" as const },
+      ],
+    };
+    // Classic: every treatment cell's request carries the brief's template.
+    const classicD = deps();
+    await new GenerateCampaignUseCase(classicD).execute(baseBrief({ template }));
+    const classicRequests = vi.mocked(classicD.compositor.compositeAsset).mock.calls.map((call) => call[0]);
+    expect(classicRequests.length).toBeGreaterThan(0);
+    for (const request of classicRequests) {
+      expect(request.template).toEqual(template);
+    }
+    // Variation, static slot: same template rides the variant's request.
+    const variationD = deps({ planner: fakePlanner(fakePlan([fakeVariant()])) });
+    await new GenerateCampaignUseCase(variationD).execute(variationBrief({ template }));
+    const variationRequests = vi.mocked(variationD.compositor.compositeAsset).mock.calls.map((call) => call[0]);
+    expect(variationRequests.length).toBeGreaterThan(0);
+    for (const request of variationRequests) {
+      expect(request.template).toEqual(template);
+    }
+    // Variation, motion slot: the video port receives the same template.
+    const motionD = deps({
+      planner: fakePlanner(fakePlan([fakeVariant({ motion: "ken-burns-in", durationSec: 6 })])),
+    });
+    await new GenerateCampaignUseCase(motionD).execute(variationBrief({ template }));
+    expect(motionD.videoCompositor.compositeVideo).toHaveBeenCalledWith(
+      expect.objectContaining({ template }),
+    );
+  });
+
   test("legal-gates every distinct pooled headline and halts like a prohibited campaign message", async () => {
     const compliance = {
       validateLegalCopy: vi.fn(async (text: string) =>

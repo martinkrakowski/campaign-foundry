@@ -306,6 +306,10 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
             canvas: spec,
             layout: treatment.layout,
             tone: treatment.tone,
+            // The brief's template (D120/D123, C3) rides every creative it
+            // renders, classic included: the resolved draw order is the
+            // brief's, not the canonical fallback.
+            template: brief.template,
             // The brief's style (T5) rides every creative it renders, classic
             // included; absent → the renderer's defaults, byte-identical (D54).
             ...(brief.style !== undefined ? { style: brief.style } : {}),
@@ -488,6 +492,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         insetsByRatio.get(cell.ratio.value),
         timeline,
         brief.style,
+        brief.template,
       ),
     );
 
@@ -527,6 +532,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     safeInsets: SafeInsets | undefined,
     timeline: CopyTimeline | undefined,
     style: CampaignBrief["style"],
+    template: CampaignBrief["template"],
   ): Promise<{ asset: GeneratedAsset; heroImage?: Uint8Array }> {
     const cellContext: BackgroundContext = {
       ...context,
@@ -559,6 +565,10 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       // The brief's style (T5) applies to every variant; absent → the
       // renderer's defaults, byte-identical to the pre-style path (D54).
       ...(style !== undefined ? { style } : {}),
+      // The brief's template (D120/D123, C3) applies to every variant, static
+      // and motion alike — the resolved draw order is the brief's, not the
+      // canonical fallback (renderMotionVariant spreads this same `request`).
+      template,
     };
 
     const treatment = variantTreatmentId(variant);

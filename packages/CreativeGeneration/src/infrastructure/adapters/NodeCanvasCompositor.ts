@@ -104,7 +104,7 @@ interface PreparedCreative {
    * its creative type, else the `image-text` canonical list
    * ({@link resolveLayerList}) — and iterated by both draw paths through the
    * {@link LAYER_DRAWERS} table: `drawLegacy` over the whole list, `drawTimeline`
-   * (C1) over the {@link GROUND_KINDS} subset only.
+   * (C1) over everything except the {@link SEQUENCED_KINDS} it draws itself.
    */
   readonly layers: readonly CreativeTemplateLayer[];
   /**
@@ -168,12 +168,26 @@ const LAYER_DRAWERS: Readonly<Partial<Record<LayerKind, LayerDrawer>>> = {
 };
 
 /**
- * The ground trio's kinds (C1): `drawTimeline` iterates `prepared.layers` but
- * draws only these, in the list's order, skipping every other kind — the
- * sequenced copy and logo are drawn explicitly, after, on their own clocks
- * (see {@link drawTimeline}).
+ * Kinds `drawTimeline` draws itself, after the ground loop, on their own
+ * clocks (C1/C3): the sequenced copy (`static-text`/`animated-text`, via
+ * {@link drawBeat}) and the logo (its own `drawImage` call, snapped to the
+ * key beat's box). The ground loop in {@link drawTimeline} skips these and
+ * runs every other kind through {@link drawLayer} — so `image`/`shade`/
+ * `accent` draw exactly as `drawLegacy` draws them, and a kind neither loop
+ * knows (`video`, `html`, `fill`) throws there too, the same message,
+ * instead of silently skipping. Before C3 this was unreachable: no caller
+ * passed a `template`, so the resolved list was always the canonical
+ * `image`/`shade`/`accent`/`static-text`/`logo` five, and every kind was
+ * either drawn or explicitly sequenced. C3 makes a brief's own template
+ * (`canonical-video`'s `video` ground layer, for one) reach this loop for
+ * real — silently skipping it would draw a shade over no background; this
+ * compositor already refuses to draw the same layer silently missing on the
+ * still path ({@link drawLayer}'s "a silently dropped layer is a redesign
+ * the goldens cannot see"), so the motion path now refuses it too, rather
+ * than disagreeing with the still path about what a template it cannot draw
+ * means.
  */
-const GROUND_KINDS: ReadonlySet<LayerKind> = new Set(["image", "shade", "accent"]);
+const SEQUENCED_KINDS: ReadonlySet<LayerKind> = new Set(["static-text", "animated-text", "logo"]);
 
 /**
  * NodeCanvasCompositor — CompositorPort adapter.
@@ -193,12 +207,14 @@ const GROUND_KINDS: ReadonlySet<LayerKind> = new Set(["image", "shade", "accent"
  * on every machine, independent of the reviewer's installed system fonts.
  *
  * The draw order is data (D121): `prepare` resolves the layer list (the brief's
- * `template.layers` when present, else the canonical layers for its creative
- * type, else the `image-text` canonical list) and both draw paths iterate it
- * through the {@link LAYER_DRAWERS} table — array position is z-order, bottom
- * first (D128). The legacy blit iterates the whole list; the motion path (C1)
- * iterates it too, for the ground trio only — copy and logo keep their own
- * sequencing and clocks (see `drawTimeline`).
+ * `template.layers` when present — C3, every production request carries one —
+ * else the canonical layers for its creative type, else the `image-text`
+ * canonical list) and both draw paths iterate it through the {@link LAYER_DRAWERS}
+ * table — array position is z-order, bottom first (D128). The legacy blit
+ * iterates the whole list; the motion path (C1) iterates it too, skipping only
+ * the sequenced copy and logo, which keep their own sequencing and clocks (see
+ * `drawTimeline`) — every other kind draws, or throws the same way the legacy
+ * blit does for a kind neither path can draw.
  *
  * Still path: {@link NodeCanvasCompositor.prepare} (I/O) →
  * {@link NodeCanvasCompositor.draw} at `t = 1` with no `motion`.
@@ -317,14 +333,9 @@ export class NodeCanvasCompositor implements CompositorPort {
       readonly durationSec?: number;
       readonly timeline?: CopyTimeline;
       /**
-       * The L1b brief template (D120/D123): present → its `layers` ARE the
-       * draw order. A brief parsed through `parseBrief` always carries one;
-       * the field stays off the port interface until L3 wires it through.
-       */
-      readonly template?: BriefTemplate;
-      /**
        * Direct-caller escape hatch: with no `template`, the canonical layers
-       * for this creative type. Production never passes it.
+       * for this creative type. Production never passes it — `request.template`
+       * (D120/D123, C3) is what every real caller carries, via `parseBrief`.
        */
       readonly creativeType?: CreativeType;
     },
@@ -828,10 +839,10 @@ function resolveBeatLayouts(
  * the key beat's mid-time, D7) and that `headline-rise` advances per beat on the
  * pose clock `t` (each beat rises on its own local progress). The text effect
  * keeps that beat-local clock unless the caller passed `effectT` (the poster
- * passes 1 — H4). The ground trio (layers 1–3) is now read from
- * `prepared.layers` (C1), the same resolved list `drawLegacy` iterates — see
- * {@link GROUND_KINDS} — so it matches the legacy blit's trio order exactly,
- * not merely by coincidence of the two bodies agreeing.
+ * passes 1 — H4). The ground layers are read from `prepared.layers` (C1), the
+ * same resolved list `drawLegacy` iterates — see {@link SEQUENCED_KINDS} — so
+ * it matches the legacy blit's order exactly, not merely by coincidence of the
+ * two bodies agreeing.
  */
 function drawTimeline(
   ctx: SKRSContext2D,
@@ -844,28 +855,30 @@ function drawTimeline(
 ): void {
   const eased = motion === undefined ? 1 : easeOutCubic(t);
 
-  // Layers 1–3 — identical to the legacy blit for this motion / pose clock.
-  // Drawn through the same table drawLegacy iterates (D121): one copy of each
-  // layer's code serves both paths. The ground trio is fixed because the
-  // sequenced copy and logo below keep their own positions; `effectT` is a
-  // value no ground drawer reads (`effectT ?? t` matches draw()'s clock shape).
+  // The ground layers — identical to the legacy blit for this motion / pose
+  // clock. Drawn through the same table drawLegacy iterates (D121): one copy
+  // of each layer's code serves both paths. `effectT` is a value no ground
+  // drawer reads (`effectT ?? t` matches draw()'s clock shape).
   //
-  // The trio is now READ from `prepared.layers`, the same resolved list
-  // `drawLegacy` iterates (C1/D121) — the one-source-of-order fix R-D1 calls
-  // for. Non-ground kinds (`static-text`/`animated-text`, `logo`) are skipped
-  // here, not thrown on: the sequenced copy and logo below keep their own
-  // positions and clocks, drawn explicitly after the trio. This was safe to
-  // do first, byte-for-byte, only because no caller passes `template` yet
-  // (that wiring is C3): `resolveLayerList` always falls through to
-  // `CANONICAL_TEMPLATES["image-text"]`, whose order is already
-  // image → shade → accent, so this list-driven loop produces exactly the
-  // by-kind calls it replaces. The motion-goldens suite proves it; the
-  // reordered-template case in NodeCanvasCompositor.layer-order — which used
-  // to pin the by-kind order deliberately, as the tripwire for this change —
-  // now asserts the new contract instead.
+  // READ from `prepared.layers`, the same resolved list `drawLegacy` iterates
+  // (C1/D121) — the one-source-of-order fix R-D1 calls for. The sequenced
+  // kinds (`static-text`/`animated-text`, `logo`) are skipped here, not
+  // thrown on: they keep their own positions and clocks, drawn explicitly
+  // below. Everything else runs through `drawLayer` exactly as the legacy
+  // blit runs it — so a kind neither path can draw (`video`, `html`, `fill`)
+  // throws the same "no drawer" error here as it does there (C3/{@link
+  // SEQUENCED_KINDS}): before C3 this loop only ever saw the canonical
+  // image/shade/accent trio, because no caller passed a `template`; now a
+  // brief's own template reaches it, `canonical-video`'s ground `video`
+  // layer included, and silently skipping that layer would draw a shade
+  // over no background instead of failing loudly. The motion-goldens suite
+  // proves the canonical case unchanged; the reordered-template case in
+  // NodeCanvasCompositor.layer-order — which used to pin the by-kind order
+  // deliberately, as the tripwire for this change — now asserts the new
+  // contract instead.
   const ground: LayerDrawContext = { ctx, prepared, motion, eased, effectT: effectT ?? t };
   for (const layer of prepared.layers) {
-    if (!GROUND_KINDS.has(layer.kind)) continue;
+    if (SEQUENCED_KINDS.has(layer.kind)) continue;
     drawLayer(layer.kind, ground);
   }
 

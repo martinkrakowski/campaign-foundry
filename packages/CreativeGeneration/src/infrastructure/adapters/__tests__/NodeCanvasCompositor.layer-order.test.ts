@@ -163,10 +163,12 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     // to assert the new contract instead of being deleted — a lane that
     // deletes its own tripwire is indistinguishable from one that broke it.
     // Byte-neutrality for every caller today is proven separately, by
-    // NodeCanvasCompositor.motion-goldens.test.ts: no caller passes `template`
-    // yet (C3), so the resolved list is always the canonical trio order and
-    // this reordering is reachable only through a direct adapter call like
-    // this one.
+    // NodeCanvasCompositor.motion-goldens.test.ts: every existing caller's
+    // brief carries the canonical template (C3 wired the port, it did not
+    // change what any brief holds), so the resolved list is still the
+    // canonical trio order for them and this reordering is reachable only
+    // through a direct adapter call like this one, or a brief whose template
+    // actually differs from canonical.
     const template: BriefTemplate = {
       id: "canonical-image-text",
       version: 1,
@@ -199,5 +201,42 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     // drawImage call), so only the ground trio — in the template's order —
     // is ever recorded here.
     expect(order).toEqual(["accent", "shade", "image"]);
+  });
+
+  test("the timeline path throws on a ground kind it cannot draw, the same way the still path does (C3)", async () => {
+    // The GROUND_KINDS asymmetry C1 flagged forward: `drawTimeline` used to
+    // skip every kind but the canonical trio, silently. Once a template's
+    // order actually reaches this loop (C3), a real template can carry a
+    // ground kind the drawer table has no entry for — `canonical-video`'s
+    // `video` layer, for one. Skipping it would draw the shade that follows
+    // over no background at all; this asserts the motion path refuses that,
+    // exactly like `drawLegacy` refuses it on the still path (see the "fill"
+    // case above) — one behaviour, not two.
+    const template: BriefTemplate = {
+      id: "canonical-video",
+      version: 1,
+      creativeType: "video",
+      unit: "standard-web",
+      layers: [
+        { id: "video", kind: "video" },
+        { id: "shade", kind: "shade" },
+        { id: "animated-text", kind: "animated-text" },
+        { id: "logo", kind: "logo" },
+      ],
+    };
+    const req: TemplateRequest & { durationSec: number; timeline: CopyTimeline } = {
+      ...request({ template }),
+      durationSec: 8,
+      timeline: {
+        beats: [{ text: "Stay wild, stay hydrated", weight: 1 }],
+        transition: "cut",
+        keyBeat: 1,
+      },
+    };
+    const prepared = await NodeCanvasCompositor.prepare(req);
+    const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
+    expect(() => NodeCanvasCompositor.draw(ctx, prepared, 0.5, undefined, 0.5)).toThrow(
+      /layer kind "video" has no drawer/,
+    );
   });
 });
