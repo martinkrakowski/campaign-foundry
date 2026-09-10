@@ -147,7 +147,7 @@ export function CopySection({
           Randomized brief can render motion, so a classic draft never offers a sequence. */}
       {state.mode === "variation" ? (
         <div data-slot="copy-timeline">
-          <TimelineSection state={state} dispatch={dispatch} warnings={warnings} />
+          <TimelineSection state={state} dispatch={dispatch} errors={errors} warnings={warnings} />
         </div>
       ) : null}
     </SectionShell>

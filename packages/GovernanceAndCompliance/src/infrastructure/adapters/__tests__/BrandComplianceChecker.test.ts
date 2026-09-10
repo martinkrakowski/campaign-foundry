@@ -174,4 +174,11 @@ describe("matchProhibitedTerms and exports (R1)", () => {
     expect(matchProhibitedTerms("Clean text")).toEqual([]);
     expect(matchProhibitedTerms("A miracle cure")).toEqual(["miracle", "cure"]);
   });
+
+  test("an accented word that merely contains a prohibited substring does not warn; the plain prohibited term still does", () => {
+    expect(matchProhibitedTerms("sécure")).toEqual([]);
+    expect(matchProhibitedTerms("récure")).toEqual([]);
+    expect(matchProhibitedTerms("précure")).toEqual([]);
+    expect(matchProhibitedTerms("cure")).toEqual(["cure"]);
+  });
 });

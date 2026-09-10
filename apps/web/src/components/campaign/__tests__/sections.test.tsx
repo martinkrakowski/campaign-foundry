@@ -94,10 +94,14 @@ describe("IdentitySection", () => {
     const copiedBtn = await screen.findByRole("button", { name: "Copied ✓" });
     expect(copiedBtn.textContent).toBe("Copied ✓");
 
-    await new Promise((r) => setTimeout(r, 1600));
     // Re-queried: the name is what reverts, and asserting it is what proves the label
     // came back rather than the text alone changing.
-    expect(screen.getByRole("button", { name: "Copy brief ID" }).textContent).toBe("Copy");
+    await waitFor(
+      () => {
+        expect(screen.getByRole("button", { name: "Copy brief ID" }).textContent).toBe("Copy");
+      },
+      { timeout: 4000 },
+    );
   });
 
   test("copy brief ID does nothing when clipboard is unavailable", () => {
@@ -158,28 +162,30 @@ describe("CopySection", () => {
   });
 
   test("renders warnings under copy fields and yields to errors", () => {
+    const miracleWarning = messages.prohibitedTerminology(["miracle"]);
+    const guaranteedWarning = messages.prohibitedTerminology(["guaranteed"]);
     const { rerender } = render(
       <CopySection
         state={state()}
         dispatch={vi.fn()}
         errors={{}}
-        warnings={{ campaignMessage: "Avoid 'miracle'", localizedMessage: "Avoid 'guaranteed'" }}
+        warnings={{ campaignMessage: miracleWarning, localizedMessage: guaranteedWarning }}
       />,
     );
-    expect(screen.getByText("Avoid 'miracle'")).toBeTruthy();
-    expect(screen.getByText("Avoid 'guaranteed'")).toBeTruthy();
+    expect(screen.getByText(miracleWarning)).toBeTruthy();
+    expect(screen.getByText(guaranteedWarning)).toBeTruthy();
 
     // When an error is also present on the same field, the error renders and the warning yields
     rerender(
       <CopySection
         state={state()}
         dispatch={vi.fn()}
-        errors={{ campaignMessage: "Headline is required" }}
-        warnings={{ campaignMessage: "Avoid 'miracle'" }}
+        errors={{ campaignMessage: messages.campaignMessage }}
+        warnings={{ campaignMessage: miracleWarning }}
       />,
     );
-    expect(screen.getByText("Headline is required")).toBeTruthy();
-    expect(screen.queryByText("Avoid 'miracle'")).toBeNull();
+    expect(screen.getByText(messages.campaignMessage)).toBeTruthy();
+    expect(screen.queryByText(miracleWarning)).toBeNull();
   });
 
   test("renders live character counter and warns on exceeding max limit", () => {

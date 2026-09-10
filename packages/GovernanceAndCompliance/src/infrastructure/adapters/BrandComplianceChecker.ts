@@ -20,13 +20,13 @@ export function escapeRegExp(term: string): string {
 
 /**
  * One anchored matcher per term, built once at module scope. The head is a
- * lookbehind over [a-z0-9], NOT \b: \b counts "_" as a word character, so no
+ * lookbehind over [\p{L}0-9], NOT \b: \b counts "_" as a word character, so no
  * boundary exists beside it and terms adjacent to an underscore slipped past
  * ("_guaranteed", "results_guaranteed", "a_miracle" were lost true positives).
  * What the gate actually wants is that the term is not preceded by a letter or
  * a digit — text is lowercased before matching, so the lookbehind expresses
  * exactly that: embedded substrings ("secure", "obscure", "procurement",
- * "manicure") still do not match because "cure" there is preceded by a letter,
+ * "manicure", "sécure") still do not match because "cure" there is preceded by a letter,
  * while underscore-adjacent terms match again. The term may run on through
  * word characters, so inflections that extend it ("cure" → "cures", "cured")
  * still hit. Stem changes are not reached: "curing", "curative" are not
@@ -39,7 +39,7 @@ export function escapeRegExp(term: string): string {
  * into a miss ("cure_milk" escaping the gate).
  */
 export const PROHIBITED_PATTERNS = PROHIBITED_TERMS.map(
-  (term) => [new RegExp(`(?<![a-z0-9])${escapeRegExp(term)}\\w*`), term] as const,
+  (term) => [new RegExp(`(?<![\\p{L}0-9])${escapeRegExp(term)}\\w*`, "u"), term] as const,
 );
 
 /** Find all prohibited terms matched in the given text. */

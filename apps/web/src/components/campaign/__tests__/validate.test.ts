@@ -683,6 +683,16 @@ describe("inline legal lint warnings (R1)", () => {
     spy.mockRestore();
   });
 
+  test("an accented word that merely contains a prohibited substring does not warn; the plain prohibited term still does", () => {
+    const accentedClean = valid({ localizedMessage: "Une maison sécure et confortable" });
+    expect(validateWarnings(accentedClean).copy.localizedMessage).toBeUndefined();
+
+    const plainProhibited = valid({ localizedMessage: "Une cure miracle pour tous" });
+    expect(validateWarnings(plainProhibited).copy.localizedMessage).toBe(
+      messages.prohibitedTerminology(["miracle", "cure"]),
+    );
+  });
+
   test("the term list has one source — fails if the web side grows its own copy", () => {
     // 1. validate.ts re-exports the exact same array reference from GovernanceAndCompliance
     expect(PROHIBITED_TERMS).toBe(DOMAIN_PROHIBITED_TERMS);

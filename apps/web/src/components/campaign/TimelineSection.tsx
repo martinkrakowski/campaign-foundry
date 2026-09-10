@@ -34,10 +34,12 @@ import { DWELL_TOLERANCE, resolveTimeline } from "@campaignfoundry/CampaignOrche
 export function TimelineSection({
   state,
   dispatch,
+  errors = {},
   warnings = {},
 }: {
   state: EditorState;
   dispatch: Dispatch<EditorAction>;
+  errors?: Record<string, string>;
   warnings?: Record<string, string>;
 }) {
   const beats = state.timeline.beats;
@@ -55,6 +57,7 @@ export function TimelineSection({
       {beats.length > 0 ? (
         <ol className="space-y-2">
           {beats.map((beat, index) => {
+            const beatError = errors[`copy-timeline-beat-${index}`];
             const beatWarning = warnings[`copy-timeline-beat-${index}`];
             return (
               <li key={beat.key} className="space-y-1">
@@ -113,7 +116,9 @@ export function TimelineSection({
                 ×
               </button>
             </div>
-            {beatWarning ? (
+            {beatError ? (
+              <span className="block text-[11px] text-error">{beatError}</span>
+            ) : beatWarning ? (
               <span className="block text-[11px] text-warning">{beatWarning}</span>
             ) : null}
           </li>
