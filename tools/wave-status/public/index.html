@@ -228,6 +228,15 @@
         gap: var(--space-2);
         align-items: baseline;
       }
+      #log-follow-container {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+      }
+      #log-follow {
+        cursor: pointer;
+        accent-color: var(--color-brand-primary);
+      }
       #log-toolbar .log-actions {
         display: flex;
         flex-wrap: wrap;
@@ -362,6 +371,12 @@
         </header>
         <div id="log" hidden></div>
       </section>
+      <template id="log-follow-template">
+        <div id="log-follow-container">
+          <input type="checkbox" id="log-follow" />
+          <label for="log-follow">follow</label>
+        </div>
+      </template>
     </div>
     <script>
       "use strict";
@@ -385,6 +400,7 @@
       let activeLogSeq = 0;
       let activeWave = null;
       let activeLane = null;
+      let following = false;
       const metricValues = {};
       for (const metric of document.querySelectorAll(
         "#metrics [data-metric]",
@@ -418,6 +434,87 @@
       }
 
       let sortByRecent = loadSortPreference();
+
+      function laneOf(status, wave, lane) {
+        if (status === null) return null;
+        for (const w of status.waves) {
+          if (w.id === wave) {
+            for (const l of w.lanes) {
+              if (l.lane === lane) return l;
+            }
+          }
+        }
+        return null;
+      }
+
+      let followControlElement = null;
+
+      function syncFollowControl(alive) {
+        if (alive) {
+          if (followControlElement === null) {
+            const template = document.getElementById(
+              "log-follow-template",
+            );
+            if (template && template.content) {
+              const fragment = template.content.cloneNode(true);
+              const wrapper = document.createElement("div");
+              wrapper.appendChild(fragment);
+              const element = wrapper.querySelector("#log-follow-container");
+              if (element) {
+                followControlElement = element;
+                const toolbar = document.getElementById("log-toolbar");
+                if (toolbar !== null) {
+                  const actions = toolbar.querySelector(".log-actions");
+                  if (actions !== null) {
+                    toolbar.insertBefore(followControlElement, actions);
+                    const checkbox = document.getElementById("log-follow");
+                    if (checkbox) {
+                      checkbox.addEventListener("change", () => {
+                        following = checkbox.checked;
+                        if (
+                          following &&
+                          activeWave !== null &&
+                          activeLane !== null
+                        ) {
+                          void maybeFollow();
+                        }
+                      });
+                    }
+                  }
+                }
+              }
+            }
+          }
+        } else {
+          following = false;
+          if (followControlElement !== null) {
+            followControlElement.remove();
+            followControlElement = null;
+          }
+        }
+      }
+
+      async function loadTail(wave, lane, seq) {
+        const res = await fetch(`/api/log/${wave}/${lane}?tail=16`);
+        let buf = null;
+        if (res.ok) {
+          buf = await res.arrayBuffer();
+        }
+        if (seq !== activeLogSeq) return;
+        if (res.ok && buf !== null) {
+          const bytes = buf.byteLength;
+          logSize.textContent = `${bytes.toLocaleString()} B`;
+          const text = new TextDecoder().decode(buf);
+          renderLogLines(text);
+          logView.scrollTop = logView.scrollHeight;
+        }
+      }
+
+      async function maybeFollow() {
+        if (!following) return;
+        if (activeWave === null || activeLane === null) return;
+        await loadTail(activeWave, activeLane, activeLogSeq);
+      }
 
       function updateSortSwitch() {
         if (!sortSwitch) return;
@@ -740,6 +837,17 @@
         setMetric("merged", m.merged);
         setMetric("failing", m.failing);
         setMetric("waves", m.waves);
+
+        // Update follow control visibility based on active lane's alive state
+        if (activeWave !== null && activeLane !== null) {
+          const activeLaneData = laneOf(status, activeWave, activeLane);
+          syncFollowControl(
+            activeLaneData !== null && activeLaneData.derived.alive === true,
+          );
+        }
+
+        // If follow is on, refetch the log tail and scroll to bottom
+        void maybeFollow();
       }
 
       async function refresh() {
@@ -773,6 +881,7 @@
           buf = await res.arrayBuffer();
         }
         if (seq !== activeLogSeq) return;
+        following = false;
         activeWave = wave;
         activeLane = lane;
         logPane.hidden = false;
@@ -795,18 +904,25 @@
           logSize.textContent = "0 B";
           renderLogLines(`no log for ${laneKey}`);
         }
+        // Update follow control based on the lane's alive state
+        const laneData = laneOf(lastStatus, wave, lane);
+        syncFollowControl(
+          laneData !== null && laneData.derived.alive === true,
+        );
       }
 
       function closeLog() {
         activeLogSeq++;
         activeWave = null;
         activeLane = null;
+        following = false;
         logPane.hidden = true;
         logView.hidden = true;
         pageGrid.classList.remove("with-log");
         pageGrid.classList.remove("expanded");
         expandBtn.textContent = "expand";
         expandBtn.setAttribute("aria-label", "expand");
+        syncFollowControl(false);
       }
 
       table.addEventListener("click", (event) => {
@@ -865,6 +981,22 @@
       });
 
       closeBtn.addEventListener("click", closeLog);
+
+      // When follow is on and user scrolls away from the bottom, turn off follow.
+      // This prevents the view from being yanked back to the bottom when the user
+      // deliberately scrolls up to read history.
+      logView.addEventListener("scroll", () => {
+        if (!following) return;
+        const isAtBottom =
+          logView.scrollHeight - logView.scrollTop - logView.clientHeight <= 1;
+        if (!isAtBottom) {
+          following = false;
+          const checkbox = document.getElementById("log-follow");
+          if (checkbox) {
+            checkbox.checked = false;
+          }
+        }
+      });
 
       // Live updates over SSE; if the stream drops, fall back to a 10 s poll.
       const source = new EventSource("/api/stream");

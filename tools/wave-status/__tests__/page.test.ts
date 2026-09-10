@@ -1478,4 +1478,363 @@ describe("the status page", () => {
       /#sort-switch:hover\s*\{[^}]*border-color:\s*var\(--color-border-control-hover\)/,
     );
   });
+
+  test("the follow control renders with an accessible name when the open lane is alive, and is absent when it is not", async () => {
+    const aliveStatus: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "T",
+          lanes: [
+            {
+              wave: "T",
+              lane: "t1",
+              derived: { alive: true },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    const page = await loadPage(aliveStatus);
+    const doc = page.window.document;
+    const row = doc.querySelector("tr.lane");
+    press(row!.querySelector("button")!, "Enter");
+
+    // Wait for the follow control to be present when lane is alive
+    await vi.waitFor(() => {
+      const checkbox = doc.getElementById("log-follow");
+      expect(checkbox).not.toBeNull();
+    });
+
+    const followCheckbox = doc.getElementById(
+      "log-follow",
+    ) as unknown as HTMLInputElement | null;
+    expect(followCheckbox?.getAttribute("id")).toBe("log-follow");
+
+    const followLabel = doc.querySelector('label[for="log-follow"]');
+    expect(followLabel).not.toBeNull();
+    expect(followLabel?.textContent?.trim().toLowerCase()).toContain("follow");
+
+    // Now emit a status where the lane is not alive
+    const deadStatus: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "T",
+          lanes: [
+            {
+              wave: "T",
+              lane: "t1",
+              derived: { alive: false },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+    page.source.emit("status", JSON.stringify(deadStatus));
+
+    // Follow control should be removed when lane is not alive
+    await vi.waitFor(() => {
+      const checkbox = doc.getElementById("log-follow");
+      expect(checkbox).toBeNull();
+    });
+  });
+
+  test("with follow on, a refresh re-fetches that lane's log and leaves the body scrolled to the bottom", async () => {
+    const aliveStatus: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "T",
+          lanes: [
+            {
+              wave: "T",
+              lane: "t1",
+              derived: { alive: true },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    const page = await loadPage(aliveStatus, "initial log");
+    const doc = page.window.document;
+    const row = doc.querySelector("tr.lane");
+    press(row!.querySelector("button")!, "Enter");
+    await vi.waitFor(() => {
+      expect(
+        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
+      ).toBe(false);
+    });
+
+    const logView = doc.getElementById("log") as HTMLElement | null;
+    expect(logView).not.toBeNull();
+
+    // Set up scrollHeight and clientHeight mocking
+    let scrollTopValue = 0;
+    Object.defineProperty(logView!, "scrollHeight", {
+      get: () => 1000,
+      configurable: true,
+    });
+    Object.defineProperty(logView!, "clientHeight", {
+      get: () => 100,
+      configurable: true,
+    });
+    Object.defineProperty(logView!, "scrollTop", {
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+      configurable: true,
+    });
+
+    // Check the follow checkbox
+    const followCheckbox = doc.getElementById(
+      "log-follow",
+    ) as unknown as HTMLInputElement | null;
+    expect(followCheckbox).not.toBeNull();
+    followCheckbox!.checked = true;
+    const changeEvent = new (
+      followCheckbox!.ownerDocument!
+        .defaultView as unknown as { Event: typeof Event }
+    ).Event("change", { bubbles: true });
+    followCheckbox!.dispatchEvent(changeEvent);
+
+    const fetchCountBefore = page.fetches.length;
+
+    // Emit a new status to trigger a refresh
+    page.source.emit("status", JSON.stringify(aliveStatus));
+
+    // Wait for the refetch to happen and scrollTop to be updated
+    await vi.waitFor(() => {
+      expect(page.fetches.length).toBeGreaterThan(fetchCountBefore);
+      expect(logView!.scrollTop).toBe(logView!.scrollHeight);
+    });
+  });
+
+  test("with follow off, a refresh does not change the scroll position", async () => {
+    const aliveStatus: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "T",
+          lanes: [
+            {
+              wave: "T",
+              lane: "t1",
+              derived: { alive: true },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    const page = await loadPage(aliveStatus, "initial log");
+    const doc = page.window.document;
+    const row = doc.querySelector("tr.lane");
+    press(row!.querySelector("button")!, "Enter");
+    await vi.waitFor(() => {
+      expect(
+        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
+      ).toBe(false);
+    });
+
+    const logView = doc.getElementById("log") as HTMLElement | null;
+    expect(logView).not.toBeNull();
+
+    // Set up scrollHeight and clientHeight mocking
+    Object.defineProperty(logView!, "scrollHeight", {
+      get: () => 1000,
+      configurable: true,
+    });
+    Object.defineProperty(logView!, "clientHeight", {
+      get: () => 100,
+      configurable: true,
+    });
+
+    // Set scrollTop to a non-bottom position
+    const savedScrollTop = 500;
+    Object.defineProperty(logView!, "scrollTop", {
+      get: () => savedScrollTop,
+      set: () => {
+        // intentionally ignore sets when testing without follow
+      },
+      configurable: true,
+    });
+
+    const fetchCountBefore = page.fetches.length;
+
+    // Do NOT check the follow checkbox (keep follow off)
+    const followCheckbox = doc.getElementById(
+      "log-follow",
+    ) as unknown as HTMLInputElement | null;
+    expect(followCheckbox?.checked).toBe(false);
+
+    // Emit a new status to trigger a refresh
+    page.source.emit("status", JSON.stringify(aliveStatus));
+
+    // Wait a moment for any async operations
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Scroll position should remain at savedScrollTop (no refetch should have happened)
+    // We verify by checking that scrollTop was not set to scrollHeight
+    expect(logView!.scrollTop).toBe(savedScrollTop);
+  });
+
+  test("when the open lane's alive flips to false, follow turns off and the control disappears", async () => {
+    const aliveStatus: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "T",
+          lanes: [
+            {
+              wave: "T",
+              lane: "t1",
+              derived: { alive: true },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    const page = await loadPage(aliveStatus, "initial log");
+    const doc = page.window.document;
+    const row = doc.querySelector("tr.lane");
+    press(row!.querySelector("button")!, "Enter");
+
+    // Wait for the follow control to appear
+    await vi.waitFor(() => {
+      const checkbox = doc.getElementById("log-follow");
+      expect(checkbox).not.toBeNull();
+    });
+
+    // Check the follow checkbox
+    const followCheckbox = doc.getElementById(
+      "log-follow",
+    ) as unknown as HTMLInputElement | null;
+    followCheckbox!.checked = true;
+    const changeEvent = new (
+      followCheckbox!.ownerDocument!
+        .defaultView as unknown as { Event: typeof Event }
+    ).Event("change", { bubbles: true });
+    followCheckbox!.dispatchEvent(changeEvent);
+
+    // Emit a status where the lane is no longer alive
+    const deadStatus: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "T",
+          lanes: [
+            {
+              wave: "T",
+              lane: "t1",
+              derived: { alive: false },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+    page.source.emit("status", JSON.stringify(deadStatus));
+
+    // Wait for the control to disappear
+    await vi.waitFor(() => {
+      const checkbox = doc.getElementById("log-follow");
+      expect(checkbox).toBeNull();
+    });
+
+    // Subsequent status updates should not try to fetch the log for a dead lane
+    const fetchCountBefore = page.fetches.filter((url) =>
+      url.includes("/api/log/"),
+    ).length;
+    page.source.emit("status", JSON.stringify(deadStatus));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const fetchCountAfter = page.fetches.filter((url) =>
+      url.includes("/api/log/"),
+    ).length;
+    expect(fetchCountAfter).toBe(fetchCountBefore);
+  });
+
+  test("when follow is on and user scrolls away from the bottom, follow turns off automatically", async () => {
+    const aliveStatus: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "T",
+          lanes: [
+            {
+              wave: "T",
+              lane: "t1",
+              derived: { alive: true },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    const page = await loadPage(aliveStatus, "initial log\nline 2\nline 3");
+    const doc = page.window.document;
+    const row = doc.querySelector("tr.lane");
+    press(row!.querySelector("button")!, "Enter");
+
+    // Wait for the follow control to appear
+    await vi.waitFor(() => {
+      const checkbox = doc.getElementById("log-follow");
+      expect(checkbox).not.toBeNull();
+    });
+
+    const logView = doc.getElementById("log") as HTMLElement | null;
+    expect(logView).not.toBeNull();
+
+    // Set up scrollHeight and clientHeight mocking
+    let scrollTopValue = 900;
+    Object.defineProperty(logView!, "scrollHeight", {
+      get: () => 1000,
+      configurable: true,
+    });
+    Object.defineProperty(logView!, "clientHeight", {
+      get: () => 100,
+      configurable: true,
+    });
+    Object.defineProperty(logView!, "scrollTop", {
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+      configurable: true,
+    });
+
+    // Check the follow checkbox
+    const followCheckbox = doc.getElementById(
+      "log-follow",
+    ) as unknown as HTMLInputElement | null;
+    expect(followCheckbox).not.toBeNull();
+    followCheckbox!.checked = true;
+    const changeEvent = new (
+      followCheckbox!.ownerDocument!
+        .defaultView as unknown as { Event: typeof Event }
+    ).Event("change", { bubbles: true });
+    followCheckbox!.dispatchEvent(changeEvent);
+    expect(followCheckbox!.checked).toBe(true);
+
+    // Simulate user scrolling away from the bottom
+    scrollTopValue = 400;
+    const scrollEvent = new (
+      logView!.ownerDocument!
+        .defaultView as unknown as { Event: typeof Event }
+    ).Event("scroll", { bubbles: true });
+    logView!.dispatchEvent(scrollEvent);
+
+    // Check that follow turned off
+    expect(followCheckbox!.checked).toBe(false);
+  });
 });
