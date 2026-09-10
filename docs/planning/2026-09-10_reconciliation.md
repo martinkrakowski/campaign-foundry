@@ -155,6 +155,49 @@ flux moves under them.
 template is unwired while they run. That is not caution for its own sake — it is the only ordering in
 which a half-finished convergence cannot ship a still image and a video that disagree.
 
+## 4c. What Phase 0 actually produced
+
+**Phase 0 is complete** — C1 (#313), C2 (#315), C3 (#319). The brief's template now reaches the
+renderer. Two outcomes need recording, because both differ from what §4 predicted.
+
+### The short-video decision
+
+**Wiring the template revealed that `short-video` has never rendered its own layer stack.** It maps
+to `creativeType: "video"` and `template: "canonical-video"`, whose ground layer is `kind: "video"`.
+**There is no `video` drawer, and no `html` drawer.** With the template unwired, `resolveLayerList`
+fell through to `canonical-image-text`, so a short-video campaign silently rendered the image-text
+stack. C3 exposed that; it did not cause it.
+
+**Owner's decision, 2026-09-10: throw loudly.** `drawTimeline` now refuses an undrawable kind the way
+`drawLegacy` already did — one throw site, not two disagreeing behaviours. A user-selectable type
+failing with a named error beats one quietly producing the wrong stack.
+
+**Consequence: a `video` drawer is now a blocker on a shipped feature, not an L11 nicety.** It moves
+to the front of Phase 2 and needs an `html` drawer beside it before the template library (L7) can
+render two of its three seed thumbnails.
+
+### Phase 0 converged three renderers, not four
+
+`drawTimeline` iterates the resolved list but **skips `static-text`, `animated-text` and `logo`**,
+drawing them afterward in fixed positions — copy is beat-selected, the logo is anchored to the key
+beat's rest-pose box. So the motion path honours the declared order **among ground layers only**.
+
+**That was C1's explicit scope boundary**, and reshaping the beat and anchor logic is a larger change
+than any Phase 0 lane. But it means the honest claim is *one order for ground layers*, not *one order
+everywhere* — and a template placing the logo below the shade is still honoured on the still path and
+not on the motion path.
+
+**New lane C5 — the motion path honours the full order.** Sequence it after the `video` drawer, since
+both touch `drawTimeline`'s draw sequence and doing them together avoids two passes over the same
+code. Until it lands, §0's table has three renderers converged and one partly.
+
+### One gap with no owner, found on the way
+
+`validateBrief` checks style and sizes but does not check the brief's copy fields **against its
+template's `accepts` / `required` sets** — so a brief whose template omits a text kind can still carry
+campaign copy the compositor will draw. It belongs with **M2**, where the boundary is already being
+extended.
+
 ## 5. Gaps this review found that no plan owned
 
 1. **The port wiring.** The templates plan assigns no lane to putting `template` on `CompositeRequest`. Now **C3**.
