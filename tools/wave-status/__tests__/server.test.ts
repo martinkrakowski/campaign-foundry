@@ -445,8 +445,8 @@ describe("the server over real HTTP", () => {
     expectStylesheetLink(html);
     expect(html).toContain("stage");
     expect(html).toContain("liveness");
-    expect(html).toContain('role="button"');
-    expect(html).toContain('addEventListener("keydown"');
+    expect(html).toContain('<button type="button" tabindex="0" aria-expanded=');
+    expect(html).toContain('addEventListener("click"');
     expect(html).toContain("esc(detail.fixed");
     expect(html).toContain("clearInterval(pollTimer)");
   });

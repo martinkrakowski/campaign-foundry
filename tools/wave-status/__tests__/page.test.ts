@@ -282,17 +282,41 @@ async function loadPage(
   return { window, fetches, intervals, source };
 }
 
+// happy-dom implements no activation behaviour for <button>: a real browser
+// fires a click when Enter or Space is pressed on a focused button, but the
+// test DOM does not, so simulate what the browser would do rather than add
+// that translation to the page itself (the page relies on the real thing).
+// Untyped, like the rest of this file's `as unknown as HTMLElement` casts:
+// happy-dom's own DOM types are not structurally assignable to lib.dom's —
+// this only ever runs against elements returned from `page.window.document`.
+function press(target: unknown, key: string): void {
+  const el = target as unknown as {
+    ownerDocument: { defaultView: unknown } | null;
+    dispatchEvent(event: unknown): boolean;
+    click(): void;
+  };
+  const event = new (
+    el.ownerDocument!.defaultView as unknown as {
+      KeyboardEvent: typeof KeyboardEvent;
+    }
+  ).KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+  if (el.dispatchEvent(event)) {
+    el.click();
+  }
+}
+
 describe("the status page", () => {
-  test("Enter or Space on a lane row fetches the log", async () => {
+  test("Enter or Space on a lane row's button fetches the log", async () => {
     const page = await loadPage(statusAt());
     const row = page.window.document.querySelector("tr.lane");
     expect(row).not.toBeNull();
-    expect(row?.getAttribute("role")).toBe("button");
-    expect(row?.getAttribute("tabindex")).toBe("0");
+    expect(row?.getAttribute("role")).not.toBe("button");
+    const button = row?.querySelector("button") ?? null;
+    expect(button).not.toBeNull();
+    expect(button?.tagName).toBe("BUTTON");
+    expect(button?.textContent?.trim().length).toBeGreaterThan(0);
 
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(button!, "Enter");
     const logView = page.window.document.getElementById(
       "log",
     ) as HTMLElement | null;
@@ -304,13 +328,47 @@ describe("the status page", () => {
 
     page.fetches.length = 0;
     if (logView !== null) logView.textContent = "";
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: " ", bubbles: true }),
-    );
+    press(button!, " ");
     await vi.waitFor(() => {
       expect(page.fetches).toContain("/api/log/T/t1?tail=16");
       expect(logView?.textContent).toContain("log-tail");
     });
+  });
+
+  test("a click anywhere on a lane row still opens the log", async () => {
+    const page = await loadPage(statusAt());
+    const row = page.window.document.querySelector(
+      "tr.lane",
+    ) as unknown as HTMLElement | null;
+    expect(row).not.toBeNull();
+    row?.click();
+    await vi.waitFor(() => {
+      expect(page.fetches).toContain("/api/log/T/t1?tail=16");
+    });
+  });
+
+  test("every wave and lane button carries a non-empty accessible name", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    const waveButtons = doc.querySelectorAll("tr.wave button");
+    const laneButtons = doc.querySelectorAll("tr.lane button");
+    expect(waveButtons.length).toBe(2);
+    expect(laneButtons.length).toBe(5);
+    for (const button of [...waveButtons, ...laneButtons]) {
+      expect(button.tagName).toBe("BUTTON");
+      expect(button.textContent?.trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  test('no <tr> carries role="button", and the page never wires its own keydown handling for it', async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    for (const row of doc.querySelectorAll("tr")) {
+      expect(row.getAttribute("role")).not.toBe("button");
+    }
+    const html = await readFile(PAGE_PATH, "utf8");
+    const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? "";
+    expect(script).not.toMatch(/addEventListener\(\s*["']keydown["']/);
   });
 
   test("a second SSE drop does not stack polling intervals", async () => {
@@ -427,9 +485,7 @@ describe("the status page", () => {
     expect(logView?.hidden).toBe(true);
 
     const row = doc.querySelector("tr.lane");
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
       expect(page.fetches).toContain("/api/log/T/t1?tail=16");
       expect(logPane?.hidden).toBe(false);
@@ -450,9 +506,7 @@ describe("the status page", () => {
     const page = await loadPage(statusAt(), "log-tail");
     const doc = page.window.document;
     const row = doc.querySelector("tr.lane");
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
       expect(
         (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
@@ -484,9 +538,7 @@ describe("the status page", () => {
     const doc = page.window.document;
     const container = doc.getElementById("page");
     const row = doc.querySelector("tr.lane");
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
       expect(container?.classList.contains("with-log")).toBe(true);
     });
@@ -521,9 +573,7 @@ describe("the status page", () => {
     const page = await loadPage(statusAt(), multiline);
     const doc = page.window.document;
     const row = doc.querySelector("tr.lane");
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
       expect(
         (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
@@ -546,9 +596,7 @@ describe("the status page", () => {
     const page = await loadPage(statusAt(), multiline);
     const doc = page.window.document;
     const row = doc.querySelector("tr.lane");
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
       expect(
         (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
@@ -613,14 +661,10 @@ describe("the status page", () => {
     expect(rows.length).toBe(2);
 
     // 1. Start opening lane T/t1 (pending)
-    rows[0]?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(rows[0]!.querySelector("button")!, "Enter");
 
     // 2. Start opening lane T/t2 before T/t1 resolves
-    rows[1]?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(rows[1]!.querySelector("button")!, "Enter");
 
     // 3. Resolve the second lane (T/t2) first
     resolveT2(new Response("log for t2", { status: 200 }));
@@ -650,9 +694,7 @@ describe("the status page", () => {
     const page = await loadPage(statusAt(), "sample log");
     const doc = page.window.document;
     const row = doc.querySelector("tr.lane");
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
       expect(
         (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
@@ -695,9 +737,7 @@ describe("the status page", () => {
     const page = await loadPage(statusAt(), multiline);
     const doc = page.window.document;
     const row = doc.querySelector("tr.lane");
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
       expect(
         (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
@@ -728,9 +768,7 @@ describe("the status page", () => {
     const page = await loadPage(statusAt(), splitBytes);
     const doc = page.window.document;
     const row = doc.querySelector("tr.lane");
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(row!.querySelector("button")!, "Enter");
 
     await vi.waitFor(() => {
       expect(
@@ -744,9 +782,7 @@ describe("the status page", () => {
     const page = await loadPage(statusAt(), "log content", { width: 320 });
     const doc = page.window.document;
     const row = doc.querySelector("tr.lane");
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
       expect(
         (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
@@ -857,9 +893,7 @@ describe("the status page", () => {
     );
 
     // Open first lane: T/t1
-    rows[0]?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(rows[0]!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
       expect(
         (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
@@ -884,9 +918,7 @@ describe("the status page", () => {
     );
 
     // Switch to second lane: T/t2
-    rows[1]?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(rows[1]!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
       expect(doc.getElementById("log-lane")?.textContent).toBe("T/t2");
     });
@@ -911,7 +943,9 @@ describe("the status page", () => {
     expect(waveRows.length).toBe(2);
 
     for (const waveRow of waveRows) {
-      expect(waveRow.getAttribute("aria-expanded")).toBe("false");
+      expect(
+        waveRow.querySelector("button")?.getAttribute("aria-expanded"),
+      ).toBe("false");
     }
 
     const laneRows = doc.querySelectorAll("tr.lane");
@@ -964,9 +998,11 @@ describe("the status page", () => {
       (disagreementRows[0] as unknown as HTMLElement | undefined)?.hidden,
     ).toBe(true);
 
+    const waveButton = waveRow.querySelector("button")!;
+
     // Open wave
     waveRow.click();
-    expect(waveRow.getAttribute("aria-expanded")).toBe("true");
+    expect(waveButton.getAttribute("aria-expanded")).toBe("true");
     expect((laneRows[0] as unknown as HTMLElement | undefined)?.hidden).toBe(
       false,
     );
@@ -979,7 +1015,7 @@ describe("the status page", () => {
 
     // Close wave
     waveRow.click();
-    expect(waveRow.getAttribute("aria-expanded")).toBe("false");
+    expect(waveButton.getAttribute("aria-expanded")).toBe("false");
     expect((laneRows[0] as unknown as HTMLElement | undefined)?.hidden).toBe(
       true,
     );
@@ -991,30 +1027,23 @@ describe("the status page", () => {
     ).toBe(true);
   });
 
-  test("the wave row is reachable by keyboard and carries aria-expanded in both states", async () => {
+  test("the wave row's button is reachable by keyboard and carries aria-expanded in both states", async () => {
     const page = await loadPage(statusAt());
     const doc = page.window.document;
     const waveRow = doc.querySelector("tr.wave") as unknown as HTMLElement;
     expect(waveRow).not.toBeNull();
-    expect(waveRow.getAttribute("role")).toBe("button");
-    expect(waveRow.getAttribute("tabindex")).toBe("0");
-    expect(waveRow.getAttribute("aria-expanded")).toBe("false");
+    expect(waveRow.getAttribute("role")).not.toBe("button");
+    expect(waveRow.getAttribute("tabindex")).toBeNull();
+    const button = waveRow.querySelector("button")!;
+    expect(button.tagName).toBe("BUTTON");
+    expect(button.getAttribute("tabindex")).toBe("0");
+    expect(button.getAttribute("aria-expanded")).toBe("false");
 
-    waveRow.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", {
-        key: "Enter",
-        bubbles: true,
-      }) as unknown as Event,
-    );
-    expect(waveRow.getAttribute("aria-expanded")).toBe("true");
+    press(button, "Enter");
+    expect(button.getAttribute("aria-expanded")).toBe("true");
 
-    waveRow.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", {
-        key: " ",
-        bubbles: true,
-      }) as unknown as Event,
-    );
-    expect(waveRow.getAttribute("aria-expanded")).toBe("false");
+    press(button, " ");
+    expect(button.getAttribute("aria-expanded")).toBe("false");
   });
 
   test("the wave row shows which wave it is and how many lanes are inside", async () => {
@@ -1040,8 +1069,12 @@ describe("the status page", () => {
 
     // Open wave T
     waveT.click();
-    expect(waveT.getAttribute("aria-expanded")).toBe("true");
-    expect(waveU.getAttribute("aria-expanded")).toBe("false");
+    expect(waveT.querySelector("button")?.getAttribute("aria-expanded")).toBe(
+      "true",
+    );
+    expect(waveU.querySelector("button")?.getAttribute("aria-expanded")).toBe(
+      "false",
+    );
 
     // Re-render via SSE status event
     page.source.emit("status", JSON.stringify(mixedStatus));
@@ -1050,8 +1083,12 @@ describe("the status page", () => {
     const updatedWaveT = updatedWaveRows[0] as unknown as HTMLElement;
     const updatedWaveU = updatedWaveRows[1] as unknown as HTMLElement;
 
-    expect(updatedWaveT.getAttribute("aria-expanded")).toBe("true");
-    expect(updatedWaveU.getAttribute("aria-expanded")).toBe("false");
+    expect(
+      updatedWaveT.querySelector("button")?.getAttribute("aria-expanded"),
+    ).toBe("true");
+    expect(
+      updatedWaveU.querySelector("button")?.getAttribute("aria-expanded"),
+    ).toBe("false");
 
     const lanesT = doc.querySelectorAll(
       'tr.lane[data-wave="T"]',
@@ -1067,21 +1104,23 @@ describe("the status page", () => {
     }
   });
 
-  test("a re-render leaves the focused wave row focused, and a vanished row gets nothing back", async () => {
+  test("a re-render leaves the focused wave's button focused, and a vanished row gets nothing back", async () => {
     const page = await loadPage(mixedStatus);
     const doc = page.window.document;
     const waveT = doc.querySelector(
       'tr.wave[data-wave="T"]',
     ) as unknown as HTMLElement;
-    waveT.focus();
-    expect(doc.activeElement).toBe(waveT);
+    const waveTButton = waveT.querySelector("button")!;
+    waveTButton.focus();
+    expect(doc.activeElement).toBe(waveTButton);
 
     page.source.emit("status", JSON.stringify(mixedStatus));
     const reRendered = doc.querySelector(
       'tr.wave[data-wave="T"]',
     ) as unknown as HTMLElement;
+    const reRenderedButton = reRendered.querySelector("button")!;
     expect(reRendered).not.toBe(waveT);
-    expect(doc.activeElement).toBe(reRendered);
+    expect(doc.activeElement).toBe(reRenderedButton);
 
     // A wave that is gone is gone: do not guess at a neighbour row.
     const withoutTwo: WaveStatus = {
@@ -1157,8 +1196,9 @@ describe("the status page", () => {
     const hot = doc.querySelector(
       'tr.lane[data-lane="l_hot"]',
     ) as unknown as HTMLElement;
-    hot.focus();
-    expect(doc.activeElement).toBe(hot);
+    const hotButton = hot.querySelector("button")!;
+    hotButton.focus();
+    expect(doc.activeElement).toBe(hotButton);
     expect(
       (doc.querySelectorAll("tr.lane")[0] as unknown as HTMLElement).dataset
         .lane,
@@ -1168,8 +1208,9 @@ describe("the status page", () => {
     const hotAgain = doc.querySelector(
       'tr.lane[data-lane="l_hot"]',
     ) as unknown as HTMLElement;
+    const hotAgainButton = hotAgain.querySelector("button")!;
     expect(hotAgain).not.toBe(hot);
-    expect(doc.activeElement).toBe(hotAgain);
+    expect(doc.activeElement).toBe(hotAgainButton);
   });
 
   test("each wave control names the one element that holds its rows, and the names are unique", async () => {
@@ -1180,7 +1221,9 @@ describe("the status page", () => {
 
     const seen = new Set<string>();
     for (const waveRow of waveRows) {
-      const control = waveRow.getAttribute("aria-controls");
+      const control = waveRow
+        .querySelector("button")
+        ?.getAttribute("aria-controls");
       expect(control).toBeTruthy();
       expect(seen.has(control!)).toBe(false);
       seen.add(control!);
