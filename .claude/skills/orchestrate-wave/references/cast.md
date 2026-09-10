@@ -178,7 +178,7 @@ the measurement rule**, so it has no cost figures at all. Three seats, no compar
 > Claude subagents through the Agent tool. The external record is kept because it is evidence, not
 > because those seats are choosable.
 >
-> **Implementer seat:** an `Agent` call, `subagent_type: "claude"`, `model: "sonnet"`, given the lane
+> **Implementer seat (2026-09-10): `agy gemini-3.8-flash-high`.** Sonnet is the reserve. Either way the brief carries the lane
 > brief plus the environment it cannot infer — the **absolute worktree path**, the branch, whether a
 > PR already exists, and the house rules (never `git add -A`, never touch the owner's dev servers,
 > never open `.agents/session-log.md`, no attribution trailer). A subagent does **not** inherit this
@@ -195,7 +195,8 @@ the measurement rule**, so it has no cost figures at all. Three seats, no compar
 | Seat | Invocation | Notes |
 |---|---|---|
 | **Orchestrator** | this session | Writes the briefs, red-teams them against the code, verifies every finding, runs its own mutations, sweeps, merges. |
-| **Implementer / remediator** | `Agent` · `subagent_type: "claude"` · `model: "sonnet"` | One agent per lane and per fix round. Give it the **absolute worktree path**, the branch, whether a PR exists, and the house rules — it inherits no conversation. |
+| **Implementer / remediator** | `agy --print "$(cat BRIEF)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high --print-timeout 90m --output-format json`, dispatched detached with an `EXIT` marker | **Owner's choice, 2026-09-10**, to keep in-house burn down — agy bills to a separate pool. Record: 18 rounds, every lane delivered, **no disposition failure observed**, mean 758 s. Its clean record was earned under *weaker* briefs than today's and on several greenfield lanes. **Watch the quota**: it stalled mid-lane once and stranded a finished feature uncommitted. |
+| *(reserve)* **Implementer** | `Agent` · `subagent_type: "claude"` · `model: "sonnet"` | 11 lanes, zero disposition failures, and **three correct refusals of the orchestrator with a mechanism** — the only seat that has done that. Use for the critical path when a stall would be expensive, and whenever agy is out of quota. |
 | **Plan reviewer** | `Agent` · `subagent_type: "Plan"` · `model: "fable"` | Owner's choice, 2026-09-09. `Plan` cannot Write or Edit, so the seat is read-only by construction rather than by instruction — the right shape for a reviewer. |
 | **Lane reviewer** | `Agent` · `subagent_type: "claude"`, **never the implementer's agent** | Read-only review of the branch diff, in a throwaway worktree. |
 | **Search** | `Agent` · `subagent_type: "Explore"` | Broad read-only sweeps where the conclusion is wanted, not the file dumps. A candidate for `haiku`. |
