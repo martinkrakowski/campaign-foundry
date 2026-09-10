@@ -294,6 +294,7 @@ __metadata:
   dependencies:
     "@campaignfoundry/CampaignOrchestration": "workspace:*"
     "@campaignfoundry/Distribution": "workspace:*"
+    "@campaignfoundry/GovernanceAndCompliance": "workspace:*"
     "@campaignfoundry/ui": "workspace:*"
     "@eslint/js": "npm:^9.0.0"
     "@types/js-yaml": "npm:^4.0.9"
