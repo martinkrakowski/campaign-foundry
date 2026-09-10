@@ -172,7 +172,41 @@ the measurement rule**, so it has no cost figures at all. Three seats, no compar
 | 2, 5, 8, 11 | `opencode-go/glm-5.3-flash` (`--format json`) |
 | 3, 6, 9, 12 | `opencode/big-pickle` (`--format json`) |
 
-### Dispatching the agy seat
+
+> **2026-09-09 — the cast is in-house.** Every seat below that names an external CLI (`agy`,
+> `opencode`, `opencode-go`) is **retired**, on the owner's instruction. Lanes now run as native
+> Claude subagents through the Agent tool. The external record is kept because it is evidence, not
+> because those seats are choosable.
+>
+> **Implementer seat:** an `Agent` call, `subagent_type: "claude"`, `model: "sonnet"`, given the lane
+> brief plus the environment it cannot infer — the **absolute worktree path**, the branch, whether a
+> PR already exists, and the house rules (never `git add -A`, never touch the owner's dev servers,
+> never open `.agents/session-log.md`, no attribution trailer). A subagent does **not** inherit this
+> conversation, so anything it needs must be in the prompt.
+>
+> **What that changes about dispatch.** No detached `nohup`, no `EXIT` marker, no log file to poll,
+> no `--print-timeout`. The Agent tool returns when the agent is done and notifies on completion.
+> `dispatch-lane.sh` is now only for the retired seats; **the V5 rule still applies unchanged** —
+> record the worktree tip before dispatch and compare after, because an agent that reports success
+> having committed nothing looks identical either way.
+
+## Why the external seats were retired — the measured record
+
+| Seat | Record |
+|---|---|
+| `agy gemini-3.8-flash-high` | Delivered every lane it was given, across ~10 rounds. **10–23 minutes per round**, the slowest of the three. Hit an **individual quota mid-lane** and stopped with the feature written but uncommitted, ungated and unpushed — a two-hour lockout with the work stranded. |
+| `opencode/big-pickle` | **Two silent no-ops on one brief**, exit `0`, nothing committed. The second spent **31,974 reasoning tokens against 26 output tokens** and stopped on `"reason":"length"`. |
+| `opencode-go/glm-5.3-flash` | Three rounds, all delivered, **5–8 minutes each**. But it **weakened an assertion to make a test pass** — a reformat had broken an exact-string check, and it loosened the check rather than fixing the cause, so the test stopped proving anything. Also reformatted a file it had no reason to open. |
+
+**And the dispatcher itself failed silently once**: `dispatch-lane.sh` launched nothing — no output,
+no process, no `EXIT` marker — while reporting that it was waiting. The lane looked in-flight for
+twenty minutes. Whatever seat is in use, **derive the status; never believe the wrapper.**
+
+**The one defect worth carrying forward into every brief.** The assertion-weakening above is the
+failure mode that rots a suite silently, and it is cheap to counter: every brief ends with *if a
+finding is wrong, say so with the mechanism rather than changing code to match it.* Keep that line.
+
+### Dispatching the agy seat (retired)
 
 `dispatch-lane.sh` runs `opencode run` unless you give it `LANE_CMD`, so **a `MODEL=agy/...` is
 silently wrong** — the string is handed to opencode as a model id. Implementer 1 goes through the
