@@ -12,24 +12,34 @@ class. A finding whose premise one of these facts disproves should not be posted
 2. **React 19.** `ref` is an ordinary prop on function components. Never suggest `forwardRef`;
    never claim `aria-*`/`ref` props "cause TypeScript errors" on a tree whose typecheck CI is
    green — a green compile disproves missing-prop and missing-import claims.
-3. **The web test environment is happy-dom: it performs NO layout — but it does apply the
-   stylesheet.** `getBoundingClientRect` returns zeros, `offsetWidth`/`offsetHeight` are zero, and
-   nothing that depends on a box being measured is available: whether an element is clipped,
-   overflows, wraps, or is visually covered cannot be observed here. Never suggest a geometry
-   assertion, and never accept one as proof that something is *reachable* or *visible*.
+3. **happy-dom performs NO layout, and whether a class resolves depends on whether its stylesheet
+   is loaded.** `getBoundingClientRect` returns zeros, `offsetWidth`/`offsetHeight` are zero, and
+   nothing requiring a measured box — clipping, overflow, wrapping, visual covering, reachability —
+   can be observed. **Never suggest a geometry assertion, and never accept a computed value as
+   proof that something is reachable or visible.**
 
-   **`getComputedStyle` does resolve class-driven declarations, and this file used to say it did
-   not.** That was wrong and it generated findings. Measured twice, in the served
-   `tools/wave-status` page: changing `.gutter { user-select: none }` to `auto` in the page's own
-   `<style>` block turns `getComputedStyle(gutter).userSelect` from `"none"` to `"auto"` and fails
-   two tests. Those assertions are live and are in `main` with a green gate.
+   On class-driven `getComputedStyle`, this file previously said a flat "cannot see them". That is
+   wrong, and the truth is a distinction neither document was making:
 
-   **So the line to hold is declared-versus-measured, not class-versus-inline.** A rule's declared
-   value is readable; the layout it would produce is not. `getComputedStyle(el).flexWrap === "wrap"`
-   is a tautology — it restates the stylesheet — but it is not *unresolvable*; it simply proves
-   nothing about whether anything wrapped. Prefer asserting the state the code controls (`hidden`,
-   an ARIA attribute, a class the code toggles) over a computed value it merely declares. D47's ban
-   on class-string assertions as *proof of layout* stands for exactly that reason.
+   - **`apps/web` component tests load no stylesheet at all** — `apps/web/vitest.setup.ts` imports
+     no CSS, so Tailwind classes have no rules behind them and class-driven values really do resolve
+     to `""`. An assertion there cannot tell a real class from a typo, which is what
+     `2026-09-01_r7-preview-panel.md` says and it is right **for that suite**.
+   - **`tools/wave-status` page tests load the real page, `<style>` block and all** — the test reads
+     `public/index.html` itself. Class-driven declarations resolve there. Measured: changing
+     `.gutter { user-select: none }` to `auto` flips `getComputedStyle(gutter).userSelect` and fails
+     `the gutter is user-select: none…`, an assertion in `main` under a green gate.
+
+   **So before endorsing or refuting a computed-style finding, ask which suite it is in.** An
+   earlier version of this entry claimed that mutation failed *two* tests; it did when first
+   measured, and one of the two later stopped reading computed style, so the count went stale. One
+   test fails today.
+
+   **Declared is not measured.** Even where a rule resolves, `flexWrap === "wrap"` only restates the
+   stylesheet — a tautology, not a proof that anything wrapped. Prefer asserting state the code
+   controls (`hidden`, an ARIA attribute, a class it toggles). That is what D47's ban on
+   class-string assertions as *proof of layout* was always about.
+
 4. **`NodeCanvasCompositor` and everything under `packages/CreativeGeneration` is server-side
    Skia canvas.** There is no DOM, no stylesheet, no theme, and no CSS cascade there.
    `ctx.fillStyle = "var(--…)"` is an invalid canvas color that silently paints black.
