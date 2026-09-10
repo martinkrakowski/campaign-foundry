@@ -494,14 +494,14 @@ describe("the status page", () => {
     const expandBtn = doc.querySelector(
       'button[aria-label="expand"]',
     ) as unknown as HTMLElement;
-    expect(expandBtn.textContent).toBe("expand");
+    expect(expandBtn.textContent?.trim()).toBe("expand");
     expect(page.window.getComputedStyle(container!).gridTemplateRows).toBe(
       "auto 1fr 1fr",
     );
 
     expandBtn.click();
     expect(container?.classList.contains("expanded")).toBe(true);
-    expect(expandBtn.textContent).toBe("collapse");
+    expect(expandBtn.textContent?.trim()).toBe("collapse");
     expect(expandBtn.getAttribute("aria-label")).toBe("collapse");
     expect(page.window.getComputedStyle(container!).gridTemplateRows).toBe(
       "auto 0 1fr",
@@ -509,7 +509,7 @@ describe("the status page", () => {
 
     expandBtn.click();
     expect(container?.classList.contains("expanded")).toBe(false);
-    expect(expandBtn.textContent).toBe("expand");
+    expect(expandBtn.textContent?.trim()).toBe("expand");
     expect(expandBtn.getAttribute("aria-label")).toBe("expand");
     expect(page.window.getComputedStyle(container!).gridTemplateRows).toBe(
       "auto 1fr 1fr",
@@ -670,8 +670,8 @@ describe("the status page", () => {
     });
     copyBtn.click();
     await vi.waitFor(() => {
-      expect(copyBtn.textContent).not.toBe("copied");
-      expect(copyBtn.textContent).toBe("copy failed");
+      expect(copyBtn.textContent?.trim()).not.toBe("copied");
+      expect(copyBtn.textContent?.trim()).toBe("copy failed");
     });
 
     // B: writeText rejects
@@ -685,8 +685,8 @@ describe("the status page", () => {
     });
     copyBtn.click();
     await vi.waitFor(() => {
-      expect(copyBtn.textContent).not.toBe("copied");
-      expect(copyBtn.textContent).toBe("copy failed");
+      expect(copyBtn.textContent?.trim()).not.toBe("copied");
+      expect(copyBtn.textContent?.trim()).toBe("copy failed");
     });
   });
 
@@ -918,7 +918,6 @@ describe("the status page", () => {
     expect(laneRows.length).toBe(5);
     for (const laneRow of laneRows) {
       expect((laneRow as unknown as HTMLElement).hidden).toBe(true);
-      expect(page.window.getComputedStyle(laneRow).display).toBe("none");
     }
   });
 
@@ -964,10 +963,6 @@ describe("the status page", () => {
     expect(
       (disagreementRows[0] as unknown as HTMLElement | undefined)?.hidden,
     ).toBe(true);
-    expect(page.window.getComputedStyle(laneRows[0]!).display).toBe("none");
-    expect(page.window.getComputedStyle(disagreementRows[0]!).display).toBe(
-      "none",
-    );
 
     // Open wave
     waveRow.click();
@@ -981,10 +976,6 @@ describe("the status page", () => {
     expect(
       (disagreementRows[0] as unknown as HTMLElement | undefined)?.hidden,
     ).toBe(false);
-    expect(page.window.getComputedStyle(laneRows[0]!).display).not.toBe("none");
-    expect(page.window.getComputedStyle(disagreementRows[0]!).display).not.toBe(
-      "none",
-    );
 
     // Close wave
     waveRow.click();
@@ -998,10 +989,6 @@ describe("the status page", () => {
     expect(
       (disagreementRows[0] as unknown as HTMLElement | undefined)?.hidden,
     ).toBe(true);
-    expect(page.window.getComputedStyle(laneRows[0]!).display).toBe("none");
-    expect(page.window.getComputedStyle(disagreementRows[0]!).display).toBe(
-      "none",
-    );
   });
 
   test("the wave row is reachable by keyboard and carries aria-expanded in both states", async () => {

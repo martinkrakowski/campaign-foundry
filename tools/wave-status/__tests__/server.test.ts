@@ -16,6 +16,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Window } from "happy-dom";
 import {
   extractDarkBlock,
   resolvePort,
@@ -68,6 +69,32 @@ async function start(
   const handle = await startServer(options);
   handles.push(handle);
   return handle;
+}
+
+/**
+ * Parses the served page the way a browser would and asserts one `link`
+ * element carries BOTH `rel="stylesheet"` and `href="/tokens.css"` — the two
+ * facts together. The exact-string form this replaces (`href="/tokens.css"`)
+ * matched any element with that href, an `<a>` included, and a formatter's
+ * reflow of the tag broke the whole-tag string match; a DOM query survives
+ * reflow and still fails when the tag is wrong.
+ */
+function expectStylesheetLink(html: string): void {
+  const window = new Window({
+    url: "http://127.0.0.1/",
+    settings: {
+      disableJavaScriptEvaluation: true,
+      disableCSSFileLoading: true,
+    },
+  });
+  try {
+    window.document.write(html);
+    const stylesheet = window.document.querySelector('link[rel="stylesheet"]');
+    expect(stylesheet).not.toBeNull();
+    expect(stylesheet?.getAttribute("href")).toBe("/tokens.css");
+  } finally {
+    window.happyDOM.close();
+  }
 }
 
 /** A fixture wave-log root: waveT with a >1 KB log, waveU with a small one. */
@@ -415,7 +442,7 @@ describe("the server over real HTTP", () => {
     expect(res.headers["content-type"]).toContain("text/html");
     const html = res.body.toString("utf8");
     expect(html).toContain("<table");
-    expect(html).toContain('href="/tokens.css"');
+    expectStylesheetLink(html);
     expect(html).toContain("stage");
     expect(html).toContain("liveness");
     expect(html).toContain('role="button"');
@@ -514,7 +541,7 @@ describe("the server over real HTTP", () => {
     // in the page fails this build.
     expect(html).not.toMatch(/--color-[a-z0-9-]+:/);
     // And yet the page does link the served tokens.
-    expect(html).toContain('href="/tokens.css"');
+    expectStylesheetLink(html);
   });
 
   test("the page's root element carries the class the served tokens are scoped to", async () => {
