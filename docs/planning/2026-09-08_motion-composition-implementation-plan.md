@@ -1,5 +1,11 @@
 # Implementation Plan: Motion Composition & Video Sequencing
 
+> **RETIRED 2026-09-10** — see `2026-09-10_reconciliation.md` §3. Phase 1 is a re-housing of
+> shipped machinery: `VideoCompositorPort`, `CanvasFfmpegVideoCompositor.writeFrames`,
+> `MOTION_FPS`, `CopyTimeline`, `beatAt`. The keyframe half is replaced by
+> `2026-09-10_keyframing.md`, which puts tracks inside the existing ports-and-adapters split
+> rather than a new bounded context. Do not implement.
+
 **Date:** 2026-09-08
 **Context:** Transitioning Campaign Foundry from an approval-loop proof-of-concept into a market-ready video generation platform for advertising.
 **Architectural Goal:** Establish the `MotionComposition` bounded context to support true multi-track, keyframe-based video generation with maximum production scalability, strictly adhering to our hexagonal architecture.
