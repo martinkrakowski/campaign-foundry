@@ -861,8 +861,12 @@ function drawTimeline(
   }
 
   // Layer 5 — brand logo, anchored to the key beat's rest-pose box, so it neither
-  // jumps between beats nor drifts from the poster (D7).
-  if (prepared.logo) {
+  // jumps between beats nor drifts from the poster (D7). Gated on `logoApplied`,
+  // not merely `prepared.logo` (the file having loaded): `logoApplied` is also
+  // true only when the resolved layer list carries a `logo` layer (F2), and the
+  // motion path must draw exactly what the compliance record reports — never a
+  // logo the record says is absent.
+  if (prepared.logoApplied && prepared.logo) {
     const { image, x, width: lw, height: lh } = prepared.logo;
     let ly = prepared.logo.y;
     const logoBox = { x, y: ly, width: lw, height: lh };
