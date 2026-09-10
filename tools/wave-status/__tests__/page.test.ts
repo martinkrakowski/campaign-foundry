@@ -2616,4 +2616,241 @@ describe("the status page", () => {
     // The scroll position the user chose must not have been overwritten.
     expect(logView!.scrollTop).toBe(400);
   });
+
+  test("each lane column carries its semantic class, matching the header's", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    const columnClasses = [
+      "c-lane",
+      "c-stage",
+      "c-live",
+      "c-log",
+      "c-pr",
+      "c-gate",
+      "c-find",
+    ];
+    const headerCells = Array.from(doc.querySelectorAll("thead th"));
+    expect(headerCells.map((th) => th.className)).toEqual(columnClasses);
+
+    const row = doc.querySelector("tr.lane");
+    expect(row).not.toBeNull();
+    const cells = Array.from(row!.querySelectorAll("td"));
+    expect(cells.map((td) => td.className)).toEqual(columnClasses);
+  });
+
+  test("a pill renders per state with the right variant, and its accessible text is the state — not colour alone", async () => {
+    // One lane per pill tone this table can show: stage (info/bad/ok as a
+    // dotted pill) and PR checks (dim/warn/ok/bad) — five distinct tones
+    // across the two families, each carrying its state as plain text.
+    const pillStatus: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "P",
+          lanes: [
+            {
+              wave: "P",
+              lane: "p1",
+              reported: { stage: "review", event: "started", ts: "now" },
+              derived: {
+                alive: true,
+                pr: { number: 1, state: "open", checks: "pending" },
+              },
+              disagreements: [],
+            },
+            {
+              wave: "P",
+              lane: "p2",
+              reported: { stage: "gate", event: "failed", ts: "now" },
+              derived: {
+                alive: false,
+                pr: { number: 2, state: "open", checks: "fail" },
+              },
+              disagreements: [],
+            },
+            {
+              wave: "P",
+              lane: "p3",
+              reported: { stage: "remediate", event: "settled", ts: "now" },
+              derived: {
+                alive: false,
+                pr: { number: 3, state: "merged", checks: "pass" },
+              },
+              disagreements: [],
+            },
+            {
+              wave: "P",
+              lane: "p4",
+              derived: {
+                alive: false,
+                pr: { number: 4, state: "merged", checks: "none" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    const page = await loadPage(pillStatus);
+    const doc = page.window.document;
+    const pills = Array.from(doc.querySelectorAll(".pill"));
+    expect(pills.length).toBeGreaterThan(0);
+    const byText = new Map(
+      pills.map((el) => [el.textContent?.trim(), el]),
+    );
+
+    const expectTone = (text: string, tone: string) => {
+      const el = byText.get(text);
+      expect(el, `no pill with text "${text}"`).toBeDefined();
+      expect(el!.classList.contains("pill")).toBe(true);
+      expect(el!.classList.contains(tone)).toBe(true);
+    };
+
+    expectTone("started", "info");
+    expectTone("failed", "bad");
+    expectTone("settled", "ok");
+    expectTone("pending", "warn");
+    expectTone("none", "dim");
+
+    // Every pill's accessible name is the state word itself, never colour
+    // alone.
+    for (const el of pills) {
+      expect(el.textContent?.trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  test("the wave band exposes eyebrow, id and an outcome rollup inside the accordion button, and aria-controls resolves to that wave's own lane rows", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    const waveT = doc.querySelector(
+      'tr.wave[data-wave="T"]',
+    ) as unknown as HTMLElement;
+    const button = waveT.querySelector("button.wave-band");
+    expect(button).not.toBeNull();
+    expect(button!.querySelector(".wave-eyebrow")?.textContent).toBe("wave");
+    expect(button!.querySelector(".wave-id")?.textContent).toBe("T");
+    const meta = button!.querySelector(".wave-meta")?.textContent ?? "";
+    expect(meta).toContain("4 lanes");
+    expect(meta).toContain("1 running");
+    expect(meta).toContain("1 settled");
+    expect(meta).toContain("1 failed");
+
+    const controlsId = button!.getAttribute("aria-controls");
+    expect(controlsId).toBeTruthy();
+    const target = doc.getElementById(controlsId!);
+    expect(target).not.toBeNull();
+    expect(target!.tagName).toBe("TBODY");
+    expect(target!.querySelectorAll('tr.lane[data-wave="T"]').length).toBe(4);
+
+    // Still a real accordion button: collapses and expands.
+    expect(button!.getAttribute("aria-expanded")).toBe("false");
+    waveT.click();
+    expect(button!.getAttribute("aria-expanded")).toBe("true");
+    for (const lane of doc.querySelectorAll('tr.lane[data-wave="T"]')) {
+      expect((lane as unknown as HTMLElement).hidden).toBe(false);
+    }
+    waveT.click();
+    expect(button!.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  test("the open lane's row carries .active, survives a re-render, and clears on close", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    (
+      doc.querySelector('tr.wave[data-wave="T"]') as unknown as HTMLElement
+    ).click();
+
+    const row = doc.querySelector(
+      'tr.lane[data-wave="T"][data-lane="t1"]',
+    ) as unknown as HTMLElement;
+    row.click();
+    await vi.waitFor(() => {
+      expect(page.fetches).toContain("/api/log/T/t1?tail=16");
+    });
+    expect(row.classList.contains("active")).toBe(true);
+    // A different lane in the same wave never carries it.
+    const other = doc.querySelector(
+      'tr.lane[data-wave="T"][data-lane="t2"]',
+    ) as unknown as HTMLElement;
+    expect(other.classList.contains("active")).toBe(false);
+
+    page.source.emit("status", JSON.stringify(mixedStatus));
+    const reRendered = doc.querySelector(
+      'tr.lane[data-wave="T"][data-lane="t1"]',
+    ) as unknown as HTMLElement;
+    expect(reRendered).not.toBe(row);
+    expect(reRendered.classList.contains("active")).toBe(true);
+
+    (
+      doc.getElementById("log-close") as unknown as HTMLElement
+    ).click();
+    const afterClose = doc.querySelector(
+      'tr.lane[data-wave="T"][data-lane="t1"]',
+    ) as unknown as HTMLElement;
+    expect(afterClose.classList.contains("active")).toBe(false);
+  });
+
+  test("with no waves at all, the table shows a single empty row instead of nothing", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    expect(doc.querySelectorAll("tr.wave").length).toBeGreaterThan(0);
+
+    page.source.emit(
+      "status",
+      JSON.stringify({ generatedAt: "now", waves: [] }),
+    );
+
+    expect(doc.querySelectorAll("tr.wave").length).toBe(0);
+    expect(doc.querySelectorAll("tr.lane").length).toBe(0);
+    const emptyRows = doc.querySelectorAll("tr.empty");
+    expect(emptyRows.length).toBe(1);
+    expect(emptyRows[0]?.textContent).toMatch(/no waves/i);
+  });
+
+  test("every semantic column keeps its header treatment distinct from its own body cells", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    (
+      doc.querySelector('tr.wave[data-wave="T"]') as unknown as HTMLElement
+    ).click();
+
+    const bodyRow = doc.querySelector('tr.lane[data-wave="T"][data-lane="t1"]');
+    expect(bodyRow).not.toBeNull();
+
+    // All seven semantic column classes the header and body share — a
+    // body-cell rule scoped only to its own class (no tbody/td qualifier)
+    // beats `thead th` on specificity and repaints that one heading as a
+    // body cell, regardless of source order. Checking every column, not
+    // just the ones already known to collide, catches a future column that
+    // repeats the same unscoped shape.
+    const columns = [
+      "c-lane",
+      "c-stage",
+      "c-live",
+      "c-log",
+      "c-pr",
+      "c-gate",
+      "c-find",
+    ];
+
+    for (const cls of columns) {
+      const th = doc.querySelector(`thead th.${cls}`);
+      const td = bodyRow?.querySelector(`td.${cls}`);
+      // toBeTruthy, not toBeNull: bodyRow?.querySelector() yields undefined
+      // (not null) when bodyRow itself is null, and undefined would pass a
+      // not-toBeNull check without either cell ever being found.
+      expect(th).toBeTruthy();
+      expect(td).toBeTruthy();
+
+      const headerSize = page.window.getComputedStyle(th!).fontSize;
+      const bodySize = page.window.getComputedStyle(td!).fontSize;
+      // The header keeps its own 10px treatment no matter which column it
+      // is, and a body cell in the same column must never resolve to that
+      // same size — if it does, a body-cell rule has won specificity over
+      // thead th and the heading is rendering as a body cell.
+      expect(headerSize).toBe("10px");
+      expect(bodySize).not.toBe(headerSize);
+    }
+  });
 });
