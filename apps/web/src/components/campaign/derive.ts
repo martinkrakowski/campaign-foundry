@@ -261,7 +261,6 @@ export {
   OCCLUSION_TABLE,
   checkPairOcclusion,
   checkRepositionOcclusion,
-  checkTemplateOcclusion,
   type OcclusionBehavior,
   type OcclusionRule,
 } from "@campaignfoundry/CampaignOrchestration/creative-types";

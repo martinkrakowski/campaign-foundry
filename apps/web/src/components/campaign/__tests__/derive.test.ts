@@ -28,7 +28,11 @@ import {
   platformsToSizes,
   clampPolicy,
   removableLayerIds,
+  OCCLUSION_TABLE,
+  checkPairOcclusion,
+  checkRepositionOcclusion,
 } from "../derive";
+import * as deriveModule from "../derive";
 import {
   initialEditorState,
   editorReducer,
@@ -488,6 +492,15 @@ describe("derive.ts", () => {
         { id: "logo", kind: "logo" as const },
       ];
       expect(findLegalInsertionIndex("image-text", imageLogo, "shade")).toBe(1);
+    });
+  });
+
+  describe("occlusion exports (D135, D136, L8o-fix2)", () => {
+    test("re-exports active occlusion checks and does not export checkTemplateOcclusion", () => {
+      expect(typeof checkPairOcclusion).toBe("function");
+      expect(typeof checkRepositionOcclusion).toBe("function");
+      expect(OCCLUSION_TABLE).toBeDefined();
+      expect("checkTemplateOcclusion" in deriveModule).toBe(false);
     });
   });
 });

@@ -7,7 +7,6 @@ import {
   OCCLUSION_TABLE,
   checkPairOcclusion,
   checkRepositionOcclusion,
-  checkTemplateOcclusion,
   formatOcclusionReason,
   type CreativeType,
 } from "../creative-types.js";
@@ -232,6 +231,13 @@ describe("occlusion table and guard checks (D135, D136)", () => {
     expect(logoOnAnimText.reason).toBe(
       "the logo layer now sits above the headline and will overlap where it sits",
     );
+
+    // Stacked images: image is opaque and obscures all, so image above image warns (L8o-fix2)
+    const imageOnImage = checkPairOcclusion("image", "image");
+    expect(imageOnImage.passed).toBe(true);
+    expect(imageOnImage.reason).toBe(
+      "the image layer now sits above the image and will hide it",
+    );
   });
 
   test("each behaviour class produces NO finding for a pair that does not trigger it (D135, D136)", () => {
@@ -258,8 +264,11 @@ describe("occlusion table and guard checks (D135, D136)", () => {
     expect(checkPairOcclusion("video", "shade")).toEqual({ passed: true });
     expect(checkPairOcclusion("html", "image")).toEqual({ passed: true });
 
-    // Same layer kind compared to itself produces no finding
+    // Same layer kind compared to itself produces no finding when behavior is "none" or doesn't obscure
     expect(checkPairOcclusion("shade", "shade")).toEqual({ passed: true });
+    expect(checkPairOcclusion("static-text", "static-text")).toEqual({
+      passed: true,
+    });
   });
 
   test("the message names both layers in each finding (D135)", () => {
@@ -402,25 +411,32 @@ describe("occlusion table and guard checks (D135, D136)", () => {
     expect(noFromAboveOccludes.reason).toBe(
       "the shade layer now sits above the headline and will mute it",
     );
-  });
-
-  test("checkTemplateOcclusion scans entire template for occluding pairs", () => {
-    const occluding = [
-      { id: "video", kind: "video" as LayerKind },
-      { id: "animated-text", kind: "animated-text" as LayerKind },
-      { id: "shade", kind: "shade" as LayerKind },
+    // Qodo's case: in canonical video with shade removed, moving animated-text down past video
+    // leaves logo above animated-text both before and after; the scan must not report that
+    // pre-existing relationship as a new occlusion (L8o-fix2, D135).
+    // Layers before move: video (0), animated-text (1), logo (2)
+    // Layers after move: animated-text (0), video (1), logo (2) [to = 0, from = 1]
+    const videoWithoutShade = [
+      videoCanonical[0]!, // video
+      videoCanonical[2]!, // animated-text
+      videoCanonical[3]!, // logo
     ];
-    expect(checkTemplateOcclusion(occluding)).toEqual({
-      passed: true,
-      reason: "the shade layer now sits above the headline and will mute it",
-    });
-
-    const nonOccluding = [
-      { id: "video", kind: "video" as LayerKind },
-      { id: "shade", kind: "shade" as LayerKind },
-      { id: "animated-text", kind: "animated-text" as LayerKind },
+    const animatedTextMovedDownPastVideo = [
+      videoWithoutShade[1]!, // animated-text at 0
+      videoWithoutShade[0]!, // video at 1
+      videoWithoutShade[2]!, // logo at 2
     ];
-    expect(checkTemplateOcclusion(nonOccluding)).toEqual({ passed: true });
+    const qodoFinding = checkRepositionOcclusion(
+      animatedTextMovedDownPastVideo,
+      0,
+      1,
+    );
+    expect(qodoFinding).toEqual({ passed: true });
+
+    // A move that changes nothing relevant produces no finding (e.g. from === to)
+    expect(
+      checkRepositionOcclusion(animatedTextMovedDownPastVideo, 0, 0),
+    ).toEqual({ passed: true });
   });
 
   test("an occluding order is still a valid template (D135, D136) — warns and never refuses", () => {

@@ -230,7 +230,6 @@ export function checkPairOcclusion(
   above: LayerKind,
   below: LayerKind,
 ): ComplianceResult {
-  if (above === below) return { passed: true };
   const rule = OCCLUSION_TABLE[above];
   if (!rule || rule.behavior === "none" || !rule.obscures) {
     return { passed: true };
@@ -250,23 +249,33 @@ export function checkPairOcclusion(
 /**
  * Checks whether repositioning a layer at `to` creates an occlusion (D135).
  *
- * Evaluated per layer on every reposition. Whichever direction the move went, inspects:
- * - whether any layer above now occludes the subject
- * - whether the subject now occludes any layer below it
+ * Evaluated per layer on every reposition:
+ * - If moved down (from > to): inspects only layers crossed above the subject in its new position
+ *   (up to from). Layers beyond from were already above the subject before the move; reporting
+ *   them would warn on pre-existing relationships the move did not create (D135).
+ * - If moved up (or direction unspecified): inspects whether any layer above now occludes the subject,
+ *   or whether the subject now occludes any layer below it.
  */
 export function checkRepositionOcclusion(
   layers: readonly { readonly kind: LayerKind }[],
   to: number,
-  _from?: number,
+  from?: number,
 ): ComplianceResult {
   if (to < 0 || to >= layers.length || layers.length === 0) {
     return { passed: true };
   }
+  if (from !== undefined && to === from) {
+    return { passed: true };
+  }
   const subject = layers[to]!;
 
-  // Whichever direction the move went, look for a layer above that occludes
-  // the subject and for a layer below that the subject occludes.
-  for (let j = to + 1; j < layers.length; j++) {
+  // If moved down (from > to), scan only layers above that were crossed by the move (up to from).
+  // Layers beyond from were already above the subject before the move; reporting them
+  // would warn on pre-existing relationships the move did not create (D135).
+  const maxScanAbove =
+    from !== undefined && to < from ? from : layers.length - 1;
+
+  for (let j = to + 1; j <= maxScanAbove; j++) {
     const above = layers[j]!;
     const result = checkPairOcclusion(above.kind, subject.kind);
     if (result.reason !== undefined) {
@@ -278,27 +287,6 @@ export function checkRepositionOcclusion(
     const result = checkPairOcclusion(subject.kind, below.kind);
     if (result.reason !== undefined) {
       return result;
-    }
-  }
-  return { passed: true };
-}
-
-/**
- * Checks an entire template layer list for any occlusion (D135, D136).
- * Scans top-down and returns the first advisory occlusion finding encountered,
- * or `{ passed: true }` if none exists.
- */
-export function checkTemplateOcclusion(
-  layers: readonly { readonly kind: LayerKind }[],
-): ComplianceResult {
-  for (let i = layers.length - 1; i >= 1; i--) {
-    const above = layers[i]!;
-    for (let j = i - 1; j >= 0; j--) {
-      const below = layers[j]!;
-      const result = checkPairOcclusion(above.kind, below.kind);
-      if (result.reason !== undefined) {
-        return result;
-      }
     }
   }
   return { passed: true };
