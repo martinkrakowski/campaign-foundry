@@ -621,6 +621,45 @@ describe("the status page", () => {
     );
   });
 
+  test("the expand icon reflects aria-expanded in both states", async () => {
+    // happy-dom does no layout (§8), so getComputedStyle cannot resolve a
+    // transform — assert the rule exists and that the DOM's own selector
+    // matching (CSSOM .matches, not layout) agrees with aria-expanded.
+    const style = await pageStyle();
+    expect(style).toMatch(
+      /#log-expand\[aria-expanded="true"\]\s*svg\s*\{[^}]*transform:\s*rotate\(180deg\)/,
+    );
+
+    const page = await loadPage(statusAt());
+    const doc = page.window.document;
+    const row = doc.querySelector("tr.lane");
+    press(row!.querySelector("button")!, "Enter");
+    await vi.waitFor(() => {
+      expect(
+        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
+      ).toBe(false);
+    });
+
+    const expandBtn = doc.querySelector(
+      'button[aria-label="expand"]',
+    ) as unknown as HTMLElement;
+    const icon = expandBtn.querySelector("svg") as unknown as {
+      matches(selector: string): boolean;
+    };
+    const rotated = '#log-expand[aria-expanded="true"] svg';
+
+    expect(expandBtn.getAttribute("aria-expanded")).toBe("false");
+    expect(icon.matches(rotated)).toBe(false);
+
+    expandBtn.click();
+    expect(expandBtn.getAttribute("aria-expanded")).toBe("true");
+    expect(icon.matches(rotated)).toBe(true);
+
+    expandBtn.click();
+    expect(expandBtn.getAttribute("aria-expanded")).toBe("false");
+    expect(icon.matches(rotated)).toBe(false);
+  });
+
   test("copy writes the body text without line numbers — assert the clipboard payload", async () => {
     const multiline = "first line\nsecond line\nthird line";
     const page = await loadPage(statusAt(), multiline);
@@ -641,6 +680,36 @@ describe("the status page", () => {
       const text = await page.window.navigator.clipboard.readText();
       expect(text).toBe(multiline);
     });
+  });
+
+  test("the copy feedback states render and clear", async () => {
+    const page = await loadPage(statusAt(), "one line");
+    const doc = page.window.document;
+    const row = doc.querySelector("tr.lane");
+    press(row!.querySelector("button")!, "Enter");
+    await vi.waitFor(() => {
+      expect(doc.querySelectorAll(".line").length).toBeGreaterThan(0);
+    });
+
+    const copyBtn = doc.querySelector(
+      'button[aria-label="copy"]',
+    ) as unknown as HTMLElement;
+
+    copyBtn.click();
+    await vi.waitFor(() => {
+      expect(copyBtn.textContent?.trim()).toBe("copied");
+    });
+    expect(copyBtn.classList.contains("ok")).toBe(true);
+    expect(copyBtn.classList.contains("bad")).toBe(false);
+
+    // The feedback is on a timer (1600 ms in the page's own script) — wait
+    // past it with a real delay, the same idiom the rest of this file uses
+    // for real timing (e.g. the SSE/poll races above), rather than reaching
+    // for fake timers the harness never wires the page's setTimeout through.
+    await new Promise((resolve) => setTimeout(resolve, 1700));
+    expect(copyBtn.textContent?.trim()).toBe("copy");
+    expect(copyBtn.classList.contains("ok")).toBe(false);
+    expect(copyBtn.classList.contains("bad")).toBe(false);
   });
 
   test("the gutter is user-select: none, and the number of gutter entries equals the line count", async () => {
