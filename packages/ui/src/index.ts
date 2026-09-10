@@ -73,4 +73,13 @@ export { PosterFrame, frameSize, type PosterFrameProps, type PosterVariant } fro
 export { PreviewPanel, type PreviewPanelProps } from "./preview-panel";
 export { PosterStack, type PosterStackProps } from "./poster-stack";
 export { ScrubBar } from "./scrub-bar";
-export { LAYERS, times, PREVIEW_BOX, fractionOfBox, canvasSpecOf, frameBox, type BoxFraction } from "./preview-layers";
+export {
+  LAYERS,
+  times,
+  PREVIEW_BOX,
+  fractionOfBox,
+  canvasSpecOf,
+  frameBox,
+  PREVIEW_LAYER_ORDER,
+  type BoxFraction,
+} from "./preview-layers";

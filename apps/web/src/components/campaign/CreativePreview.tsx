@@ -1,7 +1,8 @@
-import { useId, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useId, type CSSProperties, type ReactNode } from "react";
 import type { LayoutKind, ToneKind } from "@campaignfoundry/CampaignOrchestration";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import { DEFAULT_STYLE, type Style } from "@campaignfoundry/CampaignOrchestration/creative-style";
+import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 import type { AnchorKind } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import {
   resolveCanvas,
@@ -12,7 +13,7 @@ import {
   type CanvasSpec,
 } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
-import { LAYERS, times, canvasSpecOf } from "@/components/ui/preview-layers";
+import { LAYERS, PREVIEW_LAYER_ORDER, times, canvasSpecOf } from "@/components/ui/preview-layers";
 import { cn } from "@/lib/cn";
 
 export type LayoutOption = LayoutKind;
@@ -317,6 +318,100 @@ export function CreativePreview({
   const textAnchor = align === "left" ? "start" : align === "right" ? "end" : "middle";
   const textX = align === "left" ? textEdge : align === "right" ? W - textEdge : W / 2;
 
+  // The stack order (C2/D121): this preview paints the same list the glyph
+  // iterates and the compositor resolves — `PREVIEW_LAYER_ORDER`, never a
+  // second ordering — so a reordering of that shared source moves this SVG
+  // exactly as it moves the glyph and the render. `block` names the visual
+  // wrapper a kind draws inside; consecutive kinds sharing a block share one
+  // `<g>`, the same coalescing `creative-glyph.tsx`'s `groupRuns` does, so the
+  // canonical order still emits exactly the four wrappers this SVG always has.
+  const blockAnim: Partial<Record<PreviewBlock, string | undefined>> = {
+    ground: groundAnim,
+    text: textAnim,
+  };
+  const paintings: Partial<
+    Record<LayerKind, { readonly block: PreviewBlock; readonly element: ReactNode }>
+  > = {
+    /* Layer 1 — photo ground (the neutral placeholder). */
+    image: {
+      block: "ground",
+      element: <rect x="0" y="0" width={W} height={H} className="fill-text-muted" />,
+    },
+    /* Layer 2 — contrast shade on the headline edge, fading into the image. */
+    shade: {
+      block: "ground",
+      element: <rect x="0" y="0" width={W} height={H} fill={`url(#${shadeId})`} />,
+    },
+    /* Layer 3 — the soft fade the accent band melts into (the accent-wipe
+       layer), then the brand accent band flush to the headline edge. */
+    accent: {
+      block: "accent",
+      element: (
+        <>
+          <rect
+            x="0"
+            y={top ? band : H - band - fadeH}
+            width={W}
+            height={fadeH}
+            fill={`url(#${fadeId})`}
+            className={fadeAnim}
+          />
+          <rect x="0" y={top ? 0 : H - band} width={W} height={band} className="fill-[var(--c)]" />
+        </>
+      ),
+    },
+    /* Layer 4 — the brief's headline, as real, fitted text. */
+    "static-text": {
+      block: "text",
+      element:
+        lines.length > 0 ? (
+          <text
+            x={textX}
+            y={firstBaseline}
+            textAnchor={textAnchor}
+            fontSize={fontSize}
+            // Family and letter spacing are best-effort mirrors: the SVG names
+            // the bundled family and applies the em offset, but glyph-accurate
+            // parity for both is the server frame's job (T1b, in flight) — no
+            // SVG twin can follow Skia's metrics.
+            fontFamily={fontFamily}
+            letterSpacing={`${letterSpacingEm * fontSize}px`}
+            // The weight the compositor renders: an explicitly styled weight
+            // (400|700 — the faces that exist, D60) overrides the tone-derived
+            // rendered weight.
+            fontWeight={style?.fontWeight ?? RENDERED_FONT_WEIGHT[tone ?? "bold"]}
+            fill="#ffffff"
+          >
+            {lines[0]}
+            {lines.slice(1).map((line, index) => (
+              <tspan key={index} x={textX} dy={lineHeight}>
+                {line}
+              </tspan>
+            ))}
+          </text>
+        ) : null,
+    },
+    /* Layer 5 — the brand logo's placeholder: a neutral block at the
+       compositor's exact geometry (the asset's pixels are not the preview's
+       to invent — D26). */
+    logo: {
+      block: "logo",
+      element: <rect x={logoX} y={logoY} width={logoW} height={logoW} fill="#ffffff" fillOpacity={0.4} />,
+    },
+  };
+  // The painted kinds, in the shared order — never a second list (C2).
+  const painted = PREVIEW_LAYER_ORDER.filter((kind) => paintings[kind] !== undefined);
+  const runs: { block: PreviewBlock; kinds: LayerKind[] }[] = [];
+  for (const kind of painted) {
+    const block = paintings[kind]!.block;
+    const last = runs[runs.length - 1];
+    if (last?.block === block) {
+      last.kinds.push(kind);
+    } else {
+      runs.push({ block, kinds: [kind] });
+    }
+  }
+
   return (
     <svg
       width={W}
@@ -346,68 +441,19 @@ export function CreativePreview({
         </linearGradient>
       </defs>
 
-      <g className={groundAnim}>
-        <rect x="0" y="0" width={W} height={H} className="fill-text-muted" />
-        <rect x="0" y="0" width={W} height={H} fill={`url(#${shadeId})`} />
-      </g>
-
-      <g>
-        <rect
-          x="0"
-          y={top ? band : H - band - fadeH}
-          width={W}
-          height={fadeH}
-          fill={`url(#${fadeId})`}
-          className={fadeAnim}
-        />
-        <rect x="0" y={top ? 0 : H - band} width={W} height={band} className="fill-[var(--c)]" />
-      </g>
-
-      <g className={textAnim}>
-        {lines.length > 0 ? (
-          <text
-            x={textX}
-            y={firstBaseline}
-            textAnchor={textAnchor}
-            fontSize={fontSize}
-            // Family and letter spacing are best-effort mirrors: the SVG names
-            // the bundled family and applies the em offset, but glyph-accurate
-            // parity for both is the server frame's job (T1b, in flight) — no
-            // SVG twin can follow Skia's metrics.
-            fontFamily={fontFamily}
-            letterSpacing={`${letterSpacingEm * fontSize}px`}
-            // The weight the compositor renders: an explicitly styled weight
-            // (400|700 — the faces that exist, D60) overrides the tone-derived
-            // rendered weight.
-            fontWeight={style?.fontWeight ?? RENDERED_FONT_WEIGHT[tone ?? "bold"]}
-            fill="#ffffff"
-          >
-            {lines[0]}
-            {lines.slice(1).map((line, index) => (
-              <tspan key={index} x={textX} dy={lineHeight}>
-                {line}
-              </tspan>
-            ))}
-          </text>
-        ) : null}
-      </g>
-
-      <g>
-        {/* Layer 5 — the brand logo's placeholder: a neutral block at the
-            compositor's exact geometry (the asset's pixels are not the
-            preview's to invent — D26). */}
-        <rect
-          x={logoX}
-          y={logoY}
-          width={logoW}
-          height={logoW}
-          fill="#ffffff"
-          fillOpacity={0.4}
-        />
-      </g>
+      {runs.map((run, index) => (
+        <g key={index} className={blockAnim[run.block]}>
+          {run.kinds.map((kind) => (
+            <Fragment key={kind}>{paintings[kind]!.element}</Fragment>
+          ))}
+        </g>
+      ))}
     </svg>
   );
 }
+
+/** The visual wrapper a painted kind draws inside — see `paintings` above. */
+type PreviewBlock = "ground" | "accent" | "text" | "logo";
 
 interface Box {
   readonly x: number;
