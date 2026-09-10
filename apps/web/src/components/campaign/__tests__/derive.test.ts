@@ -31,6 +31,7 @@ import {
   OCCLUSION_TABLE,
   checkPairOcclusion,
   checkRepositionOcclusion,
+  findOcclusionDelta,
 } from "../derive";
 import * as deriveModule from "../derive";
 import {
@@ -495,10 +496,11 @@ describe("derive.ts", () => {
     });
   });
 
-  describe("occlusion exports (D135, D136, L8o-fix2)", () => {
+  describe("occlusion exports (D135, D136, L8o-fix2, L8o-fix5)", () => {
     test("re-exports active occlusion checks and does not export checkTemplateOcclusion", () => {
       expect(typeof checkPairOcclusion).toBe("function");
       expect(typeof checkRepositionOcclusion).toBe("function");
+      expect(typeof findOcclusionDelta).toBe("function");
       expect(OCCLUSION_TABLE).toBeDefined();
       expect("checkTemplateOcclusion" in deriveModule).toBe(false);
     });

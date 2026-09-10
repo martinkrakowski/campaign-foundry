@@ -246,13 +246,85 @@ export function checkPairOcclusion(
   };
 }
 
+export interface OcclusionFinding {
+  readonly above: LayerKind;
+  readonly below: LayerKind;
+  readonly behavior: OcclusionBehavior;
+}
+
+/**
+ * Scans for any occluding layer pair present in `after` that was absent from `before` (D135, D136).
+ *
+ * Move, add and remove all use the same question: only a newly created occlusion
+ * is reported, so pre-existing occlusions are never announced as changes.
+ * Returns the first newly created advisory occlusion finding encountered (top-down),
+ * or null if none was created.
+ */
+export function findOcclusionDelta(
+  before: readonly { readonly id?: string; readonly kind: LayerKind }[],
+  after: readonly { readonly id?: string; readonly kind: LayerKind }[],
+): OcclusionFinding | null {
+  const refMap = new Map<object, string>();
+  const tag = (
+    layers: readonly { readonly id?: string; readonly kind: LayerKind }[],
+    prefix: string,
+  ) =>
+    layers.map((layer, index) => {
+      let id: string;
+      if (typeof layer.id === "string" && layer.id.length > 0) {
+        id = layer.id;
+      } else {
+        const existing = refMap.get(layer);
+        if (existing) {
+          id = existing;
+        } else {
+          id = `${prefix}_${index}`;
+          refMap.set(layer, id);
+        }
+      }
+      return { id, kind: layer.kind };
+    });
+
+  const taggedBefore = tag(before, "b");
+  const taggedAfter = tag(after, "a");
+
+  const beforePairs = new Set<string>();
+  for (let j = 0; j < taggedBefore.length; j++) {
+    const above = taggedBefore[j]!;
+    for (let i = 0; i < j; i++) {
+      const below = taggedBefore[i]!;
+      if (checkPairOcclusion(above.kind, below.kind).reason !== undefined) {
+        beforePairs.add(`${above.id}->${below.id}`);
+      }
+    }
+  }
+
+  for (let j = taggedAfter.length - 1; j >= 1; j--) {
+    const above = taggedAfter[j]!;
+    for (let i = j - 1; i >= 0; i--) {
+      const below = taggedAfter[i]!;
+      const key = `${above.id}->${below.id}`;
+      if (!beforePairs.has(key)) {
+        if (checkPairOcclusion(above.kind, below.kind).reason !== undefined) {
+          return {
+            above: above.kind,
+            below: below.kind,
+            behavior: OCCLUSION_TABLE[above.kind]!.behavior,
+          };
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
 /**
  * Checks whether repositioning a layer at `to` creates an occlusion (D135).
  *
  * Evaluated per layer on every reposition:
- * - When `from` is specified: computes occluding pairs before and after the move,
- *   reporting only an advisory finding created by the move (present after, absent before).
- *   Pre-existing occlusions the move did not create are not reported (D135).
+ * - When `from` is specified: delegates to findOcclusionDelta over before and after stacks (D135).
+ *   If to === from, before equals after and delta yields no finding naturally.
  * - When `from` is undefined: caller cannot say what moved (no before-stack),
  *   so reports the current state rather than a delta.
  */
@@ -264,10 +336,7 @@ export function checkRepositionOcclusion(
   if (to < 0 || to >= layers.length || layers.length === 0) {
     return { passed: true };
   }
-  if (
-    from !== undefined &&
-    (from < 0 || from >= layers.length || to === from)
-  ) {
+  if (from !== undefined && (from < 0 || from >= layers.length)) {
     return { passed: true };
   }
 
@@ -295,48 +364,23 @@ export function checkRepositionOcclusion(
   // Reconstruct the before-stack by undoing the splice (D135).
   // Tag layers by their index in the after-stack to identify distinct layer instances.
   const taggedAfter = layers.map((layer, index) => ({
-    id: index,
+    id: `_layer_${index}`,
     kind: layer.kind,
   }));
   const taggedBefore = [...taggedAfter];
-  const moved = taggedBefore.splice(to, 1)[0]!;
-  taggedBefore.splice(from, 0, moved);
+  const [moved] = taggedBefore.splice(to, 1);
+  taggedBefore.splice(from, 0, moved!);
 
-  // Compute occluding pairs of the stack before the move.
-  const beforePairs = new Set<string>();
-  for (let j = 0; j < taggedBefore.length; j++) {
-    const above = taggedBefore[j]!;
-    for (let i = 0; i < j; i++) {
-      const below = taggedBefore[i]!;
-      if (checkPairOcclusion(above.kind, below.kind).reason !== undefined) {
-        beforePairs.add(`${above.id}->${below.id}`);
-      }
-    }
-  }
-
-  // Compute occluding pairs of the stack after the move, and report
-  // only a pair present in the second and absent from the first.
-  const subject = taggedAfter[to]!;
-  for (let j = to + 1; j < taggedAfter.length; j++) {
-    const above = taggedAfter[j]!;
-    const key = `${above.id}->${subject.id}`;
-    if (!beforePairs.has(key)) {
-      const result = checkPairOcclusion(above.kind, subject.kind);
-      if (result.reason !== undefined) {
-        return result;
-      }
-    }
-  }
-
-  for (let i = to - 1; i >= 0; i--) {
-    const below = taggedAfter[i]!;
-    const key = `${subject.id}->${below.id}`;
-    if (!beforePairs.has(key)) {
-      const result = checkPairOcclusion(subject.kind, below.kind);
-      if (result.reason !== undefined) {
-        return result;
-      }
-    }
+  const finding = findOcclusionDelta(taggedBefore, taggedAfter);
+  if (finding) {
+    return {
+      passed: true,
+      reason: formatOcclusionReason(
+        finding.above,
+        finding.below,
+        finding.behavior,
+      ),
+    };
   }
 
   return { passed: true };

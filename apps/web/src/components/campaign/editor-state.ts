@@ -82,15 +82,13 @@ import {
 } from "@campaignfoundry/Distribution/platform-profiles";
 import {
   addableKinds,
-  checkPairOcclusion,
-  checkRepositionOcclusion,
   findLegalInsertionIndex,
-  OCCLUSION_TABLE,
+  findOcclusionDelta,
   platformsToFormats,
   platformsToRatios,
   platformsToSizes,
   removableLayerIds,
-  type OcclusionBehavior,
+  type OcclusionFinding,
 } from "./derive";
 import { layerKindDisplayName } from "./display-names";
 import * as messages from "./messages";
@@ -817,12 +815,6 @@ function isLayerIndex(index: number, layerCount: number): boolean {
   return Number.isInteger(index) && index >= 0 && index < layerCount;
 }
 
-export interface OcclusionFinding {
-  readonly above: LayerKind;
-  readonly below: LayerKind;
-  readonly behavior: OcclusionBehavior;
-}
-
 /**
  * Formats an advisory finding into the catalog's note (D135, D136, D2, D18).
  * Converts raw layer kinds to display labels and maps domain occlusion behavior
@@ -843,91 +835,6 @@ export function formatOcclusionNotice(
     layerKindDisplayName(finding.below),
     effect,
   );
-}
-
-/**
- * Finds the facts of an occlusion created by repositioning a layer at `to` from `from` (D135).
- * Inspects whether any layer sitting above now occludes the subject, or whether the subject
- * now occludes any layer below it, that was not already occluded before the move.
- */
-export function findRepositionFinding(
-  layers: readonly { readonly kind: LayerKind }[],
-  to: number,
-  from: number,
-): OcclusionFinding | null {
-  const taggedAfter = layers.map((layer, index) => ({
-    id: index,
-    kind: layer.kind,
-  }));
-  const taggedBefore = [...taggedAfter];
-  const moved = taggedBefore.splice(to, 1)[0]!;
-  taggedBefore.splice(from, 0, moved);
-
-  const beforePairs = new Set<string>();
-  for (let j = 0; j < taggedBefore.length; j++) {
-    const above = taggedBefore[j]!;
-    for (let i = 0; i < j; i++) {
-      const below = taggedBefore[i]!;
-      if (checkPairOcclusion(above.kind, below.kind).reason !== undefined) {
-        beforePairs.add(`${above.id}->${below.id}`);
-      }
-    }
-  }
-
-  const subject = taggedAfter[to]!;
-  for (let j = to + 1; j < taggedAfter.length; j++) {
-    const above = taggedAfter[j]!;
-    const key = `${above.id}->${subject.id}`;
-    if (!beforePairs.has(key)) {
-      if (checkPairOcclusion(above.kind, subject.kind).reason !== undefined) {
-        return {
-          above: above.kind,
-          below: subject.kind,
-          behavior: OCCLUSION_TABLE[above.kind]!.behavior,
-        };
-      }
-    }
-  }
-
-  for (let i = to - 1; i >= 0; i--) {
-    const below = taggedAfter[i]!;
-    const key = `${subject.id}->${below.id}`;
-    if (!beforePairs.has(key)) {
-      if (checkPairOcclusion(subject.kind, below.kind).reason !== undefined) {
-        return {
-          above: subject.kind,
-          below: below.kind,
-          behavior: OCCLUSION_TABLE[subject.kind]!.behavior,
-        };
-      }
-    }
-  }
-
-  return null;
-}
-
-/**
- * Checks an entire template layer list for any occlusion (D135, D136).
- * Scans top-down and returns the first advisory occlusion finding encountered,
- * or null if none exists.
- */
-export function checkTemplateOcclusion(
-  layers: readonly { readonly kind: LayerKind }[],
-): OcclusionFinding | null {
-  for (let i = layers.length - 1; i >= 1; i--) {
-    const above = layers[i]!;
-    for (let j = i - 1; j >= 0; j--) {
-      const below = layers[j]!;
-      if (checkPairOcclusion(above.kind, below.kind).reason !== undefined) {
-        return {
-          above: above.kind,
-          below: below.kind,
-          behavior: OCCLUSION_TABLE[above.kind]!.behavior,
-        };
-      }
-    }
-  }
-  return null;
 }
 
 function reduceEditor(state: EditorState, action: EditorAction): EditorState {
@@ -1099,7 +1006,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       return {
         ...state,
         occlusionNotice: formatOcclusionNotice(
-          checkTemplateOcclusion(nextLayers),
+          findOcclusionDelta(state.template.layers, nextLayers),
         ),
         template: {
           ...state.template,
@@ -1127,7 +1034,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       return {
         ...state,
         occlusionNotice: formatOcclusionNotice(
-          checkTemplateOcclusion(nextLayers),
+          findOcclusionDelta(state.template.layers, nextLayers),
         ),
         template: {
           ...state.template,
@@ -1151,17 +1058,11 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       const layers = [...state.template.layers];
       const [moved] = layers.splice(action.from, 1);
       layers.splice(action.to, 0, moved);
-      const occlusion = checkRepositionOcclusion(
-        layers,
-        action.to,
-        action.from,
-      );
-      const finding = findRepositionFinding(layers, action.to, action.from);
-      const notice =
-        occlusion.reason !== undefined ? formatOcclusionNotice(finding) : null;
       return {
         ...state,
-        occlusionNotice: notice,
+        occlusionNotice: formatOcclusionNotice(
+          findOcclusionDelta(state.template.layers, layers),
+        ),
         template: {
           ...state.template,
           layers,

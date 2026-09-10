@@ -7,6 +7,7 @@ import {
   OCCLUSION_TABLE,
   checkPairOcclusion,
   checkRepositionOcclusion,
+  findOcclusionDelta,
   formatOcclusionReason,
   type CreativeType,
 } from "../creative-types.js";
@@ -478,25 +479,6 @@ describe("occlusion table and guard checks (D135, D136)", () => {
       1,
     );
     expect(qodoFinding).toEqual({ passed: true });
-
-    // A move that changes nothing relevant produces no finding (e.g. from === to)
-    expect(
-      checkRepositionOcclusion(animatedTextMovedDownPastVideo, 0, 0),
-    ).toEqual({ passed: true });
-  });
-
-  test("the pre-existing shade over a moved-up text produces no finding (L8o-fix3, D135)", () => {
-    const L = (kind: LayerKind) => ({ id: kind, kind });
-    // before: [image, static-text, animated-text, shade]   — shade(3) is already above static-text(1)
-    // move static-text 1 -> 2
-    const after = [
-      L("image"),
-      L("animated-text"),
-      L("static-text"),
-      L("shade"),
-    ];
-    expect(checkRepositionOcclusion(after, 2, 1).reason).toBeUndefined();
-    expect(checkRepositionOcclusion(after, 2, 1)).toEqual({ passed: true });
   });
 
   test("an occluding order is still a valid template (D135, D136) — warns and never refuses", () => {
@@ -534,5 +516,77 @@ describe("occlusion table and guard checks (D135, D136)", () => {
       ],
     };
     expect(isBriefTemplate(occludingSocialTemplate)).toBe(true);
+  });
+
+  describe("findOcclusionDelta (D135, D136, L8o-fix5)", () => {
+    test("detects newly created occluding pairs and ignores pre-existing ones", () => {
+      // 1. Move creates occlusion: shade moved above animated-text
+      const beforeMove = [
+        { id: "video", kind: "video" as LayerKind },
+        { id: "shade", kind: "shade" as LayerKind },
+        { id: "animated-text", kind: "animated-text" as LayerKind },
+      ];
+      const afterMove = [
+        { id: "video", kind: "video" as LayerKind },
+        { id: "animated-text", kind: "animated-text" as LayerKind },
+        { id: "shade", kind: "shade" as LayerKind },
+      ];
+      expect(findOcclusionDelta(beforeMove, afterMove)).toEqual({
+        above: "shade",
+        below: "animated-text",
+        behavior: "attenuating",
+      });
+
+      // 2. Pre-existing occlusion is ignored when unrelated layer is added
+      const afterAddUnrelated = [
+        { id: "video", kind: "video" as LayerKind },
+        { id: "animated-text", kind: "animated-text" as LayerKind },
+        { id: "shade", kind: "shade" as LayerKind },
+        { id: "video-2", kind: "video" as LayerKind },
+      ];
+      expect(findOcclusionDelta(afterMove, afterAddUnrelated)).toBeNull();
+
+      // 3. Removing a layer produces no newly created occlusion
+      const afterRemove = [
+        { id: "video", kind: "video" as LayerKind },
+        { id: "shade", kind: "shade" as LayerKind },
+      ];
+      expect(findOcclusionDelta(beforeMove, afterRemove)).toBeNull();
+
+      // 4. Adding a layer that creates an occlusion
+      const afterAddOccluding = [
+        { id: "video", kind: "video" as LayerKind },
+        { id: "animated-text", kind: "animated-text" as LayerKind },
+        { id: "shade", kind: "shade" as LayerKind },
+      ];
+      const beforeAdd = [
+        { id: "video", kind: "video" as LayerKind },
+        { id: "animated-text", kind: "animated-text" as LayerKind },
+      ];
+      expect(findOcclusionDelta(beforeAdd, afterAddOccluding)).toEqual({
+        above: "shade",
+        below: "animated-text",
+        behavior: "attenuating",
+      });
+
+      // 5. Identical stacks produce no delta
+      expect(findOcclusionDelta(beforeMove, beforeMove)).toBeNull();
+
+      // 6. Supports layers without explicit ids, preserving reference identity
+      const vLayer = { kind: "video" as LayerKind };
+      const tLayer = { kind: "animated-text" as LayerKind };
+      const sLayer = { kind: "shade" as LayerKind };
+      const beforeRef = [vLayer, sLayer, tLayer];
+      const afterRef = [vLayer, tLayer, sLayer];
+      expect(findOcclusionDelta(beforeRef, afterRef)).toEqual({
+        above: "shade",
+        below: "animated-text",
+        behavior: "attenuating",
+      });
+
+      // 7. Non-occluding addition without ids
+      const newVLayer = { kind: "video" as LayerKind };
+      expect(findOcclusionDelta([vLayer], [vLayer, newVLayer])).toBeNull();
+    });
   });
 });

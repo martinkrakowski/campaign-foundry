@@ -261,6 +261,8 @@ export {
   OCCLUSION_TABLE,
   checkPairOcclusion,
   checkRepositionOcclusion,
+  findOcclusionDelta,
   type OcclusionBehavior,
+  type OcclusionFinding,
   type OcclusionRule,
 } from "@campaignfoundry/CampaignOrchestration/creative-types";
