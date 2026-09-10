@@ -163,7 +163,9 @@ export function TemplateSection({ state, dispatch }: SectionProps) {
         })}
       </ol>
       {state.occlusionNotice ? (
-        <p className="text-[12px] text-text-muted">{state.occlusionNotice}</p>
+        <p role="status" className="text-[12px] text-text-muted">
+          {state.occlusionNotice}
+        </p>
       ) : null}
       {requiredNames.length > 0 ? (
         <p className="text-[12px] text-text-muted">

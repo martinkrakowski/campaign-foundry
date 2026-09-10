@@ -322,9 +322,37 @@ describe("occlusion table and guard checks (D135, D136)", () => {
       "the shade layer now sits above the headline and will mute it",
     );
 
-    // Moving animated-text back up to 2 clears finding
-    const movedUpCleared = checkRepositionOcclusion(videoCanonical, 2, 1);
+    // In a stack without logo, moving animated-text back up to 2 clears finding
+    const threeLayers = [
+      videoCanonical[0]!,
+      videoCanonical[1]!,
+      videoCanonical[2]!,
+    ];
+    const movedUpCleared = checkRepositionOcclusion(threeLayers, 2, 1);
     expect(movedUpCleared).toEqual({ passed: true });
+
+    // D135 worked example: moving a static-text headline up so it lands beneath a shade
+    const headlineUnderShade = [
+      { id: "bg", kind: "video" as LayerKind },
+      { id: "text", kind: "static-text" as LayerKind },
+      { id: "shade", kind: "shade" as LayerKind },
+    ];
+    // Moving static-text up from 0 to 1 places it directly beneath shade at 2
+    const textMovedUp = checkRepositionOcclusion(headlineUnderShade, 1, 0);
+    expect(textMovedUp.passed).toBe(true);
+    expect(textMovedUp.reason).toBe(
+      "the shade layer now sits above the headline and will mute it",
+    );
+    // The message names both layers in the pair (D135)
+    expect(textMovedUp.reason).toContain("shade");
+    expect(textMovedUp.reason).toContain("headline");
+
+    // In videoCanonical, moving animated-text from 1 to 2 places it beneath logo at 3
+    const movedUpUnderLogo = checkRepositionOcclusion(videoCanonical, 2, 1);
+    expect(movedUpUnderLogo.passed).toBe(true);
+    expect(movedUpUnderLogo.reason).toBe(
+      "the logo layer now sits above the headline and will overlap where it sits",
+    );
 
     // Out of range or empty layers returns { passed: true }
     expect(checkRepositionOcclusion([], 0)).toEqual({ passed: true });

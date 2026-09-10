@@ -410,7 +410,8 @@ describe("TemplateSection — layer reordering (L8, D128)", () => {
     let rows = screen.getAllByRole("listitem");
     expect(rows[2].textContent).toContain("accent");
     expect(rows[3].textContent).toContain("static-text");
-    // Initially, no occlusion note is rendered
+    // Initially, no occlusion note or live region is rendered
+    expect(screen.queryByRole("status")).toBeNull();
     expect(screen.queryByText(/now sits above/)).toBeNull();
 
     // 1. Move accent up (from 2 to 3, above static-text)
@@ -425,11 +426,12 @@ describe("TemplateSection — layer reordering (L8, D128)", () => {
     expect(rows[2].textContent).toContain("static-text");
     expect(rows[3].textContent).toContain("accent");
 
-    // The quiet note shows, naming both layers and what happens
-    const note = screen.getByText(
+    // The quiet note shows, carrying role="status", naming both layers and what happens
+    const note = screen.getByRole("status");
+    expect(note).toBeTruthy();
+    expect(note.textContent).toBe(
       "the accent layer now sits above the headline and will mute it",
     );
-    expect(note).toBeTruthy();
     expect(note.className).toContain("text-text-muted");
 
     // 2. Moving accent back down (from 3 to 2) clears the note
@@ -444,7 +446,8 @@ describe("TemplateSection — layer reordering (L8, D128)", () => {
     expect(rows[2].textContent).toContain("accent");
     expect(rows[3].textContent).toContain("static-text");
 
-    // The note clears
+    // The note clears and live region is emptied
+    expect(screen.queryByRole("status")).toBeNull();
     expect(screen.queryByText(/now sits above/)).toBeNull();
   });
 
@@ -465,7 +468,8 @@ describe("TemplateSection — layer reordering (L8, D128)", () => {
     expect(rows[3].textContent).toContain("logo");
     expect(rows[4].textContent).toContain("static-text");
 
-    // Non-occluding move shows no note
+    // Non-occluding move shows no note and no live region
+    expect(screen.queryByRole("status")).toBeNull();
     expect(screen.queryByText(/now sits above/)).toBeNull();
   });
 

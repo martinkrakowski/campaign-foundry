@@ -250,41 +250,29 @@ export function checkPairOcclusion(
 /**
  * Checks whether repositioning a layer at `to` creates an occlusion (D135).
  *
- * Evaluated per layer on every reposition. If the layer was moved, inspects:
- * - If moved up (or direction unspecified): whether it now sits above a layer it occludes.
- * - If moved down: whether any layer above it now occludes it, or whether it still occludes a layer below.
+ * Evaluated per layer on every reposition. Whichever direction the move went, inspects:
+ * - whether any layer above now occludes the subject
+ * - whether the subject now occludes any layer below it
  */
 export function checkRepositionOcclusion(
   layers: readonly { readonly kind: LayerKind }[],
   to: number,
-  from?: number,
+  _from?: number,
 ): ComplianceResult {
   if (to < 0 || to >= layers.length || layers.length === 0) {
     return { passed: true };
   }
   const subject = layers[to]!;
 
-  // If moved down (from > to), check if any layer above now occludes subject
-  if (from !== undefined && to < from) {
-    for (let j = to + 1; j < layers.length; j++) {
-      const above = layers[j]!;
-      const result = checkPairOcclusion(above.kind, subject.kind);
-      if (result.reason !== undefined) {
-        return result;
-      }
+  // Whichever direction the move went, look for a layer above that occludes
+  // the subject and for a layer below that the subject occludes.
+  for (let j = to + 1; j < layers.length; j++) {
+    const above = layers[j]!;
+    const result = checkPairOcclusion(above.kind, subject.kind);
+    if (result.reason !== undefined) {
+      return result;
     }
-    // Also check if subject occludes anything below it in its new position
-    for (let i = to - 1; i >= 0; i--) {
-      const below = layers[i]!;
-      const result = checkPairOcclusion(subject.kind, below.kind);
-      if (result.reason !== undefined) {
-        return result;
-      }
-    }
-    return { passed: true };
   }
-
-  // Moved up (or from unspecified): check if subject occludes any layer below it
   for (let i = to - 1; i >= 0; i--) {
     const below = layers[i]!;
     const result = checkPairOcclusion(subject.kind, below.kind);
@@ -292,18 +280,6 @@ export function checkRepositionOcclusion(
       return result;
     }
   }
-
-  // Fallback: if from was not specified, also check if any layer above occludes subject
-  if (from === undefined) {
-    for (let j = to + 1; j < layers.length; j++) {
-      const above = layers[j]!;
-      const result = checkPairOcclusion(above.kind, subject.kind);
-      if (result.reason !== undefined) {
-        return result;
-      }
-    }
-  }
-
   return { passed: true };
 }
 

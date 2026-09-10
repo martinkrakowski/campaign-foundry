@@ -1443,6 +1443,22 @@ describe("draft storage", () => {
     expect(afterRemove.occlusionNotice).toBeNull();
   });
 
+  test("occlusionNotice never survives a round-trip (D135)", () => {
+    // A state carrying a notice, saved and restored, comes back with no notice.
+    const state: EditorState = {
+      ...base(),
+      briefId: "camp",
+      occlusionNotice:
+        "the accent layer now sits above the headline and will mute it",
+    };
+    saveDraftToStorage(state);
+    const restored = loadDraftFromStorage(state);
+    expect(restored?.occlusionNotice).toBeNull();
+
+    const fromBriefState = fromBrief(toBrief(state));
+    expect(fromBriefState.occlusionNotice).toBeNull();
+  });
+
   test("a stored template with an illegal layer order falls back to canonical (L8, D128)", () => {
     // An illegal order (e.g. logo below image) is refused by isBriefTemplate
     // and falls back to the canonical template rather than corrupting the editor.
