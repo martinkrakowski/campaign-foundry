@@ -316,23 +316,29 @@ describe("the status page", () => {
     expect(button?.tagName).toBe("BUTTON");
     expect(button?.textContent?.trim().length).toBeGreaterThan(0);
 
+    const logUrl = "/api/log/T/t1?tail=16";
     press(button!, "Enter");
     const logView = page.window.document.getElementById(
       "log",
     ) as HTMLElement | null;
     await vi.waitFor(() => {
-      expect(page.fetches).toContain("/api/log/T/t1?tail=16");
+      expect(page.fetches).toContain(logUrl);
       expect(logView?.hidden).toBe(false);
       expect(logView?.textContent).toContain("log-tail");
     });
+    // A deleted hand-rolled keydown handler and native <button> activation
+    // both answering the same key press is exactly the double-fire a real
+    // browser would never produce: one key press, one fetch.
+    expect(page.fetches.filter((url) => url === logUrl)).toHaveLength(1);
 
     page.fetches.length = 0;
     if (logView !== null) logView.textContent = "";
     press(button!, " ");
     await vi.waitFor(() => {
-      expect(page.fetches).toContain("/api/log/T/t1?tail=16");
+      expect(page.fetches).toContain(logUrl);
       expect(logView?.textContent).toContain("log-tail");
     });
+    expect(page.fetches.filter((url) => url === logUrl)).toHaveLength(1);
   });
 
   test("a click anywhere on a lane row still opens the log", async () => {
@@ -1205,11 +1211,24 @@ describe("the status page", () => {
     ).toBe("l_hot");
 
     page.source.emit("status", JSON.stringify(after));
+
+    // Prove the re-sort actually happened: l_cold is now the more recently
+    // updated lane, so it must lead and l_hot must have moved off row 0. If
+    // sorting silently stopped working, l_hot would stay at index 0 and a
+    // position-based focus restore would satisfy the assertions below just
+    // as well as an identity-based one — this is what rules that out.
+    const rowsAfter = doc.querySelectorAll("tr.lane");
+    expect((rowsAfter[0] as unknown as HTMLElement).dataset.lane).toBe(
+      "l_cold",
+    );
+    expect((rowsAfter[1] as unknown as HTMLElement).dataset.lane).toBe("l_hot");
+
     const hotAgain = doc.querySelector(
       'tr.lane[data-lane="l_hot"]',
     ) as unknown as HTMLElement;
     const hotAgainButton = hotAgain.querySelector("button")!;
     expect(hotAgain).not.toBe(hot);
+    expect(hotAgain).toBe(rowsAfter[1]);
     expect(doc.activeElement).toBe(hotAgainButton);
   });
 
