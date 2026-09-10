@@ -1657,12 +1657,15 @@ describe("the status page", () => {
       configurable: true,
     });
 
-    // Set scrollTop to a non-bottom position
+    // Track scrollTop with a real backing variable, so a write during the
+    // refresh actually shows up here instead of vanishing into a setter
+    // that discards it.
     const savedScrollTop = 500;
+    let scrollTopValue = savedScrollTop;
     Object.defineProperty(logView!, "scrollTop", {
-      get: () => savedScrollTop,
-      set: () => {
-        // intentionally ignore sets when testing without follow
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
       },
       configurable: true,
     });
@@ -1681,8 +1684,10 @@ describe("the status page", () => {
     // Wait a moment for any async operations
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    // Scroll position should remain at savedScrollTop (no refetch should have happened)
-    // We verify by checking that scrollTop was not set to scrollHeight
+    // With follow off, maybeFollow() must return before it ever fetches the
+    // log tail or touches scrollTop: no new request, and the recorded
+    // scrollTop write stays at its prior value.
+    expect(page.fetches.length).toBe(fetchCountBefore);
     expect(logView!.scrollTop).toBe(savedScrollTop);
   });
 
