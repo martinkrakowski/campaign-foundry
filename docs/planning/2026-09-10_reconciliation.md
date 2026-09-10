@@ -71,7 +71,7 @@ retired motion plan proposed keyframes as a **fourth**.
 | `2026-09-10_the-motion-path-and-l9` (#307) | **Live.** Absorbs the convergence sequence below; M1 and M1b are lanes C1 and C3 here. |
 | `2026-09-08_extensible-composition-plan` (#309) | **Retired.** Shipped under other names; its remainder is forbidden (`zIndex` vs D128), colliding (a second kind vocabulary), or already owned by L10/L11. Keep the visual-builder idea as a note on L10. |
 | `2026-09-08_motion-composition-implementation-plan` (#309) | **Retired as written.** Phase 1 is a re-housing of shipped machinery. If keyframes are wanted, they are a new, smaller plan under R-D4 — and cannot start before C1. |
-| `2026-09-08_collaboration-and-curation-plan` (#309) | **Unreviewed.** Out of scope here; it touches drafts and asset pools, not the render stack. Review before it is dispatched. |
+| `2026-09-08_collaboration-and-curation-plan` (#309) | **Retired.** Reviewed 2026-09-10. Two thirds of it **shipped before it was drafted** — revision hashes with conditional writes (2026-08-28) and the copy-pool drawer with its routes (2026-08-30). The remainder is the **D64(b)** deferral list built on the D64(a) storage port — which cannot both be true — plus **D82**. Gated by an owner decision, not by a lane. **Inline legal lint survives as lane R1.** |
 | `2026-09-10_seat-selection` (#305) | **Live**, independent of this arc. |
 | `2026-09-09_verification-budget` | **Live**, V3 still open. |
 
@@ -143,9 +143,11 @@ flux moves under them.
 - **V3** — the reviewer measurement gate; **V4** — the class-disposition tool.
 - **S1–S4** — the seat trials and the wave-record fields that make them arithmetic.
 - **T3** — the log pane, last of the three theming lanes.
-- **A review of `2026-09-08_collaboration-and-curation-plan`**, still unread. It touches drafts and
-  asset pools, not the stack — but nothing has checked it against the code, and the two composition
-  plans looked fine until something did.
+- **R1 — inline legal lint.** The brief's own message fields are legal-checked only at generation, while
+  pool entries are gated before any render. The ruleset is eight literal strings and a regex in
+  `BrandComplianceChecker`; exporting the matcher and running it in `validate.ts` as a warning bucket is the
+  whole lane — no endpoint, no debounce. **The one survivor of the collaboration plan**, and independent of
+  both D64 and the render stack.
 
 ### The one rule this sequence encodes
 
