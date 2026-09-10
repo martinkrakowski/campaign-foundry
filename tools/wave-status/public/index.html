@@ -397,7 +397,12 @@
       const expandedWaves = new Set();
       const SORT_STORAGE_KEY = "wave-status:sort";
       let lastStatus = null;
-      let activeLogSeq = 0;
+      // One counter for every tail request — an open, and every follow
+      // refresh, each claims its own generation here. A response is only
+      // ever acted on if it is still the newest request outstanding, so an
+      // older response landing after a newer one is silently discarded, and
+      // two follow refreshes for the same lane can never race each other.
+      let requestSeq = 0;
       let activeWave = null;
       let activeLane = null;
       let following = false;
@@ -466,7 +471,10 @@
                 if (toolbar !== null) {
                   const actions = toolbar.querySelector(".log-actions");
                   if (actions !== null) {
-                    toolbar.insertBefore(followControlElement, actions);
+                    actions.insertBefore(
+                      followControlElement,
+                      actions.firstChild,
+                    );
                     const checkbox = document.getElementById("log-follow");
                     if (checkbox) {
                       checkbox.addEventListener("change", () => {
@@ -500,20 +508,31 @@
         if (res.ok) {
           buf = await res.arrayBuffer();
         }
-        if (seq !== activeLogSeq) return;
+        // A newer request — another follow refresh, an open, or a close —
+        // has started since this one did. Its answer is stale; say nothing.
+        if (seq !== requestSeq) return;
         if (res.ok && buf !== null) {
           const bytes = buf.byteLength;
           logSize.textContent = `${bytes.toLocaleString()} B`;
           const text = new TextDecoder().decode(buf);
           renderLogLines(text);
-          logView.scrollTop = logView.scrollHeight;
+          // Only yank the view to the bottom if the user still wants that —
+          // they may have unchecked follow, or scrolled away to read
+          // history, while this request was in flight.
+          if (following) {
+            logView.scrollTop = logView.scrollHeight;
+          }
         }
       }
 
       async function maybeFollow() {
         if (!following) return;
         if (activeWave === null || activeLane === null) return;
-        await loadTail(activeWave, activeLane, activeLogSeq);
+        // Each call claims its own generation, even for the same lane —
+        // without this, two overlapping refreshes for one lane share a
+        // sequence and cannot tell which of them is newer.
+        const seq = ++requestSeq;
+        await loadTail(activeWave, activeLane, seq);
       }
 
       function updateSortSwitch() {
@@ -871,16 +890,17 @@
       }
 
       async function openLog(row) {
-        const seq = ++activeLogSeq;
+        const seq = ++requestSeq;
         const wave = row.dataset.wave;
         const lane = row.dataset.lane;
         const laneKey = `${wave}/${lane}`;
-        const res = await fetch(`/api/log/${wave}/${lane}?tail=16`);
-        let buf = null;
-        if (res.ok) {
-          buf = await res.arrayBuffer();
-        }
-        if (seq !== activeLogSeq) return;
+        // Settle the active lane's identity — and turn follow off — before
+        // the request starts, not after it resolves. A render that lands
+        // while this fetch is in flight (SSE fires independently of any
+        // fetch) must already see the new lane, never the outgoing one: it
+        // is this settling, done synchronously, that stops such a render
+        // from starting a follow refresh for the lane being switched away
+        // from.
         following = false;
         activeWave = wave;
         activeLane = lane;
@@ -895,6 +915,20 @@
           expandBtn.setAttribute("aria-label", "expand");
         }
         logLane.textContent = laneKey;
+        // Update follow control based on the lane's alive state
+        const laneData = laneOf(lastStatus, wave, lane);
+        syncFollowControl(
+          laneData !== null && laneData.derived.alive === true,
+        );
+
+        const res = await fetch(`/api/log/${wave}/${lane}?tail=16`);
+        let buf = null;
+        if (res.ok) {
+          buf = await res.arrayBuffer();
+        }
+        // A newer open (or a close) has started since — its answer belongs
+        // to a lane that is no longer the one on screen.
+        if (seq !== requestSeq) return;
         if (res.ok && buf !== null) {
           const bytes = buf.byteLength;
           logSize.textContent = `${bytes.toLocaleString()} B`;
@@ -904,15 +938,10 @@
           logSize.textContent = "0 B";
           renderLogLines(`no log for ${laneKey}`);
         }
-        // Update follow control based on the lane's alive state
-        const laneData = laneOf(lastStatus, wave, lane);
-        syncFollowControl(
-          laneData !== null && laneData.derived.alive === true,
-        );
       }
 
       function closeLog() {
-        activeLogSeq++;
+        requestSeq++;
         activeWave = null;
         activeLane = null;
         following = false;
