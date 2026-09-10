@@ -12,10 +12,24 @@ class. A finding whose premise one of these facts disproves should not be posted
 2. **React 19.** `ref` is an ordinary prop on function components. Never suggest `forwardRef`;
    never claim `aria-*`/`ref` props "cause TypeScript errors" on a tree whose typecheck CI is
    green — a green compile disproves missing-prop and missing-import claims.
-3. **The web test environment is happy-dom: it performs NO layout.** `getBoundingClientRect`
-   returns zeros and `getComputedStyle` cannot see class-driven styles. Never suggest
-   computed-style or geometry assertions; the repo's D47 rule forbids class-string assertions
-   as *proof* of layout for the same reason.
+3. **The web test environment is happy-dom: it performs NO layout — but it does apply the
+   stylesheet.** `getBoundingClientRect` returns zeros, `offsetWidth`/`offsetHeight` are zero, and
+   nothing that depends on a box being measured is available: whether an element is clipped,
+   overflows, wraps, or is visually covered cannot be observed here. Never suggest a geometry
+   assertion, and never accept one as proof that something is *reachable* or *visible*.
+
+   **`getComputedStyle` does resolve class-driven declarations, and this file used to say it did
+   not.** That was wrong and it generated findings. Measured twice, in the served
+   `tools/wave-status` page: changing `.gutter { user-select: none }` to `auto` in the page's own
+   `<style>` block turns `getComputedStyle(gutter).userSelect` from `"none"` to `"auto"` and fails
+   two tests. Those assertions are live and are in `main` with a green gate.
+
+   **So the line to hold is declared-versus-measured, not class-versus-inline.** A rule's declared
+   value is readable; the layout it would produce is not. `getComputedStyle(el).flexWrap === "wrap"`
+   isa tautology — it restates the stylesheet — but it is not *unresolvable*; it simply proves
+   nothing about whether anything wrapped. Prefer asserting the state the code controls (`hidden`,
+   an ARIA attribute, a class the code toggles) over a computed value it merely declares. D47's ban
+   on class-string assertions as *proof of layout* stands for exactly that reason.
 4. **`NodeCanvasCompositor` and everything under `packages/CreativeGeneration` is server-side
    Skia canvas.** There is no DOM, no stylesheet, no theme, and no CSS cascade there.
    `ctx.fillStyle = "var(--…)"` is an invalid canvas color that silently paints black.
