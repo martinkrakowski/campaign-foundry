@@ -12,6 +12,12 @@ export const INSET_GOLDEN_CELL_COUNT = 1;
 export const DISPLAY_GOLDEN_CELL_COUNT = 20;
 /** One display inset cell (`headline-top/bold/300x250`). */
 export const DISPLAY_INSET_GOLDEN_CELL_COUNT = 1;
+/**
+ * 2 layouts × 4 MOTION_KINDS × (5 clip-shape `t` samples + 1 poster-shape
+ * cell) — the motion path's only byte proof (C1/R-D6). See
+ * NodeCanvasCompositor.motion-goldens.test.ts.
+ */
+export const MOTION_GOLDEN_CELL_COUNT = 48;
 
 export function compositorGoldenKey(
   platform: string = process.platform,
