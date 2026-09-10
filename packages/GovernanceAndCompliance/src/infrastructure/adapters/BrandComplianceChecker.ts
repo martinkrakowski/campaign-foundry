@@ -2,7 +2,7 @@ import { createCanvas, loadImage } from "@napi-rs/canvas";
 import type { CompliancePort, ComplianceResult } from "@campaignfoundry/CampaignOrchestration";
 
 /** Prohibited promotional terminology — any hit fails the legal gate (ZeroToleranceLegalGate). */
-const PROHIBITED_TERMS = [
+export const PROHIBITED_TERMS = [
   "guaranteed",
   "miracle",
   "cure",
@@ -14,7 +14,7 @@ const PROHIBITED_TERMS = [
 ];
 
 /** Escape regex metacharacters so the term list stays data, never a pattern — "100% safe" must not become a regex injection. */
-function escapeRegExp(term: string): string {
+export function escapeRegExp(term: string): string {
   return term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
@@ -38,9 +38,17 @@ function escapeRegExp(term: string): string {
  * direction for a zero-tolerance gate; a tail lookahead could only turn that
  * into a miss ("cure_milk" escaping the gate).
  */
-const PROHIBITED_PATTERNS = PROHIBITED_TERMS.map(
+export const PROHIBITED_PATTERNS = PROHIBITED_TERMS.map(
   (term) => [new RegExp(`(?<![a-z0-9])${escapeRegExp(term)}\\w*`), term] as const,
 );
+
+/** Find all prohibited terms matched in the given text. */
+export function matchProhibitedTerms(text: string): string[] {
+  const lower = text.toLowerCase();
+  return PROHIBITED_PATTERNS.filter(([pattern]) => pattern.test(lower)).map(
+    ([, term]) => term,
+  );
+}
 
 /** A brand-colour pixel density below this fails the visual check (MinimumBrandColorDensity). */
 const MIN_BRAND_COLOR_DENSITY = 0.02;
@@ -72,10 +80,7 @@ function hexToRgb(hex: string): [number, number, number] {
  */
 export class BrandComplianceChecker implements CompliancePort {
   async validateLegalCopy(text: string): Promise<ComplianceResult> {
-    const lower = text.toLowerCase();
-    const hits = PROHIBITED_PATTERNS.filter(([pattern]) => pattern.test(lower)).map(
-      ([, term]) => term,
-    );
+    const hits = matchProhibitedTerms(text);
     return hits.length > 0
       ? { passed: false, reason: `Prohibited terminology: ${hits.join(", ")}` }
       : { passed: true };

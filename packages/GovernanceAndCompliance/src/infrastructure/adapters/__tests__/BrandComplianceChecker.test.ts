@@ -1,6 +1,11 @@
 import { describe, test, expect } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
-import { BrandComplianceChecker } from "../BrandComplianceChecker.js";
+import {
+  BrandComplianceChecker,
+  PROHIBITED_TERMS,
+  matchProhibitedTerms,
+  escapeRegExp,
+} from "../BrandComplianceChecker.js";
 
 /** A solid-colour PNG buffer for density sampling. */
 const solidPng = (hex: string, w = 20, h = 20): Uint8Array => {
@@ -149,5 +154,24 @@ describe("BrandComplianceChecker — brand-colour density", () => {
     // "#14e" → (17,68,238); a solid #1144ee image is an exact match.
     const r = await checker.validateBrandColorDensity(solidPng("#1144ee"), "#14e");
     expect(r.passed).toBe(true);
+  });
+});
+
+describe("matchProhibitedTerms and exports (R1)", () => {
+  test("exports PROHIBITED_TERMS as an array of 8 strings", () => {
+    expect(PROHIBITED_TERMS).toHaveLength(8);
+    expect(PROHIBITED_TERMS).toContain("cure");
+    expect(PROHIBITED_TERMS).toContain("miracle");
+    expect(PROHIBITED_TERMS).toContain("guaranteed");
+  });
+
+  test("escapeRegExp escapes regex metacharacters", () => {
+    expect(escapeRegExp("100% safe")).toBe("100% safe");
+    expect(escapeRegExp("a.b*c?")).toBe("a\\.b\\*c\\?");
+  });
+
+  test("matchProhibitedTerms returns matching terms", () => {
+    expect(matchProhibitedTerms("Clean text")).toEqual([]);
+    expect(matchProhibitedTerms("A miracle cure")).toEqual(["miracle", "cure"]);
   });
 });

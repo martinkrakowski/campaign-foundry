@@ -37,10 +37,12 @@ import {
 } from "@/components/campaign/editor-state";
 import {
   validateState,
+  validateWarnings,
   getTotalErrorCount,
   motionUnavailableReason,
   SAFE_ID_PATTERN,
   type FieldErrors,
+  type FieldWarnings,
 } from "@/components/campaign/validate";
 import { IdentitySection, CopySection, ProductsSection, TreatmentsSection, OutputSection, PolicySection, TemplateSection } from "@/components/campaign/sections";
 import { StatusChip } from "@/components/campaign/StatusChip";
@@ -176,6 +178,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const { setPanels, setTopPanels } = useEditorPanels();
   const [state, dispatch] = useReducer(editorReducer, initialEditorState());
   const [errors, setErrors] = useState<Record<string, FieldErrors>>({});
+  const [warnings, setWarnings] = useState<Record<string, FieldWarnings>>({});
   // Not a boolean: the section that blocks is what the refusal needs to scroll to, and
   // deriving it here keeps "is it blocked" and "where" from disagreeing. null = valid.
   const [blockedAt, setBlockedAt] = useState<string | null>(null);
@@ -439,6 +442,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   useEffect(() => {
     const existingIds = briefs.map((b) => b.brief.id);
     setErrors(validateState(state, existingIds));
+    setWarnings(validateWarnings(state));
     // D7: Save is blocked by structural invalidity only. A capability being off
     // makes the draft unrunnable on this host, not unsavable — so the gating check
     // runs the same validation with the capability unknown. The API parses saves in
@@ -1207,6 +1211,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
             state={state}
             dispatch={dispatch}
             errors={sectionErrorsVisible("copy")}
+            warnings={warnings.copy}
             onOpenPool={() => setPoolDrawerOpen(true)}
           />
         );
@@ -1532,9 +1537,9 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
                <div>
                  <IdentitySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("identity")} />
                </div>
-               <div>
-                 <CopySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("copy")} onOpenPool={() => setPoolDrawerOpen(true)} />
-               </div>
+                <div>
+                  <CopySection state={state} dispatch={dispatch} errors={sectionErrorsVisible("copy")} warnings={warnings.copy} onOpenPool={() => setPoolDrawerOpen(true)} />
+                </div>
                 <div>
                   <ProductsSection
                     state={state}

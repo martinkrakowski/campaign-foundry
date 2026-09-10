@@ -1,4 +1,5 @@
 import { MAX_DURATION_SEC, MIN_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
+import { matchProhibitedTerms } from "@campaignfoundry/GovernanceAndCompliance";
 import type { EditorState } from "./editor-state";
 import {
   LAYOUT_OPTIONS,
@@ -35,6 +36,8 @@ export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 export { MIN_DURATION_SEC, MAX_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 
 export type FieldErrors = Record<string, string>;
+export type FieldWarnings = Record<string, string>;
+export { matchProhibitedTerms, PROHIBITED_TERMS } from "@campaignfoundry/GovernanceAndCompliance";
 
 const UINT32_MAX = 0xffffffff;
 const BASE_DISTANCE_AXES = 6;
@@ -123,6 +126,36 @@ export function validateCopy(state: EditorState): FieldErrors {
     errors.campaignMessage = messages.campaignMessageTooLong;
   }
   return { ...errors, ...validateTimeline(state) };
+}
+
+/**
+ * Validate prohibited promotional terminology across the brief's own message
+ * fields (campaignMessage, localizedMessage, and timeline beats) as early warnings (R1).
+ * Never blocks Save — these are warnings, not structural errors.
+ */
+export function validateCopyWarnings(state: EditorState): FieldWarnings {
+  const warnings: FieldWarnings = {};
+  if (state.campaignMessage.trim() !== "") {
+    const hits = matchProhibitedTerms(state.campaignMessage);
+    if (hits.length > 0) {
+      warnings.campaignMessage = messages.prohibitedTerminology(hits);
+    }
+  }
+  if (state.localizedMessage.trim() !== "") {
+    const hits = matchProhibitedTerms(state.localizedMessage);
+    if (hits.length > 0) {
+      warnings.localizedMessage = messages.prohibitedTerminology(hits);
+    }
+  }
+  state.timeline.beats.forEach((beat, index) => {
+    if (beat.text.trim() !== "") {
+      const hits = matchProhibitedTerms(beat.text);
+      if (hits.length > 0) {
+        warnings[`copy-timeline-beat-${index}`] = messages.prohibitedTerminology(hits);
+      }
+    }
+  });
+  return warnings;
 }
 
 /**
@@ -409,4 +442,22 @@ export function hasSectionErrors(sectionErrors: Record<string, FieldErrors>, sec
 
 export function getTotalErrorCount(sectionErrors: Record<string, FieldErrors>): number {
   return Object.values(sectionErrors).reduce((count, errors) => count + Object.keys(errors).length, 0);
+}
+
+export function validateWarnings(state: EditorState): Record<string, FieldWarnings> {
+  return {
+    copy: validateCopyWarnings(state),
+  };
+}
+
+export function hasWarnings(warnings: FieldWarnings): boolean {
+  return Object.keys(warnings).length > 0;
+}
+
+export function hasSectionWarnings(sectionWarnings: Record<string, FieldWarnings>, section: string): boolean {
+  return hasWarnings(sectionWarnings[section] ?? {});
+}
+
+export function getTotalWarningCount(sectionWarnings: Record<string, FieldWarnings>): number {
+  return Object.values(sectionWarnings).reduce((count, warnings) => count + Object.keys(warnings).length, 0);
 }

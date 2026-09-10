@@ -157,6 +157,31 @@ describe("CopySection", () => {
     expect(screen.getByText("odd")).toBeTruthy();
   });
 
+  test("renders warnings under copy fields and yields to errors", () => {
+    const { rerender } = render(
+      <CopySection
+        state={state()}
+        dispatch={vi.fn()}
+        errors={{}}
+        warnings={{ campaignMessage: "Avoid 'miracle'", localizedMessage: "Avoid 'guaranteed'" }}
+      />,
+    );
+    expect(screen.getByText("Avoid 'miracle'")).toBeTruthy();
+    expect(screen.getByText("Avoid 'guaranteed'")).toBeTruthy();
+
+    // When an error is also present on the same field, the error renders and the warning yields
+    rerender(
+      <CopySection
+        state={state()}
+        dispatch={vi.fn()}
+        errors={{ campaignMessage: "Headline is required" }}
+        warnings={{ campaignMessage: "Avoid 'miracle'" }}
+      />,
+    );
+    expect(screen.getByText("Headline is required")).toBeTruthy();
+    expect(screen.queryByText("Avoid 'miracle'")).toBeNull();
+  });
+
   test("renders live character counter and warns on exceeding max limit", () => {
     const { unmount } = render(<CopySection state={state({ campaignMessage: "Stay wild" })} dispatch={vi.fn()} errors={{}} />);
     expect(screen.getByText("9 / 60")).toBeTruthy();

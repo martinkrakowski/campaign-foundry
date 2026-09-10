@@ -85,6 +85,7 @@ export function SectionShell({
 export function Field({
   label,
   error,
+  warning,
   hint,
   children,
   fieldKey,
@@ -92,6 +93,7 @@ export function Field({
 }: {
   label: string;
   error?: string;
+  warning?: string;
   hint?: string;
   children: React.ReactNode;
   fieldKey?: string;
@@ -106,7 +108,11 @@ export function Field({
         {children}
       </Wrapper>
       {hint ? <span className="mt-1 block text-[11px] text-text-muted">{hint}</span> : null}
-      {error ? <span className="mt-1 block text-[11px] text-error">{error}</span> : null}
+      {error ? (
+        <span className="mt-1 block text-[11px] text-error">{error}</span>
+      ) : warning ? (
+        <span className="mt-1 block text-[11px] text-warning">{warning}</span>
+      ) : null}
     </div>
   );
 }

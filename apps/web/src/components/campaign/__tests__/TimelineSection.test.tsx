@@ -42,6 +42,18 @@ describe("TimelineSection — beat rows (E5.2)", () => {
     expect((screen.getByRole("button", { name: messages.timelineAddBeat }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  test("renders beat warning when warnings are present", () => {
+    const state = withBeats([{ text: "Miracle cure", weight: 1 }]);
+    render(
+      <TimelineSection
+        state={state}
+        dispatch={vi.fn()}
+        warnings={{ "copy-timeline-beat-0": "Prohibited term: 'cure'" }}
+      />,
+    );
+    expect(screen.getByText("Prohibited term: 'cure'")).toBeTruthy();
+  });
+
   test("each beat gets a text field, a share stepper and a poster control", async () => {
     const user = userEvent.setup();
     const live = renderLive(withBeats([{ text: "One", weight: 1 }, { text: "Two", weight: 2 }]));
