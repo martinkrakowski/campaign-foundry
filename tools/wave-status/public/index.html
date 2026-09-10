@@ -62,6 +62,12 @@
       #page.with-log.expanded {
         grid-template-rows: auto 0 1fr;
       }
+      /* Belt and braces: the 0fr row above already collapses the table
+     pane's height, but its content would still be present underneath —
+     reachable by a scroll gesture or a stray Tab — without this. */
+      #page.expanded #table-pane {
+        display: none;
+      }
       .title-row {
         display: flex;
         flex-wrap: wrap;
@@ -162,11 +168,14 @@
         }
       }
       @media (prefers-reduced-motion: reduce) {
-        .conn-dot {
+        .conn-dot,
+        #log {
           animation: none !important;
         }
         tr.lane td,
-        .row-go {
+        .row-go,
+        #log-expand svg,
+        #log-toolbar button {
           transition: none !important;
         }
       }
@@ -548,6 +557,14 @@
       #log-pane[hidden] {
         display: none;
       }
+      /* Focused programmatically on open (see openLog) so the pane, not
+     just a control inside it, is where keyboard attention lands. Visible
+     2px brand outline so keyboard users can see where focus landed. */
+      #log-pane:focus {
+        outline: 2px solid;
+        outline-color: var(--color-brand-on-tint);
+        outline-offset: -1px;
+      }
       #log-toolbar {
         display: flex;
         flex-wrap: wrap;
@@ -556,25 +573,47 @@
         gap: var(--space-2);
         padding: var(--space-2) var(--space-3);
         border-bottom: 1px solid var(--color-border);
-        font-family: var(--font-mono);
-        font-size: 12px;
         background: var(--color-surface-2);
-        color: var(--color-text-secondary);
       }
       #log-toolbar .log-info {
         display: flex;
         flex-wrap: wrap;
-        gap: var(--space-2);
+        gap: var(--space-3);
         align-items: baseline;
+        min-width: 0;
       }
+      #log-lane {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--color-text-primary);
+      }
+      #log-size {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--color-text-muted);
+      }
+      /* The reference has no follow control, so it carries no typography
+     for one. #log-toolbar used to set mono/12px/secondary for everything
+     inside it, which this container's <label> rode for free; that shared
+     rule is gone now that each toolbar piece owns its own type (see
+     #log-lane, #log-size, #log-toolbar button above) — restate it here so
+     "follow" still reads like the row of controls it sits beside, not the
+     body's 14px sans default. */
       #log-follow-container {
         display: flex;
         align-items: center;
         gap: var(--space-1);
+        font-family: var(--font-sans);
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--color-text-primary);
       }
+      /* --color-brand-primary is the :root-only token (see the brand-mark
+     comment above) — the checkbox takes the tint that .dark does serve. */
       #log-follow {
         cursor: pointer;
-        accent-color: var(--color-brand-primary);
+        accent-color: var(--color-brand-on-tint);
       }
       #log-toolbar .log-actions {
         display: flex;
@@ -582,40 +621,125 @@
         gap: var(--space-2);
       }
       #log-toolbar button {
-        background: transparent;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px; /* between --space-1 (4px) and --space-2 (8px); the icon crowds the label at either step */
+        height: 26px;
+        padding: 0 10px; /* between --space-2 (8px) and --space-3 (12px); the control reads cramped at one step, loose at the other */
+        background: var(--color-surface-2);
         border: 1px solid var(--color-border-control);
         border-radius: var(--radius-sm);
         color: var(--color-text-primary);
-        font-family: var(--font-mono);
+        font-family: var(--font-sans);
         font-size: 12px;
-        padding: var(--space-1) var(--space-2);
+        font-weight: 500;
         cursor: pointer;
+        transition:
+          background 150ms ease,
+          border-color 150ms ease;
       }
       #log-toolbar button:hover {
         background: var(--color-surface);
         border-color: var(--color-border-control-hover);
       }
+      #log-toolbar button:focus-visible {
+        outline: none;
+        border-color: var(--color-border-control-hover);
+        box-shadow: 0 0 0 2px
+          color-mix(in srgb, var(--color-brand-on-tint) 50%, transparent);
+      }
+      /* 13px, like .row-go above: no step on the local scale fits an icon
+     this small. */
+      .tb-icon {
+        width: 13px;
+        height: 13px;
+        flex: none;
+      }
+      #log-expand svg {
+        transition: transform 150ms ease;
+      }
+      #log-expand[aria-expanded="true"] svg {
+        transform: rotate(180deg);
+      }
+      /* A fixed min-width so "copy failed" — the widest label the button
+     ever carries — does not shift the rest of the bar when it appears. */
+      #log-copy {
+        justify-content: center;
+        min-width: 92px;
+      }
+      /* The reference mixes the state colour toward transparent (over the
+     button's own surface-2 ground); mixed toward border-control instead —
+     the base control edge already the worst-ground floor (§2 Tokens) clears 3:1,
+     and mixing toward transparent would let the 1.6 s feedback edge dip
+     under it. This keeps the tint while never falling below the boundary
+     the plain state does. */
+      #log-copy.ok {
+        color: var(--color-success);
+        border-color: color-mix(
+          in srgb,
+          var(--color-success) 45%,
+          var(--color-border-control)
+        );
+      }
+      #log-copy.bad {
+        color: var(--color-error);
+        border-color: color-mix(
+          in srgb,
+          var(--color-error) 45%,
+          var(--color-border-control)
+        );
+      }
       #log {
+        flex: 1;
+        min-height: 0;
         margin: 0;
-        padding: var(--space-3);
-        color: var(--color-text-secondary);
+        padding: var(--space-2) 0;
+        overflow: auto;
+        scrollbar-gutter: stable;
+        background: var(--color-surface);
         font-family: var(--font-mono);
         font-size: 12px;
-        overflow: auto;
-        min-height: 0;
-        flex: 1;
-        display: grid;
-        grid-template-columns: auto 1fr;
-        column-gap: var(--space-3);
-        line-height: 1.5;
+        line-height: 1.7;
+        color: var(--color-text-secondary);
+        animation: log-in 250ms ease;
       }
+      @keyframes log-in {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+      .log-line {
+        display: flex;
+        width: max-content;
+        min-width: 100%;
+        background: var(--color-surface);
+      }
+      .log-line:hover {
+        background: var(--color-surface-2);
+      }
+      /* The gutter stays put when a long line is scrolled sideways, and
+     matches whatever ground its line currently has. */
       .gutter {
-        user-select: none;
+        flex: none;
+        width: 48px;
+        padding-right: var(--space-3);
         text-align: right;
         color: var(--color-text-muted);
+        user-select: none;
+        position: sticky;
+        left: 0;
+        background: inherit;
       }
       .line {
         white-space: pre;
+        padding-left: var(--space-3);
+      }
+      .log-empty {
+        padding: var(--space-4) var(--space-3);
+        color: var(--color-text-muted);
       }
     </style>
   </head>
@@ -713,22 +837,78 @@
           </thead>
         </table>
       </section>
-      <section id="log-pane" hidden>
+      <section id="log-pane" hidden tabindex="-1" aria-label="Log">
         <header id="log-toolbar">
           <div class="log-info">
             <span id="log-lane"></span>
             <span id="log-size"></span>
           </div>
           <div class="log-actions">
-            <button type="button" id="log-expand" aria-label="expand">
-              expand
+            <button
+              type="button"
+              id="log-expand"
+              aria-label="expand"
+              aria-expanded="false"
+              aria-controls="log-pane"
+            >
+              <svg
+                class="tb-icon"
+                viewBox="0 0 14 14"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+                focusable="false"
+              ><path d="M3.5 8.8 7 5.3l3.5 3.5" /></svg>
+              <span id="log-expand-label">expand</span>
             </button>
-            <button type="button" id="log-copy" aria-label="copy">copy</button>
+            <button type="button" id="log-copy" aria-label="copy">
+              <svg
+                class="tb-icon"
+                viewBox="0 0 14 14"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+                focusable="false"
+              ><rect x="4.75" y="4.75" width="7.5" height="7.5" rx="1.5" /><path
+                  d="M9.25 4.75V3.2A1.45 1.45 0 0 0 7.8 1.75H3.2A1.45 1.45 0 0 0 1.75 3.2v4.6a1.45 1.45 0 0 0 1.45 1.45h1.55"
+                /></svg>
+              <span id="log-copy-label">copy</span>
+            </button>
             <button type="button" id="log-download" aria-label="download">
-              download
+              <svg
+                class="tb-icon"
+                viewBox="0 0 14 14"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+                focusable="false"
+              ><path d="M7 1.75v7.5" /><path d="m3.9 6.4 3.1 3.1 3.1-3.1" /><path
+                  d="M1.9 12.25h10.2"
+                /></svg>
+              <span>download</span>
             </button>
             <button type="button" id="log-close" aria-label="close">
-              close
+              <svg
+                class="tb-icon"
+                viewBox="0 0 14 14"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+                focusable="false"
+              ><path d="m3.2 3.2 7.6 7.6" /><path d="M10.8 3.2 3.2 10.8" /></svg>
+              <span>close</span>
             </button>
           </div>
         </header>
@@ -752,7 +932,9 @@
       const logLane = document.getElementById("log-lane");
       const logSize = document.getElementById("log-size");
       const expandBtn = document.getElementById("log-expand");
+      const expandLabel = document.getElementById("log-expand-label");
       const copyBtn = document.getElementById("log-copy");
+      const copyLabel = document.getElementById("log-copy-label");
       const downloadBtn = document.getElementById("log-download");
       const closeBtn = document.getElementById("log-close");
       const pageGrid = document.getElementById("page");
@@ -762,6 +944,7 @@
       const SORT_STORAGE_KEY = "wave-status:sort";
       let lastStatus = null;
       let connState = "connecting";
+      let copyTimer = null;
       // One counter for every tail request — an open, and every follow
       // refresh, each claims its own generation here. A response is only
       // ever acted on if it is still the newest request outstanding, so an
@@ -1371,10 +1554,28 @@
         const fragments = [];
         for (let i = 0; i < lines.length; i++) {
           fragments.push(
-            `<span class="gutter">${i + 1}</span><span class="line">${esc(lines[i])}</span>`,
+            `<div class="log-line"><span class="gutter">${i + 1}</span><span class="line">${esc(lines[i])}</span></div>`,
           );
         }
         logView.innerHTML = fragments.join("");
+      }
+
+      // A missing log is not a zero-line log: no gutter, no numbered line
+      // that would misleadingly imply the file has one empty line.
+      function showLogEmpty(text) {
+        logView.innerHTML = `<div class="log-empty">${esc(text)}</div>`;
+      }
+
+      // The one place the expand control's tri-state (label text, its
+      // aria-label, and aria-expanded for the icon rotation) is written —
+      // called both from openLog (a fresh pane inherits whatever expanded
+      // state survived the previous close) and from the button's own click.
+      function syncExpandBtn() {
+        const isExpanded = pageGrid.classList.contains("expanded");
+        const nextAction = isExpanded ? "collapse" : "expand";
+        expandLabel.textContent = nextAction;
+        expandBtn.setAttribute("aria-label", nextAction);
+        expandBtn.setAttribute("aria-expanded", String(isExpanded));
       }
 
       async function openLog(row) {
@@ -1396,14 +1597,9 @@
         logPane.hidden = false;
         logView.hidden = false;
         pageGrid.classList.add("with-log");
-        if (pageGrid.classList.contains("expanded")) {
-          expandBtn.textContent = "collapse";
-          expandBtn.setAttribute("aria-label", "collapse");
-        } else {
-          expandBtn.textContent = "expand";
-          expandBtn.setAttribute("aria-label", "expand");
-        }
+        syncExpandBtn();
         logLane.textContent = laneKey;
+        logPane.setAttribute("aria-label", `Log for ${laneKey}`);
         // Update follow control based on the lane's alive state
         const laneData = laneOf(lastStatus, wave, lane);
         syncFollowControl(
@@ -1425,11 +1621,22 @@
           renderLogLines(text);
         } else {
           logSize.textContent = "0 B";
-          renderLogLines(`no log for ${laneKey}`);
+          showLogEmpty(`no log for ${laneKey}`);
         }
+        // Moves keyboard focus into the pane once its content is settled —
+        // still guarded by the seq check above, so a superseded open never
+        // steals focus from whatever the newer one already gave it.
+        logPane.focus({ preventScroll: true });
       }
 
       function closeLog() {
+        if (following) {
+          clearTimeout(followTimer);
+        }
+        clearTimeout(copyTimer);
+        copyLabel.textContent = "copy";
+        copyBtn.setAttribute("aria-label", "copy");
+        copyBtn.classList.remove("ok", "bad");
         requestSeq++;
         activeWave = null;
         activeLane = null;
@@ -1437,10 +1644,10 @@
         following = false;
         logPane.hidden = true;
         logView.hidden = true;
+        logPane.setAttribute("aria-label", "Log");
         pageGrid.classList.remove("with-log");
         pageGrid.classList.remove("expanded");
-        expandBtn.textContent = "expand";
-        expandBtn.setAttribute("aria-label", "expand");
+        syncExpandBtn();
         syncFollowControl(false);
       }
 
@@ -1461,10 +1668,8 @@
       // the action twice or duplicate what the browser already does.
 
       expandBtn.addEventListener("click", () => {
-        const isExpanded = pageGrid.classList.toggle("expanded");
-        const nextAction = isExpanded ? "collapse" : "expand";
-        expandBtn.textContent = nextAction;
-        expandBtn.setAttribute("aria-label", nextAction);
+        pageGrid.classList.toggle("expanded");
+        syncExpandBtn();
       });
 
       copyBtn.addEventListener("click", async () => {
@@ -1472,19 +1677,27 @@
           typeof window !== "undefined" ? window : document.defaultView;
         const lines = Array.from(logView.querySelectorAll(".line"));
         const text = lines.map((el) => el.textContent).join("\n");
-        const prev = copyBtn.textContent;
+        let ok = false;
         try {
           if (!win.navigator?.clipboard?.writeText) {
             throw new Error("clipboard unavailable");
           }
           await win.navigator.clipboard.writeText(text);
-          copyBtn.textContent = "copied";
+          ok = true;
         } catch {
-          copyBtn.textContent = "copy failed";
+          // ok stays false; reported below
         }
-        setTimeout(() => {
-          copyBtn.textContent = prev;
-        }, 1500);
+        const feedback = ok ? "copied" : "copy failed";
+        copyLabel.textContent = feedback;
+        copyBtn.setAttribute("aria-label", feedback);
+        copyBtn.classList.toggle("ok", ok);
+        copyBtn.classList.toggle("bad", !ok);
+        clearTimeout(copyTimer);
+        copyTimer = setTimeout(() => {
+          copyLabel.textContent = "copy";
+          copyBtn.setAttribute("aria-label", "copy");
+          copyBtn.classList.remove("ok", "bad");
+        }, 1600);
       });
 
       downloadBtn.addEventListener("click", () => {

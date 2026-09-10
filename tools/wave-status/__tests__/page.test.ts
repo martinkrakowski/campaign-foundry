@@ -54,6 +54,7 @@ interface PageHandle {
 const windows: Window[] = [];
 
 afterEach(() => {
+  vi.useRealTimers();
   FakeEventSource.instances = [];
   while (windows.length > 0) {
     windows.pop()?.happyDOM.close();
@@ -554,6 +555,25 @@ describe("the status page", () => {
     expect(container?.classList.contains("with-log")).toBe(false);
   });
 
+  test("the pane shows a visible focus treatment when focused", async () => {
+    const page = await loadPage(statusAt(), "log-tail");
+    const doc = page.window.document;
+    const row = doc.querySelector("tr.lane");
+    const logPane = doc.getElementById("log-pane");
+
+    expect(doc.activeElement).not.toBe(logPane);
+    expect(page.window.getComputedStyle(logPane!).outlineStyle).not.toBe("solid");
+
+    press(row!.querySelector("button")!, "Enter");
+    await vi.waitFor(() => {
+      expect(doc.activeElement).toBe(logPane);
+    });
+
+    const style = page.window.getComputedStyle(logPane!);
+    expect(style.outlineStyle).toBe("solid");
+    expect(style.outlineWidth).toBe("2px");
+  });
+
   test("the toolbar renders each control with an accessible name, and the lane name and byte size", async () => {
     const page = await loadPage(statusAt(), "log-tail");
     const doc = page.window.document;
@@ -621,6 +641,46 @@ describe("the status page", () => {
     );
   });
 
+  test("the expand icon reflects aria-expanded in both states", async () => {
+    // getComputedStyle resolves class-driven and attribute-driven declarations
+    // in this suite (§8 Testing the UI) because public/index.html includes its
+    // <style> block — assert the computed transform rotates when expanded.
+    const page = await loadPage(statusAt());
+    const doc = page.window.document;
+    const row = doc.querySelector("tr.lane");
+    press(row!.querySelector("button")!, "Enter");
+    await vi.waitFor(() => {
+      expect(
+        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
+      ).toBe(false);
+    });
+
+    const expandBtn = doc.querySelector(
+      'button[aria-label="expand"]',
+    ) as unknown as HTMLElement;
+    const icon = doc.querySelector("#log-expand svg");
+
+    expect(expandBtn.getAttribute("aria-expanded")).toBe("false");
+    expect(expandBtn.getAttribute("aria-controls")).toBe("log-pane");
+    expect(page.window.getComputedStyle(icon!).transform).not.toBe(
+      "rotate(180deg)",
+    );
+
+    expandBtn.click();
+    expect(expandBtn.getAttribute("aria-expanded")).toBe("true");
+    expect(expandBtn.getAttribute("aria-label")).toBe("collapse");
+    expect(page.window.getComputedStyle(icon!).transform).toBe(
+      "rotate(180deg)",
+    );
+
+    expandBtn.click();
+    expect(expandBtn.getAttribute("aria-expanded")).toBe("false");
+    expect(expandBtn.getAttribute("aria-label")).toBe("expand");
+    expect(page.window.getComputedStyle(icon!).transform).not.toBe(
+      "rotate(180deg)",
+    );
+  });
+
   test("copy writes the body text without line numbers — assert the clipboard payload", async () => {
     const multiline = "first line\nsecond line\nthird line";
     const page = await loadPage(statusAt(), multiline);
@@ -641,6 +701,37 @@ describe("the status page", () => {
       const text = await page.window.navigator.clipboard.readText();
       expect(text).toBe(multiline);
     });
+  });
+
+  test("the copy feedback states render and clear", async () => {
+    const page = await loadPage(statusAt(), "one line");
+    const doc = page.window.document;
+    const row = doc.querySelector("tr.lane");
+    press(row!.querySelector("button")!, "Enter");
+    await vi.waitFor(() => {
+      expect(doc.querySelectorAll(".line").length).toBeGreaterThan(0);
+    });
+
+    const copyBtn = doc.querySelector(
+      'button[aria-label="copy"]',
+    ) as unknown as HTMLElement;
+
+    vi.useFakeTimers();
+    try {
+      copyBtn.click();
+      await vi.waitFor(() => {
+        expect(copyBtn.textContent?.trim()).toBe("copied");
+      });
+      expect(copyBtn.classList.contains("ok")).toBe(true);
+      expect(copyBtn.classList.contains("bad")).toBe(false);
+
+      vi.advanceTimersByTime(1600);
+      expect(copyBtn.textContent?.trim()).toBe("copy");
+      expect(copyBtn.classList.contains("ok")).toBe(false);
+      expect(copyBtn.classList.contains("bad")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("the gutter is user-select: none, and the number of gutter entries equals the line count", async () => {
@@ -889,6 +980,75 @@ describe("the status page", () => {
     expect(doc.getElementById("log")?.textContent).not.toContain(
       "stale log for t1",
     );
+  });
+
+  test("a log that resolves after a newer open does not move focus", async () => {
+    const twoLanesStatus: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "T",
+          lanes: [
+            {
+              wave: "T",
+              lane: "t1",
+              derived: { alive: true },
+              disagreements: [],
+            },
+            {
+              wave: "T",
+              lane: "t2",
+              derived: { alive: true },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    let resolveT1!: (res: Response) => void;
+    const pT1 = new Promise<Response>((resolve) => {
+      resolveT1 = resolve;
+    });
+
+    let resolveT2!: (res: Response) => void;
+    const pT2 = new Promise<Response>((resolve) => {
+      resolveT2 = resolve;
+    });
+
+    const page = await loadPage(twoLanesStatus, (url) => {
+      if (url.includes("/api/log/T/t1")) return pT1;
+      if (url.includes("/api/log/T/t2")) return pT2;
+      return new Response("not found", { status: 404 });
+    });
+
+    const doc = page.window.document;
+    const rows = doc.querySelectorAll("tr.lane");
+    const logPane = doc.getElementById("log-pane");
+    const row0Btn = rows[0]!.querySelector("button")!;
+    const row1Btn = rows[1]!.querySelector("button")!;
+
+    // 1. Start opening lane T/t1 (pending)
+    press(row0Btn, "Enter");
+
+    // 2. Start opening lane T/t2 before T/t1 resolves
+    press(row1Btn, "Enter");
+    row1Btn.focus();
+    expect(doc.activeElement).toBe(row1Btn);
+
+    // 3. Stale T/t1 resolves while T/t2 is still pending
+    resolveT1(new Response("stale log for t1", { status: 200 }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Stale resolution must NOT move focus to the pane
+    expect(doc.activeElement).toBe(row1Btn);
+    expect(doc.activeElement).not.toBe(logPane);
+
+    // 4. Newer T/t2 resolves — it is newest, so it moves focus to the pane
+    resolveT2(new Response("log for t2", { status: 200 }));
+    await vi.waitFor(() => {
+      expect(doc.activeElement).toBe(logPane);
+    });
   });
 
   test("a lane switch with a render in between: the header, the size and the body all name the new lane", async () => {
