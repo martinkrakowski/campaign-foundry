@@ -190,6 +190,29 @@ the measurement rule**, so it has no cost figures at all. Three seats, no compar
 > record the worktree tip before dispatch and compare after, because an agent that reports success
 > having committed nothing looks identical either way.
 
+## The in-house cast
+
+| Seat | Invocation | Notes |
+|---|---|---|
+| **Orchestrator** | this session | Writes the briefs, red-teams them against the code, verifies every finding, runs its own mutations, sweeps, merges. |
+| **Implementer / remediator** | `Agent` · `subagent_type: "claude"` · `model: "sonnet"` | One agent per lane and per fix round. Give it the **absolute worktree path**, the branch, whether a PR exists, and the house rules — it inherits no conversation. |
+| **Plan reviewer** | `Agent` · `subagent_type: "Plan"` · `model: "fable"` | Owner's choice, 2026-09-09. `Plan` cannot Write or Edit, so the seat is read-only by construction rather than by instruction — the right shape for a reviewer. |
+| **Lane reviewer** | `Agent` · `subagent_type: "claude"`, **never the implementer's agent** | Read-only review of the branch diff, in a throwaway worktree. |
+| **Search** | `Agent` · `subagent_type: "Explore"` | Broad read-only sweeps where the conclusion is wanted, not the file dumps. A candidate for `haiku`. |
+| **Bot reviewers** | PR-Agent ×3, Qodo, CodeRabbit | CI services, unchanged. Qodo and CodeRabbit carry the signal; see the verification-budget plan. |
+
+**What a subagent brief must carry that a CLI brief did not.** No conversation is inherited, so the
+absolute worktree path, the branch, whether a PR is already open, and the house rules all have to be
+written out. Omitting them is the in-house equivalent of an unfunded seat: a full cycle, nothing to
+show.
+
+**One line survives in every brief regardless of seat**, because it counters the failure most likely
+to rot a suite quietly: *if a finding is wrong, say so with the mechanism rather than changing code
+to match it.* The first in-house lane exercised it correctly — told to fix a computed-style
+assertion, it verified the fix had already landed, found the one remaining assertion was legitimately
+about responsive wrap rather than a restated state, and **refused with a reason** instead of
+complying.
+
 ## Why the external seats were retired — the measured record
 
 | Seat | Record |
