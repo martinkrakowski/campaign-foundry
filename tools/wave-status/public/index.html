@@ -1,543 +1,893 @@
 <!doctype html>
 <html lang="en" class="dark">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Wave status</title>
-<link rel="stylesheet" href="/tokens.css">
-<style>
-  /* The colour tokens (--color-*) come from /tokens.css, which the server
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wave status</title>
+    <link rel="stylesheet" href="/tokens.css" />
+    <style>
+      /* The colour tokens (--color-*) come from /tokens.css, which the server
      serves by extracting the dark "Firefly" block from apps/web/src/styles/tokens.css.
      This page never redeclares them, so an app token change cannot silently drift.
      The served block is scoped to `.dark`, so <html> carries that class — the same
      opt-in apps/web uses; without it the served rules match nothing.
      Only the non-colour tokens are defined here. */
-  :root {
-    --space-1: 4px;
-    --space-2: 8px;
-    --space-3: 12px;
-    --space-4: 16px;
-    --space-6: 24px;
-    --radius-sm: 4px;
-    --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    --font-sans: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--color-background);
-    color: var(--color-text-primary);
-    font-family: var(--font-sans);
-    font-size: 14px;
-    line-height: 1.5;
-  }
-  /* The page is a full-height grid: the header is auto-sized, the area below
+      :root {
+        --space-1: 4px;
+        --space-2: 8px;
+        --space-3: 12px;
+        --space-4: 16px;
+        --space-6: 24px;
+        --radius-sm: 4px;
+        --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --font-sans: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--color-background);
+        color: var(--color-text-primary);
+        font-family: var(--font-sans);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      /* The page is a full-height grid: the header is auto-sized, the area below
      it splits evenly between the table pane and the log pane — and with no
      log open the table takes the whole area. Sizing is CSS only; a resize is
      handled by the layout, never by a listener. */
-  #page {
-    display: grid;
-    grid-template-rows: auto 1fr;
-    gap: var(--space-4);
-    height: 100vh;
-    height: 100dvh;
-    padding: var(--space-6);
-  }
-  #page.with-log { grid-template-rows: auto 1fr 1fr; }
-  #page.with-log.expanded { grid-template-rows: auto 0 1fr; }
-  h1 { font-size: 18px; margin: 0; }
-  #title-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2) var(--space-6); }
-  #metrics {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-1) var(--space-4);
-    font-family: var(--font-mono);
-    font-size: 12px;
-  }
-  .metric .value { font-weight: bold; }
-  .metric .label { color: var(--color-text-muted); }
-  #connection {
-    margin: var(--space-2) 0 0;
-    color: var(--color-text-muted);
-    font-family: var(--font-mono);
-    font-size: 12px;
-  }
-  #connection.live { color: var(--color-success); }
-  #connection.polling { color: var(--color-warning); }
-  #table-pane { overflow-y: auto; min-height: 0; }
-  /* Separate borders so the sticky thead keeps its underline while scrolled
+      #page {
+        display: grid;
+        grid-template-rows: auto 1fr;
+        gap: var(--space-4);
+        height: 100vh;
+        height: 100dvh;
+        padding: var(--space-6);
+      }
+      #page.with-log {
+        grid-template-rows: auto 1fr 1fr;
+      }
+      #page.with-log.expanded {
+        grid-template-rows: auto 0 1fr;
+      }
+      h1 {
+        font-size: 18px;
+        margin: 0;
+      }
+      #title-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: var(--space-2) var(--space-6);
+      }
+      #metrics {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-1) var(--space-4);
+        font-family: var(--font-mono);
+        font-size: 12px;
+      }
+      .metric .value {
+        font-weight: bold;
+      }
+      .metric .label {
+        color: var(--color-text-muted);
+      }
+      #connection {
+        margin: var(--space-2) 0 0;
+        color: var(--color-text-muted);
+        font-family: var(--font-mono);
+        font-size: 12px;
+      }
+      #connection.live {
+        color: var(--color-success);
+      }
+      #connection.polling {
+        color: var(--color-warning);
+      }
+      #table-pane {
+        overflow-y: auto;
+        min-height: 0;
+      }
+      /* Separate borders so the sticky thead keeps its underline while scrolled
      (collapse would let it be painted away by the rows beneath). */
-  table {
-    width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-  }
-  th, td {
-    padding: var(--space-2) var(--space-3);
-    text-align: left;
-    border-bottom: 1px solid var(--color-border);
-    vertical-align: top;
-  }
-  thead th {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    background: var(--color-surface);
-  }
-  th {
-    color: var(--color-text-secondary);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-weight: normal;
-  }
-  tr.wave td { background: var(--color-surface-2); font-family: var(--font-mono); }
-  tr.lane { cursor: pointer; }
-  tr.lane:hover td { background: var(--color-surface-2); }
-  td.mono { font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; }
-  .ok { color: var(--color-success); }
-  .warn { color: var(--color-warning); }
-  .bad { color: var(--color-error); }
-  .info { color: var(--color-info); }
-  .dim { color: var(--color-text-muted); }
-  tr.disagreement td {
-    background: var(--color-surface);
-    border-left: 3px solid var(--color-warning);
-    color: var(--color-warning);
-    font-family: var(--font-mono);
-    font-size: 12px;
-  }
-  #log-pane {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-  }
-  #log-pane[hidden] {
-    display: none;
-  }
-  #log-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
-    border-bottom: 1px solid var(--color-border);
-    font-family: var(--font-mono);
-    font-size: 12px;
-    background: var(--color-surface-2);
-    color: var(--color-text-secondary);
-  }
-  #log-toolbar .log-info {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-    align-items: baseline;
-  }
-  #log-toolbar .log-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-  }
-  #log-toolbar button {
-    background: transparent;
-    border: 1px solid var(--color-border-control);
-    border-radius: var(--radius-sm);
-    color: var(--color-text-primary);
-    font-family: var(--font-mono);
-    font-size: 12px;
-    padding: var(--space-1) var(--space-2);
-    cursor: pointer;
-  }
-  #log-toolbar button:hover {
-    background: var(--color-surface);
-    border-color: var(--color-border-control-hover);
-  }
-  #log {
-    margin: 0;
-    padding: var(--space-3);
-    color: var(--color-text-secondary);
-    font-family: var(--font-mono);
-    font-size: 12px;
-    overflow: auto;
-    min-height: 0;
-    flex: 1;
-    display: grid;
-    grid-template-columns: auto 1fr;
-    column-gap: var(--space-3);
-    line-height: 1.5;
-  }
-  .gutter {
-    user-select: none;
-    text-align: right;
-    color: var(--color-text-muted);
-  }
-  .line {
-    white-space: pre;
-  }
-</style>
-</head>
-<body>
-<div id="page">
-  <header>
-    <div id="title-row">
-      <h1>Wave status</h1>
-      <div id="metrics">
-        <span class="metric" data-metric="lanes"><span class="value">—</span> <span class="label">lanes</span></span>
-        <span class="metric" data-metric="alive"><span class="value">—</span> <span class="label">alive</span></span>
-        <span class="metric" data-metric="settled"><span class="value">—</span> <span class="label">settled</span></span>
-        <span class="metric" data-metric="failed"><span class="value">—</span> <span class="label">failed</span></span>
-        <span class="metric" data-metric="running"><span class="value">—</span> <span class="label">running</span></span>
-        <span class="metric" data-metric="open"><span class="value">—</span> <span class="label">PRs open</span></span>
-        <span class="metric" data-metric="merged"><span class="value">—</span> <span class="label">PRs merged</span></span>
-        <span class="metric" data-metric="failing"><span class="value">—</span> <span class="label">checks failing</span></span>
-        <span class="metric" data-metric="waves"><span class="value">—</span> <span class="label">waves</span></span>
-      </div>
+      table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+      }
+      th,
+      td {
+        padding: var(--space-2) var(--space-3);
+        text-align: left;
+        border-bottom: 1px solid var(--color-border);
+        vertical-align: top;
+      }
+      thead th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: var(--color-surface);
+      }
+      th {
+        color: var(--color-text-secondary);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-weight: normal;
+      }
+      tr.wave {
+        cursor: pointer;
+      }
+      tr.wave td {
+        background: var(--color-surface-2);
+        font-family: var(--font-mono);
+      }
+      tr.wave:hover td {
+        background: var(--color-surface);
+      }
+      tr[hidden] {
+        display: none;
+      }
+      tr.lane {
+        cursor: pointer;
+      }
+      tr.lane:hover td {
+        background: var(--color-surface-2);
+      }
+      /* The row stays a row (default `row` role) — HTML-ARIA forbids putting
+     role="button" on a <tr> inside a table. The actual control is this
+     <button>, unstyled down to plain text so the row's own look is
+     unchanged; the row's click handler still delegates to it. */
+      tr.wave button,
+      tr.lane button {
+        display: block;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        border: 0;
+        font: inherit;
+        color: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+      td.mono {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+      .ok {
+        color: var(--color-success);
+      }
+      .warn {
+        color: var(--color-warning);
+      }
+      .bad {
+        color: var(--color-error);
+      }
+      .info {
+        color: var(--color-info);
+      }
+      .dim {
+        color: var(--color-text-muted);
+      }
+      tr.disagreement td {
+        background: var(--color-surface);
+        border-left: 3px solid var(--color-warning);
+        color: var(--color-warning);
+        font-family: var(--font-mono);
+        font-size: 12px;
+      }
+      #sort-switch {
+        background: transparent;
+        border: 1px solid var(--color-border-control);
+        border-radius: var(--radius-sm);
+        color: var(--color-text-primary);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        padding: var(--space-1) var(--space-2);
+        cursor: pointer;
+      }
+      #sort-switch:hover {
+        background: var(--color-surface);
+        border-color: var(--color-border-control-hover);
+      }
+      #log-pane {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+      }
+      #log-pane[hidden] {
+        display: none;
+      }
+      #log-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+        border-bottom: 1px solid var(--color-border);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        background: var(--color-surface-2);
+        color: var(--color-text-secondary);
+      }
+      #log-toolbar .log-info {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+        align-items: baseline;
+      }
+      #log-toolbar .log-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+      }
+      #log-toolbar button {
+        background: transparent;
+        border: 1px solid var(--color-border-control);
+        border-radius: var(--radius-sm);
+        color: var(--color-text-primary);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        padding: var(--space-1) var(--space-2);
+        cursor: pointer;
+      }
+      #log-toolbar button:hover {
+        background: var(--color-surface);
+        border-color: var(--color-border-control-hover);
+      }
+      #log {
+        margin: 0;
+        padding: var(--space-3);
+        color: var(--color-text-secondary);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        overflow: auto;
+        min-height: 0;
+        flex: 1;
+        display: grid;
+        grid-template-columns: auto 1fr;
+        column-gap: var(--space-3);
+        line-height: 1.5;
+      }
+      .gutter {
+        user-select: none;
+        text-align: right;
+        color: var(--color-text-muted);
+      }
+      .line {
+        white-space: pre;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="page">
+      <header>
+        <div id="title-row">
+          <h1>Wave status</h1>
+          <div id="metrics">
+            <span class="metric" data-metric="lanes"
+              ><span class="value">—</span>
+              <span class="label">lanes</span></span
+            >
+            <span class="metric" data-metric="alive"
+              ><span class="value">—</span>
+              <span class="label">alive</span></span
+            >
+            <span class="metric" data-metric="settled"
+              ><span class="value">—</span>
+              <span class="label">settled</span></span
+            >
+            <span class="metric" data-metric="failed"
+              ><span class="value">—</span>
+              <span class="label">failed</span></span
+            >
+            <span class="metric" data-metric="running"
+              ><span class="value">—</span>
+              <span class="label">running</span></span
+            >
+            <span class="metric" data-metric="open"
+              ><span class="value">—</span>
+              <span class="label">PRs open</span></span
+            >
+            <span class="metric" data-metric="merged"
+              ><span class="value">—</span>
+              <span class="label">PRs merged</span></span
+            >
+            <span class="metric" data-metric="failing"
+              ><span class="value">—</span>
+              <span class="label">checks failing</span></span
+            >
+            <span class="metric" data-metric="waves"
+              ><span class="value">—</span>
+              <span class="label">waves</span></span
+            >
+            <button
+              type="button"
+              role="switch"
+              id="sort-switch"
+              aria-checked="true"
+              aria-label="sort lanes by most recently updated"
+            >
+              <span class="label">sort:</span> <span class="value">recent</span>
+            </button>
+          </div>
+        </div>
+        <p id="connection">connecting…</p>
+      </header>
+      <section id="table-pane">
+        <table id="status-table">
+          <thead>
+            <tr>
+              <th>lane</th>
+              <th>stage</th>
+              <th>liveness</th>
+              <th>log (bytes · mtime · EXIT)</th>
+              <th>PR · checks</th>
+              <th>gate (exit · coverage)</th>
+              <th>fixed / refuted / mutations</th>
+            </tr>
+          </thead>
+        </table>
+      </section>
+      <section id="log-pane" hidden>
+        <header id="log-toolbar">
+          <div class="log-info">
+            <span id="log-lane"></span>
+            <span id="log-size"></span>
+          </div>
+          <div class="log-actions">
+            <button type="button" id="log-expand" aria-label="expand">
+              expand
+            </button>
+            <button type="button" id="log-copy" aria-label="copy">copy</button>
+            <button type="button" id="log-download" aria-label="download">
+              download
+            </button>
+            <button type="button" id="log-close" aria-label="close">
+              close
+            </button>
+          </div>
+        </header>
+        <div id="log" hidden></div>
+      </section>
     </div>
-    <p id="connection">connecting…</p>
-  </header>
-  <section id="table-pane">
-    <table>
-      <thead>
-        <tr>
-          <th>lane</th>
-          <th>stage</th>
-          <th>liveness</th>
-          <th>log (bytes · mtime · EXIT)</th>
-          <th>PR · checks</th>
-          <th>gate (exit · coverage)</th>
-          <th>fixed / refuted / mutations</th>
-        </tr>
-      </thead>
-      <tbody id="lanes"></tbody>
-    </table>
-  </section>
-  <section id="log-pane" hidden>
-    <header id="log-toolbar">
-      <div class="log-info">
-        <span id="log-lane"></span>
-        <span id="log-size"></span>
-      </div>
-      <div class="log-actions">
-        <button type="button" id="log-expand" aria-label="expand">expand</button>
-        <button type="button" id="log-copy" aria-label="copy">copy</button>
-        <button type="button" id="log-download" aria-label="download">download</button>
-        <button type="button" id="log-close" aria-label="close">close</button>
-      </div>
-    </header>
-    <div id="log" hidden></div>
-  </section>
-</div>
-<script>
-  "use strict";
-  const lanesBody = document.getElementById("lanes");
-  const connection = document.getElementById("connection");
-  const logPane = document.getElementById("log-pane");
-  const logToolbar = document.getElementById("log-toolbar");
-  const logView = document.getElementById("log");
-  const logLane = document.getElementById("log-lane");
-  const logSize = document.getElementById("log-size");
-  const expandBtn = document.getElementById("log-expand");
-  const copyBtn = document.getElementById("log-copy");
-  const downloadBtn = document.getElementById("log-download");
-  const closeBtn = document.getElementById("log-close");
-  const pageGrid = document.getElementById("page");
-  let activeLogSeq = 0;
-  let activeWave = null;
-  let activeLane = null;
-  const metricValues = {};
-  for (const metric of document.querySelectorAll("#metrics [data-metric]")) {
-    metricValues[metric.getAttribute("data-metric")] = metric.querySelector(".value");
-  }
+    <script>
+      "use strict";
+      const table = document.getElementById("status-table");
+      const connection = document.getElementById("connection");
+      const logPane = document.getElementById("log-pane");
+      const logToolbar = document.getElementById("log-toolbar");
+      const logView = document.getElementById("log");
+      const logLane = document.getElementById("log-lane");
+      const logSize = document.getElementById("log-size");
+      const expandBtn = document.getElementById("log-expand");
+      const copyBtn = document.getElementById("log-copy");
+      const downloadBtn = document.getElementById("log-download");
+      const closeBtn = document.getElementById("log-close");
+      const pageGrid = document.getElementById("page");
+      const sortSwitch = document.getElementById("sort-switch");
+      const defaultExpanded = false;
+      const expandedWaves = new Set();
+      const SORT_STORAGE_KEY = "wave-status:sort";
+      let lastStatus = null;
+      let activeLogSeq = 0;
+      let activeWave = null;
+      let activeLane = null;
+      const metricValues = {};
+      for (const metric of document.querySelectorAll(
+        "#metrics [data-metric]",
+      )) {
+        metricValues[metric.getAttribute("data-metric")] =
+          metric.querySelector(".value");
+      }
 
-  function esc(value) {
-    return String(value).replace(/[&<>"']/g, (c) => ({
-      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-    })[c]);
-  }
-
-  function mark(kind, text) {
-    return text === undefined ? '<span class="dim">—</span>' : `<span class="${kind}">${esc(text)}</span>`;
-  }
-
-  function stage(lane) {
-    if (lane.reported === undefined) return '<span class="dim">— (no events)</span>';
-    const tone = lane.reported.event === "failed" ? "bad" : lane.reported.event === "settled" ? "ok" : "info";
-    const round = lane.reported.round === undefined ? "" : ` (round ${lane.reported.round})`;
-    return `<span class="${tone}">${esc(lane.reported.stage)} ${esc(lane.reported.event)}${esc(round)}</span>`;
-  }
-
-  function liveness(lane) {
-    return lane.derived.alive ? '<span class="ok">alive</span>' : '<span class="dim">not alive</span>';
-  }
-
-  function logCell(lane) {
-    const log = lane.derived.log;
-    if (log === undefined) return '<span class="dim">no log</span>';
-    const exit = lane.derived.exit === undefined
-      ? '<span class="dim">no EXIT</span>'
-      : lane.derived.exit === 0 ? '<span class="ok">EXIT 0</span>' : `<span class="bad">EXIT ${esc(lane.derived.exit)}</span>`;
-    const age = Math.round((Date.now() - log.mtimeMs) / 1000);
-    return `${log.bytes.toLocaleString()} B · ${age}s ago · ${exit}`;
-  }
-
-  function prCell(lane) {
-    const pr = lane.derived.pr;
-    if (pr === undefined) return '<span class="dim">no PR</span>';
-    const tone = pr.state === "merged" ? "ok" : pr.state === "open" ? "info" : "bad";
-    const checks = { none: "dim", pending: "warn", pass: "ok", fail: "bad" }[pr.checks];
-    return `#${pr.number} <span class="${tone}">${esc(pr.state)}</span> · <span class="${checks}">${esc(pr.checks)}</span>`;
-  }
-
-  function gateCell(lane) {
-    const gate = lane.derived.gate;
-    if (gate === undefined) return '<span class="dim">no gate log</span>';
-    const exit = gate.exit === undefined
-      ? '<span class="dim">—</span>'
-      : gate.exit === 0 ? '<span class="ok">exit 0</span>' : `<span class="bad">exit ${esc(gate.exit)}</span>`;
-    const cov = gate.coverage === undefined ? "" :
-      ` · ${gate.coverage.statements}/${gate.coverage.branches}/${gate.coverage.functions}/${gate.coverage.lines}%`;
-    return `${exit}${esc(cov)}`;
-  }
-
-  function findingsCell(lane) {
-    const detail = lane.reported === undefined ? undefined : lane.reported.detail;
-    if (detail === undefined) return '<span class="dim">—</span>';
-    return `${esc(detail.fixed ?? "—")} / ${esc(detail.refuted ?? "—")} / ${esc(detail.mutations ?? "—")}`
-      + (detail.mutationsBit === undefined ? "" : ` <span class="dim">(${esc(detail.mutationsBit)} bit)</span>`);
-  }
-
-  function setMetric(name, value) {
-    // An unknown value shows —, never 0 — the same rule the cells follow:
-    // "no failures" and "we don't know" are different answers.
-    metricValues[name].textContent = value === undefined ? "—" : String(value);
-  }
-
-  function metricsOf(status) {
-    let lanes = 0;
-    let alive = 0;
-    let waves = 0;
-    let events = 0;
-    let prs = 0;
-    let settled;
-    let failed;
-    let running;
-    let open;
-    let merged;
-    let failing;
-    for (const wave of status.waves) {
-      waves++;
-      for (const lane of wave.lanes) {
-        lanes++;
-        if (lane.derived.alive) alive++;
-        if (lane.reported !== undefined) {
-          events++;
-          if (lane.reported.event === "settled") settled = (settled ?? 0) + 1;
-          else if (lane.reported.event === "failed") failed = (failed ?? 0) + 1;
-          else if (lane.reported.event === "started") running = (running ?? 0) + 1;
-        }
-        const pr = lane.derived.pr;
-        if (pr !== undefined) {
-          prs++;
-          if (pr.state === "open") open = (open ?? 0) + 1;
-          else if (pr.state === "merged") merged = (merged ?? 0) + 1;
-          if (pr.checks === "fail") failing = (failing ?? 0) + 1;
+      function loadSortPreference() {
+        try {
+          const storage = (typeof window !== "undefined" ? window : globalThis)
+            .localStorage;
+          const stored = storage ? storage.getItem(SORT_STORAGE_KEY) : null;
+          if (stored === null || stored === undefined) return true;
+          return stored !== "false" && stored !== "off" && stored !== "0";
+        } catch {
+          return true;
         }
       }
-    }
-    // With no reported events at all (or no observed PR at all) the outcomes
-    // are unknown; once any observation exists, a zero is a real answer.
-    if (events > 0) { settled ??= 0; failed ??= 0; running ??= 0; }
-    if (prs > 0) { open ??= 0; merged ??= 0; failing ??= 0; }
-    return { lanes, alive, waves, settled, failed, running, open, merged, failing };
-  }
 
-  function render(status) {
-    const rows = [];
-    for (const wave of status.waves) {
-      rows.push(`<tr class="wave"><td colspan="7">wave ${esc(wave.id)}</td></tr>`);
-      for (const lane of wave.lanes) {
-        const key = `${esc(wave.id)}/${esc(lane.lane)}`;
-        rows.push(
-          `<tr class="lane" data-wave="${esc(wave.id)}" data-lane="${esc(lane.lane)}" role="button" tabindex="0">`
-          + `<td class="mono">${key}</td>`
-          + `<td>${stage(lane)}</td>`
-          + `<td>${liveness(lane)}</td>`
-          + `<td class="mono">${logCell(lane)}</td>`
-          + `<td>${prCell(lane)}</td>`
-          + `<td class="mono">${gateCell(lane)}</td>`
-          + `<td>${findingsCell(lane)}</td>`
-          + "</tr>",
+      function saveSortPreference(val) {
+        try {
+          const storage = (typeof window !== "undefined" ? window : globalThis)
+            .localStorage;
+          if (storage) {
+            storage.setItem(SORT_STORAGE_KEY, val ? "true" : "false");
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      let sortByRecent = loadSortPreference();
+
+      function updateSortSwitch() {
+        if (!sortSwitch) return;
+        sortSwitch.setAttribute("aria-checked", String(sortByRecent));
+        sortSwitch.innerHTML = sortByRecent
+          ? '<span class="label">sort:</span> <span class="value">recent</span>'
+          : '<span class="label">sort:</span> <span class="value">server order</span>';
+      }
+
+      if (sortSwitch) {
+        Object.defineProperty(sortSwitch, "checked", {
+          get: () => sortByRecent,
+          configurable: true,
+        });
+        sortSwitch.addEventListener("click", () => {
+          sortByRecent = !sortByRecent;
+          updateSortSwitch();
+          saveSortPreference(sortByRecent);
+          if (lastStatus !== null) {
+            render(lastStatus);
+          }
+        });
+      }
+
+      updateSortSwitch();
+
+      function laneMtime(lane) {
+        return lane.derived &&
+          lane.derived.log &&
+          typeof lane.derived.log.mtimeMs === "number"
+          ? lane.derived.log.mtimeMs
+          : lane.log && typeof lane.log.mtimeMs === "number"
+            ? lane.log.mtimeMs
+            : undefined;
+      }
+
+      function compareLanes(a, b) {
+        const aTime = laneMtime(a);
+        const bTime = laneMtime(b);
+        if (aTime !== undefined && bTime !== undefined) {
+          return bTime - aTime;
+        }
+        if (aTime !== undefined && bTime === undefined) {
+          return -1;
+        }
+        if (aTime === undefined && bTime !== undefined) {
+          return 1;
+        }
+        return 0;
+      }
+
+      function toggleWave(waveId) {
+        if (expandedWaves.has(waveId)) {
+          expandedWaves.delete(waveId);
+        } else {
+          expandedWaves.add(waveId);
+        }
+        const isExpanded = expandedWaves.has(waveId);
+        const waveRows = table.querySelectorAll("tr.wave");
+        for (const waveRow of waveRows) {
+          if (waveRow.dataset.wave === waveId) {
+            waveRow
+              .querySelector("button")
+              ?.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+            let next = waveRow.nextElementSibling;
+            while (next && !next.classList.contains("wave")) {
+              next.hidden = !isExpanded;
+              next = next.nextElementSibling;
+            }
+            break;
+          }
+        }
+      }
+
+      function esc(value) {
+        return String(value).replace(
+          /[&<>"']/g,
+          (c) =>
+            ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            })[c],
         );
-        // A banner per disagreement, in the lane's own words (D103).
-        for (const disagreement of lane.disagreements) {
-          rows.push(`<tr class="disagreement"><td colspan="7">${esc(disagreement)}</td></tr>`);
+      }
+
+      function mark(kind, text) {
+        return text === undefined
+          ? '<span class="dim">—</span>'
+          : `<span class="${kind}">${esc(text)}</span>`;
+      }
+
+      function stage(lane) {
+        if (lane.reported === undefined)
+          return '<span class="dim">— (no events)</span>';
+        const tone =
+          lane.reported.event === "failed"
+            ? "bad"
+            : lane.reported.event === "settled"
+              ? "ok"
+              : "info";
+        const round =
+          lane.reported.round === undefined
+            ? ""
+            : ` (round ${lane.reported.round})`;
+        return `<span class="${tone}">${esc(lane.reported.stage)} ${esc(lane.reported.event)}${esc(round)}</span>`;
+      }
+
+      function liveness(lane) {
+        return lane.derived.alive
+          ? '<span class="ok">alive</span>'
+          : '<span class="dim">not alive</span>';
+      }
+
+      function logCell(lane) {
+        const log = lane.derived.log;
+        if (log === undefined) return '<span class="dim">no log</span>';
+        const exit =
+          lane.derived.exit === undefined
+            ? '<span class="dim">no EXIT</span>'
+            : lane.derived.exit === 0
+              ? '<span class="ok">EXIT 0</span>'
+              : `<span class="bad">EXIT ${esc(lane.derived.exit)}</span>`;
+        const age = Math.round((Date.now() - log.mtimeMs) / 1000);
+        return `${log.bytes.toLocaleString()} B · ${age}s ago · ${exit}`;
+      }
+
+      function prCell(lane) {
+        const pr = lane.derived.pr;
+        if (pr === undefined) return '<span class="dim">no PR</span>';
+        const tone =
+          pr.state === "merged" ? "ok" : pr.state === "open" ? "info" : "bad";
+        const checks = {
+          none: "dim",
+          pending: "warn",
+          pass: "ok",
+          fail: "bad",
+        }[pr.checks];
+        return `#${pr.number} <span class="${tone}">${esc(pr.state)}</span> · <span class="${checks}">${esc(pr.checks)}</span>`;
+      }
+
+      function gateCell(lane) {
+        const gate = lane.derived.gate;
+        if (gate === undefined) return '<span class="dim">no gate log</span>';
+        const exit =
+          gate.exit === undefined
+            ? '<span class="dim">—</span>'
+            : gate.exit === 0
+              ? '<span class="ok">exit 0</span>'
+              : `<span class="bad">exit ${esc(gate.exit)}</span>`;
+        const cov =
+          gate.coverage === undefined
+            ? ""
+            : ` · ${gate.coverage.statements}/${gate.coverage.branches}/${gate.coverage.functions}/${gate.coverage.lines}%`;
+        return `${exit}${esc(cov)}`;
+      }
+
+      function findingsCell(lane) {
+        const detail =
+          lane.reported === undefined ? undefined : lane.reported.detail;
+        if (detail === undefined) return '<span class="dim">—</span>';
+        return (
+          `${esc(detail.fixed ?? "—")} / ${esc(detail.refuted ?? "—")} / ${esc(detail.mutations ?? "—")}` +
+          (detail.mutationsBit === undefined
+            ? ""
+            : ` <span class="dim">(${esc(detail.mutationsBit)} bit)</span>`)
+        );
+      }
+
+      function setMetric(name, value) {
+        // An unknown value shows —, never 0 — the same rule the cells follow:
+        // "no failures" and "we don't know" are different answers.
+        metricValues[name].textContent =
+          value === undefined ? "—" : String(value);
+      }
+
+      function metricsOf(status) {
+        let lanes = 0;
+        let alive = 0;
+        let waves = 0;
+        let events = 0;
+        let prs = 0;
+        let settled;
+        let failed;
+        let running;
+        let open;
+        let merged;
+        let failing;
+        for (const wave of status.waves) {
+          waves++;
+          for (const lane of wave.lanes) {
+            lanes++;
+            if (lane.derived.alive) alive++;
+            if (lane.reported !== undefined) {
+              events++;
+              if (lane.reported.event === "settled")
+                settled = (settled ?? 0) + 1;
+              else if (lane.reported.event === "failed")
+                failed = (failed ?? 0) + 1;
+              else if (lane.reported.event === "started")
+                running = (running ?? 0) + 1;
+            }
+            const pr = lane.derived.pr;
+            if (pr !== undefined) {
+              prs++;
+              if (pr.state === "open") open = (open ?? 0) + 1;
+              else if (pr.state === "merged") merged = (merged ?? 0) + 1;
+              if (pr.checks === "fail") failing = (failing ?? 0) + 1;
+            }
+          }
+        }
+        // With no reported events at all (or no observed PR at all) the outcomes
+        // are unknown; once any observation exists, a zero is a real answer.
+        if (events > 0) {
+          settled ??= 0;
+          failed ??= 0;
+          running ??= 0;
+        }
+        if (prs > 0) {
+          open ??= 0;
+          merged ??= 0;
+          failing ??= 0;
+        }
+        return {
+          lanes,
+          alive,
+          waves,
+          settled,
+          failed,
+          running,
+          open,
+          merged,
+          failing,
+        };
+      }
+
+      function identityOf(row) {
+        // Rows are identified by their wave and lane, never by their index:
+        // sorting re-orders rows, so a position saved before a render may be
+        // a different lane after it.
+        return row.classList.contains("wave")
+          ? `wave:${row.dataset.wave}`
+          : `lane:${row.dataset.wave}/${row.dataset.lane}`;
+      }
+
+      function render(status) {
+        lastStatus = status;
+        // A render replaces the table body's contents, and every poll tick or
+        // SSE event would otherwise destroy the focused row and drop focus
+        // back to the document. Take the focused row's identity now and give
+        // it back once the rows exist again; if it is gone, do nothing.
+        const active = document.activeElement;
+        let focusKey = null;
+        if (active !== null && active.tagName === "BUTTON") {
+          const row = active.closest("tr.wave, tr.lane");
+          if (row !== null && table.contains(row)) {
+            focusKey = identityOf(row);
+          }
+        }
+        const groups = [];
+        for (const wave of status.waves) {
+          const isExpanded = expandedWaves.has(wave.id) || defaultExpanded;
+          const count = wave.lanes.length;
+          const countLabel = `${count} ${count === 1 ? "lane" : "lanes"}`;
+          // One tbody per wave: a group of rows a <tr> could never own, and
+          // a single real element for aria-controls to name (a <div> cannot
+          // wrap rows inside a table).
+          const rowHtml = [
+            `<tr class="wave" data-wave="${esc(wave.id)}"><td colspan="7"><button type="button" tabindex="0" aria-expanded="${isExpanded ? "true" : "false"}" aria-controls="waves-${esc(wave.id)}">wave ${esc(wave.id)} · ${countLabel}</button></td></tr>`,
+          ];
+          const lanes = sortByRecent
+            ? [...wave.lanes].sort(compareLanes)
+            : wave.lanes;
+          for (const lane of lanes) {
+            const key = `${esc(wave.id)}/${esc(lane.lane)}`;
+            rowHtml.push(
+              `<tr class="lane" data-wave="${esc(wave.id)}" data-lane="${esc(lane.lane)}"${isExpanded ? "" : " hidden"}>` +
+                `<td class="mono"><button type="button" tabindex="0">${key}</button></td>` +
+                `<td>${stage(lane)}</td>` +
+                `<td>${liveness(lane)}</td>` +
+                `<td class="mono">${logCell(lane)}</td>` +
+                `<td>${prCell(lane)}</td>` +
+                `<td class="mono">${gateCell(lane)}</td>` +
+                `<td>${findingsCell(lane)}</td>` +
+                "</tr>",
+            );
+            // A banner per disagreement, in the lane's own words (D103).
+            for (const disagreement of lane.disagreements) {
+              rowHtml.push(
+                `<tr class="disagreement" data-wave="${esc(wave.id)}"${isExpanded ? "" : " hidden"}><td colspan="7">${esc(disagreement)}</td></tr>`,
+              );
+            }
+          }
+          groups.push({ id: wave.id, rowHtml });
+        }
+        for (const old of Array.from(table.tBodies)) old.remove();
+        for (const group of groups) {
+          const body = document.createElement("tbody");
+          body.id = `waves-${group.id}`;
+          body.innerHTML = group.rowHtml.join("");
+          table.appendChild(body);
+        }
+        if (focusKey !== null) {
+          for (const row of table.querySelectorAll("tr.wave, tr.lane")) {
+            if (identityOf(row) === focusKey) {
+              row.querySelector("button")?.focus();
+              break;
+            }
+          }
+        }
+        const m = metricsOf(status);
+        setMetric("lanes", m.lanes);
+        setMetric("alive", m.alive);
+        setMetric("settled", m.settled);
+        setMetric("failed", m.failed);
+        setMetric("running", m.running);
+        setMetric("open", m.open);
+        setMetric("merged", m.merged);
+        setMetric("failing", m.failing);
+        setMetric("waves", m.waves);
+      }
+
+      async function refresh() {
+        try {
+          const res = await fetch("/api/status");
+          render(await res.json());
+        } catch {
+          connection.textContent = "status unreachable";
         }
       }
-    }
-    lanesBody.innerHTML = rows.join("");
-    const m = metricsOf(status);
-    setMetric("lanes", m.lanes);
-    setMetric("alive", m.alive);
-    setMetric("settled", m.settled);
-    setMetric("failed", m.failed);
-    setMetric("running", m.running);
-    setMetric("open", m.open);
-    setMetric("merged", m.merged);
-    setMetric("failing", m.failing);
-    setMetric("waves", m.waves);
-  }
 
-  async function refresh() {
-    try {
-      const res = await fetch("/api/status");
-      render(await res.json());
-    } catch {
-      connection.textContent = "status unreachable";
-    }
-  }
-
-  function renderLogLines(text) {
-    const lines = text.split("\n");
-    const fragments = [];
-    for (let i = 0; i < lines.length; i++) {
-      fragments.push(
-        `<span class="gutter">${i + 1}</span><span class="line">${esc(lines[i])}</span>`,
-      );
-    }
-    logView.innerHTML = fragments.join("");
-  }
-
-  async function openLog(row) {
-    const seq = ++activeLogSeq;
-    const wave = row.dataset.wave;
-    const lane = row.dataset.lane;
-    const laneKey = `${wave}/${lane}`;
-    const res = await fetch(`/api/log/${wave}/${lane}?tail=16`);
-    let buf = null;
-    if (res.ok) {
-      buf = await res.arrayBuffer();
-    }
-    if (seq !== activeLogSeq) return;
-    activeWave = wave;
-    activeLane = lane;
-    logPane.hidden = false;
-    logView.hidden = false;
-    pageGrid.classList.add("with-log");
-    if (pageGrid.classList.contains("expanded")) {
-      expandBtn.textContent = "collapse";
-      expandBtn.setAttribute("aria-label", "collapse");
-    } else {
-      expandBtn.textContent = "expand";
-      expandBtn.setAttribute("aria-label", "expand");
-    }
-    logLane.textContent = laneKey;
-    if (res.ok && buf !== null) {
-      const bytes = buf.byteLength;
-      logSize.textContent = `${bytes.toLocaleString()} B`;
-      const text = new TextDecoder().decode(buf);
-      renderLogLines(text);
-    } else {
-      logSize.textContent = "0 B";
-      renderLogLines(`no log for ${laneKey}`);
-    }
-  }
-
-  function closeLog() {
-    activeLogSeq++;
-    activeWave = null;
-    activeLane = null;
-    logPane.hidden = true;
-    logView.hidden = true;
-    pageGrid.classList.remove("with-log");
-    pageGrid.classList.remove("expanded");
-    expandBtn.textContent = "expand";
-    expandBtn.setAttribute("aria-label", "expand");
-  }
-
-  lanesBody.addEventListener("click", (event) => {
-    const row = event.target.closest("tr.lane");
-    if (row === null) return;
-    void openLog(row);
-  });
-
-  lanesBody.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    const row = event.target.closest("tr.lane");
-    if (row === null) return;
-    event.preventDefault();
-    void openLog(row);
-  });
-
-  expandBtn.addEventListener("click", () => {
-    const isExpanded = pageGrid.classList.toggle("expanded");
-    const nextAction = isExpanded ? "collapse" : "expand";
-    expandBtn.textContent = nextAction;
-    expandBtn.setAttribute("aria-label", nextAction);
-  });
-
-  copyBtn.addEventListener("click", async () => {
-    const win = typeof window !== "undefined" ? window : document.defaultView;
-    const lines = Array.from(logView.querySelectorAll(".line"));
-    const text = lines.map((el) => el.textContent).join("\n");
-    const prev = copyBtn.textContent;
-    try {
-      if (!win.navigator?.clipboard?.writeText) {
-        throw new Error("clipboard unavailable");
+      function renderLogLines(text) {
+        const lines = text.split("\n");
+        const fragments = [];
+        for (let i = 0; i < lines.length; i++) {
+          fragments.push(
+            `<span class="gutter">${i + 1}</span><span class="line">${esc(lines[i])}</span>`,
+          );
+        }
+        logView.innerHTML = fragments.join("");
       }
-      await win.navigator.clipboard.writeText(text);
-      copyBtn.textContent = "copied";
-    } catch {
-      copyBtn.textContent = "copy failed";
-    }
-    setTimeout(() => {
-      copyBtn.textContent = prev;
-    }, 1500);
-  });
 
-  downloadBtn.addEventListener("click", () => {
-    const wave = activeWave;
-    const lane = activeLane;
-    if (!wave || !lane) return;
-    const a = document.createElement("a");
-    a.href = `/api/log/${wave}/${lane}?full=1`;
-    a.download = `${wave}-${lane}.log`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  });
+      async function openLog(row) {
+        const seq = ++activeLogSeq;
+        const wave = row.dataset.wave;
+        const lane = row.dataset.lane;
+        const laneKey = `${wave}/${lane}`;
+        const res = await fetch(`/api/log/${wave}/${lane}?tail=16`);
+        let buf = null;
+        if (res.ok) {
+          buf = await res.arrayBuffer();
+        }
+        if (seq !== activeLogSeq) return;
+        activeWave = wave;
+        activeLane = lane;
+        logPane.hidden = false;
+        logView.hidden = false;
+        pageGrid.classList.add("with-log");
+        if (pageGrid.classList.contains("expanded")) {
+          expandBtn.textContent = "collapse";
+          expandBtn.setAttribute("aria-label", "collapse");
+        } else {
+          expandBtn.textContent = "expand";
+          expandBtn.setAttribute("aria-label", "expand");
+        }
+        logLane.textContent = laneKey;
+        if (res.ok && buf !== null) {
+          const bytes = buf.byteLength;
+          logSize.textContent = `${bytes.toLocaleString()} B`;
+          const text = new TextDecoder().decode(buf);
+          renderLogLines(text);
+        } else {
+          logSize.textContent = "0 B";
+          renderLogLines(`no log for ${laneKey}`);
+        }
+      }
 
-  closeBtn.addEventListener("click", closeLog);
+      function closeLog() {
+        activeLogSeq++;
+        activeWave = null;
+        activeLane = null;
+        logPane.hidden = true;
+        logView.hidden = true;
+        pageGrid.classList.remove("with-log");
+        pageGrid.classList.remove("expanded");
+        expandBtn.textContent = "expand";
+        expandBtn.setAttribute("aria-label", "expand");
+      }
 
-  // Live updates over SSE; if the stream drops, fall back to a 10 s poll.
-  const source = new EventSource("/api/stream");
-  let pollTimer = null;
-  source.addEventListener("status", (event) => {
-    connection.textContent = "live (sse)";
-    connection.className = "live";
-    render(JSON.parse(event.data));
-  });
-  source.onopen = () => {
-    connection.textContent = "live (sse)";
-    connection.className = "live";
-  };
-  source.onerror = () => {
-    source.close();
-    connection.textContent = "polling every 10s (sse closed)";
-    connection.className = "polling";
-    if (pollTimer !== null) clearInterval(pollTimer);
-    pollTimer = setInterval(refresh, 10000);
-    refresh();
-  };
+      table.addEventListener("click", (event) => {
+        const waveRow = event.target.closest("tr.wave");
+        if (waveRow !== null) {
+          toggleWave(waveRow.dataset.wave);
+          return;
+        }
+        const row = event.target.closest("tr.lane");
+        if (row === null) return;
+        void openLog(row);
+      });
 
-  refresh();
-</script>
-</body>
+      // No keydown handler here: the accordion and log-opener are real
+      // <button> elements now, and a native button already answers Enter
+      // and Space with a click event — adding our own would either fire
+      // the action twice or duplicate what the browser already does.
+
+      expandBtn.addEventListener("click", () => {
+        const isExpanded = pageGrid.classList.toggle("expanded");
+        const nextAction = isExpanded ? "collapse" : "expand";
+        expandBtn.textContent = nextAction;
+        expandBtn.setAttribute("aria-label", nextAction);
+      });
+
+      copyBtn.addEventListener("click", async () => {
+        const win =
+          typeof window !== "undefined" ? window : document.defaultView;
+        const lines = Array.from(logView.querySelectorAll(".line"));
+        const text = lines.map((el) => el.textContent).join("\n");
+        const prev = copyBtn.textContent;
+        try {
+          if (!win.navigator?.clipboard?.writeText) {
+            throw new Error("clipboard unavailable");
+          }
+          await win.navigator.clipboard.writeText(text);
+          copyBtn.textContent = "copied";
+        } catch {
+          copyBtn.textContent = "copy failed";
+        }
+        setTimeout(() => {
+          copyBtn.textContent = prev;
+        }, 1500);
+      });
+
+      downloadBtn.addEventListener("click", () => {
+        const wave = activeWave;
+        const lane = activeLane;
+        if (!wave || !lane) return;
+        const a = document.createElement("a");
+        a.href = `/api/log/${wave}/${lane}?full=1`;
+        a.download = `${wave}-${lane}.log`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      });
+
+      closeBtn.addEventListener("click", closeLog);
+
+      // Live updates over SSE; if the stream drops, fall back to a 10 s poll.
+      const source = new EventSource("/api/stream");
+      let pollTimer = null;
+      source.addEventListener("status", (event) => {
+        connection.textContent = "live (sse)";
+        connection.className = "live";
+        render(JSON.parse(event.data));
+      });
+      source.onopen = () => {
+        connection.textContent = "live (sse)";
+        connection.className = "live";
+      };
+      source.onerror = () => {
+        source.close();
+        connection.textContent = "polling every 10s (sse closed)";
+        connection.className = "polling";
+        if (pollTimer !== null) clearInterval(pollTimer);
+        pollTimer = setInterval(refresh, 10000);
+        refresh();
+      };
+
+      refresh();
+    </script>
+  </body>
 </html>

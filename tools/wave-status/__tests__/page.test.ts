@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import { Window } from "happy-dom";
 import type { WaveStatus } from "../lib/types.js";
 
-const PAGE_PATH = fileURLToPath(new URL("../public/index.html", import.meta.url));
+const PAGE_PATH = fileURLToPath(
+  new URL("../public/index.html", import.meta.url),
+);
 
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
@@ -13,13 +15,25 @@ class FakeEventSource {
   readonly url: string;
   closed = false;
 
+  readonly listeners: Record<string, ((event: { data: string }) => void)[]> =
+    {};
+
   constructor(url: string) {
     this.url = url;
     FakeEventSource.instances.push(this);
   }
 
-  addEventListener(_type: string, _listener: (event: { data: string }) => void): void {
-    /* tests drive onerror; status events are not needed here */
+  addEventListener(
+    type: string,
+    listener: (event: { data: string }) => void,
+  ): void {
+    (this.listeners[type] ??= []).push(listener);
+  }
+
+  emit(type: string, data: string): void {
+    for (const listener of this.listeners[type] ?? []) {
+      listener({ data });
+    }
   }
 
   close(): void {
@@ -73,56 +87,67 @@ const statusAt = (detail?: Record<string, unknown>): WaveStatus =>
 // Two waves, five lanes: alive and not, and the three reported outcomes, plus
 // one lane with no events at all. Four observed PRs — one lane has none — two
 // open, two merged, one with failing checks.
-const mixedStatus: WaveStatus =
-  {
-    generatedAt: "now",
-    waves: [
-      {
-        id: "T",
-        lanes: [
-          {
-            wave: "T",
-            lane: "t1",
-            reported: { stage: "remediate", event: "settled", ts: "now" },
-            derived: { alive: true, pr: { number: 1, state: "open", checks: "pass" } },
-            disagreements: [],
+const mixedStatus: WaveStatus = {
+  generatedAt: "now",
+  waves: [
+    {
+      id: "T",
+      lanes: [
+        {
+          wave: "T",
+          lane: "t1",
+          reported: { stage: "remediate", event: "settled", ts: "now" },
+          derived: {
+            alive: true,
+            pr: { number: 1, state: "open", checks: "pass" },
           },
-          {
-            wave: "T",
-            lane: "t2",
-            reported: { stage: "gate", event: "failed", ts: "now" },
-            derived: { alive: false, pr: { number: 2, state: "open", checks: "fail" } },
-            disagreements: [],
+          disagreements: [],
+        },
+        {
+          wave: "T",
+          lane: "t2",
+          reported: { stage: "gate", event: "failed", ts: "now" },
+          derived: {
+            alive: false,
+            pr: { number: 2, state: "open", checks: "fail" },
           },
-          {
-            wave: "T",
-            lane: "t3",
-            reported: { stage: "review", event: "started", ts: "now" },
-            derived: { alive: true },
-            disagreements: [],
+          disagreements: [],
+        },
+        {
+          wave: "T",
+          lane: "t3",
+          reported: { stage: "review", event: "started", ts: "now" },
+          derived: { alive: true },
+          disagreements: [],
+        },
+        {
+          wave: "T",
+          lane: "t4",
+          derived: {
+            alive: false,
+            pr: { number: 3, state: "merged", checks: "none" },
           },
-          {
-            wave: "T",
-            lane: "t4",
-            derived: { alive: false, pr: { number: 3, state: "merged", checks: "none" } },
-            disagreements: [],
+          disagreements: [],
+        },
+      ],
+    },
+    {
+      id: "U",
+      lanes: [
+        {
+          wave: "U",
+          lane: "u1",
+          reported: { stage: "merge", event: "settled", ts: "now" },
+          derived: {
+            alive: false,
+            pr: { number: 4, state: "merged", checks: "pass" },
           },
-        ],
-      },
-      {
-        id: "U",
-        lanes: [
-          {
-            wave: "U",
-            lane: "u1",
-            reported: { stage: "merge", event: "settled", ts: "now" },
-            derived: { alive: false, pr: { number: 4, state: "merged", checks: "pass" } },
-            disagreements: [],
-          },
-        ],
-      },
-    ],
-  } as WaveStatus;
+          disagreements: [],
+        },
+      ],
+    },
+  ],
+} as WaveStatus;
 
 // name, label, value — counts for mixedStatus above.
 const EXPECTED_METRICS: ReadonlyArray<readonly [string, string, string]> = [
@@ -149,6 +174,8 @@ type LogPayload =
 
 interface LoadPageOptions {
   width?: number;
+  storage?: Record<string, string>;
+  mockStorageError?: boolean;
 }
 
 async function loadPage(
@@ -160,8 +187,23 @@ async function loadPage(
   const scriptMatch = /<script>([\s\S]*?)<\/script>/.exec(html);
   if (scriptMatch === null) throw new Error("page has no script");
 
-  const window = new Window({ url: "http://127.0.0.1/", width: options?.width });
+  const window = new Window({
+    url: "http://127.0.0.1/",
+    width: options?.width,
+  });
   windows.push(window);
+
+  if (options?.storage) {
+    for (const [key, value] of Object.entries(options.storage)) {
+      window.localStorage.setItem(key, value);
+    }
+  }
+  if (options?.mockStorageError) {
+    vi.spyOn(window.localStorage, "getItem").mockImplementation(() => {
+      throw new Error("localStorage read failed");
+    });
+  }
+
   window.document.write(html.replace(/<script>[\s\S]*?<\/script>/, ""));
 
   const fetches: string[] = [];
@@ -179,7 +221,10 @@ async function loadPage(
         const res = await logText(url);
         return res instanceof Response
           ? res
-          : new Response(res, { status: 200, headers: { "content-type": "text/plain" } });
+          : new Response(res, {
+              status: 200,
+              headers: { "content-type": "text/plain" },
+            });
       }
       return new Response(logText as unknown as BodyInit, {
         status: 200,
@@ -237,31 +282,99 @@ async function loadPage(
   return { window, fetches, intervals, source };
 }
 
+// happy-dom implements no activation behaviour for <button>: a real browser
+// fires a click when Enter or Space is pressed on a focused button, but the
+// test DOM does not, so simulate what the browser would do rather than add
+// that translation to the page itself (the page relies on the real thing).
+// Untyped, like the rest of this file's `as unknown as HTMLElement` casts:
+// happy-dom's own DOM types are not structurally assignable to lib.dom's —
+// this only ever runs against elements returned from `page.window.document`.
+function press(target: unknown, key: string): void {
+  const el = target as unknown as {
+    ownerDocument: { defaultView: unknown } | null;
+    dispatchEvent(event: unknown): boolean;
+    click(): void;
+  };
+  const event = new (
+    el.ownerDocument!.defaultView as unknown as {
+      KeyboardEvent: typeof KeyboardEvent;
+    }
+  ).KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+  if (el.dispatchEvent(event)) {
+    el.click();
+  }
+}
+
 describe("the status page", () => {
-  test("Enter or Space on a lane row fetches the log", async () => {
+  test("Enter or Space on a lane row's button fetches the log", async () => {
     const page = await loadPage(statusAt());
     const row = page.window.document.querySelector("tr.lane");
     expect(row).not.toBeNull();
-    expect(row?.getAttribute("role")).toBe("button");
-    expect(row?.getAttribute("tabindex")).toBe("0");
+    expect(row?.getAttribute("role")).not.toBe("button");
+    const button = row?.querySelector("button") ?? null;
+    expect(button).not.toBeNull();
+    expect(button?.tagName).toBe("BUTTON");
+    expect(button?.textContent?.trim().length).toBeGreaterThan(0);
 
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
-    const logView = page.window.document.getElementById("log") as HTMLElement | null;
+    const logUrl = "/api/log/T/t1?tail=16";
+    press(button!, "Enter");
+    const logView = page.window.document.getElementById(
+      "log",
+    ) as HTMLElement | null;
     await vi.waitFor(() => {
-      expect(page.fetches).toContain("/api/log/T/t1?tail=16");
+      expect(page.fetches).toContain(logUrl);
       expect(logView?.hidden).toBe(false);
       expect(logView?.textContent).toContain("log-tail");
     });
+    // A deleted hand-rolled keydown handler and native <button> activation
+    // both answering the same key press is exactly the double-fire a real
+    // browser would never produce: one key press, one fetch.
+    expect(page.fetches.filter((url) => url === logUrl)).toHaveLength(1);
 
     page.fetches.length = 0;
     if (logView !== null) logView.textContent = "";
-    row?.dispatchEvent(new page.window.KeyboardEvent("keydown", { key: " ", bubbles: true }));
+    press(button!, " ");
     await vi.waitFor(() => {
-      expect(page.fetches).toContain("/api/log/T/t1?tail=16");
+      expect(page.fetches).toContain(logUrl);
       expect(logView?.textContent).toContain("log-tail");
     });
+    expect(page.fetches.filter((url) => url === logUrl)).toHaveLength(1);
+  });
+
+  test("a click anywhere on a lane row still opens the log", async () => {
+    const page = await loadPage(statusAt());
+    const row = page.window.document.querySelector(
+      "tr.lane",
+    ) as unknown as HTMLElement | null;
+    expect(row).not.toBeNull();
+    row?.click();
+    await vi.waitFor(() => {
+      expect(page.fetches).toContain("/api/log/T/t1?tail=16");
+    });
+  });
+
+  test("every wave and lane button carries a non-empty accessible name", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    const waveButtons = doc.querySelectorAll("tr.wave button");
+    const laneButtons = doc.querySelectorAll("tr.lane button");
+    expect(waveButtons.length).toBe(2);
+    expect(laneButtons.length).toBe(5);
+    for (const button of [...waveButtons, ...laneButtons]) {
+      expect(button.tagName).toBe("BUTTON");
+      expect(button.textContent?.trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  test('no <tr> carries role="button", and the page never wires its own keydown handling for it', async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    for (const row of doc.querySelectorAll("tr")) {
+      expect(row.getAttribute("role")).not.toBe("button");
+    }
+    const html = await readFile(PAGE_PATH, "utf8");
+    const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? "";
+    expect(script).not.toMatch(/addEventListener\(\s*["']keydown["']/);
   });
 
   test("a second SSE drop does not stack polling intervals", async () => {
@@ -273,7 +386,12 @@ describe("the status page", () => {
 
   test("a detail value of <b> renders as text, not markup", async () => {
     const page = await loadPage(
-      statusAt({ fixed: "<b>", refuted: "<img>", mutations: "</td>", mutationsBit: "<i>" }),
+      statusAt({
+        fixed: "<b>",
+        refuted: "<img>",
+        mutations: "</td>",
+        mutationsBit: "<i>",
+      }),
     );
     const cell = page.window.document.querySelector("tr.lane td:last-child");
     expect(cell?.textContent).toContain("<b>");
@@ -300,9 +418,15 @@ describe("the status page", () => {
     // PR metrics come from observed PRs, not from lanes: five lanes (one with
     // no PR at all) yield PRs open 2 — a count fed by lanes instead of PR
     // observations would read 5, or sweep the no-PR lane into some bucket.
-    expect(doc.querySelector('[data-metric="open"] .value')?.textContent).toBe("2");
-    expect(doc.querySelector('[data-metric="merged"] .value')?.textContent).toBe("2");
-    expect(doc.querySelector('[data-metric="lanes"] .value')?.textContent).toBe("5");
+    expect(doc.querySelector('[data-metric="open"] .value')?.textContent).toBe(
+      "2",
+    );
+    expect(
+      doc.querySelector('[data-metric="merged"] .value')?.textContent,
+    ).toBe("2");
+    expect(doc.querySelector('[data-metric="lanes"] .value')?.textContent).toBe(
+      "5",
+    );
   });
 
   test("an unknown metric renders —, never 0", async () => {
@@ -310,14 +434,29 @@ describe("the status page", () => {
     // about outcomes or PRs, and the header must say so.
     const page = await loadPage(statusAt());
     const doc = page.window.document;
-    for (const name of ["settled", "failed", "running", "open", "merged", "failing"]) {
-      expect(doc.querySelector(`[data-metric="${name}"] .value`)?.textContent).toBe("—");
+    for (const name of [
+      "settled",
+      "failed",
+      "running",
+      "open",
+      "merged",
+      "failing",
+    ]) {
+      expect(
+        doc.querySelector(`[data-metric="${name}"] .value`)?.textContent,
+      ).toBe("—");
     }
     // The structural counts are known the moment a status arrives; a known
     // zero (all lanes not alive) is a real answer, unlike an unknown one.
-    expect(doc.querySelector('[data-metric="lanes"] .value')?.textContent).toBe("1");
-    expect(doc.querySelector('[data-metric="alive"] .value')?.textContent).toBe("0");
-    expect(doc.querySelector('[data-metric="waves"] .value')?.textContent).toBe("1");
+    expect(doc.querySelector('[data-metric="lanes"] .value')?.textContent).toBe(
+      "1",
+    );
+    expect(doc.querySelector('[data-metric="alive"] .value')?.textContent).toBe(
+      "0",
+    );
+    expect(doc.querySelector('[data-metric="waves"] .value')?.textContent).toBe(
+      "1",
+    );
   });
 
   test("the container declares two grid rows and the log pane is hidden with no log open", async () => {
@@ -328,10 +467,16 @@ describe("the status page", () => {
     // Two rows with no log open, three with one — the grid sizes both panes;
     // JavaScript only flips the state, it must never listen for resizes.
     expect(style).toMatch(/#page\s*\{[^}]*grid-template-rows:\s*auto 1fr\s*;/);
-    expect(style).toMatch(/#page\.with-log\s*\{[^}]*grid-template-rows:\s*auto 1fr 1fr\s*;/);
+    expect(style).toMatch(
+      /#page\.with-log\s*\{[^}]*grid-template-rows:\s*auto 1fr 1fr\s*;/,
+    );
     expect(style).not.toMatch(/max-height:\s*40vh/);
-    expect(script).not.toMatch(/addEventListener\(\s*["']resize["']|onresize\s*=/);
-    const logView = page.window.document.getElementById("log") as HTMLElement | null;
+    expect(script).not.toMatch(
+      /addEventListener\(\s*["']resize["']|onresize\s*=/,
+    );
+    const logView = page.window.document.getElementById(
+      "log",
+    ) as HTMLElement | null;
     expect(logView?.hidden).toBe(true);
   });
 
@@ -346,9 +491,7 @@ describe("the status page", () => {
     expect(logView?.hidden).toBe(true);
 
     const row = doc.querySelector("tr.lane");
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
       expect(page.fetches).toContain("/api/log/T/t1?tail=16");
       expect(logPane?.hidden).toBe(false);
@@ -356,7 +499,9 @@ describe("the status page", () => {
       expect(container?.classList.contains("with-log")).toBe(true);
     });
 
-    const closeBtn = doc.querySelector('button[aria-label="close"]') as unknown as HTMLElement | null;
+    const closeBtn = doc.querySelector(
+      'button[aria-label="close"]',
+    ) as unknown as HTMLElement | null;
     closeBtn?.click();
     expect(logPane?.hidden).toBe(true);
     expect(logView?.hidden).toBe(true);
@@ -367,17 +512,17 @@ describe("the status page", () => {
     const page = await loadPage(statusAt(), "log-tail");
     const doc = page.window.document;
     const row = doc.querySelector("tr.lane");
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
-      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
+      expect(
+        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
+      ).toBe(false);
     });
 
     const toolbar = doc.getElementById("log-toolbar");
     expect(toolbar).not.toBeNull();
-    expect(doc.getElementById("log-lane")?.textContent).toBe("T/t1");
-    expect(doc.getElementById("log-size")?.textContent).toBe("8 B");
+    expect(doc.getElementById("log-lane")?.textContent?.trim()).toBe("T/t1");
+    expect(doc.getElementById("log-size")?.textContent?.trim()).toBe("8 B");
 
     const expandBtn = toolbar?.querySelector('button[aria-label="expand"]');
     const copyBtn = toolbar?.querySelector('button[aria-label="copy"]');
@@ -385,13 +530,13 @@ describe("the status page", () => {
     const closeBtn = toolbar?.querySelector('button[aria-label="close"]');
 
     expect(expandBtn).not.toBeNull();
-    expect(expandBtn?.textContent).toBe("expand");
+    expect(expandBtn?.textContent?.trim()).toBe("expand");
     expect(copyBtn).not.toBeNull();
-    expect(copyBtn?.textContent).toBe("copy");
+    expect(copyBtn?.textContent?.trim()).toBe("copy");
     expect(downloadBtn).not.toBeNull();
-    expect(downloadBtn?.textContent).toBe("download");
+    expect(downloadBtn?.textContent?.trim()).toBe("download");
     expect(closeBtn).not.toBeNull();
-    expect(closeBtn?.textContent).toBe("close");
+    expect(closeBtn?.textContent?.trim()).toBe("close");
   });
 
   test("expand sets the table row to zero and collapse restores it; the toggle's label changes", async () => {
@@ -399,28 +544,34 @@ describe("the status page", () => {
     const doc = page.window.document;
     const container = doc.getElementById("page");
     const row = doc.querySelector("tr.lane");
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
       expect(container?.classList.contains("with-log")).toBe(true);
     });
 
-    const expandBtn = doc.querySelector('button[aria-label="expand"]') as unknown as HTMLElement;
-    expect(expandBtn.textContent).toBe("expand");
-    expect(page.window.getComputedStyle(container!).gridTemplateRows).toBe("auto 1fr 1fr");
+    const expandBtn = doc.querySelector(
+      'button[aria-label="expand"]',
+    ) as unknown as HTMLElement;
+    expect(expandBtn.textContent?.trim()).toBe("expand");
+    expect(page.window.getComputedStyle(container!).gridTemplateRows).toBe(
+      "auto 1fr 1fr",
+    );
 
     expandBtn.click();
     expect(container?.classList.contains("expanded")).toBe(true);
-    expect(expandBtn.textContent).toBe("collapse");
+    expect(expandBtn.textContent?.trim()).toBe("collapse");
     expect(expandBtn.getAttribute("aria-label")).toBe("collapse");
-    expect(page.window.getComputedStyle(container!).gridTemplateRows).toBe("auto 0 1fr");
+    expect(page.window.getComputedStyle(container!).gridTemplateRows).toBe(
+      "auto 0 1fr",
+    );
 
     expandBtn.click();
     expect(container?.classList.contains("expanded")).toBe(false);
-    expect(expandBtn.textContent).toBe("expand");
+    expect(expandBtn.textContent?.trim()).toBe("expand");
     expect(expandBtn.getAttribute("aria-label")).toBe("expand");
-    expect(page.window.getComputedStyle(container!).gridTemplateRows).toBe("auto 1fr 1fr");
+    expect(page.window.getComputedStyle(container!).gridTemplateRows).toBe(
+      "auto 1fr 1fr",
+    );
   });
 
   test("copy writes the body text without line numbers — assert the clipboard payload", async () => {
@@ -428,14 +579,16 @@ describe("the status page", () => {
     const page = await loadPage(statusAt(), multiline);
     const doc = page.window.document;
     const row = doc.querySelector("tr.lane");
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
-      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
+      expect(
+        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
+      ).toBe(false);
     });
 
-    const copyBtn = doc.querySelector('button[aria-label="copy"]') as unknown as HTMLElement;
+    const copyBtn = doc.querySelector(
+      'button[aria-label="copy"]',
+    ) as unknown as HTMLElement;
     copyBtn.click();
     await vi.waitFor(async () => {
       const text = await page.window.navigator.clipboard.readText();
@@ -449,11 +602,11 @@ describe("the status page", () => {
     const page = await loadPage(statusAt(), multiline);
     const doc = page.window.document;
     const row = doc.querySelector("tr.lane");
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
-      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
+      expect(
+        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
+      ).toBe(false);
     });
 
     const gutters = doc.querySelectorAll(".gutter");
@@ -476,8 +629,18 @@ describe("the status page", () => {
         {
           id: "T",
           lanes: [
-            { wave: "T", lane: "t1", derived: { alive: true }, disagreements: [] },
-            { wave: "T", lane: "t2", derived: { alive: true }, disagreements: [] },
+            {
+              wave: "T",
+              lane: "t1",
+              derived: { alive: true },
+              disagreements: [],
+            },
+            {
+              wave: "T",
+              lane: "t2",
+              derived: { alive: true },
+              disagreements: [],
+            },
           ],
         },
       ],
@@ -504,14 +667,10 @@ describe("the status page", () => {
     expect(rows.length).toBe(2);
 
     // 1. Start opening lane T/t1 (pending)
-    rows[0]?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(rows[0]!.querySelector("button")!, "Enter");
 
     // 2. Start opening lane T/t2 before T/t1 resolves
-    rows[1]?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(rows[1]!.querySelector("button")!, "Enter");
 
     // 3. Resolve the second lane (T/t2) first
     resolveT2(new Response("log for t2", { status: 200 }));
@@ -532,21 +691,25 @@ describe("the status page", () => {
     expect(doc.getElementById("log-lane")?.textContent).toBe("T/t2");
     expect(doc.getElementById("log-size")?.textContent).toBe("10 B");
     expect(doc.getElementById("log")?.textContent).toContain("log for t2");
-    expect(doc.getElementById("log")?.textContent).not.toContain("stale log for t1");
+    expect(doc.getElementById("log")?.textContent).not.toContain(
+      "stale log for t1",
+    );
   });
 
   test("copy reports failure and does not claim success when clipboard API is absent or writeText rejects", async () => {
     const page = await loadPage(statusAt(), "sample log");
     const doc = page.window.document;
     const row = doc.querySelector("tr.lane");
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
-      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
+      expect(
+        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
+      ).toBe(false);
     });
 
-    const copyBtn = doc.querySelector('button[aria-label="copy"]') as unknown as HTMLElement;
+    const copyBtn = doc.querySelector(
+      'button[aria-label="copy"]',
+    ) as unknown as HTMLElement;
 
     // A: navigator.clipboard absent
     Object.defineProperty(page.window.navigator, "clipboard", {
@@ -555,21 +718,23 @@ describe("the status page", () => {
     });
     copyBtn.click();
     await vi.waitFor(() => {
-      expect(copyBtn.textContent).not.toBe("copied");
-      expect(copyBtn.textContent).toBe("copy failed");
+      expect(copyBtn.textContent?.trim()).not.toBe("copied");
+      expect(copyBtn.textContent?.trim()).toBe("copy failed");
     });
 
     // B: writeText rejects
     Object.defineProperty(page.window.navigator, "clipboard", {
       value: {
-        writeText: vi.fn().mockRejectedValue(new Error("clipboard permission denied")),
+        writeText: vi
+          .fn()
+          .mockRejectedValue(new Error("clipboard permission denied")),
       },
       configurable: true,
     });
     copyBtn.click();
     await vi.waitFor(() => {
-      expect(copyBtn.textContent).not.toBe("copied");
-      expect(copyBtn.textContent).toBe("copy failed");
+      expect(copyBtn.textContent?.trim()).not.toBe("copied");
+      expect(copyBtn.textContent?.trim()).toBe("copy failed");
     });
   });
 
@@ -578,11 +743,11 @@ describe("the status page", () => {
     const page = await loadPage(statusAt(), multiline);
     const doc = page.window.document;
     const row = doc.querySelector("tr.lane");
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
-      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
+      expect(
+        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
+      ).toBe(false);
     });
 
     // Gutter user-select set to auto (e.g. style change)
@@ -593,7 +758,9 @@ describe("the status page", () => {
       expect(page.window.getComputedStyle(gutter).userSelect).toBe("auto");
     }
 
-    const copyBtn = doc.querySelector('button[aria-label="copy"]') as unknown as HTMLElement;
+    const copyBtn = doc.querySelector(
+      'button[aria-label="copy"]',
+    ) as unknown as HTMLElement;
     copyBtn.click();
 
     await vi.waitFor(async () => {
@@ -607,12 +774,12 @@ describe("the status page", () => {
     const page = await loadPage(statusAt(), splitBytes);
     const doc = page.window.document;
     const row = doc.querySelector("tr.lane");
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(row!.querySelector("button")!, "Enter");
 
     await vi.waitFor(() => {
-      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
+      expect(
+        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
+      ).toBe(false);
       expect(doc.getElementById("log-size")?.textContent).toBe("3 B");
     });
   });
@@ -621,11 +788,11 @@ describe("the status page", () => {
     const page = await loadPage(statusAt(), "log content", { width: 320 });
     const doc = page.window.document;
     const row = doc.querySelector("tr.lane");
-    row?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(row!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
-      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
+      expect(
+        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
+      ).toBe(false);
     });
 
     const toolbar = doc.getElementById("log-toolbar");
@@ -659,7 +826,9 @@ describe("the status page", () => {
       };
     }
 
-    const rules = Array.from(sheet.cssRules) as unknown as readonly StyleRuleLike[];
+    const rules = Array.from(
+      sheet.cssRules,
+    ) as unknown as readonly StyleRuleLike[];
 
     const controls = doc.querySelectorAll("#log-toolbar button");
     expect(controls.length).toBeGreaterThan(0);
@@ -675,8 +844,12 @@ describe("the status page", () => {
       expect(rule?.style.borderColor).toBe("var(--color-border-control)");
     }
 
-    const hoverRule = rules.find((r) => r.selectorText === "#log-toolbar button:hover");
-    expect(hoverRule?.style.borderColor).toBe("var(--color-border-control-hover)");
+    const hoverRule = rules.find(
+      (r) => r.selectorText === "#log-toolbar button:hover",
+    );
+    expect(hoverRule?.style.borderColor).toBe(
+      "var(--color-border-control-hover)",
+    );
 
     // At least one frame still resolves to the frame token
     const frame = doc.getElementById("log-pane");
@@ -706,42 +879,52 @@ describe("the status page", () => {
 
     const downloads: Array<{ href: string; download: string }> = [];
     const origCreateElement = doc.createElement.bind(doc);
-    vi.spyOn(doc, "createElement").mockImplementation((tagName: string, ...args) => {
-      const el = origCreateElement(tagName, ...args);
-      if (tagName.toLowerCase() === "a") {
-        vi.spyOn(el, "click").mockImplementation(() => {
-          downloads.push({
-            href: el.getAttribute("href") ?? (el as unknown as { href: string }).href,
-            download: el.getAttribute("download") ?? (el as unknown as { download: string }).download,
+    vi.spyOn(doc, "createElement").mockImplementation(
+      (tagName: string, ...args) => {
+        const el = origCreateElement(tagName, ...args);
+        if (tagName.toLowerCase() === "a") {
+          vi.spyOn(el, "click").mockImplementation(() => {
+            downloads.push({
+              href:
+                el.getAttribute("href") ??
+                (el as unknown as { href: string }).href,
+              download:
+                el.getAttribute("download") ??
+                (el as unknown as { download: string }).download,
+            });
           });
-        });
-      }
-      return el;
-    });
+        }
+        return el;
+      },
+    );
 
     // Open first lane: T/t1
-    rows[0]?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(rows[0]!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
-      expect((doc.getElementById("log-pane") as HTMLElement | null)?.hidden).toBe(false);
+      expect(
+        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
+      ).toBe(false);
       expect(doc.getElementById("log-lane")?.textContent).toBe("T/t1");
     });
 
-    const downloadBtn = doc.querySelector('button[aria-label="download"]') as HTMLElement | null;
+    const downloadBtn = doc.querySelector(
+      'button[aria-label="download"]',
+    ) as HTMLElement | null;
     expect(downloadBtn).not.toBeNull();
 
     const fetchesAfterLane1 = page.fetches.length;
     downloadBtn?.click();
 
-    expect(downloads).toEqual([{ href: "/api/log/T/t1?full=1", download: "T-t1.log" }]);
+    expect(downloads).toEqual([
+      { href: "/api/log/T/t1?full=1", download: "T-t1.log" },
+    ]);
     expect(page.fetches.length).toBe(fetchesAfterLane1);
-    expect(page.fetches.filter((url) => url.includes("full=1"))).toHaveLength(0);
+    expect(page.fetches.filter((url) => url.includes("full=1"))).toHaveLength(
+      0,
+    );
 
     // Switch to second lane: T/t2
-    rows[1]?.dispatchEvent(
-      new page.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    press(rows[1]!.querySelector("button")!, "Enter");
     await vi.waitFor(() => {
       expect(doc.getElementById("log-lane")?.textContent).toBe("T/t2");
     });
@@ -754,7 +937,545 @@ describe("the status page", () => {
       { href: "/api/log/T/t2?full=1", download: "T-t2.log" },
     ]);
     expect(page.fetches.length).toBe(fetchesAfterLane2);
-    expect(page.fetches.filter((url) => url.includes("full=1"))).toHaveLength(0);
+    expect(page.fetches.filter((url) => url.includes("full=1"))).toHaveLength(
+      0,
+    );
+  });
+
+  test("every wave renders collapsed, and its lanes are not present or not visible until it is opened", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    const waveRows = doc.querySelectorAll("tr.wave");
+    expect(waveRows.length).toBe(2);
+
+    for (const waveRow of waveRows) {
+      expect(
+        waveRow.querySelector("button")?.getAttribute("aria-expanded"),
+      ).toBe("false");
+    }
+
+    const laneRows = doc.querySelectorAll("tr.lane");
+    expect(laneRows.length).toBe(5);
+    for (const laneRow of laneRows) {
+      expect((laneRow as unknown as HTMLElement).hidden).toBe(true);
+    }
+  });
+
+  test("opening a wave reveals its lanes and their disagreement rows; closing hides both", async () => {
+    const statusWithDisagreement: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "W",
+          lanes: [
+            {
+              wave: "W",
+              lane: "w1",
+              derived: { alive: true },
+              disagreements: ["lane disagreement banner"],
+            },
+            {
+              wave: "W",
+              lane: "w2",
+              derived: { alive: false },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    const page = await loadPage(statusWithDisagreement);
+    const doc = page.window.document;
+    const waveRow = doc.querySelector("tr.wave") as unknown as HTMLElement;
+    const laneRows = doc.querySelectorAll("tr.lane");
+    const disagreementRows = doc.querySelectorAll("tr.disagreement");
+    expect(laneRows.length).toBe(2);
+    expect(disagreementRows.length).toBe(1);
+
+    // Initially collapsed
+    expect((laneRows[0] as unknown as HTMLElement | undefined)?.hidden).toBe(
+      true,
+    );
+    expect((laneRows[1] as unknown as HTMLElement | undefined)?.hidden).toBe(
+      true,
+    );
+    expect(
+      (disagreementRows[0] as unknown as HTMLElement | undefined)?.hidden,
+    ).toBe(true);
+
+    const waveButton = waveRow.querySelector("button")!;
+
+    // Open wave
+    waveRow.click();
+    expect(waveButton.getAttribute("aria-expanded")).toBe("true");
+    expect((laneRows[0] as unknown as HTMLElement | undefined)?.hidden).toBe(
+      false,
+    );
+    expect((laneRows[1] as unknown as HTMLElement | undefined)?.hidden).toBe(
+      false,
+    );
+    expect(
+      (disagreementRows[0] as unknown as HTMLElement | undefined)?.hidden,
+    ).toBe(false);
+
+    // Close wave
+    waveRow.click();
+    expect(waveButton.getAttribute("aria-expanded")).toBe("false");
+    expect((laneRows[0] as unknown as HTMLElement | undefined)?.hidden).toBe(
+      true,
+    );
+    expect((laneRows[1] as unknown as HTMLElement | undefined)?.hidden).toBe(
+      true,
+    );
+    expect(
+      (disagreementRows[0] as unknown as HTMLElement | undefined)?.hidden,
+    ).toBe(true);
+  });
+
+  test("the wave row's button is reachable by keyboard and carries aria-expanded in both states", async () => {
+    const page = await loadPage(statusAt());
+    const doc = page.window.document;
+    const waveRow = doc.querySelector("tr.wave") as unknown as HTMLElement;
+    expect(waveRow).not.toBeNull();
+    expect(waveRow.getAttribute("role")).not.toBe("button");
+    expect(waveRow.getAttribute("tabindex")).toBeNull();
+    const button = waveRow.querySelector("button")!;
+    expect(button.tagName).toBe("BUTTON");
+    expect(button.getAttribute("tabindex")).toBe("0");
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+
+    press(button, "Enter");
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+
+    press(button, " ");
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  test("the wave row shows which wave it is and how many lanes are inside", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    const waveRows = doc.querySelectorAll("tr.wave");
+    expect(waveRows[0]?.textContent).toContain("wave T");
+    expect(waveRows[0]?.textContent).toContain("4 lanes");
+    expect(waveRows[1]?.textContent).toContain("wave U");
+    expect(waveRows[1]?.textContent).toContain("1 lane");
+  });
+
+  test("an opened wave is still open after a re-render", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    const waveRows = doc.querySelectorAll("tr.wave");
+    expect(waveRows.length).toBe(2);
+
+    const waveT = waveRows[0] as unknown as HTMLElement;
+    const waveU = waveRows[1] as unknown as HTMLElement;
+    expect(waveT.dataset.wave).toBe("T");
+    expect(waveU.dataset.wave).toBe("U");
+
+    // Open wave T
+    waveT.click();
+    expect(waveT.querySelector("button")?.getAttribute("aria-expanded")).toBe(
+      "true",
+    );
+    expect(waveU.querySelector("button")?.getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+
+    // Re-render via SSE status event
+    page.source.emit("status", JSON.stringify(mixedStatus));
+
+    const updatedWaveRows = doc.querySelectorAll("tr.wave");
+    const updatedWaveT = updatedWaveRows[0] as unknown as HTMLElement;
+    const updatedWaveU = updatedWaveRows[1] as unknown as HTMLElement;
+
+    expect(
+      updatedWaveT.querySelector("button")?.getAttribute("aria-expanded"),
+    ).toBe("true");
+    expect(
+      updatedWaveU.querySelector("button")?.getAttribute("aria-expanded"),
+    ).toBe("false");
+
+    const lanesT = doc.querySelectorAll(
+      'tr.lane[data-wave="T"]',
+    ) as unknown as NodeListOf<HTMLElement>;
+    for (const lane of lanesT) {
+      expect(lane.hidden).toBe(false);
+    }
+    const lanesU = doc.querySelectorAll(
+      'tr.lane[data-wave="U"]',
+    ) as unknown as NodeListOf<HTMLElement>;
+    for (const lane of lanesU) {
+      expect(lane.hidden).toBe(true);
+    }
+  });
+
+  test("a re-render leaves the focused wave's button focused, and a vanished row gets nothing back", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    const waveT = doc.querySelector(
+      'tr.wave[data-wave="T"]',
+    ) as unknown as HTMLElement;
+    const waveTButton = waveT.querySelector("button")!;
+    waveTButton.focus();
+    expect(doc.activeElement).toBe(waveTButton);
+
+    page.source.emit("status", JSON.stringify(mixedStatus));
+    const reRendered = doc.querySelector(
+      'tr.wave[data-wave="T"]',
+    ) as unknown as HTMLElement;
+    const reRenderedButton = reRendered.querySelector("button")!;
+    expect(reRendered).not.toBe(waveT);
+    expect(doc.activeElement).toBe(reRenderedButton);
+
+    // A wave that is gone is gone: do not guess at a neighbour row.
+    const withoutTwo: WaveStatus = {
+      generatedAt: "now",
+      waves: mixedStatus.waves.filter((wave) => wave.id !== "T"),
+    };
+    page.source.emit("status", JSON.stringify(withoutTwo));
+    expect(doc.querySelector('tr.wave[data-wave="T"]')).toBeNull();
+    expect(doc.activeElement).toBe(doc.body);
+  });
+
+  test("with sorting on, focus follows lane identity across a re-render, not row position", async () => {
+    const before: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "W",
+          lanes: [
+            {
+              wave: "W",
+              lane: "l_hot",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 3000, tail: "" },
+              },
+              disagreements: [],
+            },
+            {
+              wave: "W",
+              lane: "l_cold",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 1000, tail: "" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+    const after: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "W",
+          lanes: [
+            {
+              wave: "W",
+              lane: "l_hot",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 1000, tail: "" },
+              },
+              disagreements: [],
+            },
+            {
+              wave: "W",
+              lane: "l_cold",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 3000, tail: "" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    const page = await loadPage(before);
+    const doc = page.window.document;
+    (doc.querySelector("tr.wave") as unknown as HTMLElement).click();
+    const hot = doc.querySelector(
+      'tr.lane[data-lane="l_hot"]',
+    ) as unknown as HTMLElement;
+    const hotButton = hot.querySelector("button")!;
+    hotButton.focus();
+    expect(doc.activeElement).toBe(hotButton);
+    expect(
+      (doc.querySelectorAll("tr.lane")[0] as unknown as HTMLElement).dataset
+        .lane,
+    ).toBe("l_hot");
+
+    page.source.emit("status", JSON.stringify(after));
+
+    // Prove the re-sort actually happened: l_cold is now the more recently
+    // updated lane, so it must lead and l_hot must have moved off row 0. If
+    // sorting silently stopped working, l_hot would stay at index 0 and a
+    // position-based focus restore would satisfy the assertions below just
+    // as well as an identity-based one — this is what rules that out.
+    const rowsAfter = doc.querySelectorAll("tr.lane");
+    expect((rowsAfter[0] as unknown as HTMLElement).dataset.lane).toBe(
+      "l_cold",
+    );
+    expect((rowsAfter[1] as unknown as HTMLElement).dataset.lane).toBe("l_hot");
+
+    const hotAgain = doc.querySelector(
+      'tr.lane[data-lane="l_hot"]',
+    ) as unknown as HTMLElement;
+    const hotAgainButton = hotAgain.querySelector("button")!;
+    expect(hotAgain).not.toBe(hot);
+    expect(hotAgain).toBe(rowsAfter[1]);
+    expect(doc.activeElement).toBe(hotAgainButton);
+  });
+
+  test("each wave control names the one element that holds its rows, and the names are unique", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    const waveRows = Array.from(doc.querySelectorAll("tr.wave"));
+    expect(waveRows.length).toBe(2);
+
+    const seen = new Set<string>();
+    for (const waveRow of waveRows) {
+      const control = waveRow
+        .querySelector("button")
+        ?.getAttribute("aria-controls");
+      expect(control).toBeTruthy();
+      expect(seen.has(control!)).toBe(false);
+      seen.add(control!);
+      const group = doc.getElementById(control!);
+      expect(group).not.toBeNull();
+      for (const lane of group!.querySelectorAll("tr.lane")) {
+        expect(lane.getAttribute("data-wave")).toBe(
+          waveRow.getAttribute("data-wave"),
+        );
+      }
+    }
+  });
+
+  test("with sorting on, a lane whose log.mtimeMs is newest appears first, and a lane with no log is last", async () => {
+    const statusWithMtimes: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "W",
+          lanes: [
+            {
+              wave: "W",
+              lane: "l_mid",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 2000, tail: "" },
+              },
+              disagreements: [],
+            },
+            {
+              wave: "W",
+              lane: "l_old",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 1000, tail: "" },
+              },
+              disagreements: [],
+            },
+            {
+              wave: "W",
+              lane: "l_new",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 3000, tail: "" },
+              },
+              disagreements: [],
+            },
+            {
+              wave: "W",
+              lane: "l_nolog",
+              derived: { alive: false },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    const page = await loadPage(statusWithMtimes);
+    const doc = page.window.document;
+    const lanes = Array.from(doc.querySelectorAll('tr.lane[data-wave="W"]'));
+    expect(lanes.length).toBe(4);
+
+    const laneIds = lanes.map((el) => el.getAttribute("data-lane"));
+    expect(laneIds[0]).toBe("l_new");
+    expect(laneIds[1]).toBe("l_mid");
+    expect(laneIds[2]).toBe("l_old");
+    expect(laneIds[3]).toBe("l_nolog");
+  });
+
+  test("the switch has an accessible name, flipping it restores the server order without a refresh, and the choice survives a reload", async () => {
+    const statusWithMtimes: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "W",
+          lanes: [
+            {
+              wave: "W",
+              lane: "l_server1",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 1000, tail: "" },
+              },
+              disagreements: [],
+            },
+            {
+              wave: "W",
+              lane: "l_server2",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 3000, tail: "" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    const page = await loadPage(statusWithMtimes);
+    const doc = page.window.document;
+    const switchEl = doc.getElementById(
+      "sort-switch",
+    ) as unknown as HTMLElement;
+    expect(switchEl).not.toBeNull();
+    expect(switchEl.getAttribute("role")).toBe("switch");
+    expect(switchEl.getAttribute("aria-label")).toBeTruthy();
+    expect(switchEl.getAttribute("aria-label")).toMatch(/sort/i);
+    expect(switchEl.getAttribute("aria-checked")).toBe("true");
+
+    // Initially sorted newest first
+    let lanes = Array.from(doc.querySelectorAll('tr.lane[data-wave="W"]'));
+    expect(lanes.map((l) => l.getAttribute("data-lane"))).toEqual([
+      "l_server2",
+      "l_server1",
+    ]);
+
+    const fetchCountBefore = page.fetches.length;
+
+    // Flip switch off
+    switchEl.click();
+    expect(switchEl.getAttribute("aria-checked")).toBe("false");
+
+    // Server order is restored without any network fetch
+    lanes = Array.from(doc.querySelectorAll('tr.lane[data-wave="W"]'));
+    expect(lanes.map((l) => l.getAttribute("data-lane"))).toEqual([
+      "l_server1",
+      "l_server2",
+    ]);
+    expect(page.fetches.length).toBe(fetchCountBefore);
+
+    // Stored preference is saved in localStorage
+    expect(page.window.localStorage.getItem("wave-status:sort")).toBe("false");
+
+    // Survives a reload
+    const reloadedPage = await loadPage(statusWithMtimes, undefined, {
+      storage: { "wave-status:sort": "false" },
+    });
+    const reloadedDoc = reloadedPage.window.document;
+    const reloadedSwitch = reloadedDoc.getElementById(
+      "sort-switch",
+    ) as unknown as HTMLElement;
+    expect(reloadedSwitch.getAttribute("aria-checked")).toBe("false");
+    const reloadedLanes = Array.from(
+      reloadedDoc.querySelectorAll('tr.lane[data-wave="W"]'),
+    );
+    expect(reloadedLanes.map((l) => l.getAttribute("data-lane"))).toEqual([
+      "l_server1",
+      "l_server2",
+    ]);
+  });
+
+  test("a localStorage read that throws still renders with sorting on", async () => {
+    const statusWithMtimes: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "W",
+          lanes: [
+            {
+              wave: "W",
+              lane: "l_old",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 1000, tail: "" },
+              },
+              disagreements: [],
+            },
+            {
+              wave: "W",
+              lane: "l_new",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 3000, tail: "" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    const page = await loadPage(statusWithMtimes, undefined, {
+      mockStorageError: true,
+    });
+    const doc = page.window.document;
+    const switchEl = doc.getElementById(
+      "sort-switch",
+    ) as unknown as HTMLElement;
+    expect(switchEl.getAttribute("aria-checked")).toBe("true");
+
+    const lanes = Array.from(doc.querySelectorAll('tr.lane[data-wave="W"]'));
+    expect(lanes.map((l) => l.getAttribute("data-lane"))).toEqual([
+      "l_new",
+      "l_old",
+    ]);
+  });
+
+  test("the sort switch control resolves its border to the control token", async () => {
+    const page = await loadPage(statusAt());
+    const doc = page.window.document;
+    const sheet = doc.styleSheets[0];
+    const style = await pageStyle();
+
+    interface StyleRuleLike {
+      readonly selectorText: string;
+      readonly style: {
+        readonly borderColor?: string;
+        readonly border?: string;
+      };
+    }
+
+    const rules = Array.from(
+      sheet.cssRules,
+    ) as unknown as readonly StyleRuleLike[];
+    const sortSwitch = doc.getElementById("sort-switch");
+    expect(sortSwitch).not.toBeNull();
+
+    const rule = rules.find(
+      (r) =>
+        r.selectorText !== undefined &&
+        !r.selectorText.includes(":") &&
+        sortSwitch!.matches(r.selectorText) &&
+        Boolean(r.style.borderColor || r.style.border),
+    );
+    expect(rule?.style.borderColor).toBe("var(--color-border-control)");
+
+    expect(style).toMatch(
+      /#sort-switch\s*\{[^}]*border:\s*1px solid var\(--color-border-control\)/,
+    );
+    expect(style).toMatch(
+      /#sort-switch:hover\s*\{[^}]*border-color:\s*var\(--color-border-control-hover\)/,
+    );
   });
 });
-
