@@ -30,6 +30,36 @@ record.
 
 ## 1. Findings
 
+#### **F0 · C · The brief's template never reaches the compositor at all**
+
+**Everything the templates arc shipped is inert at render time.** The reorder control, the ordering
+constraints, the occlusion guard, the layer list itself — all validated, all stored, all reflected in
+the editor's own preview, and **all ignored when a campaign renders.**
+
+**Evidence.**
+- `CompositorPort.ts` — `CompositeRequest` has **no `template` and no `creativeType` field**.
+  `VideoCompositorPort` extends it and adds none.
+- `GenerateCampaignUseCase` and `PreviewCreativeFrameUseCase` build those requests and **neither
+  passes a template**. The only mention of the word across the whole application layer is one
+  comment.
+- `NodeCanvasCompositor.prepare` accepts an optional `template`, and its own comment says the field
+  "stays off the port interface until L3 wires it through". **L3a and L3b shipped; the port was never
+  touched.**
+- `resolveLayerList(undefined, undefined)` therefore falls through to
+  `CANONICAL_TEMPLATES["image-text"]` for every still, poster, MP4 frame and preview frame. The only
+  callers that pass a template are tests.
+
+**Mechanism.** A user reorders layers in the Template section. The order passes `validateTemplate`
+and `isBriefTemplate`, is persisted in the brief, and renders in the canonical order regardless.
+
+**What it changes.** MP-D1's *"like the still path already does"* is true at the adapter seam and
+**false in the product**. M1 is necessary but not sufficient, and a wiring lane must follow it.
+
+**Sequencing matters and is counter-intuitive.** M1 must land **before** the wiring, not after. While
+the template is unwired, M1's list is always the canonical one, so byte-identity is trivially
+preserved and the refactor is safe. **Wiring first would open F1's hazard for every reorder rather
+than only for toggles** — the still image would honour the user's order while the video ignored it.
+
 #### **F1 · C · L9's definition of done cannot be met on timeline briefs**
 
 L9's DoD says *"a disabled optional layer is absent from the draw list"*. True on the still path,
@@ -89,17 +119,24 @@ required layer*.
 | Lane | Task | Owns | Buys |
 |---|---|---|---|
 | **M1** | **The motion path iterates the list.** Keep the drawn order identical for canonical templates so goldens do not move; the change is *where the order comes from*, not what it is. Prove byte-identity on the canonical set before anything else. | `NodeCanvasCompositor.ts`, its tests | L9 becomes possible |
+| **M1b** | **Wire `template` through the port.** Add it to `CompositeRequest`, pass it from both use cases, and decide whether the kit's `PREVIEW_LAYER_ORDER` follows the brief or stays canonical — it derives from `CANONICAL_TEMPLATES` today, so preview and compositor agree only because **both** ignore the brief. **Must land after M1.** | `CompositorPort.ts`, both use cases, port test doubles, possibly `preview-layers.ts` | The arc stops being inert |
 | **M2** | **`enabled` reaches the boundary**: the field, its validation in `isBriefTemplate` and `validateTemplate`, its slot in `LAYER_KEY_ORDER`, and MP-D4/MP-D5 counting rules. | `creative-templates.ts`, `brief-template.ts`, `brief-yaml.ts`, `load-brief.ts` | The contract L9's UI needs |
 | **M3** | **The toggle itself** (D129) — the control, the reducer action, and MP-D3's occlusion rule over the enabled subset. | `editor-state.ts`, `derive.ts`, `TemplateSection.tsx`, `messages.ts` | L9 |
 | **M4** | **Amend the templates plan**: F3's L7 status, F4's ownership list, F5's DoD wording, and D136 as half-shipped. | `2026-09-08_creative-templates-and-units.md` | The plan stops asserting things that are not true |
 
-**Order.** M1 → M2 → M3, strictly. M4 whenever. **M1 is the gate**: if the canonical goldens move,
+**Order.** M1 → **M1b** → M2 → M3, strictly. M4 whenever. **M1 is the gate**: if the canonical goldens move,
 stop and report rather than re-recording them — a golden that changes under a refactor is either a
 real behaviour change or a bug, and both want a decision.
 
 ## 3. Definition of Done
 
-- **M1**: every canonical template renders byte-identical before and after; a template whose list
+- **M1**: every canonical template renders byte-identical before and after — proven per frame through
+  `NodeCanvasCompositor.draw`, since **there is no video byte golden** and D10's freeze is not backed
+  by one. `NodeCanvasCompositor.layer-order.test.ts` pins the by-kind order deliberately and is
+  **expected to go red and be rewritten**; that is not a golden moving.
+- **M1b**: a reordered template renders in that order on **both** paths, and the editor preview agrees
+  with the compositor or is explicitly documented as canonical-only.
+- **M1**: (superseded above); a template whose list
   omits a ground kind omits it from **both** paths. Proven by mutation, not by inspection.
 - **M2**: `enabled: "yes"` is refused at both boundaries; a disabled layer survives a YAML round trip
   in its declared key position; two disabled `image` layers are refused under MP-D4.
