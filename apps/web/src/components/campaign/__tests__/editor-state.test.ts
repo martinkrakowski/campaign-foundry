@@ -45,9 +45,13 @@ import {
   DEFAULT_DURATION_SEC,
   MAX_BEATS,
   MAX_WEIGHT,
+  checkTemplateOcclusion,
+  findRepositionFinding,
+  formatOcclusionNotice,
   type EditorState,
   type EditorAction,
 } from "../editor-state";
+import * as messages from "../messages";
 import { dumpBrief } from "@campaignfoundry/shared";
 import { type Style } from "@campaignfoundry/CampaignOrchestration/creative-style";
 import { load } from "js-yaml";
@@ -1429,18 +1433,169 @@ describe("draft storage", () => {
       initial,
     );
 
-    // 5. addLayer and removeLayer reset occlusionNotice to null
-    const afterAdd = editorReducer(movedToOcclusion, {
-      type: "addLayer",
-      kind: "image",
-    });
-    expect(afterAdd.occlusionNotice).toBeNull();
-
-    const afterRemove = editorReducer(movedToOcclusion, {
+    // 5. removing an unrelated layer keeps the occlusion notice (L8o-fix4)
+    const afterRemoveUnrelated = editorReducer(movedToOcclusion, {
       type: "removeLayer",
       id: "logo",
     });
-    expect(afterRemove.occlusionNotice).toBeNull();
+    expect(afterRemoveUnrelated.occlusionNotice).toBe(
+      "the accent layer now sits above the headline and will mute it",
+    );
+
+    // 6. removing the occluding layer itself clears the notice (L8o-fix4)
+    const afterRemoveOccluding = editorReducer(afterRemoveUnrelated, {
+      type: "removeLayer",
+      id: "accent",
+    });
+    expect(afterRemoveOccluding.occlusionNotice).toBeNull();
+  });
+
+  test("a template with an occlusion keeps its notice when an unrelated layer is added and when an unrelated one is removed; removing the occluding layer itself clears it (L8o-fix4)", () => {
+    // A video template with shade sitting above animated-text (genuine occlusion)
+    const canonicalVideo = templateFromCanonical("short-video");
+    const occludingVideoState: EditorState = {
+      ...base(),
+      template: {
+        ...canonicalVideo,
+        layers: [
+          canonicalVideo.layers[0]!, // video (0)
+          canonicalVideo.layers[2]!, // animated-text (1)
+          canonicalVideo.layers[1]!, // shade (2) — sits above animated-text
+        ],
+      },
+      occlusionNotice:
+        "the shade layer now sits above the headline and will mute it",
+    };
+
+    // 1. Adding an unrelated layer (video) keeps the notice
+    const afterAddUnrelated = editorReducer(occludingVideoState, {
+      type: "addLayer",
+      kind: "video",
+    });
+    expect(afterAddUnrelated.occlusionNotice).toBe(
+      "the shade layer now sits above the headline and will mute it",
+    );
+
+    // 2. Removing an unrelated layer keeps the notice
+    const afterRemoveUnrelated = editorReducer(afterAddUnrelated, {
+      type: "removeLayer",
+      id: "video-2",
+    });
+    expect(afterRemoveUnrelated.occlusionNotice).toBe(
+      "the shade layer now sits above the headline and will mute it",
+    );
+
+    // 3. Removing the occluding layer itself (shade) clears it
+    const afterRemoveOccluding = editorReducer(afterRemoveUnrelated, {
+      type: "removeLayer",
+      id: "shade",
+    });
+    expect(afterRemoveOccluding.occlusionNotice).toBeNull();
+  });
+
+  test("occlusion notice comes from the message catalog and not from the domain (D2, D18)", () => {
+    const initial = initialEditorState("brief");
+    const spy = vi
+      .spyOn(messages, "templateOcclusionNote")
+      .mockReturnValue("catalog-derived occlusion note");
+    try {
+      const moved = editorReducer(initial, {
+        type: "moveLayer",
+        from: 2,
+        to: 3,
+      });
+      expect(spy).toHaveBeenCalledWith("Accent", "Static text", "mute");
+      expect(moved.occlusionNotice).toBe("catalog-derived occlusion note");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("formatOcclusionNotice formats findings for all behavior classes and handles null", () => {
+    expect(formatOcclusionNotice(null)).toBeNull();
+    expect(
+      formatOcclusionNotice({
+        above: "image",
+        below: "accent",
+        behavior: "opaque",
+      }),
+    ).toBe("the image layer now sits above the accent and will hide it");
+    expect(
+      formatOcclusionNotice({
+        above: "shade",
+        below: "static-text",
+        behavior: "attenuating",
+      }),
+    ).toBe("the shade layer now sits above the headline and will mute it");
+    expect(
+      formatOcclusionNotice({
+        above: "logo",
+        below: "static-text",
+        behavior: "local",
+      }),
+    ).toBe(
+      "the logo layer now sits above the headline and will overlap where it sits",
+    );
+  });
+
+  test("checkTemplateOcclusion and findRepositionFinding detect occluding pairs and non-occluding stacks", () => {
+    // Non-occluding template
+    const cleanStack = [
+      { id: "image", kind: "image" as const },
+      { id: "shade", kind: "shade" as const },
+      { id: "static-text", kind: "static-text" as const },
+    ];
+    expect(checkTemplateOcclusion(cleanStack)).toBeNull();
+
+    // Occluding template (shade above static-text)
+    const occludingStack = [
+      { id: "image", kind: "image" as const },
+      { id: "static-text", kind: "static-text" as const },
+      { id: "shade", kind: "shade" as const },
+    ];
+    expect(checkTemplateOcclusion(occludingStack)).toEqual({
+      above: "shade",
+      below: "static-text",
+      behavior: "attenuating",
+    });
+
+    // findRepositionFinding: moving layer down under an occluding layer
+    const afterMoveDown = [
+      { id: "image", kind: "image" as const },
+      { id: "static-text", kind: "static-text" as const },
+      { id: "shade", kind: "shade" as const },
+    ];
+    const downFinding = findRepositionFinding(afterMoveDown, 1, 2);
+    expect(downFinding).toEqual({
+      above: "shade",
+      below: "static-text",
+      behavior: "attenuating",
+    });
+
+    // findRepositionFinding: move creating no occlusion
+    const noOcclusionMove = [
+      { id: "image", kind: "image" as const },
+      { id: "shade", kind: "shade" as const },
+      { id: "accent", kind: "accent" as const },
+    ];
+    expect(findRepositionFinding(noOcclusionMove, 2, 1)).toBeNull();
+
+    // findRepositionFinding: ignore pairs that were already occluded before the reposition (lines 881, 895)
+    // 1. Layer above subject was already occluding it before the move
+    const layersAbovePreExisting = [
+      { id: "video", kind: "video" as const },
+      { id: "static-text", kind: "static-text" as const },
+      { id: "shade", kind: "shade" as const },
+    ];
+    expect(findRepositionFinding(layersAbovePreExisting, 1, 0)).toBeNull();
+
+    // 2. Layer below subject was already occluded by it before the move
+    const layersBelowPreExisting = [
+      { id: "static-text", kind: "static-text" as const },
+      { id: "video", kind: "video" as const },
+      { id: "shade", kind: "shade" as const },
+    ];
+    expect(findRepositionFinding(layersBelowPreExisting, 2, 1)).toBeNull();
   });
 
   test("occlusionNotice never survives a round-trip (D135)", () => {

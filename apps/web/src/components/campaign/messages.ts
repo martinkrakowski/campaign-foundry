@@ -14,8 +14,7 @@
 // --- Identity ---
 
 /** `briefId` */
-export const briefId =
-  "Brief ID can only use small letters, numbers and dashes — try something like summer-spark.";
+export const briefId = "Brief ID can only use small letters, numbers and dashes — try something like summer-spark.";
 /** `briefId.duplicate` */
 export function briefIdDuplicate(conflictingId: string): string {
   return `A brief called ${conflictingId} already exists — pick a different Brief ID.`;
@@ -30,8 +29,7 @@ export function saveAsIdSuggestion(slug: string): string {
 /** `targetRegion` */
 export const targetRegion = "No region yet — pick one of the region chips.";
 /** `targetAudience` */
-export const targetAudience =
-  "No audience yet — tell us who this campaign is for.";
+export const targetAudience = "No audience yet — tell us who this campaign is for.";
 export const campaignNameLabel = "Campaign Name";
 export const campaignNamePlaceholder = "e.g. Summer Spark";
 export const briefIdReadout = "This is the brief id — made from the name";
@@ -44,17 +42,14 @@ export const targetRegionOtherPlaceholder = "e.g. LATAM";
 /** Names the free-text box the Other… chip reveals; the group label cannot name it. */
 export const targetRegionOtherInputLabel = "Target Region — other";
 export const targetAudienceLabel = "Target Audience";
-export const targetAudiencePlaceholder =
-  "e.g. urban outdoor enthusiasts, 25-40";
+export const targetAudiencePlaceholder = "e.g. urban outdoor enthusiasts, 25-40";
 
 // --- Copy ---
 
 /** `campaignMessage` */
-export const campaignMessage =
-  "No message yet — write the one line you want people to remember.";
+export const campaignMessage = "No message yet — write the one line you want people to remember.";
 /** `campaignMessage.length` */
-export const campaignMessageTooLong =
-  "Headline is longer than 60 characters — make it shorter.";
+export const campaignMessageTooLong = "Headline is longer than 60 characters — make it shorter.";
 export const headlineLabel = "Headline";
 export const headlinePlaceholder = "e.g. Stay wild. Stay hydrated.";
 export function headlineCounter(current: number, max = 60): string {
@@ -93,8 +88,7 @@ export const productLogoLabel = "Logo";
 export const productRemove = "Remove";
 export const productUploadErrorFallback = "Upload failed";
 /** `product-N-id` */
-export const productId =
-  "Product ID can only use small letters, numbers and dashes — try something like acrobat-pro.";
+export const productId = "Product ID can only use small letters, numbers and dashes — try something like acrobat-pro.";
 /** `product-N-id.duplicate` */
 export function productIdDuplicate(id: string): string {
   return `Two products share the ID ${id} — give this one its own.`;
@@ -102,8 +96,7 @@ export function productIdDuplicate(id: string): string {
 /** `product-N-name` */
 export const productName = "This product has no name yet — type one in.";
 /** `product-N-color` */
-export const productColor =
-  "That colour is not one we can read — pick it with the swatch, or type one like #1473E6.";
+export const productColor = "That colour is not one we can read — pick it with the swatch, or type one like #1473E6.";
 /** `product-N-logo` */
 export const productLogo = "No logo yet — upload one with the Logo button.";
 
@@ -121,43 +114,32 @@ export const logoUpload = "Upload";
 // --- Treatments ---
 
 /** `treatment-N-id` */
-export const treatmentId =
-  "Treatment ID can only use small letters, numbers and dashes — try something like bold-hero.";
+export const treatmentId = "Treatment ID can only use small letters, numbers and dashes — try something like bold-hero.";
 /** `treatment-N-id.duplicate` */
 export function treatmentIdDuplicate(id: string): string {
   return `Two treatments share the ID ${id} — give this one its own.`;
 }
 /** `treatment-N-layout` */
-export const treatmentLayout =
-  "That layout is not one of the choices — pick one in the Layout panel.";
+export const treatmentLayout = "That layout is not one of the choices — pick one in the Layout panel.";
 /** `treatment-N-tone` */
-export const treatmentTone =
-  "That tone is not one of the choices — pick one in the Tone panel.";
+export const treatmentTone = "That tone is not one of the choices — pick one in the Tone panel.";
 
 // --- Policy ---
 
 /** `count` */
-export const count =
-  "Count is empty — set it to 1 or more with the Count slider.";
+export const count = "Count is empty — set it to 1 or more with the Count slider.";
 /** `seed` */
-export const seed =
-  "Seed needs a whole number — press Random, or leave it blank.";
+export const seed = "Seed needs a whole number — press Random, or leave it blank.";
 /** `minDistance` */
 export function minDistance(maxDistance: number): string {
   return `Min distance can be 0 to ${maxDistance} right now — move the Min distance slider back into that range.`;
 }
 /** `perProduct` */
-export const perProduct =
-  "Coverage per product needs a whole number — set it with the stepper, or leave it blank.";
+export const perProduct = "Coverage per product needs a whole number — set it with the stepper, or leave it blank.";
 /** `perRatio` */
-export const perRatio =
-  "Coverage per ratio needs a whole number — set it with the stepper, or leave it blank.";
+export const perRatio = "Coverage per ratio needs a whole number — set it with the stepper, or leave it blank.";
 /** `perRatio.exceeds` */
-export function perRatioExceeds(
-  drawableCount: number,
-  floor: number,
-  count: number,
-): string {
+export function perRatioExceeds(drawableCount: number, floor: number, count: number): string {
   return `${drawableCount} ratios at ${floor} each need more creatives than your Count of ${count} — raise Count, or lower Coverage per ratio.`;
 }
 /** `ratio` */
@@ -179,41 +161,28 @@ export function ratioExcludedNone(): string {
   return "Not used for video — none of your platforms play video. Turn on Still images to use this shape.";
 }
 /** `layout` */
-export const layout =
-  "No layout picked — tap at least one layout card; you can pick them all.";
+export const layout = "No layout picked — tap at least one layout card; you can pick them all.";
 /** `tone` */
-export const tone =
-  "No tone picked — tap at least one tone card; Bold and Subtle can both be on.";
+export const tone = "No tone picked — tap at least one tone card; Bold and Subtle can both be on.";
 /** `anchor` */
-export const anchor =
-  "No anchor picked — tap at least one anchor card; Top, Middle and Bottom can all be on.";
+export const anchor = "No anchor picked — tap at least one anchor card; Top, Middle and Bottom can all be on.";
 /** `background` */
-export const background =
-  "No background picked — tap at least one background card.";
+export const background = "No background picked — tap at least one background card.";
 /** `paletteShift` */
-export const paletteShift =
-  "No colour mood picked — tap at least one colour card.";
+export const paletteShift = "No colour mood picked — tap at least one colour card.";
 
 // --- Output ---
 
 /** `formats` */
-export const formats =
-  "Nothing to make yet — turn on Still images, Video, or both.";
+export const formats = "Nothing to make yet — turn on Still images, Video, or both.";
 /** `platforms` */
-export const platforms =
-  "No platform picked yet — choose where these creatives will go.";
+export const platforms = "No platform picked yet — choose where these creatives will go.";
 /** `platforms.incompatible` — `platform` is a display label; `formats` holds format display labels. */
-export function platformsIncompatible(
-  platform: string,
-  formats: string[],
-): string {
+export function platformsIncompatible(platform: string, formats: string[]): string {
   return `${platform} only takes ${formats.join(" or ")} — turn that on under Formats, or take the platform off.`;
 }
 /** `formats.unsupported` — `format` and `candidates` hold display labels. */
-export function formatsUnsupported(
-  format: string,
-  candidates: string[],
-): string {
+export function formatsUnsupported(format: string, candidates: string[]): string {
   return `None of your platforms can take ${format} — add one of ${joinList(candidates)}, or turn ${format} off.`;
 }
 /**
@@ -237,23 +206,21 @@ export const addPhotoPlatform = "Add a photo platform";
 export const turnOnStillImages = "Turn on Still images";
 export const shapesFromPlatforms = "from your platforms";
 
+
 // --- Motion ---
 
 /** `motion` */
 export const motion = "No video style picked — tap at least one video card.";
 /** `motion.kindUnknown` — the video-style list holds a kind the picker never offered (a loaded brief can). */
-export const motionKindUnknown =
-  "That video style is not one of the choices — pick again in the Video styles panel.";
+export const motionKindUnknown = "That video style is not one of the choices — pick again in the Video styles panel.";
 /** `duration` */
-export const duration =
-  "No clip length yet — add one with the stepper, like 6 seconds.";
+export const duration = "No clip length yet — add one with the stepper, like 6 seconds.";
 /** `duration.range` */
 export function durationRange(min: number, max: number): string {
   return `Clip lengths must be whole seconds from ${min} to ${max} — change the one outside that range.`;
 }
 /** `duration.duplicate` */
-export const durationDuplicate =
-  "Two clip lengths are the same — remove one of them.";
+export const durationDuplicate = "Two clip lengths are the same — remove one of them.";
 
 // --- Status ---
 
@@ -269,8 +236,7 @@ export function statusApplied(briefId: string): string {
 export const statusApplyRefusal =
   "The brief is complete, but video cannot be made on this computer right now — Generate will wait until it is set up.";
 /** `status.leavePrompt` */
-export const statusLeavePrompt =
-  "You have changes that are not saved yet — leave anyway?";
+export const statusLeavePrompt = "You have changes that are not saved yet — leave anyway?";
 export const confirmDialogTitle = "Unsaved edits";
 export const confirmDialogStay = "Stay";
 export const confirmDialogLeave = "Leave";
@@ -279,8 +245,7 @@ export const confirmDialogLeave = "Leave";
  * the blank route's New brief both throw away unsaved work; the question is the
  * shell guard's, asked where the gesture stands rather than at a navigation.
  */
-export const statusReplacePrompt =
-  "You have changes that are not saved yet — discard them?";
+export const statusReplacePrompt = "You have changes that are not saved yet — discard them?";
 /** The replace confirmation's confirm verb: the draft is thrown away. */
 export const confirmDialogDiscard = "Discard changes";
 /**
@@ -304,8 +269,7 @@ export const statusSaveFailed = "Could not save — try Save again.";
 export const statusSaveConflict =
   "This brief changed on disk while you were editing — press Save again to keep your version and overwrite the other changes.";
 /** `status.saveAsFailed` */
-export const statusSaveAsFailed =
-  "Could not save the copy — try Save as again.";
+export const statusSaveAsFailed = "Could not save the copy — try Save as again.";
 
 // --- Hints (defined here; wired into PolicySection by lanes L2/L4, who own that file) ---
 
@@ -318,14 +282,11 @@ export function hintMinDistance(max: number): string {
   return `How different any two creatives must be — 0 means any two can match, ${max} means they differ in everything`;
 }
 /** `hint.seed` */
-export const hintSeed =
-  "Optional — keep the same number to get the same set of creatives every time";
+export const hintSeed = "Optional — keep the same number to get the same set of creatives every time";
 /** `hint.perRatio` */
-export const hintPerRatio =
-  "Optional — make sure every shape gets at least this many";
+export const hintPerRatio = "Optional — make sure every shape gets at least this many";
 /** `hint.perProduct` */
-export const hintPerProduct =
-  "Optional — make sure every product gets at least this many";
+export const hintPerProduct = "Optional — make sure every product gets at least this many";
 
 // --- Readouts (defined here; wired into PolicySection by lanes L2/L4, who own that file) ---
 
@@ -369,8 +330,7 @@ export function statusNotApplied(errorCount: number): SectionSentence {
   };
 }
 
-export const statusReady =
-  "Ready — Save to keep it, or press Generate in the top bar to run it.";
+export const statusReady = "Ready — Save to keep it, or press Generate in the top bar to run it.";
 
 export function statusLoaded(briefId: string): string {
   return `Loaded ${briefId} — press Generate in the top bar to run it.`;
@@ -389,10 +349,7 @@ export function joinList(items: string[]): string {
  */
 export function estimateSentence(parts: {
   readonly creatives: number;
-  readonly ratios: readonly {
-    readonly label: string;
-    readonly count: number;
-  }[];
+  readonly ratios: readonly { readonly label: string; readonly count: number }[];
   readonly products: number;
   readonly genaiCalls: number;
 }): string {
@@ -410,8 +367,7 @@ export function estimateSentence(parts: {
 }
 
 /** The estimate cannot be drawn yet, because the brief is not far enough along. */
-export const estimateNotReady =
-  "Fill in the brief and the estimate appears here.";
+export const estimateNotReady = "Fill in the brief and the estimate appears here.";
 /** The estimate is being worked out. */
 export const estimateWorking = "Working out what you will get…";
 /** The planner could not be reached; the brief is unaffected. */
@@ -423,9 +379,7 @@ export const estimateUnavailable = "Cannot work out the estimate right now.";
 export const outlineLegend = "Sections";
 /** The aside: no issues, or how many things across the draft a visitor still has to fix. */
 export function outlineIssueCount(count: number): string {
-  return count === 0
-    ? "No issues"
-    : `${count} ${count === 1 ? "thing" : "things"} to fix`;
+  return count === 0 ? "No issues" : `${count} ${count === 1 ? "thing" : "things"} to fix`;
 }
 
 /** The count slider's readout: what you asked for, against what the axes can make. */
@@ -449,11 +403,7 @@ export const outputDurationLegend = "Clip lengths";
 
 /** What each format card says under its picture. */
 export const formatStillMeta = "still · one frame";
-export function formatMotionMeta(
-  fps: number,
-  min: number,
-  max: number,
-): string {
+export function formatMotionMeta(fps: number, min: number, max: number): string {
   return `clip · ${fps} fps · ${min}–${max} s`;
 }
 
@@ -469,16 +419,12 @@ export const timelineLegend = "Copy sequence";
  * Said once, above the rows. The clip length is the *shortest* selected, because that is
  * the one the readability floor is measured against.
  */
-export const timelineHelp =
-  "Each beat holds the screen for its share of the clip.";
+export const timelineHelp = "Each beat holds the screen for its share of the clip.";
 export const timelineEmpty = "No sequence — the headline holds the whole clip.";
 
 export const timelineAddBeat = "Add beat";
 /** Why *Add beat* is unavailable: adding one would leave a beat too brief to read. */
-export function timelineAddBlockedFloor(
-  shortestSec: number,
-  floorSec: number,
-): string {
+export function timelineAddBlockedFloor(shortestSec: number, floorSec: number): string {
   return `Another beat would leave one under ${floorSec}s on the ${shortestSec}s clip — too brief to read.`;
 }
 /** Why *Add beat* is unavailable: the sequence is already as long as a clip can carry. */
@@ -522,10 +468,7 @@ export function timelineDwell(seconds: number): string {
   return `${seconds.toFixed(1)}s`;
 }
 /** A beat whose dwell is under the floor on this clip length. */
-export function timelineDwellUnderFloor(
-  seconds: number,
-  floorSec: number,
-): string {
+export function timelineDwellUnderFloor(seconds: number, floorSec: number): string {
   return `${seconds.toFixed(1)}s — under the ${floorSec}s floor`;
 }
 
@@ -539,14 +482,10 @@ export function timelineDwellUnderFloor(
 export function timelineTooManyBeats(max: number): string {
   return `A sequence holds at most ${max} beats — remove the extras to save.`;
 }
-export function timelineBeatWeightOutOfRange(
-  position: number,
-  max: number,
-): string {
+export function timelineBeatWeightOutOfRange(position: number, max: number): string {
   return `Beat ${position}'s share must be a whole number between 1 and ${max}.`;
 }
-export const timelineKeyBeatMissing =
-  "The poster points at a beat that is no longer there.";
+export const timelineKeyBeatMissing = "The poster points at a beat that is no longer there.";
 /** A beat too brief to read on the shortest clip — the one the floor is measured against. */
 export function timelineBeatUnderFloor(
   position: number,
@@ -582,10 +521,7 @@ export const previewLegend = "Preview";
 /** The preview's caption when no platform has been picked yet. */
 export const previewNoPlatform = "no platform yet";
 /** The preview's caption — ratio and platform are display labels, never raw values (D18). */
-export function previewCaption(
-  ratioLabel: string,
-  platformLabel: string,
-): string {
+export function previewCaption(ratioLabel: string, platformLabel: string): string {
   return `${ratioLabel} · ${platformLabel}`;
 }
 /**
@@ -593,11 +529,7 @@ export function previewCaption(
  * words — `MOTION_KIND_META`'s display labels, never a raw kind id (D18) — so the
  * reading is not the only carrier of the meaning.
  */
-export function previewCaptionMotion(
-  ratioLabel: string,
-  platformLabel: string,
-  styleLabel: string,
-): string {
+export function previewCaptionMotion(ratioLabel: string, platformLabel: string, styleLabel: string): string {
   return `${ratioLabel} · ${platformLabel} · ${styleLabel}`;
 }
 /**
@@ -606,11 +538,7 @@ export function previewCaptionMotion(
  * says the delivered video animates. A display label via `TEXT_EFFECT_META`,
  * never a raw kind id (D18).
  */
-export function previewCaptionTextEffect(
-  ratioLabel: string,
-  platformLabel: string,
-  effectLabel: string,
-): string {
+export function previewCaptionTextEffect(ratioLabel: string, platformLabel: string, effectLabel: string): string {
   return `${ratioLabel} · ${platformLabel} · ${effectLabel}`;
 }
 /** The preview's step readout, e.g. "2 / 6". */
@@ -652,8 +580,7 @@ export const generate = "Generate";
  * the route it names is where the editor lives. D35: "press Apply to run" is gone —
  * that verb no longer exists.
  */
-export const generateNoBrief =
-  "Nothing is ready to run yet — open the Brief editor and save a brief first.";
+export const generateNoBrief = "Nothing is ready to run yet — open the Brief editor and save a brief first.";
 
 /* ── The three-way Generate question (D35) ── */
 
@@ -666,11 +593,9 @@ export const generateNoBrief =
  */
 export const generateDraftTitle = "Run the brief you are editing?";
 export const generateDraftRunThis = "Run this draft";
-export const generateDraftRunThisHint =
-  "Run what is on screen without writing it to disk.";
+export const generateDraftRunThisHint = "Run what is on screen without writing it to disk.";
 export const generateDraftSaveRun = "Save and run";
-export const generateDraftSaveRunHint =
-  "Write the brief to disk, then run the saved file.";
+export const generateDraftSaveRunHint = "Write the brief to disk, then run the saved file.";
 export const confirmCancel = "Cancel";
 /**
  * "Run this draft" pressed while the draft would not pass validation (GB-D3 — the
@@ -743,17 +668,12 @@ export function stepEyebrow(step: number, total: number): string {
 
 /** A step's subtitle — the one line under each step heading. */
 export const stepSubtitleIdentity = "Name the campaign and say who it is for.";
-export const stepSubtitleCopy =
-  "Write the one line you want people to remember.";
-export const stepSubtitleProducts =
-  "Add what you are advertising, with its colour and logo.";
+export const stepSubtitleCopy = "Write the one line you want people to remember.";
+export const stepSubtitleProducts = "Add what you are advertising, with its colour and logo.";
 export const stepSubtitleTreatments = "Choose the looks each product gets.";
-export const stepSubtitleLayout =
-  "Set the type every creative inherits — the preview shows the result.";
-export const stepSubtitlePolicy =
-  "Say how many ads you want, and how much they should differ.";
-export const stepSubtitleOutput =
-  "Pick where the ads run, and whether they move.";
+export const stepSubtitleLayout = "Set the type every creative inherits — the preview shows the result.";
+export const stepSubtitlePolicy = "Say how many ads you want, and how much they should differ.";
+export const stepSubtitleOutput = "Pick where the ads run, and whether they move.";
 export const stepSubtitleReview = "Last look, then send it to the pipeline.";
 
 /* ── The Layout step (T7) ─────────────────────────────────────────────────── */
@@ -780,8 +700,7 @@ export const statusStepReady = "Looking good.";
  * The review step's footer status sentence. It states readiness rather than naming a
  * control: Review supplies no Next, and the run verb (Generate) lives in the top bar.
  */
-export const statusStepReview =
-  "Everything checks out — this is the last look.";
+export const statusStepReview = "Everything checks out — this is the last look.";
 /** The review step's body: the brief has met every step, so this is the last look. */
 export const stepReviewIntro =
   "The brief is in shape. This is the last look — Generate in the top bar runs it.";
@@ -815,12 +734,7 @@ const SEG_BAR_STATE: Record<SegBarState, string> = {
  * everything a visitor with sight reads off the heading above it: where the step
  * sits in the walk, what it is called, and where it stands.
  */
-export function segBarSegment(
-  position: number,
-  total: number,
-  label: string,
-  state: SegBarState,
-): string {
+export function segBarSegment(position: number, total: number, label: string, state: SegBarState): string {
   return `Step ${position} of ${total}: ${label}, ${SEG_BAR_STATE[state]}`;
 }
 
@@ -936,8 +850,7 @@ export const modelReuseNoteTitle =
  * of the copy (D18); a procedural brief gets no suffix, because its frame IS the
  * real background.
  */
-export const previewFrameStandInBackground =
-  "background is a stand-in until the run";
+export const previewFrameStandInBackground = "background is a stand-in until the run";
 
 /* ── The create dialog (W1 / D65–D67) ─────────────────────────────────────── */
 
@@ -985,8 +898,7 @@ export const startFromExistingBlank = "Start from a blank campaign";
 /** While the source list is on its way. */
 export const startFromExistingLoading = "Loading campaigns…";
 /** An empty store is not an error: it means this create will be the first campaign. */
-export const startFromExistingEmpty =
-  "No campaigns yet — this create will be the first one.";
+export const startFromExistingEmpty = "No campaigns yet — this create will be the first one.";
 /** The list could not be read (M3: name the fact, offer the way out). */
 export const startFromExistingError =
   "Could not load the campaign list — nothing can be started from right now. Close this window and try again.";
@@ -1021,16 +933,13 @@ export const createCampaignDuplicateFailed =
 
 /** `01` — region and audience, the two answers that say who the campaign is for. */
 export const createSectionTargeting = "Targeting";
-export const createSectionTargetingHint =
-  "Pick where the campaign runs, and say who it is for.";
+export const createSectionTargetingHint = "Pick where the campaign runs, and say who it is for.";
 /** `02` — the start-from picker's section: blank, or an existing campaign's copy. */
 export const createSectionStartFrom = "Start from";
-export const createSectionStartFromHint =
-  "Begin blank, or pick an existing campaign to copy from.";
+export const createSectionStartFromHint = "Begin blank, or pick an existing campaign to copy from.";
 /** `03` — the mode panel's section: one design, or a set of variations. */
 export const createSectionMode = "Mode";
-export const createSectionModeHint =
-  "Classic makes one design; Randomized makes a set of variations.";
+export const createSectionModeHint = "Classic makes one design; Randomized makes a set of variations.";
 
 /* ── A campaign listing that failed (D83 / F-A) ──────────────────────────── */
 
@@ -1106,10 +1015,8 @@ export function startFromRatioCaption(ratios: readonly string[]): string {
 export const modeTileTagBrief = "Uniform";
 export const modeTileTagVariation = "Varied";
 /** The mode tile's one-sentence body: what the mode produces. */
-export const modeTileBlurbBrief =
-  "One design for the whole set — every creative matches.";
-export const modeTileBlurbVariation =
-  "A set of creatives, each a different take on the same brief.";
+export const modeTileBlurbBrief = "One design for the whole set — every creative matches.";
+export const modeTileBlurbVariation = "A set of creatives, each a different take on the same brief.";
 /** The mode tile's preview panel caption, in its bottom-right corner. */
 export const modeTileCaptionBrief = "one design";
 export const modeTileCaptionVariation = "six variations";
@@ -1146,8 +1053,7 @@ export const worldMapFallbackHint =
  * the region reaches generation only as prompt text — it shapes the generated
  * backgrounds and copy, and nothing dispatches or fans out per region (D94).
  */
-export const worldMapRegionHint =
-  "The region shapes the generated backgrounds and copy.";
+export const worldMapRegionHint = "The region shapes the generated backgrounds and copy.";
 
 /* ── S4 — the mode flip's dropped format (D99/F1) ─────────────────────────── */
 
