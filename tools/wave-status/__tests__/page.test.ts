@@ -2807,4 +2807,50 @@ describe("the status page", () => {
     expect(emptyRows.length).toBe(1);
     expect(emptyRows[0]?.textContent).toMatch(/no waves/i);
   });
+
+  test("every semantic column keeps its header treatment distinct from its own body cells", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    (
+      doc.querySelector('tr.wave[data-wave="T"]') as unknown as HTMLElement
+    ).click();
+
+    const bodyRow = doc.querySelector('tr.lane[data-wave="T"][data-lane="t1"]');
+    expect(bodyRow).not.toBeNull();
+
+    // All seven semantic column classes the header and body share — a
+    // body-cell rule scoped only to its own class (no tbody/td qualifier)
+    // beats `thead th` on specificity and repaints that one heading as a
+    // body cell, regardless of source order. Checking every column, not
+    // just the ones already known to collide, catches a future column that
+    // repeats the same unscoped shape.
+    const columns = [
+      "c-lane",
+      "c-stage",
+      "c-live",
+      "c-log",
+      "c-pr",
+      "c-gate",
+      "c-find",
+    ];
+
+    for (const cls of columns) {
+      const th = doc.querySelector(`thead th.${cls}`);
+      const td = bodyRow?.querySelector(`td.${cls}`);
+      // toBeTruthy, not toBeNull: bodyRow?.querySelector() yields undefined
+      // (not null) when bodyRow itself is null, and undefined would pass a
+      // not-toBeNull check without either cell ever being found.
+      expect(th).toBeTruthy();
+      expect(td).toBeTruthy();
+
+      const headerSize = page.window.getComputedStyle(th!).fontSize;
+      const bodySize = page.window.getComputedStyle(td!).fontSize;
+      // The header keeps its own 10px treatment no matter which column it
+      // is, and a body cell in the same column must never resolve to that
+      // same size — if it does, a body-cell rule has won specificity over
+      // thead th and the heading is rendering as a body cell.
+      expect(headerSize).toBe("10px");
+      expect(bodySize).not.toBe(headerSize);
+    }
+  });
 });

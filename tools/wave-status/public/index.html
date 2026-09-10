@@ -419,19 +419,23 @@
         color: var(--color-text-muted);
         margin-left: 6px; /* see .row-go above — same in-between value, same reason */
       }
-      .c-live {
+      /* tbody td.c-* (not the bare class) so these body-cell rules never
+     outrank thead th's own typography on the same class — a bare class
+     selector is (0,1,0), which already beats thead th's (0,0,2) on
+     specificity alone regardless of source order. */
+      tbody td.c-live {
         font-size: 12px;
       }
       .live-ok {
         color: var(--color-success);
       }
-      .c-log,
-      .c-gate {
+      tbody td.c-log,
+      tbody td.c-gate {
         font-family: var(--font-mono);
         font-size: 12px;
         color: var(--color-text-secondary);
       }
-      .c-find {
+      tbody td.c-find {
         font-family: var(--font-mono);
         font-size: 12px;
         color: var(--color-text-primary);
