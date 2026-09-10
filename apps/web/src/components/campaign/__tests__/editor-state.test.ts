@@ -1,7 +1,14 @@
 import { describe, test, expect, beforeEach, vi, afterEach } from "vitest";
-import type { CampaignBrief, CampaignType, CopyPool } from "@campaignfoundry/CampaignOrchestration";
+import type {
+  CampaignBrief,
+  CampaignType,
+  CopyPool,
+} from "@campaignfoundry/CampaignOrchestration";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
-import { templateFromCanonical, type LayerProps } from "@campaignfoundry/CampaignOrchestration/brief-template";
+import {
+  templateFromCanonical,
+  type LayerProps,
+} from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import { timelineProblem } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import { axisProductSize } from "../validate";
@@ -38,9 +45,11 @@ import {
   DEFAULT_DURATION_SEC,
   MAX_BEATS,
   MAX_WEIGHT,
+  formatOcclusionNotice,
   type EditorState,
   type EditorAction,
 } from "../editor-state";
+import * as messages from "../messages";
 import { dumpBrief } from "@campaignfoundry/shared";
 import { type Style } from "@campaignfoundry/CampaignOrchestration/creative-style";
 import { load } from "js-yaml";
@@ -57,7 +66,13 @@ const reduce = (state: EditorState, ...actions: EditorAction[]): EditorState =>
 const base = (): EditorState => initialEditorState();
 
 const pool = (statuses: string[]): CopyPool =>
-  ({ entries: statuses.map((status, i) => ({ id: `e${i}`, text: `t${i}`, status })) }) as unknown as CopyPool;
+  ({
+    entries: statuses.map((status, i) => ({
+      id: `e${i}`,
+      text: `t${i}`,
+      status,
+    })),
+  }) as unknown as CopyPool;
 
 const savedBrief = (over: Partial<CampaignBrief> = {}): CampaignBrief =>
   ({
@@ -66,11 +81,15 @@ const savedBrief = (over: Partial<CampaignBrief> = {}): CampaignBrief =>
     targetRegion: "DE",
     targetAudience: "a",
     campaignMessage: "Hi",
-    products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "l.png" }],
+    products: [
+      { id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "l.png" },
+    ],
     // The brief's own type when the fixture names one, never the default blindly
     // (L3a): every produced brief carries its canonical template, layer list
     // materialised from the canonical library, never hand-written.
-    template: templateFromCanonical((over.type ?? DEFAULT_CAMPAIGN_TYPE) as CampaignType),
+    template: templateFromCanonical(
+      (over.type ?? DEFAULT_CAMPAIGN_TYPE) as CampaignType,
+    ),
     ...over,
   }) as CampaignBrief;
 
@@ -79,7 +98,14 @@ describe("value helpers", () => {
     const a = emptyProduct(1);
     const b = emptyProduct(2);
     expect(b.key).toBe(a.key + 1);
-    expect(a).toMatchObject({ id: "", name: "", primaryColor: "#1473E6", logoPath: "", inputAsset: "", idTouched: false });
+    expect(a).toMatchObject({
+      id: "",
+      name: "",
+      primaryColor: "#1473E6",
+      logoPath: "",
+      inputAsset: "",
+      idTouched: false,
+    });
   });
 
   test("slugify lowercases, collapses runs, trims dashes and caps at 64", () => {
@@ -102,20 +128,26 @@ describe("value helpers", () => {
   test("assetFileName substitutes placeholders for an empty stem or product id", () => {
     expect(assetFileName("!!!.png", "alpha")).toBe("alpha-logo.png");
     expect(assetFileName("mark.png", "")).toBe("product-mark.png");
-    expect(assetFileName(`${"z".repeat(70)}.png`, "alpha")).toBe(`alpha-${"z".repeat(58)}.png`);
+    expect(assetFileName(`${"z".repeat(70)}.png`, "alpha")).toBe(
+      `alpha-${"z".repeat(58)}.png`,
+    );
   });
 
   test("approvedHeadlines counts only approved entries", () => {
     expect(approvedHeadlines(null)).toBe(0);
     expect(approvedHeadlines(pool([]))).toBe(0);
-    expect(approvedHeadlines(pool(["approved", "pending", "approved"]))).toBe(2);
+    expect(approvedHeadlines(pool(["approved", "pending", "approved"]))).toBe(
+      2,
+    );
   });
 });
 
 describe("fileToBase64", () => {
   test("strips the data-URL prefix", async () => {
     const file = new File(["hello"], "a.png", { type: "image/png" });
-    await expect(fileToBase64(file)).resolves.toBe(Buffer.from("hello").toString("base64"));
+    await expect(fileToBase64(file)).resolves.toBe(
+      Buffer.from("hello").toString("base64"),
+    );
   });
 
   test("returns the raw result when there is no comma, and empty for a non-string result", async () => {
@@ -156,7 +188,9 @@ describe("fileToBase64", () => {
       error: unknown = null;
     }
     vi.stubGlobal("FileReader", SilentReader);
-    await expect(fileToBase64(new File([""], "a.png"))).rejects.toThrow("read failed");
+    await expect(fileToBase64(new File([""], "a.png"))).rejects.toThrow(
+      "read failed",
+    );
     vi.unstubAllGlobals();
   });
 });
@@ -180,33 +214,55 @@ describe("initialEditorState", () => {
 
 describe("editorReducer — identity and copy", () => {
   test("setMode switches mode", () => {
-    expect(reduce(base(), { type: "setMode", mode: "variation" }).mode).toBe("variation");
+    expect(reduce(base(), { type: "setMode", mode: "variation" }).mode).toBe(
+      "variation",
+    );
   });
 
   test("patching campaignName on a new draft derives briefId via slugify", () => {
-    const next = reduce(base(), { type: "patch", patch: { campaignName: "Summer Launch 2026!" } });
+    const next = reduce(base(), {
+      type: "patch",
+      patch: { campaignName: "Summer Launch 2026!" },
+    });
     expect(next.campaignName).toBe("Summer Launch 2026!");
     expect(next.briefId).toBe("summer-launch-2026");
   });
 
   test("patching campaignName on a file-loaded draft does not re-derive briefId", () => {
-    const fileState = fromBrief(savedBrief({ id: "original-id" }), { file: "original-id.yaml" });
-    const next = reduce(fileState, { type: "patch", patch: { campaignName: "Renamed Campaign" } });
+    const fileState = fromBrief(savedBrief({ id: "original-id" }), {
+      file: "original-id.yaml",
+    });
+    const next = reduce(fileState, {
+      type: "patch",
+      patch: { campaignName: "Renamed Campaign" },
+    });
     expect(next.campaignName).toBe("Renamed Campaign");
     expect(next.briefId).toBe("original-id");
   });
 
   test("patch merges fields without touching the pool when briefId is unchanged", () => {
-    const seeded = { ...base(), pool: pool(["approved"]), headlineAxisDropped: true };
+    const seeded = {
+      ...base(),
+      pool: pool(["approved"]),
+      headlineAxisDropped: true,
+    };
     seeded.variation = { ...seeded.variation, headline: true };
-    const next = reduce(seeded, { type: "patch", patch: { targetRegion: "DE" } });
+    const next = reduce(seeded, {
+      type: "patch",
+      patch: { targetRegion: "DE" },
+    });
     expect(next.targetRegion).toBe("DE");
     expect(next.pool).not.toBeNull();
     expect(next.variation.headline).toBe(true);
   });
 
   test("patch resets the pool and headline axis when briefId actually changes", () => {
-    const seeded = { ...base(), briefId: "old", pool: pool(["approved"]), headlineAxisDropped: true };
+    const seeded = {
+      ...base(),
+      briefId: "old",
+      pool: pool(["approved"]),
+      headlineAxisDropped: true,
+    };
     seeded.variation = { ...seeded.variation, headline: true };
     const next = reduce(seeded, { type: "patch", patch: { briefId: "new" } });
     expect(next.pool).toBeNull();
@@ -216,7 +272,9 @@ describe("editorReducer — identity and copy", () => {
 
   test("patch with the same briefId keeps the pool", () => {
     const seeded = { ...base(), briefId: "same", pool: pool(["approved"]) };
-    expect(reduce(seeded, { type: "patch", patch: { briefId: "same" } }).pool).not.toBeNull();
+    expect(
+      reduce(seeded, { type: "patch", patch: { briefId: "same" } }).pool,
+    ).not.toBeNull();
   });
 });
 
@@ -224,7 +282,11 @@ describe("editorReducer — products", () => {
   test("setProduct patches only the matching key", () => {
     const state = { ...base(), products: [emptyProduct(1), emptyProduct(2)] };
     const [first, second] = state.products;
-    const next = reduce(state, { type: "setProduct", key: first.key, patch: { primaryColor: "#000000" } });
+    const next = reduce(state, {
+      type: "setProduct",
+      key: first.key,
+      patch: { primaryColor: "#000000" },
+    });
     expect(next.products[0].primaryColor).toBe("#000000");
     expect(next.products[1]).toBe(second);
   });
@@ -232,23 +294,40 @@ describe("editorReducer — products", () => {
   test("editing the name derives the id until the id is touched directly", () => {
     const state = base();
     const key = state.products[0].key;
-    const derived = reduce(state, { type: "setProduct", key, patch: { name: "Hydra Bottle" } });
+    const derived = reduce(state, {
+      type: "setProduct",
+      key,
+      patch: { name: "Hydra Bottle" },
+    });
     expect(derived.products[0].id).toBe("hydra-bottle");
     expect(derived.products[0].idTouched).toBe(false);
 
-    const touched = reduce(derived, { type: "setProduct", key, patch: { id: "custom" } });
+    const touched = reduce(derived, {
+      type: "setProduct",
+      key,
+      patch: { id: "custom" },
+    });
     expect(touched.products[0].idTouched).toBe(true);
 
-    const renamed = reduce(touched, { type: "setProduct", key, patch: { name: "Something Else" } });
+    const renamed = reduce(touched, {
+      type: "setProduct",
+      key,
+      patch: { name: "Something Else" },
+    });
     expect(renamed.products[0].id).toBe("custom");
   });
 
   test("addProduct appends and removeProduct drops by key", () => {
     const added = reduce(base(), { type: "addProduct" });
     expect(added.products).toHaveLength(2);
-    const removed = reduce(added, { type: "removeProduct", key: added.products[1].key });
+    const removed = reduce(added, {
+      type: "removeProduct",
+      key: added.products[1].key,
+    });
     expect(removed.products).toHaveLength(1);
-    expect(removed.products.map((p) => p.key)).not.toContain(added.products[1].key);
+    expect(removed.products.map((p) => p.key)).not.toContain(
+      added.products[1].key,
+    );
   });
 
   test("addProduct picks the next unused swatch from SWATCH_PALETTE and wraps around", () => {
@@ -266,11 +345,23 @@ describe("editorReducer — products", () => {
 
 describe("editorReducer — treatments", () => {
   test("add, patch the matching index, and remove", () => {
-    const added = reduce(base(), { type: "addTreatment" }, { type: "addTreatment" });
+    const added = reduce(
+      base(),
+      { type: "addTreatment" },
+      { type: "addTreatment" },
+    );
     expect(added.treatments).toHaveLength(2);
-    expect(added.treatments[0]).toEqual({ id: "", layout: LAYOUT_OPTIONS[0], tone: TONE_OPTIONS[0] });
+    expect(added.treatments[0]).toEqual({
+      id: "",
+      layout: LAYOUT_OPTIONS[0],
+      tone: TONE_OPTIONS[0],
+    });
 
-    const patched = reduce(added, { type: "setTreatment", index: 1, patch: { id: "bold" } });
+    const patched = reduce(added, {
+      type: "setTreatment",
+      index: 1,
+      patch: { id: "bold" },
+    });
     expect(patched.treatments[1].id).toBe("bold");
     expect(patched.treatments[0].id).toBe("");
 
@@ -282,11 +373,17 @@ describe("editorReducer — treatments", () => {
 
 describe("editorReducer — variation axes", () => {
   test("setVariation writes the named numeric field", () => {
-    expect(reduce(base(), { type: "setVariation", field: "seed", value: "42" }).variation.seed).toBe("42");
+    expect(
+      reduce(base(), { type: "setVariation", field: "seed", value: "42" })
+        .variation.seed,
+    ).toBe("42");
   });
 
   test("toggles remove a selected value and re-add it in canonical order", () => {
-    const off = reduce(base(), { type: "toggleLayout", value: LAYOUT_OPTIONS[0] });
+    const off = reduce(base(), {
+      type: "toggleLayout",
+      value: LAYOUT_OPTIONS[0],
+    });
     expect(off.variation.layout).toEqual([LAYOUT_OPTIONS[1]]);
     const on = reduce(off, { type: "toggleLayout", value: LAYOUT_OPTIONS[0] });
     expect(on.variation.layout).toEqual([...LAYOUT_OPTIONS]);
@@ -301,7 +398,10 @@ describe("editorReducer — variation axes", () => {
     );
     expect(state.variation.tone).toEqual([TONE_OPTIONS[1]]);
     expect(state.variation.background).toEqual(["procedural", "genai"]);
-    expect(state.variation.paletteShift).toEqual([PALETTE_SHIFT_OPTIONS[1], PALETTE_SHIFT_OPTIONS[2]]);
+    expect(state.variation.paletteShift).toEqual([
+      PALETTE_SHIFT_OPTIONS[1],
+      PALETTE_SHIFT_OPTIONS[2],
+    ]);
   });
 
   test("ratio toggles remove a selected canvas and re-add it in canonical order", () => {
@@ -322,16 +422,24 @@ describe("editorReducer — variation axes", () => {
   test("toggleHeadline flips the flag", () => {
     const on = reduce(base(), { type: "toggleHeadline" });
     expect(on.variation.headline).toBe(true);
-    expect(reduce(on, { type: "toggleHeadline" }).variation.headline).toBe(false);
+    expect(reduce(on, { type: "toggleHeadline" }).variation.headline).toBe(
+      false,
+    );
   });
 
   test("togglePlatform removes and restores in canonical order", () => {
-    const off = reduce(base(), { type: "togglePlatform", value: STATIC_PLATFORMS[1] });
+    const off = reduce(base(), {
+      type: "togglePlatform",
+      value: STATIC_PLATFORMS[1],
+    });
     expect(off.platforms).toEqual([STATIC_PLATFORMS[0], STATIC_PLATFORMS[2]]);
     // outputExplicit is reserved for briefs that declared `output` on load; a bare
     // toggle no longer sets it, so a toggle back to the default round-trips clean.
     expect(off.outputExplicit).toBe(false);
-    expect(reduce(off, { type: "togglePlatform", value: STATIC_PLATFORMS[1] }).platforms).toEqual([...STATIC_PLATFORMS]);
+    expect(
+      reduce(off, { type: "togglePlatform", value: STATIC_PLATFORMS[1] })
+        .platforms,
+    ).toEqual([...STATIC_PLATFORMS]);
   });
 
   test("togglePlatform orders motion platforms after the static ones", () => {
@@ -341,7 +449,9 @@ describe("editorReducer — variation axes", () => {
       { type: "togglePlatform", value: "linkedin" },
     );
     expect(state.platforms).toEqual(["instagram-feed", "linkedin", "tiktok"]);
-    expect(reduce(state, { type: "togglePlatform", value: "linkedin" }).platforms).toEqual(["instagram-feed", "tiktok"]);
+    expect(
+      reduce(state, { type: "togglePlatform", value: "linkedin" }).platforms,
+    ).toEqual(["instagram-feed", "tiktok"]);
   });
 });
 
@@ -349,25 +459,36 @@ describe("editorReducer — motion, duration and formats", () => {
   test("toggleMotion adds then removes", () => {
     const on = reduce(base(), { type: "toggleMotion", value: "ken-burns-in" });
     expect(on.motion).toEqual(["ken-burns-in"]);
-    expect(reduce(on, { type: "toggleMotion", value: "ken-burns-in" }).motion).toEqual([]);
+    expect(
+      reduce(on, { type: "toggleMotion", value: "ken-burns-in" }).motion,
+    ).toEqual([]);
   });
 
   test("duration is appended, written by index and removed by index", () => {
     // each Add offers a length the list does not already hold — the planner
     // de-duplicates this axis, so a repeat would draw nothing. The first offer is
     // the domain's DEFAULT_DURATION_SEC; the next free second is the smallest in range.
-    const added = reduce(base(), { type: "addDuration" }, { type: "addDuration" });
+    const added = reduce(
+      base(),
+      { type: "addDuration" },
+      { type: "addDuration" },
+    );
     expect(added.duration).toEqual([DEFAULT_DURATION_SEC, 2]);
     const set = reduce(added, { type: "setDuration", index: 1, value: 8 });
     expect(set.duration).toEqual([DEFAULT_DURATION_SEC, 8]);
-    expect(reduce(set, { type: "removeDuration", index: 0 }).duration).toEqual([8]);
+    expect(reduce(set, { type: "removeDuration", index: 0 }).duration).toEqual([
+      8,
+    ]);
   });
 
   test("Add duration never offers a length already in the list", () => {
     let state = base();
-    for (let i = 0; i < 8; i += 1) state = reduce(state, { type: "addDuration" });
+    for (let i = 0; i < 8; i += 1)
+      state = reduce(state, { type: "addDuration" });
     expect(new Set(state.duration).size).toBe(state.duration.length);
-    expect(state.duration.every((s) => Number.isInteger(s) && s >= 2 && s <= 30)).toBe(true);
+    expect(
+      state.duration.every((s) => Number.isInteger(s) && s >= 2 && s <= 30),
+    ).toBe(true);
   });
 
   test("Add duration is a no-op once every length is taken", () => {
@@ -381,46 +502,82 @@ describe("editorReducer — motion, duration and formats", () => {
     expect(on.formats).toEqual(["static", "motion"]);
     // see togglePlatform: toggling never sets outputExplicit on its own
     expect(on.outputExplicit).toBe(false);
-    expect(reduce(on, { type: "toggleFormat", value: "motion" }).formats).toEqual(["static"]);
+    expect(
+      reduce(on, { type: "toggleFormat", value: "motion" }).formats,
+    ).toEqual(["static"]);
   });
 });
 
 describe("editorReducer — pool and capabilities", () => {
   test("setPool for a different brief is ignored", () => {
     const state = { ...base(), briefId: "camp" };
-    expect(reduce(state, { type: "setPool", briefId: "other", pool: pool(["approved"]) })).toBe(state);
+    expect(
+      reduce(state, {
+        type: "setPool",
+        briefId: "other",
+        pool: pool(["approved"]),
+      }),
+    ).toBe(state);
   });
 
   test("an empty pool drops the headline axis and records that it was dropped", () => {
-    const state = reduce({ ...base(), briefId: "camp" }, { type: "toggleHeadline" });
-    const next = reduce(state, { type: "setPool", briefId: "camp", pool: pool(["pending"]) });
+    const state = reduce(
+      { ...base(), briefId: "camp" },
+      { type: "toggleHeadline" },
+    );
+    const next = reduce(state, {
+      type: "setPool",
+      briefId: "camp",
+      pool: pool(["pending"]),
+    });
     expect(next.variation.headline).toBe(false);
     expect(next.headlineAxisDropped).toBe(true);
   });
 
   test("a pool with approved copy keeps the axis and clears the dropped flag", () => {
-    const state = reduce({ ...base(), briefId: "camp" }, { type: "toggleHeadline" });
-    const next = reduce(state, { type: "setPool", briefId: "camp", pool: pool(["approved"]) });
+    const state = reduce(
+      { ...base(), briefId: "camp" },
+      { type: "toggleHeadline" },
+    );
+    const next = reduce(state, {
+      type: "setPool",
+      briefId: "camp",
+      pool: pool(["approved"]),
+    });
     expect(next.variation.headline).toBe(true);
     expect(next.headlineAxisDropped).toBe(false);
   });
 
   test("an empty pool with the axis already off still reports nothing dropped", () => {
-    const next = reduce({ ...base(), briefId: "camp" }, { type: "setPool", briefId: "camp", pool: null });
+    const next = reduce(
+      { ...base(), briefId: "camp" },
+      { type: "setPool", briefId: "camp", pool: null },
+    );
     expect(next.headlineAxisDropped).toBe(false);
   });
 
   test("loadPool for a different brief is ignored", () => {
     const state = { ...base(), briefId: "camp", pool: null };
-    const next = reduce(state, { type: "loadPool", briefId: "other", pool: pool(["approved"]) });
+    const next = reduce(state, {
+      type: "loadPool",
+      briefId: "other",
+      pool: pool(["approved"]),
+    });
     expect(next.pool).toBeNull();
     expect(next).toBe(state);
   });
 
   test("loadPool for current brief updates pool without touching variation", () => {
-    const state = reduce({ ...base(), briefId: "camp" }, { type: "toggleHeadline" });
+    const state = reduce(
+      { ...base(), briefId: "camp" },
+      { type: "toggleHeadline" },
+    );
     expect(state.variation.headline).toBe(true);
-    const next = reduce(state, { type: "loadPool", briefId: "camp", pool: pool([]) });
+    const next = reduce(state, {
+      type: "loadPool",
+      briefId: "camp",
+      pool: pool([]),
+    });
     expect(next.pool).toEqual(pool([]));
     expect(next.variation.headline).toBe(true);
     expect(next.headlineAxisDropped).toBe(false);
@@ -428,21 +585,36 @@ describe("editorReducer — pool and capabilities", () => {
 
   test("loadPool with null pool clears previous pool", () => {
     const state = { ...base(), briefId: "camp", pool: pool(["approved"]) };
-    const next = reduce(state, { type: "loadPool", briefId: "camp", pool: null });
+    const next = reduce(state, {
+      type: "loadPool",
+      briefId: "camp",
+      pool: null,
+    });
     expect(next.pool).toBeNull();
   });
 
   test("setCapabilities stores the probe result", () => {
-    const next = reduce(base(), { type: "setCapabilities", capabilities: { motion: false, reason: "no ffmpeg" } });
+    const next = reduce(base(), {
+      type: "setCapabilities",
+      capabilities: { motion: false, reason: "no ffmpeg" },
+    });
     expect(next.capabilities).toEqual({ motion: false, reason: "no ffmpeg" });
   });
 });
 
 describe("editorReducer — load, apply, save, discard", () => {
   test("load replaces the state from a brief", () => {
-    const next = reduce(base(), { type: "load", brief: savedBrief(), entry: { file: "camp.yaml", revision: "r1" } });
+    const next = reduce(base(), {
+      type: "load",
+      brief: savedBrief(),
+      entry: { file: "camp.yaml", revision: "r1" },
+    });
     expect(next.briefId).toBe("camp");
-    expect(next.source).toMatchObject({ kind: "file", file: "camp.yaml", revision: "r1" });
+    expect(next.source).toMatchObject({
+      kind: "file",
+      file: "camp.yaml",
+      revision: "r1",
+    });
   });
 
   test("apply snapshots the current brief", () => {
@@ -455,7 +627,10 @@ describe("editorReducer — load, apply, save, discard", () => {
     // Save & apply awaits the network before dispatching, so the draft may have moved
     // on; the run holds the pre-await brief and the snapshot must match it
     const applied = toBrief(state);
-    const edited = reduce(state, { type: "patch", patch: { campaignMessage: "typed during save" } });
+    const edited = reduce(state, {
+      type: "patch",
+      patch: { campaignMessage: "typed during save" },
+    });
     const next = reduce(edited, { type: "apply", applied });
 
     expect(next.appliedSnapshot).toEqual(applied);
@@ -470,28 +645,57 @@ describe("editorReducer — load, apply, save, discard", () => {
 
   test("save on a new draft promotes the source to a file", () => {
     const next = reduce({ ...base(), briefId: "camp" }, { type: "save" });
-    expect(next.source).toMatchObject({ kind: "file", file: "camp.yaml", loadedId: "camp", revision: undefined });
+    expect(next.source).toMatchObject({
+      kind: "file",
+      file: "camp.yaml",
+      loadedId: "camp",
+      revision: undefined,
+    });
   });
 
   test("save on a loaded file keeps the file identity and refreshes the snapshot", () => {
-    const loaded = reduce(base(), { type: "load", brief: savedBrief(), entry: { file: "camp.yaml", revision: "r1" } });
-    const edited = reduce(loaded, { type: "patch", patch: { campaignMessage: "Changed" } });
+    const loaded = reduce(base(), {
+      type: "load",
+      brief: savedBrief(),
+      entry: { file: "camp.yaml", revision: "r1" },
+    });
+    const edited = reduce(loaded, {
+      type: "patch",
+      patch: { campaignMessage: "Changed" },
+    });
     const next = reduce(edited, { type: "save" });
-    expect(next.source).toMatchObject({ kind: "file", file: "camp.yaml", revision: "r1" });
-    expect(next.source.kind === "file" && next.source.savedSnapshot?.campaignMessage).toBe("Changed");
+    expect(next.source).toMatchObject({
+      kind: "file",
+      file: "camp.yaml",
+      revision: "r1",
+    });
+    expect(
+      next.source.kind === "file" && next.source.savedSnapshot?.campaignMessage,
+    ).toBe("Changed");
   });
 
   test("save with an entry adopts the fresh identity and revision without replacing the draft", () => {
-    const loaded = reduce(base(), { type: "load", brief: savedBrief(), entry: { file: "camp.yaml", revision: "r1" } });
+    const loaded = reduce(base(), {
+      type: "load",
+      brief: savedBrief(),
+      entry: { file: "camp.yaml", revision: "r1" },
+    });
     // The keystroke lands while the save request is in flight; the response then
     // carries the brief the server stored.
-    const edited = reduce(loaded, { type: "patch", patch: { campaignMessage: "typed during save" } });
+    const edited = reduce(loaded, {
+      type: "patch",
+      patch: { campaignMessage: "typed during save" },
+    });
     const next = reduce(edited, {
       type: "save",
       saved: savedBrief(),
       entry: { file: "camp.yaml", revision: "r2" },
     });
-    expect(next.source).toMatchObject({ kind: "file", file: "camp.yaml", revision: "r2" });
+    expect(next.source).toMatchObject({
+      kind: "file",
+      file: "camp.yaml",
+      revision: "r2",
+    });
     // the in-flight edit survives — `save` never replaces the draft the way `load` does
     expect(next.campaignMessage).toBe("typed during save");
     // …and it still reads dirty against the server's snapshot, so it is not lost silently
@@ -499,27 +703,58 @@ describe("editorReducer — load, apply, save, discard", () => {
   });
 
   test("save with an entry that carries no revision leaves the loaded revision alone", () => {
-    const loaded = reduce(base(), { type: "load", brief: savedBrief(), entry: { file: "camp.yaml", revision: "r1" } });
-    const next = reduce(loaded, { type: "save", saved: savedBrief(), entry: { file: "camp.yaml" } });
-    expect(next.source).toMatchObject({ kind: "file", file: "camp.yaml", revision: "r1" });
+    const loaded = reduce(base(), {
+      type: "load",
+      brief: savedBrief(),
+      entry: { file: "camp.yaml", revision: "r1" },
+    });
+    const next = reduce(loaded, {
+      type: "save",
+      saved: savedBrief(),
+      entry: { file: "camp.yaml" },
+    });
+    expect(next.source).toMatchObject({
+      kind: "file",
+      file: "camp.yaml",
+      revision: "r1",
+    });
   });
 
   test("save with an entry promotes a new draft to the file the server named", () => {
     const next = reduce(
       { ...base(), briefId: "camp" },
-      { type: "save", saved: savedBrief(), entry: { file: "elsewhere.yaml", revision: "r9" } },
+      {
+        type: "save",
+        saved: savedBrief(),
+        entry: { file: "elsewhere.yaml", revision: "r9" },
+      },
     );
-    expect(next.source).toMatchObject({ kind: "file", file: "elsewhere.yaml", loadedId: "camp", revision: "r9" });
+    expect(next.source).toMatchObject({
+      kind: "file",
+      file: "elsewhere.yaml",
+      loadedId: "camp",
+      revision: "r9",
+    });
   });
 
   test("discard on a loaded file reverts to the saved snapshot", () => {
-    const loaded = reduce(base(), { type: "load", brief: savedBrief(), entry: { file: "camp.yaml", revision: "r1" } });
-    const edited = reduce(loaded, { type: "patch", patch: { campaignMessage: "Changed" } });
+    const loaded = reduce(base(), {
+      type: "load",
+      brief: savedBrief(),
+      entry: { file: "camp.yaml", revision: "r1" },
+    });
+    const edited = reduce(loaded, {
+      type: "patch",
+      patch: { campaignMessage: "Changed" },
+    });
     expect(reduce(edited, { type: "discard" }).campaignMessage).toBe("Hi");
   });
 
   test("discard on a new draft resets to the initial state in the same mode", () => {
-    const dirty = reduce({ ...base(), mode: "variation", briefId: "camp" }, { type: "patch", patch: { targetRegion: "DE" } });
+    const dirty = reduce(
+      { ...base(), mode: "variation", briefId: "camp" },
+      { type: "patch", patch: { targetRegion: "DE" } },
+    );
     const next = reduce(dirty, { type: "discard" });
     expect(next.mode).toBe("variation");
     expect(next.briefId).toBe("");
@@ -529,7 +764,13 @@ describe("editorReducer — load, apply, save, discard", () => {
   test("discard on a file source with no snapshot falls back to a fresh state", () => {
     const state: EditorState = {
       ...base(),
-      source: { kind: "file", file: "camp.yaml", loadedId: "camp", savedSnapshot: null, revision: undefined },
+      source: {
+        kind: "file",
+        file: "camp.yaml",
+        loadedId: "camp",
+        savedSnapshot: null,
+        revision: undefined,
+      },
       briefId: "camp",
     };
     expect(reduce(state, { type: "discard" }).briefId).toBe("");
@@ -574,16 +815,26 @@ describe("toBrief", () => {
     const classicMotion = toBrief(filled({ formats: ["static", "motion"] }));
     expect(classicMotion.output?.formats ?? []).not.toContain("motion");
     expect(classicMotion).not.toHaveProperty("output");
-    const variationMotion = toBrief(filled({ mode: "variation", formats: ["static", "motion"] }));
-    expect(variationMotion.output).toEqual({ formats: ["static", "motion"], platforms: [...STATIC_PLATFORMS] });
+    const variationMotion = toBrief(
+      filled({ mode: "variation", formats: ["static", "motion"] }),
+    );
+    expect(variationMotion.output).toEqual({
+      formats: ["static", "motion"],
+      platforms: [...STATIC_PLATFORMS],
+    });
   });
 
   test("an output the loaded brief declared stays written even at default values", () => {
     const declared = fromBrief(
-      savedBrief({ output: { formats: ["static"], platforms: [...STATIC_PLATFORMS] } }),
+      savedBrief({
+        output: { formats: ["static"], platforms: [...STATIC_PLATFORMS] },
+      }),
       { file: "camp.yaml" },
     );
-    expect(toBrief(declared).output).toEqual({ formats: ["static"], platforms: [...STATIC_PLATFORMS] });
+    expect(toBrief(declared).output).toEqual({
+      formats: ["static"],
+      platforms: [...STATIC_PLATFORMS],
+    });
   });
 
   test("an output the user has toggled on then off back to default is omitted", () => {
@@ -599,21 +850,38 @@ describe("toBrief", () => {
   });
 
   test("localizedMessage is emitted only when it is non-blank after trimming", () => {
-    expect(toBrief(filled({ localizedMessage: "   " }))).not.toHaveProperty("localizedMessage");
-    expect(toBrief(filled({ localizedMessage: " Hallo " }))).toMatchObject({ localizedMessage: "Hallo" });
+    expect(toBrief(filled({ localizedMessage: "   " }))).not.toHaveProperty(
+      "localizedMessage",
+    );
+    expect(toBrief(filled({ localizedMessage: " Hallo " }))).toMatchObject({
+      localizedMessage: "Hallo",
+    });
   });
 
   test("a product's inputAsset is emitted only when non-blank", () => {
     const state = filled();
-    const withAsset = reduce(state, { type: "setProduct", key: state.products[0].key, patch: { inputAsset: " a.png " } });
-    expect(toBrief(withAsset).products[0]).toMatchObject({ inputAsset: "a.png" });
-    const blank = reduce(state, { type: "setProduct", key: state.products[0].key, patch: { inputAsset: "  " } });
+    const withAsset = reduce(state, {
+      type: "setProduct",
+      key: state.products[0].key,
+      patch: { inputAsset: " a.png " },
+    });
+    expect(toBrief(withAsset).products[0]).toMatchObject({
+      inputAsset: "a.png",
+    });
+    const blank = reduce(state, {
+      type: "setProduct",
+      key: state.products[0].key,
+      patch: { inputAsset: "  " },
+    });
     expect(toBrief(blank).products[0]).not.toHaveProperty("inputAsset");
   });
 
   test("variation mode emits count and omits non-numeric seed and minDistance", () => {
     const state = filled({ mode: "variation" });
-    const brief = toBrief({ ...state, variation: { ...state.variation, seed: "", minDistance: "" } });
+    const brief = toBrief({
+      ...state,
+      variation: { ...state.variation, seed: "", minDistance: "" },
+    });
     expect(brief.variation).toMatchObject({ count: 12 });
     expect(brief.variation).not.toHaveProperty("seed");
     expect(brief.variation).not.toHaveProperty("minDistance");
@@ -621,27 +889,49 @@ describe("toBrief", () => {
 
   test("variation mode emits numeric seed and minDistance when present", () => {
     const state = filled({ mode: "variation" });
-    const brief = toBrief({ ...state, variation: { ...state.variation, seed: "7", minDistance: "3" } });
-    expect(brief.variation).toMatchObject({ count: 12, seed: 7, minDistance: 3 });
+    const brief = toBrief({
+      ...state,
+      variation: { ...state.variation, seed: "7", minDistance: "3" },
+    });
+    expect(brief.variation).toMatchObject({
+      count: 12,
+      seed: 7,
+      minDistance: 3,
+    });
   });
 
   test("an unparseable count degrades to zero", () => {
     const state = filled({ mode: "variation" });
-    expect(toBrief({ ...state, variation: { ...state.variation, count: "" } }).variation?.count).toBe(0);
+    expect(
+      toBrief({ ...state, variation: { ...state.variation, count: "" } })
+        .variation?.count,
+    ).toBe(0);
   });
 
   test("coverage carries only the positive halves and is dropped when both are zero", () => {
     const state = filled({ mode: "variation" });
-    const both = toBrief({ ...state, variation: { ...state.variation, perProduct: "2", perRatio: "3" } });
+    const both = toBrief({
+      ...state,
+      variation: { ...state.variation, perProduct: "2", perRatio: "3" },
+    });
     expect(both.variation?.coverage).toEqual({ perProduct: 2, perRatio: 3 });
 
-    const onlyProduct = toBrief({ ...state, variation: { ...state.variation, perProduct: "2", perRatio: "0" } });
+    const onlyProduct = toBrief({
+      ...state,
+      variation: { ...state.variation, perProduct: "2", perRatio: "0" },
+    });
     expect(onlyProduct.variation?.coverage).toEqual({ perProduct: 2 });
 
-    const onlyRatio = toBrief({ ...state, variation: { ...state.variation, perProduct: "0", perRatio: "3" } });
+    const onlyRatio = toBrief({
+      ...state,
+      variation: { ...state.variation, perProduct: "0", perRatio: "3" },
+    });
     expect(onlyRatio.variation?.coverage).toEqual({ perRatio: 3 });
 
-    const neither = toBrief({ ...state, variation: { ...state.variation, perProduct: "0", perRatio: "0" } });
+    const neither = toBrief({
+      ...state,
+      variation: { ...state.variation, perProduct: "0", perRatio: "0" },
+    });
     expect(neither.variation).not.toHaveProperty("coverage");
   });
 
@@ -649,7 +939,9 @@ describe("toBrief", () => {
     const state = filled({ mode: "variation" });
     expect(toBrief(state).variation?.axes).not.toHaveProperty("headline");
     const on = reduce(state, { type: "toggleHeadline" });
-    expect(toBrief(on).variation?.axes).toMatchObject({ headline: HEADLINE_POOL_REF });
+    expect(toBrief(on).variation?.axes).toMatchObject({
+      headline: HEADLINE_POOL_REF,
+    });
   });
 
   test("the ratio axis is emitted only when the selection constrains", () => {
@@ -657,7 +949,9 @@ describe("toBrief", () => {
     // a full selection is the default (absent → every ratio): no key, byte-stable
     expect(toBrief(state).variation?.axes).not.toHaveProperty("ratio");
     const narrowed = reduce(state, { type: "toggleRatio", value: "9:16" });
-    expect(toBrief(narrowed).variation?.axes).toMatchObject({ ratio: ["1:1", "16:9"] });
+    expect(toBrief(narrowed).variation?.axes).toMatchObject({
+      ratio: ["1:1", "16:9"],
+    });
     // re-selecting the full set drops the key again — it no longer constrains
     const restored = reduce(narrowed, { type: "toggleRatio", value: "9:16" });
     expect(toBrief(restored).variation?.axes).not.toHaveProperty("ratio");
@@ -670,7 +964,9 @@ describe("fromBrief", () => {
   });
 
   test("with an entry the source records file, id and revision", () => {
-    expect(fromBrief(savedBrief(), { file: "camp.yaml", revision: "r1" }).source).toMatchObject({
+    expect(
+      fromBrief(savedBrief(), { file: "camp.yaml", revision: "r1" }).source,
+    ).toMatchObject({
       kind: "file",
       file: "camp.yaml",
       loadedId: "camp",
@@ -683,7 +979,10 @@ describe("fromBrief", () => {
   });
 
   test("loaded products are marked as having a deliberate id", () => {
-    expect(fromBrief(savedBrief()).products[0]).toMatchObject({ id: "alpha", idTouched: true });
+    expect(fromBrief(savedBrief()).products[0]).toMatchObject({
+      id: "alpha",
+      idTouched: true,
+    });
   });
 
   test("treatments, mode, formats and platforms default when absent", () => {
@@ -700,13 +999,17 @@ describe("fromBrief", () => {
       savedBrief({
         mode: "variation",
         localizedMessage: "Hallo",
-        treatments: [{ id: "bold-bottom", layout: "headline-bottom", tone: "bold" }],
+        treatments: [
+          { id: "bold-bottom", layout: "headline-bottom", tone: "bold" },
+        ],
         output: { formats: ["static", "motion"], platforms: ["linkedin"] },
       } as Partial<CampaignBrief>),
     );
     expect(state.mode).toBe("variation");
     expect(state.localizedMessage).toBe("Hallo");
-    expect(state.treatments).toEqual([{ id: "bold-bottom", layout: "headline-bottom", tone: "bold" }]);
+    expect(state.treatments).toEqual([
+      { id: "bold-bottom", layout: "headline-bottom", tone: "bold" },
+    ]);
     expect(state.formats).toEqual(["static", "motion"]);
     expect(state.platforms).toEqual(["linkedin"]);
   });
@@ -731,14 +1034,24 @@ describe("the creative template survives the editor (L3a, D120/D123)", () => {
   });
 
   test("a fresh draft is seeded with the campaign type's canonical template", () => {
-    expect(initialEditorState("brief").template).toEqual(templateFromCanonical(DEFAULT_CAMPAIGN_TYPE));
-    expect(initialEditorState("variation").template).toEqual(templateFromCanonical(DEFAULT_CAMPAIGN_TYPE));
+    expect(initialEditorState("brief").template).toEqual(
+      templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+    );
+    expect(initialEditorState("variation").template).toEqual(
+      templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+    );
   });
 
   test("applying a preset seeds the preset's canonical template, so type and template agree", () => {
-    const short = reduce(base(), { type: "applyPreset", campaignType: "short-video" });
+    const short = reduce(base(), {
+      type: "applyPreset",
+      campaignType: "short-video",
+    });
     expect(short.template).toEqual(templateFromCanonical("short-video"));
-    const social = reduce(base(), { type: "applyPreset", campaignType: "social-post" });
+    const social = reduce(base(), {
+      type: "applyPreset",
+      campaignType: "social-post",
+    });
     expect(social.template).toEqual(templateFromCanonical("social-post"));
   });
 });
@@ -751,7 +1064,9 @@ describe("per-layer props survive the editor (L3b, D134)", () => {
     const canonical = templateFromCanonical(type);
     return {
       ...canonical,
-      layers: canonical.layers.map((layer) => (layer.kind === kind ? { ...layer, props } : layer)),
+      layers: canonical.layers.map((layer) =>
+        layer.kind === kind ? { ...layer, props } : layer,
+      ),
     };
   };
 
@@ -760,14 +1075,26 @@ describe("per-layer props survive the editor (L3b, D134)", () => {
     const state = fromBrief(savedBrief({ template }), { file: "camp.yaml" });
     const emitted = toBrief(state);
     expect(emitted.template).toEqual(template);
-    expect(emitted.template.layers.find((layer) => layer.kind === "shade")?.props).toEqual({ alpha: 0.5 });
+    expect(
+      emitted.template.layers.find((layer) => layer.kind === "shade")?.props,
+    ).toEqual({ alpha: 0.5 });
     // The held layer is the same data the brief carried — never re-derived.
-    expect(emitted.template.layers.find((layer) => layer.kind === "image")?.props).toBeUndefined();
+    expect(
+      emitted.template.layers.find((layer) => layer.kind === "image")?.props,
+    ).toBeUndefined();
   });
 
   test("a stored draft carrying props round-trips through the real storage path", () => {
-    const template = withProps("short-video", "animated-text", { anchor: "middle", typeFloor: 0.4 });
-    const state: EditorState = { ...base(), briefId: "camp", type: "short-video", template };
+    const template = withProps("short-video", "animated-text", {
+      anchor: "middle",
+      typeFloor: 0.4,
+    });
+    const state: EditorState = {
+      ...base(),
+      briefId: "camp",
+      type: "short-video",
+      template,
+    };
     saveDraftToStorage(state);
     const restored = loadDraftFromStorage(state);
     expect(restored?.template).toEqual(template);
@@ -783,7 +1110,9 @@ describe("per-layer props survive the editor (L3b, D134)", () => {
     };
     saveDraftToStorage(state);
     expect(() => loadDraftFromStorage(state)).not.toThrow();
-    expect(loadDraftFromStorage(state)?.template).toEqual(templateFromCanonical("short-video"));
+    expect(loadDraftFromStorage(state)?.template).toEqual(
+      templateFromCanonical("short-video"),
+    );
   });
 });
 
@@ -795,16 +1124,30 @@ describe("dirty tracking", () => {
   test("a file source with no snapshot is dirty against save", () => {
     const state: EditorState = {
       ...base(),
-      source: { kind: "file", file: "camp.yaml", loadedId: "camp", savedSnapshot: null, revision: undefined },
+      source: {
+        kind: "file",
+        file: "camp.yaml",
+        loadedId: "camp",
+        savedSnapshot: null,
+        revision: undefined,
+      },
     };
     expect(isDirtySinceSave(state)).toBe(true);
   });
 
   test("a freshly loaded file is clean until it is edited", () => {
-    const loaded = reduce(base(), { type: "load", brief: savedBrief(), entry: { file: "camp.yaml" } });
+    const loaded = reduce(base(), {
+      type: "load",
+      brief: savedBrief(),
+      entry: { file: "camp.yaml" },
+    });
     const saved = reduce(loaded, { type: "save" });
     expect(isDirtySinceSave(saved)).toBe(false);
-    expect(isDirtySinceSave(reduce(saved, { type: "patch", patch: { campaignMessage: "Changed" } }))).toBe(true);
+    expect(
+      isDirtySinceSave(
+        reduce(saved, { type: "patch", patch: { campaignMessage: "Changed" } }),
+      ),
+    ).toBe(true);
   });
 
   test("dirt against apply follows the applied snapshot", () => {
@@ -812,7 +1155,14 @@ describe("dirty tracking", () => {
     expect(isDirtySinceApply(state)).toBe(true);
     const applied = reduce(state, { type: "apply" });
     expect(isDirtySinceApply(applied)).toBe(false);
-    expect(isDirtySinceApply(reduce(applied, { type: "patch", patch: { campaignMessage: "Changed" } }))).toBe(true);
+    expect(
+      isDirtySinceApply(
+        reduce(applied, {
+          type: "patch",
+          patch: { campaignMessage: "Changed" },
+        }),
+      ),
+    ).toBe(true);
   });
 });
 
@@ -822,8 +1172,14 @@ describe("draft storage", () => {
 
   test("the key follows the loaded id for a file and the temp id for a new draft", () => {
     const fresh = base();
-    expect(getDraftKey(fresh)).toBe(`cf:draft:${fresh.source.kind === "new" ? fresh.source.tempId : ""}`);
-    const loaded = reduce(fresh, { type: "load", brief: savedBrief(), entry: { file: "camp.yaml" } });
+    expect(getDraftKey(fresh)).toBe(
+      `cf:draft:${fresh.source.kind === "new" ? fresh.source.tempId : ""}`,
+    );
+    const loaded = reduce(fresh, {
+      type: "load",
+      brief: savedBrief(),
+      entry: { file: "camp.yaml" },
+    });
     expect(getDraftKey(loaded)).toBe("cf:draft:camp");
   });
 
@@ -852,7 +1208,10 @@ describe("draft storage", () => {
     const legacyVariation: Record<string, unknown> = { ...state.variation };
     delete legacyVariation.ratio;
     const legacyDraft = { ...state, variation: legacyVariation };
-    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: legacyDraft, timestamp: 1 }));
+    localStorage.setItem(
+      getDraftKey(state),
+      JSON.stringify({ state: legacyDraft, timestamp: 1 }),
+    );
 
     const restored = loadDraftFromStorage(state);
     expect(restored).not.toBeNull();
@@ -866,7 +1225,10 @@ describe("draft storage", () => {
     const state = { ...base(), briefId: "camp", campaignMessage: "hi" };
     const legacy: Record<string, unknown> = { ...state };
     delete legacy.headlineAxisDropped;
-    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: legacy, timestamp: 1 }));
+    localStorage.setItem(
+      getDraftKey(state),
+      JSON.stringify({ state: legacy, timestamp: 1 }),
+    );
 
     const restored = loadDraftFromStorage(state);
     expect(restored?.headlineAxisDropped).toBe(false);
@@ -879,15 +1241,24 @@ describe("draft storage", () => {
     // one, because the field did not exist yet) — and the draft may already hold a
     // non-default type, so the canonical fallback must follow the type, not the
     // default: a short-video draft must come back with short-video's template.
-    const state: EditorState = { ...base(), briefId: "camp", type: "short-video" };
+    const state: EditorState = {
+      ...base(),
+      briefId: "camp",
+      type: "short-video",
+    };
     const legacy: Record<string, unknown> = { ...state };
     delete legacy.template;
-    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: legacy, timestamp: 1 }));
+    localStorage.setItem(
+      getDraftKey(state),
+      JSON.stringify({ state: legacy, timestamp: 1 }),
+    );
 
     const restored = loadDraftFromStorage(state);
     expect(restored?.template).toEqual(templateFromCanonical("short-video"));
     // And exactly what normalizeDraftState restored is what a save re-emits.
-    expect(toBrief(restored as EditorState).template).toEqual(templateFromCanonical("short-video"));
+    expect(toBrief(restored as EditorState).template).toEqual(
+      templateFromCanonical("short-video"),
+    );
   });
 
   test("a draft saved with a template keeps it verbatim through the real storage round-trip (L3a)", () => {
@@ -895,11 +1266,18 @@ describe("draft storage", () => {
     // stored template that differs from the draft type's canonical one survives
     // save → load → save unchanged, word for word.
     const template = templateFromCanonical("short-video");
-    const state: EditorState = { ...base(), briefId: "camp", type: "paid-social", template };
+    const state: EditorState = {
+      ...base(),
+      briefId: "camp",
+      type: "paid-social",
+      template,
+    };
     saveDraftToStorage(state);
     const restored = loadDraftFromStorage(state);
     expect(restored).not.toBeNull();
-    expect(restored?.template).not.toEqual(templateFromCanonical("paid-social"));
+    expect(restored?.template).not.toEqual(
+      templateFromCanonical("paid-social"),
+    );
     expect(restored?.template).toEqual(template);
     expect(toBrief(restored as EditorState).template).toEqual(template);
   });
@@ -918,9 +1296,16 @@ describe("draft storage", () => {
     // canonical id and an array `layers` without `version`/`creativeType`/`unit`
     // is the exact shape that used to sail through the old id+layers guard and
     // get refused by the API's validateTemplate at `toBrief`.
-    const state: EditorState = { ...base(), briefId: "camp", type: "short-video" };
+    const state: EditorState = {
+      ...base(),
+      briefId: "camp",
+      type: "short-video",
+    };
     const store = (template: unknown) =>
-      localStorage.setItem(getDraftKey(state), JSON.stringify({ state: { ...state, template }, timestamp: 1 }));
+      localStorage.setItem(
+        getDraftKey(state),
+        JSON.stringify({ state: { ...state, template }, timestamp: 1 }),
+      );
 
     for (const corrupt of [
       "not-an-object",
@@ -934,23 +1319,39 @@ describe("draft storage", () => {
       // Same five-field contract from the other side: every field valid except
       // `version` — the clause that makes the check complete is the one that
       // must be load-bearing, so a guard that forgot it still admits this.
-      { id: "canonical-image-text", creativeType: "image-text", unit: "standard-web", layers: [] },
+      {
+        id: "canonical-image-text",
+        creativeType: "image-text",
+        unit: "standard-web",
+        layers: [],
+      },
       // The per-layer half (L5): an entry that is not a layer — a `null`, a
       // bare string, a kindless object — crashes the first `layer.kind`
       // dereference, and a duplicated id is the rule the API's
       // `validateTemplate` already applies. Either corrupts the whole template.
-      { id: "canonical-video", version: 1, creativeType: "video", unit: "standard-web", layers: [null, "junk", {}] },
       {
         id: "canonical-video",
         version: 1,
         creativeType: "video",
         unit: "standard-web",
-        layers: [{ id: "shade", kind: "shade" }, { id: "shade", kind: "shade" }],
+        layers: [null, "junk", {}],
+      },
+      {
+        id: "canonical-video",
+        version: 1,
+        creativeType: "video",
+        unit: "standard-web",
+        layers: [
+          { id: "shade", kind: "shade" },
+          { id: "shade", kind: "shade" },
+        ],
       },
     ]) {
       store(corrupt);
       expect(() => loadDraftFromStorage(state)).not.toThrow();
-      expect(loadDraftFromStorage(state)?.template).toEqual(templateFromCanonical("short-video"));
+      expect(loadDraftFromStorage(state)?.template).toEqual(
+        templateFromCanonical("short-video"),
+      );
     }
   });
 
@@ -969,7 +1370,12 @@ describe("draft storage", () => {
         canonical.layers[4]!,
       ],
     };
-    const state: EditorState = { ...base(), briefId: "camp", type: "display-ad", template: reordered };
+    const state: EditorState = {
+      ...base(),
+      briefId: "camp",
+      type: "display-ad",
+      template: reordered,
+    };
     saveDraftToStorage(state);
     const restored = loadDraftFromStorage(state);
     expect(restored?.template).toEqual(reordered);
@@ -979,12 +1385,201 @@ describe("draft storage", () => {
     expect(toBrief(restored as EditorState).template).toEqual(reordered);
   });
 
+  test("moveLayer creates occlusion notice when moving a layer creates occlusion, and clears it when reversed (D135, D136)", () => {
+    // Canonical image-text: image (0), shade (1), accent (2), static-text (3), logo (4)
+    const initial = initialEditorState("brief");
+    expect(initial.occlusionNotice).toBeNull();
+
+    // 1. Move accent (2) up to 3 (above static-text)
+    const movedToOcclusion = editorReducer(initial, {
+      type: "moveLayer",
+      from: 2,
+      to: 3,
+    });
+    expect(movedToOcclusion.template.layers[2].kind).toBe("static-text");
+    expect(movedToOcclusion.template.layers[3].kind).toBe("accent");
+    expect(movedToOcclusion.occlusionNotice).toBe(
+      "the accent layer now sits above the headline and will mute it",
+    );
+
+    // 2. Move accent back down from 3 to 2
+    const movedBack = editorReducer(movedToOcclusion, {
+      type: "moveLayer",
+      from: 3,
+      to: 2,
+    });
+    expect(movedBack.template.layers[2].kind).toBe("accent");
+    expect(movedBack.template.layers[3].kind).toBe("static-text");
+    expect(movedBack.occlusionNotice).toBeNull();
+
+    // 3. Move static-text (3) up to 4 (above logo): non-occluding move leaves occlusionNotice null
+    const movedTextUp = editorReducer(initial, {
+      type: "moveLayer",
+      from: 3,
+      to: 4,
+    });
+    expect(movedTextUp.occlusionNotice).toBeNull();
+
+    // 4. Moving layer to its own index or out of bounds is a no-op
+    expect(editorReducer(initial, { type: "moveLayer", from: 2, to: 2 })).toBe(
+      initial,
+    );
+    expect(editorReducer(initial, { type: "moveLayer", from: -1, to: 2 })).toBe(
+      initial,
+    );
+    expect(editorReducer(initial, { type: "moveLayer", from: 2, to: 99 })).toBe(
+      initial,
+    );
+
+    // 5. removing an unrelated layer keeps the occlusion notice (L8o-fix4)
+    const afterRemoveUnrelated = editorReducer(movedToOcclusion, {
+      type: "removeLayer",
+      id: "logo",
+    });
+    expect(afterRemoveUnrelated.occlusionNotice).toBeNull();
+
+    // 6. removing the occluding layer itself clears the notice (L8o-fix4)
+    const afterRemoveOccluding = editorReducer(afterRemoveUnrelated, {
+      type: "removeLayer",
+      id: "accent",
+    });
+    expect(afterRemoveOccluding.occlusionNotice).toBeNull();
+  });
+
+  test("adding an unrelated layer to a template that already occludes produces no notice; removing produces no notice (L8o-fix5, D135)", () => {
+    // A video template with shade sitting above animated-text (genuine occlusion)
+    const canonicalVideo = templateFromCanonical("short-video");
+    const occludingVideoState: EditorState = {
+      ...base(),
+      template: {
+        ...canonicalVideo,
+        layers: [
+          canonicalVideo.layers[0]!, // video (0)
+          canonicalVideo.layers[2]!, // animated-text (1)
+          canonicalVideo.layers[1]!, // shade (2) — sits above animated-text
+        ],
+      },
+      occlusionNotice:
+        "the shade layer now sits above the headline and will mute it",
+    };
+
+    // 1. Adding an unrelated layer (video) produces no notice
+    const afterAddUnrelated = editorReducer(occludingVideoState, {
+      type: "addLayer",
+      kind: "video",
+    });
+    expect(afterAddUnrelated.occlusionNotice).toBeNull();
+
+    // 2. Removing an unrelated layer produces no notice
+    const afterRemoveUnrelated = editorReducer(afterAddUnrelated, {
+      type: "removeLayer",
+      id: "video-2",
+    });
+    expect(afterRemoveUnrelated.occlusionNotice).toBeNull();
+
+    // 3. Removing the occluding layer itself (shade) also produces no notice
+    const afterRemoveOccluding = editorReducer(afterRemoveUnrelated, {
+      type: "removeLayer",
+      id: "shade",
+    });
+    expect(afterRemoveOccluding.occlusionNotice).toBeNull();
+  });
+
+  test("addLayer produces an occlusion notice when the added layer creates an occlusion (D135, D136)", () => {
+    const canonicalVideo = templateFromCanonical("short-video");
+    const videoWithoutShade: EditorState = {
+      ...base(),
+      template: {
+        ...canonicalVideo,
+        layers: [
+          canonicalVideo.layers[0]!, // video
+          canonicalVideo.layers[2]!, // animated-text
+          canonicalVideo.layers[3]!, // logo
+        ],
+      },
+      occlusionNotice: null,
+    };
+    const afterAddShade = editorReducer(videoWithoutShade, {
+      type: "addLayer",
+      kind: "shade",
+    });
+    expect(afterAddShade.occlusionNotice).toBe(
+      "the shade layer now sits above the headline and will mute it",
+    );
+  });
+
+  test("occlusion notice comes from the message catalog and not from the domain (D2, D18)", () => {
+    const initial = initialEditorState("brief");
+    const spy = vi
+      .spyOn(messages, "templateOcclusionNote")
+      .mockReturnValue("catalog-derived occlusion note");
+    try {
+      const moved = editorReducer(initial, {
+        type: "moveLayer",
+        from: 2,
+        to: 3,
+      });
+      expect(spy).toHaveBeenCalledWith("Accent", "Static text", "mute");
+      expect(moved.occlusionNotice).toBe("catalog-derived occlusion note");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("formatOcclusionNotice formats findings for all behavior classes and handles null", () => {
+    expect(formatOcclusionNotice(null)).toBeNull();
+    expect(
+      formatOcclusionNotice({
+        above: "image",
+        below: "accent",
+        behavior: "opaque",
+      }),
+    ).toBe("the image layer now sits above the accent and will hide it");
+    expect(
+      formatOcclusionNotice({
+        above: "shade",
+        below: "static-text",
+        behavior: "attenuating",
+      }),
+    ).toBe("the shade layer now sits above the headline and will mute it");
+    expect(
+      formatOcclusionNotice({
+        above: "logo",
+        below: "static-text",
+        behavior: "local",
+      }),
+    ).toBe(
+      "the logo layer now sits above the headline and will overlap where it sits",
+    );
+  });
+
+  test("occlusionNotice never survives a round-trip (D135)", () => {
+    // A state carrying a notice, saved and restored, comes back with no notice.
+    const state: EditorState = {
+      ...base(),
+      briefId: "camp",
+      occlusionNotice:
+        "the accent layer now sits above the headline and will mute it",
+    };
+    saveDraftToStorage(state);
+    const restored = loadDraftFromStorage(state);
+    expect(restored?.occlusionNotice).toBeNull();
+
+    const fromBriefState = fromBrief(toBrief(state));
+    expect(fromBriefState.occlusionNotice).toBeNull();
+  });
+
   test("a stored template with an illegal layer order falls back to canonical (L8, D128)", () => {
     // An illegal order (e.g. logo below image) is refused by isBriefTemplate
     // and falls back to the canonical template rather than corrupting the editor.
     const canonical = templateFromCanonical("paid-social");
     const illegal = { ...canonical, layers: [...canonical.layers].reverse() };
-    const state: EditorState = { ...base(), briefId: "camp", type: "display-ad", template: illegal };
+    const state: EditorState = {
+      ...base(),
+      briefId: "camp",
+      type: "display-ad",
+      template: illegal,
+    };
     saveDraftToStorage(state);
     const restored = loadDraftFromStorage(state);
     expect(restored?.template).toEqual(templateFromCanonical("display-ad"));
@@ -992,8 +1587,15 @@ describe("draft storage", () => {
 
   test("normalization never overrides a key the draft actually set", () => {
     const state = { ...base(), briefId: "camp" };
-    const draft = { ...state, variation: { ...state.variation, ratio: ["9:16"] }, formats: ["motion"] };
-    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: draft, timestamp: 1 }));
+    const draft = {
+      ...state,
+      variation: { ...state.variation, ratio: ["9:16"] },
+      formats: ["motion"],
+    };
+    localStorage.setItem(
+      getDraftKey(state),
+      JSON.stringify({ state: draft, timestamp: 1 }),
+    );
 
     const restored = loadDraftFromStorage(state);
     expect(restored?.variation.ratio).toEqual(["9:16"]);
@@ -1004,14 +1606,20 @@ describe("draft storage", () => {
     const state = { ...base(), briefId: "camp" };
     const legacy: Record<string, unknown> = { ...state };
     delete legacy.mode;
-    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: legacy, timestamp: 1 }));
+    localStorage.setItem(
+      getDraftKey(state),
+      JSON.stringify({ state: legacy, timestamp: 1 }),
+    );
     expect(loadDraftFromStorage(state)?.mode).toBe("brief");
   });
 
   test("a variation value that is present but not an object falls back to the default shape", () => {
     const state = { ...base(), briefId: "camp" };
     const corrupt = { ...state, variation: null };
-    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: corrupt, timestamp: 1 }));
+    localStorage.setItem(
+      getDraftKey(state),
+      JSON.stringify({ state: corrupt, timestamp: 1 }),
+    );
     expect(loadDraftFromStorage(state)?.variation).toEqual(base().variation);
   });
 
@@ -1024,7 +1632,10 @@ describe("draft storage", () => {
       products: [null, "not-a-product", { ...state.products[0], key: 7 }],
       nextProductKey: 8,
     };
-    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: draft, timestamp: 1 }));
+    localStorage.setItem(
+      getDraftKey(state),
+      JSON.stringify({ state: draft, timestamp: 1 }),
+    );
 
     const restored = loadDraftFromStorage(state);
     expect(restored).not.toBeNull();
@@ -1040,7 +1651,10 @@ describe("draft storage", () => {
   test("a present mode survives, and an invalid one falls back to brief instead of leaking", () => {
     const state = { ...base(), briefId: "camp" };
     const store = (mode: unknown) =>
-      localStorage.setItem(getDraftKey(state), JSON.stringify({ state: { ...state, mode }, timestamp: 1 }));
+      localStorage.setItem(
+        getDraftKey(state),
+        JSON.stringify({ state: { ...state, mode }, timestamp: 1 }),
+      );
     // The first cut of normalizeDraftState validated mode but then let the raw
     // spread overwrite it: a garbage string restored verbatim. Both legal values
     // must round-trip and every other value must collapse to the default.
@@ -1061,15 +1675,22 @@ describe("draft storage", () => {
       formats: "motion",
       variation: { ...state.variation, ratio: "9:16", layout: 42 },
     };
-    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: corrupt, timestamp: 1 }));
+    localStorage.setItem(
+      getDraftKey(state),
+      JSON.stringify({ state: corrupt, timestamp: 1 }),
+    );
     const restored = loadDraftFromStorage(state) as EditorState;
     expect(restored.variation.ratio).toEqual([...RATIO_OPTIONS]);
     expect(restored.variation.layout).toEqual([...LAYOUT_OPTIONS]);
     expect(restored.formats).toEqual(["static"]);
     // toggleOrdered runs `.includes` and `.filter` on the list — the failure the
     // unrepaired string would have produced on the user's next click.
-    expect(() => reduce(restored, { type: "toggleRatio", value: "1:1" })).not.toThrow();
-    expect(reduce(restored, { type: "toggleRatio", value: "1:1" }).variation.ratio).toEqual(["9:16", "16:9"]);
+    expect(() =>
+      reduce(restored, { type: "toggleRatio", value: "1:1" }),
+    ).not.toThrow();
+    expect(
+      reduce(restored, { type: "toggleRatio", value: "1:1" }).variation.ratio,
+    ).toEqual(["9:16", "16:9"]);
   });
 
   test("every other repaired field takes its default when the draft's value is not its type", () => {
@@ -1085,7 +1706,10 @@ describe("draft storage", () => {
       // 7, not 12: the default is "12", so a coerced String(12) would pass by accident
       variation: { ...state.variation, headline: "yes", count: 7 },
     };
-    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: corrupt, timestamp: 1 }));
+    localStorage.setItem(
+      getDraftKey(state),
+      JSON.stringify({ state: corrupt, timestamp: 1 }),
+    );
     const restored = loadDraftFromStorage(state) as EditorState;
     expect(restored.source.kind).toBe("new");
     expect(restored.products).toHaveLength(1);
@@ -1118,7 +1742,12 @@ describe("draft storage", () => {
     saveDraftToStorage(base());
     expect(hasRecoverableDraft()).toBe(false);
     // A typed name is real work — the F19 case the create dialog asks about.
-    saveDraftToStorage(reduce(base(), { type: "patch", patch: { campaignName: "Half-written" } }));
+    saveDraftToStorage(
+      reduce(base(), {
+        type: "patch",
+        patch: { campaignName: "Half-written" },
+      }),
+    );
     expect(hasRecoverableDraft()).toBe(true);
     // Read-only by contract: the draft that made it answer true is still on disk.
     expect(loadDraftFromStorage(base())?.campaignName).toBe("Half-written");
@@ -1133,7 +1762,11 @@ describe("draft storage", () => {
 describe("canPlan", () => {
   const ready = (): EditorState => {
     const state = { ...base(), mode: "variation" as const, briefId: "camp" };
-    return reduce(state, { type: "setProduct", key: state.products[0].key, patch: { id: "alpha" } });
+    return reduce(state, {
+      type: "setProduct",
+      key: state.products[0].key,
+      patch: { id: "alpha" },
+    });
   };
 
   test("is true only for a named randomized brief with a product and a count of at least one", () => {
@@ -1145,7 +1778,9 @@ describe("canPlan", () => {
     expect(canPlan({ ...ready(), briefId: "" })).toBe(false);
     expect(canPlan({ ...ready(), products: [] })).toBe(false);
     const noCount = ready();
-    expect(canPlan({ ...noCount, variation: { ...noCount.variation, count: "0" } })).toBe(false);
+    expect(
+      canPlan({ ...noCount, variation: { ...noCount.variation, count: "0" } }),
+    ).toBe(false);
   });
 });
 
@@ -1165,7 +1800,9 @@ describe("variation policy round-trip", () => {
     targetRegion: "DE",
     targetAudience: "a",
     campaignMessage: "Hi",
-    products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "l.png" }],
+    products: [
+      { id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "l.png" },
+    ],
     mode: "variation",
     variation: {
       count: 40,
@@ -1210,28 +1847,52 @@ describe("variation policy round-trip", () => {
   test("a randomized brief with only a count keeps the optional fields absent", () => {
     const sparse = {
       ...randomized,
-      variation: { count: 5, axes: { layout: ["headline-top"], tone: ["bold"], background: { source: ["procedural"] }, paletteShift: [0] } },
+      variation: {
+        count: 5,
+        axes: {
+          layout: ["headline-top"],
+          tone: ["bold"],
+          background: { source: ["procedural"] },
+          paletteShift: [0],
+        },
+      },
     } as unknown as CampaignBrief;
     const state = fromBrief(sparse, { file: "camp.yaml" });
-    expect(state.variation).toMatchObject({ count: "5", seed: "", minDistance: "", perProduct: "", perRatio: "" });
+    expect(state.variation).toMatchObject({
+      count: "5",
+      seed: "",
+      minDistance: "",
+      perProduct: "",
+      perRatio: "",
+    });
     expect(state.motion).toEqual([]);
     expect(toBrief(state).variation).toEqual(sparse.variation);
   });
 
   test("a classic brief still gets the editor's randomized defaults", () => {
     const state = fromBrief(savedBrief(), { file: "camp.yaml" });
-    expect(state.variation).toMatchObject({ count: "12", minDistance: "2", perProduct: "1", perRatio: "1" });
+    expect(state.variation).toMatchObject({
+      count: "12",
+      minDistance: "2",
+      perProduct: "1",
+      perRatio: "1",
+    });
   });
 
   test("a requested ratio subset round-trips, and a brief without the axis keeps every ratio", () => {
     const policy = randomized.variation as { axes: Record<string, unknown> };
     const selected = {
       ...randomized,
-      variation: { ...policy, axes: { ...policy.axes, ratio: ["1:1", "16:9"] } },
+      variation: {
+        ...policy,
+        axes: { ...policy.axes, ratio: ["1:1", "16:9"] },
+      },
     } as unknown as CampaignBrief;
     const state = fromBrief(selected, { file: "camp.yaml" });
     expect(state.variation.ratio).toEqual(["1:1", "16:9"]);
-    expect(toBrief(state).variation?.axes).toMatchObject({ ratio: ["1:1", "16:9"] });
+    expect(toBrief(state).variation?.axes).toMatchObject({
+      ratio: ["1:1", "16:9"],
+    });
     // no key → all three selected, and saving back stays key-free
     const plain = fromBrief(randomized, { file: "camp.yaml" });
     expect(plain.variation.ratio).toEqual(["1:1", "9:16", "16:9"]);
@@ -1249,11 +1910,16 @@ describe("the anchor axis (T4)", () => {
   test("a fresh draft sits on the derived top/bottom pair — the absent axis' own behaviour", () => {
     expect(initialEditorState().variation.anchor).toEqual(["top", "bottom"]);
     // The absent axis writes no key: a fresh draft round-trips anchor-free.
-    expect(toBrief(initialEditorState("variation")).variation?.axes).not.toHaveProperty("anchor");
+    expect(
+      toBrief(initialEditorState("variation")).variation?.axes,
+    ).not.toHaveProperty("anchor");
   });
 
   test("toggleAnchor with the min-one guard: the last value cannot be deselected", () => {
-    const locked = reduce(initialEditorState("variation"), { type: "toggleAnchor", value: "bottom" });
+    const locked = reduce(initialEditorState("variation"), {
+      type: "toggleAnchor",
+      value: "bottom",
+    });
     expect(locked.variation.anchor).toEqual(["top"]);
     // Dropping the guard would empty the selection here — the click is a no-op instead.
     const blocked = reduce(locked, { type: "toggleAnchor", value: "top" });
@@ -1262,12 +1928,22 @@ describe("the anchor axis (T4)", () => {
   });
 
   test("selecting Middle activates the axis; the flag latches, so on→off stays carried", () => {
-    const on = reduce(initialEditorState("variation"), { type: "toggleAnchor", value: "middle" });
+    const on = reduce(initialEditorState("variation"), {
+      type: "toggleAnchor",
+      value: "middle",
+    });
     expect(on.variation.anchor).toEqual(["top", "middle", "bottom"]);
     expect(on.anchorExplicit).toBe(true);
-    expect(toBrief(on).variation?.axes?.anchor).toEqual(["top", "middle", "bottom"]);
+    expect(toBrief(on).variation?.axes?.anchor).toEqual([
+      "top",
+      "middle",
+      "bottom",
+    ]);
     // A lock also writes the key.
-    const locked = reduce(initialEditorState("variation"), { type: "toggleAnchor", value: "bottom" });
+    const locked = reduce(initialEditorState("variation"), {
+      type: "toggleAnchor",
+      value: "bottom",
+    });
     expect(locked.variation.anchor).toEqual(["top"]);
     expect(toBrief(locked).variation?.axes?.anchor).toEqual(["top"]);
     // Toggle-on → toggle-off: NOT byte-identical to never having toggled. The
@@ -1302,10 +1978,10 @@ describe("the anchor axis (T4)", () => {
     // presence, never a toggle.
     expect(state.anchorExplicit).toBe(false);
     expect(isDirtySinceSave(state)).toBe(false);
-    const off = reduce(
-      reduce(state, { type: "toggleAnchor", value: "top" }),
-      { type: "toggleAnchor", value: "top" },
-    );
+    const off = reduce(reduce(state, { type: "toggleAnchor", value: "top" }), {
+      type: "toggleAnchor",
+      value: "top",
+    });
     expect(off.variation.anchor).toEqual(["top", "bottom"]);
     expect(off.anchorExplicit).toBe(true);
     expect(toBrief(off).variation?.axes?.anchor).toEqual(["top", "bottom"]);
@@ -1313,7 +1989,10 @@ describe("the anchor axis (T4)", () => {
   });
 
   test("with layout locked, an anchor toggled off and back on still emits the axis", () => {
-    const locked = reduce(initialEditorState("variation"), { type: "toggleLayout", value: "headline-bottom" });
+    const locked = reduce(initialEditorState("variation"), {
+      type: "toggleLayout",
+      value: "headline-bottom",
+    });
     const off = reduce(locked, { type: "toggleAnchor", value: "top" });
     expect(off.variation.anchor).toEqual(["bottom"]);
     const back = reduce(off, { type: "toggleAnchor", value: "top" });
@@ -1350,7 +2029,10 @@ describe("the anchor axis (T4)", () => {
   });
 
   test("normalizeDraftState infers the flag from the data for pre-T4 drafts", () => {
-    const legacy = normalizeDraftState({ mode: "variation" } as Record<string, unknown>);
+    const legacy = normalizeDraftState({ mode: "variation" } as Record<
+      string,
+      unknown
+    >);
     expect(legacy.variation.anchor).toEqual(["top", "bottom"]);
     expect(legacy.anchorExplicit).toBe(false);
     const authored = normalizeDraftState({
@@ -1364,13 +2046,21 @@ describe("the anchor axis (T4)", () => {
     // Toggle top off and back on: the pair the user expressed, with the flag
     // latched. The draft is serialised the way saveDraftToStorage writes it.
     const toggled = reduce(
-      reduce(initialEditorState("variation"), { type: "toggleAnchor", value: "top" }),
+      reduce(initialEditorState("variation"), {
+        type: "toggleAnchor",
+        value: "top",
+      }),
       { type: "toggleAnchor", value: "top" },
     );
-    const restored = normalizeDraftState(JSON.parse(JSON.stringify(toggled)) as Record<string, unknown>);
+    const restored = normalizeDraftState(
+      JSON.parse(JSON.stringify(toggled)) as Record<string, unknown>,
+    );
     expect(restored.anchorExplicit).toBe(true);
     expect(restored.variation.anchor).toEqual(["top", "bottom"]);
-    expect(toBrief(restored).variation?.axes?.anchor).toEqual(["top", "bottom"]);
+    expect(toBrief(restored).variation?.axes?.anchor).toEqual([
+      "top",
+      "bottom",
+    ]);
   });
 
   test("a restored draft's anchor list is filtered to the axis vocabulary (#169 pattern)", () => {
@@ -1397,7 +2087,12 @@ describe("the anchor axis (T4)", () => {
     expect(absent).toBe(36);
     // A one-value selection adds no combination — the axis is carried, not expanded.
     const locked = axisProductSize(
-      randomized({ variation: { ...initialEditorState("variation").variation, anchor: ["top"] } }),
+      randomized({
+        variation: {
+          ...initialEditorState("variation").variation,
+          anchor: ["top"],
+        },
+      }),
     );
     expect(locked).toBe(36);
     // Three values triple the anchor factor.
@@ -1420,7 +2115,11 @@ describe("the anchor axis (T4)", () => {
 
 describe("restore", () => {
   test("reinstates a recovered draft", () => {
-    const draft = { ...base(), briefId: "recovered", campaignMessage: "from storage" };
+    const draft = {
+      ...base(),
+      briefId: "recovered",
+      campaignMessage: "from storage",
+    };
     expect(reduce(base(), { type: "restore", state: draft })).toMatchObject({
       briefId: "recovered",
       campaignMessage: "from storage",
@@ -1428,7 +2127,10 @@ describe("restore", () => {
   });
 
   test("keeps the probe's verdict rather than the draft's stale one", () => {
-    const probed = { ...base(), capabilities: { motion: false, reason: "no ffmpeg" } };
+    const probed = {
+      ...base(),
+      capabilities: { motion: false, reason: "no ffmpeg" },
+    };
     // the draft was persisted before the probe answered
     const draft = { ...base(), briefId: "recovered", capabilities: null };
     expect(reduce(probed, { type: "restore", state: draft })).toMatchObject({
@@ -1439,7 +2141,9 @@ describe("restore", () => {
 
   test("takes the draft's verdict when this session has none", () => {
     const draft = { ...base(), capabilities: { motion: true } };
-    expect(reduce(base(), { type: "restore", state: draft }).capabilities).toEqual({ motion: true });
+    expect(
+      reduce(base(), { type: "restore", state: draft }).capabilities,
+    ).toEqual({ motion: true });
   });
 });
 
@@ -1447,7 +2151,9 @@ describe("isPristine", () => {
   test("is true for a freshly opened editor and false once anything is typed", () => {
     expect(isPristine(initialEditorState())).toBe(true);
     expect(isPristine(initialEditorState("variation"))).toBe(true);
-    expect(isPristine(reduce(base(), { type: "patch", patch: { briefId: "x" } }))).toBe(false);
+    expect(
+      isPristine(reduce(base(), { type: "patch", patch: { briefId: "x" } })),
+    ).toBe(false);
   });
 });
 
@@ -1476,33 +2182,64 @@ describe("deterministic product keys (D16)", () => {
   });
 
   test("a restored 5-product draft without counter gets nextProductKey = 6", () => {
-    const state = { ...base(), products: [emptyProduct(1), emptyProduct(2), emptyProduct(3), emptyProduct(4), emptyProduct(5)] };
+    const state = {
+      ...base(),
+      products: [
+        emptyProduct(1),
+        emptyProduct(2),
+        emptyProduct(3),
+        emptyProduct(4),
+        emptyProduct(5),
+      ],
+    };
     const raw = { ...state, nextProductKey: undefined };
     delete (raw as Record<string, unknown>).nextProductKey;
-    const normalized = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    const normalized = normalizeDraftState(
+      raw as unknown as Record<string, unknown>,
+    );
     expect(normalized.nextProductKey).toBe(6);
   });
 
   test("a restored draft with stored counter of 42 keeps 42", () => {
-    const state = { ...base(), products: [emptyProduct(1)], nextProductKey: 42 };
-    const normalized = normalizeDraftState(state as unknown as Record<string, unknown>);
+    const state = {
+      ...base(),
+      products: [emptyProduct(1)],
+      nextProductKey: 42,
+    };
+    const normalized = normalizeDraftState(
+      state as unknown as Record<string, unknown>,
+    );
     expect(normalized.nextProductKey).toBe(42);
   });
 
   test("a restored draft with a stale counter below the highest key clamps to maxKey + 1", () => {
     const state = {
       ...base(),
-      products: [emptyProduct(1), emptyProduct(2), emptyProduct(3), emptyProduct(4), emptyProduct(5)],
+      products: [
+        emptyProduct(1),
+        emptyProduct(2),
+        emptyProduct(3),
+        emptyProduct(4),
+        emptyProduct(5),
+      ],
       nextProductKey: 3,
     };
-    const normalized = normalizeDraftState(state as unknown as Record<string, unknown>);
+    const normalized = normalizeDraftState(
+      state as unknown as Record<string, unknown>,
+    );
     expect(normalized.nextProductKey).toBe(6);
   });
 
   test("addProduct after a stale-counter restore cannot mint an existing key", () => {
     const restored = normalizeDraftState({
       ...base(),
-      products: [emptyProduct(1), emptyProduct(2), emptyProduct(3), emptyProduct(4), emptyProduct(5)],
+      products: [
+        emptyProduct(1),
+        emptyProduct(2),
+        emptyProduct(3),
+        emptyProduct(4),
+        emptyProduct(5),
+      ],
       nextProductKey: 3,
     } as unknown as Record<string, unknown>);
     const added = reduce(restored, { type: "addProduct" });
@@ -1520,40 +2257,64 @@ describe("deterministic product keys (D16)", () => {
         { ...emptyProduct(1), id: "c", key: "not-a-number" },
       ],
     };
-    const normalized = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    const normalized = normalizeDraftState(
+      raw as unknown as Record<string, unknown>,
+    );
     expect(normalized.products.map((p) => p.key)).toEqual([1, 2, 3]);
   });
 
   test("a restored draft with no products gets nextProductKey = 1", () => {
     const raw = { products: [] as never[], nextProductKey: undefined };
-    const normalized = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    const normalized = normalizeDraftState(
+      raw as unknown as Record<string, unknown>,
+    );
     expect(normalized.nextProductKey).toBe(1);
   });
 
   test("a restored draft keeps its explicit-mode flag, and a wrong-typed one is repaired", () => {
-    const kept = normalizeDraftState({ ...base(), modeExplicit: true } as unknown as Record<string, unknown>);
+    const kept = normalizeDraftState({
+      ...base(),
+      modeExplicit: true,
+    } as unknown as Record<string, unknown>);
     expect(kept.modeExplicit).toBe(true);
-    const repaired = normalizeDraftState({ ...base(), modeExplicit: "yes" } as unknown as Record<string, unknown>);
+    const repaired = normalizeDraftState({
+      ...base(),
+      modeExplicit: "yes",
+    } as unknown as Record<string, unknown>);
     expect(repaired.modeExplicit).toBe(false);
   });
 
   test("a restored draft keeps its explicit-output flag, and a wrong-typed one is repaired", () => {
-    const kept = normalizeDraftState({ ...base(), outputExplicit: true } as unknown as Record<string, unknown>);
+    const kept = normalizeDraftState({
+      ...base(),
+      outputExplicit: true,
+    } as unknown as Record<string, unknown>);
     expect(kept.outputExplicit).toBe(true);
-    const repaired = normalizeDraftState({ ...base(), outputExplicit: "yes" } as unknown as Record<string, unknown>);
+    const repaired = normalizeDraftState({
+      ...base(),
+      outputExplicit: "yes",
+    } as unknown as Record<string, unknown>);
     expect(repaired.outputExplicit).toBe(false);
   });
 
   test("a legacy restored draft without campaignName backfills campaignName from briefId", () => {
     const raw = { briefId: "legacy-brief-slug", products: [] as never[] };
-    const normalized = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    const normalized = normalizeDraftState(
+      raw as unknown as Record<string, unknown>,
+    );
     expect(normalized.campaignName).toBe("legacy-brief-slug");
     expect(normalized.briefId).toBe("legacy-brief-slug");
   });
 
   test("a restored draft with explicit campaignName preserves it", () => {
-    const raw = { briefId: "my-slug", campaignName: "My Campaign", products: [] as never[] };
-    const normalized = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    const raw = {
+      briefId: "my-slug",
+      campaignName: "My Campaign",
+      products: [] as never[],
+    };
+    const normalized = normalizeDraftState(
+      raw as unknown as Record<string, unknown>,
+    );
     expect(normalized.campaignName).toBe("My Campaign");
     expect(normalized.briefId).toBe("my-slug");
   });
@@ -1584,15 +2345,17 @@ describe("deterministic product keys (D16)", () => {
   });
 
   test("removeProduct removes exactly one by key", () => {
-    const state = fromBrief(savedBrief({
-      products: [
-        { id: "a", name: "A", primaryColor: "#000", logoPath: "" },
-        { id: "b", name: "B", primaryColor: "#111", logoPath: "" },
-        { id: "c", name: "C", primaryColor: "#222", logoPath: "" },
-        { id: "d", name: "D", primaryColor: "#333", logoPath: "" },
-        { id: "e", name: "E", primaryColor: "#444", logoPath: "" },
-      ],
-    }));
+    const state = fromBrief(
+      savedBrief({
+        products: [
+          { id: "a", name: "A", primaryColor: "#000", logoPath: "" },
+          { id: "b", name: "B", primaryColor: "#111", logoPath: "" },
+          { id: "c", name: "C", primaryColor: "#222", logoPath: "" },
+          { id: "d", name: "D", primaryColor: "#333", logoPath: "" },
+          { id: "e", name: "E", primaryColor: "#444", logoPath: "" },
+        ],
+      }),
+    );
     const removed = reduce(state, { type: "removeProduct", key: 3 });
     expect(removed.products).toHaveLength(4);
     expect(removed.products.map((p) => p.key)).not.toContain(3);
@@ -1604,17 +2367,20 @@ describe("whole-corpus round-trip", () => {
   const briefDir = path.join(process.cwd(), "briefs");
   const files = fs.readdirSync(briefDir).filter((f) => f.endsWith(".yaml"));
 
-  test.each(files)("%s round-trips fromBrief → toBrief → serialise byte-for-byte", (file) => {
-    const filePath = path.join(briefDir, file);
-    const yamlText = fs.readFileSync(filePath, "utf-8");
-    const parsed = load(yamlText) as CampaignBrief;
-    const entry = { file, revision: undefined as unknown as undefined };
-    const state = fromBrief(parsed, entry);
-    const roundTrippedBrief = toBrief(state);
-    const originalSerialised = dumpBrief(parsed);
-    const roundTrippedSerialised = dumpBrief(roundTrippedBrief);
-    expect(roundTrippedSerialised).toBe(originalSerialised);
-  });
+  test.each(files)(
+    "%s round-trips fromBrief → toBrief → serialise byte-for-byte",
+    (file) => {
+      const filePath = path.join(briefDir, file);
+      const yamlText = fs.readFileSync(filePath, "utf-8");
+      const parsed = load(yamlText) as CampaignBrief;
+      const entry = { file, revision: undefined as unknown as undefined };
+      const state = fromBrief(parsed, entry);
+      const roundTrippedBrief = toBrief(state);
+      const originalSerialised = dumpBrief(parsed);
+      const roundTrippedSerialised = dumpBrief(roundTrippedBrief);
+      expect(roundTrippedSerialised).toBe(originalSerialised);
+    },
+  );
 });
 
 describe("mode fidelity across a load → save round trip", () => {
@@ -1624,10 +2390,20 @@ describe("mode fidelity across a load → save round trip", () => {
       targetRegion: "DE",
       targetAudience: "a",
       campaignMessage: "Hi",
-      products: [{ id: "p", name: "P", primaryColor: "#FF7A00", logoPath: "assets/p.png" }],
+      products: [
+        {
+          id: "p",
+          name: "P",
+          primaryColor: "#FF7A00",
+          logoPath: "assets/p.png",
+        },
+      ],
       ...over,
     }) as CampaignBrief;
-  const entry = { file: "camp.yaml", revision: undefined as unknown as undefined };
+  const entry = {
+    file: "camp.yaml",
+    revision: undefined as unknown as undefined,
+  };
   const trip = (brief: CampaignBrief) => toBrief(fromBrief(brief, entry));
 
   test("a brief that spells out the default mode keeps it", () => {
@@ -1660,16 +2436,27 @@ describe("mode fidelity across a load → save round trip", () => {
 });
 
 describe("the count clamp and its one-time notice", () => {
-  const variation = (): EditorState => ({ ...initialEditorState(), mode: "variation", briefId: "camp" });
+  const variation = (): EditorState => ({
+    ...initialEditorState(),
+    mode: "variation",
+    briefId: "camp",
+  });
 
   test("narrowing an axis below the count lowers the count and says so, once", () => {
     const start = variation();
     const ceiling = axisProductSize(start);
-    const atCeiling = editorReducer(start, { type: "setVariation", field: "count", value: String(ceiling) });
+    const atCeiling = editorReducer(start, {
+      type: "setVariation",
+      field: "count",
+      value: String(ceiling),
+    });
     expect(atCeiling.countNotice).toBeNull();
 
     // half the layouts go, so half the combinations do: the count cannot stand
-    const narrowed = editorReducer(atCeiling, { type: "toggleLayout", value: LAYOUT_OPTIONS[0] });
+    const narrowed = editorReducer(atCeiling, {
+      type: "toggleLayout",
+      value: LAYOUT_OPTIONS[0],
+    });
     const lowered = axisProductSize(narrowed);
     expect(lowered).toBeLessThan(ceiling);
     expect(narrowed.variation.count).toBe(String(lowered));
@@ -1679,37 +2466,60 @@ describe("the count clamp and its one-time notice", () => {
   test("a count that still fits is left alone, and clears a standing notice", () => {
     const start = variation();
     const narrowed = editorReducer(
-      editorReducer(start, { type: "setVariation", field: "count", value: String(axisProductSize(start)) }),
+      editorReducer(start, {
+        type: "setVariation",
+        field: "count",
+        value: String(axisProductSize(start)),
+      }),
       { type: "toggleLayout", value: LAYOUT_OPTIONS[0] },
     );
     expect(narrowed.countNotice).not.toBeNull();
 
     // widening it back leaves the (now small) count alone and takes the notice down
-    const widened = editorReducer(narrowed, { type: "toggleLayout", value: LAYOUT_OPTIONS[0] });
+    const widened = editorReducer(narrowed, {
+      type: "toggleLayout",
+      value: LAYOUT_OPTIONS[0],
+    });
     expect(widened.countNotice).toBeNull();
     expect(widened.variation.count).toBe(narrowed.variation.count);
   });
 
   test("setting the count by hand answers the notice", () => {
     const noticed = editorReducer(
-      editorReducer(variation(), { type: "setVariation", field: "count", value: String(axisProductSize(variation())) }),
+      editorReducer(variation(), {
+        type: "setVariation",
+        field: "count",
+        value: String(axisProductSize(variation())),
+      }),
       { type: "toggleLayout", value: LAYOUT_OPTIONS[0] },
     );
     expect(noticed.countNotice).not.toBeNull();
 
-    const answered = editorReducer(noticed, { type: "setVariation", field: "count", value: "3" });
+    const answered = editorReducer(noticed, {
+      type: "setVariation",
+      field: "count",
+      value: "3",
+    });
     expect(answered.countNotice).toBeNull();
     expect(answered.variation.count).toBe("3");
   });
 
   test("the notice is said once: the next thing the user does takes it down", () => {
     const noticed = editorReducer(
-      editorReducer(variation(), { type: "setVariation", field: "count", value: String(axisProductSize(variation())) }),
+      editorReducer(variation(), {
+        type: "setVariation",
+        field: "count",
+        value: String(axisProductSize(variation())),
+      }),
       { type: "toggleLayout", value: LAYOUT_OPTIONS[0] },
     );
     expect(noticed.countNotice).not.toBeNull();
 
-    const seeded = editorReducer(noticed, { type: "setVariation", field: "seed", value: "42" });
+    const seeded = editorReducer(noticed, {
+      type: "setVariation",
+      field: "seed",
+      value: "42",
+    });
     expect(seeded.countNotice).toBeNull();
     expect(seeded.variation.seed).toBe("42");
     // and the count it was lowered to stands — the notice going does not undo the clamp
@@ -1718,56 +2528,95 @@ describe("the count clamp and its one-time notice", () => {
 
   test("every axis that shrinks the ceiling clamps, not just layout and tone", () => {
     const atCeiling = (s: EditorState) =>
-      editorReducer(s, { type: "setVariation", field: "count", value: String(axisProductSize(s)) });
+      editorReducer(s, {
+        type: "setVariation",
+        field: "count",
+        value: String(axisProductSize(s)),
+      });
 
     // a ratio: the planner would have refused this policy before, rather than the
     // editor lowering the count for it
-    const ratioed = editorReducer(atCeiling(variation()), { type: "toggleRatio", value: RATIO_OPTIONS[0] });
+    const ratioed = editorReducer(atCeiling(variation()), {
+      type: "toggleRatio",
+      value: RATIO_OPTIONS[0],
+    });
     expect(Number(ratioed.variation.count)).toBe(axisProductSize(ratioed));
     expect(ratioed.countNotice).toBe(axisProductSize(ratioed));
 
     // and a product, which is not a variation axis at all
-    const twoProducts = { ...variation(), products: [emptyProduct(1), emptyProduct(2)] };
+    const twoProducts = {
+      ...variation(),
+      products: [emptyProduct(1), emptyProduct(2)],
+    };
     const named = editorReducer(
-      editorReducer(twoProducts, { type: "setProduct", key: 1, patch: { id: "alpha" } }),
+      editorReducer(twoProducts, {
+        type: "setProduct",
+        key: 1,
+        patch: { id: "alpha" },
+      }),
       { type: "setProduct", key: 2, patch: { id: "beta" } },
     );
-    const dropped = editorReducer(atCeiling(named), { type: "removeProduct", key: 2 });
+    const dropped = editorReducer(atCeiling(named), {
+      type: "removeProduct",
+      key: 2,
+    });
     expect(Number(dropped.variation.count)).toBe(axisProductSize(dropped));
   });
 
   test("the last background and the last palette shift hold, like every other axis", () => {
     let s = variation();
-    for (const option of BACKGROUND_OPTIONS.filter((o) => s.variation.background.includes(o)).slice(0, -1)) {
+    for (const option of BACKGROUND_OPTIONS.filter((o) =>
+      s.variation.background.includes(o),
+    ).slice(0, -1)) {
       s = editorReducer(s, { type: "toggleBackground", value: option });
     }
     const lastBackground = s.variation.background;
     expect(lastBackground.length).toBe(1);
-    expect(editorReducer(s, { type: "toggleBackground", value: lastBackground[0] })).toBe(s);
+    expect(
+      editorReducer(s, { type: "toggleBackground", value: lastBackground[0] }),
+    ).toBe(s);
 
     for (const shift of s.variation.paletteShift.slice(0, -1)) {
       s = editorReducer(s, { type: "togglePalette", value: shift });
     }
     const lastShift = s.variation.paletteShift;
     expect(lastShift.length).toBe(1);
-    expect(editorReducer(s, { type: "togglePalette", value: lastShift[0] })).toBe(s);
+    expect(
+      editorReducer(s, { type: "togglePalette", value: lastShift[0] }),
+    ).toBe(s);
   });
 });
 
 describe("the axis min-one guard", () => {
-  const variation = (): EditorState => ({ ...initialEditorState(), mode: "variation", briefId: "camp" });
+  const variation = (): EditorState => ({
+    ...initialEditorState(),
+    mode: "variation",
+    briefId: "camp",
+  });
 
   test("the last tone stays selected, exactly as the last layout does", () => {
-    const oneTone = editorReducer(variation(), { type: "toggleTone", value: TONE_OPTIONS[0] });
+    const oneTone = editorReducer(variation(), {
+      type: "toggleTone",
+      value: TONE_OPTIONS[0],
+    });
     expect(oneTone.variation.tone).toEqual([TONE_OPTIONS[1]]);
 
-    const refused = editorReducer(oneTone, { type: "toggleTone", value: TONE_OPTIONS[1] });
+    const refused = editorReducer(oneTone, {
+      type: "toggleTone",
+      value: TONE_OPTIONS[1],
+    });
     expect(refused).toBe(oneTone);
   });
 
   test("a count that is not a number at all counts as zero, so nothing is clamped", () => {
-    const blank = { ...variation(), variation: { ...variation().variation, count: "" } };
-    const narrowed = editorReducer(blank, { type: "toggleLayout", value: LAYOUT_OPTIONS[0] });
+    const blank = {
+      ...variation(),
+      variation: { ...variation().variation, count: "" },
+    };
+    const narrowed = editorReducer(blank, {
+      type: "toggleLayout",
+      value: LAYOUT_OPTIONS[0],
+    });
     // 0 is never above the ceiling, so the count is left as the user typed it
     expect(narrowed.variation.count).toBe("");
     expect(narrowed.countNotice).toBeNull();
@@ -1779,9 +2628,14 @@ describe("a campaign name the slug throws away is still work", () => {
     // "!!!" slugs to "", so the brief is byte-identical to a blank one. Comparing briefs
     // alone would call this pristine — the draft would not be autosaved and leaving would
     // not prompt, so the name the user typed would disappear without a word.
-    const typed = editorReducer(initialEditorState(), { type: "patch", patch: { campaignName: "!!!" } });
+    const typed = editorReducer(initialEditorState(), {
+      type: "patch",
+      patch: { campaignName: "!!!" },
+    });
     expect(typed.briefId).toBe("");
-    expect(JSON.stringify(toBrief(typed))).toBe(JSON.stringify(toBrief(initialEditorState())));
+    expect(JSON.stringify(toBrief(typed))).toBe(
+      JSON.stringify(toBrief(initialEditorState())),
+    );
     expect(isPristine(typed)).toBe(false);
   });
 
@@ -1792,7 +2646,9 @@ describe("a campaign name the slug throws away is still work", () => {
 
 describe("L4.1 Whole-corpus round-trip tests (D7)", () => {
   const briefsDir = path.resolve(__dirname, "../../../../../../briefs");
-  const yamlFiles = fs.readdirSync(briefsDir).filter((f) => f.endsWith(".yaml"));
+  const yamlFiles = fs
+    .readdirSync(briefsDir)
+    .filter((f) => f.endsWith(".yaml"));
 
   test("discovers all corpus YAML files on disk", () => {
     expect(yamlFiles.length).toBeGreaterThanOrEqual(7);
@@ -1814,8 +2670,14 @@ describe("L4.1 Whole-corpus round-trip tests (D7)", () => {
       // equality of `toBrief` objects means the saved bytes are identical too —
       // which in turn keeps `policyHash` and `axisProductSize` stable (D7/D9).
       const testPlatform = state.platforms.includes("tiktok") ? "x" : "tiktok";
-      const toggled = reduce(state, { type: "togglePlatform", value: testPlatform });
-      const untoggled = reduce(toggled, { type: "togglePlatform", value: testPlatform });
+      const toggled = reduce(state, {
+        type: "togglePlatform",
+        value: testPlatform,
+      });
+      const untoggled = reduce(toggled, {
+        type: "togglePlatform",
+        value: testPlatform,
+      });
 
       const roundTripped = toBrief(untoggled);
       expect(roundTripped).toEqual(serialized);
@@ -1834,9 +2696,15 @@ describe("L4.1 Whole-corpus round-trip tests (D7)", () => {
     expect(state.formats).toEqual(["motion"]);
 
     // Toggling a platform does NOT overwrite formats
-    const toggled = reduce(state, { type: "togglePlatform", value: "linkedin" });
+    const toggled = reduce(state, {
+      type: "togglePlatform",
+      value: "linkedin",
+    });
     expect(toggled.formats).toEqual(["motion"]);
-    const untoggled = reduce(toggled, { type: "togglePlatform", value: "linkedin" });
+    const untoggled = reduce(toggled, {
+      type: "togglePlatform",
+      value: "linkedin",
+    });
     expect(untoggled.formats).toEqual(["motion"]);
   });
 
@@ -1861,9 +2729,15 @@ describe("L4.1 Whole-corpus round-trip tests (D7)", () => {
     expect(state.variation.ratio).toEqual(["1:1"]);
 
     // Toggling a platform does NOT overwrite ratios
-    const toggled = reduce(state, { type: "togglePlatform", value: "linkedin" });
+    const toggled = reduce(state, {
+      type: "togglePlatform",
+      value: "linkedin",
+    });
     expect(toggled.variation.ratio).toEqual(["1:1"]);
-    const untoggled = reduce(toggled, { type: "togglePlatform", value: "linkedin" });
+    const untoggled = reduce(toggled, {
+      type: "togglePlatform",
+      value: "linkedin",
+    });
     expect(untoggled.variation.ratio).toEqual(["1:1"]);
   });
 
@@ -1924,10 +2798,16 @@ describe("L4.5 Fresh-draft Video on→off identity test (D9)", () => {
   test("touching motion kinds prevents retraction when Video is toggled off", () => {
     const fresh = initialEditorState("variation");
     const videoOn = reduce(fresh, { type: "toggleFormat", value: "motion" });
-    const customized = reduce(videoOn, { type: "toggleMotion", value: "ken-burns-out" });
+    const customized = reduce(videoOn, {
+      type: "toggleMotion",
+      value: "ken-burns-out",
+    });
     expect(customized.motionTouched).toBe(true);
 
-    const videoOff = reduce(customized, { type: "toggleFormat", value: "motion" });
+    const videoOff = reduce(customized, {
+      type: "toggleFormat",
+      value: "motion",
+    });
     // Retraction does not happen because user explicitly touched motion
     expect(videoOff.motion).toContain("ken-burns-in");
   });
@@ -1935,9 +2815,8 @@ describe("L4.5 Fresh-draft Video on→off identity test (D9)", () => {
 
 describe("DEFAULT_DURATION_SEC (L1)", () => {
   test("the editor re-exports the domain leaf constant rather than keeping a private copy", async () => {
-    const { DEFAULT_DURATION_SEC: domainDefault } = await import(
-      "@campaignfoundry/CampaignOrchestration/variation-defaults"
-    );
+    const { DEFAULT_DURATION_SEC: domainDefault } =
+      await import("@campaignfoundry/CampaignOrchestration/variation-defaults");
     // The editor's default is the domain's, so changing the one constant moves the
     // editor's seed and `nextFreeDuration` along with it — no private 5-vs-6 drift.
     expect(DEFAULT_DURATION_SEC).toBe(domainDefault);
@@ -1968,10 +2847,11 @@ describe("motionPackagedRatios", () => {
 
   test("a display profile contributes no motion ratio", () => {
     expect(Array.from(motionPackagedRatios(["google-display"]))).toEqual([]);
-    expect(Array.from(motionPackagedRatios(["google-display", "tiktok"]))).toEqual(["9:16"]);
+    expect(
+      Array.from(motionPackagedRatios(["google-display", "tiktok"])),
+    ).toEqual(["9:16"]);
   });
 });
-
 
 describe("a draft written before the override flags existed", () => {
   const legacy = (over: Record<string, unknown>) =>
@@ -1988,7 +2868,10 @@ describe("a draft written before the override flags existed", () => {
     // toggle permission to overwrite it.
     const restored = legacy({ formats: ["static", "motion"] });
     expect(restored.formatsOverridden).toBe(true);
-    const toggled = editorReducer(restored, { type: "togglePlatform", value: "linkedin" });
+    const toggled = editorReducer(restored, {
+      type: "togglePlatform",
+      value: "linkedin",
+    });
     expect(toggled.formats).toEqual(["static", "motion"]);
   });
 
@@ -2005,14 +2888,23 @@ describe("a draft written before the override flags existed", () => {
   test("a flag that is present is believed, not re-inferred", () => {
     // the user turned an override off deliberately; the data still differs, and that is
     // not the restore's business to second-guess
-    expect(legacy({ formats: ["static", "motion"], formatsOverridden: false }).formatsOverridden).toBe(false);
+    expect(
+      legacy({ formats: ["static", "motion"], formatsOverridden: false })
+        .formatsOverridden,
+    ).toBe(false);
   });
 });
 
 describe("the output remedies do what their labels say", () => {
   const motionOnly = () =>
     editorReducer(
-      { ...initialEditorState(), mode: "variation", briefId: "camp", platforms: ["instagram-reel"], formats: ["motion"] },
+      {
+        ...initialEditorState(),
+        mode: "variation",
+        briefId: "camp",
+        platforms: ["instagram-reel"],
+        formats: ["motion"],
+      },
       { type: "patch", patch: {} },
     );
 
@@ -2030,16 +2922,30 @@ describe("the output remedies do what their labels say", () => {
   });
 
   test("adding a clip length uses the second the user clicked", () => {
-    const base = { ...initialEditorState(), mode: "variation" as const, duration: [6] };
-    expect(editorReducer(base, { type: "addDuration", value: 12 }).duration).toEqual([6, 12]);
+    const base = {
+      ...initialEditorState(),
+      mode: "variation" as const,
+      duration: [6],
+    };
+    expect(
+      editorReducer(base, { type: "addDuration", value: 12 }).duration,
+    ).toEqual([6, 12]);
     // a second already on the reel would be a no-op for the planner, so fall back
-    expect(editorReducer(base, { type: "addDuration", value: 6 }).duration).not.toEqual([6, 6]);
+    expect(
+      editorReducer(base, { type: "addDuration", value: 6 }).duration,
+    ).not.toEqual([6, 6]);
     // and with no second named at all, the old behaviour stands
-    expect(editorReducer(base, { type: "addDuration" }).duration.length).toBe(2);
+    expect(editorReducer(base, { type: "addDuration" }).duration.length).toBe(
+      2,
+    );
   });
 
   test("an override flag lifts when the selection returns to what the platforms derive", () => {
-    const start = { ...initialEditorState(), mode: "variation" as const, platforms: ["instagram-feed"] };
+    const start = {
+      ...initialEditorState(),
+      mode: "variation" as const,
+      platforms: ["instagram-feed"],
+    };
     const on = editorReducer(start, { type: "toggleFormat", value: "motion" });
     expect(on.formatsOverridden).toBe(true);
     // back to the derived set: a latched flag would freeze formats against the next
@@ -2063,7 +2969,7 @@ describe("override detection is about bytes, not sets", () => {
     } as Record<string, unknown>);
     expect(reversed.formatsOverridden).toBe(true);
   });
-})
+});
 
 describe("the load path and the draft path agree about what counts as overridden", () => {
   test("a brief loaded from disk with reordered formats is overridden, exactly as a draft is", () => {
@@ -2072,27 +2978,44 @@ describe("the load path and the draft path agree about what counts as overridden
     // from — and the load path, the one that reads other people's briefs, was the lenient
     // of the two. A later platform toggle would then rewrite an order nobody edited.
     const loaded = fromBrief(
-      savedBrief({ output: { formats: ["motion", "static"], platforms: ["instagram-feed", "instagram-reel"] } }),
+      savedBrief({
+        output: {
+          formats: ["motion", "static"],
+          platforms: ["instagram-feed", "instagram-reel"],
+        },
+      }),
     );
     expect(loaded.formatsOverridden).toBe(true);
   });
 
   test("a brief whose formats match the derived order is still not overridden", () => {
     const loaded = fromBrief(
-      savedBrief({ output: { formats: platformsToFormats(["instagram-feed"]), platforms: ["instagram-feed"] } }),
+      savedBrief({
+        output: {
+          formats: platformsToFormats(["instagram-feed"]),
+          platforms: ["instagram-feed"],
+        },
+      }),
     );
     expect(loaded.formatsOverridden).toBe(false);
   });
-})
+});
 
 const authored = (state: EditorState) =>
-  state.timeline.beats.map((beat) => ({ text: beat.text, weight: beat.weight }));
+  state.timeline.beats.map((beat) => ({
+    text: beat.text,
+    weight: beat.weight,
+  }));
 
 describe("copy timeline (E5.1)", () => {
   // A variation draft that can carry a serialised timeline: variation mode and the
   // motion format, with no `axes.headline` — the D5 gate `canSerializeTimeline`.
   const motionState = (): EditorState =>
-    ({ ...initialEditorState("variation"), briefId: "camp", formats: ["static", "motion"] }) as EditorState;
+    ({
+      ...initialEditorState("variation"),
+      briefId: "camp",
+      formats: ["static", "motion"],
+    }) as EditorState;
 
   const named = (texts: string[]): EditorState => {
     let state = motionState();
@@ -2103,7 +3026,8 @@ describe("copy timeline (E5.1)", () => {
     return state;
   };
 
-  const texts = (state: EditorState): string[] => state.timeline.beats.map((beat) => beat.text);
+  const texts = (state: EditorState): string[] =>
+    state.timeline.beats.map((beat) => beat.text);
 
   // A corpus-style motion brief that round-trips byte-for-byte once a timeline is
   // added — mirrors briefs/sample-motion.yaml's full axis set plus `copy.timeline`.
@@ -2115,7 +3039,12 @@ describe("copy timeline (E5.1)", () => {
       campaignMessage: "Stay wild.",
       localizedMessage: "Bleib wild.",
       products: [
-        { id: "hydra-bottle", name: "Hydra Bottle", primaryColor: "#1473E6", logoPath: "assets/inputs/hydra-logo.png" },
+        {
+          id: "hydra-bottle",
+          name: "Hydra Bottle",
+          primaryColor: "#1473E6",
+          logoPath: "assets/inputs/hydra-logo.png",
+        },
       ],
       mode: "variation",
       variation: {
@@ -2132,7 +3061,10 @@ describe("copy timeline (E5.1)", () => {
           duration: [6],
         },
       } as unknown as CampaignBrief["variation"],
-      output: { formats: ["static", "motion"], platforms: ["instagram-feed", "instagram-reel"] },
+      output: {
+        formats: ["static", "motion"],
+        platforms: ["instagram-feed", "instagram-reel"],
+      },
       copy: {
         timeline: {
           beats: [
@@ -2163,7 +3095,11 @@ describe("copy timeline (E5.1)", () => {
 
     test("setBeatText and setBeatWeight patch the named beat only", () => {
       const edited = reduce(
-        reduce(named(["One", "Two", "Three"]), { type: "setBeatText", index: 1, text: "Updated" }),
+        reduce(named(["One", "Two", "Three"]), {
+          type: "setBeatText",
+          index: 1,
+          text: "Updated",
+        }),
         { type: "setBeatWeight", index: 1, weight: 4 },
       );
       expect(authored(edited)).toEqual([
@@ -2175,7 +3111,10 @@ describe("copy timeline (E5.1)", () => {
 
     test("setKeyBeat makes the 1-based poster and setTransition swaps the cut", () => {
       const edited = reduce(
-        reduce(named(["One", "Two", "Three"]), { type: "setKeyBeat", index: 2 }),
+        reduce(named(["One", "Two", "Three"]), {
+          type: "setKeyBeat",
+          index: 2,
+        }),
         { type: "setTransition", transition: "cut" },
       );
       expect(edited.timeline.keyBeat).toBe(3);
@@ -2183,44 +3122,69 @@ describe("copy timeline (E5.1)", () => {
     });
 
     test("removeBeat removes exactly one beat per key", () => {
-      expect(texts(reduce(named(["One", "Two", "Three"]), { type: "removeBeat", index: 1 }))).toEqual([
-        "One",
-        "Three",
-      ]);
+      expect(
+        texts(
+          reduce(named(["One", "Two", "Three"]), {
+            type: "removeBeat",
+            index: 1,
+          }),
+        ),
+      ).toEqual(["One", "Three"]);
     });
 
     test("moveBeat reorders without duplicating or dropping", () => {
-      const moved = reduce(named(["One", "Two", "Three"]), { type: "moveBeat", from: 0, to: 2 });
+      const moved = reduce(named(["One", "Two", "Three"]), {
+        type: "moveBeat",
+        from: 0,
+        to: 2,
+      });
       expect(texts(moved)).toEqual(["Two", "Three", "One"]);
     });
 
     test("a no-op move and an off-range remove return the same state object", () => {
-      const state = reduce(named(["One", "Two", "Three"]), { type: "setKeyBeat", index: 1 });
-      expect(editorReducer(state, { type: "moveBeat", from: 2, to: 2 })).toBe(state);
-      expect(editorReducer(state, { type: "removeBeat", index: 4 })).toBe(state);
+      const state = reduce(named(["One", "Two", "Three"]), {
+        type: "setKeyBeat",
+        index: 1,
+      });
+      expect(editorReducer(state, { type: "moveBeat", from: 2, to: 2 })).toBe(
+        state,
+      );
+      expect(editorReducer(state, { type: "removeBeat", index: 4 })).toBe(
+        state,
+      );
     });
 
     test("an out-of-range move source is a no-op, never an injected undefined beat", () => {
       const state = reduce(named(["One", "Two", "Three"]), { type: "addBeat" });
       const moved = editorReducer(state, { type: "moveBeat", from: 4, to: 0 });
       expect(moved).toBe(state);
-      expect(moved.timeline.beats.every((beat) => beat.text !== undefined && beat.weight !== undefined)).toBe(true);
+      expect(
+        moved.timeline.beats.every(
+          (beat) => beat.text !== undefined && beat.weight !== undefined,
+        ),
+      ).toBe(true);
     });
 
     test("an out-of-range move DESTINATION is a no-op and leaves the poster pointing at a beat", () => {
       // `to` was unchecked: moving the selected first beat to index 9 of a three-beat list
       // appended it and recorded keyBeat 10 — a timeline the API refuses on Save.
-      const state = reduce(named(["One", "Two", "Three"]), { type: "setKeyBeat", index: 0 });
+      const state = reduce(named(["One", "Two", "Three"]), {
+        type: "setKeyBeat",
+        index: 0,
+      });
       for (const to of [3, 9, -1, 1.5]) {
         const moved = editorReducer(state, { type: "moveBeat", from: 0, to });
         expect(moved).toBe(state);
       }
-      expect(state.timeline.keyBeat).toBeLessThanOrEqual(state.timeline.beats.length);
+      expect(state.timeline.keyBeat).toBeLessThanOrEqual(
+        state.timeline.beats.length,
+      );
     });
 
     test("addBeat refuses past the domain's beat ceiling", () => {
       let state = motionState();
-      for (let i = 0; i < MAX_BEATS; i += 1) state = reduce(state, { type: "addBeat" });
+      for (let i = 0; i < MAX_BEATS; i += 1)
+        state = reduce(state, { type: "addBeat" });
       expect(state.timeline.beats).toHaveLength(MAX_BEATS);
       // The parser rejects more, so the editor must not build a draft Save cannot take.
       expect(editorReducer(state, { type: "addBeat" })).toBe(state);
@@ -2229,15 +3193,23 @@ describe("copy timeline (E5.1)", () => {
     test("setBeatWeight refuses a weight the parser would reject", () => {
       const state = named(["One", "Two", "Three"]);
       for (const weight of [0, -1, 1.5, MAX_WEIGHT + 1, Number.NaN]) {
-        expect(editorReducer(state, { type: "setBeatWeight", index: 1, weight })).toBe(state);
+        expect(
+          editorReducer(state, { type: "setBeatWeight", index: 1, weight }),
+        ).toBe(state);
       }
       // The bounds themselves are accepted.
-      expect(reduce(state, { type: "setBeatWeight", index: 1, weight: 1 }).timeline.beats[1]?.weight).toBe(1);
       expect(
-        reduce(state, { type: "setBeatWeight", index: 1, weight: MAX_WEIGHT }).timeline.beats[1]?.weight,
+        reduce(state, { type: "setBeatWeight", index: 1, weight: 1 }).timeline
+          .beats[1]?.weight,
+      ).toBe(1);
+      expect(
+        reduce(state, { type: "setBeatWeight", index: 1, weight: MAX_WEIGHT })
+          .timeline.beats[1]?.weight,
       ).toBe(MAX_WEIGHT);
       // An index outside the list is a no-op too, like the move and remove cases.
-      expect(editorReducer(state, { type: "setBeatWeight", index: 7, weight: 2 })).toBe(state);
+      expect(
+        editorReducer(state, { type: "setBeatWeight", index: 7, weight: 2 }),
+      ).toBe(state);
     });
 
     test("setKeyBeat refuses an index no beat occupies", () => {
@@ -2245,7 +3217,9 @@ describe("copy timeline (E5.1)", () => {
       for (const index of [3, 9, -1, 0.5]) {
         expect(editorReducer(state, { type: "setKeyBeat", index })).toBe(state);
       }
-      expect(reduce(state, { type: "setKeyBeat", index: 2 }).timeline.keyBeat).toBe(3);
+      expect(
+        reduce(state, { type: "setKeyBeat", index: 2 }).timeline.keyBeat,
+      ).toBe(3);
     });
   });
 
@@ -2253,7 +3227,10 @@ describe("copy timeline (E5.1)", () => {
     test("moving the poster itself carries the poster to its new row", () => {
       const poster = 0;
       const moved = reduce(
-        reduce(named(["One", "Two", "Three"]), { type: "setKeyBeat", index: poster }),
+        reduce(named(["One", "Two", "Three"]), {
+          type: "setKeyBeat",
+          index: poster,
+        }),
         { type: "moveBeat", from: poster, to: 2 },
       );
       expect(texts(moved)).toEqual(["Two", "Three", "One"]);
@@ -2261,7 +3238,10 @@ describe("copy timeline (E5.1)", () => {
     });
 
     test("a beat carried forward across the poster shifts the poster's row left", () => {
-      const state = reduce(named(["One", "Two", "Three", "Four"]), { type: "setKeyBeat", index: 2 });
+      const state = reduce(named(["One", "Two", "Three", "Four"]), {
+        type: "setKeyBeat",
+        index: 2,
+      });
       const moved = reduce(state, { type: "moveBeat", from: 0, to: 3 });
       expect(texts(moved)).toEqual(["Two", "Three", "Four", "One"]);
       // the poster (Three) is now second — keyBeat tracks the row, and the selected
@@ -2270,49 +3250,70 @@ describe("copy timeline (E5.1)", () => {
     });
 
     test("a beat carried back across the poster shifts the poster's row right", () => {
-      const state = reduce(named(["One", "Two", "Three", "Four"]), { type: "setKeyBeat", index: 0 });
+      const state = reduce(named(["One", "Two", "Three", "Four"]), {
+        type: "setKeyBeat",
+        index: 0,
+      });
       const moved = reduce(state, { type: "moveBeat", from: 3, to: 0 });
       expect(texts(moved)).toEqual(["Four", "One", "Two", "Three"]);
       expect(moved.timeline.keyBeat).toBe(2);
     });
 
     test("a beat that moves above the poster without crossing it leaves the poster's row alone", () => {
-      const state = reduce(named(["One", "Two", "Three", "Four"]), { type: "setKeyBeat", index: 2 });
+      const state = reduce(named(["One", "Two", "Three", "Four"]), {
+        type: "setKeyBeat",
+        index: 2,
+      });
       const moved = reduce(state, { type: "moveBeat", from: 0, to: 1 });
       expect(texts(moved)).toEqual(["Two", "One", "Three", "Four"]);
       expect(moved.timeline.keyBeat).toBe(3);
     });
 
     test("a beat that moves below the poster without crossing it leaves the poster's row alone", () => {
-      const state = reduce(named(["One", "Two", "Three", "Four"]), { type: "setKeyBeat", index: 0 });
+      const state = reduce(named(["One", "Two", "Three", "Four"]), {
+        type: "setKeyBeat",
+        index: 0,
+      });
       const moved = reduce(state, { type: "moveBeat", from: 2, to: 3 });
       expect(texts(moved)).toEqual(["One", "Two", "Four", "Three"]);
       expect(moved.timeline.keyBeat).toBe(1);
     });
 
     test("removing a beat before the poster decrements it", () => {
-      const state = reduce(named(["One", "Two", "Three", "Four"]), { type: "setKeyBeat", index: 2 });
+      const state = reduce(named(["One", "Two", "Three", "Four"]), {
+        type: "setKeyBeat",
+        index: 2,
+      });
       const removed = reduce(state, { type: "removeBeat", index: 0 });
       expect(texts(removed)).toEqual(["Two", "Three", "Four"]);
       expect(removed.timeline.keyBeat).toBe(2);
     });
 
     test("removing the poster itself keeps the row — the shifted beat inherits it", () => {
-      const state = reduce(named(["One", "Two", "Three", "Four"]), { type: "setKeyBeat", index: 2 });
+      const state = reduce(named(["One", "Two", "Three", "Four"]), {
+        type: "setKeyBeat",
+        index: 2,
+      });
       const removed = reduce(state, { type: "removeBeat", index: 2 });
       expect(texts(removed)).toEqual(["One", "Two", "Four"]);
       expect(removed.timeline.keyBeat).toBe(3);
     });
 
     test("removing the poster when it is last picks the new last beat", () => {
-      const state = reduce(named(["One", "Two", "Three"]), { type: "setKeyBeat", index: 2 });
+      const state = reduce(named(["One", "Two", "Three"]), {
+        type: "setKeyBeat",
+        index: 2,
+      });
       const removed = reduce(state, { type: "removeBeat", index: 2 });
       expect(texts(removed)).toEqual(["One", "Two"]);
       expect(removed.timeline.keyBeat).toBe(2);
     });
 
     test("removing a beat after the poster leaves it alone", () => {
-      const state = reduce(named(["One", "Two", "Three"]), { type: "setKeyBeat", index: 0 });
+      const state = reduce(named(["One", "Two", "Three"]), {
+        type: "setKeyBeat",
+        index: 0,
+      });
       const removed = reduce(state, { type: "removeBeat", index: 2 });
       expect(texts(removed)).toEqual(["One", "Two"]);
       expect(removed.timeline.keyBeat).toBe(1);
@@ -2321,7 +3322,11 @@ describe("copy timeline (E5.1)", () => {
     test("removing the last beat empties the draft and resets the poster to its sentinel", () => {
       const state = reduce(named(["One"]), { type: "setKeyBeat", index: 0 });
       const removed = reduce(state, { type: "removeBeat", index: 0 });
-      expect(removed.timeline).toEqual({ beats: [], transition: "fade", keyBeat: 1 });
+      expect(removed.timeline).toEqual({
+        beats: [],
+        transition: "fade",
+        keyBeat: 1,
+      });
       // an empty timeline has no `copy` block to write, and a later add can rebuild it
       expect(toBrief(removed).copy).toBeUndefined();
       expect(reduce(removed, { type: "addBeat" }).timeline.keyBeat).toBe(1);
@@ -2350,7 +3355,9 @@ describe("copy timeline (E5.1)", () => {
           expect(state.timeline.keyBeat).toBe(1);
         } else {
           expect(state.timeline.keyBeat).toBeGreaterThanOrEqual(1);
-          expect(state.timeline.keyBeat).toBeLessThanOrEqual(state.timeline.beats.length);
+          expect(state.timeline.keyBeat).toBeLessThanOrEqual(
+            state.timeline.beats.length,
+          );
         }
       }
       // And the draft that comes out of this is structurally sound for the running
@@ -2380,7 +3387,12 @@ describe("copy timeline (E5.1)", () => {
 
     test("a timeline brief survives a load → save byte-for-byte", () => {
       const brief = timelineBrief();
-      const roundTripped = toBrief(fromBrief(brief, { file: "camp.yaml", revision: undefined as unknown as undefined }));
+      const roundTripped = toBrief(
+        fromBrief(brief, {
+          file: "camp.yaml",
+          revision: undefined as unknown as undefined,
+        }),
+      );
       expect(dumpBrief(roundTripped)).toBe(dumpBrief(brief));
     });
 
@@ -2399,13 +3411,21 @@ describe("copy timeline (E5.1)", () => {
 
     test("a declared-but-empty copy block round-trips (copyExplicit)", () => {
       const brief = savedBrief({ copy: {} });
-      const roundTripped = toBrief(fromBrief(brief, { file: "camp.yaml", revision: undefined as unknown as undefined }));
+      const roundTripped = toBrief(
+        fromBrief(brief, {
+          file: "camp.yaml",
+          revision: undefined as unknown as undefined,
+        }),
+      );
       expect(roundTripped.copy).toEqual({});
       expect(dumpBrief(roundTripped)).toBe(dumpBrief(brief));
     });
 
     test("a host without the ffmpeg capability still round-trips a loaded timeline verbatim", () => {
-      const loaded = { ...fromBrief(timelineBrief()), capabilities: { motion: false, reason: "no ffmpeg on host" } };
+      const loaded = {
+        ...fromBrief(timelineBrief()),
+        capabilities: { motion: false, reason: "no ffmpeg on host" },
+      };
       const written = toBrief(loaded);
       // the brief arrives with motion formats (the parser required them), so the
       // timeline persists even though this host has no controls for it (D11/D12)
@@ -2421,7 +3441,9 @@ describe("copy timeline (E5.1)", () => {
         index: 0,
         text: "Hook",
       });
-      expect(toBrief(authored).copy?.timeline?.beats).toEqual([{ text: "Hook", weight: 1 }]);
+      expect(toBrief(authored).copy?.timeline?.beats).toEqual([
+        { text: "Hook", weight: 1 },
+      ]);
     });
 
     test("Video off drops the timeline from the brief but keeps the beats in the draft", () => {
@@ -2430,7 +3452,10 @@ describe("copy timeline (E5.1)", () => {
         index: 0,
         text: "Hook",
       });
-      const videoOff = reduce(authored, { type: "toggleFormat", value: "motion" });
+      const videoOff = reduce(authored, {
+        type: "toggleFormat",
+        value: "motion",
+      });
       expect(videoOff.timeline.beats).toHaveLength(1);
       expect(toBrief(videoOff).copy).toBeUndefined();
     });
@@ -2444,7 +3469,9 @@ describe("copy timeline (E5.1)", () => {
       const classic = reduce(authored, { type: "setMode", mode: "brief" });
       expect(toBrief(classic).copy).toBeUndefined();
       const back = reduce(classic, { type: "setMode", mode: "variation" });
-      expect(toBrief(back).copy?.timeline?.beats).toEqual([{ text: "Hook", weight: 1 }]);
+      expect(toBrief(back).copy?.timeline?.beats).toEqual([
+        { text: "Hook", weight: 1 },
+      ]);
     });
 
     test("a timeline cannot combine with axes.headline: pool://copy", () => {
@@ -2464,7 +3491,11 @@ describe("copy timeline (E5.1)", () => {
   describe("drafts written before timelines existed", () => {
     test("a legacy draft restores an empty timeline and no copy flag", () => {
       const restored = normalizeDraftState({ mode: "brief", briefId: "camp" });
-      expect(restored.timeline).toEqual({ beats: [], transition: "fade", keyBeat: 1 });
+      expect(restored.timeline).toEqual({
+        beats: [],
+        transition: "fade",
+        keyBeat: 1,
+      });
       expect(restored.copyExplicit).toBe(false);
     });
 
@@ -2474,7 +3505,12 @@ describe("copy timeline (E5.1)", () => {
         briefId: "camp",
         copyExplicit: true,
         timeline: {
-          beats: [null, { text: "kept", weight: 7 }, { text: 42, weight: 99 }, { text: "ok", weight: -3 }],
+          beats: [
+            null,
+            { text: "kept", weight: 7 },
+            { text: 42, weight: 99 },
+            { text: "ok", weight: -3 },
+          ],
           transition: "slide",
           keyBeat: 20,
         },
@@ -2496,7 +3532,11 @@ describe("copy timeline (E5.1)", () => {
         briefId: "camp",
         timeline: { beats: "nope", transition: "cut", keyBeat: 0 },
       });
-      expect(nonArray.timeline).toEqual({ beats: [], transition: "cut", keyBeat: 1 });
+      expect(nonArray.timeline).toEqual({
+        beats: [],
+        transition: "cut",
+        keyBeat: 1,
+      });
 
       const missingWeight = normalizeDraftState({
         mode: "brief",
@@ -2515,7 +3555,14 @@ describe("the brief style block round-trips (T5/D58)", () => {
     savedBrief({ style }) as CampaignBrief;
 
   test("a hand-authored YAML style survives load → save verbatim", () => {
-    const style: Style = { fontFamily: "Lora", fontWeight: 700, sizeScale: 0.08, lineHeight: 1.4, letterSpacing: 0.05, align: "left" };
+    const style: Style = {
+      fontFamily: "Lora",
+      fontWeight: 700,
+      sizeScale: 0.08,
+      lineHeight: 1.4,
+      letterSpacing: 0.05,
+      align: "left",
+    };
     const state = fromBrief(styledBrief(style));
     expect(state.styleExplicit).toBe(true);
     expect(state.style).toEqual(style);
@@ -2574,7 +3621,9 @@ describe("the brief style block round-trips (T5/D58)", () => {
         align: "diagonal", // not in the vocabulary → dropped
       },
     };
-    const state = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    const state = normalizeDraftState(
+      raw as unknown as Record<string, unknown>,
+    );
     expect(state.style).toEqual({});
     expect(state.styleExplicit).toBe(false);
   });
@@ -2582,9 +3631,14 @@ describe("the brief style block round-trips (T5/D58)", () => {
   test("a restored draft keeps valid style elements and infers the flag from divergence", () => {
     // A pre-T5 draft carries no styleExplicit key at all — strip it, the way an
     // older build's persisted draft looks.
-    const raw = { ...base(), style: { fontFamily: "Lora", sizeScale: 0.08, bogus: true } };
+    const raw = {
+      ...base(),
+      style: { fontFamily: "Lora", sizeScale: 0.08, bogus: true },
+    };
     delete (raw as { styleExplicit?: boolean }).styleExplicit;
-    const state = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    const state = normalizeDraftState(
+      raw as unknown as Record<string, unknown>,
+    );
     expect(state.style).toEqual({ fontFamily: "Lora", sizeScale: 0.08 });
     expect(state.styleExplicit).toBe(true); // diverges → authored
   });
@@ -2592,21 +3646,41 @@ describe("the brief style block round-trips (T5/D58)", () => {
   test("a restored draft keeps every valid style element, bounds included", () => {
     const raw = {
       ...base(),
-      style: { lineHeight: 1.6, letterSpacing: -0.02, align: "right", fontWeight: 400 },
+      style: {
+        lineHeight: 1.6,
+        letterSpacing: -0.02,
+        align: "right",
+        fontWeight: 400,
+      },
     };
-    const state = normalizeDraftState(raw as unknown as Record<string, unknown>);
-    expect(state.style).toEqual({ lineHeight: 1.6, letterSpacing: -0.02, align: "right", fontWeight: 400 });
+    const state = normalizeDraftState(
+      raw as unknown as Record<string, unknown>,
+    );
+    expect(state.style).toEqual({
+      lineHeight: 1.6,
+      letterSpacing: -0.02,
+      align: "right",
+      fontWeight: 400,
+    });
   });
 
   test("a non-object style in a restored draft repairs to empty", () => {
     const raw = { ...base(), style: "Lora" };
-    const state = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    const state = normalizeDraftState(
+      raw as unknown as Record<string, unknown>,
+    );
     expect(state.style).toEqual({});
   });
 
   test("a declared flag is believed even when the values equal the defaults", () => {
-    const raw = { ...base(), style: { fontFamily: "Inter" }, styleExplicit: true };
-    const state = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    const raw = {
+      ...base(),
+      style: { fontFamily: "Inter" },
+      styleExplicit: true,
+    };
+    const state = normalizeDraftState(
+      raw as unknown as Record<string, unknown>,
+    );
     expect(state.styleExplicit).toBe(true);
     expect(toBrief(state).style).toEqual({ fontFamily: "Inter" });
   });
@@ -2629,11 +3703,19 @@ describe("the brief style block round-trips (T5/D58)", () => {
   });
 
   test("an effect alone is a real block: emitted without the flag, None unwrites the key", () => {
-    const state = { ...base(), style: { textEffect: "scale-in" as const }, styleExplicit: false };
+    const state = {
+      ...base(),
+      style: { textEffect: "scale-in" as const },
+      styleExplicit: false,
+    };
     expect(toBrief(state).style).toEqual({ textEffect: "scale-in" });
     // A draft whose only content is a parked undefined key serialises as the
     // empty explicit block (the latch keeps the block, the key is gone).
-    const none = { ...base(), style: { textEffect: undefined }, styleExplicit: true };
+    const none = {
+      ...base(),
+      style: { textEffect: undefined },
+      styleExplicit: true,
+    };
     expect(toBrief(none).style).toEqual({});
   });
 
@@ -2643,24 +3725,38 @@ describe("the brief style block round-trips (T5/D58)", () => {
       style: { textEffect: "spin", fontFamily: "Lora" }, // not a kind → dropped
     };
     delete (raw as { styleExplicit?: boolean }).styleExplicit;
-    const state = normalizeDraftState(raw as unknown as Record<string, unknown>);
+    const state = normalizeDraftState(
+      raw as unknown as Record<string, unknown>,
+    );
     expect(state.style).toEqual({ fontFamily: "Lora" });
-    const valid = normalizeDraftState({ ...base(), style: { textEffect: "slide-in" } } as unknown as Record<string, unknown>);
+    const valid = normalizeDraftState({
+      ...base(),
+      style: { textEffect: "slide-in" },
+    } as unknown as Record<string, unknown>);
     expect(valid.style).toEqual({ textEffect: "slide-in" });
   });
 });
 
 describe("the Layout step's setStyle action (T7)", () => {
   test("a control's patch merges into the style and latches the flag (D58)", () => {
-    const next = editorReducer(base(), { type: "setStyle", patch: { fontFamily: "Lora" } });
+    const next = editorReducer(base(), {
+      type: "setStyle",
+      patch: { fontFamily: "Lora" },
+    });
     expect(next.style).toEqual({ fontFamily: "Lora" });
     expect(next.styleExplicit).toBe(true);
     expect(toBrief(next).style).toEqual({ fontFamily: "Lora" });
   });
 
   test("returning a value to its default keeps the authored block (the anchorExplicit latch)", () => {
-    const touched = editorReducer(base(), { type: "setStyle", patch: { fontWeight: 700 } });
-    const reverted = editorReducer(touched, { type: "setStyle", patch: { fontWeight: 400 } });
+    const touched = editorReducer(base(), {
+      type: "setStyle",
+      patch: { fontWeight: 700 },
+    });
+    const reverted = editorReducer(touched, {
+      type: "setStyle",
+      patch: { fontWeight: 400 },
+    });
     // An explicit-but-default weight says "I wrote this key" — the block survives.
     expect(reverted.style).toEqual({ fontWeight: 400 });
     expect(toBrief(reverted).style).toEqual({ fontWeight: 400 });
@@ -2668,22 +3764,34 @@ describe("the Layout step's setStyle action (T7)", () => {
 
   test("a patch that would leave the block outside the Style VO's bounds is a no-op", () => {
     const state = base();
-    const next = editorReducer(state, { type: "setStyle", patch: { sizeScale: 5 } });
+    const next = editorReducer(state, {
+      type: "setStyle",
+      patch: { sizeScale: 5 },
+    });
     expect(next).toBe(state);
     // A legal field cannot smuggle an illegal sibling through either.
-    const mixed = editorReducer(state, { type: "setStyle", patch: { lineHeight: 9, fontFamily: "Lora" } });
+    const mixed = editorReducer(state, {
+      type: "setStyle",
+      patch: { lineHeight: 9, fontFamily: "Lora" },
+    });
     expect(mixed).toBe(state);
   });
 
   test("an Effect chip's dispatch latches the flag, and None unwrites the key (T6)", () => {
-    const picked = editorReducer(base(), { type: "setStyle", patch: { textEffect: "fade-in" } });
+    const picked = editorReducer(base(), {
+      type: "setStyle",
+      patch: { textEffect: "fade-in" },
+    });
     expect(picked.style).toEqual({ textEffect: "fade-in" });
     expect(picked.styleExplicit).toBe(true);
     expect(toBrief(picked).style).toEqual({ textEffect: "fade-in" });
     // None is the absent field: the reducer deletes the key outright — the
     // draft's shape matches a loaded brief's — and the touched block stays
     // authored (the latch).
-    const none = editorReducer(picked, { type: "setStyle", patch: { textEffect: undefined } });
+    const none = editorReducer(picked, {
+      type: "setStyle",
+      patch: { textEffect: undefined },
+    });
     expect(none.styleExplicit).toBe(true);
     expect(none.style).toEqual({});
   });
@@ -2708,30 +3816,44 @@ describe("dirty-on-load over the corpus (B2)", () => {
   const briefsDir = path.resolve(__dirname, "../../../../../../briefs");
   const briefFiles = fs
     .readdirSync(briefsDir)
-    .filter((f) => [".yaml", ".yml", ".json"].includes(path.extname(f).toLowerCase()));
+    .filter((f) =>
+      [".yaml", ".yml", ".json"].includes(path.extname(f).toLowerCase()),
+    );
   const parseBriefFile = (filename: string): CampaignBrief => {
     const raw = fs.readFileSync(path.join(briefsDir, filename), "utf8");
     return path.extname(filename).toLowerCase() === ".json"
       ? (JSON.parse(raw) as CampaignBrief)
       : (load(raw) as CampaignBrief);
   };
-  const reloaded = (state: EditorState, snapshot: CampaignBrief): EditorState => ({
+  const reloaded = (
+    state: EditorState,
+    snapshot: CampaignBrief,
+  ): EditorState => ({
     ...state,
     source:
       state.source.kind === "file"
         ? { ...state.source, savedSnapshot: snapshot }
-        : { kind: "file", file: "camp.yaml", loadedId: state.briefId, savedSnapshot: snapshot, revision: undefined },
+        : {
+            kind: "file",
+            file: "camp.yaml",
+            loadedId: state.briefId,
+            savedSnapshot: snapshot,
+            revision: undefined,
+          },
   });
 
   test("discovers every corpus brief file on disk", () => {
     expect(briefFiles.length).toBeGreaterThanOrEqual(8);
   });
 
-  test.each(briefFiles)("a freshly loaded %s reads clean with zero edits", (filename) => {
-    const state = fromBrief(parseBriefFile(filename), { file: filename });
-    expect(state.source.kind).toBe("file");
-    expect(isDirtySinceSave(state)).toBe(false);
-  });
+  test.each(briefFiles)(
+    "a freshly loaded %s reads clean with zero edits",
+    (filename) => {
+      const state = fromBrief(parseBriefFile(filename), { file: filename });
+      expect(state.source.kind).toBe("file");
+      expect(isDirtySinceSave(state)).toBe(false);
+    },
+  );
 
   test("a brief whose file declares localizedMessage reads clean — the sharpest key-order case", () => {
     // The files declare `localizedMessage` fifth; `toBrief` appends it near the
@@ -2739,12 +3861,17 @@ describe("dirty-on-load over the corpus (B2)", () => {
     // the instant it opened.
     const brief = parseBriefFile("sample-campaign.yaml");
     expect(brief.localizedMessage).toBeTruthy();
-    expect(isDirtySinceSave(fromBrief(brief, { file: "sample-campaign.yaml" }))).toBe(false);
+    expect(
+      isDirtySinceSave(fromBrief(brief, { file: "sample-campaign.yaml" })),
+    ).toBe(false);
   });
 
   test.each(briefFiles)("a real edit to %s still reads dirty", (filename) => {
     const state = fromBrief(parseBriefFile(filename), { file: filename });
-    const edited = reduce(state, { type: "patch", patch: { campaignMessage: `${state.campaignMessage} edited` } });
+    const edited = reduce(state, {
+      type: "patch",
+      patch: { campaignMessage: `${state.campaignMessage} edited` },
+    });
     expect(isDirtySinceSave(edited)).toBe(true);
   });
 
@@ -2756,7 +3883,11 @@ describe("dirty-on-load over the corpus (B2)", () => {
     expect(brief.products.length).toBeGreaterThanOrEqual(2);
     const swapped: CampaignBrief = {
       ...brief,
-      products: [brief.products[1], brief.products[0], ...brief.products.slice(2)],
+      products: [
+        brief.products[1],
+        brief.products[0],
+        ...brief.products.slice(2),
+      ],
     };
     expect(isDirtySinceSave(reloaded(state, swapped))).toBe(true);
   });
@@ -2764,8 +3895,13 @@ describe("dirty-on-load over the corpus (B2)", () => {
   test("an undefined-valued key counts as absent — {a: 1} equals {a: 1, b: undefined}", () => {
     // JSON.stringify drops undefined-valued keys; the comparison must keep doing
     // so, or the fix becomes its mirror image and any such snapshot reads dirty.
-    const state = fromBrief(parseBriefFile("sample-campaign.yaml"), { file: "sample-campaign.yaml" });
-    const withGhost = { ...toBrief(state), ghost: undefined } as unknown as CampaignBrief;
+    const state = fromBrief(parseBriefFile("sample-campaign.yaml"), {
+      file: "sample-campaign.yaml",
+    });
+    const withGhost = {
+      ...toBrief(state),
+      ghost: undefined,
+    } as unknown as CampaignBrief;
     expect(isDirtySinceSave(reloaded(state, withGhost))).toBe(false);
   });
 });
@@ -2780,7 +3916,15 @@ describe("setMode and the mode-incompatible format (S4/D99)", () => {
   const randomWithMotion = (): EditorState =>
     reduce(
       reduce(base(), { type: "setMode", mode: "variation" }),
-      { type: "patch", patch: { campaignName: "camp", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi" } },
+      {
+        type: "patch",
+        patch: {
+          campaignName: "camp",
+          targetRegion: "DE",
+          targetAudience: "a",
+          campaignMessage: "Hi",
+        },
+      },
       { type: "setProduct", key: 1, patch: { name: "A" } },
       { type: "toggleFormat", value: "motion" },
     );
@@ -2790,7 +3934,10 @@ describe("setMode and the mode-incompatible format (S4/D99)", () => {
     state.mode === "brief" && state.formats.includes("motion");
 
   test("flipping to Classic costs the Video format in the brief, and says so", () => {
-    const flipped = reduce(randomWithMotion(), { type: "setMode", mode: "brief" });
+    const flipped = reduce(randomWithMotion(), {
+      type: "setMode",
+      mode: "brief",
+    });
     expect(flipped.mode).toBe("brief");
     // The draft keeps the user's formats: the remedy ("switch back to Randomized")
     // must restore them intact, and the D5 round-trip needs them to survive.
@@ -2805,7 +3952,10 @@ describe("setMode and the mode-incompatible format (S4/D99)", () => {
     // The user-flow first case: Video on, Still untouched. The gate leaves the
     // classic default output — the block is omitted entirely — and the parser,
     // with capability enforcement on as every run path calls it, accepts it.
-    const flipped = reduce(randomWithMotion(), { type: "setMode", mode: "brief" });
+    const flipped = reduce(randomWithMotion(), {
+      type: "setMode",
+      mode: "brief",
+    });
     expect(flipped.formats).toEqual(["static", "motion"]);
     expect("output" in toBrief(flipped)).toBe(false);
     expect(() => parseBrief(toBrief(flipped), RUN)).not.toThrow();
@@ -2816,7 +3966,10 @@ describe("setMode and the mode-incompatible format (S4/D99)", () => {
     // Randomized campaign whose only format was motion is ["static"], not the
     // empty list the API also refuses. Over the default platforms that is the
     // absent-key default — the block is omitted, which also parses.
-    const motionOnly = reduce(randomWithMotion(), { type: "toggleFormat", value: "static" });
+    const motionOnly = reduce(randomWithMotion(), {
+      type: "toggleFormat",
+      value: "static",
+    });
     expect(motionOnly.formats).toEqual(["motion"]);
     const flipped = reduce(motionOnly, { type: "setMode", mode: "brief" });
     expect(flipped.formats).toEqual(["motion"]);
@@ -2838,7 +3991,13 @@ describe("setMode and the mode-incompatible format (S4/D99)", () => {
     // A file that carried both formats under an explicit classic mode — the shape
     // the fix must never "help" by clearing from the other direction too.
     const loaded = fromBrief(
-      savedBrief({ mode: "brief", output: { formats: ["static", "motion"], platforms: [...STATIC_PLATFORMS, "instagram-reel"] } }),
+      savedBrief({
+        mode: "brief",
+        output: {
+          formats: ["static", "motion"],
+          platforms: [...STATIC_PLATFORMS, "instagram-reel"],
+        },
+      }),
       { file: "camp.yaml" },
     );
     const flipped = reduce(loaded, { type: "setMode", mode: "variation" });
@@ -2848,7 +4007,10 @@ describe("setMode and the mode-incompatible format (S4/D99)", () => {
   });
 
   test("a flip back to Randomized takes the notice down — it is derived from classic + motion", () => {
-    const flipped = reduce(randomWithMotion(), { type: "setMode", mode: "brief" });
+    const flipped = reduce(randomWithMotion(), {
+      type: "setMode",
+      mode: "brief",
+    });
     expect(formatDropped(flipped)).toBe(true);
     const back = reduce(flipped, { type: "setMode", mode: "variation" });
     expect(formatDropped(back)).toBe(false);
@@ -2860,7 +4022,10 @@ describe("setMode and the mode-incompatible format (S4/D99)", () => {
     // refuses. The gate is what stops the serialisation from being that
     // combination: a passthrough mutant of toBrief makes parseBrief throw,
     // which is the proof this pins the change, not the parser.
-    const flipped = reduce(randomWithMotion(), { type: "setMode", mode: "brief" });
+    const flipped = reduce(randomWithMotion(), {
+      type: "setMode",
+      mode: "brief",
+    });
     expect(flipped.mode).toBe("brief");
     expect(flipped.formats).toContain("motion");
     expect(toBrief(flipped).output?.formats ?? []).not.toContain("motion");
@@ -2871,7 +4036,10 @@ describe("setMode and the mode-incompatible format (S4/D99)", () => {
     // The real contract: the file cannot carry classic+motion, the recovery
     // copy can. fromBrief(toBrief(flipped)) is a save; normalizeDraftState is
     // a reload of the autosaved draft. They disagree about Video on purpose.
-    const flipped = reduce(randomWithMotion(), { type: "setMode", mode: "brief" });
+    const flipped = reduce(randomWithMotion(), {
+      type: "setMode",
+      mode: "brief",
+    });
     expect(flipped.formats).toContain("motion");
 
     const restored = normalizeDraftState({
@@ -2892,7 +4060,10 @@ describe("setMode and the mode-incompatible format (S4/D99)", () => {
     // The timeline's own rule (the beats survive a switch to classic): the gate
     // takes the format out of the brief, never the work out of the draft, and the
     // existing D5 round-trip test holds the same contract for the timeline.
-    const withTimeline = reduce(randomWithMotion(), { type: "addBeat", text: "one" });
+    const withTimeline = reduce(randomWithMotion(), {
+      type: "addBeat",
+      text: "one",
+    });
     const flipped = reduce(withTimeline, { type: "setMode", mode: "brief" });
     expect(flipped.formats).toEqual(["static", "motion"]);
     expect(flipped.motion.length).toBeGreaterThan(0);
@@ -2914,7 +4085,10 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
   });
 
   test("applyPreset seeds the preset's platforms, formats and mode, and records the type", () => {
-    const paid = reduce(base(), { type: "applyPreset", campaignType: "paid-social" });
+    const paid = reduce(base(), {
+      type: "applyPreset",
+      campaignType: "paid-social",
+    });
     expect(paid.type).toBe("paid-social");
     expect(paid.platforms).toEqual([
       "instagram-feed",
@@ -2930,13 +4104,22 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
   });
 
   test("applying the same preset twice yields the same state (idempotent)", () => {
-    const once = reduce(base(), { type: "applyPreset", campaignType: "short-video" });
-    const twice = reduce(once, { type: "applyPreset", campaignType: "short-video" });
+    const once = reduce(base(), {
+      type: "applyPreset",
+      campaignType: "short-video",
+    });
+    const twice = reduce(once, {
+      type: "applyPreset",
+      campaignType: "short-video",
+    });
     expect(twice).toEqual(once);
   });
 
   test("a preset is a preset, not a policy — the user's platform change stands", () => {
-    const paid = reduce(base(), { type: "applyPreset", campaignType: "paid-social" });
+    const paid = reduce(base(), {
+      type: "applyPreset",
+      campaignType: "paid-social",
+    });
     const off = reduce(paid, { type: "togglePlatform", value: "tiktok" });
     expect(off.platforms).not.toContain("tiktok");
     expect(off.type).toBe("paid-social");
@@ -2945,11 +4128,17 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
   test("a motion preset seeds the motion defaults the way Video-on always has (D9)", () => {
     // Without this, a seeded short-video campaign opens an editor whose Save is
     // blocked by an empty motion axis the user never saw a control for.
-    const short = reduce(base(), { type: "applyPreset", campaignType: "short-video" });
+    const short = reduce(base(), {
+      type: "applyPreset",
+      campaignType: "short-video",
+    });
     expect(short.motion.length).toBeGreaterThan(0);
     expect(short.duration).toEqual([DEFAULT_DURATION_SEC]);
     // A still-only preset afterwards leaves no orphaned kinds behind.
-    const back = reduce(short, { type: "applyPreset", campaignType: "social-post" });
+    const back = reduce(short, {
+      type: "applyPreset",
+      campaignType: "social-post",
+    });
     expect(back.motion).toEqual([]);
     expect(back.duration).toEqual([]);
     expect(back.mode).toBe("brief");
@@ -2958,7 +4147,15 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
   test("D110 — a short-video seed is Randomized, motion-only, and parses on the run path", () => {
     const short = reduce(
       base(),
-      { type: "patch", patch: { campaignName: "camp", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi" } },
+      {
+        type: "patch",
+        patch: {
+          campaignName: "camp",
+          targetRegion: "DE",
+          targetAudience: "a",
+          campaignMessage: "Hi",
+        },
+      },
       { type: "setProduct", key: 1, patch: { name: "A" } },
       { type: "applyPreset", campaignType: "short-video" },
     );
@@ -2970,13 +4167,25 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
   test("D117 — a display-ad seed is Classic, stills-only, seeds A3's profiles, derives the five sizes, and parses on the run path", () => {
     const display = reduce(
       base(),
-      { type: "patch", patch: { campaignName: "camp", targetRegion: "DE", targetAudience: "a", campaignMessage: "Hi" } },
+      {
+        type: "patch",
+        patch: {
+          campaignName: "camp",
+          targetRegion: "DE",
+          targetAudience: "a",
+          campaignMessage: "Hi",
+        },
+      },
       { type: "setProduct", key: 1, patch: { name: "A" } },
       { type: "applyPreset", campaignType: "display-ad" },
     );
     expect(display.mode).toBe("brief");
     expect(display.formats).toEqual(["static"]);
-    expect(display.platforms).toEqual(["google-display", "meta-audience-network", "display-web"]);
+    expect(display.platforms).toEqual([
+      "google-display",
+      "meta-audience-network",
+      "display-web",
+    ]);
     const brief = toBrief(display);
     expect(brief.type).toBe("display-ad");
     expect(brief.output?.sizes).toEqual([...DISPLAY_SIZE_VALUES]);
@@ -2989,26 +4198,34 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
   });
 
   test("an explicitly spelled default type round-trips", () => {
-    const loaded = fromBrief(savedBrief({ type: "social-post" }), { file: "camp.yaml" });
+    const loaded = fromBrief(savedBrief({ type: "social-post" }), {
+      file: "camp.yaml",
+    });
     expect(loaded.type).toBe("social-post");
     expect(toBrief(loaded).type).toBe("social-post");
   });
 
   test("a non-default type round-trips", () => {
-    const loaded = fromBrief(savedBrief({ type: "paid-social" }), { file: "camp.yaml" });
+    const loaded = fromBrief(savedBrief({ type: "paid-social" }), {
+      file: "camp.yaml",
+    });
     expect(toBrief(loaded).type).toBe("paid-social");
   });
 
   test("a freshly loaded typed brief is not dirty", () => {
     // Qodo flagged #224: without `type` on the state, the lossy projection
     // compared unequal to the snapshot and every typed brief read dirty on load.
-    const loaded = fromBrief(savedBrief({ type: "paid-social" }), { file: "camp.yaml" });
+    const loaded = fromBrief(savedBrief({ type: "paid-social" }), {
+      file: "camp.yaml",
+    });
     expect(isDirtySinceSave(loaded)).toBe(false);
   });
 
   test("a pre-T2 draft carries no type and normalises to the default (D112)", () => {
     // What the previous build wrote: a state with no type keys at all.
-    const stored: Record<string, unknown> = JSON.parse(JSON.stringify(initialEditorState()));
+    const stored: Record<string, unknown> = JSON.parse(
+      JSON.stringify(initialEditorState()),
+    );
     delete stored.type;
     delete stored.typeExplicit;
     const restored = normalizeDraftState(stored);
@@ -3020,7 +4237,10 @@ describe("the campaign type preset (T2 / D108–D112)", () => {
   test("a draft with an out-of-vocabulary type falls back to the default", () => {
     // "display-ad" joined the vocabulary in A5 (D117), so the out-of-vocab
     // example is a type that is still outside it.
-    const raw = JSON.parse(JSON.stringify(initialEditorState())) as Record<string, unknown>;
+    const raw = JSON.parse(JSON.stringify(initialEditorState())) as Record<
+      string,
+      unknown
+    >;
     raw.type = "banner";
     raw.typeExplicit = true;
     const restored = normalizeDraftState(raw);
@@ -3052,14 +4272,23 @@ describe("display platforms (D116)", () => {
   });
 
   test("toggling google-display on adds it to platforms and toBrief emits its five sizes", () => {
-    const on = reduce(base(), { type: "togglePlatform", value: "google-display" });
+    const on = reduce(base(), {
+      type: "togglePlatform",
+      value: "google-display",
+    });
     expect(on.platforms).toEqual([...STATIC_PLATFORMS, "google-display"]);
-    expect(toBrief(on).output?.platforms).toEqual([...STATIC_PLATFORMS, "google-display"]);
+    expect(toBrief(on).output?.platforms).toEqual([
+      ...STATIC_PLATFORMS,
+      "google-display",
+    ]);
     expect(toBrief(on).output?.sizes).toEqual([...DISPLAY_SIZE_VALUES]);
   });
 
   test("toggling google-display off removes sizes again", () => {
-    const on = reduce(base(), { type: "togglePlatform", value: "google-display" });
+    const on = reduce(base(), {
+      type: "togglePlatform",
+      value: "google-display",
+    });
     const off = reduce(on, { type: "togglePlatform", value: "google-display" });
     expect(off.platforms).toEqual([...STATIC_PLATFORMS]);
     expect(toBrief(off).output).toBeUndefined();
@@ -3068,10 +4297,14 @@ describe("display platforms (D116)", () => {
 
   test("a social-only brief's toBrief is byte-identical to main's (no sizes key)", () => {
     const declared = fromBrief(
-      savedBrief({ output: { formats: ["static"], platforms: [...STATIC_PLATFORMS] } }),
+      savedBrief({
+        output: { formats: ["static"], platforms: [...STATIC_PLATFORMS] },
+      }),
     );
     const serialised = toBrief(declared);
-    expect(JSON.stringify(serialised.output)).toBe(JSON.stringify(SOCIAL_ONLY_OUTPUT));
+    expect(JSON.stringify(serialised.output)).toBe(
+      JSON.stringify(SOCIAL_ONLY_OUTPUT),
+    );
     expect(serialised.output).not.toHaveProperty("sizes");
   });
 
@@ -3105,9 +4338,18 @@ describe("display platforms (D116)", () => {
 
   test("toggling a display platform off then on restores its full size list (a subset is not sticky)", () => {
     const loaded = fromBrief(
-      savedBrief({ output: { formats: ["static"], platforms: ["google-display"], sizes: ["728x90"] } }),
+      savedBrief({
+        output: {
+          formats: ["static"],
+          platforms: ["google-display"],
+          sizes: ["728x90"],
+        },
+      }),
     );
-    const off = reduce(loaded, { type: "togglePlatform", value: "google-display" });
+    const off = reduce(loaded, {
+      type: "togglePlatform",
+      value: "google-display",
+    });
     expect(off.sizes).toEqual([]);
     const on = reduce(off, { type: "togglePlatform", value: "google-display" });
     expect(on.sizes).toEqual([...DISPLAY_SIZE_VALUES]);
@@ -3116,16 +4358,28 @@ describe("display platforms (D116)", () => {
 
   test("adding a second display platform contributes only the sizes not already present", () => {
     const loaded = fromBrief(
-      savedBrief({ output: { formats: ["static"], platforms: ["google-display"], sizes: ["728x90"] } }),
+      savedBrief({
+        output: {
+          formats: ["static"],
+          platforms: ["google-display"],
+          sizes: ["728x90"],
+        },
+      }),
     );
-    const both = reduce(loaded, { type: "togglePlatform", value: "meta-audience-network" });
+    const both = reduce(loaded, {
+      type: "togglePlatform",
+      value: "meta-audience-network",
+    });
     // meta offers 300x250 / 320x50 / 300x600; 728x90 was already authored —
     // canonical order, no duplicates, and 160x600 stays absent (meta has it not).
     expect(both.sizes).toEqual(["300x250", "728x90", "320x50", "300x600"]);
   });
 
   test("normalizeDraftState defaults sizes for drafts saved before the field existed", () => {
-    const raw = JSON.parse(JSON.stringify(initialEditorState())) as Record<string, unknown>;
+    const raw = JSON.parse(JSON.stringify(initialEditorState())) as Record<
+      string,
+      unknown
+    >;
     delete raw.sizes;
     raw.platforms = ["google-display"];
     raw.formats = ["static"];
@@ -3134,7 +4388,10 @@ describe("display platforms (D116)", () => {
   });
 
   test("a draft's stored size list is filtered to the vocabulary, subset otherwise believed", () => {
-    const raw = JSON.parse(JSON.stringify(initialEditorState())) as Record<string, unknown>;
+    const raw = JSON.parse(JSON.stringify(initialEditorState())) as Record<
+      string,
+      unknown
+    >;
     raw.platforms = ["google-display"];
     raw.sizes = ["728x90", "999x999"];
     const restored = normalizeDraftState(raw);

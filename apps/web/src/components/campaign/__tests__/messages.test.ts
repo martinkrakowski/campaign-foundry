@@ -3,11 +3,35 @@ import * as messages from "../messages";
 import { formatDisplayName } from "../display-names";
 
 const forbidden = [
-  "[", ">=", "×", "variation.", "coverage.", "axis", "axes", "draw", "floor", "package", "planner", "parser",
+  "[",
+  ">=",
+  "×",
+  "variation.",
+  "coverage.",
+  "axis",
+  "axes",
+  "draw",
+  "floor",
+  "package",
+  "planner",
+  "parser",
   // the raw values a user must never see — display-names.ts converts them at the call site
-  "static", "motion", "9:16", "1:1", "16:9", "pool://copy", "procedural", "asset-pool", "genai",
+  "static",
+  "motion",
+  "9:16",
+  "1:1",
+  "16:9",
+  "pool://copy",
+  "procedural",
+  "asset-pool",
+  "genai",
   // raw platform ids are jargon too — display-names.ts converts them at the call site
-  "instagram-feed", "instagram-story", "instagram-reel", "tiktok", "youtube-short", "linkedin",
+  "instagram-feed",
+  "instagram-story",
+  "instagram-reel",
+  "tiktok",
+  "youtube-short",
+  "linkedin",
 ];
 
 /**
@@ -20,7 +44,12 @@ const forbidden = [
  */
 const SAMPLE_ARGS = {
   estimateSentence: [
-    { creatives: 1, ratios: [{ label: "Square", count: 1 }], products: 1, genaiCalls: 0 },
+    {
+      creatives: 1,
+      ratios: [{ label: "Square", count: 1 }],
+      products: 1,
+      genaiCalls: 0,
+    },
   ],
   formatsUnsupported: ["Video", ["Instagram Story"]],
   // One arg so the default `max = 60` branch is taken; callers that pass both
@@ -35,6 +64,7 @@ const SAMPLE_ARGS = {
   // Array-first: GENERIC_ARGS' bare string would throw, and the sample is the
   // kind of display-name list the production caller passes.
   templateRequiredNote: [["Image", "Static text"]],
+  templateOcclusionNote: ["Shade", "Static text", "mute"],
   startFromRatioCaption: [["1:1", "9:16", "16:9"]],
   timelineBeatUnderFloor: [1, 1.8, 2, 6],
   timelineDwell: [1.8],
@@ -59,7 +89,8 @@ const JARGON_ALLOWLIST = {
 function stringsFrom(value: unknown): string[] {
   if (typeof value === "string") return [value];
   if (Array.isArray(value)) return value.flatMap(stringsFrom);
-  if (value !== null && typeof value === "object") return Object.values(value).flatMap(stringsFrom);
+  if (value !== null && typeof value === "object")
+    return Object.values(value).flatMap(stringsFrom);
   return [];
 }
 
@@ -70,7 +101,10 @@ function argsFor(name: string): readonly unknown[] {
   return GENERIC_ARGS;
 }
 
-function scanMessages(): { entries: { name: string; strings: string[] }[]; unscannable: string[] } {
+function scanMessages(): {
+  entries: { name: string; strings: string[] }[];
+  unscannable: string[];
+} {
   const entries: { name: string; strings: string[] }[] = [];
   const unscannable: string[] = [];
   for (const [name, value] of Object.entries(messages)) {
@@ -80,7 +114,9 @@ function scanMessages(): { entries: { name: string; strings: string[] }[]; unsca
     }
     if (typeof value !== "function") continue;
     try {
-      const extracted = stringsFrom((value as (...args: unknown[]) => unknown)(...argsFor(name)));
+      const extracted = stringsFrom(
+        (value as (...args: unknown[]) => unknown)(...argsFor(name)),
+      );
       if (extracted.length === 0) unscannable.push(name);
       else entries.push({ name, strings: extracted });
     } catch {
@@ -110,7 +146,9 @@ describe("messages jargon test", () => {
 
   test("every SAMPLE_ARGS key names a function export", () => {
     for (const name of Object.keys(SAMPLE_ARGS)) {
-      expect(typeof (messages as Record<string, unknown>)[name], name).toBe("function");
+      expect(typeof (messages as Record<string, unknown>)[name], name).toBe(
+        "function",
+      );
     }
   });
 
@@ -118,16 +156,22 @@ describe("messages jargon test", () => {
     const { entries } = scanMessages();
     const byName = new Map(entries.map((entry) => [entry.name, entry.strings]));
     for (const [name, reason] of Object.entries(JARGON_ALLOWLIST)) {
-      expect(reason.trim().length, `${name} must carry a one-line reason`).toBeGreaterThan(0);
+      expect(
+        reason.trim().length,
+        `${name} must carry a one-line reason`,
+      ).toBeGreaterThan(0);
       const scanned = byName.get(name) ?? [];
       expect(
         scanned.length,
         `${name} is not a scanned function export — remove its allowlist entry`,
       ).toBeGreaterThan(0);
-      const stillHits = scanned.some((str) => forbidden.some((term) => str.includes(term)));
-      expect(stillHits, `${name} no longer hits the jargon list — remove its allowlist entry`).toBe(
-        true,
+      const stillHits = scanned.some((str) =>
+        forbidden.some((term) => str.includes(term)),
       );
+      expect(
+        stillHits,
+        `${name} no longer hits the jargon list — remove its allowlist entry`,
+      ).toBe(true);
     }
   });
 
@@ -141,7 +185,9 @@ describe("messages jargon test", () => {
       for (const str of strings) {
         const lower = str.toLowerCase();
         expect(lower, `${name}: ${JSON.stringify(str)}`).not.toContain("appl");
-        expect(lower, `${name}: ${JSON.stringify(str)}`).not.toContain("launch");
+        expect(lower, `${name}: ${JSON.stringify(str)}`).not.toContain(
+          "launch",
+        );
       }
     }
   });
@@ -167,7 +213,9 @@ describe("descriptor messages", () => {
 
 describe("readout.ratioFloor", () => {
   test("states the budget, and only says it is too many when it is", () => {
-    expect(messages.readoutRatioFloor(3, 2, 6, 12, false)).not.toContain("too many");
+    expect(messages.readoutRatioFloor(3, 2, 6, 12, false)).not.toContain(
+      "too many",
+    );
     expect(messages.readoutRatioFloor(3, 2, 6, 5, true)).toContain("too many");
   });
 });
@@ -175,7 +223,9 @@ describe("readout.ratioFloor", () => {
 describe("startFromRatioCaption", () => {
   test("is a count with both plural arms, never the raw ratio ids", () => {
     expect(messages.startFromRatioCaption(["16:9"])).toBe("1 ratio");
-    expect(messages.startFromRatioCaption(["1:1", "9:16", "16:9"])).toBe("3 ratios");
+    expect(messages.startFromRatioCaption(["1:1", "9:16", "16:9"])).toBe(
+      "3 ratios",
+    );
   });
 });
 
@@ -192,5 +242,25 @@ describe("template messages (L5)", () => {
   test("reviewTemplateLayers formats one and many", () => {
     expect(messages.reviewTemplateLayers(1)).toBe("1 layer");
     expect(messages.reviewTemplateLayers(3)).toBe("3 layers");
+  });
+
+  test("templateOcclusionNote formats all occlusion effects and target layers (D135)", () => {
+    expect(messages.templateOcclusionNote("Shade", "Static text", "mute")).toBe(
+      "the shade layer now sits above the headline and will mute it",
+    );
+    expect(
+      messages.templateOcclusionNote("Accent", "Animated text", "mute"),
+    ).toBe("the accent layer now sits above the headline and will mute it");
+    expect(messages.templateOcclusionNote("Image", "Accent", "hide")).toBe(
+      "the image layer now sits above the accent and will hide it",
+    );
+    expect(
+      messages.templateOcclusionNote("Logo", "Static text", "overlap"),
+    ).toBe(
+      "the logo layer now sits above the headline and will overlap where it sits",
+    );
+    expect(messages.templateOcclusionNote("Logo", "Accent", "overlap")).toBe(
+      "the logo layer now sits above the accent and will overlap where it sits",
+    );
   });
 });

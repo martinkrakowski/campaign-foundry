@@ -449,6 +449,39 @@ describe("parseBrief", () => {
         "logo",
       ]);
     });
+
+    test("an occluding template order is accepted by validateTemplate and parseBrief (D135, D136) — warns and never refuses", () => {
+      // In video, shade sitting above animated-text is an occluding order,
+      // but ordering constraints do not forbid it and occlusion never refuses (D135).
+      const base = templateFromCanonical("short-video");
+      const occludingVideo = {
+        ...base,
+        layers: [
+          base.layers[0]!, // video
+          base.layers[2]!, // animated-text
+          base.layers[1]!, // shade (sits above animated-text — occluding!)
+          base.layers[3]!, // logo
+        ],
+      };
+      const validated = validateTemplate(occludingVideo, "short-video");
+      expect(validated.layers.map((l) => l.kind)).toEqual([
+        "video",
+        "animated-text",
+        "shade",
+        "logo",
+      ]);
+      const parsed = parseBrief({
+        ...valid,
+        type: "short-video",
+        template: occludingVideo,
+      });
+      expect(parsed.template.layers.map((l) => l.kind)).toEqual([
+        "video",
+        "animated-text",
+        "shade",
+        "logo",
+      ]);
+    });
   });
 
   describe("layer props (L3b, D134)", () => {

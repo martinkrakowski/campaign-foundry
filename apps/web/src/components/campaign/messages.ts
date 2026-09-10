@@ -1145,6 +1145,30 @@ export function templateMoveDownDescription(name: string): string {
   return `Move ${name} down`;
 }
 
+/**
+ * Advisory note when a layer reposition creates an occlusion (D135, D136).
+ * Names both layers and describes what happens in the quiet-note idiom.
+ * Formatters receive display labels (D18): "Shade", "Static text", etc.
+ */
+export function templateOcclusionNote(
+  aboveName: string,
+  belowName: string,
+  effect: "hide" | "mute" | "overlap",
+): string {
+  const below =
+    belowName.toLowerCase() === "static text" ||
+    belowName.toLowerCase() === "animated text"
+      ? "the headline"
+      : `the ${belowName.toLowerCase()}`;
+  const verb =
+    effect === "hide"
+      ? "hide it"
+      : effect === "mute"
+        ? "mute it"
+        : "overlap where it sits";
+  return `the ${aboveName.toLowerCase()} layer now sits above ${below} and will ${verb}`;
+}
+
 /** The review step's template row: how many layers the brief will carry. */
 export function reviewTemplateLayers(count: number): string {
   return `${count} ${count === 1 ? "layer" : "layers"}`;

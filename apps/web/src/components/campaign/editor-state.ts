@@ -83,11 +83,15 @@ import {
 import {
   addableKinds,
   findLegalInsertionIndex,
+  findOcclusionDelta,
   platformsToFormats,
   platformsToRatios,
   platformsToSizes,
   removableLayerIds,
+  type OcclusionFinding,
 } from "./derive";
+import { layerKindDisplayName } from "./display-names";
+import * as messages from "./messages";
 
 export const LAYOUT_OPTIONS = ["headline-top", "headline-bottom"] as const;
 export const TONE_OPTIONS = ["bold", "subtle"] as const;
@@ -403,6 +407,12 @@ export interface EditorState {
    * axis toggle that does not clamp. Derived UI state: never serialized.
    */
   countNotice: number | null;
+  /**
+   * Advisory finding when a layer reposition introduces occlusion (D135, D136).
+   * Populated on `moveLayer` when the new order occludes, cleared when the order
+   * no longer occludes. Derived UI state: never serialized.
+   */
+  occlusionNotice: string | null;
   appliedSnapshot: CampaignBrief | null;
   capabilities: { motion: boolean; reason?: string } | null;
 }
@@ -549,6 +559,7 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
     pool: null,
     headlineAxisDropped: false,
     countNotice: null,
+    occlusionNotice: null,
     appliedSnapshot: null,
     capabilities: null,
   };
@@ -804,6 +815,28 @@ function isLayerIndex(index: number, layerCount: number): boolean {
   return Number.isInteger(index) && index >= 0 && index < layerCount;
 }
 
+/**
+ * Formats an advisory finding into the catalog's note (D135, D136, D2, D18).
+ * Converts raw layer kinds to display labels and maps domain occlusion behavior
+ * to the catalog's effect verb ("hide" | "mute" | "overlap").
+ */
+export function formatOcclusionNotice(
+  finding: OcclusionFinding | null,
+): string | null {
+  if (!finding) return null;
+  const effect: "hide" | "mute" | "overlap" =
+    finding.behavior === "opaque"
+      ? "hide"
+      : finding.behavior === "attenuating"
+        ? "mute"
+        : "overlap";
+  return messages.templateOcclusionNote(
+    layerKindDisplayName(finding.above),
+    layerKindDisplayName(finding.below),
+    effect,
+  );
+}
+
 function reduceEditor(state: EditorState, action: EditorAction): EditorState {
   switch (action.type) {
     case "setMode": {
@@ -874,6 +907,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         motion,
         duration,
         motionSeeded,
+        occlusionNotice: null,
       };
     }
     case "patch": {
@@ -971,6 +1005,9 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       ];
       return {
         ...state,
+        occlusionNotice: formatOcclusionNotice(
+          findOcclusionDelta(state.template.layers, nextLayers),
+        ),
         template: {
           ...state.template,
           // Placed at the derived legal index (highest index satisfying constraints,
@@ -993,11 +1030,15 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       const index = state.template.layers.findIndex(
         (layer) => layer.id === action.id,
       );
+      const nextLayers = state.template.layers.filter((_, i) => i !== index);
       return {
         ...state,
+        occlusionNotice: formatOcclusionNotice(
+          findOcclusionDelta(state.template.layers, nextLayers),
+        ),
         template: {
           ...state.template,
-          layers: state.template.layers.filter((_, i) => i !== index),
+          layers: nextLayers,
         },
       };
     }
@@ -1019,6 +1060,9 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       layers.splice(action.to, 0, moved);
       return {
         ...state,
+        occlusionNotice: formatOcclusionNotice(
+          findOcclusionDelta(state.template.layers, layers),
+        ),
         template: {
           ...state.template,
           layers,
@@ -1929,6 +1973,7 @@ export function fromBrief(
     pool: null,
     headlineAxisDropped: false,
     countNotice: null,
+    occlusionNotice: null,
     appliedSnapshot: null,
     capabilities: null,
   };
@@ -2413,6 +2458,8 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     motionSeeded: raw.motionSeeded === true,
     // The count notice is one-time UI, not part of the draft it describes.
     countNotice: null,
+    // The occlusion notice is derived UI from reposition, not persisted state.
+    occlusionNotice: null,
   } as EditorState;
 }
 

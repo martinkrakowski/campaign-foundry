@@ -402,6 +402,77 @@ describe("TemplateSection — layer reordering (L8, D128)", () => {
     expect(rows[3].textContent).toContain("accent");
   });
 
+  test("a move creating an occlusion shows the advisory note, move still happens, and note clears when changed back (D135, D136)", async () => {
+    const user = userEvent.setup();
+    render(<Harness initial={state()} />);
+
+    // Canonical order: image (0), shade (1), accent (2), static-text (3), logo (4)
+    let rows = screen.getAllByRole("listitem");
+    expect(rows[2].textContent).toContain("accent");
+    expect(rows[3].textContent).toContain("static-text");
+    // Initially, no occlusion note or live region is rendered
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText(/now sits above/)).toBeNull();
+
+    // 1. Move accent up (from 2 to 3, above static-text)
+    const accentUp = within(rows[2]).getByRole("button", {
+      name: "accent",
+      description: messages.templateMoveUpDescription("Accent"),
+    });
+    await user.click(accentUp);
+
+    // The move still applied: accent is now at index 3, static-text at index 2
+    rows = screen.getAllByRole("listitem");
+    expect(rows[2].textContent).toContain("static-text");
+    expect(rows[3].textContent).toContain("accent");
+
+    // The quiet note shows, carrying role="status", naming both layers and what happens
+    const note = screen.getByRole("status");
+    expect(note).toBeTruthy();
+    expect(note.textContent).toBe(
+      "the accent layer now sits above the headline and will mute it",
+    );
+    expect(note.className).toContain("text-text-muted");
+
+    // 2. Moving accent back down (from 3 to 2) clears the note
+    const accentDown = within(rows[3]).getByRole("button", {
+      name: "accent",
+      description: messages.templateMoveDownDescription("Accent"),
+    });
+    await user.click(accentDown);
+
+    // The move still applied: accent back at index 2, static-text back at index 3
+    rows = screen.getAllByRole("listitem");
+    expect(rows[2].textContent).toContain("accent");
+    expect(rows[3].textContent).toContain("static-text");
+
+    // The note clears and live region is emptied
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText(/now sits above/)).toBeNull();
+  });
+
+  test("a move that does not create an occlusion shows no note (D135, D136)", async () => {
+    const user = userEvent.setup();
+    render(<Harness initial={state()} />);
+
+    // In canonical image-text: move static-text (index 3) up to index 4 (above logo at 3)
+    let rows = screen.getAllByRole("listitem");
+    const textUp = within(rows[3]).getByRole("button", {
+      name: "static-text",
+      description: messages.templateMoveUpDescription("Static text"),
+    });
+    await user.click(textUp);
+
+    // Move still applied
+    rows = screen.getAllByRole("listitem");
+    expect(rows[3].textContent).toContain("logo");
+    expect(rows[4].textContent).toContain("static-text");
+
+    // Non-occluding move shows no note and no live region
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText(/now sits above/)).toBeNull();
+  });
+
   test("the list is bottom-first: first layer offers no down toward bottom and last offers no up past top", () => {
     // Array position is z-order, bottom first (D128, per templateListLabel "Layers, bottom first"):
     // - Index 0 is the bottom layer (drawn first, behind everything).

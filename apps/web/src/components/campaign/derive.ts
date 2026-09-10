@@ -255,3 +255,14 @@ export function canMoveLayer(
 ): boolean {
   return layerMoveDirections(state, index).includes(direction);
 }
+
+// Re-export occlusion table and checks (D135, D136)
+export {
+  OCCLUSION_TABLE,
+  checkPairOcclusion,
+  checkRepositionOcclusion,
+  findOcclusionDelta,
+  type OcclusionBehavior,
+  type OcclusionFinding,
+  type OcclusionRule,
+} from "@campaignfoundry/CampaignOrchestration/creative-types";
