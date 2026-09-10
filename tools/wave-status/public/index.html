@@ -51,40 +51,161 @@
       #page.with-log.expanded {
         grid-template-rows: auto 0 1fr;
       }
-      h1 {
-        font-size: 18px;
-        margin: 0;
-      }
-      #title-row {
+      .title-row {
         display: flex;
         flex-wrap: wrap;
-        align-items: baseline;
-        gap: var(--space-2) var(--space-6);
+        align-items: center;
+        gap: var(--space-2) var(--space-3);
       }
+      .brand {
+        display: flex;
+        align-items: center;
+        /* 10px matches no step on the scale below (--space-2 is 8px,
+       --space-3 is 12px); the mark-to-title gap reads right at neither,
+       so this stays a literal rather than forcing the design to a step
+       that isn't it. */
+        gap: 10px;
+      }
+      /* --color-brand-primary is a :root-only token: the server at
+     /tokens.css extracts just the .dark block (see server.ts,
+     extractDarkBlock), and .dark never redeclares it, so it is never
+     served here. --color-brand-on-tint is the FIREFLY-badge brand blue
+     that .dark does carry — use that, not the unserved token. */
+      .brand-mark {
+        /* 10px (size) and 3px (radius) both fall between scale steps —
+       --space-1 is 4px, --radius-sm is 4px — and rounding either up
+       would visibly change this mark. Literals, not a forced fit. */
+        width: 10px;
+        height: 10px;
+        flex: none;
+        border-radius: 3px;
+        background: var(--color-brand-on-tint);
+      }
+      h1 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        line-height: 1.2;
+        letter-spacing: -0.01em;
+        color: var(--color-text-emphasis);
+      }
+      .header-tools {
+        margin-left: auto;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      /* The connection indicator: state in words, the dot only ever agrees
+     with them. It is wired to the real EventSource and its poll fallback
+     below — never a class set once and left alone. */
+      #connection {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 26px;
+        padding: 0 10px 0 9px;
+        border: 1px solid var(--color-border);
+        border-radius: 999px;
+        background: var(--color-surface);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--color-text-secondary);
+        white-space: nowrap;
+      }
+      .conn-dot {
+        /* 6px sits between --space-1 (4px) and --space-2 (8px); a dot
+       this small on the scale would read as either cramped or bloated,
+       so the size stays a literal. (border-radius: 50% is a proportion,
+       not a spacing value — it's what makes the dot round at any size,
+       so it isn't one of these.) */
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--color-text-muted);
+        flex: none;
+      }
+      #connection.live .conn-dot {
+        background: var(--color-success);
+        animation: pulse 2.4s ease-in-out infinite;
+      }
+      #connection.polling .conn-dot {
+        background: var(--color-warning);
+      }
+      #connection.connecting .conn-dot {
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+      #connection.down .conn-dot {
+        background: var(--color-error);
+      }
+      #connection.down {
+        color: var(--color-error);
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.35;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .conn-dot {
+          animation: none !important;
+        }
+      }
+      /* Nine numbers are three questions: what is running, how it ended,
+     what the PRs are doing. The groups are hairline-separated and wrap as
+     units. */
       #metrics {
         display: flex;
         flex-wrap: wrap;
-        gap: var(--space-1) var(--space-4);
+        row-gap: var(--space-2);
+        margin-top: var(--space-3);
+      }
+      .mgroup {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 0 var(--space-6);
+        border-left: 1px solid var(--color-border);
+      }
+      .mgroup:first-child {
+        padding-left: 0;
+        border-left: none;
+      }
+      .mlabel {
         font-family: var(--font-mono);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--color-text-muted);
+      }
+      .mstats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-1) var(--space-4);
+      }
+      .metric {
         font-size: 12px;
+        line-height: 1.4;
       }
       .metric .value {
-        font-weight: bold;
+        font-family: var(--font-mono);
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        color: var(--color-text-primary);
+      }
+      /* A problem count only turns red when there is a problem — "failed 0"
+     is a good answer and must not read as an alarm. */
+      .metric .value.hot {
+        color: var(--color-error);
       }
       .metric .label {
         color: var(--color-text-muted);
-      }
-      #connection {
-        margin: var(--space-2) 0 0;
-        color: var(--color-text-muted);
-        font-family: var(--font-mono);
-        font-size: 12px;
-      }
-      #connection.live {
-        color: var(--color-success);
-      }
-      #connection.polling {
-        color: var(--color-warning);
+        font-size: 11px;
+        margin-left: 3px;
       }
       #table-pane {
         overflow-y: auto;
@@ -184,13 +305,16 @@
         font-size: 12px;
       }
       #sort-switch {
+        display: inline-flex;
+        align-items: center;
+        height: 26px;
         background: transparent;
         border: 1px solid var(--color-border-control);
         border-radius: var(--radius-sm);
         color: var(--color-text-primary);
         font-family: var(--font-mono);
         font-size: 12px;
-        padding: var(--space-1) var(--space-2);
+        padding: 0 var(--space-2);
         cursor: pointer;
       }
       #sort-switch:hover {
@@ -283,45 +407,12 @@
   <body>
     <div id="page">
       <header>
-        <div id="title-row">
-          <h1>Wave status</h1>
-          <div id="metrics">
-            <span class="metric" data-metric="lanes"
-              ><span class="value">—</span>
-              <span class="label">lanes</span></span
-            >
-            <span class="metric" data-metric="alive"
-              ><span class="value">—</span>
-              <span class="label">alive</span></span
-            >
-            <span class="metric" data-metric="settled"
-              ><span class="value">—</span>
-              <span class="label">settled</span></span
-            >
-            <span class="metric" data-metric="failed"
-              ><span class="value">—</span>
-              <span class="label">failed</span></span
-            >
-            <span class="metric" data-metric="running"
-              ><span class="value">—</span>
-              <span class="label">running</span></span
-            >
-            <span class="metric" data-metric="open"
-              ><span class="value">—</span>
-              <span class="label">PRs open</span></span
-            >
-            <span class="metric" data-metric="merged"
-              ><span class="value">—</span>
-              <span class="label">PRs merged</span></span
-            >
-            <span class="metric" data-metric="failing"
-              ><span class="value">—</span>
-              <span class="label">checks failing</span></span
-            >
-            <span class="metric" data-metric="waves"
-              ><span class="value">—</span>
-              <span class="label">waves</span></span
-            >
+        <div class="title-row">
+          <div class="brand">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <h1>Wave status</h1>
+          </div>
+          <div class="header-tools">
             <button
               type="button"
               role="switch"
@@ -331,9 +422,65 @@
             >
               <span class="label">sort:</span> <span class="value">recent</span>
             </button>
+            <span id="connection" class="connecting" role="status">
+              <span class="conn-dot" aria-hidden="true"></span
+              ><span class="conn-text">connecting…</span>
+            </span>
           </div>
         </div>
-        <p id="connection">connecting…</p>
+        <div id="metrics">
+          <div class="mgroup">
+            <span class="mlabel">campaign</span>
+            <div class="mstats">
+              <span class="metric" data-metric="waves"
+                ><span class="value">—</span>
+                <span class="label">waves</span></span
+              >
+              <span class="metric" data-metric="lanes"
+                ><span class="value">—</span>
+                <span class="label">lanes</span></span
+              >
+              <span class="metric" data-metric="alive"
+                ><span class="value">—</span>
+                <span class="label">alive</span></span
+              >
+            </div>
+          </div>
+          <div class="mgroup">
+            <span class="mlabel">outcomes</span>
+            <div class="mstats">
+              <span class="metric" data-metric="settled"
+                ><span class="value">—</span>
+                <span class="label">settled</span></span
+              >
+              <span class="metric" data-metric="failed"
+                ><span class="value">—</span>
+                <span class="label">failed</span></span
+              >
+              <span class="metric" data-metric="running"
+                ><span class="value">—</span>
+                <span class="label">running</span></span
+              >
+            </div>
+          </div>
+          <div class="mgroup">
+            <span class="mlabel">pull requests</span>
+            <div class="mstats">
+              <span class="metric" data-metric="open"
+                ><span class="value">—</span>
+                <span class="label">PRs open</span></span
+              >
+              <span class="metric" data-metric="merged"
+                ><span class="value">—</span>
+                <span class="label">PRs merged</span></span
+              >
+              <span class="metric" data-metric="failing"
+                ><span class="value">—</span>
+                <span class="label">checks failing</span></span
+              >
+            </div>
+          </div>
+        </div>
       </header>
       <section id="table-pane">
         <table id="status-table">
@@ -382,6 +529,7 @@
       "use strict";
       const table = document.getElementById("status-table");
       const connection = document.getElementById("connection");
+      const connText = connection.querySelector(".conn-text");
       const logPane = document.getElementById("log-pane");
       const logToolbar = document.getElementById("log-toolbar");
       const logView = document.getElementById("log");
@@ -397,6 +545,7 @@
       const expandedWaves = new Set();
       const SORT_STORAGE_KEY = "wave-status:sort";
       let lastStatus = null;
+      let connState = "connecting";
       // One counter for every tail request — an open, and every follow
       // refresh, each claims its own generation here. A response is only
       // ever acted on if it is still the newest request outstanding, so an
@@ -750,6 +899,23 @@
         // "no failures" and "we don't know" are different answers.
         metricValues[name].textContent =
           value === undefined ? "—" : String(value);
+        // A problem count only turns red when there is a problem — "failed
+        // 0" is a good answer and must not read as an alarm.
+        metricValues[name].classList.toggle(
+          "hot",
+          (name === "failed" || name === "failing") &&
+            typeof value === "number" &&
+            value > 0,
+        );
+      }
+
+      // The one place connection state is written — so the indicator can
+      // never drift from what the EventSource (and its poll fallback) are
+      // actually doing.
+      function setConn(state, text) {
+        connState = state;
+        connection.className = state;
+        connText.textContent = text;
       }
 
       function metricsOf(status) {
@@ -909,12 +1075,29 @@
         void maybeFollow();
       }
 
+      // One generation governs both transports — the same idiom loadTail
+      // uses for log tails below. A poll claims a generation when it
+      // starts and checks it once its await returns; an SSE arrival (a
+      // status event, or the stream opening live) claims one the instant
+      // it writes, since it never awaits anything, so it is always its
+      // own newest generation. Whichever wrote most recently owns the
+      // generation, so a slow poll that resolves after a newer SSE
+      // payload — or a newer poll — already landed must not act at all:
+      // not on the table, and not on the connection indicator.
+      let statusSeq = 0;
       async function refresh() {
+        const seq = ++statusSeq;
         try {
           const res = await fetch("/api/status");
-          render(await res.json());
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const body = await res.json();
+          if (seq !== statusSeq) return;
+          render(body);
+          // A poll that lands while the indicator still says "down" is the
+          // signal that connectivity came back — say so.
+          if (connState === "down") setConn("polling", "polling every 10 s");
         } catch {
-          connection.textContent = "status unreachable";
+          if (seq === statusSeq) setConn("down", "status unreachable");
         }
       }
 
@@ -1071,18 +1254,24 @@
       const source = new EventSource("/api/stream");
       let pollTimer = null;
       source.addEventListener("status", (event) => {
-        connection.textContent = "live (sse)";
-        connection.className = "live";
+        // Claim the generation before writing — a poll already in flight,
+        // still awaiting its own fetch, must find this generation newer
+        // than the one it captured and discard its answer when it lands.
+        ++statusSeq;
+        setConn("live", "live · sse");
         render(JSON.parse(event.data));
       });
       source.onopen = () => {
-        connection.textContent = "live (sse)";
-        connection.className = "live";
+        // Same claim as the status listener above: the stream coming up
+        // is itself news, and must outrank a poll already in flight — a
+        // poll that then fails must not be read as "the connection is
+        // down" when the connection just opened.
+        ++statusSeq;
+        setConn("live", "live · sse");
       };
       source.onerror = () => {
         source.close();
-        connection.textContent = "polling every 10s (sse closed)";
-        connection.className = "polling";
+        setConn("polling", "polling every 10 s");
         if (pollTimer !== null) clearInterval(pollTimer);
         pollTimer = setInterval(refresh, 10000);
         refresh();

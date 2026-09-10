@@ -46,6 +46,9 @@ interface PageHandle {
   readonly fetches: string[];
   readonly intervals: Set<number>;
   readonly source: FakeEventSource;
+  // Invokes the most recently registered setInterval handler once, as if a
+  // real 10 s poll tick had fired — the harness never runs timers itself.
+  readonly firePoll: () => void;
 }
 
 const windows: Window[] = [];
@@ -176,6 +179,17 @@ interface LoadPageOptions {
   width?: number;
   storage?: Record<string, string>;
   mockStorageError?: boolean;
+  // Lets a test flip /api/status from healthy to unreachable after the
+  // page's own initial load (which must succeed, or loadPage's own
+  // waitFor below never resolves) — the object is held by reference, so
+  // the test can mutate `.ok` after loadPage returns.
+  statusGate?: { ok: boolean };
+  // Lets a test take full control of what each /api/status call receives,
+  // by call index (1-based) — the first call still has to feed loadPage's
+  // own waitFor below (a Promise that never resolves would hang the load),
+  // so a responder that wants to race a later poll should resolve call 1
+  // immediately and only defer from call 2 on.
+  statusResponder?: (callIndex: number) => Promise<Response> | Response;
 }
 
 async function loadPage(
@@ -207,10 +221,20 @@ async function loadPage(
   window.document.write(html.replace(/<script>[\s\S]*?<\/script>/, ""));
 
   const fetches: string[] = [];
+  let statusCalls = 0;
   const fetchImpl = async (input: RequestInfo | URL): Promise<Response> => {
     const url = String(input);
     fetches.push(url);
     if (url.startsWith("/api/status")) {
+      statusCalls++;
+      if (options?.statusResponder) {
+        return options.statusResponder(statusCalls);
+      }
+      // The very first call feeds loadPage's own waitFor below — it must
+      // succeed regardless of the gate, or the page never finishes loading.
+      if (options?.statusGate && statusCalls > 1 && !options.statusGate.ok) {
+        throw new Error("status fetch failed");
+      }
       return new Response(JSON.stringify(status), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -235,15 +259,19 @@ async function loadPage(
   };
 
   const intervals = new Set<number>();
+  let lastIntervalHandler: (() => void) | null = null;
   let nextId = 1;
   const setIntervalImpl = (handler: () => void): number => {
-    void handler;
     const id = nextId++;
     intervals.add(id);
+    lastIntervalHandler = handler;
     return id;
   };
   const clearIntervalImpl = (id: number): void => {
     intervals.delete(id);
+  };
+  const firePoll = (): void => {
+    lastIntervalHandler?.();
   };
 
   const run = new Function(
@@ -279,7 +307,7 @@ async function loadPage(
   const source = FakeEventSource.instances[0];
   if (source === undefined) throw new Error("EventSource was not constructed");
 
-  return { window, fetches, intervals, source };
+  return { window, fetches, intervals, source, firePoll };
 }
 
 // happy-dom implements no activation behaviour for <button>: a real browser
@@ -427,6 +455,24 @@ describe("the status page", () => {
     expect(doc.querySelector('[data-metric="lanes"] .value')?.textContent).toBe(
       "5",
     );
+    // A problem count only turns red when there is a problem — mixedStatus
+    // has one failed lane and one failing check, so those two values (and
+    // only those two) carry the hot class.
+    expect(
+      doc.querySelector('[data-metric="failed"] .value')?.classList.contains(
+        "hot",
+      ),
+    ).toBe(true);
+    expect(
+      doc.querySelector('[data-metric="failing"] .value')?.classList.contains(
+        "hot",
+      ),
+    ).toBe(true);
+    expect(
+      doc.querySelector('[data-metric="settled"] .value')?.classList.contains(
+        "hot",
+      ),
+    ).toBe(false);
   });
 
   test("an unknown metric renders —, never 0", async () => {
@@ -621,6 +667,154 @@ describe("the status page", () => {
     const style = await pageStyle();
     expect(style).toMatch(/var\(--color-/); // tokens are consumed, from /tokens.css
     expect(style).not.toMatch(/--color-[\w-]+\s*:/);
+  });
+
+  test("the connection indicator reflects each state it can be in, driven by the real connection", async () => {
+    const statusGate = { ok: true };
+    const page = await loadPage(statusAt(), undefined, { statusGate });
+    const doc = page.window.document;
+    const indicator = doc.getElementById("connection") as HTMLElement | null;
+    expect(indicator).not.toBeNull();
+
+    // Before any SSE event fires, the page is still connecting — nothing
+    // has pinned it to a class of its own; this is the markup's own initial
+    // state, still standing.
+    expect(indicator?.className).toBe("connecting");
+    expect(indicator?.textContent).toMatch(/connecting/);
+
+    // The stream opens: live.
+    page.source.onopen?.();
+    expect(indicator?.className).toBe("live");
+    expect(indicator?.textContent).toMatch(/live/);
+
+    // An SSE status event also (re-)confirms live.
+    page.source.emit("status", JSON.stringify(statusAt()));
+    expect(indicator?.className).toBe("live");
+
+    // The stream drops but the status endpoint still answers: polling, not
+    // down — connectivity to the server itself is still fine.
+    page.source.onerror?.();
+    expect(indicator?.className).toBe("polling");
+    expect(indicator?.textContent).toMatch(/polling/);
+
+    // Now the status endpoint itself stops answering: a poll tick (fired
+    // here directly, the way the real 10 s timer would) that fails must
+    // flip the indicator to down — this is the real fallback failing, not
+    // a class hardcoded on the element. The onerror handler above already
+    // started a refresh() that is still in flight (gate was true when it
+    // read it) — the sequence guard in refresh() must stop that stale,
+    // eventually-successful call from clobbering this one back to
+    // "polling" once it lands after this one already reported down.
+    statusGate.ok = false;
+    page.firePoll();
+    await vi.waitFor(() => {
+      expect(indicator?.className).toBe("down");
+    });
+    expect(indicator?.textContent).toMatch(/unreachable/);
+
+    // Connectivity returns: the next poll tick itself (not the SSE drop
+    // handler, which would set "polling" regardless of the fetch outcome)
+    // must climb the indicator back out of "down" on its own.
+    statusGate.ok = true;
+    page.firePoll();
+    await vi.waitFor(() => {
+      expect(indicator?.className).toBe("polling");
+    });
+  });
+
+  test("an SSE status arriving while a poll is pending wins — the late poll changes neither the table nor the indicator", async () => {
+    const sseStatus = statusAt({ fixed: "from-sse" });
+    const stalePollStatus = statusAt({ fixed: "from-stale-poll" });
+
+    let resolveSlowPoll!: (res: Response) => void;
+    const pendingPoll = new Promise<Response>((resolve) => {
+      resolveSlowPoll = resolve;
+    });
+
+    const page = await loadPage(statusAt(), undefined, {
+      statusResponder: (callIndex) => {
+        // Call 1 is the page's own initial load — it must resolve so
+        // loadPage's waitFor below is not left hanging on a Promise that
+        // never settles. Every call after that (the onerror-triggered
+        // poll below) hangs on `pendingPoll` until the test resolves it.
+        if (callIndex === 1) {
+          return new Response(JSON.stringify(statusAt()), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return pendingPoll;
+      },
+    });
+    const doc = page.window.document;
+    const indicator = doc.getElementById("connection") as HTMLElement | null;
+    const findings = () =>
+      doc.querySelector("tr.lane td:last-child")?.textContent ?? "";
+
+    // The stream drops, which starts a fallback poll (call 2) — it is
+    // now in flight, awaiting `pendingPoll`.
+    page.source.onerror?.();
+    expect(indicator?.className).toBe("polling");
+
+    // SSE reconnects and delivers a status event while that poll is still
+    // pending. Its data must land, and the indicator must say live.
+    page.source.emit("status", JSON.stringify(sseStatus));
+    expect(findings()).toContain("from-sse");
+    expect(indicator?.className).toBe("live");
+
+    // The stale poll finally resolves, with different content. It must
+    // change nothing: the table still shows the SSE payload, not the
+    // poll's, and the indicator is untouched.
+    resolveSlowPoll(
+      new Response(JSON.stringify(stalePollStatus), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(findings()).toContain("from-sse");
+    expect(findings()).not.toContain("from-stale-poll");
+    expect(indicator?.className).toBe("live");
+  });
+
+  test("a poll that fails while the stream is healthy leaves the indicator live, not down", async () => {
+    let settlePendingPoll!: (res: Response | Promise<Response>) => void;
+    const pendingPoll = new Promise<Response>((resolve) => {
+      settlePendingPoll = resolve;
+    });
+
+    const page = await loadPage(statusAt(), undefined, {
+      statusResponder: (callIndex) => {
+        // Same shape as above: call 1 feeds loadPage's own load, every
+        // call after that hangs until the test settles it.
+        if (callIndex === 1) {
+          return new Response(JSON.stringify(statusAt()), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return pendingPoll;
+      },
+    });
+    const doc = page.window.document;
+    const indicator = doc.getElementById("connection") as HTMLElement | null;
+
+    // The stream drops, starting a fallback poll (call 2) — in flight,
+    // awaiting `pendingPoll`.
+    page.source.onerror?.();
+    expect(indicator?.className).toBe("polling");
+
+    // The stream comes back up while that poll is still pending — a
+    // reconnect the real EventSource fires as another `onopen`.
+    page.source.onopen?.();
+    expect(indicator?.className).toBe("live");
+
+    // The stale poll now fails. The connection is healthy — this must not
+    // be read as "the connection is down".
+    settlePendingPoll(Promise.reject(new Error("status fetch failed")));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(indicator?.className).toBe("live");
+    expect(indicator?.textContent).toMatch(/live/);
   });
 
   test("a late log response does not overwrite a newer opened lane's header, size, or body", async () => {
