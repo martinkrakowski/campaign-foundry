@@ -98,6 +98,61 @@ library (L7, which never shipped past a port with no consumer), and keyframes if
 
 ---
 
+## 4b. Canonical lane names, and the master sequence
+
+**A naming collision in my own plans, recorded rather than quietly renamed.** The reconciliation and
+`2026-09-10_the-motion-path-and-l9.md` name the same two lanes twice: **C1 = M1** (the motion path
+iterates the list) and **C3 = M1b** (wire `template` onto the port). Two documents naming one lane is
+the same defect as four renderers naming one stack.
+
+**The `C` names win**, because the convergence sequence is the thing that orders everything else.
+`M1`/`M1b` are retired as aliases; `M2`, `M3`, `M4` keep their names and their home.
+
+### The master sequence
+
+**Phase 0 — unblock (nothing else may start inside this phase).**
+
+| | Lane | Home |
+|---|---|---|
+| 1 | **C1** — the motion path iterates the list | this doc / the L9 doc |
+| 2 | **C2** — the previews read one order | this doc |
+| 3 | **C3** — wire `template` onto the port | this doc / the L9 doc |
+
+**C3 is the moment the product starts honouring a user's template.** Everything before it is
+byte-neutral by construction; nothing before it is user-visible.
+
+**Phase 1 — finish the templates arc.**
+
+| | Lane | Home |
+|---|---|---|
+| 4 | **C4** — `props` becomes live (geometry has one source) | this doc |
+| 5 | **M2** — `enabled` reaches the boundary | the L9 doc |
+| 6 | **M3** — the toggle (L9/D129) | the L9 doc |
+
+**Phase 2 — the arc's own remainder**, in the templates plan's declared order: **L10** (frames,
+D130), **L11** (fill and region, D131/D132), then **L7** (the template library, which never shipped
+past a port with no consumer, and whose thumbnails need drawers L10/L11 build).
+
+**Phase 3 — keyframing**, `2026-09-10_keyframing.md`: **K1 → K2 → K3 → K4**, with **K2 as its gate**.
+Blocked on C1 and best done after Phase 2, since tracks address layers by id and a layer set still in
+flux moves under them.
+
+**Unblocked, parallel, any time.** These touch nothing in the render stack:
+
+- **M4** — amend the templates plan (L7's status, L9's ownership and DoD wording, D136 half-shipped).
+- **V3** — the reviewer measurement gate; **V4** — the class-disposition tool.
+- **S1–S4** — the seat trials and the wave-record fields that make them arithmetic.
+- **T3** — the log pane, last of the three theming lanes.
+- **A review of `2026-09-08_collaboration-and-curation-plan`**, still unread. It touches drafts and
+  asset pools, not the stack — but nothing has checked it against the code, and the two composition
+  plans looked fine until something did.
+
+### The one rule this sequence encodes
+
+**Nothing user-visible ships until C3.** C1, C2 and C4 are each provably byte-neutral because the
+template is unwired while they run. That is not caution for its own sake — it is the only ordering in
+which a half-finished convergence cannot ship a still image and a video that disagree.
+
 ## 5. Gaps this review found that no plan owned
 
 1. **The port wiring.** The templates plan assigns no lane to putting `template` on `CompositeRequest`. Now **C3**.
