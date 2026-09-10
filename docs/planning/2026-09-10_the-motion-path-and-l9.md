@@ -108,7 +108,7 @@ dumps after `props`. **L9's ownership list is missing the files it will actually
 
 #### **F5 · M · L9's DoD contradicts the kit's gating rule**
 
-It says *"a disabled control"*. `DESIGN.md` §1.5 and `TemplateSection.tsx`'s own header say the
+It says *"a disabled control"*. `DESIGN.md` §1 and `TemplateSection.tsx`'s own header say the
 opposite: absent from the offer, never present-and-disabled. Rewrite as *no toggle is offered on a
 required layer*.
 

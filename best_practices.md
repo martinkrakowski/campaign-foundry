@@ -40,6 +40,19 @@ class. A finding whose premise one of these facts disproves should not be posted
    controls (`hidden`, an ARIA attribute, a class it toggles). That is what D47's ban on
    class-string assertions as *proof of layout* was always about.
 
+4. **There is no `DESIGN.md` §1.5, and the two rules that sound alike are different.** I cited
+   "§1.5" for the offer rule throughout one session; it does not exist. The two real rules:
+
+   - **§1 Principles (line 30)** — a refusal "must never leave the user with a disabled control as
+     the answer". This is the **offer** rule: a control the boundary would refuse is **absent**, not
+     present-and-disabled. `TemplateSection.tsx` follows it for add and remove.
+   - **§5 Patterns, "Capability gating"** — when the **host** cannot do something (no ffmpeg → no
+     motion) the control **is disabled and the reason is shown**, quoting the probe.
+
+   **They are resolved by cause, not by preference.** A rule the product would refuse → hide the
+   offer. A capability the machine lacks → disable and say why, because the user can act on that.
+   Citing the wrong one inverts the fix. Quote the section name, never a subsection number.
+
 4. **`NodeCanvasCompositor` and everything under `packages/CreativeGeneration` is server-side
    Skia canvas.** There is no DOM, no stylesheet, no theme, and no CSS cascade there.
    `ctx.fillStyle = "var(--…)"` is an invalid canvas color that silently paints black.
