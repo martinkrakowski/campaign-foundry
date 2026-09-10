@@ -2,11 +2,11 @@
 name: Orchestrate a delegated wave
 description: >
   Run one wave of the delegated implementation pipeline for this repo: intake and confirm the
-  cast, cut a worktree and branch per lane, dispatch lane briefs to the implementer CLI, review
+  cast, cut a worktree and branch per lane, dispatch lane briefs to the implementer seat, review
   every PR with two independent models, remediate, sweep the review threads, and merge
   sequentially. Use for "run wave N of the plan", "dispatch the lanes", "orchestrate the
   implementation", "delegate this plan to the agents". Explicit invocation only — it creates
-  worktrees, spends money on other CLIs, and opens pull requests.
+  worktrees, spawns subagents, and opens pull requests.
 disable-model-invocation: true
 argument-hint: "[plan-path] [wave]"
 arguments: [plan, wave]
@@ -22,8 +22,11 @@ templates A–D, invariants, failure playbook) and `docs/workflows/orchestrator-
 **Read the plan and both documents before acting.** This file is the operating contract and wins
 where they differ; it deliberately does not copy them, so they cannot drift apart.
 
-- Verified CLI invocations, model ids and each model's track record: [references/cast.md](references/cast.md)
-- Staggered dispatch + blocking wait: `${CLAUDE_SKILL_DIR}/scripts/dispatch-lane.sh`
+- The cast, and each seat's track record: [references/cast.md](references/cast.md)
+- **Lanes run in-house** (2026-09-09, owner's instruction): the implementer is an `Agent` call —
+  `subagent_type: "claude"`, `model: "sonnet"` — and the reviewer is a second `Agent` that is
+  **not** the implementer. `scripts/dispatch-lane.sh` and every external CLI it drives are
+  **retired**; the script stays only to read old wave logs.
 
 ## Naming waves and lanes
 
@@ -156,8 +159,10 @@ output for a cell, the cell is *unknown* — a valid answer. A confident wrong o
 ## Before you dispatch
 
 1. **Verify main is green** and the tree is clean. Fast-forward local main.
-2. **Verify the seats are funded and resolve.** `grok models`, `agy models`, and a one-word
-   `opencode run` probe. An unfunded implementer costs a whole cycle and leaves nothing behind.
+2. **Give the subagent what it cannot infer.** It inherits none of this conversation, so its
+   prompt must carry the **absolute worktree path**, the branch, whether a PR already exists, and
+   the house rules below. A brief that assumes context the agent does not have is the in-house
+   equivalent of an unfunded seat: a whole cycle, nothing to show.
 3. **Confirm the cast, the lanes and their file ownership** with the owner, and wait for the
    go-ahead. If the plan does not assign file ownership per lane, say so — that is a plan defect
    and the lanes will collide.
@@ -173,8 +178,9 @@ output for a cell, the cell is *unknown* — a valid answer. A confident wrong o
 that did not happen.
 
 1. **Implement.** One lane = one worktree = one branch = one PR. `yarn install` per worktree
-   yourself. Write each brief from Template A, then launch detached via the dispatch script and
-   wait on the `EXIT` marker. Never let two lanes own the same file at the same time.
+   yourself. Write each brief from Template A, then dispatch it as an `Agent`. **Record the
+   worktree tip first** — an agent that reports success having committed nothing looks identical to
+   one that did the work. Never let two lanes own the same file at the same time.
    Emit as you go (`scripts/wave-event.sh`): `dispatch started` per lane just before its launch.
    The per-lane `implement settled|failed` events **are** the completion record of a dispatch —
    `implement settled` when a lane's `EXIT` marker lands, `implement failed` on a non-zero
