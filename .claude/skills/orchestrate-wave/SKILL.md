@@ -23,8 +23,11 @@ templates A–D, invariants, failure playbook) and `docs/workflows/orchestrator-
 where they differ; it deliberately does not copy them, so they cannot drift apart.
 
 - The cast, and each seat's track record: [references/cast.md](references/cast.md)
-- **Lanes run in-house** (2026-09-09, owner's instruction): the implementer is an `Agent` call —
-  `subagent_type: "claude"`, `model: "sonnet"` — and the reviewer is a second `Agent` that is
+- **The implementer seat is `agy gemini-3.8-flash-high`** (2026-09-10, owner's choice — it bills to a
+  separate pool). Dispatch it detached with an `EXIT` marker; **record the worktree tip first**, and
+  **watch the quota** — it stalled mid-lane once and stranded a finished feature uncommitted.
+  **`Agent` · `subagent_type: "claude"` · `model: "sonnet"` is the reserve**, and keeps the critical
+  path, where a stall is expensive. Reviewers stay in-house: a second `Agent` that is
   **not** the implementer. `scripts/dispatch-lane.sh` and every external CLI it drives are
   **retired**; the script stays only to read old wave logs.
 
@@ -161,7 +164,7 @@ output for a cell, the cell is *unknown* — a valid answer. A confident wrong o
 1. **Verify main is green** and the tree is clean. Fast-forward local main.
 2. **Give the subagent what it cannot infer.** It inherits none of this conversation, so its
    prompt must carry the **absolute worktree path**, the branch, whether a PR already exists, and
-   the house rules below. A brief that assumes context the agent does not have is the in-house
+   the house rules below. A brief that assumes context the agent does not have is the
    equivalent of an unfunded seat: a whole cycle, nothing to show.
 3. **Confirm the cast, the lanes and their file ownership** with the owner, and wait for the
    go-ahead. If the plan does not assign file ownership per lane, say so — that is a plan defect
