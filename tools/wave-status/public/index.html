@@ -60,6 +60,10 @@
       .brand {
         display: flex;
         align-items: center;
+        /* 10px matches no step on the scale below (--space-2 is 8px,
+       --space-3 is 12px); the mark-to-title gap reads right at neither,
+       so this stays a literal rather than forcing the design to a step
+       that isn't it. */
         gap: 10px;
       }
       /* --color-brand-primary is a :root-only token: the server at
@@ -68,6 +72,9 @@
      served here. --color-brand-on-tint is the FIREFLY-badge brand blue
      that .dark does carry — use that, not the unserved token. */
       .brand-mark {
+        /* 10px (size) and 3px (radius) both fall between scale steps —
+       --space-1 is 4px, --radius-sm is 4px — and rounding either up
+       would visibly change this mark. Literals, not a forced fit. */
         width: 10px;
         height: 10px;
         flex: none;
@@ -107,6 +114,11 @@
         white-space: nowrap;
       }
       .conn-dot {
+        /* 6px sits between --space-1 (4px) and --space-2 (8px); a dot
+       this small on the scale would read as either cramped or bloated,
+       so the size stays a literal. (border-radius: 50% is a proportion,
+       not a spacing value — it's what makes the dot round at any size,
+       so it isn't one of these.) */
         width: 6px;
         height: 6px;
         border-radius: 50%;
@@ -1063,10 +1075,15 @@
         void maybeFollow();
       }
 
-      // Each call claims its own generation, the same idiom loadTail uses
-      // for log tails below: a slow poll that finally resolves after a
-      // faster, newer one already reported "down" must not un-say that —
-      // its answer belongs to a moment that is no longer the latest.
+      // One generation governs both transports — the same idiom loadTail
+      // uses for log tails below. A poll claims a generation when it
+      // starts and checks it once its await returns; an SSE arrival (a
+      // status event, or the stream opening live) claims one the instant
+      // it writes, since it never awaits anything, so it is always its
+      // own newest generation. Whichever wrote most recently owns the
+      // generation, so a slow poll that resolves after a newer SSE
+      // payload — or a newer poll — already landed must not act at all:
+      // not on the table, and not on the connection indicator.
       let statusSeq = 0;
       async function refresh() {
         const seq = ++statusSeq;
@@ -1237,10 +1254,19 @@
       const source = new EventSource("/api/stream");
       let pollTimer = null;
       source.addEventListener("status", (event) => {
+        // Claim the generation before writing — a poll already in flight,
+        // still awaiting its own fetch, must find this generation newer
+        // than the one it captured and discard its answer when it lands.
+        ++statusSeq;
         setConn("live", "live · sse");
         render(JSON.parse(event.data));
       });
       source.onopen = () => {
+        // Same claim as the status listener above: the stream coming up
+        // is itself news, and must outrank a poll already in flight — a
+        // poll that then fails must not be read as "the connection is
+        // down" when the connection just opened.
+        ++statusSeq;
         setConn("live", "live · sse");
       };
       source.onerror = () => {
