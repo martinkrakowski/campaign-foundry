@@ -1,0 +1,16 @@
+{
+  "darwin-arm64": {
+    "fileHash": "dbc1eca4dc0773359bfbdc7538c1617c12cf3c10b5b767b9db7a3102221627f0",
+    "streamHash": "fc0a0ad029905e2fd94dda59246adc81a25bc71cd88276f56749fe8e18bb54aa",
+    "ffmpegVersion": "6.0",
+    "x264Version": "core 164 r3075 66a5bc1",
+    "threads": "1"
+  },
+  "linux-x64": {
+    "fileHash": "3e8b49571c6884f4488cf79290968879275e5d734eedea3c872e1ce04bf71f1b",
+    "streamHash": "f278a130ff51a1378f5f89da30fb800098e4a382cbb543871f314580a63b19fe",
+    "ffmpegVersion": "7.0.2-static",
+    "x264Version": "core 164 r3191 4613ac3",
+    "threads": "1"
+  }
+}

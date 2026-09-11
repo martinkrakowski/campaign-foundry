@@ -47,7 +47,7 @@ jobs:
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
 
       - name: Record compositor goldens
-        run: "yarn vitest run packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.goldens.test.ts packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.motion-goldens.test.ts"
+        run: "yarn vitest run packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.goldens.test.ts packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.motion-goldens.test.ts packages/CreativeGeneration/src/infrastructure/adapters/__tests__/CanvasFfmpegVideoCompositor.byte-golden.test.ts"
         env:
           NODE_ENV: test
           RECORD_COMPOSITOR_GOLDENS: "1"
