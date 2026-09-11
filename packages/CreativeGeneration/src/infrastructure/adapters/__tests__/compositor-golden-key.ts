@@ -19,18 +19,6 @@ export const DISPLAY_INSET_GOLDEN_CELL_COUNT = 1;
  */
 export const MOTION_GOLDEN_CELL_COUNT = 48;
 
-export function compositorGoldenKey(
-  platform: string = process.platform,
-  arch: string = process.arch,
-): string {
-  const override = process.env.COMPOSITOR_GOLDEN_KEY_OVERRIDE;
-  if (override !== undefined && override !== "") return override;
-  return `${platform}-${arch}`;
-}
-
-export type GoldenMap = Record<string, string>;
-export type GoldenFixture = Record<string, GoldenMap>;
-
 /**
  * The one non-platform top-level key a golden fixture may carry.
  *
@@ -47,6 +35,47 @@ export type GoldenFixture = Record<string, GoldenMap>;
  */
 export const GOLDEN_PROVENANCE_KEY = "platformProvenance";
 
+export function compositorGoldenKey(
+  platform: string = process.platform,
+  arch: string = process.arch,
+): string {
+  const override = process.env.COMPOSITOR_GOLDEN_KEY_OVERRIDE;
+  if (override !== undefined && override !== "") {
+    // The override is the key a recording run writes *into*. Left unvalidated it
+    // is a way to record cells over the caveat and destroy it, so the one key
+    // this file reserves is refused rather than trusted.
+    if (override === GOLDEN_PROVENANCE_KEY) {
+      throw new Error(
+        `COMPOSITOR_GOLDEN_KEY_OVERRIDE=${JSON.stringify(override)} is refused: ` +
+          `"${GOLDEN_PROVENANCE_KEY}" is reserved for the caveat, not for golden cells. ` +
+          `Recording under it would overwrite the provenance this suite exists to hold. ` +
+          `Use the "<platform>-<arch>" key of the machine you are recording on.`,
+      );
+    }
+    return override;
+  }
+  return `${platform}-${arch}`;
+}
+
+export type GoldenMap = Record<string, string>;
+
+/** Who re-proves a platform's cells: a CI runner, or nobody. */
+export type GoldenReproof = "ci" | "nothing";
+export type GoldenProvenance = { readonly reprovedBy: GoldenReproof; readonly note: string };
+
+/** `${platform}-${arch}` -> who re-proves it: the value under `GOLDEN_PROVENANCE_KEY`. */
+export type GoldenProvenanceMap = Readonly<Record<string, GoldenProvenance>>;
+
+/**
+ * A golden fixture file holds two different shapes side by side, so an
+ * undifferentiated `Record<string, GoldenMap>` is a comfortable lie: it claims
+ * the caveat is a flat cell map. Indexing a platform-arch key yields a
+ * `GoldenMap`; indexing `GOLDEN_PROVENANCE_KEY` yields the caveat map.
+ */
+export type GoldenFixture = Record<string, GoldenMap> & {
+  readonly [GOLDEN_PROVENANCE_KEY]?: GoldenProvenanceMap;
+};
+
 /** `${platform}-${arch}`, exactly as `compositorGoldenKey` produces it. */
 const PLATFORM_KEY_PATTERN = /^[a-z0-9]+-[a-z0-9]+$/;
 
@@ -58,10 +87,6 @@ export function isGoldenPlatformKey(key: string): boolean {
 export function goldenPlatformKeys(fixture: Record<string, unknown>): string[] {
   return Object.keys(fixture).filter(isGoldenPlatformKey);
 }
-
-/** Who re-proves a platform's cells: a CI runner, or nobody. */
-export type GoldenReproof = "ci" | "nothing";
-export type GoldenProvenance = { readonly reprovedBy: GoldenReproof; readonly note: string };
 
 /** The map for `key`, or `undefined` when missing or empty (caller should fail). */
 export function resolveGoldenMap(fixture: GoldenFixture, key: string): GoldenMap | undefined {

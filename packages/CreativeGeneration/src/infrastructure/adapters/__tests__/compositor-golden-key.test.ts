@@ -7,6 +7,7 @@ import {
   BASE_GOLDEN_CELL_COUNT,
   DISPLAY_GOLDEN_CELL_COUNT,
   DISPLAY_INSET_GOLDEN_CELL_COUNT,
+  GOLDEN_PROVENANCE_KEY,
   INSET_GOLDEN_CELL_COUNT,
   assertRecordedMap,
   compositorGoldenKey,
@@ -70,6 +71,20 @@ describe("compositorGoldenKey", () => {
     process.env.COMPOSITOR_GOLDEN_KEY_OVERRIDE = "";
     try {
       expect(compositorGoldenKey("linux", "x64")).toBe("linux-x64");
+    } finally {
+      if (prev === undefined) delete process.env.COMPOSITOR_GOLDEN_KEY_OVERRIDE;
+      else process.env.COMPOSITOR_GOLDEN_KEY_OVERRIDE = prev;
+    }
+  });
+
+  test("the reserved caveat key is refused as an override", () => {
+    const prev = process.env.COMPOSITOR_GOLDEN_KEY_OVERRIDE;
+    process.env.COMPOSITOR_GOLDEN_KEY_OVERRIDE = GOLDEN_PROVENANCE_KEY;
+    try {
+      // A recording run under this override would write cells over the caveat.
+      expect(() => compositorGoldenKey("linux", "x64")).toThrow(
+        /"platformProvenance" is reserved for the caveat/,
+      );
     } finally {
       if (prev === undefined) delete process.env.COMPOSITOR_GOLDEN_KEY_OVERRIDE;
       else process.env.COMPOSITOR_GOLDEN_KEY_OVERRIDE = prev;

@@ -7,7 +7,10 @@ import {
   goldenPlatformKeys,
   goldenProvenanceProblems,
   readGoldenFixture,
+  resolveGoldenMap,
   type GoldenFixture,
+  type GoldenProvenanceMap,
+  type GoldenReproof,
 } from "./compositor-golden-key.js";
 
 /**
@@ -25,13 +28,30 @@ const fixtureFiles = (): string[] =>
 const families = (): { readonly file: string; readonly fixture: GoldenFixture }[] =>
   fixtureFiles().map((file) => ({ file, fixture: readGoldenFixture(join(FIXTURES, file)) }));
 
-const provenanceOf = (
-  fixture: GoldenFixture,
-): Record<string, { readonly reprovedBy?: string }> =>
-  (fixture as Record<string, unknown>)[GOLDEN_PROVENANCE_KEY] as Record<
-    string,
-    { readonly reprovedBy?: string }
-  >;
+const provenanceOf = (fixture: GoldenFixture): GoldenProvenanceMap =>
+  fixture[GOLDEN_PROVENANCE_KEY] ?? {};
+
+/**
+ * The platform keys every golden family commits, and who re-proves each.
+ *
+ * Named as literals on purpose. Deriving them from the fixture — the obvious
+ * `goldenPlatformKeys(fixture)` — makes the assertion unfalsifiable: delete
+ * `darwin-arm64` from a family and both sides shrink together, so the one key
+ * whose weak provenance this suite exists to document can vanish unobserved.
+ */
+const REQUIRED_PLATFORMS: readonly {
+  readonly key: string;
+  readonly reprovedBy: GoldenReproof;
+}[] = [
+  { key: "darwin-arm64", reprovedBy: "nothing" },
+  { key: "linux-x64", reprovedBy: "ci" },
+];
+
+/** What to do when a fixtures file is not, in fact, a golden family. */
+const NOT_A_FAMILY_HINT =
+  `has no "<platform>-<arch>" key, so the family scan cannot see it and it ships without ` +
+  `a caveat. If it is genuinely not a golden family, move it out of fixtures/; if it is, ` +
+  `give it a platform-arch map and a "${GOLDEN_PROVENANCE_KEY}" entry.`;
 
 describe("golden families state who re-proves them (X3)", () => {
   test("every fixture carrying platform goldens carries the caveat too", () => {
@@ -47,23 +67,30 @@ describe("golden families state who re-proves them (X3)", () => {
       .map(({ file }) => file);
     expect(scanned).toEqual(fixtureFiles());
     expect(scanned.length).toBeGreaterThanOrEqual(6);
+    // Same fact, said as a diagnosis: name the file and what to do about it.
+    const notAFamily = fixtureFiles()
+      .filter((file) => !scanned.includes(file))
+      .map((file) => `${file}: ${NOT_A_FAMILY_HINT}`);
+    expect(notAFamily).toEqual([]);
   });
 
-  test("the mac key is declared re-proved by nothing, the linux key by CI", () => {
-    const declared = families().flatMap(({ file, fixture }) => {
-      const provenance = provenanceOf(fixture);
-      return goldenPlatformKeys(fixture).map(
-        (key) => `${file} ${key} -> ${String(provenance[key]?.reprovedBy)}`,
-      );
-    });
-    const wanted = families().flatMap(({ file, fixture }) =>
-      goldenPlatformKeys(fixture).map(
-        (key) => `${file} ${key} -> ${key === "linux-x64" ? "ci" : "nothing"}`,
+  test("every family carries both committed platform maps, each with the reproof it declares", () => {
+    const wanted = fixtureFiles().flatMap((file) =>
+      REQUIRED_PLATFORMS.map(
+        ({ key, reprovedBy }) => `${file} ${key}: map present, reprovedBy=${reprovedBy}`,
       ),
     );
-    expect(declared).toEqual(wanted);
+    const actual = families().flatMap(({ file, fixture }) => {
+      const provenance = provenanceOf(fixture);
+      return REQUIRED_PLATFORMS.map(
+        ({ key }) =>
+          `${file} ${key}: map ` +
+          `${resolveGoldenMap(fixture, key) === undefined ? "ABSENT" : "present"}, ` +
+          `reprovedBy=${provenance[key]?.reprovedBy ?? "ABSENT"}`,
+      );
+    });
+    expect(actual).toEqual(wanted);
   });
-
 });
 
 describe("goldenProvenanceProblems", () => {
