@@ -48,7 +48,15 @@ const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest(
 
 const require = createRequire(import.meta.url);
 const ffmpegStatic = require("ffmpeg-static") as string | null;
-const ffmpegPath = typeof ffmpegStatic === "string" ? ffmpegStatic : null;
+const ffmpegOverride = process.env.COMPOSITOR_FFMPEG_PATH;
+const ffmpegPath =
+  ffmpegOverride !== undefined
+    ? ffmpegOverride === ""
+      ? null
+      : ffmpegOverride
+    : typeof ffmpegStatic === "string"
+      ? ffmpegStatic
+      : null;
 const ffmpegProbe = ffmpegPath
   ? spawnSync(ffmpegPath, ["-version"], { encoding: "utf8", timeout: 5_000 })
   : undefined;
@@ -115,10 +123,12 @@ describe("CanvasFfmpegVideoCompositor byte golden (VG2)", () => {
     cellsHint: "5 fields (fileHash, streamHash, ffmpegVersion, x264Version, threads) for the one canonical timeline",
   });
 
-  test.skipIf(!ffmpegOk)(
-    skipReason ?? "the canonical timeline's encoded MP4 matches the committed byte golden for this platform (D10)",
+  test.skipIf(!recording && !ffmpegOk)(
+    (!recording ? skipReason : undefined) ??
+      "the canonical timeline's encoded MP4 matches the committed byte golden for this platform (D10)",
     { timeout: 60_000 },
     async () => {
+      if (!ffmpegOk) throw new Error(skipReason);
       if (!ffmpegPath) throw new Error("ffmpeg-static binary is not available");
       const run = goldenRun(goldens, recording, missingMessage);
 
@@ -143,6 +153,43 @@ describe("CanvasFfmpegVideoCompositor byte golden (VG2)", () => {
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
+    },
+  );
+
+  test.runIf(!process.env.COMPOSITOR_BYTE_GOLDEN_SUBPROCESS)(
+    "with the record flag set and the probe forced to fail, the suite fails rather than skipping",
+    { timeout: 30_000 },
+    () => {
+      const vitestBin = fileURLToPath(
+        new URL("../../../../../../node_modules/vitest/vitest.mjs", import.meta.url),
+      );
+      const target = fileURLToPath(import.meta.url);
+
+      const recordRun = spawnSync(process.execPath, [vitestBin, "run", target], {
+        env: {
+          ...process.env,
+          RECORD_COMPOSITOR_GOLDENS: "1",
+          COMPOSITOR_FFMPEG_PATH: "/dev/null",
+          COMPOSITOR_BYTE_GOLDEN_SUBPROCESS: "1",
+        },
+        encoding: "utf8",
+      });
+      expect(recordRun.status).not.toBe(0);
+      expect(recordRun.stdout + (recordRun.stderr ?? "")).toMatch(
+        /ffmpeg-static binary cannot execute/,
+      );
+
+      const assertRun = spawnSync(process.execPath, [vitestBin, "run", target], {
+        env: {
+          ...process.env,
+          RECORD_COMPOSITOR_GOLDENS: "0",
+          COMPOSITOR_FFMPEG_PATH: "/dev/null",
+          COMPOSITOR_BYTE_GOLDEN_SUBPROCESS: "1",
+        },
+        encoding: "utf8",
+      });
+      expect(assertRun.status).toBe(0);
+      expect(assertRun.stdout).toMatch(/skipped/);
     },
   );
 });
