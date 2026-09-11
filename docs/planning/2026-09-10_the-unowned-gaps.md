@@ -1,5 +1,9 @@
 # The Unowned Gaps — Architecture & Development Plan
 
+> **Amended 2026-09-10 after review.** Two of the six were already owned and are demoted to notes; the
+> lane prefix moved from `U` to `X`, because `U1`–`U8` are the directives in
+> `2026-08-28_graphical-brief-editor.md`.
+
 **Date:** 2026-09-10 · **Status:** draft, for the owner's approval · **Nothing dispatched.**
 **Verified against:** `main` at `f4f4d63`.
 
@@ -58,26 +62,26 @@ with the real stylesheet. The page then sees every token, and the two substituti
 on their merits rather than on availability. **Guard it with a test** asserting every token the page
 references resolves — the absence of that test is why this was found by accident twice.
 
-## 5. D136 is half-shipped
+## 5. D136 is half-shipped — **M4 plus a code change**
 
 **Evidence.** The occlusion advisory reaches the editor and no further. `CompliancePort` and
 `ComplianceResult` were listed in L8's ownership and never touched. The advisory encodes as
 `{ passed: true, reason }` while `ComplianceResult` documents `reason` as *"populated on failure"* —
 so an aggregator reading `passed` sees nothing and one reading `reason` sees a failure.
 
-**Recommended default: amend D136 to editor-only, and fix the encoding.** The compliance page is
+**M4 already owns "D136 as half-shipped"** (`2026-09-10_the-motion-path-and-l9.md`). What it does not own is the **encoding fix** — `{ passed: true, reason }` against a type documenting `reason` as *populated on failure*. **Recommended default: amend D136 to editor-only in M4, and fix the encoding as a small change beside it.** The compliance page is
 **run-scoped** — one row per generated asset from `useRun()` — and an occlusion finding exists before
 any run. Aggregating it there needs a page redesign that nothing else wants. **Amending is honest;
 leaving a decision half-shipped is not.** The encoding ambiguity is real either way and should be
 resolved whichever side is chosen.
 
-## 6. `validateBrief` never checks copy against the template
+## 6. `validateBrief` never checks copy against the template — **already M2's, not a lane**
 
 **Evidence.** It validates style and sizes. It does **not** check the brief's copy fields against its
 template's `accepts` / `required` sets, so a brief whose template omits a text kind can still carry
 campaign copy the compositor will draw.
 
-**Recommended default: fold it into M2**, where the boundary is already being extended for `enabled`.
+**Already assigned**: `2026-09-10_reconciliation.md` §4c gives it to M2. This is a note, not a lane. **One correction it needs**: `validateBrief` is a private method of `GenerateCampaignUseCase`, **not** `load-brief.ts` where M2's other work sits — M2's brief must say which boundary.
 It is the same boundary, the same file, and the same kind of rule. **Written into M2's brief rather
 than left as a note**, which is how it stayed unowned until now.
 
@@ -87,16 +91,15 @@ than left as a note**, which is how it stayed unowned until now.
 
 | | Lane | Note |
 |---|---|---|
-| 1 | **U3** — the macOS golden caveat | one comment; do it first because it costs nothing |
-| 2 | **U4** — serve `:root` as a base, with the resolve test | small, unblocks nothing, prevents a third workaround |
-| 3 | **U5** — amend D136 and fix the encoding | a decision plus a small change |
-| 4 | **U6** — fold the copy/template cross-check into M2's brief | no code; it changes a brief |
-| 5 | **U2** — `alt` in the props vocabulary | sequence with the HTML layer |
-| 6 | **U1** — **Prettier, alone** | last, because it conflicts with everything; run when no lane is in flight |
+| 1 | **X3** — the macOS golden caveat | one comment; do it first because it costs nothing |
+| 2 | **X4** — serve `:root` as a base, with the resolve test | small, unblocks nothing, prevents a third workaround |
+| 3 | **X5** — the encoding fix (the amendment itself is M4's) | small |
+| 5 | **X2** — `alt` in the props vocabulary | sequence with the HTML layer |
+| 6 | **X1** — **Prettier, alone** | last, because it conflicts with everything; run when no lane is in flight |
 
 ## 8. What this plan refuses
 
-- **It does not batch U1 with anything.** A repo-wide reformat run beside another lane is how a real
+- **It does not batch X1 with anything.** A repo-wide reformat run beside another lane is how a real
   change gets buried, which is the problem it exists to solve.
 - **It does not add a macOS CI runner** to close gap 3. The cost is real and the honest caveat is
   cheap.
