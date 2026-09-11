@@ -192,6 +192,18 @@ const pageStyle = async (): Promise<string> => {
   return /<style>([\s\S]*?)<\/style>/.exec(html)?.[1] ?? "";
 };
 
+const scanReferencedTokens = (html: string): Set<string> => {
+  const styleMatch = /<style>([\s\S]*?)<\/style>/.exec(html);
+  if (!styleMatch || !styleMatch[1]) {
+    throw new Error("page has no <style> block or it is empty");
+  }
+  const referencedTokens = new Set<string>();
+  for (const match of styleMatch[1].matchAll(/var\(\s*(--[a-z0-9-]+)\s*(?:,|\))/gi)) {
+    referencedTokens.add(match[1]);
+  }
+  return referencedTokens;
+};
+
 type LogPayload =
   | string
   | Uint8Array
@@ -3879,16 +3891,7 @@ describe("the status page", () => {
     try {
       // Derive the set of tokens the page actually references from the real HTML
       const html = await readFile(PAGE_PATH, "utf8");
-      const styleMatch = /<style>([\s\S]*?)<\/style>/.exec(html);
-      if (!styleMatch || !styleMatch[1]) {
-        throw new Error("page has no <style> block or it is empty");
-      }
-      const pageStyle = styleMatch[1];
-      const referencedTokens = new Set<string>();
-      // Match var(--token-name) with optional fallback and capture the token name only
-      for (const match of pageStyle.matchAll(/var\(\s*(--[a-z0-9-]+)\s*(?:,|\))/gi)) {
-        referencedTokens.add(match[1]);
-      }
+      const referencedTokens = scanReferencedTokens(html);
 
       // Fetch what the server actually serves for /tokens.css
       const res = await new Promise<{
@@ -3957,16 +3960,7 @@ describe("the status page", () => {
         "</style>",
         "      .test { color: var(--color-missing-token, #ff0000); }\n    </style>",
       );
-      const styleMatch = /<style>([\s\S]*?)<\/style>/.exec(modifiedHtml);
-      if (!styleMatch || !styleMatch[1]) {
-        throw new Error("modified page has no <style> block or it is empty");
-      }
-      const pageStyle = styleMatch[1];
-      const referencedTokens = new Set<string>();
-      // The fixed regex should now capture tokens with fallbacks
-      for (const match of pageStyle.matchAll(/var\(\s*(--[a-z0-9-]+)\s*(?:,|\))/gi)) {
-        referencedTokens.add(match[1]);
-      }
+      const referencedTokens = scanReferencedTokens(modifiedHtml);
 
       // Fetch what the server actually serves for /tokens.css
       const res = await new Promise<{
