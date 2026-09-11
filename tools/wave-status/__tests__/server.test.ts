@@ -484,6 +484,31 @@ describe("extractRootBlock", () => {
     ).toBe(":root { --b: 2; }");
   });
 
+  test(":root.dark, :root > body, and :root[data-x] are rejected", () => {
+    expect(extractRootBlock(":root.dark { --color: 1; }")).toBeUndefined();
+    expect(extractRootBlock(":root > body { --color: 1; }")).toBeUndefined();
+    expect(extractRootBlock(":root[data-x] { --color: 1; }")).toBeUndefined();
+  });
+
+  test(":root alone and :root within a comma-separated list are accepted", () => {
+    expect(extractRootBlock(":root { --color: 1; }")).toBe(
+      ":root { --color: 1; }",
+    );
+    expect(extractRootBlock(":root, html { --color: 1; }")).toBe(
+      ":root, html { --color: 1; }",
+    );
+    expect(extractRootBlock("html, :root { --color: 1; }")).toBe(
+      "html, :root { --color: 1; }",
+    );
+  });
+
+  test("a top-level at-rule or leading brace without selector is handled", () => {
+    expect(
+      extractRootBlock('@import "base.css";\n:root { --color: 1; }'),
+    ).toBe(":root { --color: 1; }");
+    expect(extractRootBlock("{ --color: 1; }")).toBeUndefined();
+  });
+
   test("the real tokens.css extracts to a :root block of token declarations", async () => {
     const css = await readFile(realTokensPath, "utf8");
     const root = extractRootBlock(css) ?? "";

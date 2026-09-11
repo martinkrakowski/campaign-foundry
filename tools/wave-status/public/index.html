@@ -801,7 +801,7 @@
               id="filter"
               type="search"
               placeholder="filter lanes…"
-              aria-label="Filter lanes by wave, lane, stage or message"
+              aria-label="Filter lanes by wave or lane"
               autocomplete="off"
               spellcheck="false"
             />
@@ -1057,7 +1057,7 @@
       function applyFilter() {
         filterText = filterInput ? filterInput.value.trim().toLowerCase() : "";
         if (lastStatus !== null) {
-          render(lastStatus);
+          render(lastStatus, { skipFollow: true });
         }
       }
 
@@ -1325,7 +1325,9 @@
               ?.setAttribute("aria-expanded", isExpanded ? "true" : "false");
             let next = waveRow.nextElementSibling;
             while (next && !next.classList.contains("wave")) {
-              next.hidden = !isExpanded;
+              if (!next.classList.contains("empty")) {
+                next.hidden = !isExpanded;
+              }
               next = next.nextElementSibling;
             }
             break;
@@ -1561,7 +1563,7 @@
         }
       }
 
-      function render(status) {
+      function render(status, options = {}) {
         lastStatus = status;
         // A render replaces the table body's contents, and every poll tick or
         // SSE event would otherwise destroy the focused row and drop focus
@@ -1599,7 +1601,7 @@
               ? "No lanes in wave"
               : `No lanes match “${esc(filterInput ? filterInput.value : "")}”`;
             rowHtml.push(
-              `<tr class="empty" data-wave="${esc(wave.id)}"${isExpanded ? "" : " hidden"}><td colspan="7">${emptyMsg}</td></tr>`,
+              `<tr class="empty" data-wave="${esc(wave.id)}"><td colspan="7">${emptyMsg}</td></tr>`,
             );
           } else {
             for (const lane of filteredLanes) {
@@ -1670,7 +1672,9 @@
         }
 
         // If follow is on, refetch the log tail and scroll to bottom
-        void maybeFollow();
+        if (!options.skipFollow) {
+          void maybeFollow();
+        }
       }
 
       // One generation governs both transports — the same idiom loadTail

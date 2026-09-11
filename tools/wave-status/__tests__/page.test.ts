@@ -3514,8 +3514,7 @@ describe("the status page", () => {
     expect(filter).not.toBeNull();
     expect(filter?.getAttribute("type")).toBe("search");
     const label = filter?.getAttribute("aria-label");
-    expect(label).toBeTruthy();
-    expect(label?.toLowerCase()).toContain("filter");
+    expect(label).toBe("Filter lanes by wave or lane");
 
     const filterBorder = page.window.getComputedStyle(filter!).borderColor;
     const expectedBorder = page.window
@@ -3523,6 +3522,131 @@ describe("the status page", () => {
       .getPropertyValue("--color-border-control")
       .trim();
     expect(filterBorder).toBe(expectedBorder);
+
+    // Verify searching by wave id and lane name
+    const filterInput = filter as unknown as HTMLInputElement;
+    filterInput.value = "U";
+    filterInput.dispatchEvent(
+      new (doc.defaultView as unknown as { Event: typeof Event }).Event("input", {
+        bubbles: true,
+      }),
+    );
+    expect(doc.querySelectorAll("tr.lane").length).toBe(1);
+    expect(doc.querySelector("tr.lane")?.getAttribute("data-wave")).toBe("U");
+
+    filterInput.value = "t2";
+    filterInput.dispatchEvent(
+      new (doc.defaultView as unknown as { Event: typeof Event }).Event("input", {
+        bubbles: true,
+      }),
+    );
+    expect(doc.querySelectorAll("tr.lane").length).toBe(1);
+    expect(doc.querySelector("tr.lane")?.getAttribute("data-lane")).toBe("t2");
+  });
+
+  test("filtering with every wave collapsed displays the no-match empty row rather than hiding it", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    const filter = doc.getElementById("filter") as unknown as HTMLInputElement;
+
+    const dispatchInput = () => {
+      const event = new (
+        filter.ownerDocument!.defaultView as unknown as { Event: typeof Event }
+      ).Event("input", { bubbles: true });
+      filter.dispatchEvent(event);
+    };
+
+    // Verify every wave is collapsed initially (page opens with defaultExpanded = false)
+    const waveButtons = Array.from(doc.querySelectorAll("tr.wave button"));
+    expect(waveButtons.length).toBeGreaterThan(0);
+    for (const btn of waveButtons) {
+      expect(btn.getAttribute("aria-expanded")).toBe("false");
+    }
+    const allLanes = Array.from(doc.querySelectorAll("tr.lane"));
+    for (const lane of allLanes) {
+      expect((lane as unknown as HTMLElement).hidden).toBe(true);
+    }
+
+    // Filter to "t1" — Wave U has no matching lanes.
+    filter.value = "t1";
+    dispatchInput();
+
+    const emptyU = doc.querySelector('tr.empty[data-wave="U"]') as unknown as HTMLElement;
+    expect(emptyU).not.toBeNull();
+    expect(emptyU.hidden).toBe(false);
+    expect(emptyU.textContent).toContain("No lanes match “t1”");
+
+    // Filter to a query that matches no lane in any wave
+    filter.value = "nomatchanywhere";
+    dispatchInput();
+
+    const emptyRows = Array.from(doc.querySelectorAll("tr.empty"));
+    expect(emptyRows.length).toBe(2);
+    for (const row of emptyRows) {
+      expect((row as unknown as HTMLElement).hidden).toBe(false);
+      expect(row.textContent).toContain("No lanes match “nomatchanywhere”");
+    }
+
+    // Toggling the wave open and closed keeps the empty row visible
+    const waveUButton = doc.querySelector('tr.wave[data-wave="U"] button') as unknown as HTMLElement;
+    waveUButton.click();
+    expect(waveUButton.getAttribute("aria-expanded")).toBe("true");
+    expect((doc.querySelector('tr.empty[data-wave="U"]') as unknown as HTMLElement).hidden).toBe(false);
+
+    waveUButton.click();
+    expect(waveUButton.getAttribute("aria-expanded")).toBe("false");
+    expect((doc.querySelector('tr.empty[data-wave="U"]') as unknown as HTMLElement).hidden).toBe(false);
+  });
+
+  test("typing in the filter does not refetch the followed log", async () => {
+    let logCalls = 0;
+    const page = await loadPage(mixedStatus, () => {
+      logCalls++;
+      return new Response("log output", { status: 200 });
+    });
+    const doc = page.window.document;
+
+    // Open log for T/t1
+    const laneT1 = doc.querySelector('tr.lane[data-wave="T"][data-lane="t1"]') as unknown as HTMLElement;
+    laneT1.click();
+    await vi.waitFor(() => {
+      expect(page.fetches).toContain("/api/log/T/t1?tail=16");
+    });
+    const initialFetches = page.fetches.length;
+
+    // Enable follow
+    const followCheckbox = doc.getElementById("log-follow") as unknown as HTMLInputElement;
+    followCheckbox.checked = true;
+    followCheckbox.dispatchEvent(
+      new (followCheckbox.ownerDocument!.defaultView as unknown as { Event: typeof Event }).Event("change", {
+        bubbles: true,
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(page.fetches.length).toBeGreaterThan(initialFetches);
+    });
+    const followFetches = page.fetches.length;
+
+    // Type multiple characters into filter
+    const filter = doc.getElementById("filter") as unknown as HTMLInputElement;
+    filter.value = "t";
+    filter.dispatchEvent(
+      new (filter.ownerDocument!.defaultView as unknown as { Event: typeof Event }).Event("input", {
+        bubbles: true,
+      }),
+    );
+    filter.value = "t1";
+    filter.dispatchEvent(
+      new (filter.ownerDocument!.defaultView as unknown as { Event: typeof Event }).Event("input", {
+        bubbles: true,
+      }),
+    );
+
+    // Give any microtasks/promises a turn
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Filter typing must not have triggered additional log tail fetches
+    expect(page.fetches.length).toBe(followFetches);
   });
 
   test("a referenced token that resolves to empty raises the warning naming it; a fully-resolving page shows nothing", async () => {

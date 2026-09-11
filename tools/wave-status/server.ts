@@ -378,12 +378,17 @@ async function serveTokens(res: ServerResponse, tokensCssPath: string): Promise<
   res.end(`${root}\n\n${dark}\n`);
 }
 
+function matchesSelectorItem(prelude: string, selector: string): boolean {
+  const items = prelude.split(",").map((s) => s.trim());
+  return items.includes(selector);
+}
+
 function extractTopLevelBlock(css: string, selector: string): string | undefined {
   let start = -1;
+  let ruleStart = -1;
   let depth = 0;
   let inComment = false;
   let inQuote: "'" | '"' | null = null;
-  const selLen = selector.length;
   for (let i = 0; i < css.length; i++) {
     const ch = css[i];
     if (inComment) {
@@ -410,15 +415,28 @@ function extractTopLevelBlock(css: string, selector: string): string | undefined
       inQuote = ch;
       continue;
     }
-    if (start < 0 && depth === 0 && ch === selector[0] && css.startsWith(selector, i)) {
-      const after = css[i + selLen];
-      if (after === undefined || !/[A-Za-z0-9_-]/.test(after)) start = i;
+    if (depth === 0) {
+      if (ch === ";") {
+        ruleStart = -1;
+      } else if (!/\s/.test(ch) && ruleStart < 0) {
+        ruleStart = i;
+      }
     }
     if (ch === "{") {
+      if (depth === 0 && ruleStart >= 0) {
+        const rawPrelude = css.slice(ruleStart, i);
+        const prelude = rawPrelude.replace(/\/\*[\s\S]*?\*\//g, "").trim();
+        if (matchesSelectorItem(prelude, selector)) {
+          start = ruleStart;
+        }
+      }
       depth++;
     } else if (ch === "}") {
       depth--;
-      if (depth === 0 && start >= 0) return css.slice(start, i + 1);
+      if (depth === 0) {
+        if (start >= 0) return css.slice(start, i + 1);
+        ruleStart = -1;
+      }
     }
   }
   return undefined;
