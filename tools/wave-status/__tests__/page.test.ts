@@ -3880,10 +3880,13 @@ describe("the status page", () => {
       // Derive the set of tokens the page actually references from the real HTML
       const html = await readFile(PAGE_PATH, "utf8");
       const styleMatch = /<style>([\s\S]*?)<\/style>/.exec(html);
-      const pageStyle = styleMatch ? styleMatch[1] : "";
+      if (!styleMatch || !styleMatch[1]) {
+        throw new Error("page has no <style> block or it is empty");
+      }
+      const pageStyle = styleMatch[1];
       const referencedTokens = new Set<string>();
-      // Match var(--token-name) and capture the full token name
-      for (const match of pageStyle.matchAll(/var\(\s*(--[a-z0-9-]+)\s*\)/gi)) {
+      // Match var(--token-name) with optional fallback and capture the token name only
+      for (const match of pageStyle.matchAll(/var\(\s*(--[a-z0-9-]+)\s*(?:,|\))/gi)) {
         referencedTokens.add(match[1]);
       }
 
@@ -3932,6 +3935,100 @@ describe("the status page", () => {
         );
       }
       expect(missing).toEqual([]);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  test("a reference with a fallback like var(--missing, #fff) is caught as unserved", async () => {
+    const root = await mkdir(join(tmpdir(), "wave-status-fallback-test-"), {
+      recursive: true,
+    });
+    dirs.push(root);
+    const handle = await startServer({
+      port: 0,
+      root,
+      collect: async () => statusAt(0),
+    });
+    try {
+      const html = await readFile(PAGE_PATH, "utf8");
+      // Create a modified HTML with a fallback reference to an unserved token
+      const modifiedHtml = html.replace(
+        "</style>",
+        "      .test { color: var(--color-missing-token, #ff0000); }\n    </style>",
+      );
+      const styleMatch = /<style>([\s\S]*?)<\/style>/.exec(modifiedHtml);
+      if (!styleMatch || !styleMatch[1]) {
+        throw new Error("modified page has no <style> block or it is empty");
+      }
+      const pageStyle = styleMatch[1];
+      const referencedTokens = new Set<string>();
+      // The fixed regex should now capture tokens with fallbacks
+      for (const match of pageStyle.matchAll(/var\(\s*(--[a-z0-9-]+)\s*(?:,|\))/gi)) {
+        referencedTokens.add(match[1]);
+      }
+
+      // Fetch what the server actually serves for /tokens.css
+      const res = await new Promise<{
+        status: number;
+        body: string;
+      }>((resolve, reject) => {
+        const req = httpRequest(
+          { host: "127.0.0.1", port: handle.port, path: "/tokens.css" },
+          (res) => {
+            const chunks: Buffer[] = [];
+            res.on("data", (chunk) => chunks.push(chunk));
+            res.on("end", () =>
+              resolve({
+                status: res.statusCode ?? 0,
+                body: Buffer.concat(chunks).toString("utf8"),
+              }),
+            );
+            res.on("error", reject);
+          },
+        );
+        req.on("error", reject);
+        req.end();
+      });
+
+      expect(res.status).toBe(200);
+
+      // Extract tokens from the served response body
+      const servedTokens = new Set<string>();
+      for (const match of res.body.matchAll(/(--[a-z0-9-]+)\s*:/gi)) {
+        servedTokens.add(match[1].toLowerCase());
+      }
+
+      // The missing token should now be detected even with the fallback
+      const missing = Array.from(referencedTokens)
+        .map((t) => t.toLowerCase())
+        .filter((token) => !servedTokens.has(token));
+      expect(missing).toContain("--color-missing-token");
+    } finally {
+      await handle.close();
+    }
+  });
+
+  test("a missing <style> block fails loudly, not silently", async () => {
+    const root = await mkdir(join(tmpdir(), "wave-status-missing-style-test-"), {
+      recursive: true,
+    });
+    dirs.push(root);
+    const handle = await startServer({
+      port: 0,
+      root,
+      collect: async () => statusAt(0),
+    });
+    try {
+      const html = await readFile(PAGE_PATH, "utf8");
+      // Remove the style block entirely
+      const htmlWithoutStyle = html.replace(/<style>[\s\S]*?<\/style>/g, "");
+      const styleMatch = /<style>([\s\S]*?)<\/style>/.exec(htmlWithoutStyle);
+      expect(() => {
+        if (!styleMatch || !styleMatch[1]) {
+          throw new Error("page has no <style> block or it is empty");
+        }
+      }).toThrow("page has no <style> block or it is empty");
     } finally {
       await handle.close();
     }
