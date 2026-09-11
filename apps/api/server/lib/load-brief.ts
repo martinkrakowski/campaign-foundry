@@ -23,6 +23,7 @@ import {
   TONE_VALUES,
   isPaletteShift,
   isSupportedBriefSchemaVersion,
+  layerEnabledProblem,
   layerPropsProblem,
   satisfiesOrderConstraints,
   styleProblem,
@@ -246,6 +247,7 @@ export function validateTemplate(
   const rules = CREATIVE_TYPE_RULES[value.creativeType as CreativeType];
   const seenIds = new Set<string>();
   const presentKinds = new Set<string>();
+  const enabledKinds = new Set<string>();
   const kindCounts = new Map<string, number>();
 
   for (let i = 0; i < value.layers.length; i++) {
@@ -277,6 +279,20 @@ export function validateTemplate(
     }
     presentKinds.add(layer.kind);
     kindCounts.set(layer.kind, (kindCounts.get(layer.kind) ?? 0) + 1);
+
+    // D129 — a layer's enabled flag, when present, must be boolean. Structural,
+    // never lenient (the `validateSizes` convention): the decision is the
+    // domain's `layerEnabledProblem`, shared with `isBriefTemplate` so the two
+    // boundaries cannot drift — only the message shape is local.
+    const enabledProblem = layerEnabledProblem(layer.enabled);
+    if (enabledProblem !== undefined) {
+      throw new Error(
+        `Campaign brief field "template.layers[${i}].${enabledProblem.field}" must ${enabledProblem.must}; got ${JSON.stringify(enabledProblem.value)}.`,
+      );
+    }
+    if (layer.enabled !== false) {
+      enabledKinds.add(layer.kind);
+    }
 
     // D134 — a layer's own props, when present, must be its kind's. Structural,
     // never lenient (the `validateSizes` convention): the decision is the
@@ -323,8 +339,10 @@ export function validateTemplate(
     }
   }
 
+  // D129/MP-D4 — "Required" means at least one enabled instance of each required kind,
+  // not merely one present.
   for (const req of rules.required) {
-    if (!presentKinds.has(req)) {
+    if (!enabledKinds.has(req)) {
       throw new Error(
         `Campaign brief field "template.layers" must include required layer kind "${req}" for creative type "${value.creativeType}".`,
       );

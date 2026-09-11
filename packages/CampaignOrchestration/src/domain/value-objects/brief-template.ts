@@ -82,6 +82,30 @@ const LAYER_PROPS: Readonly<Record<LayerKind, readonly string[]>> = {
   fill: [],
 };
 
+/** Why a layer's `enabled` is not a shape the brief may carry (D129); undefined when it is. */
+export interface LayerEnabledProblem {
+  /** The field name the problem names — always "enabled". */
+  readonly field: "enabled";
+  /** The requirement, phrased to follow "must" in a `Campaign brief field …` message. */
+  readonly must: string;
+  /** The offending value, for the message's `got <JSON>` clause. */
+  readonly value: unknown;
+}
+
+/**
+ * The one enabled decision both boundaries read (D129): `isBriefTemplate`
+ * refuses on a defined problem, and the API's `validateTemplate` formats the
+ * same problem into its message shape — the two cannot drift, the way
+ * `layerPropsProblem` is shared. Absent enabled is always fine: absence means
+ * enabled (true). Defined enabled must be a boolean.
+ */
+export function layerEnabledProblem(
+  enabled: unknown,
+): LayerEnabledProblem | undefined {
+  if (enabled === undefined || typeof enabled === "boolean") return undefined;
+  return { field: "enabled", must: "be a boolean", value: enabled };
+}
+
 /** Why a layer's `props` is not a shape the brief may carry (D134); undefined when it is. */
 export interface LayerPropsProblem {
   /** The props subpath the problem names — "" for the props object itself, `.<field>` for one value. */
@@ -247,7 +271,8 @@ export function satisfiesOrderConstraints(
  * — the editor's draft restore and the run context's `cf:brief` restore — so a
  * half-written template can never be cast through and reach `toBrief`. Array
  * position IS z-order (D128): a template whose layer order violates the creative
- * type's declared `above`/`below` constraints is not a valid template. A layer's `props`,
+ * type's declared `above`/`below` constraints is not a valid template. A layer's `enabled`,
+ * when present, must be a boolean (D129) — absent means enabled. A layer's `props`,
  * when present, must be a shape that layer's kind may carry (D134) — same key set,
  * every number a fraction in [0, 1], the anchor a vocabulary member — so an
  * unknown key or a value out of range cannot ride the guard into the editor or
@@ -287,19 +312,22 @@ export function isBriefTemplate(value: unknown): value is BriefTemplate {
 interface LayerEntry {
   readonly id: string;
   readonly kind: LayerKind;
+  readonly enabled?: boolean;
+  readonly props?: LayerProps;
 }
 
 /**
  * A `layers` entry is a layer (L5): a non-null, non-array object naming a
  * string `id` and a vocabulary `kind` — the fields every consumer below the
  * guard dereferences, and which a `null`, a bare string or a kindless object
- * names neither of — with `props`, when present, a shape that kind may carry
- * (D134). This is the per-layer half of `isBriefTemplate`, the one check a
- * stored draft's entries face, so it carries the whole entry contract, not
- * only the props half it once was: a corrupt entry used to pass as "no props
- * problem" and crash the editor's first `layer.kind` dereference on mount,
- * and a duplicated id used to ride in where the API's `validateTemplate`
- * refuses. Refusing here sends the whole template to the canonical fallback.
+ * names neither of — with `enabled`, when present, a boolean (D129), and
+ * `props`, when present, a shape that kind may carry (D134). This is the
+ * per-layer half of `isBriefTemplate`, the one check a stored draft's entries
+ * face, so it carries the whole entry contract, not only the props half it
+ * once was: a corrupt entry used to pass as "no props problem" and crash the
+ * editor's first `layer.kind` dereference on mount, and a duplicated id used
+ * to ride in where the API's `validateTemplate` refuses. Refusing here sends
+ * the whole template to the canonical fallback.
  */
 function isLayerEntry(layer: unknown): layer is LayerEntry {
   const rec =
@@ -314,6 +342,7 @@ function isLayerEntry(layer: unknown): layer is LayerEntry {
   ) {
     return false;
   }
+  if (layerEnabledProblem(rec.enabled) !== undefined) return false;
   if (rec.props === undefined) return true;
   return layerPropsProblem(rec.kind as LayerKind, rec.props) === undefined;
 }

@@ -33,6 +33,7 @@ import type { PlatformSafeZoneResolver } from "../ports/out/PlatformProfilePort.
 import type { VideoCompositorPort } from "../ports/out/VideoCompositorPort.js";
 import { MOTION_FPS } from "../../domain/value-objects/MotionKind.vo.js";
 import { resolveTimeline, timelineProblem, type CopyTimeline } from "../../domain/value-objects/CopyTimeline.vo.js";
+import { CREATIVE_TYPE_RULES } from "../../domain/value-objects/creative-types.js";
 import { DEFAULT_DURATION, DEFAULT_DURATION_SEC } from "../../domain/value-objects/variation-defaults.js";
 
 /**
@@ -792,6 +793,66 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         return err(
           new Error(
             `output.sizes entry "${size}" is not a display size (expected one of ${DISPLAY_SIZE_VALUES.join(", ")}).`,
+          ),
+        );
+      }
+    }
+    // Check copy fields against template accepts / required sets (M2).
+    // A brief whose template omits a text kind (or disables all instances) must not
+    // carry sequenced copy or dynamic copy that the compositor will draw.
+    const copyCompat = this.validateCopyTemplateCompatibility(brief);
+    if (!copyCompat.success) return copyCompat;
+
+    return ok(true);
+  }
+
+  private validateCopyTemplateCompatibility(brief: CampaignBrief): Result<true, Error> {
+    if (brief.copy?.timeline !== undefined) {
+      const templateRules = CREATIVE_TYPE_RULES[brief.template.creativeType];
+      const acceptsText = templateRules.accepts.some(
+        (kind) => kind === "static-text" || kind === "animated-text",
+      );
+      if (!acceptsText) {
+        return err(
+          new Error(
+            `Campaign brief template creative type "${brief.template.creativeType}" does not accept text layers for "copy.timeline".`,
+          ),
+        );
+      }
+      const hasEnabledText = brief.template.layers.some(
+        (layer) =>
+          (layer.kind === "static-text" || layer.kind === "animated-text") &&
+          layer.enabled !== false,
+      );
+      if (!hasEnabledText) {
+        return err(
+          new Error(
+            'Campaign brief with "copy.timeline" requires an enabled text layer in "template.layers".',
+          ),
+        );
+      }
+    }
+    if (brief.variation?.axes?.headline !== undefined) {
+      const templateRules = CREATIVE_TYPE_RULES[brief.template.creativeType];
+      const acceptsText = templateRules.accepts.some(
+        (kind) => kind === "static-text" || kind === "animated-text",
+      );
+      if (!acceptsText) {
+        return err(
+          new Error(
+            `Campaign brief template creative type "${brief.template.creativeType}" does not accept text layers for "variation.axes.headline".`,
+          ),
+        );
+      }
+      const hasEnabledText = brief.template.layers.some(
+        (layer) =>
+          (layer.kind === "static-text" || layer.kind === "animated-text") &&
+          layer.enabled !== false,
+      );
+      if (!hasEnabledText) {
+        return err(
+          new Error(
+            'Campaign brief with "variation.axes.headline" requires an enabled text layer in "template.layers".',
           ),
         );
       }

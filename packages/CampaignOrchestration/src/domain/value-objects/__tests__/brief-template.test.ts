@@ -4,6 +4,7 @@ import { CANONICAL_TEMPLATES } from "../creative-templates.js";
 import type { LayerKind } from "../layer-kinds.js";
 import {
   isBriefTemplate,
+  layerEnabledProblem,
   layerPropsProblem,
   satisfiesOrderConstraints,
   templateFromCanonical,
@@ -345,3 +346,54 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
     });
   });
 });
+
+describe("isBriefTemplate layer enabled (D129)", () => {
+  const withLayer = (layer: unknown): boolean =>
+    isBriefTemplate({
+      id: "canonical-image-text",
+      version: 1,
+      creativeType: "image-text",
+      unit: "standard-web",
+      layers: [layer],
+    });
+
+  test("accepts a layer without enabled (absent means enabled)", () => {
+    expect(withLayer({ id: "image", kind: "image" })).toBe(true);
+  });
+
+  test("accepts a layer with enabled: true and enabled: false", () => {
+    expect(withLayer({ id: "shade", kind: "shade", enabled: true })).toBe(true);
+    expect(withLayer({ id: "shade", kind: "shade", enabled: false })).toBe(true);
+  });
+
+  test("refuses a layer with non-boolean enabled (e.g. string 'yes', number 1)", () => {
+    expect(withLayer({ id: "shade", kind: "shade", enabled: "yes" })).toBe(false);
+    expect(withLayer({ id: "shade", kind: "shade", enabled: "true" })).toBe(false);
+    expect(withLayer({ id: "shade", kind: "shade", enabled: 1 })).toBe(false);
+    expect(withLayer({ id: "shade", kind: "shade", enabled: 0 })).toBe(false);
+    expect(withLayer({ id: "shade", kind: "shade", enabled: null })).toBe(false);
+    expect(withLayer({ id: "shade", kind: "shade", enabled: {} })).toBe(false);
+  });
+
+  test("layerEnabledProblem returns undefined for boolean and undefined, problem for non-boolean", () => {
+    expect(layerEnabledProblem(undefined)).toBeUndefined();
+    expect(layerEnabledProblem(true)).toBeUndefined();
+    expect(layerEnabledProblem(false)).toBeUndefined();
+    expect(layerEnabledProblem("yes")).toEqual({
+      field: "enabled",
+      must: "be a boolean",
+      value: "yes",
+    });
+    expect(layerEnabledProblem(1)).toEqual({
+      field: "enabled",
+      must: "be a boolean",
+      value: 1,
+    });
+    expect(layerEnabledProblem(null)).toEqual({
+      field: "enabled",
+      must: "be a boolean",
+      value: null,
+    });
+  });
+});
+

@@ -110,6 +110,21 @@ function countKinds(
   return counts;
 }
 
+/** Kind → enabled layer count for a template's layer list (D129, MP-D4).
+ * Absent `enabled` means enabled (`enabled !== false`). */
+function countEnabledKinds(
+  layers: readonly { readonly kind: LayerKind; readonly enabled?: boolean }[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const layer of layers) {
+    counts.set(
+      layer.kind,
+      (counts.get(layer.kind) ?? 0) + (layer.enabled !== false ? 1 : 0),
+    );
+  }
+  return counts;
+}
+
 /**
  * Finds the highest legal index (from `layers.length` down to 0) where a new layer
  * of `kind` can be inserted into `layers` while satisfying all ordering constraints
@@ -175,22 +190,24 @@ export function addableKinds(state: EditorState): readonly LayerKind[] {
 /**
  * Which layers of the pinned template the editor may remove (D124), derived from
  * the same table: a layer is removable when its kind is not required — or when
- * the kind is required but still present more than once, so removing one cannot
- * strip the template of a kind the boundary refuses to parse without. Template
- * order (array position is z-order, D128), so the UI can walk the list it renders.
+ * removing it would still leave at least one enabled instance of that kind (D129,
+ * MP-D4), so removing one cannot strip the template of a required kind the boundary
+ * refuses to parse without. Template order (array position is z-order, D128), so the
+ * UI can walk the list it renders.
  */
 export function removableLayerIds(state: EditorState): readonly string[] {
   const rules = CREATIVE_TYPE_RULES[state.template.creativeType];
-  const counts = countKinds(state.template.layers);
+  const enabledCounts = countEnabledKinds(state.template.layers);
   return (
     state.template.layers
-      // `as number`: `counts` is built from this same list, so every layer's kind
+      // `as number`: `enabledCounts` is built from this same list, so every layer's kind
       // is present — the lookup cannot miss.
-      .filter(
-        (layer) =>
-          !rules.required.includes(layer.kind) ||
-          (counts.get(layer.kind) as number) > 1,
-      )
+      .filter((layer) => {
+        if (!rules.required.includes(layer.kind)) return true;
+        const enabled = enabledCounts.get(layer.kind) as number;
+        const remaining = layer.enabled !== false ? enabled - 1 : enabled;
+        return remaining >= 1;
+      })
       .map((layer) => layer.id)
   );
 }

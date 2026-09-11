@@ -26,8 +26,8 @@ export const BRIEF_KEY_ORDER = [
   "output",
 ] as const;
 
-/** A template layer's canonical key order (L3b, D134): identity, kind, then its props. */
-const LAYER_KEY_ORDER = ["id", "kind", "props"] as const;
+/** A template layer's canonical key order (L3b, D134, D129): identity, kind, enabled, then its props. */
+const LAYER_KEY_ORDER = ["id", "kind", "enabled", "props"] as const;
 
 /**
  * The props' canonical key order: the order the domain's `LayerProps` union

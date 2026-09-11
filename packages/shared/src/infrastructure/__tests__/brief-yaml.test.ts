@@ -248,4 +248,51 @@ describe("dumpBrief layer and props order (L3b, D134)", () => {
       template: { id: "x", layers: ["junk", { id: "tint", kind: "shade", props: null }] },
     });
   });
+
+  test("a disabled layer survives a YAML round trip in its declared key position (id, kind, enabled, props)", () => {
+    const withDisabledLayer = {
+      ...brief,
+      template: {
+        id: "canonical-image-text",
+        version: 1,
+        creativeType: "image-text",
+        unit: "standard-web",
+        layers: [
+          { kind: "image", id: "bg" },
+          // Keys deliberately scrambled to prove the writer orders them
+          { props: { alpha: 0.5 }, enabled: false, kind: "shade", id: "tint" },
+          { id: "band", kind: "accent", enabled: true },
+        ],
+      },
+    };
+    const yaml = dumpBrief(withDisabledLayer);
+    // Declared key position: id, kind, enabled, props
+    expect(yaml.indexOf("id: tint")).toBeLessThan(yaml.indexOf("kind: shade"));
+    expect(yaml.indexOf("kind: shade")).toBeLessThan(yaml.indexOf("enabled: false"));
+    expect(yaml.indexOf("enabled: false")).toBeLessThan(yaml.indexOf("props:"));
+    expect(yaml.indexOf("props:")).toBeLessThan(yaml.indexOf("alpha: 0.5"));
+
+    // Round-trip determinism and byte-identity
+    const parsed = parse(yaml) as typeof withDisabledLayer;
+    expect(parsed.template.layers[1]).toEqual({
+      id: "tint",
+      kind: "shade",
+      enabled: false,
+      props: { alpha: 0.5 },
+    });
+    expect(parsed.template.layers[2]).toEqual({
+      id: "band",
+      kind: "accent",
+      enabled: true,
+    });
+    expect(dumpBrief(parsed)).toBe(yaml);
+  });
+
+  test("a layer with no enabled behaves exactly as today — an existing brief round-trips byte-identically", () => {
+    // templated has no enabled field on any layer; dumping and reparsing produces byte-identical YAML
+    const yaml = dumpBrief(templated);
+    expect(yaml).not.toContain("enabled:");
+    const reparsed = parse(yaml) as typeof templated;
+    expect(dumpBrief(reparsed)).toBe(yaml);
+  });
 });

@@ -189,7 +189,7 @@ describe("derive.ts", () => {
 
   describe("layer cardinality derivations (D124)", () => {
     const stateWithLayers = (
-      layers: readonly { id: string; kind: LayerKind }[],
+      layers: readonly { id: string; kind: LayerKind; enabled?: boolean }[],
     ) => {
       const state = initialEditorState();
       return { ...state, template: { ...state.template, layers } };
@@ -257,6 +257,20 @@ describe("derive.ts", () => {
       expect(removable).toContain("image-2");
       // The other required kind is still present once, so it stays pinned.
       expect(removable).not.toContain("static-text");
+    });
+
+    test("removableLayerIds omits an enabled required layer when only one enabled instance exists alongside a disabled one, but offers the disabled one", () => {
+      const state = initialEditorState();
+      const withDisabled = [
+        ...state.template.layers,
+        { id: "image-disabled", kind: "image" as const, enabled: false },
+      ];
+      const removable = removableLayerIds(stateWithLayers(withDisabled));
+      // Removing the enabled instance leaves zero enabled instances of a required kind,
+      // which the boundary refuses. The enabled layer must not be offered.
+      expect(removable).not.toContain("image");
+      // Removing the disabled instance does not change the enabled count and stays allowed.
+      expect(removable).toContain("image-disabled");
     });
 
     test("another creative type's table row drives the same derivations", () => {
