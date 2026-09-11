@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdir } from "node:fs/promises";
+import { request as httpRequest, type IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Window } from "happy-dom";
-import { extractDarkBlock, extractRootBlock } from "../server.js";
+import { extractDarkBlock, extractRootBlock, startServer } from "../server.js";
 import { collect, realDeps } from "../lib/collect.js";
 import { readEvents } from "../lib/events.js";
 import { mergeStatus } from "../lib/merge.js";
@@ -3865,74 +3866,74 @@ describe("the status page", () => {
   });
 
   test("every token the page references resolves in /tokens.css", async () => {
-    // Derive the set of tokens the page actually references from the real HTML
-    const html = await readFile(PAGE_PATH, "utf8");
-    const styleMatch = /<style>([\s\S]*?)<\/style>/.exec(html);
-    const pageStyle = styleMatch ? styleMatch[1] : "";
-    const referencedTokens = new Set<string>();
-    // Match var(--token-name) and capture the full token name
-    for (const match of pageStyle.matchAll(/var\(\s*(--[a-z0-9-]+)\s*\)/gi)) {
-      referencedTokens.add(match[1]);
+    // Start a real server to test what actually gets served
+    const root = await mkdir(join(tmpdir(), "wave-status-token-test-"), {
+      recursive: true,
+    });
+    dirs.push(root);
+    const handle = await startServer({
+      port: 0,
+      root,
+      collect: async () => statusAt(0),
+    });
+    try {
+      // Derive the set of tokens the page actually references from the real HTML
+      const html = await readFile(PAGE_PATH, "utf8");
+      const styleMatch = /<style>([\s\S]*?)<\/style>/.exec(html);
+      const pageStyle = styleMatch ? styleMatch[1] : "";
+      const referencedTokens = new Set<string>();
+      // Match var(--token-name) and capture the full token name
+      for (const match of pageStyle.matchAll(/var\(\s*(--[a-z0-9-]+)\s*\)/gi)) {
+        referencedTokens.add(match[1]);
+      }
+
+      // Fetch what the server actually serves for /tokens.css
+      const res = await new Promise<{
+        status: number;
+        body: string;
+      }>((resolve, reject) => {
+        const req = httpRequest(
+          { host: "127.0.0.1", port: handle.port, path: "/tokens.css" },
+          (res) => {
+            const chunks: Buffer[] = [];
+            res.on("data", (chunk) => chunks.push(chunk));
+            res.on("end", () =>
+              resolve({
+                status: res.statusCode ?? 0,
+                body: Buffer.concat(chunks).toString("utf8"),
+              }),
+            );
+            res.on("error", reject);
+          },
+        );
+        req.on("error", reject);
+        req.end();
+      });
+
+      expect(res.status).toBe(200);
+
+      // Extract tokens from the served response body
+      const servedTokens = new Set<string>();
+      for (const match of res.body.matchAll(/(--[a-z0-9-]+)\s*:/gi)) {
+        servedTokens.add(match[1].toLowerCase());
+      }
+
+      // Every referenced token must be served
+      const missing = Array.from(referencedTokens)
+        .map((t) => t.toLowerCase())
+        .filter((token) => !servedTokens.has(token));
+      if (missing.length > 0) {
+        throw new Error(
+          `Unresolved tokens: ${missing.join(", ")}. ` +
+            `Referenced: ${Array.from(referencedTokens)
+              .map((t) => t.toLowerCase())
+              .join(", ")}. ` +
+            `Served: ${Array.from(servedTokens).join(", ")}.`,
+        );
+      }
+      expect(missing).toEqual([]);
+    } finally {
+      await handle.close();
     }
-
-    // Derive the set of tokens served from the real tokens.css
-    const tokensRaw = await readFile(realTokensPath, "utf8");
-    const servedTokens = new Set<string>();
-
-    // Extract from :root block
-    const rootBlock = extractRootBlock(tokensRaw) ?? "";
-    for (const match of rootBlock.matchAll(/(--[a-z0-9-]+)\s*:/gi)) {
-      servedTokens.add(match[1].toLowerCase());
-    }
-
-    // Extract from .dark block
-    const darkBlock = extractDarkBlock(tokensRaw) ?? "";
-    for (const match of darkBlock.matchAll(/(--[a-z0-9-]+)\s*:/gi)) {
-      servedTokens.add(match[1].toLowerCase());
-    }
-
-    // Every referenced token must be served
-    const missing = Array.from(referencedTokens)
-      .map((t) => t.toLowerCase())
-      .filter((token) => !servedTokens.has(token));
-    if (missing.length > 0) {
-      throw new Error(
-        `Unresolved tokens: ${missing.join(", ")}. ` +
-          `Referenced: ${Array.from(referencedTokens)
-            .map((t) => t.toLowerCase())
-            .join(", ")}. ` +
-          `Served: ${Array.from(servedTokens).join(", ")}.`,
-      );
-    }
-    expect(missing).toEqual([]);
-  });
-
-  test("serving only .dark (not :root) leaves brand-primary unresolved", async () => {
-    // Verify the test fails when only .dark is served, proving we catch regressions
-    const html = await readFile(PAGE_PATH, "utf8");
-    const styleMatch = /<style>([\s\S]*?)<\/style>/.exec(html);
-    const pageStyle = styleMatch ? styleMatch[1] : "";
-    const referencedTokens = new Set<string>();
-    for (const match of pageStyle.matchAll(/var\(\s*(--[a-z0-9-]+)\s*\)/gi)) {
-      referencedTokens.add(match[1].toLowerCase());
-    }
-
-    // Extract only from .dark block (simulating the old broken behavior)
-    const tokensRaw = await readFile(realTokensPath, "utf8");
-    const darkBlock = extractDarkBlock(tokensRaw) ?? "";
-    const servedTokens = new Set<string>();
-    for (const match of darkBlock.matchAll(/(--[a-z0-9-]+)\s*:/gi)) {
-      servedTokens.add(match[1].toLowerCase());
-    }
-
-    // This should find missing tokens (proving the test catches the bug)
-    const missing = Array.from(referencedTokens).filter(
-      (token) => !servedTokens.has(token),
-    );
-
-    // Assert that --color-brand-primary is among the missing (the known issue)
-    expect(missing).toContain("--color-brand-primary");
-    // And that there are indeed some missing tokens
-    expect(missing.length).toBeGreaterThan(0);
   });
 });
