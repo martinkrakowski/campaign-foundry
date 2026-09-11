@@ -693,6 +693,24 @@ describe("inline legal lint warnings (R1)", () => {
     );
   });
 
+  test("a term preceded by a non-ASCII digit does not warn; a term at a real boundary still does", () => {
+    const nonAsciiDigitClean = valid({ localizedMessage: "Étape ٣cure rapide" });
+    expect(validateWarnings(nonAsciiDigitClean).copy.localizedMessage).toBeUndefined();
+
+    const nonAsciiDigitBoundary = valid({ localizedMessage: "Étape ٣ cure rapide" });
+    expect(validateWarnings(nonAsciiDigitBoundary).copy.localizedMessage).toBe(
+      messages.prohibitedTerminology(["cure"]),
+    );
+
+    const asciiDigitClean = valid({ localizedMessage: "Étape 3cure rapide" });
+    expect(validateWarnings(asciiDigitClean).copy.localizedMessage).toBeUndefined();
+
+    const asciiDigitBoundary = valid({ localizedMessage: "Étape 3 cure rapide" });
+    expect(validateWarnings(asciiDigitBoundary).copy.localizedMessage).toBe(
+      messages.prohibitedTerminology(["cure"]),
+    );
+  });
+
   test("the term list has one source — fails if the web side grows its own copy", () => {
     // 1. validate.ts re-exports the exact same array reference from GovernanceAndCompliance
     expect(PROHIBITED_TERMS).toBe(DOMAIN_PROHIBITED_TERMS);

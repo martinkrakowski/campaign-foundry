@@ -181,4 +181,20 @@ describe("matchProhibitedTerms and exports (R1)", () => {
     expect(matchProhibitedTerms("précure")).toEqual([]);
     expect(matchProhibitedTerms("cure")).toEqual(["cure"]);
   });
+
+  test("a term preceded by a non-ASCII digit does not warn; a term at a real boundary still does", () => {
+    // Non-ASCII digits (Arabic-Indic, Devanagari) do not form a word boundary
+    expect(matchProhibitedTerms("٣cure")).toEqual([]);
+    expect(matchProhibitedTerms("३miracle")).toEqual([]);
+    expect(matchProhibitedTerms("٣guaranteed")).toEqual([]);
+
+    // A term at a real boundary still matches
+    expect(matchProhibitedTerms("٣ cure")).toEqual(["cure"]);
+    expect(matchProhibitedTerms("३ miracle")).toEqual(["miracle"]);
+    expect(matchProhibitedTerms("cure")).toEqual(["cure"]);
+
+    // Existing ASCII cases stay green
+    expect(matchProhibitedTerms("3cure")).toEqual([]);
+    expect(matchProhibitedTerms("3 cure")).toEqual(["cure"]);
+  });
 });

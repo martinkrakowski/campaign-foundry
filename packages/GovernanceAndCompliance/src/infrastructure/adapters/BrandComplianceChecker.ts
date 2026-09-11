@@ -20,7 +20,7 @@ export function escapeRegExp(term: string): string {
 
 /**
  * One anchored matcher per term, built once at module scope. The head is a
- * lookbehind over [\p{L}0-9], NOT \b: \b counts "_" as a word character, so no
+ * lookbehind over [\p{L}\p{N}], NOT \b: \b counts "_" as a word character, so no
  * boundary exists beside it and terms adjacent to an underscore slipped past
  * ("_guaranteed", "results_guaranteed", "a_miracle" were lost true positives).
  * What the gate actually wants is that the term is not preceded by a letter or
@@ -39,7 +39,7 @@ export function escapeRegExp(term: string): string {
  * into a miss ("cure_milk" escaping the gate).
  */
 export const PROHIBITED_PATTERNS = PROHIBITED_TERMS.map(
-  (term) => [new RegExp(`(?<![\\p{L}0-9])${escapeRegExp(term)}\\w*`, "u"), term] as const,
+  (term) => [new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(term)}\\w*`, "u"), term] as const,
 );
 
 /** Find all prohibited terms matched in the given text. */
