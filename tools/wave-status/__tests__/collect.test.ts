@@ -3,13 +3,30 @@ import { describe, test, expect, vi, type Mock } from "vitest";
 vi.mock("node:child_process", () => ({ execFile: vi.fn() }));
 
 import { execFile } from "node:child_process";
-import { collect, LOG_TAIL_BYTES, parseChecks, realDeps, waveIdFromDirName } from "../lib/collect.js";
+import {
+  collect,
+  derivePrefix,
+  LOG_TAIL_BYTES,
+  parseChecks,
+  pgrepPattern,
+  realDeps,
+  waveIdFromDirName,
+  worktreeFacts,
+} from "../lib/collect.js";
 import type { CollectDeps, TailHandle } from "../lib/collect.js";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+const { execFile: realExecFile } = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+
 const execFileMock = execFile as unknown as Mock;
+execFileMock.mockImplementation(
+  (file: string, args: readonly string[], optionsOrCallback: unknown, maybeCallback?: unknown) => {
+    return (realExecFile as unknown as (...a: unknown[]) => unknown)(file, args, optionsOrCallback, maybeCallback);
+  },
+);
+
 type ExecError = Error & { code?: number };
 type ExecCallback = (error: ExecError | null, stdout: string) => void;
 
@@ -20,9 +37,16 @@ interface FakeTree {
   readonly files?: Record<string, string>;
   readonly pgrep?: (pattern: string) => Promise<number>;
   readonly gh?: (args: readonly string[]) => Promise<string>;
+  readonly git?: (args: readonly string[]) => Promise<string>;
 }
 
-function fakeDeps({ dirs = {}, files = {}, pgrep = async () => 0, gh = async () => "[]" }: FakeTree): CollectDeps {
+function fakeDeps({
+  dirs = {},
+  files = {},
+  pgrep = async () => 0,
+  gh = async () => "[]",
+  git,
+}: FakeTree): CollectDeps {
   return {
     readdir: async (dir) => {
       const names = dirs[dir];
@@ -42,6 +66,7 @@ function fakeDeps({ dirs = {}, files = {}, pgrep = async () => 0, gh = async () 
     },
     pgrep,
     gh,
+    ...(git ? { git } : {}),
   };
 }
 
@@ -91,9 +116,9 @@ const TREE: FakeTree = {
     // gate-v3.log is listed but unreadable; waveV/events.jsonl likewise.
   },
   pgrep: async (pattern) => {
-    if (pattern === "wt-t1(/|$| )") return 0;
-    if (pattern === "wt-u2(/|$| )") return 2;
-    if (pattern === "wt-v3(/|$| )") throw new Error("pgrep exploded");
+    if (pattern === "cf-t1(/|$| )") return 0;
+    if (pattern === "cf-u2(/|$| )") return 2;
+    if (pattern === "cf-v3(/|$| )") throw new Error("pgrep exploded");
     return 0;
   },
   gh: async (args) => {
@@ -219,7 +244,40 @@ describe("collect", () => {
       ROOT,
       "now",
     );
-    expect(seen).toEqual(["wt-s2(/|$| )"]);
+    expect(seen).toEqual(["cf-s2(/|$| )"]);
+  });
+
+  test("the liveness probe matches a process running in the worktree layout actually used, and fails if the convention changes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wave-status-wt-"));
+    const worktree = join(root, "cf-c5");
+    const worktrees = [join(root, "campaign-foundry"), worktree];
+    const pattern = pgrepPattern("c5", worktrees);
+    const re = new RegExp(pattern);
+
+    const liveProcessCmd = `cd ${worktree} && agy --model gemini-3.8-flash-high`;
+    expect(re.test(liveProcessCmd)).toBe(true);
+
+    const obsoleteCmd = `cd ${join(root, "wt-c5")} && agy`;
+    expect(re.test(obsoleteCmd)).toBe(false);
+
+    expect(pattern).toBe("cf-c5(/|$| )");
+  });
+
+  test("the liveness probe dynamically derives pattern from worktrees when layout changes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wave-status-custom-"));
+    const customWorktrees = [
+      join(root, "campaign-foundry"),
+      join(root, "custom-c5"),
+    ];
+    const pattern = pgrepPattern("c5", customWorktrees);
+    expect(pattern).toBe("custom-c5(/|$| )");
+    const re = new RegExp(pattern);
+    expect(re.test(`cd ${customWorktrees[1]} && agy`)).toBe(true);
+    expect(re.test(`cd ${join(root, "cf-c5")} && agy`)).toBe(false);
+
+    // Deriving prefix for a lane not yet in worktree list
+    const unlistedLanePattern = pgrepPattern("c6", customWorktrees);
+    expect(unlistedLanePattern).toBe("custom-c6(/|$| )");
   });
 
   test("cached PR facts are reused and gh is not called", async () => {
@@ -402,10 +460,11 @@ describe("parseChecks", () => {
 });
 
 describe("waveIdFromDirName", () => {
-  test("strips the leading wave and any dashes", () => {
+  test("strips the leading wave and optional separator while preserving identifier hyphens", () => {
     expect(waveIdFromDirName("waveT")).toBe("T");
     expect(waveIdFromDirName("wave-2")).toBe("2");
     expect(waveIdFromDirName("waves")).toBe("s");
+    expect(waveIdFromDirName("wave-creative-templates-w03")).toBe("creative-templates-w03");
   });
 });
 
@@ -463,5 +522,40 @@ describe("realDeps — the process-level wiring", () => {
     await expect(realDeps.gh(["pr", "list"])).resolves.toBe("[]");
     stubExec(() => [new Error("gh: not found"), ""]);
     await expect(realDeps.gh(["pr", "list"])).rejects.toThrow("gh: not found");
+  });
+
+  test("git resolves stdout; a git failure rejects (collect turns that into no worktrees)", async () => {
+    stubExec(() => [null, "worktree /path\n"]);
+    await expect(realDeps.git?.(["worktree", "list"])).resolves.toBe("worktree /path\n");
+    stubExec(() => [new Error("git: not found"), ""]);
+    await expect(realDeps.git?.(["worktree", "list"])).rejects.toThrow("git: not found");
+  });
+
+  test("worktreeFacts handles undefined git, errors, and empty responses", async () => {
+    expect(await worktreeFacts({} as CollectDeps)).toEqual([]);
+    expect(
+      await worktreeFacts({
+        git: async () => {
+          throw new Error("git error");
+        },
+      } as unknown as CollectDeps),
+    ).toEqual([]);
+    expect(
+      await worktreeFacts({
+        git: async () => "worktree /path/one\nbranch refs/heads/main\n\nworktree /path/two\n",
+      } as unknown as CollectDeps),
+    ).toEqual(["/path/one", "/path/two"]);
+  });
+
+  test("derivePrefix handles worktree paths and returns undefined when no pattern matches", () => {
+    expect(derivePrefix(["/path/cf-c5", "/path/cf-t4"])).toBe("cf-");
+    expect(derivePrefix(["/path/wt-t1"])).toBe("wt-");
+    expect(derivePrefix(["/path/nomatch"])).toBeUndefined();
+    expect(derivePrefix([])).toBeUndefined();
+  });
+
+  test("pgrepPattern handles base === lane and unmatched worktrees fallback", () => {
+    expect(pgrepPattern("c5", ["/path/c5"])).toBe("c5(/|$| )");
+    expect(pgrepPattern("c5", ["/path/nomatch"])).toBe("cf-c5(/|$| )");
   });
 });

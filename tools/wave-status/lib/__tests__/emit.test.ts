@@ -263,6 +263,58 @@ describe("scripts/wave-event.sh agrees with formatEvent byte-for-byte", () => {
     expect(stderr).toContain("--detail must be a JSON object");
     expect(readFileSync(log, "utf8")).toBe("sentinel\n");
   });
+
+  test("standalone invocation with 4 args and LOGDIR environment variable", () => {
+    const dir = tempDir();
+    execFileSync("sh", [waveEventSh, "W3", "l1", "dispatch", "started"], {
+      env: { ...process.env, LOGDIR: dir },
+    });
+    const written = readFileSync(join(dir, "events.jsonl"), "utf8");
+    const ts = JSON.parse(written).ts as string;
+    expect(written).toBe(
+      formatEvent({ ts, wave: "W3", lane: "l1", stage: "dispatch", event: "started" }, clock),
+    );
+  });
+
+  test("standalone invocation with --logdir flag", () => {
+    const dir = tempDir();
+    execFileSync("sh", [waveEventSh, "--logdir", dir, "W3", "l1", "implement", "settled", "--pr", "99"]);
+    const written = readFileSync(join(dir, "events.jsonl"), "utf8");
+    const ts = JSON.parse(written).ts as string;
+    expect(written).toBe(
+      formatEvent({ ts, wave: "W3", lane: "l1", stage: "implement", event: "settled", pr: 99 }, clock),
+    );
+  });
+
+  test("standalone invocation with default logdir derived from wave name", () => {
+    const waveName = `WTest${Date.now()}`;
+    const expectedDir = `/tmp/wave-${waveName}`;
+    dirs.push(expectedDir);
+    execFileSync("sh", [waveEventSh, waveName, "l1", "dispatch", "started"], {
+      env: { ...process.env, LOGDIR: "" },
+    });
+    expect(existsSync(join(expectedDir, "events.jsonl"))).toBe(true);
+    const written = readFileSync(join(expectedDir, "events.jsonl"), "utf8");
+    const parsed = JSON.parse(written);
+    expect(parsed.wave).toBe(waveName);
+    expect(parsed.lane).toBe("l1");
+    expect(parsed.stage).toBe("dispatch");
+    expect(parsed.event).toBe("started");
+  });
+
+  test("invocation with fewer than 4 arguments exits 2 with usage", () => {
+    let status: number | undefined = -1;
+    let stderr = "";
+    try {
+      execFileSync("sh", [waveEventSh, "W3", "l1"]);
+    } catch (error) {
+      const err = error as { status: number | undefined; stderr: Buffer };
+      status = err.status;
+      stderr = err.stderr.toString();
+    }
+    expect(status).toBe(2);
+    expect(stderr).toContain("usage:");
+  });
 });
 
 describe("scripts/dispatch-lane.sh emits its events", () => {

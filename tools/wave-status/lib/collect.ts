@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { open as fsOpen, readdir as fsReaddir, readFile as fsReadFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { readEvents } from "./events.js";
 import { mergeStatus } from "./merge.js";
 import type { LaneObservation, WaveEvent, WaveStatus } from "./types.js";
@@ -31,6 +31,7 @@ export interface CollectDeps {
   readonly open: (path: string) => Promise<TailHandle>;
   readonly pgrep: (pattern: string) => Promise<number>;
   readonly gh: (args: readonly string[]) => Promise<string>;
+  readonly git?: (args: readonly string[]) => Promise<string>;
 }
 
 /** Wave log directories live directly under here: `/tmp/wave*`. */
@@ -55,7 +56,7 @@ interface GhPrListEntry {
 }
 
 export function waveIdFromDirName(name: string): string {
-  return name.replace(/^wave/, "").replace(/-/g, "");
+  return name.replace(/^wave-?/, "");
 }
 
 /**
@@ -77,6 +78,7 @@ export async function collect(
   const observed: Record<string, LaneObservation> = {};
 
   const prByLane = cachedPrByLane ?? (await prFacts(deps));
+  const worktrees = await worktreeFacts(deps);
 
   let dirNames: readonly string[];
   try {
@@ -113,7 +115,7 @@ export async function collect(
 
       let alive = false;
       try {
-        alive = (await deps.pgrep(pgrepPattern(lane))) > 0;
+        alive = (await deps.pgrep(pgrepPattern(lane, worktrees))) > 0;
       } catch {
         alive = false;
       }
@@ -311,7 +313,51 @@ export const realDeps: CollectDeps = {
         }
       });
     }),
+  git: (args) =>
+    new Promise((resolve, reject) => {
+      execFile("git", args, { timeout: 10_000 }, (error, stdout) => {
+        if (error !== null) {
+          reject(error);
+        } else {
+          resolve(stdout);
+        }
+      });
+    }),
 };
+
+/**
+ * Discover worktree paths from git (`git worktree list --porcelain`).
+ * Any git failure yields an empty list — never a throw.
+ */
+export async function worktreeFacts(deps: CollectDeps): Promise<readonly string[]> {
+  if (deps.git === undefined) return [];
+  try {
+    const stdout = await deps.git(["worktree", "list", "--porcelain"]);
+    const paths: string[] = [];
+    for (const line of stdout.split("\n")) {
+      if (line.startsWith("worktree ")) {
+        paths.push(line.slice("worktree ".length).trim());
+      }
+    }
+    return paths;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Derive the naming prefix from existing worktrees (e.g. "cf-" from "cf-c5",
+ * or "wt-" from "wt-t1").
+ */
+export function derivePrefix(worktrees: readonly string[]): string | undefined {
+  const candidates = worktrees.length > 1 ? worktrees.slice(1) : worktrees;
+  for (const wt of candidates) {
+    const base = basename(wt);
+    const match = /^([A-Za-z0-9_]+-)[A-Za-z0-9_-]+$/.exec(base);
+    if (match) return match[1];
+  }
+  return undefined;
+}
 
 function countPids(stdout: string): number {
   return stdout.split("\n").filter((line) => line.trim() !== "").length;
@@ -323,11 +369,25 @@ function escapeRegExp(value: string): string {
 }
 
 /**
- * `pgrep -f` is ERE against the full command line. Anchor to the worktree
- * path segment so `wt-s2` does not match `wt-s2i`.
+ * `pgrep -f` is ERE against the full command line. Derive the pattern from
+ * the worktree path the lane actually runs in (or the worktree naming convention
+ * discovered from git), so the probe cannot silently drift from reality.
+ * Fallback defaults to "cf-" (the current repository's convention).
  */
-function pgrepPattern(lane: string): string {
-  return `wt-${escapeRegExp(lane)}(/|$| )`;
+export function pgrepPattern(lane: string, worktrees?: readonly string[]): string {
+  if (worktrees !== undefined && worktrees.length > 0) {
+    for (const wt of worktrees) {
+      const base = basename(wt);
+      if (base.endsWith(`-${lane}`) || base === lane) {
+        return `${escapeRegExp(base)}(/|$| )`;
+      }
+    }
+    const prefix = derivePrefix(worktrees);
+    if (prefix !== undefined) {
+      return `${escapeRegExp(prefix)}${escapeRegExp(lane)}(/|$| )`;
+    }
+  }
+  return `cf-${escapeRegExp(lane)}(/|$| )`;
 }
 
 /**
