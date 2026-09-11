@@ -302,7 +302,7 @@ export function validateTemplate(
   // caps: a single layer of a capped kind can never overdraw its budget, and
   // together they refuse every overdraw the table declares.
   for (const kind of rules.accepts) {
-    const max = rules.maxOf?.[kind];
+    const max = rules.maxOf[kind];
     if (max === undefined) continue;
     const got = kindCounts.get(kind) ?? 0;
     if (got > max) {
@@ -311,7 +311,7 @@ export function validateTemplate(
       );
     }
   }
-  for (const budget of rules.sharedBudgets ?? []) {
+  for (const budget of rules.sharedBudgets) {
     const got = budget.kinds.reduce(
       (sum, kind) => sum + (kindCounts.get(kind) ?? 0),
       0,

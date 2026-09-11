@@ -149,9 +149,9 @@ export function addableKinds(state: EditorState): readonly LayerKind[] {
   const rules = CREATIVE_TYPE_RULES[state.template.creativeType];
   const counts = countKinds(state.template.layers);
   return rules.accepts.filter((kind) => {
-    if ((counts.get(kind) ?? 0) >= (rules.maxOf?.[kind] ?? Infinity))
+    if ((counts.get(kind) ?? 0) >= (rules.maxOf[kind] ?? Infinity))
       return false;
-    for (const budget of rules.sharedBudgets ?? []) {
+    for (const budget of rules.sharedBudgets) {
       if (!budget.kinds.includes(kind)) continue;
       const used = budget.kinds.reduce(
         (sum, budgeted) => sum + (counts.get(budgeted) ?? 0),

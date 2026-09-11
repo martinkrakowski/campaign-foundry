@@ -116,6 +116,7 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
       accepts: ["image", "html", "logo"],
       required: ["image", "html"],
       maxOf: { logo: 1 },
+      sharedBudgets: [],
       outputFamilies: ["html"],
     });
 
