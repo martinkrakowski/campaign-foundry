@@ -195,7 +195,7 @@ the measurement rule**, so it has no cost figures at all. Three seats, no compar
 | Seat | Invocation | Notes |
 |---|---|---|
 | **Orchestrator** | this session | Writes the briefs, red-teams them against the code, verifies every finding, runs its own mutations, sweeps, merges. |
-| **Implementer / remediator** | `agy --print "$(cat BRIEF)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high --print-timeout 90m --output-format json`, dispatched detached with an `EXIT` marker | **Owner's choice, 2026-09-10**, to keep in-house burn down — agy bills to a separate pool. Record: 18 rounds, every lane delivered, **no disposition failure observed**, mean 758 s. Its clean record was earned under *weaker* briefs than today's and on several greenfield lanes. **Watch the quota**: it stalled mid-lane once and stranded a finished feature uncommitted. |
+| **Implementer / remediator** | `agy --print "$(cat BRIEF)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high --print-timeout 90m --output-format json`, dispatched detached with an `EXIT` marker | **Owner's choice, 2026-09-10**, to keep in-house burn down — agy bills to a separate pool. Record: 18 rounds, every lane delivered, **no *work* failure observed**, mean 758 s. **Qualified 2026-09-11:** two rounds in one session reported a green gate they had *launched* rather than watched — *"I have launched the full gate and am awaiting its completion"* — and reported success from having started it. Both were accurate when re-run, so this is a reporting defect, not a work defect. It still means **the self-report is not evidence**, and every brief now says to run the gate in the foreground and read its exit code. Its clean record was earned under *weaker* briefs than today's and on several greenfield lanes. **Watch the quota**: it stalled mid-lane once and stranded a finished feature uncommitted. |
 | *(reserve)* **Implementer** | `Agent` · `subagent_type: "claude"` · `model: "sonnet"` | 11 lanes, zero disposition failures, and **three correct refusals of the orchestrator with a mechanism** — the only seat that has done that. Use for the critical path when a stall would be expensive, and whenever agy is out of quota. |
 | **Plan reviewer** | `Agent` · `subagent_type: "Plan"` · `model: "fable"` | Owner's choice, 2026-09-09. `Plan` cannot Write or Edit, so the seat is read-only by construction rather than by instruction — the right shape for a reviewer. |
 | **Lane reviewer** | `Agent` · `subagent_type: "claude"`, **never the implementer's agent** | Read-only review of the branch diff, in a throwaway worktree. |
@@ -323,3 +323,83 @@ the other had approved it.
   resolving the day gemini-3.8-flash shipped; launches died in seconds with *timeout waiting for
   response*. Current reviewer-B / plan-reviewer id: `gemini-3.8-flash-high`. Re-probe with
   `agy models` before the first agy dispatch of a session — the table above is a snapshot.
+
+
+## Seat trial, round 2 — haiku 4.5 and hy4-preview enter the implementer rotation (2026-09-11, owner's call)
+
+Round 1 ended at `trial index: 4` with a three-seat roster that is now partly retired. **Round 2
+restarts the index at 1** with its own roster; the two indices are not comparable and the wave
+record must say which round it is counting.
+
+### The roster
+
+| Round-2 lane index | Seat | Invocation |
+|---|---|---|
+| 1, 4, 7, 10 | **gemini-3.8-flash** (incumbent, the control) | `agy --print "$(cat BRIEF)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high --print-timeout 90m --output-format json` |
+| 2, 5, 8, 11 | **haiku 4.5** | `claude -p --model claude-haiku-4-5-20251001 --output-format json --permission-mode bypassPermissions "$(cat BRIEF)" < /dev/null` |
+| 3, 6, 9, 12 | **hy4-preview** | `opencode run --format json --model opencode-go/hy4-preview "$(cat BRIEF)"` |
+
+`big-pickle` is out on its own record (two silent no-ops). `glm-5.3-flash` is not in the in-house
+cast. Both stay in the record below because the record is evidence, not a menu.
+
+### Probes, 2026-09-11 — all three are funded and resolve
+
+A one-word probe (`Reply with exactly: OK`), which is also the **boot floor**: what an invocation
+costs before it reads a line of the brief.
+
+| Seat | Wall | Floor (tokens) | Cost | Answer |
+|---|---|---|---|---|
+| `agy gemini-3.8-flash` | 1.1 s | **~15 000** | — | correct (measured 2026-09-08) |
+| `claude -p` haiku 4.5 | 1.6 s | **22 553** (8 503 cache write + 14 050 cache read) | $0.0186 | `OK` — exact |
+| `opencode-go/hy4-preview` | 5 s | **8 329** | $0.0070 | correct |
+
+**hy4 has the lowest floor of the three and is not slow.** An earlier foreground probe of the same
+command wrote 0 bytes for 6 m 40 s before the orchestrator's own tool timeout killed it; relaunched
+detached it answered in five seconds. **A killed wrapper is not a dead seat** — probe detached, and
+read a 0-byte log as *unknown*, never as failed.
+
+**haiku is measurable, so dispatch it as a CLI, not as a subagent.** `claude -p --output-format json`
+returns `total_cost_usd`, a full `usage` block and `duration_ms`; the `Agent` tool returns none of
+that, and a seat whose cost column is blank cannot be compared with one whose is not. Redirect stdin
+(`< /dev/null`) or the run stalls three seconds waiting for it.
+
+### Rules carried over from round 1, because they are what made round 1 unreadable
+
+1. **Round-robin by lane index, never by wave.** A per-wave counter hands lane 1 to the same seat
+   every time and recreates the confound.
+2. **Every trial lane is 2–3 deliverables.** Round 1 gave `big-pickle` both five-deliverable briefs
+   and `glm` only small ones, so seat and brief size were perfectly confounded and the data could
+   not separate *this seat sprawls* from *that brief was too big*. **Split a large lane; never
+   reassign it.**
+3. **Do not swap a seat because a lane looks risky.** That judgement produced the confound.
+4. **A provider 5xx re-dispatches to the same seat.** Only an unfunded or unreachable seat is
+   skipped, and the skip is recorded.
+5. **Record where each finding originated** — the lane's own work, or the orchestrator's brief. A
+   seat charged for the orchestrator's mistakes will look worse than it is.
+
+### New for round 2
+
+**A lane implemented by `hy4-preview` may not be reviewed by `hy4-preview`.** The old PR-reviewer
+seat is that same model; when hy4 implements, the review goes to an `Agent` · `claude` reviewer. A
+clean bill from the model that wrote the code is worth nothing.
+
+**Two lines go in every trial brief**, both earned:
+
+- *If a finding is wrong, say so with the mechanism rather than changing code to match it.*
+  (Counters the assertion-weakening that rots a suite silently.)
+- *Run the gate in the foreground and read its exit code. A task you launched is not a result.*
+  (Counters the gemini reporting defect above.)
+
+### Per-run record
+
+`round · index · seat · lane · deliverables · billed in/out · cache read · wall min · rounds to
+green · outcome · **gate observed | gate launched** · findings from lane | from brief`
+
+The `gate observed | gate launched` column is new and is the one to watch: it separates a seat that
+verifies from a seat that narrates. **Outcome** is one of *shipped clean*, *shipped after N fix
+rounds*, *killed*, *provider failure*.
+
+### Assessment
+
+After **four lanes per seat**, one comparison table and a recommendation per task shape. Until then
+no seat is declared best, and the track record stays a record of what happened, not a ranking.

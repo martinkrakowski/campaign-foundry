@@ -96,3 +96,40 @@ cannot fail against the defect it names (vacuous tripwires, early returns before
 per-frame/two-path features applied to only one draw path; rest-pose/poster clocks sampling the
 wrong `t`; synchronous double-fire on async confirm handlers; dirty-state machinery fighting a
 navigation. Findings in these classes have a near-100% acceptance rate — spend the effort there.
+
+## A mutation is only evidence if the mutant changes behaviour (2026-09-11)
+
+`yarn mutate` refuses a **textual** no-op — it checks the file's bytes changed and that the intended
+text landed. It cannot tell that the *program* still behaves identically, and a fallback path is
+exactly where that hides.
+
+**The case.** A reviewer claimed a YAML round-trip test could not see `enabled: true` being dropped.
+The orchestrator "confirmed" it by mutating `orderedKeys` so the declared-order loop skipped every
+`true`-valued key, ran the suite, saw 16 passes, and reported the test vacuous. `orderedKeys` has a
+**second, catch-all loop**:
+
+```ts
+for (const key of order) {
+  const value = source[key];
+  if (value !== undefined) out[key] = value;          // ← mutated here
+}
+for (const key of Object.keys(source)) {
+  if (!Object.prototype.hasOwnProperty.call(out, key) && source[key] !== undefined) out[key] = source[key];
+}                                                      // ← copies it straight back
+```
+
+The key still reached the output, merely later in the order. Nothing failed because nothing had
+changed. Mutating **both** loops reds two tests — including one older than the branch under review.
+The suite was never blind, and a fix round was dispatched on a false premise.
+
+**The check, before reading any verdict.** Prove the mutant changes an observable: call the mutated
+function once and diff its output against the original, or assert the mutated behaviour directly.
+Ten seconds, and it separates *the test is weak* from *my mutation did nothing*.
+
+**The tell.** A surviving mutant on a path that is obviously covered should raise suspicion of the
+mutation, not of the test. Ask what else in the function could be compensating — a fallback, a
+default, a second pass, a `??`, a catch-all — before concluding the assertion is vacuous.
+
+**Where this bites hardest.** A survived verdict is an accusation against a test. Acting on a false
+one costs a delegated round and, worse, teaches the suite's readers that a good test was bad.
+
