@@ -6,6 +6,32 @@ add link, add button — and the ability to bring an existing campaign's styles 
 
 ---
 
+## 0. What L6 already shipped — read this before the rest
+
+**This plan is not new work. It is the remainder of lane L6**, and an earlier draft did not say so —
+the same failure that retired three plans this week. What exists on `main` today:
+
+| Piece | Where |
+|---|---|
+| `format: "html"` as a third family | `GeneratedAsset.ts`, `campaign-types.ts`, `PlatformProfile.vo.ts` |
+| The `image-html` creative type, its compat table and `outputFamilies: ["html"]` | `creative-types.ts` |
+| `canonical-image-html` carrying an **`{ id: "html", kind: "html" }` layer** | `creative-templates.ts` |
+| `htmlBundlePath` and `htmlFallbackPath` on the asset **and** on `PackageableAsset` | `GeneratedAsset.ts`, `PackageForPlatformUseCase.use-case.ts` |
+| `packageHtml` — reads bundle + fallback, writes both, **refuses an html asset with no fallback** | `PackageForPlatformUseCase.use-case.ts` |
+| **A per-platform byte budget already enforced**: `bundle.length <= profile.maxBytes` | same file |
+| The API boundary accepting `html` | `load-brief.ts`, `SUPPORTED_FORMATS` |
+
+**And one thing that does not work today, found during review.** `GenerateCampaignUseCase` emits
+`format: "static"` or `format: "motion"` and **never `"html"`**. So an `image-html` brief is accepted
+at the boundary and **renders silently as a static row** — the same "silently produced the wrong
+thing" shape as `short-video` before C3. **Recording it here as the current state**, because a plan
+that does not know what the product does today is how the last three failed.
+
+**What this changes about the decisions below.** **HL-D6's 150 KB constant is withdrawn** — a
+per-platform `maxBytes` already exists and a second budget is the two-sources defect this arc exists
+to remove. The build-time meter reads **that** number. And the lanes must populate **both**
+`htmlBundlePath` and `htmlFallbackPath`, which is the contract `packageHtml` already checks.
+
 ## 0. The constraint that decides the whole design
 
 **D122 already settles the hardest question, and it is not the one it looks like.**
@@ -38,8 +64,8 @@ produces an HTML layer whose fallback is wrong, and nobody notices until a buyer
 | **HL-D2** | **Element kinds are constrained to what both renderers can express**: `text`, `button`, `image`. A **link is not an element kind** — it is a property any element may carry. | A `<div>`-anything builder cannot have a faithful raster fallback. Constraining the vocabulary is what makes HL-D5 possible at all. |
 | **HL-D3** | **The click destination is a first-class brief field, and it emits `clickTag`, not `href`.** | **There is no click destination anywhere in this codebase today** — I checked. That is a real gap for an advertising product: an ad that cannot be clicked is not an ad. And ad servers require the `clickTag` convention so the server can wrap and measure the click; an `<a href>` produces an ad that renders and does not track, which is the worst failure mode because it looks fine. |
 | **HL-D4** | **Style comes from the brief's own `creative-style`, not from an importer.** | The brief already carries `fontFamily`, `fontWeight` and the product colours the editor sets. **"Import the campaign's styles" is already true** — they are in the brief. Building an importer would create a second style source beside `creative-style`, which D126 keeps as the single one until its own deprecation lane. Per-element overrides use the same optional-override shape as D134 props. |
-| **HL-D5** | **The raster fallback is produced by the canvas compositor from the same element list**, not by rendering the markup. | D122's requirement, and HL-D2 is what makes it achievable. |
-| **HL-D6** | **A weight budget is enforced at the boundary, not discovered at upload.** | Display advertising has hard initial-load limits — the common ceiling is **150 KB**. A builder that lets a user assemble a 400 KB unit and finds out at packaging time has wasted their work. The repo already knows the IAB sizes (`display-sizes.ts`: 300×250, 728×90, 320×50, 160×600, 300×600); weight belongs beside them. |
+| **HL-D5** | **The raster fallback is produced by the canvas compositor from the same element list**, not by rendering the markup — which means **HL3 adds an `html` entry to `LAYER_DRAWERS`.** | D122 forbids rasterising **markup**. It says nothing against the compositor drawing a *typed element list* natively, and the two are not the same thing. This matters concretely: `canonical-image-html` carries an `html` **layer**, and `drawLayer` throws on any kind absent from the table — so **the fallback render of an `image-html` brief is impossible without that entry.** An earlier draft of the finishing-video plan refused it; that refusal was wrong and is withdrawn. |
+| **HL-D6** | **The weight budget is shown while building — and it is `profile.maxBytes`, not a new constant.** | A builder that lets a user assemble an over-budget unit and finds out at packaging has wasted their work. But `packageHtml` **already enforces `bundle.length <= profile.maxBytes`** per platform, so the number exists and varies by placement. Surfacing a second hard-coded 150 KB beside it would be two budgets disagreeing — the defect this arc exists to remove. **The meter reads the profile.** |
 | **HL-D7** | **User-authored content is never rendered into the app's own DOM.** The editor preview is a sandboxed frame, or it is the canvas rendition. | Text and URLs a user types, assembled into markup and injected into the editor, is an XSS surface in the operator's own tool. |
 
 ---
@@ -66,7 +92,7 @@ brand-locked artefacts, not free web pages.
   where an ad goes when clicked.
 - **The backup image is an industry deliverable, not an implementation detail.** It should be named,
   visible in the editor, and reviewable — a buyer asks for it by name.
-- **The weight budget (HL-D6)**, live while building.
+- **The weight budget (HL-D6)** surfaced live while building, reading the per-platform `maxBytes` that packaging already enforces.
 - **Alt text**, which the backup image needs and which no current layer carries.
 - **Animation belongs to keyframing, not to a second system.** If the HTML layer ever animates, the
   track model in `2026-09-10_keyframing.md` should drive both the CSS and the canvas —
@@ -95,6 +121,8 @@ fallback being reverse-engineered from markup and quietly diverging.
 
 **Blocked on:** `fill` and per-element frames want D130/D131 (L10/L11). HL1 and HL2 are not blocked.
 
+**HL4 must also emit `format: "html"` from the generation path** — it does not today — and set both `htmlBundlePath` and `htmlFallbackPath`, which `packageHtml` already requires.
+
 ## 3. Definition of Done
 
 - An `image-html` brief produces **both** an HTML unit and a backup image that a person would call
@@ -102,8 +130,7 @@ fallback being reverse-engineered from markup and quietly diverging.
 - Every element the tooling can add appears in both. **A tool that can produce an element the canvas
   cannot draw is a defect, not a feature.**
 - A unit over the weight budget is refused **while building**, naming the budget and the overage.
-- The click destination reaches the packaged unit as a `clickTag`, and the packaging step fails
-  without one.
+- The click destination reaches the packaged unit as a `clickTag`. **`packageHtml` already refuses an html asset with no fallback; the clickTag check is a change to that function, owned by HL4.**
 - No user-authored string is ever rendered into the operator's own DOM.
 
 ## 4. What this plan refuses
