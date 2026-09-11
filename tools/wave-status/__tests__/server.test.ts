@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { Window } from "happy-dom";
 import {
   extractDarkBlock,
+  extractRootBlock,
   resolvePort,
   routeFor,
   startServer,
@@ -430,6 +431,78 @@ describe("extractDarkBlock", () => {
   });
 });
 
+describe("extractRootBlock", () => {
+  test("returns the :root block through its matching brace", () => {
+    expect(
+      extractRootBlock(
+        ":root {\n  --color-background: #ffffff;\n}\n.dark {\n  --color-background: #0f0f0f;\n}",
+      ),
+    ).toBe(":root {\n  --color-background: #ffffff;\n}");
+  });
+
+  test("a brace inside a comment does not close the block early", () => {
+    expect(extractRootBlock(":root { /* *x } */ --color-a: 1; }")).toBe(
+      ":root { /* *x } */ --color-a: 1; }",
+    );
+  });
+
+  test("a brace inside a double-quoted string is ignored", () => {
+    expect(extractRootBlock(':root { --color-a: "}"; }')).toBe(
+      ':root { --color-a: "}"; }',
+    );
+  });
+
+  test("an escaped quote inside a string does not close it", () => {
+    expect(
+      extractRootBlock(':root { --color-a: "\\" }"; --color-b: 2; }'),
+    ).toBe(':root { --color-a: "\\" }"; --color-b: 2; }');
+  });
+
+  test("a brace inside a single-quoted string is ignored", () => {
+    expect(extractRootBlock(":root { --color-a: '}'; }")).toBe(
+      ":root { --color-a: '}'; }",
+    );
+  });
+
+  test("nested braces balance before the block closes", () => {
+    expect(extractRootBlock(":root { --color-a: {nested}; }")).toBe(
+      ":root { --color-a: {nested}; }",
+    );
+  });
+
+  test("a :root selector with no brace, or a block that never closes, is undefined", () => {
+    expect(extractRootBlock(":root")).toBeUndefined();
+    expect(extractRootBlock(":root { --color-a: 1;")).toBeUndefined();
+    expect(extractRootBlock(":root /* no closing brace */")).toBeUndefined();
+  });
+
+  test("a selector that merely starts like :root is not the block", () => {
+    expect(
+      extractRootBlock(
+        ".own { --a: 1; }\n:rootish { --c: 3; }\n:root { --b: 2; }",
+      ),
+    ).toBe(":root { --b: 2; }");
+  });
+
+  test("the real tokens.css extracts to a :root block of token declarations", async () => {
+    const css = await readFile(realTokensPath, "utf8");
+    const root = extractRootBlock(css) ?? "";
+    const open = root.indexOf("{");
+    expect(open).toBeGreaterThan(0);
+    expect(root.slice(0, open).trim()).toBe(":root");
+    const lines = root
+      .slice(open + 1, root.lastIndexOf("}"))
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "");
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) {
+      expect(line).toMatch(/^(--[A-Za-z0-9-]+|color-scheme)\s*:\s*[^;]+;$/);
+    }
+  });
+});
+
 describe("the server over real HTTP", () => {
   test("GET / serves the page", async () => {
     const handle = await start({
@@ -463,7 +536,7 @@ describe("the server over real HTTP", () => {
     expect((await get(handle.port, "/")).status).toBe(500);
   });
 
-  test("GET /tokens.css serves the app's dark block as text/css", async () => {
+  test("GET /tokens.css serves the app's tokens with :root as base and .dark after it", async () => {
     const root = await makeFixture();
     const tokensPath = join(root, "tokens.css");
     await writeFile(
@@ -472,6 +545,7 @@ describe("the server over real HTTP", () => {
         ":root {",
         "  --color-background: #ffffff;",
         "  --color-surface-2: #f1f5f9;",
+        "  --color-brand-primary: #3b82f6;",
         "}",
         ".dark {",
         "  --color-background: #0f0f0f;",
@@ -492,12 +566,25 @@ describe("the server over real HTTP", () => {
     const body = res.body.toString("utf8");
     expect(body).toContain("--color-background");
     expect(body).toContain("--color-surface-2");
-    // The body carries the dark values, not the light ones — a change that
-    // serves the wrong block fails here.
-    expect(body).toContain("--color-background: #0f0f0f");
-    expect(body).not.toContain("--color-background: #ffffff");
-    // Only the dark block is served, never the light `:root`.
-    expect(body).not.toContain("#f1f5f9");
+    expect(body).toContain("--color-brand-primary: #3b82f6");
+    // Verify the cascade order: :root first, .dark second, so dark overrides win.
+    const rootIndex = body.indexOf(":root {");
+    const darkIndex = body.indexOf(".dark {");
+    expect(rootIndex).toBeGreaterThanOrEqual(0);
+    expect(darkIndex).toBeGreaterThan(rootIndex);
+    // Dark override resolves correctly
+    const window = new Window({ url: "http://127.0.0.1/" });
+    window.document.write(
+      '<html class="dark"><head></head><body></body></html>',
+    );
+    const style = window.document.createElement("style");
+    style.textContent = body;
+    window.document.head.appendChild(style);
+    const cs = window.getComputedStyle(window.document.documentElement);
+    expect(cs.getPropertyValue("--color-background")).toBe("#0f0f0f");
+    expect(cs.getPropertyValue("--color-surface-2")).toBe("#262626");
+    expect(cs.getPropertyValue("--color-brand-primary")).toBe("#3b82f6");
+    window.happyDOM.close();
   });
 
   test("GET /tokens.css is 500 naming the file when it cannot be read", async () => {
@@ -515,6 +602,22 @@ describe("the server over real HTTP", () => {
     expect(res.body.toString("utf8")).toContain(missing);
   });
 
+  test("GET /tokens.css is 500 naming the file when it has no :root block", async () => {
+    const root = await makeFixture();
+    const tokensPath = join(root, "tokens.css");
+    await writeFile(tokensPath, ".dark { --color-background: #0f0f0f; }\n");
+    const handle = await start({
+      port: 0,
+      root,
+      collect: async () => statusAt(0),
+      tokensCssPath: tokensPath,
+    });
+    const res = await get(handle.port, "/tokens.css");
+    expect(res.status).toBe(500);
+    expect(res.body.toString("utf8")).toContain(tokensPath);
+    expect(res.body.toString("utf8")).toContain("has no :root block");
+  });
+
   test("GET /tokens.css is 500 naming the file when it has no dark block", async () => {
     const root = await makeFixture();
     const tokensPath = join(root, "tokens.css");
@@ -528,6 +631,40 @@ describe("the server over real HTTP", () => {
     const res = await get(handle.port, "/tokens.css");
     expect(res.status).toBe(500);
     expect(res.body.toString("utf8")).toContain(tokensPath);
+    expect(res.body.toString("utf8")).toContain("has no dark block");
+  });
+
+  test("every --color-* the page references resolves to a non-empty value", async () => {
+    const handle = await start({
+      port: 0,
+      root: await makeFixture(),
+      collect: async () => statusAt(0),
+    });
+    const pageRes = await get(handle.port, "/");
+    const tokensRes = await get(handle.port, "/tokens.css");
+    expect(pageRes.status).toBe(200);
+    expect(tokensRes.status).toBe(200);
+    const html = pageRes.body.toString("utf8");
+    const css = tokensRes.body.toString("utf8");
+    const styleMatches = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)];
+    const referenced = new Set<string>();
+    for (const match of styleMatches) {
+      for (const m of match[1].matchAll(/var\(\s*(--color-[a-z0-9-]+)/g)) {
+        referenced.add(m[1]);
+      }
+    }
+    expect(referenced.size).toBeGreaterThan(0);
+    const window = new Window({ url: "http://127.0.0.1/" });
+    window.document.write(html.replace(/<script>[\s\S]*?<\/script>/, ""));
+    const style = window.document.createElement("style");
+    style.textContent = css;
+    window.document.head.appendChild(style);
+    const cs = window.getComputedStyle(window.document.documentElement);
+    for (const token of referenced) {
+      const val = cs.getPropertyValue(token).trim();
+      expect(val, `token ${token} must resolve`).not.toBe("");
+    }
+    window.happyDOM.close();
   });
 
   test("the page declares no --color-* custom property of its own", async () => {
@@ -577,9 +714,8 @@ describe("the server over real HTTP", () => {
     // so a page that loses its class, and a block re-scoped to another class
     // — or served without any selector at all — each fail here.
     const css = tokens.body.toString("utf8");
-    const selector = css.slice(0, css.indexOf("{")).trim();
-    const scoped = [...selector.matchAll(/\.([A-Za-z][\w-]*)/g)].map(
-      (m) => m[1],
+    const scoped = [...css.matchAll(/(?:^|\})\s*([^{]+)\{/g)].flatMap((m) =>
+      [...m[1].matchAll(/\.([A-Za-z][\w-]*)/g)].map((c) => c[1]),
     );
     expect(scoped.length).toBeGreaterThan(0);
     const html = page.body.toString("utf8");

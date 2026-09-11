@@ -347,11 +347,11 @@ async function serveLog(
 }
 
 /**
- * `/tokens.css` — the app's dark tokens, extracted from tokens.css and served
- * as CSS. This lane exists so the status page stops copying the values: it links
- * this route instead of redeclaring them, so a token change in the app cannot
- * silently drift. Fail loudly on a missing file or missing dark block — the
- * route 500s and names the file, and the page is visibly unstyled.
+ * `/tokens.css` — the app's tokens: `:root` as a base and `.dark` after it,
+ * extracted from tokens.css and served as CSS. The base declares everything;
+ * the theme block overrides what differs. Cascade order matters: `:root` first,
+ * `.dark` second, so dark overrides still win. Fail loudly on a missing file or
+ * missing block — the route 500s and names the file.
  */
 async function serveTokens(res: ServerResponse, tokensCssPath: string): Promise<void> {
   let css: string;
@@ -362,6 +362,12 @@ async function serveTokens(res: ServerResponse, tokensCssPath: string): Promise<
     res.end(`tokens.css missing or unreadable: ${tokensCssPath}`);
     return;
   }
+  const root = extractRootBlock(css);
+  if (root === undefined) {
+    res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+    res.end(`tokens.css has no :root block: ${tokensCssPath}`);
+    return;
+  }
   const dark = extractDarkBlock(css);
   if (dark === undefined) {
     res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
@@ -369,25 +375,15 @@ async function serveTokens(res: ServerResponse, tokensCssPath: string): Promise<
     return;
   }
   res.writeHead(200, { "content-type": "text/css; charset=utf-8" });
-  res.end(dark);
+  res.end(`${root}\n\n${dark}\n`);
 }
 
-/**
- * Extract the top-level `.dark { … }` block from a CSS file. One traversal,
- * skipping comments and strings throughout: a `.dark` mentioned inside a
- * comment or a string cannot start the match — the real tokens.css names the
- * class in its header comment — and a brace inside either cannot cut it short.
- * The match is taken only in selector position, where the character after the
- * name cannot continue it, so `.darkish` is not `.dark`. The returned rule
- * carries its `.dark` selector — a faithful copy of the app's block, not a
- * headless `{ … }` body a browser would discard. Returns undefined when there
- * is no `.dark` block.
- */
-export function extractDarkBlock(css: string): string | undefined {
+function extractTopLevelBlock(css: string, selector: string): string | undefined {
   let start = -1;
   let depth = 0;
   let inComment = false;
   let inQuote: "'" | '"' | null = null;
+  const selLen = selector.length;
   for (let i = 0; i < css.length; i++) {
     const ch = css[i];
     if (inComment) {
@@ -414,8 +410,8 @@ export function extractDarkBlock(css: string): string | undefined {
       inQuote = ch;
       continue;
     }
-    if (start < 0 && depth === 0 && ch === "." && css.startsWith(".dark", i)) {
-      const after = css[i + 5];
+    if (start < 0 && depth === 0 && ch === selector[0] && css.startsWith(selector, i)) {
+      const after = css[i + selLen];
       if (after === undefined || !/[A-Za-z0-9_-]/.test(after)) start = i;
     }
     if (ch === "{") {
@@ -426,6 +422,30 @@ export function extractDarkBlock(css: string): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * Extract the top-level `.dark { … }` block from a CSS file. One traversal,
+ * skipping comments and strings throughout: a `.dark` mentioned inside a
+ * comment or a string cannot start the match — the real tokens.css names the
+ * class in its header comment — and a brace inside either cannot cut it short.
+ * The match is taken only in selector position, where the character after the
+ * name cannot continue it, so `.darkish` is not `.dark`. The returned rule
+ * carries its `.dark` selector — a faithful copy of the app's block, not a
+ * headless `{ … }` body a browser would discard. Returns undefined when there
+ * is no `.dark` block.
+ */
+export function extractDarkBlock(css: string): string | undefined {
+  return extractTopLevelBlock(css, ".dark");
+}
+
+/**
+ * Extract the top-level `:root { … }` block from a CSS file. One traversal,
+ * skipping comments and strings throughout. Returns undefined when there
+ * is no `:root` block.
+ */
+export function extractRootBlock(css: string): string | undefined {
+  return extractTopLevelBlock(css, ":root");
 }
 
 /** Map a wave id back to its log directory by re-deriving ids from the root. */

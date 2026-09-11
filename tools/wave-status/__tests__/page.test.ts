@@ -2,10 +2,15 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { Window } from "happy-dom";
+import { extractDarkBlock, extractRootBlock } from "../server.js";
 import type { WaveStatus } from "../lib/types.js";
 
 const PAGE_PATH = fileURLToPath(
   new URL("../public/index.html", import.meta.url),
+);
+
+const realTokensPath = fileURLToPath(
+  new URL("../../../apps/web/src/styles/tokens.css", import.meta.url),
 );
 
 class FakeEventSource {
@@ -191,6 +196,7 @@ interface LoadPageOptions {
   // so a responder that wants to race a later poll should resolve call 1
   // immediately and only defer from call 2 on.
   statusResponder?: (callIndex: number) => Promise<Response> | Response;
+  tokensCss?: string | false;
 }
 
 async function loadPage(
@@ -220,6 +226,23 @@ async function loadPage(
   }
 
   window.document.write(html.replace(/<script>[\s\S]*?<\/script>/, ""));
+
+  const tokensCss =
+    options?.tokensCss !== undefined
+      ? options.tokensCss
+      : await (async () => {
+          const raw = await readFile(realTokensPath, "utf8");
+          const root = extractRootBlock(raw) ?? "";
+          const dark = extractDarkBlock(raw) ?? "";
+          return `${root}\n\n${dark}\n`;
+        })();
+
+  if (tokensCss) {
+    const style = window.document.createElement("style");
+    style.setAttribute("data-tokens", "");
+    style.textContent = tokensCss;
+    window.document.head.appendChild(style);
+  }
 
   const fetches: string[] = [];
   let statusCalls = 0;
@@ -282,6 +305,7 @@ async function loadPage(
     "setInterval",
     "clearInterval",
     "window",
+    "getComputedStyle",
     scriptMatch[1],
   ) as (
     document: Document,
@@ -290,6 +314,7 @@ async function loadPage(
     setIntervalFn: (handler: () => void, ms?: number) => number,
     clearIntervalFn: (id: number) => void,
     window: Window,
+    getComputedStyle: typeof window.getComputedStyle,
   ) => void;
 
   run(
@@ -299,6 +324,7 @@ async function loadPage(
     setIntervalImpl,
     clearIntervalImpl,
     window,
+    window.getComputedStyle.bind(window),
   );
 
   await vi.waitFor(() => {
@@ -3012,5 +3038,115 @@ describe("the status page", () => {
       expect(headerSize).toBe("10px");
       expect(bodySize).not.toBe(headerSize);
     }
+  });
+
+  test("typing narrows the rows; clearing restores them; a wave with no surviving lanes says so; the open log survives a filter that hides its row", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    const filter = doc.getElementById("filter") as unknown as HTMLInputElement;
+    expect(filter).not.toBeNull();
+
+    const dispatchInput = () => {
+      const event = new (
+        filter.ownerDocument!.defaultView as unknown as { Event: typeof Event }
+      ).Event("input", { bubbles: true });
+      filter.dispatchEvent(event);
+    };
+
+    // Initially all 5 lanes from mixedStatus (4 in T, 1 in U)
+    expect(doc.querySelectorAll("tr.lane").length).toBe(5);
+
+    // Filter to "t1" — only lane t1 matches.
+    filter.value = "t1";
+    dispatchInput();
+
+    const surviving = doc.querySelectorAll("tr.lane");
+    expect(surviving.length).toBe(1);
+    expect(surviving[0]?.getAttribute("data-lane")).toBe("t1");
+
+    // Wave U has no surviving lanes and says so
+    const emptyU = doc.querySelector('tr.empty[data-wave="U"]');
+    expect(emptyU).not.toBeNull();
+    expect(emptyU?.textContent).toContain("No lanes match “t1”");
+
+    // Open log for t1
+    (surviving[0] as unknown as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.fetches).toContain("/api/log/T/t1?tail=16");
+    });
+    const logPane = doc.getElementById("log-pane") as unknown as HTMLElement;
+    expect(logPane?.hidden).toBe(false);
+    expect(doc.getElementById("log-lane")?.textContent).toBe("T/t1");
+
+    // Now type a filter that hides t1 (e.g. "u1")
+    filter.value = "u1";
+    dispatchInput();
+
+    expect(doc.querySelectorAll("tr.lane").length).toBe(1);
+    expect(
+      doc.querySelector('tr.lane[data-wave="T"][data-lane="t1"]'),
+    ).toBeNull();
+    // Wave T now has no surviving lanes
+    const emptyT = doc.querySelector('tr.empty[data-wave="T"]');
+    expect(emptyT).not.toBeNull();
+    expect(emptyT?.textContent).toContain("No lanes match “u1”");
+
+    // Open log pane survives even though t1 is hidden
+    expect(logPane?.hidden).toBe(false);
+    expect(doc.getElementById("log-lane")?.textContent).toBe("T/t1");
+
+    // Clearing restores all rows and the active row indicator
+    filter.value = "";
+    dispatchInput();
+    expect(doc.querySelectorAll("tr.lane").length).toBe(5);
+    const restoredT1 = doc.querySelector(
+      'tr.lane[data-wave="T"][data-lane="t1"]',
+    );
+    expect(restoredT1?.classList.contains("active")).toBe(true);
+    expect(logPane?.hidden).toBe(false);
+  });
+
+  test("the filter input resolves its border to the control token and carries an accessible name", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    const filter = doc.getElementById("filter");
+    expect(filter).not.toBeNull();
+    expect(filter?.getAttribute("type")).toBe("search");
+    const label = filter?.getAttribute("aria-label");
+    expect(label).toBeTruthy();
+    expect(label?.toLowerCase()).toContain("filter");
+
+    const filterBorder = page.window.getComputedStyle(filter!).borderColor;
+    const expectedBorder = page.window
+      .getComputedStyle(doc.documentElement)
+      .getPropertyValue("--color-border-control")
+      .trim();
+    expect(filterBorder).toBe(expectedBorder);
+  });
+
+  test("a referenced token that resolves to empty raises the warning naming it; a fully-resolving page shows nothing", async () => {
+    // Fully resolving page shows nothing
+    const normalPage = await loadPage(mixedStatus);
+    const normalWarning = normalPage.window.document.getElementById(
+      "palette-warning",
+    ) as unknown as HTMLElement;
+    expect(normalWarning?.hidden).toBe(true);
+
+    // Broken tokens: omit --color-brand-primary
+    const raw = await readFile(realTokensPath, "utf8");
+    const root = extractRootBlock(raw) ?? "";
+    const dark = extractDarkBlock(raw) ?? "";
+    const brokenCss = `${root}\n\n${dark}\n`.replaceAll(
+      "--color-brand-primary",
+      "--color-brand-primary-omitted",
+    );
+    const brokenPage = await loadPage(mixedStatus, undefined, {
+      tokensCss: brokenCss,
+    });
+    const brokenWarning = brokenPage.window.document.getElementById(
+      "palette-warning",
+    ) as unknown as HTMLElement;
+    expect(brokenWarning?.hidden).toBe(false);
+    expect(brokenWarning?.textContent).toContain("--color-brand-primary");
   });
 });
