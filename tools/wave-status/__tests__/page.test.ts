@@ -4017,11 +4017,8 @@ describe("the status page", () => {
       const html = await readFile(PAGE_PATH, "utf8");
       // Remove the style block entirely
       const htmlWithoutStyle = html.replace(/<style>[\s\S]*?<\/style>/g, "");
-      const styleMatch = /<style>([\s\S]*?)<\/style>/.exec(htmlWithoutStyle);
       expect(() => {
-        if (!styleMatch || !styleMatch[1]) {
-          throw new Error("page has no <style> block or it is empty");
-        }
+        scanReferencedTokens(htmlWithoutStyle);
       }).toThrow("page has no <style> block or it is empty");
     } finally {
       await handle.close();
