@@ -18,6 +18,7 @@ import { registerBundledFonts } from "../../fonts.js";
 import { ProceduralBackgroundGenerator } from "../ProceduralBackgroundGenerator.js";
 import {
   compositorGoldenKey,
+  goldenPlatformKeys,
   goldenRun,
   missingGoldenMapMessage,
   resolveGoldenMap,
@@ -66,7 +67,7 @@ describe("NodeCanvasCompositor D10 — the legacy path is byte-identical after t
   const backgrounds = new ProceduralBackgroundGenerator();
   const key = compositorGoldenKey();
   const goldens = resolveGoldenMap(fixture, key);
-  const missingMessage = missingGoldenMapMessage(key, Object.keys(fixture));
+  const missingMessage = missingGoldenMapMessage(key, goldenPlatformKeys(fixture));
 
   // The committed platform goldens encode the pre-timeline still bytes. `draw` and
   // `drawLegacy` must BOTH land on them for every motion kind at rest, or the

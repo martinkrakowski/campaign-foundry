@@ -11,7 +11,9 @@ import {
   assertRecordedMap,
   compositorGoldenKey,
   goldenMapsEqual,
+  goldenPlatformKeys,
   goldenRun,
+  isGoldenPlatformKey,
   isRecordingGoldens,
   mergeGoldenFixture,
   missingGoldenMapMessage,
@@ -88,6 +90,28 @@ describe("resolveGoldenMap", () => {
 
   test("returns undefined when the map is empty", () => {
     expect(resolveGoldenMap({ "win32-x64": {} }, "win32-x64")).toBeUndefined();
+  });
+});
+
+describe("goldenPlatformKeys", () => {
+  test("returns only the platform-arch keys, never the caveat key", () => {
+    const fixture = {
+      "darwin-arm64": { cell: "a" },
+      "linux-x64": { cell: "b" },
+      platformProvenance: { "linux-x64": { reprovedBy: "ci", note: "asserted by CI" } },
+    };
+    expect(goldenPlatformKeys(fixture)).toEqual(["darwin-arm64", "linux-x64"]);
+  });
+
+  test("is empty for a fixture file that is not a golden family", () => {
+    expect(goldenPlatformKeys({ cases: [] })).toEqual([]);
+  });
+
+  test("isGoldenPlatformKey accepts platform-arch and rejects anything else", () => {
+    expect(isGoldenPlatformKey("darwin-arm64")).toBe(true);
+    expect(isGoldenPlatformKey("win32-x64")).toBe(true);
+    expect(isGoldenPlatformKey("platformProvenance")).toBe(false);
+    expect(isGoldenPlatformKey("cases")).toBe(false);
   });
 });
 

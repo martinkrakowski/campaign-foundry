@@ -10,6 +10,7 @@ import { CanvasFfmpegVideoCompositor } from "../CanvasFfmpegVideoCompositor.js";
 import { canonicalMp4Request } from "./canonical-mp4-request.js";
 import {
   compositorGoldenKey,
+  goldenPlatformKeys,
   goldenRun,
   isRecordingGoldens,
   missingGoldenMapMessage,
@@ -118,7 +119,7 @@ describe("CanvasFfmpegVideoCompositor byte golden (VG2)", () => {
   const key = compositorGoldenKey();
   const recording = isRecordingGoldens();
   const goldens = resolveGoldenMap(fixture, key);
-  const missingMessage = missingGoldenMapMessage(key, Object.keys(fixture), {
+  const missingMessage = missingGoldenMapMessage(key, goldenPlatformKeys(fixture), {
     fixtureFile: "compositor-goldens-mp4.json",
     cellsHint: "5 fields (fileHash, streamHash, ffmpegVersion, x264Version, threads) for the one canonical timeline",
   });
