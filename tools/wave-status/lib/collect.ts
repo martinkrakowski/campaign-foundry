@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { open as fsOpen, readdir as fsReaddir, readFile as fsReadFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { readEvents } from "./events.js";
 import { mergeStatus } from "./merge.js";
 import type { LaneObservation, WaveEvent, WaveStatus } from "./types.js";
@@ -352,7 +352,7 @@ export async function worktreeFacts(deps: CollectDeps): Promise<readonly string[
 export function derivePrefix(worktrees: readonly string[]): string | undefined {
   const candidates = worktrees.length > 1 ? worktrees.slice(1) : worktrees;
   for (const wt of candidates) {
-    const base = wt.split("/").pop() ?? "";
+    const base = basename(wt);
     const match = /^([A-Za-z0-9_]+-)[A-Za-z0-9_-]+$/.exec(base);
     if (match) return match[1];
   }
@@ -377,7 +377,7 @@ function escapeRegExp(value: string): string {
 export function pgrepPattern(lane: string, worktrees?: readonly string[]): string {
   if (worktrees !== undefined && worktrees.length > 0) {
     for (const wt of worktrees) {
-      const base = wt.split("/").pop() ?? "";
+      const base = basename(wt);
       if (base.endsWith(`-${lane}`) || base === lane) {
         return `${escapeRegExp(base)}(/|$| )`;
       }

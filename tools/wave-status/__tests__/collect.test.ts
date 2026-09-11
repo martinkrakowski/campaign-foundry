@@ -248,29 +248,32 @@ describe("collect", () => {
   });
 
   test("the liveness probe matches a process running in the worktree layout actually used, and fails if the convention changes", async () => {
-    const worktrees = await worktreeFacts(realDeps);
+    const root = await mkdtemp(join(tmpdir(), "wave-status-wt-"));
+    const worktree = join(root, "cf-c5");
+    const worktrees = [join(root, "campaign-foundry"), worktree];
     const pattern = pgrepPattern("c5", worktrees);
     const re = new RegExp(pattern);
 
-    const liveProcessCmd = "cd /Users/martin/Projects/Client-work/ADOBE/cf-c5 && agy --model gemini-3.8-flash-high";
+    const liveProcessCmd = `cd ${worktree} && agy --model gemini-3.8-flash-high`;
     expect(re.test(liveProcessCmd)).toBe(true);
 
-    const obsoleteCmd = "cd /Users/martin/Projects/Client-work/ADOBE/wt-c5 && agy";
+    const obsoleteCmd = `cd ${join(root, "wt-c5")} && agy`;
     expect(re.test(obsoleteCmd)).toBe(false);
 
     expect(pattern).toBe("cf-c5(/|$| )");
   });
 
-  test("the liveness probe dynamically derives pattern from worktrees when layout changes", () => {
+  test("the liveness probe dynamically derives pattern from worktrees when layout changes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wave-status-custom-"));
     const customWorktrees = [
-      "/Users/martin/Projects/Client-work/ADOBE/campaign-foundry",
-      "/Users/martin/Projects/Client-work/ADOBE/custom-c5",
+      join(root, "campaign-foundry"),
+      join(root, "custom-c5"),
     ];
     const pattern = pgrepPattern("c5", customWorktrees);
     expect(pattern).toBe("custom-c5(/|$| )");
     const re = new RegExp(pattern);
-    expect(re.test("cd /Users/martin/Projects/Client-work/ADOBE/custom-c5 && agy")).toBe(true);
-    expect(re.test("cd /Users/martin/Projects/Client-work/ADOBE/cf-c5 && agy")).toBe(false);
+    expect(re.test(`cd ${customWorktrees[1]} && agy`)).toBe(true);
+    expect(re.test(`cd ${join(root, "cf-c5")} && agy`)).toBe(false);
 
     // Deriving prefix for a lane not yet in worktree list
     const unlistedLanePattern = pgrepPattern("c6", customWorktrees);
