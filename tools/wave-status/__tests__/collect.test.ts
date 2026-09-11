@@ -460,10 +460,11 @@ describe("parseChecks", () => {
 });
 
 describe("waveIdFromDirName", () => {
-  test("strips the leading wave and any dashes", () => {
+  test("strips the leading wave and optional separator while preserving identifier hyphens", () => {
     expect(waveIdFromDirName("waveT")).toBe("T");
     expect(waveIdFromDirName("wave-2")).toBe("2");
     expect(waveIdFromDirName("waves")).toBe("s");
+    expect(waveIdFromDirName("wave-creative-templates-w03")).toBe("creative-templates-w03");
   });
 });
 

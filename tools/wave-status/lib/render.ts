@@ -51,11 +51,23 @@ function laneCell(lane: LaneStatus): string {
   return `${sanitize(lane.wave)}/${sanitize(lane.lane)}`;
 }
 
+export const STALLED_GRACE_MS = 60_000;
+
+export function isLaneStalled(lane: LaneStatus, nowMs?: number): boolean {
+  if (lane.reported === undefined || lane.reported.event !== "started" || lane.derived.alive) {
+    return false;
+  }
+  const ts = Date.parse(lane.reported.ts);
+  if (Number.isNaN(ts)) return false;
+  const now = nowMs ?? Date.now();
+  return now - ts > STALLED_GRACE_MS;
+}
+
 function stageCell(lane: LaneStatus): string {
   const reported = lane.reported;
   if (reported === undefined) return ABSENT;
   const round = reported.round === undefined ? "" : ` (round ${reported.round})`;
-  const isStalled = reported.event === "started" && !lane.derived.alive;
+  const isStalled = isLaneStalled(lane);
   const event = isStalled ? "stalled" : reported.event;
   return `${reported.stage} ${event}${round}`;
 }
@@ -91,7 +103,7 @@ const COLUMNS: readonly Column[] = [
       if (event === undefined) return withCode(DIM, text);
       if (event === "failed") return withCode(RED, text);
       if (event === "settled") return withCode(GREEN, text);
-      if (event === "started" && !lane.derived.alive) return withCode(YELLOW, text);
+      if (event === "started" && isLaneStalled(lane)) return withCode(YELLOW, text);
       return withCode(CYAN, text);
     },
   },

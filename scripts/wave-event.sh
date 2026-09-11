@@ -62,10 +62,10 @@ if [ -z "$LOGDIR" ]; then
   root="${WAVE_LOG_ROOT:-/tmp}"
   if [ -d "$root/wave-$WAVE" ]; then
     LOGDIR="$root/wave-$WAVE"
-  elif [ -d "$root/$WAVE" ]; then
-    LOGDIR="$root/$WAVE"
   elif [ -d "$root/wave$WAVE" ]; then
     LOGDIR="$root/wave$WAVE"
+  elif case "$WAVE" in wave*) [ -d "$root/$WAVE" ] ;; *) false ;; esac; then
+    LOGDIR="$root/$WAVE"
   else
     case "$WAVE" in
       wave*) LOGDIR="$root/$WAVE" ;;

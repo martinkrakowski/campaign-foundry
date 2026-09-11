@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { renderStatus, truncate } from "../render.js";
+import { isLaneStalled, renderStatus, truncate } from "../render.js";
 import type { LaneStatus, WaveStatus } from "../types.js";
 
 const TS = "2026-09-07T17:00:00Z";
@@ -260,5 +260,26 @@ describe("renderStatus", () => {
     expect(outPlain).toContain("dispatch stalled");
     const outColor = renderStatus(status, { color: true });
     expect(outColor).toContain("\x1b[33mdispatch stalled\x1b[0m");
+  });
+
+  test("a lane whose reported stage is started and process not alive yet within grace period renders as started", () => {
+    const status = makeStatus([
+      makeLane("t1", {
+        reported: { stage: "dispatch", event: "started", ts: new Date().toISOString() },
+        alive: false,
+      }),
+    ]);
+    const outPlain = renderStatus(status, { color: false });
+    expect(outPlain).toContain("dispatch started");
+    const outColor = renderStatus(status, { color: true });
+    expect(outColor).toContain("\x1b[36mdispatch started\x1b[0m");
+  });
+
+  test("isLaneStalled returns false for invalid timestamps", () => {
+    const lane = makeLane("t1", {
+      reported: { stage: "dispatch", event: "started", ts: "invalid-date" },
+      alive: false,
+    });
+    expect(isLaneStalled(lane)).toBe(false);
   });
 });

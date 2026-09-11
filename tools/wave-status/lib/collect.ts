@@ -56,7 +56,7 @@ interface GhPrListEntry {
 }
 
 export function waveIdFromDirName(name: string): string {
-  return name.replace(/^wave/, "").replace(/-/g, "");
+  return name.replace(/^wave-?/, "");
 }
 
 /**
