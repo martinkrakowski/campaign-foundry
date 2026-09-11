@@ -7,10 +7,11 @@
     <link rel="stylesheet" href="/tokens.css" />
     <style>
       /* The colour tokens (--color-*) come from /tokens.css, which the server
-     serves by extracting the dark "Firefly" block from apps/web/src/styles/tokens.css.
+     serves by extracting :root as a base and .dark after it from
+     apps/web/src/styles/tokens.css.
      This page never redeclares them, so an app token change cannot silently drift.
-     The served block is scoped to `.dark`, so <html> carries that class — the same
-     opt-in apps/web uses; without it the served rules match nothing.
+     The served blocks are scoped to :root and .dark, so <html> carries that class —
+     the same opt-in apps/web uses; without it the served rules match nothing.
      Only the non-colour tokens are defined here. */
       :root {
         --space-1: 4px;
@@ -32,6 +33,13 @@
         font-family: var(--font-sans);
         font-size: 14px;
         line-height: 1.5;
+      }
+      ::selection {
+        background: color-mix(
+          in srgb,
+          var(--color-brand-primary) 30%,
+          transparent
+        );
       }
       .visually-hidden {
         position: absolute;
@@ -83,11 +91,6 @@
        that isn't it. */
         gap: 10px;
       }
-      /* --color-brand-primary is a :root-only token: the server at
-     /tokens.css extracts just the .dark block (see server.ts,
-     extractDarkBlock), and .dark never redeclares it, so it is never
-     served here. --color-brand-on-tint is the FIREFLY-badge brand blue
-     that .dark does carry — use that, not the unserved token. */
       .brand-mark {
         /* 10px (size) and 3px (radius) both fall between scale steps —
        --space-1 is 4px, --radius-sm is 4px — and rounding either up
@@ -96,7 +99,7 @@
         height: 10px;
         flex: none;
         border-radius: 3px;
-        background: var(--color-brand-on-tint);
+        background: var(--color-brand-primary);
       }
       h1 {
         margin: 0;
@@ -112,6 +115,43 @@
         flex-wrap: wrap;
         align-items: center;
         gap: var(--space-2);
+      }
+      /* A control's own edge uses the control-border pair (WCAG 1.4.11): its fill
+         (surface on background) is 1.05 : 1 from its ground, so the hairline is the
+         only thing identifying it. */
+      #filter {
+        width: 220px;
+        height: 26px;
+        padding: 0 10px;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border-control);
+        border-radius: var(--radius-sm);
+        color: var(--color-text-primary);
+        font-family: var(--font-mono);
+        font-size: 12px;
+      }
+      #filter::placeholder {
+        color: var(--color-text-muted);
+      }
+      #filter:focus {
+        outline: none;
+        border-color: var(--color-border-control-hover);
+        box-shadow: 0 0 0 2px
+          color-mix(in srgb, var(--color-brand-primary) 50%, transparent);
+      }
+      /* Shown only when a var(--color-*) the page references does not resolve:
+         the page names the problem instead of rendering unstyled. */
+      #palette-warning {
+        margin: var(--space-2) 0 0;
+        padding: var(--space-2) var(--space-3);
+        font-size: 12px;
+        background: rgba(245, 158, 11, 0.12);
+        border: 1px solid var(--color-warning);
+        border-radius: var(--radius-sm);
+        color: var(--color-warning);
+      }
+      #palette-warning[hidden] {
+        display: none;
       }
       /* The connection indicator: state in words, the dot only ever agrees
      with them. It is wired to the real EventSource and its poll fallback
@@ -371,7 +411,7 @@
       }
       tr.lane:focus-within td:first-child,
       tr.lane.active td:first-child {
-        box-shadow: inset 2px 0 0 var(--color-brand-on-tint);
+        box-shadow: inset 2px 0 0 var(--color-brand-primary);
       }
       tr.lane.active td {
         background: var(--color-brand-tint);
@@ -562,7 +602,7 @@
      2px brand outline so keyboard users can see where focus landed. */
       #log-pane:focus {
         outline: 2px solid;
-        outline-color: var(--color-brand-on-tint);
+        outline-color: var(--color-brand-primary);
         outline-offset: -1px;
       }
       #log-toolbar {
@@ -613,7 +653,7 @@
      comment above) — the checkbox takes the tint that .dark does serve. */
       #log-follow {
         cursor: pointer;
-        accent-color: var(--color-brand-on-tint);
+        accent-color: var(--color-brand-primary);
       }
       #log-toolbar .log-actions {
         display: flex;
@@ -646,7 +686,7 @@
         outline: none;
         border-color: var(--color-border-control-hover);
         box-shadow: 0 0 0 2px
-          color-mix(in srgb, var(--color-brand-on-tint) 50%, transparent);
+          color-mix(in srgb, var(--color-brand-primary) 50%, transparent);
       }
       /* 13px, like .row-go above: no step on the local scale fits an icon
      this small. */
@@ -741,6 +781,11 @@
         padding: var(--space-4) var(--space-3);
         color: var(--color-text-muted);
       }
+      @media (max-width: 760px) {
+        #filter {
+          width: 150px;
+        }
+      }
     </style>
   </head>
   <body>
@@ -752,6 +797,14 @@
             <h1>Wave status</h1>
           </div>
           <div class="header-tools">
+            <input
+              id="filter"
+              type="search"
+              placeholder="filter lanes…"
+              aria-label="Filter lanes by wave or lane"
+              autocomplete="off"
+              spellcheck="false"
+            />
             <button
               type="button"
               role="switch"
@@ -767,6 +820,10 @@
             </span>
           </div>
         </div>
+        <p id="palette-warning" hidden>
+          tokens.css did not load — the colour tokens are served by the wave status server at
+          /tokens.css. Open this page through the server.
+        </p>
         <div id="metrics">
           <div class="mgroup">
             <span class="mlabel">campaign</span>
@@ -926,6 +983,7 @@
       const table = document.getElementById("status-table");
       const connection = document.getElementById("connection");
       const connText = connection.querySelector(".conn-text");
+      const filterInput = document.getElementById("filter");
       const logPane = document.getElementById("log-pane");
       const logToolbar = document.getElementById("log-toolbar");
       const logView = document.getElementById("log");
@@ -943,8 +1001,70 @@
       const expandedWaves = new Set();
       const SORT_STORAGE_KEY = "wave-status:sort";
       let lastStatus = null;
+      let filterText = "";
       let connState = "connecting";
       let copyTimer = null;
+
+      // Palette guard: verifies that every var(--color-*) custom property
+      // referenced in the page's stylesheets resolves to a non-empty value.
+      function checkPalette() {
+        const warning = document.getElementById("palette-warning");
+        if (warning === null) return;
+        const styleEls = document.querySelectorAll("style");
+        const referenced = new Set();
+        for (const el of styleEls) {
+          if (el.hasAttribute("data-tokens")) continue;
+          const text = el.textContent || "";
+          for (const m of text.matchAll(/var\(\s*(--color-[a-z0-9-]+)/g)) {
+            referenced.add(m[1]);
+          }
+        }
+        const win =
+          typeof window !== "undefined"
+            ? window
+            : (document.defaultView ?? globalThis);
+        const getStyles = win.getComputedStyle
+          ? win.getComputedStyle.bind(win)
+          : typeof getComputedStyle === "function"
+            ? getComputedStyle
+            : null;
+        if (!getStyles) return;
+        const computed = getStyles(document.documentElement);
+        const unresolving = [];
+        for (const token of referenced) {
+          const val = computed.getPropertyValue(token).trim();
+          if (!val) {
+            unresolving.push(token);
+          }
+        }
+        if (unresolving.length > 0) {
+          warning.hidden = false;
+          warning.textContent = `Unresolved colour token(s): ${unresolving.join(", ")}`;
+        } else {
+          warning.hidden = true;
+        }
+      }
+
+      checkPalette();
+
+      function laneMatches(wave, lane) {
+        if (filterText === "") return true;
+        const key = `${wave.id}/${lane.lane}`.toLowerCase();
+        const name = (lane.lane || "").toLowerCase();
+        return name.includes(filterText) || key.includes(filterText);
+      }
+
+      function applyFilter() {
+        filterText = filterInput ? filterInput.value.trim().toLowerCase() : "";
+        if (lastStatus !== null) {
+          render(lastStatus, { skipFollow: true });
+        }
+      }
+
+      if (filterInput !== null) {
+        filterInput.addEventListener("input", applyFilter);
+      }
+
       // One counter for every tail request — an open, and every follow
       // refresh, each claims its own generation here. A response is only
       // ever acted on if it is still the newest request outstanding, so an
@@ -1158,9 +1278,7 @@
             : undefined;
       }
 
-      function compareLanes(a, b) {
-        const aTime = laneMtime(a);
-        const bTime = laneMtime(b);
+      function compareMtimes(aTime, bTime) {
         if (aTime !== undefined && bTime !== undefined) {
           return bTime - aTime;
         }
@@ -1171,6 +1289,25 @@
           return 1;
         }
         return 0;
+      }
+
+      function compareLanes(a, b) {
+        return compareMtimes(laneMtime(a), laneMtime(b));
+      }
+
+      function waveMtime(wave) {
+        let max;
+        for (const lane of wave.lanes) {
+          const time = laneMtime(lane);
+          if (time !== undefined && (max === undefined || time > max)) {
+            max = time;
+          }
+        }
+        return max;
+      }
+
+      function compareWaves(a, b) {
+        return compareMtimes(waveMtime(a), waveMtime(b));
       }
 
       function toggleWave(waveId) {
@@ -1188,7 +1325,9 @@
               ?.setAttribute("aria-expanded", isExpanded ? "true" : "false");
             let next = waveRow.nextElementSibling;
             while (next && !next.classList.contains("wave")) {
-              next.hidden = !isExpanded;
+              if (!next.classList.contains("empty")) {
+                next.hidden = !isExpanded;
+              }
               next = next.nextElementSibling;
             }
             break;
@@ -1424,7 +1563,7 @@
         }
       }
 
-      function render(status) {
+      function render(status, options = {}) {
         lastStatus = status;
         // A render replaces the table body's contents, and every poll tick or
         // SSE event would otherwise destroy the focused row and drop focus
@@ -1438,39 +1577,52 @@
             focusKey = identityOf(row);
           }
         }
+        const waves = sortByRecent
+          ? [...status.waves].sort(compareWaves)
+          : status.waves;
         const groups = [];
-        for (const wave of status.waves) {
+        for (const wave of waves) {
           const isExpanded = expandedWaves.has(wave.id) || defaultExpanded;
+          const lanes = sortByRecent
+            ? [...wave.lanes].sort(compareLanes)
+            : wave.lanes;
+          const filteredLanes = lanes.filter((lane) => laneMatches(wave, lane));
           // One tbody per wave: a group of rows a <tr> could never own, and
           // a single real element for aria-controls to name (a <div> cannot
           // wrap rows inside a table).
           const rowHtml = [
             `<tr class="wave" data-wave="${esc(wave.id)}"><td colspan="7">` +
               `<button type="button" class="wave-band" tabindex="0" aria-expanded="${isExpanded ? "true" : "false"}" aria-controls="waves-${esc(wave.id)}">` +
-              `<span class="wave-eyebrow">wave</span> <span class="wave-id">${esc(wave.id)}</span><span class="wave-meta">${waveMeta(wave.lanes)}</span>` +
+              `<span class="wave-eyebrow">wave</span> <span class="wave-id">${esc(wave.id)}</span><span class="wave-meta">${waveMeta(filteredLanes)}</span>` +
               `</button></td></tr>`,
           ];
-          const lanes = sortByRecent
-            ? [...wave.lanes].sort(compareLanes)
-            : wave.lanes;
-          for (const lane of lanes) {
-            const key = `${esc(wave.id)}/${esc(lane.lane)}`;
+          if (filteredLanes.length === 0) {
+            const emptyMsg = filterText === ""
+              ? "No lanes in wave"
+              : `No lanes match “${esc(filterInput ? filterInput.value : "")}”`;
             rowHtml.push(
-              `<tr class="lane" data-wave="${esc(wave.id)}" data-lane="${esc(lane.lane)}"${isExpanded ? "" : " hidden"}>` +
-                `<td class="c-lane"><button type="button" class="key" tabindex="0">${key}</button></td>` +
-                `<td class="c-stage">${stageCell(lane)}</td>` +
-                `<td class="c-live">${liveness(lane)}</td>` +
-                `<td class="c-log">${logCell(lane)}${ROW_GO}</td>` +
-                `<td class="c-pr">${prCell(lane)}</td>` +
-                `<td class="c-gate">${gateCell(lane)}</td>` +
-                `<td class="c-find">${findingsCell(lane)}</td>` +
-                "</tr>",
+              `<tr class="empty" data-wave="${esc(wave.id)}"><td colspan="7">${emptyMsg}</td></tr>`,
             );
-            // A banner per disagreement, in the lane's own words (D103).
-            for (const disagreement of lane.disagreements) {
+          } else {
+            for (const lane of filteredLanes) {
+              const key = `${esc(wave.id)}/${esc(lane.lane)}`;
               rowHtml.push(
-                `<tr class="disagreement" data-wave="${esc(wave.id)}"${isExpanded ? "" : " hidden"}><td colspan="7">${esc(disagreement)}</td></tr>`,
+                `<tr class="lane" data-wave="${esc(wave.id)}" data-lane="${esc(lane.lane)}"${isExpanded ? "" : " hidden"}>` +
+                  `<td class="c-lane"><button type="button" class="key" tabindex="0">${key}</button></td>` +
+                  `<td class="c-stage">${stageCell(lane)}</td>` +
+                  `<td class="c-live">${liveness(lane)}</td>` +
+                  `<td class="c-log">${logCell(lane)}${ROW_GO}</td>` +
+                  `<td class="c-pr">${prCell(lane)}</td>` +
+                  `<td class="c-gate">${gateCell(lane)}</td>` +
+                  `<td class="c-find">${findingsCell(lane)}</td>` +
+                  "</tr>",
               );
+              // A banner per disagreement, in the lane's own words (D103).
+              for (const disagreement of lane.disagreements) {
+                rowHtml.push(
+                  `<tr class="disagreement" data-wave="${esc(wave.id)}"${isExpanded ? "" : " hidden"}><td colspan="7">${esc(disagreement)}</td></tr>`,
+                );
+              }
             }
           }
           groups.push({ id: wave.id, rowHtml });
@@ -1520,7 +1672,9 @@
         }
 
         // If follow is on, refetch the log tail and scroll to bottom
-        void maybeFollow();
+        if (!options.skipFollow) {
+          void maybeFollow();
+        }
       }
 
       // One generation governs both transports — the same idiom loadTail

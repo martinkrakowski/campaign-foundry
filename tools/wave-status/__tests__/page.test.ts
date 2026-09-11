@@ -2,10 +2,15 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { Window } from "happy-dom";
+import { extractDarkBlock, extractRootBlock } from "../server.js";
 import type { WaveStatus } from "../lib/types.js";
 
 const PAGE_PATH = fileURLToPath(
   new URL("../public/index.html", import.meta.url),
+);
+
+const realTokensPath = fileURLToPath(
+  new URL("../../../apps/web/src/styles/tokens.css", import.meta.url),
 );
 
 class FakeEventSource {
@@ -191,6 +196,7 @@ interface LoadPageOptions {
   // so a responder that wants to race a later poll should resolve call 1
   // immediately and only defer from call 2 on.
   statusResponder?: (callIndex: number) => Promise<Response> | Response;
+  tokensCss?: string | false;
 }
 
 async function loadPage(
@@ -220,6 +226,23 @@ async function loadPage(
   }
 
   window.document.write(html.replace(/<script>[\s\S]*?<\/script>/, ""));
+
+  const tokensCss =
+    options?.tokensCss !== undefined
+      ? options.tokensCss
+      : await (async () => {
+          const raw = await readFile(realTokensPath, "utf8");
+          const root = extractRootBlock(raw) ?? "";
+          const dark = extractDarkBlock(raw) ?? "";
+          return `${root}\n\n${dark}\n`;
+        })();
+
+  if (tokensCss) {
+    const style = window.document.createElement("style");
+    style.setAttribute("data-tokens", "");
+    style.textContent = tokensCss;
+    window.document.head.appendChild(style);
+  }
 
   const fetches: string[] = [];
   let statusCalls = 0;
@@ -282,6 +305,7 @@ async function loadPage(
     "setInterval",
     "clearInterval",
     "window",
+    "getComputedStyle",
     scriptMatch[1],
   ) as (
     document: Document,
@@ -290,6 +314,7 @@ async function loadPage(
     setIntervalFn: (handler: () => void, ms?: number) => number,
     clearIntervalFn: (id: number) => void,
     window: Window,
+    getComputedStyle: typeof window.getComputedStyle,
   ) => void;
 
   run(
@@ -299,6 +324,7 @@ async function loadPage(
     setIntervalImpl,
     clearIntervalImpl,
     window,
+    window.getComputedStyle.bind(window),
   );
 
   await vi.waitFor(() => {
@@ -1764,6 +1790,407 @@ describe("the status page", () => {
     expect(laneIds[3]).toBe("l_nolog");
   });
 
+  test("with sorting on, the wave whose most recent lane is newest renders first, with every wave collapsed", async () => {
+    const statusWithWaves: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "W_mid",
+          lanes: [
+            {
+              wave: "W_mid",
+              lane: "l_mid",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 2000, tail: "" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+        {
+          id: "W_old",
+          lanes: [
+            {
+              wave: "W_old",
+              lane: "l_old",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 1000, tail: "" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+        {
+          id: "W_new",
+          lanes: [
+            {
+              wave: "W_new",
+              lane: "l_new",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 3000, tail: "" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    const page = await loadPage(statusWithWaves);
+    const doc = page.window.document;
+
+    // Assert every wave is collapsed by default (the reported case)
+    const waveRows = Array.from(doc.querySelectorAll("tr.wave"));
+    expect(waveRows.length).toBe(3);
+    for (const waveRow of waveRows) {
+      expect(
+        waveRow.querySelector("button")?.getAttribute("aria-expanded"),
+      ).toBe("false");
+    }
+    const laneRows = Array.from(doc.querySelectorAll("tr.lane"));
+    expect(laneRows.length).toBe(3);
+    for (const laneRow of laneRows) {
+      expect((laneRow as unknown as HTMLElement).hidden).toBe(true);
+    }
+
+    // With sorting on, W_new (3000) renders first, followed by W_mid (2000), then W_old (1000)
+    const waveIds = waveRows.map((el) => el.getAttribute("data-wave"));
+    expect(waveIds).toEqual(["W_new", "W_mid", "W_old"]);
+    expect(waveIds[0]).toBe("W_new");
+  });
+
+  test("flipping the switch off restores server order at both levels", async () => {
+    const multiLevelStatus: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "W_server1",
+          lanes: [
+            {
+              wave: "W_server1",
+              lane: "l_s1_old",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 1000, tail: "" },
+              },
+              disagreements: [],
+            },
+            {
+              wave: "W_server1",
+              lane: "l_s1_new",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 2000, tail: "" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+        {
+          id: "W_server2",
+          lanes: [
+            {
+              wave: "W_server2",
+              lane: "l_s2_old",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 3000, tail: "" },
+              },
+              disagreements: [],
+            },
+            {
+              wave: "W_server2",
+              lane: "l_s2_new",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 4000, tail: "" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    const page = await loadPage(multiLevelStatus);
+    const doc = page.window.document;
+    const switchEl = doc.getElementById(
+      "sort-switch",
+    ) as unknown as HTMLElement;
+    expect(switchEl).not.toBeNull();
+    expect(switchEl.getAttribute("aria-checked")).toBe("true");
+
+    // Initially sorted newest first at both wave and lane levels
+    let waveRows = Array.from(doc.querySelectorAll("tr.wave"));
+    expect(waveRows.map((w) => w.getAttribute("data-wave"))).toEqual([
+      "W_server2",
+      "W_server1",
+    ]);
+    let lanesW2 = Array.from(
+      doc.querySelectorAll('tr.lane[data-wave="W_server2"]'),
+    );
+    expect(lanesW2.map((l) => l.getAttribute("data-lane"))).toEqual([
+      "l_s2_new",
+      "l_s2_old",
+    ]);
+    let lanesW1 = Array.from(
+      doc.querySelectorAll('tr.lane[data-wave="W_server1"]'),
+    );
+    expect(lanesW1.map((l) => l.getAttribute("data-lane"))).toEqual([
+      "l_s1_new",
+      "l_s1_old",
+    ]);
+
+    // Flip switch off
+    switchEl.click();
+    expect(switchEl.getAttribute("aria-checked")).toBe("false");
+
+    // Server order is restored at both levels
+    waveRows = Array.from(doc.querySelectorAll("tr.wave"));
+    expect(waveRows.map((w) => w.getAttribute("data-wave"))).toEqual([
+      "W_server1",
+      "W_server2",
+    ]);
+    lanesW1 = Array.from(
+      doc.querySelectorAll('tr.lane[data-wave="W_server1"]'),
+    );
+    expect(lanesW1.map((l) => l.getAttribute("data-lane"))).toEqual([
+      "l_s1_old",
+      "l_s1_new",
+    ]);
+    lanesW2 = Array.from(
+      doc.querySelectorAll('tr.lane[data-wave="W_server2"]'),
+    );
+    expect(lanesW2.map((l) => l.getAttribute("data-lane"))).toEqual([
+      "l_s2_old",
+      "l_s2_new",
+    ]);
+
+    // Flip switch on again
+    switchEl.click();
+    expect(switchEl.getAttribute("aria-checked")).toBe("true");
+
+    waveRows = Array.from(doc.querySelectorAll("tr.wave"));
+    expect(waveRows.map((w) => w.getAttribute("data-wave"))).toEqual([
+      "W_server2",
+      "W_server1",
+    ]);
+    lanesW2 = Array.from(
+      doc.querySelectorAll('tr.lane[data-wave="W_server2"]'),
+    );
+    expect(lanesW2.map((l) => l.getAttribute("data-lane"))).toEqual([
+      "l_s2_new",
+      "l_s2_old",
+    ]);
+    lanesW1 = Array.from(
+      doc.querySelectorAll('tr.lane[data-wave="W_server1"]'),
+    );
+    expect(lanesW1.map((l) => l.getAttribute("data-lane"))).toEqual([
+      "l_s1_new",
+      "l_s1_old",
+    ]);
+  });
+
+  test("a wave with no timestamped lane sorts last", async () => {
+    const statusWithNoTimestamp: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "W_nolog",
+          lanes: [
+            {
+              wave: "W_nolog",
+              lane: "l_none",
+              derived: { alive: false },
+              disagreements: [],
+            },
+          ],
+        },
+        {
+          id: "W_empty",
+          lanes: [],
+        },
+        {
+          id: "W_old",
+          lanes: [
+            {
+              wave: "W_old",
+              lane: "l_old",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 1000, tail: "" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+        {
+          id: "W_new",
+          lanes: [
+            {
+              wave: "W_new",
+              lane: "l_new",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 3000, tail: "" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    const page = await loadPage(statusWithNoTimestamp);
+    const doc = page.window.document;
+    const waveRows = Array.from(doc.querySelectorAll("tr.wave"));
+    const waveIds = waveRows.map((el) => el.getAttribute("data-wave"));
+    expect(waveIds).toEqual(["W_new", "W_old", "W_nolog", "W_empty"]);
+  });
+
+  test("an expanded wave stays expanded across a re-sort, and an open log stays open when its wave moves", async () => {
+    const beforeStatus: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "W_A",
+          lanes: [
+            {
+              wave: "W_A",
+              lane: "l_a",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 1000, tail: "" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+        {
+          id: "W_B",
+          lanes: [
+            {
+              wave: "W_B",
+              lane: "l_b",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 2000, tail: "" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    const afterStatus: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "W_A",
+          lanes: [
+            {
+              wave: "W_A",
+              lane: "l_a",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 3000, tail: "" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+        {
+          id: "W_B",
+          lanes: [
+            {
+              wave: "W_B",
+              lane: "l_b",
+              derived: {
+                alive: true,
+                log: { bytes: 10, mtimeMs: 2000, tail: "" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    const page = await loadPage(beforeStatus, "test log for W_A/l_a");
+    const doc = page.window.document;
+
+    // Initial state with sorting on: W_B (2000) is first, W_A (1000) is second
+    let waveRows = Array.from(doc.querySelectorAll("tr.wave"));
+    expect(waveRows.map((r) => r.getAttribute("data-wave"))).toEqual([
+      "W_B",
+      "W_A",
+    ]);
+
+    // Expand W_A
+    const waveAButton = doc.querySelector(
+      'tr.wave[data-wave="W_A"] button',
+    ) as unknown as HTMLElement;
+    waveAButton.click();
+    expect(waveAButton.getAttribute("aria-expanded")).toBe("true");
+    const laneA = doc.querySelector(
+      'tr.lane[data-wave="W_A"][data-lane="l_a"]',
+    ) as unknown as HTMLElement;
+    expect(laneA.hidden).toBe(false);
+
+    // Open log for W_A / l_a
+    laneA.click();
+    await vi.waitFor(() => {
+      expect(page.fetches).toContain("/api/log/W_A/l_a?tail=16");
+      expect(
+        (doc.getElementById("log-pane") as HTMLElement | null)?.hidden,
+      ).toBe(false);
+    });
+    expect(doc.getElementById("log-lane")?.textContent).toBe("W_A/l_a");
+    expect(laneA.classList.contains("active")).toBe(true);
+
+    // Emit new status where W_A becomes newer (3000 > 2000)
+    // This moves W_A from second to first row!
+    page.source.emit("status", JSON.stringify(afterStatus));
+
+    // Prove the re-sort moved W_A to the first position
+    waveRows = Array.from(doc.querySelectorAll("tr.wave"));
+    expect(waveRows.map((r) => r.getAttribute("data-wave"))).toEqual([
+      "W_A",
+      "W_B",
+    ]);
+
+    // W_A is still expanded after moving
+    const waveAButtonAfter = doc.querySelector(
+      'tr.wave[data-wave="W_A"] button',
+    ) as unknown as HTMLElement;
+    expect(waveAButtonAfter.getAttribute("aria-expanded")).toBe("true");
+    const laneAAfter = doc.querySelector(
+      'tr.lane[data-wave="W_A"][data-lane="l_a"]',
+    ) as unknown as HTMLElement;
+    expect(laneAAfter.hidden).toBe(false);
+
+    // The open log is still open and active row is preserved on the moved lane
+    const logPane = doc.getElementById("log-pane") as HTMLElement | null;
+    expect(logPane?.hidden).toBe(false);
+    expect(doc.getElementById("log-lane")?.textContent).toBe("W_A/l_a");
+    expect(laneAAfter.classList.contains("active")).toBe(true);
+
+    // Now flip the sort switch off to restore server order (W_A, W_B)
+    const switchEl = doc.getElementById(
+      "sort-switch",
+    ) as unknown as HTMLElement;
+    switchEl.click();
+    expect(switchEl.getAttribute("aria-checked")).toBe("false");
+    expect(waveAButtonAfter.getAttribute("aria-expanded")).toBe("true");
+    expect(logPane?.hidden).toBe(false);
+    expect(doc.getElementById("log-lane")?.textContent).toBe("W_A/l_a");
+    expect(laneAAfter.classList.contains("active")).toBe(true);
+  });
+
   test("the switch has an accessible name, flipping it restores the server order without a refresh, and the choice survives a reload", async () => {
     const statusWithMtimes: WaveStatus = {
       generatedAt: "now",
@@ -3012,5 +3439,239 @@ describe("the status page", () => {
       expect(headerSize).toBe("10px");
       expect(bodySize).not.toBe(headerSize);
     }
+  });
+
+  test("typing narrows the rows; clearing restores them; a wave with no surviving lanes says so; the open log survives a filter that hides its row", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    const filter = doc.getElementById("filter") as unknown as HTMLInputElement;
+    expect(filter).not.toBeNull();
+
+    const dispatchInput = () => {
+      const event = new (
+        filter.ownerDocument!.defaultView as unknown as { Event: typeof Event }
+      ).Event("input", { bubbles: true });
+      filter.dispatchEvent(event);
+    };
+
+    // Initially all 5 lanes from mixedStatus (4 in T, 1 in U)
+    expect(doc.querySelectorAll("tr.lane").length).toBe(5);
+
+    // Filter to "t1" — only lane t1 matches.
+    filter.value = "t1";
+    dispatchInput();
+
+    const surviving = doc.querySelectorAll("tr.lane");
+    expect(surviving.length).toBe(1);
+    expect(surviving[0]?.getAttribute("data-lane")).toBe("t1");
+
+    // Wave U has no surviving lanes and says so
+    const emptyU = doc.querySelector('tr.empty[data-wave="U"]');
+    expect(emptyU).not.toBeNull();
+    expect(emptyU?.textContent).toContain("No lanes match “t1”");
+
+    // Open log for t1
+    (surviving[0] as unknown as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(page.fetches).toContain("/api/log/T/t1?tail=16");
+    });
+    const logPane = doc.getElementById("log-pane") as unknown as HTMLElement;
+    expect(logPane?.hidden).toBe(false);
+    expect(doc.getElementById("log-lane")?.textContent).toBe("T/t1");
+
+    // Now type a filter that hides t1 (e.g. "u1")
+    filter.value = "u1";
+    dispatchInput();
+
+    expect(doc.querySelectorAll("tr.lane").length).toBe(1);
+    expect(
+      doc.querySelector('tr.lane[data-wave="T"][data-lane="t1"]'),
+    ).toBeNull();
+    // Wave T now has no surviving lanes
+    const emptyT = doc.querySelector('tr.empty[data-wave="T"]');
+    expect(emptyT).not.toBeNull();
+    expect(emptyT?.textContent).toContain("No lanes match “u1”");
+
+    // Open log pane survives even though t1 is hidden
+    expect(logPane?.hidden).toBe(false);
+    expect(doc.getElementById("log-lane")?.textContent).toBe("T/t1");
+
+    // Clearing restores all rows and the active row indicator
+    filter.value = "";
+    dispatchInput();
+    expect(doc.querySelectorAll("tr.lane").length).toBe(5);
+    const restoredT1 = doc.querySelector(
+      'tr.lane[data-wave="T"][data-lane="t1"]',
+    );
+    expect(restoredT1?.classList.contains("active")).toBe(true);
+    expect(logPane?.hidden).toBe(false);
+  });
+
+  test("the filter input resolves its border to the control token and carries an accessible name", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    const filter = doc.getElementById("filter");
+    expect(filter).not.toBeNull();
+    expect(filter?.getAttribute("type")).toBe("search");
+    const label = filter?.getAttribute("aria-label");
+    expect(label).toBe("Filter lanes by wave or lane");
+
+    const filterBorder = page.window.getComputedStyle(filter!).borderColor;
+    const expectedBorder = page.window
+      .getComputedStyle(doc.documentElement)
+      .getPropertyValue("--color-border-control")
+      .trim();
+    expect(filterBorder).toBe(expectedBorder);
+
+    // Verify searching by wave id and lane name
+    const filterInput = filter as unknown as HTMLInputElement;
+    filterInput.value = "U";
+    filterInput.dispatchEvent(
+      new (doc.defaultView as unknown as { Event: typeof Event }).Event("input", {
+        bubbles: true,
+      }),
+    );
+    expect(doc.querySelectorAll("tr.lane").length).toBe(1);
+    expect(doc.querySelector("tr.lane")?.getAttribute("data-wave")).toBe("U");
+
+    filterInput.value = "t2";
+    filterInput.dispatchEvent(
+      new (doc.defaultView as unknown as { Event: typeof Event }).Event("input", {
+        bubbles: true,
+      }),
+    );
+    expect(doc.querySelectorAll("tr.lane").length).toBe(1);
+    expect(doc.querySelector("tr.lane")?.getAttribute("data-lane")).toBe("t2");
+  });
+
+  test("filtering with every wave collapsed displays the no-match empty row rather than hiding it", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    const filter = doc.getElementById("filter") as unknown as HTMLInputElement;
+
+    const dispatchInput = () => {
+      const event = new (
+        filter.ownerDocument!.defaultView as unknown as { Event: typeof Event }
+      ).Event("input", { bubbles: true });
+      filter.dispatchEvent(event);
+    };
+
+    // Verify every wave is collapsed initially (page opens with defaultExpanded = false)
+    const waveButtons = Array.from(doc.querySelectorAll("tr.wave button"));
+    expect(waveButtons.length).toBeGreaterThan(0);
+    for (const btn of waveButtons) {
+      expect(btn.getAttribute("aria-expanded")).toBe("false");
+    }
+    const allLanes = Array.from(doc.querySelectorAll("tr.lane"));
+    for (const lane of allLanes) {
+      expect((lane as unknown as HTMLElement).hidden).toBe(true);
+    }
+
+    // Filter to "t1" — Wave U has no matching lanes.
+    filter.value = "t1";
+    dispatchInput();
+
+    const emptyU = doc.querySelector('tr.empty[data-wave="U"]') as unknown as HTMLElement;
+    expect(emptyU).not.toBeNull();
+    expect(emptyU.hidden).toBe(false);
+    expect(emptyU.textContent).toContain("No lanes match “t1”");
+
+    // Filter to a query that matches no lane in any wave
+    filter.value = "nomatchanywhere";
+    dispatchInput();
+
+    const emptyRows = Array.from(doc.querySelectorAll("tr.empty"));
+    expect(emptyRows.length).toBe(2);
+    for (const row of emptyRows) {
+      expect((row as unknown as HTMLElement).hidden).toBe(false);
+      expect(row.textContent).toContain("No lanes match “nomatchanywhere”");
+    }
+
+    // Toggling the wave open and closed keeps the empty row visible
+    const waveUButton = doc.querySelector('tr.wave[data-wave="U"] button') as unknown as HTMLElement;
+    waveUButton.click();
+    expect(waveUButton.getAttribute("aria-expanded")).toBe("true");
+    expect((doc.querySelector('tr.empty[data-wave="U"]') as unknown as HTMLElement).hidden).toBe(false);
+
+    waveUButton.click();
+    expect(waveUButton.getAttribute("aria-expanded")).toBe("false");
+    expect((doc.querySelector('tr.empty[data-wave="U"]') as unknown as HTMLElement).hidden).toBe(false);
+  });
+
+  test("typing in the filter does not refetch the followed log", async () => {
+    let logCalls = 0;
+    const page = await loadPage(mixedStatus, () => {
+      logCalls++;
+      return new Response("log output", { status: 200 });
+    });
+    const doc = page.window.document;
+
+    // Open log for T/t1
+    const laneT1 = doc.querySelector('tr.lane[data-wave="T"][data-lane="t1"]') as unknown as HTMLElement;
+    laneT1.click();
+    await vi.waitFor(() => {
+      expect(page.fetches).toContain("/api/log/T/t1?tail=16");
+    });
+    const initialFetches = page.fetches.length;
+
+    // Enable follow
+    const followCheckbox = doc.getElementById("log-follow") as unknown as HTMLInputElement;
+    followCheckbox.checked = true;
+    followCheckbox.dispatchEvent(
+      new (followCheckbox.ownerDocument!.defaultView as unknown as { Event: typeof Event }).Event("change", {
+        bubbles: true,
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(page.fetches.length).toBeGreaterThan(initialFetches);
+    });
+    const followFetches = page.fetches.length;
+
+    // Type multiple characters into filter
+    const filter = doc.getElementById("filter") as unknown as HTMLInputElement;
+    filter.value = "t";
+    filter.dispatchEvent(
+      new (filter.ownerDocument!.defaultView as unknown as { Event: typeof Event }).Event("input", {
+        bubbles: true,
+      }),
+    );
+    filter.value = "t1";
+    filter.dispatchEvent(
+      new (filter.ownerDocument!.defaultView as unknown as { Event: typeof Event }).Event("input", {
+        bubbles: true,
+      }),
+    );
+
+    // Give any microtasks/promises a turn
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Filter typing must not have triggered additional log tail fetches
+    expect(page.fetches.length).toBe(followFetches);
+  });
+
+  test("a referenced token that resolves to empty raises the warning naming it; a fully-resolving page shows nothing", async () => {
+    // Fully resolving page shows nothing
+    const normalPage = await loadPage(mixedStatus);
+    const normalWarning = normalPage.window.document.getElementById(
+      "palette-warning",
+    ) as unknown as HTMLElement;
+    expect(normalWarning?.hidden).toBe(true);
+
+    // Broken tokens: omit --color-brand-primary
+    const raw = await readFile(realTokensPath, "utf8");
+    const root = extractRootBlock(raw) ?? "";
+    const dark = extractDarkBlock(raw) ?? "";
+    const brokenCss = `${root}\n\n${dark}\n`.replaceAll(
+      "--color-brand-primary",
+      "--color-brand-primary-omitted",
+    );
+    const brokenPage = await loadPage(mixedStatus, undefined, {
+      tokensCss: brokenCss,
+    });
+    const brokenWarning = brokenPage.window.document.getElementById(
+      "palette-warning",
+    ) as unknown as HTMLElement;
+    expect(brokenWarning?.hidden).toBe(false);
+    expect(brokenWarning?.textContent).toContain("--color-brand-primary");
   });
 });
