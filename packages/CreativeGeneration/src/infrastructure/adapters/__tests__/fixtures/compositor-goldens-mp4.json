@@ -5,5 +5,12 @@
     "ffmpegVersion": "6.0",
     "x264Version": "core 164 r3075 66a5bc1",
     "threads": "1"
+  },
+  "linux-x64": {
+    "fileHash": "3e8b49571c6884f4488cf79290968879275e5d734eedea3c872e1ce04bf71f1b",
+    "streamHash": "f278a130ff51a1378f5f89da30fb800098e4a382cbb543871f314580a63b19fe",
+    "ffmpegVersion": "7.0.2-static",
+    "x264Version": "core 164 r3191 4613ac3",
+    "threads": "1"
   }
 }
