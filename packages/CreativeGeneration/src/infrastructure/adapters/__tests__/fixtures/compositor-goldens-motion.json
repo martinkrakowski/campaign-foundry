@@ -98,5 +98,15 @@
     "headline-top/accent-wipe/clip/0.75": "b8161ec08f0c57f31f89dd59813cf9398e06017fbc16a747cd4cd4e271ce68f4",
     "headline-top/accent-wipe/clip/1.00": "48517d72d359871abbc2350ccb615f3b01ace23e3d0823be58c3eb98a7f2d3f4",
     "headline-top/accent-wipe/poster": "2cd26b195c039671dfc9bbaa84840b4e62b5824b7e56d1812f9e25c12c50a17b"
+  },
+  "platformProvenance": {
+    "darwin-arm64": {
+      "reprovedBy": "nothing",
+      "note": "Recorded once, on one machine (macOS, Apple silicon). No runner re-proves these cells: CI is ubuntu-latest, so this key is asserted by nothing and a drift here fails no build."
+    },
+    "linux-x64": {
+      "reprovedBy": "ci",
+      "note": "Re-proved by CI on every run: the test job is ubuntu-latest, so these cells are asserted, not merely recorded, and a drift here fails the build."
+    }
   }
 }

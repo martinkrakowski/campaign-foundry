@@ -4,5 +4,15 @@
   },
   "linux-x64": {
     "headline-top/bold/9:16": "86841e53a671bf38cd929489d224e32359c67b4b22bc623b17ecefda0ae2db67"
+  },
+  "platformProvenance": {
+    "darwin-arm64": {
+      "reprovedBy": "nothing",
+      "note": "Recorded once, on one machine (macOS, Apple silicon). No runner re-proves these cells: CI is ubuntu-latest, so this key is asserted by nothing and a drift here fails no build."
+    },
+    "linux-x64": {
+      "reprovedBy": "ci",
+      "note": "Re-proved by CI on every run: the test job is ubuntu-latest, so these cells are asserted, not merely recorded, and a drift here fails the build."
+    }
   }
 }

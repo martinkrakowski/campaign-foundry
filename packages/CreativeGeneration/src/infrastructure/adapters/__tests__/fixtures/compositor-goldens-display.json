@@ -42,5 +42,15 @@
     "headline-top/subtle/160x600": "e3a1a90d98570b4e66f971c76376755903c3037fc112594c30e3773553c5ccbe",
     "headline-top/subtle/320x50": "54266b1219420ca6a2a324edb71a3f740915e4ba7fd58ae72e8d3074831bcf1c",
     "headline-top/subtle/300x600": "498e9d893bda6140447f4bad5d04366bc66c501f9c17a474670e5fca28f14c70"
+  },
+  "platformProvenance": {
+    "darwin-arm64": {
+      "reprovedBy": "nothing",
+      "note": "Recorded once, on one machine (macOS, Apple silicon). No runner re-proves these cells: CI is ubuntu-latest, so this key is asserted by nothing and a drift here fails no build."
+    },
+    "linux-x64": {
+      "reprovedBy": "ci",
+      "note": "Re-proved by CI on every run: the test job is ubuntu-latest, so these cells are asserted, not merely recorded, and a drift here fails the build."
+    }
   }
 }

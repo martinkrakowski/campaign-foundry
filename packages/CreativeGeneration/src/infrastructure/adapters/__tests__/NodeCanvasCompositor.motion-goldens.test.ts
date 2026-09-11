@@ -18,6 +18,7 @@ import { ProceduralBackgroundGenerator } from "../ProceduralBackgroundGenerator.
 import {
   MOTION_GOLDEN_CELL_COUNT,
   compositorGoldenKey,
+  goldenPlatformKeys,
   goldenRun,
   isRecordingGoldens,
   missingGoldenMapMessage,
@@ -109,7 +110,7 @@ describe("NodeCanvasCompositor motion goldens (C1)", () => {
   const key = compositorGoldenKey();
   const recording = isRecordingGoldens();
   const goldens = resolveGoldenMap(fixture, key);
-  const missingMessage = missingGoldenMapMessage(key, Object.keys(fixture), {
+  const missingMessage = missingGoldenMapMessage(key, goldenPlatformKeys(fixture), {
     fixtureFile: "compositor-goldens-motion.json",
     cellsHint: `${MOTION_GOLDEN_CELL_COUNT} sha256 cells (both layouts × ${MOTION_KINDS.length} motion kinds × five clip samples + the poster frame)`,
   });

@@ -23,6 +23,7 @@ import {
   DISPLAY_INSET_GOLDEN_CELL_COUNT,
   INSET_GOLDEN_CELL_COUNT,
   compositorGoldenKey,
+  goldenPlatformKeys,
   goldenRun,
   isRecordingGoldens,
   missingGoldenMapMessage,
@@ -84,7 +85,7 @@ describe("NodeCanvasCompositor goldens", () => {
   const key = compositorGoldenKey();
   const recording = isRecordingGoldens();
   const goldens = resolveGoldenMap(fixture, key);
-  const missingMessage = missingGoldenMapMessage(key, Object.keys(fixture));
+  const missingMessage = missingGoldenMapMessage(key, goldenPlatformKeys(fixture));
 
   test(
     "still PNG sha256 matches the committed matrix (both layouts × both tones × three ratios)",
@@ -175,7 +176,7 @@ describe("NodeCanvasCompositor inset goldens", () => {
   const key = compositorGoldenKey();
   const recording = isRecordingGoldens();
   const goldens = resolveGoldenMap(insetFixture, key);
-  const missingMessage = missingGoldenMapMessage(key, Object.keys(insetFixture), {
+  const missingMessage = missingGoldenMapMessage(key, goldenPlatformKeys(insetFixture), {
     fixtureFile: "compositor-goldens-insets.json",
     cellsHint: `the ${INSET_CELL} cell`,
   });
@@ -220,7 +221,7 @@ describe("NodeCanvasCompositor display goldens", () => {
   const key = compositorGoldenKey();
   const recording = isRecordingGoldens();
   const goldens = resolveGoldenMap(displayFixture, key);
-  const missingMessage = missingGoldenMapMessage(key, Object.keys(displayFixture), {
+  const missingMessage = missingGoldenMapMessage(key, goldenPlatformKeys(displayFixture), {
     fixtureFile: "compositor-goldens-display.json",
     cellsHint: "20 sha256 cells (both layouts × both tones × five display sizes)",
   });
@@ -259,7 +260,7 @@ describe("NodeCanvasCompositor display inset goldens", () => {
   const key = compositorGoldenKey();
   const recording = isRecordingGoldens();
   const goldens = resolveGoldenMap(displayInsetFixture, key);
-  const missingMessage = missingGoldenMapMessage(key, Object.keys(displayInsetFixture), {
+  const missingMessage = missingGoldenMapMessage(key, goldenPlatformKeys(displayInsetFixture), {
     fixtureFile: "compositor-goldens-display-insets.json",
     cellsHint: `the ${DISPLAY_INSET_CELL} cell`,
   });

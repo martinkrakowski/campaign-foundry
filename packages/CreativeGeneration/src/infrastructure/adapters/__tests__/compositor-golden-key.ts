@@ -19,17 +19,74 @@ export const DISPLAY_INSET_GOLDEN_CELL_COUNT = 1;
  */
 export const MOTION_GOLDEN_CELL_COUNT = 48;
 
+/**
+ * The one non-platform top-level key a golden fixture may carry.
+ *
+ * Every fixture ships a `darwin-arm64` and a `linux-x64` map, which reads as
+ * "verified on two platforms". Only one of them is: CI is `ubuntu-latest`, so
+ * `linux-x64` is re-proved on every run and `darwin-arm64` — recorded once, on
+ * one machine — is re-proved by nothing. The fixture shape cannot say that on
+ * its own, so the caveat lives in the data rather than in a comment a reformat
+ * would drop, and `compositor-golden-provenance.test.ts` fails a family that
+ * ships without it.
+ *
+ * It is deliberately *not* shaped like `${platform}-${arch}`: no loader, and no
+ * reader, can mistake it for a golden map.
+ */
+export const GOLDEN_PROVENANCE_KEY = "platformProvenance";
+
 export function compositorGoldenKey(
   platform: string = process.platform,
   arch: string = process.arch,
 ): string {
   const override = process.env.COMPOSITOR_GOLDEN_KEY_OVERRIDE;
-  if (override !== undefined && override !== "") return override;
+  if (override !== undefined && override !== "") {
+    // The override is the key a recording run writes *into*. Left unvalidated it
+    // is a way to record cells over the caveat and destroy it, so the one key
+    // this file reserves is refused rather than trusted.
+    if (override === GOLDEN_PROVENANCE_KEY) {
+      throw new Error(
+        `COMPOSITOR_GOLDEN_KEY_OVERRIDE=${JSON.stringify(override)} is refused: ` +
+          `"${GOLDEN_PROVENANCE_KEY}" is reserved for the caveat, not for golden cells. ` +
+          `Recording under it would overwrite the provenance this suite exists to hold. ` +
+          `Use the "<platform>-<arch>" key of the machine you are recording on.`,
+      );
+    }
+    return override;
+  }
   return `${platform}-${arch}`;
 }
 
 export type GoldenMap = Record<string, string>;
-export type GoldenFixture = Record<string, GoldenMap>;
+
+/** Who re-proves a platform's cells: a CI runner, or nobody. */
+export type GoldenReproof = "ci" | "nothing";
+export type GoldenProvenance = { readonly reprovedBy: GoldenReproof; readonly note: string };
+
+/** `${platform}-${arch}` -> who re-proves it: the value under `GOLDEN_PROVENANCE_KEY`. */
+export type GoldenProvenanceMap = Readonly<Record<string, GoldenProvenance>>;
+
+/**
+ * A golden fixture file holds two different shapes side by side, so an
+ * undifferentiated `Record<string, GoldenMap>` is a comfortable lie: it claims
+ * the caveat is a flat cell map. Indexing a platform-arch key yields a
+ * `GoldenMap`; indexing `GOLDEN_PROVENANCE_KEY` yields the caveat map.
+ */
+export type GoldenFixture = Record<string, GoldenMap> & {
+  readonly [GOLDEN_PROVENANCE_KEY]?: GoldenProvenanceMap;
+};
+
+/** `${platform}-${arch}`, exactly as `compositorGoldenKey` produces it. */
+const PLATFORM_KEY_PATTERN = /^[a-z0-9]+-[a-z0-9]+$/;
+
+export function isGoldenPlatformKey(key: string): boolean {
+  return PLATFORM_KEY_PATTERN.test(key);
+}
+
+/** Only the `${platform}-${arch}` keys of a fixture — never the caveat key. */
+export function goldenPlatformKeys(fixture: Record<string, unknown>): string[] {
+  return Object.keys(fixture).filter(isGoldenPlatformKey);
+}
 
 /** The map for `key`, or `undefined` when missing or empty (caller should fail). */
 export function resolveGoldenMap(fixture: GoldenFixture, key: string): GoldenMap | undefined {
@@ -52,6 +109,89 @@ export function missingGoldenMapMessage(
     `Record ${cellsHint} into fixtures/${fixtureFile}["${key}"]. ` +
     `Run .github/workflows/record-goldens.yml (workflow_dispatch) or set RECORD_COMPOSITOR_GOLDENS=1 on the target platform.`
   );
+}
+
+const REPROOF_VALUES: readonly GoldenReproof[] = ["ci", "nothing"];
+const REPROOF_CHOICES = REPROOF_VALUES.map((v) => `"${v}"`).join(" | ");
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * What `file` must fix before its platform goldens may ship. Empty means the
+ * caveat is present and well-formed.
+ *
+ * A file with no `${platform}-${arch}` key is not a golden family — the
+ * fixtures directory is shared — and is left alone. A file that *is* one must
+ * account for every top-level key, because a key this cannot classify is a
+ * platform map it cannot hold to the caveat.
+ */
+export function goldenProvenanceProblems(
+  fixture: Record<string, unknown>,
+  file: string,
+): string[] {
+  const platformKeys = goldenPlatformKeys(fixture);
+  if (platformKeys.length === 0) return [];
+
+  const unclassifiable = Object.keys(fixture).filter(
+    (k) => k !== GOLDEN_PROVENANCE_KEY && !isGoldenPlatformKey(k),
+  );
+  if (unclassifiable.length > 0) {
+    return unclassifiable.map(
+      (k) =>
+        `${file}: top-level key "${k}" is neither a platform-arch golden map nor ` +
+        `"${GOLDEN_PROVENANCE_KEY}". Every platform map must match ${"`${platform}-${arch}`"}, ` +
+        `or the caveat cannot be held to it.`,
+    );
+  }
+
+  const provenance = fixture[GOLDEN_PROVENANCE_KEY];
+  if (!isPlainObject(provenance)) {
+    return [
+      `${file}: ${platformKeys.length} platform golden map(s) (${platformKeys.join(", ")}) but no ` +
+        `"${GOLDEN_PROVENANCE_KEY}" object. Add one entry per platform key: ` +
+        `{ "reprovedBy": ${REPROOF_CHOICES}, "note": "<what re-proves this key>" } — ` +
+        `"ci" for a key a runner asserts on every run, "nothing" for a key recorded once ` +
+        `and asserted by no runner.`,
+    ];
+  }
+
+  const problems: string[] = [];
+  let ciReproved = 0;
+  for (const key of platformKeys) {
+    const entry = provenance[key];
+    if (!isPlainObject(entry)) {
+      problems.push(
+        `${file}["${GOLDEN_PROVENANCE_KEY}"] has no entry for "${key}" — add ` +
+          `{ "reprovedBy": ${REPROOF_CHOICES}, "note": "..." }`,
+      );
+      continue;
+    }
+    const reprovedBy = entry["reprovedBy"];
+    if (reprovedBy !== "ci" && reprovedBy !== "nothing") {
+      problems.push(
+        `${file}["${GOLDEN_PROVENANCE_KEY}"]["${key}"].reprovedBy must be ` +
+          `${REPROOF_CHOICES}, got ${JSON.stringify(reprovedBy)}`,
+      );
+    } else if (reprovedBy === "ci") {
+      ciReproved += 1;
+    }
+    const note = entry["note"];
+    if (typeof note !== "string" || note.trim() === "") {
+      problems.push(
+        `${file}["${GOLDEN_PROVENANCE_KEY}"]["${key}"].note must be a non-empty string ` +
+          `saying what re-proves this key`,
+      );
+    }
+  }
+
+  if (ciReproved === 0) {
+    problems.push(
+      `${file}: no platform key declares "reprovedBy": "ci" — a golden family that no runner ` +
+        `asserts is a vacuous tripwire (D85 / D115)`,
+    );
+  }
+  return problems;
 }
 
 export function isRecordingGoldens(env: NodeJS.ProcessEnv = process.env): boolean {
