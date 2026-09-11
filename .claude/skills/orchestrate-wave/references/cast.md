@@ -333,11 +333,37 @@ record must say which round it is counting.
 
 ### The roster
 
-| Round-2 lane index | Seat | Invocation |
+| Round-2 lane index | Seat | Model / CLI |
 |---|---|---|
-| 1, 4, 7, 10 | **gemini-3.8-flash** (incumbent, the control) | `agy --print "$(cat BRIEF)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high --print-timeout 90m --output-format json` |
-| 2, 5, 8, 11 | **haiku 4.5** | `claude -p --model claude-haiku-4-5-20251001 --output-format json --permission-mode bypassPermissions "$(cat BRIEF)" < /dev/null` |
-| 3, 6, 9, 12 | **hy4-preview** | `opencode run --format json --model opencode-go/hy4-preview "$(cat BRIEF)"` |
+| 1, 4, 7, 10 | **gemini-3.8-flash** (incumbent, the control) | `agy --print "$(cat $BRIEF)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high --print-timeout 90m --output-format json` |
+| 2, 5, 8, 11 | **haiku 4.5** | `claude -p --model claude-haiku-4-5-20251001 --output-format json --permission-mode bypassPermissions "$(cat $BRIEF)" < /dev/null` |
+| 3, 6, 9, 12 | **hy4-preview** | `opencode run --format json --model opencode-go/hy4-preview "$(cat $BRIEF)"` |
+
+**Those are the model arguments, not a dispatch line.** None of the three runs correctly on its own:
+each expands `$BRIEF` in whatever directory the shell happens to be in, and each edits whatever
+checkout it is started from. Every seat is launched through the same wrapper, which supplies the two
+things the row above omits — **where it runs** and **a marker to wait on**:
+
+```sh
+BRIEF=/abs/path/to/brief.md          # absolute: the expansion is deferred to the lane's own shell
+WT=/abs/path/to/cf-<lane>            # the worktree the lane owns, never the main checkout
+LOG=/abs/path/to/<lane>.log
+nohup zsh -c "cd ${WT} && <seat command above> > ${LOG} 2>&1; echo \"EXIT \$?\" >> ${LOG}" \
+  >/dev/null 2>&1 & disown
+```
+
+`cd "$WT"` is not optional. A seat started from the repository root edits the main checkout, beside
+the owner's running dev server, and its commits land on whatever branch is checked out there. An
+**absolute** `$BRIEF` matters for the same reason: `dispatch-lane.sh` defers the `cat` to the lane's
+shell, so a relative path resolves against the worktree, not against where you typed it.
+
+**And the brief itself must carry what no invocation can.** A lane agent inherits no conversation,
+so the brief states the absolute worktree path, the branch, **whether a PR is already open**, and
+the house rules — never `git add -A`, never touch the owner's dev servers, never open
+`.agents/session-log.md`, no attribution trailer. Omitting them is the in-house equivalent of an
+unfunded seat: a full cycle spent, nothing to show. `dispatch-lane.sh` handles the stagger, the
+marker and the wave events for the opencode seats; the other two use the `LANE_CMD` escape hatch
+documented above.
 
 `big-pickle` is out on its own record (two silent no-ops). `glm-5.3-flash` is not in the in-house
 cast. Both stay in the record below because the record is evidence, not a menu.
