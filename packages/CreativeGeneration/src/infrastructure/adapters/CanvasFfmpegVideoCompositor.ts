@@ -229,6 +229,37 @@ function posterCopyTAt(
   return (keyBeat.startT + keyBeat.endT) / 2;
 }
 
+/**
+ * VG1: three free variables that a single `+bitexact` flag does not pin, all
+ * fixed here before any MP4 byte golden exists to invalidate (a review's
+ * finding — the earlier claim that `+bitexact` alone made this deterministic
+ * was wrong):
+ *
+ *  - `-threads 1`: unset, libx264 defaults to `threads=auto` (~1.5x cores),
+ *    and that literal number is embedded in the x264 SEI user-data NAL
+ *    (verified: `strings` on an encoded file shows the "options: ... threads=N"
+ *    banner in the bytes themselves) — so two machines with different core
+ *    counts produce different MP4 bytes *within one platform key*. Pinning to
+ *    1 also matches the pool comment above (canvas raster, not ffmpeg, is the
+ *    bottleneck), so single-threaded encoding costs nothing in practice.
+ *  - `-sws_flags +accurate_rnd+bitexact`: the implicit rgba->yuv420p
+ *    conversion goes through swscale (default scaler flags are "bicubic",
+ *    unverified for bit-exactness); its SIMD paths are not guaranteed
+ *    identical across CPU feature sets without this. **Placement matters**:
+ *    this must come after `-i`, not before it. Verified with `-v debug`:
+ *    placed before `-i` (as a pre-input "global" option, the usual
+ *    convention), the auto-inserted scaler's log line never shows the value
+ *    ("Setting 'sws_flags' to value ..." never appears, and the resulting
+ *    `flags:` bitmask is unchanged) — it is silently inert. Placed after
+ *    `-i`, the same debug line confirms the option lands (flags bitmask
+ *    gains the accurate_rnd/bitexact bits). An earlier attempt at this pin
+ *    put it before `-i` and would have shipped a no-op.
+ *  - `-flags +bitexact` (codec-level, alongside the format-level `-fflags`
+ *    already below): the comment on `+faststart`/`+bitexact` implied this was
+ *    already codec-bitexact; it was not. Empirically a no-op against this
+ *    exact arg set on the pinned ffmpeg-static build, but it is free and is
+ *    the documented pairing for reproducible libx264 output, so it stays.
+ */
 function ffmpegArgs(width: number, height: number, fps: number, outPath: string): string[] {
   return [
     "-f",
@@ -241,6 +272,10 @@ function ffmpegArgs(width: number, height: number, fps: number, outPath: string)
     String(fps),
     "-i",
     "-",
+    // Output-context option: must follow -i to reach the auto-inserted
+    // rgba->yuv420p scaler (see the doc comment above — before -i is inert).
+    "-sws_flags",
+    "+accurate_rnd+bitexact",
     "-c:v",
     "libx264",
     "-pix_fmt",
@@ -249,10 +284,15 @@ function ffmpegArgs(width: number, height: number, fps: number, outPath: string)
     "veryfast",
     "-crf",
     "20",
+    "-threads",
+    "1",
     // faststart moves the finalized moov ahead of mdat (progressive playback);
-    // bitexact strips encoder tags so identical frames yield identical bytes.
+    // -flags/-fflags +bitexact strip codec- and format-level encoder tags so
+    // identical frames yield identical bytes (VG1).
     "-movflags",
     "+faststart",
+    "-flags",
+    "+bitexact",
     "-fflags",
     "+bitexact",
     "-map_metadata",
