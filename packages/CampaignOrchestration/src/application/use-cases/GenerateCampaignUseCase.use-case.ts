@@ -803,6 +803,27 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     const copyCompat = this.validateCopyTemplateCompatibility(brief);
     if (!copyCompat.success) return copyCompat;
 
+    // D122: The HTML family is its own output family; its markup is never rasterised.
+    // Refuse image-html until an HTML renderer exists: the HTML output family has no
+    // renderer yet, so no campaign can be produced for it. Delete this guard when the
+    // HTML renderer ships — and decide there, not here, how the HTML family validates
+    // text, since by D122 its copy lives in markup rather than in a text layer.
+    //
+    // Last, deliberately: the checks above are about the brief the operator wrote, and
+    // a brief that is both unrenderable AND internally inconsistent should hear about
+    // the inconsistency it can act on. Placing this first would make every image-html
+    // brief report the same sentence and would strand the "does not accept text layers"
+    // arm above with no reachable creative type, since image-html is the only one that
+    // refuses text.
+    const creativeType = brief.template.creativeType;
+    if (creativeType === "image-html") {
+      return err(
+        new Error(
+          'Creative type "image-html" is not supported: the HTML output family has no renderer yet, so no campaign can be produced for it.',
+        ),
+      );
+    }
+
     return ok(true);
   }
 

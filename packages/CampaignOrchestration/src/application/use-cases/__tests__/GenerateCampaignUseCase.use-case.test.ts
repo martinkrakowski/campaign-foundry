@@ -106,6 +106,42 @@ describe("GenerateCampaignUseCase — validation", () => {
     expect(result.value.assets.length).toBeGreaterThan(0);
     expect(result.value.assets.every((a) => a.productId === "solo")).toBe(true);
   });
+
+  test("refuses an image-html brief at the boundary because the HTML family has no renderer yet", async () => {
+    // Without this guard, GenerateCampaignUseCase executes and throws from the
+    // compositor (NodeCanvasCompositor: layer kind "html" has no drawer).
+    // The refusal must happen at the boundary and name the unsupported family.
+    const d = deps({
+      compositor: {
+        compositeAsset: vi.fn(async () => {
+          throw new Error('NodeCanvasCompositor: layer kind "html" has no drawer in this compositor');
+        }),
+      },
+    });
+    const template: BriefTemplate = {
+      ...CANONICAL_TEMPLATES["image-html"],
+      id: "canonical-image-html",
+    };
+    const result = await new GenerateCampaignUseCase(d).execute(baseBrief({ template }));
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.message).toMatch(/HTML output family has no renderer yet/);
+    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+    expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
+  });
+
+  test("other creative types (image-text, video) pass brief validation", async () => {
+    const d = deps();
+    const imageTextResult = await new GenerateCampaignUseCase(d).execute(
+      baseBrief({ template: templateFromCanonical("social-post") }),
+    );
+    expect(imageTextResult.success).toBe(true);
+
+    const videoResult = await new GenerateCampaignUseCase(d).execute(
+      baseBrief({ template: templateFromCanonical("short-video") }),
+    );
+    expect(videoResult.success).toBe(true);
+  });
 });
 
 describe("GenerateCampaignUseCase — legal gate", () => {
