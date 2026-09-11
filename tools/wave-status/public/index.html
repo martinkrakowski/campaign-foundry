@@ -1278,9 +1278,7 @@
             : undefined;
       }
 
-      function compareLanes(a, b) {
-        const aTime = laneMtime(a);
-        const bTime = laneMtime(b);
+      function compareMtimes(aTime, bTime) {
         if (aTime !== undefined && bTime !== undefined) {
           return bTime - aTime;
         }
@@ -1291,6 +1289,25 @@
           return 1;
         }
         return 0;
+      }
+
+      function compareLanes(a, b) {
+        return compareMtimes(laneMtime(a), laneMtime(b));
+      }
+
+      function waveMtime(wave) {
+        let max;
+        for (const lane of wave.lanes) {
+          const time = laneMtime(lane);
+          if (time !== undefined && (max === undefined || time > max)) {
+            max = time;
+          }
+        }
+        return max;
+      }
+
+      function compareWaves(a, b) {
+        return compareMtimes(waveMtime(a), waveMtime(b));
       }
 
       function toggleWave(waveId) {
@@ -1558,8 +1575,11 @@
             focusKey = identityOf(row);
           }
         }
+        const waves = sortByRecent
+          ? [...status.waves].sort(compareWaves)
+          : status.waves;
         const groups = [];
-        for (const wave of status.waves) {
+        for (const wave of waves) {
           const isExpanded = expandedWaves.has(wave.id) || defaultExpanded;
           const lanes = sortByRecent
             ? [...wave.lanes].sort(compareLanes)
