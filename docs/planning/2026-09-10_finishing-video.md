@@ -1,5 +1,11 @@
 # Finishing Video — Architecture & Development Plan
 
+> **Amended 2026-09-10 after review. This is a sequencing note over lanes that already have names,
+> not a plan with its own prefix.** Three of its four lanes were renames: **VF1 is C5**
+> (`2026-09-10_reconciliation.md` §4c), **VF2 is the VG plan**, and **VF3 is L11's `fill` half**. Only
+> VF4 was new. I created a C1/M1 collision earlier this session and did not notice for hours; this is
+> the same mistake and it is recorded rather than quietly renamed.
+
 **Date:** 2026-09-10 · **Status:** draft, for the owner's approval · **Nothing dispatched.**
 **Verified against:** `main` at `f4f4d63`, plus PR #322 (the `video` drawer) in flight.
 **Hands off to:** `2026-09-10_keyframing.md`, whose gate this plan is.
@@ -32,15 +38,22 @@
 
 ## 1. Lanes
 
-| Lane | Task | Proof |
+| Lane | Where it already lives | Note |
 |---|---|---|
-| **VF1** | **The motion path honours the full order.** `drawTimeline` stops skipping `static-text`, `animated-text` and `logo`. The copy layer keeps its beat selection and the logo its key-beat anchor — **what changes is *when* they are drawn, not *how***. Where a layer's position in the list conflicts with its anchor, the list wins and the anchor is computed within it. | Frame goldens unchanged for canonical templates. A template with the logo below the shade renders that way in **both** paths. |
-| **VF2** | **An MP4 byte golden.** Hash the encoded output, not just the frames, for one short canonical timeline per platform key. If ffmpeg's output proves not reproducible across runs, **say so and delete D10's freeze claim** rather than recording a hash that will flap. | The golden is stable across two consecutive runs on one machine before it is committed. |
-| **VF3** | **The `fill` drawer** (D131). A solid or gradient region, the primitive `accent` already half-implements. | A `fill` layer renders; an undrawable kind still throws. |
-| **VF4** | **Retire the `GROUND_KINDS`/`SEQUENCED_KINDS` split** once VF1 lands — it exists only to describe the exception VF1 removes. | The concept has no callers. |
+| **C5** | `2026-09-10_reconciliation.md` §4c | The motion path honours the **full** order. **Scope correction below.** |
+| **VG1–VG3** | `2026-09-10_the-mp4-byte-golden.md` | The MP4 byte golden, or D10's claim withdrawn. |
+| **L11 (`fill` half)** | `2026-09-08_creative-templates-and-units.md`, D131 | The `fill` drawer. |
+| **VF4** | *new, and the only one* | Retire the `SEQUENCED_KINDS` split once C5 lands — it exists only to describe the exception C5 removes. |
 
-**Order.** VF2 first — a golden before a refactor, the lesson C1 already paid for. Then VF1, then VF3.
-VF4 whenever VF1 is in.
+**A scope correction C5 needs, found in review.** VF-D1 claimed a reordered template "is honoured in
+the still and ignored in the video". **The still path cannot honour it either in one case**:
+`drawLogo` throws *"the logo layer snaps to the text block, but no static-text layer ran before it"*
+when no text layer has run, and the ordering table permits `[image, logo, shade, static-text]`. So
+C5 must also take the logo's anchor from a prepared layout — as `drawTimeline` already does via
+`scenes.anchor.box` — **or** narrow its definition of done and say why. As written, an implementer
+lands the motion change, runs the DoD and finds the still path throwing.
+
+**Order.** **VG first** — a golden before a refactor, the lesson C1 already paid for. Then **C5**, then **L11's fill half**. VF4 whenever C5 is in.
 
 **Blocked on:** #322 merging.
 
@@ -58,13 +71,21 @@ VF4 whenever VF1 is in.
 motion path is list-driven, because *"keyframed per-layer motion is meaningless while the motion path
 draws three of five layers by name."*
 
-**C1 satisfied the letter of that and not the spirit.** The ground trio is list-driven; copy and logo
-are not. A keyframe track addresses a layer by `id` (K-D4) and animates `opacity`, `scale`, `dx`,
-`dy`. **A track on the logo cannot mean anything while the logo's position is computed outside the
-list.** So:
+**C1 satisfied the letter of that and not the spirit — but my original reason was wrong**, and the
+review corrected it. I claimed a track on the logo "cannot mean anything while the logo's position is
+computed outside the list". **That is false**: the logo's `x`/`y` are computed in `prepare()` for
+**both** paths, from geometry and insets, never from list order. A `dx`/`dy`/`opacity`/`scale` track
+on the logo or the copy is **meaningful today** — copy already composes exactly such a pose per frame.
 
-**Keyframing's real gate is VF1, not C1.** Recorded here and in the keyframing plan, so K1 is not
-started on the strength of C1 alone.
+**The real reasons to gate keyframing on C5 are two, and both are engineering rather than semantic:**
+
+1. **There is no single site to resolve a track by `id`.** `drawBeat` and the logo block never hold a
+   layer record — copy is drawn without knowing *which* `static-text` layer it is, and a template
+   with two text layers collapses to one beat block on the motion path. A track addressed by `id`
+   has nothing to bind to.
+2. **Z-order would be wrong, silently.** An opacity track fading a text layer the template places
+   below the shade would fade it *above* the shade in motion. That is the C5 defect surfacing through
+   keyframing rather than a keyframing defect.
 
 **What keyframing inherits when VF1 lands:** one ordered list, every layer addressed by id, both draw
 paths iterating it, and — if VF2 succeeds — the first honest way to prove a motion change did not
@@ -73,9 +94,10 @@ checkable.** Without VF2, K2 can only compare frames, which is weaker than what 
 
 ## 4. What this plan refuses
 
-- **It does not build an `html` drawer.** D122 is explicit: markup is never rasterised, and the
-  fallback is a separate rendition from the existing pipeline. An `html` entry in `LAYER_DRAWERS`
-  would contradict it.
+- ~~It does not build an `html` drawer.~~ **Withdrawn — this was wrong.** D122 forbids rasterising
+  **markup**; it says nothing against the compositor drawing a typed element list. And
+  `canonical-image-html` carries an `html` **layer**, so the fallback render of an `image-html` brief
+  is impossible without that entry. The `html` drawer is **HL3's**, in `2026-09-10_the-html-layer.md`.
 - **It does not add video decoding.** The `video` layer is the motion-context ground, drawing what
   `image` draws (#322). A brief carries no video input asset; `videoPath` is output only.
 - **It does not re-record a golden to make a lane green.** If VF1 moves a frame hash, that is a
