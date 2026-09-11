@@ -1,0 +1,9 @@
+{
+  "darwin-arm64": {
+    "fileHash": "dbc1eca4dc0773359bfbdc7538c1617c12cf3c10b5b767b9db7a3102221627f0",
+    "streamHash": "fc0a0ad029905e2fd94dda59246adc81a25bc71cd88276f56749fe8e18bb54aa",
+    "ffmpegVersion": "6.0",
+    "x264Version": "core 164 r3075 66a5bc1",
+    "threads": "1"
+  }
+}
