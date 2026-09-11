@@ -3863,4 +3863,76 @@ describe("the status page", () => {
     expect(brokenWarning?.hidden).toBe(false);
     expect(brokenWarning?.textContent).toContain("--color-brand-primary");
   });
+
+  test("every token the page references resolves in /tokens.css", async () => {
+    // Derive the set of tokens the page actually references from the real HTML
+    const html = await readFile(PAGE_PATH, "utf8");
+    const styleMatch = /<style>([\s\S]*?)<\/style>/.exec(html);
+    const pageStyle = styleMatch ? styleMatch[1] : "";
+    const referencedTokens = new Set<string>();
+    // Match var(--token-name) and capture the full token name
+    for (const match of pageStyle.matchAll(/var\(\s*(--[a-z0-9-]+)\s*\)/gi)) {
+      referencedTokens.add(match[1]);
+    }
+
+    // Derive the set of tokens served from the real tokens.css
+    const tokensRaw = await readFile(realTokensPath, "utf8");
+    const servedTokens = new Set<string>();
+
+    // Extract from :root block
+    const rootBlock = extractRootBlock(tokensRaw) ?? "";
+    for (const match of rootBlock.matchAll(/(--[a-z0-9-]+)\s*:/gi)) {
+      servedTokens.add(match[1].toLowerCase());
+    }
+
+    // Extract from .dark block
+    const darkBlock = extractDarkBlock(tokensRaw) ?? "";
+    for (const match of darkBlock.matchAll(/(--[a-z0-9-]+)\s*:/gi)) {
+      servedTokens.add(match[1].toLowerCase());
+    }
+
+    // Every referenced token must be served
+    const missing = Array.from(referencedTokens)
+      .map((t) => t.toLowerCase())
+      .filter((token) => !servedTokens.has(token));
+    if (missing.length > 0) {
+      throw new Error(
+        `Unresolved tokens: ${missing.join(", ")}. ` +
+          `Referenced: ${Array.from(referencedTokens)
+            .map((t) => t.toLowerCase())
+            .join(", ")}. ` +
+          `Served: ${Array.from(servedTokens).join(", ")}.`,
+      );
+    }
+    expect(missing).toEqual([]);
+  });
+
+  test("serving only .dark (not :root) leaves brand-primary unresolved", async () => {
+    // Verify the test fails when only .dark is served, proving we catch regressions
+    const html = await readFile(PAGE_PATH, "utf8");
+    const styleMatch = /<style>([\s\S]*?)<\/style>/.exec(html);
+    const pageStyle = styleMatch ? styleMatch[1] : "";
+    const referencedTokens = new Set<string>();
+    for (const match of pageStyle.matchAll(/var\(\s*(--[a-z0-9-]+)\s*\)/gi)) {
+      referencedTokens.add(match[1].toLowerCase());
+    }
+
+    // Extract only from .dark block (simulating the old broken behavior)
+    const tokensRaw = await readFile(realTokensPath, "utf8");
+    const darkBlock = extractDarkBlock(tokensRaw) ?? "";
+    const servedTokens = new Set<string>();
+    for (const match of darkBlock.matchAll(/(--[a-z0-9-]+)\s*:/gi)) {
+      servedTokens.add(match[1].toLowerCase());
+    }
+
+    // This should find missing tokens (proving the test catches the bug)
+    const missing = Array.from(referencedTokens).filter(
+      (token) => !servedTokens.has(token),
+    );
+
+    // Assert that --color-brand-primary is among the missing (the known issue)
+    expect(missing).toContain("--color-brand-primary");
+    // And that there are indeed some missing tokens
+    expect(missing.length).toBeGreaterThan(0);
+  });
 });
