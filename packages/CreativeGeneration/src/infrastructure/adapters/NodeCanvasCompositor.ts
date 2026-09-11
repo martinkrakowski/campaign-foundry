@@ -151,7 +151,10 @@ interface LayerDrawContext {
  * `static-text` (D127): the kind names the capability and its props select
  * which mechanism drives it, and a still frame of animated text is its rest
  * pose — exactly what drawStaticText paints; the moving path is L6/L11's.
- * Kinds this compositor cannot draw (`fill`, `html`, `video`) are absent, and
+ * `video` maps to the same drawer as `image` (VD): video is the output frame
+ * sequence rather than an input asset, and on any single frame the background
+ * is a still image blit (with kenBurnsScale applied in motion).
+ * Kinds this compositor cannot draw (`fill`, `html`) are absent, and
  * hitting one throws ({@link drawLayer}) instead of skipping.
  * Module-private: the `@generated` barrels `export *` this file, so a named
  * export would leak `SKRSContext2D` (through {@link LayerDrawContext}) from
@@ -160,6 +163,7 @@ interface LayerDrawContext {
  */
 const LAYER_DRAWERS: Readonly<Partial<Record<LayerKind, LayerDrawer>>> = {
   image: paintBackground,
+  video: paintBackground,
   shade: paintShade,
   accent: paintAccent,
   "static-text": drawStaticText,
@@ -172,20 +176,18 @@ const LAYER_DRAWERS: Readonly<Partial<Record<LayerKind, LayerDrawer>>> = {
  * clocks (C1/C3): the sequenced copy (`static-text`/`animated-text`, via
  * {@link drawBeat}) and the logo (its own `drawImage` call, snapped to the
  * key beat's box). The ground loop in {@link drawTimeline} skips these and
- * runs every other kind through {@link drawLayer} — so `image`/`shade`/
+ * runs every other kind through {@link drawLayer} — so `image`/`video`/`shade`/
  * `accent` draw exactly as `drawLegacy` draws them, and a kind neither loop
- * knows (`video`, `html`, `fill`) throws there too, the same message,
+ * knows (`html`, `fill`) throws there too, the same message,
  * instead of silently skipping. Before C3 this was unreachable: no caller
  * passed a `template`, so the resolved list was always the canonical
  * `image`/`shade`/`accent`/`static-text`/`logo` five, and every kind was
- * either drawn or explicitly sequenced. C3 makes a brief's own template
- * (`canonical-video`'s `video` ground layer, for one) reach this loop for
- * real — silently skipping it would draw a shade over no background; this
- * compositor already refuses to draw the same layer silently missing on the
- * still path ({@link drawLayer}'s "a silently dropped layer is a redesign
- * the goldens cannot see"), so the motion path now refuses it too, rather
- * than disagreeing with the still path about what a template it cannot draw
- * means.
+ * either drawn or explicitly sequenced. C3 made a brief's own template
+ * reach this loop for real; before VD this threw for `canonical-video`'s `video`
+ * ground layer, which now draws through `paintBackground` alongside `image`.
+ * An undrawable kind (`html`, `fill`) still throws here, the same message,
+ * rather than disagreeing with the still path about what a template it cannot
+ * draw means.
  */
 const SEQUENCED_KINDS: ReadonlySet<LayerKind> = new Set(["static-text", "animated-text", "logo"]);
 
@@ -865,13 +867,13 @@ function drawTimeline(
   // kinds (`static-text`/`animated-text`, `logo`) are skipped here, not
   // thrown on: they keep their own positions and clocks, drawn explicitly
   // below. Everything else runs through `drawLayer` exactly as the legacy
-  // blit runs it — so a kind neither path can draw (`video`, `html`, `fill`)
+  // blit runs it — so a kind neither path can draw (`html`, `fill`)
   // throws the same "no drawer" error here as it does there (C3/{@link
   // SEQUENCED_KINDS}): before C3 this loop only ever saw the canonical
   // image/shade/accent trio, because no caller passed a `template`; now a
-  // brief's own template reaches it, `canonical-video`'s ground `video`
-  // layer included, and silently skipping that layer would draw a shade
-  // over no background instead of failing loudly. The motion-goldens suite
+  // brief's own template reaches it (`canonical-video`'s ground `video`
+  // draws through `paintBackground` per VD, while an undrawable kind still
+  // throws). The motion-goldens suite
   // proves the canonical case unchanged; the reordered-template case in
   // NodeCanvasCompositor.layer-order — which used to pin the by-kind order
   // deliberately, as the tripwire for this change — now asserts the new
@@ -1120,15 +1122,14 @@ function resolveLayerList(
 
 /**
  * One layer of the draw: look the kind up in the dispatch table and paint it.
- * A kind with no entry — `fill`, `html`, `video` (drawn by their own lanes,
- * L6/L11) — throws, never skips: a silently dropped layer is a redesign the
- * goldens cannot see.
+ * A kind with no entry — `fill`, `html` (L6) — throws, never skips: a
+ * silently dropped layer is a redesign the goldens cannot see.
  */
 function drawLayer(kind: LayerKind, c: LayerDrawContext): void {
   const drawer = LAYER_DRAWERS[kind];
   if (drawer === undefined) {
     throw new Error(
-      `NodeCanvasCompositor: layer kind "${kind}" has no drawer in this compositor — it draws image, shade, accent, static-text, animated-text and logo only`,
+      `NodeCanvasCompositor: layer kind "${kind}" has no drawer in this compositor — it draws image, video, shade, accent, static-text, animated-text and logo only`,
     );
   }
   drawer(c);

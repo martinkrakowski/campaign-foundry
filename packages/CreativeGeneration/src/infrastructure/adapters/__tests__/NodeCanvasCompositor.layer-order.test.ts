@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
 import {
   CANONICAL_TEMPLATES,
+  templateFromCanonical,
   type BriefTemplate,
   type CompositeRequest,
   type CreativeType,
@@ -41,8 +42,16 @@ const request = (over: Partial<TemplateRequest> = {}): TemplateRequest => ({
   ...over,
 });
 
-/** The five kinds this compositor draws, in canonical order. */
-const DRAWABLE_KINDS = ["image", "shade", "accent", "static-text", "logo"] as const;
+/** The kinds this compositor draws. */
+const DRAWABLE_KINDS = [
+  "image",
+  "video",
+  "shade",
+  "accent",
+  "static-text",
+  "animated-text",
+  "logo",
+] as const;
 
 /**
  * The compositor's dispatch table, reached through the TS-private seam: the
@@ -136,6 +145,25 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     );
   });
 
+  test("a layer kind this compositor cannot draw throws the named error (html)", async () => {
+    const template: BriefTemplate = {
+      id: "canonical-image-html",
+      version: 1,
+      creativeType: "image-html",
+      unit: "standard-web",
+      layers: [
+        { id: "image", kind: "image" },
+        { id: "html", kind: "html" },
+        { id: "logo", kind: "logo" },
+      ],
+    };
+    const prepared = await NodeCanvasCompositor.prepare(request({ template }));
+    const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
+    expect(() => NodeCanvasCompositor.draw(ctx, prepared, 1)).toThrow(
+      /layer kind "html" has no drawer/,
+    );
+  });
+
   test("the logo layer snaps to the text block — a logo with no static-text before it throws, never guesses", async () => {
     const template: BriefTemplate = {
       id: "canonical-image-text",
@@ -203,24 +231,19 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     expect(order).toEqual(["accent", "shade", "image"]);
   });
 
-  test("the timeline path throws on a ground kind it cannot draw, the same way the still path does (C3)", async () => {
+  test("the timeline path throws on a ground kind it cannot draw, the same way the still path does (html)", async () => {
     // The GROUND_KINDS asymmetry C1 flagged forward: `drawTimeline` used to
-    // skip every kind but the canonical trio, silently. Once a template's
-    // order actually reaches this loop (C3), a real template can carry a
-    // ground kind the drawer table has no entry for — `canonical-video`'s
-    // `video` layer, for one. Skipping it would draw the shade that follows
-    // over no background at all; this asserts the motion path refuses that,
-    // exactly like `drawLegacy` refuses it on the still path (see the "fill"
-    // case above) — one behaviour, not two.
+    // skip every kind but the canonical trio, silently. When a template's
+    // order reaches this loop, an undrawable ground kind (e.g. html, fill)
+    // throws rather than silently skipping.
     const template: BriefTemplate = {
-      id: "canonical-video",
+      id: "canonical-image-html",
       version: 1,
-      creativeType: "video",
+      creativeType: "image-html",
       unit: "standard-web",
       layers: [
-        { id: "video", kind: "video" },
-        { id: "shade", kind: "shade" },
-        { id: "animated-text", kind: "animated-text" },
+        { id: "image", kind: "image" },
+        { id: "html", kind: "html" },
         { id: "logo", kind: "logo" },
       ],
     };
@@ -236,7 +259,96 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     const prepared = await NodeCanvasCompositor.prepare(req);
     const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
     expect(() => NodeCanvasCompositor.draw(ctx, prepared, 0.5, undefined, 0.5)).toThrow(
-      /layer kind "video" has no drawer/,
+      /layer kind "html" has no drawer/,
     );
+  });
+
+  test("a canonical-video template renders without throwing on the still path and in motion frames (VD)", async () => {
+    const template: BriefTemplate = templateFromCanonical("short-video");
+    const reqStill = request({ template });
+    const preparedStill = await NodeCanvasCompositor.prepare(reqStill);
+    const ctxStill = createCanvas(preparedStill.width, preparedStill.height).getContext("2d");
+    expect(() => NodeCanvasCompositor.draw(ctxStill, preparedStill, 1)).not.toThrow();
+
+    const orderStill = await drawWithRecorder(reqStill);
+    expect(orderStill).toEqual(["video", "shade", "animated-text", "logo"]);
+
+    const reqMotion: TemplateRequest & { durationSec: number; timeline: CopyTimeline } = {
+      ...request({ template }),
+      durationSec: 8,
+      timeline: {
+        beats: [{ text: "Stay wild, stay hydrated", weight: 1 }],
+        transition: "cut",
+        keyBeat: 1,
+      },
+    };
+    const preparedMotion = await NodeCanvasCompositor.prepare(reqMotion);
+    const ctxMotion = createCanvas(preparedMotion.width, preparedMotion.height).getContext("2d");
+    expect(() => NodeCanvasCompositor.draw(ctxMotion, preparedMotion, 0.5, "ken-burns-out", 0.5)).not.toThrow();
+
+    const orderMotion = recordDrawOrder();
+    NodeCanvasCompositor.draw(ctxMotion, preparedMotion, 0.5, "ken-burns-out", 0.5);
+    expect(orderMotion).toEqual(["video", "shade"]);
+  });
+
+  test("the video layer draws the exact same pixels the image layer would (VD)", async () => {
+    const imageTemplate: BriefTemplate = {
+      id: "canonical-image-text",
+      version: 1,
+      creativeType: "image-text",
+      unit: "standard-web",
+      layers: [{ id: "ground", kind: "image" }],
+    };
+    const videoTemplate: BriefTemplate = {
+      id: "canonical-video",
+      version: 1,
+      creativeType: "video",
+      unit: "standard-web",
+      layers: [{ id: "ground", kind: "video" }],
+    };
+
+    const bg = background();
+    const baseReq = {
+      background: bg,
+      message: "Stay wild, stay hydrated",
+      brandColor: "#1473E6",
+      logoPath: "assets/inputs/hydra-logo.png",
+      canvas: { ratio: "1:1" as const },
+      layout: "headline-bottom" as const,
+      tone: "bold" as const,
+    };
+
+    // Still path proof
+    const prepImageStill = await NodeCanvasCompositor.prepare({ ...baseReq, template: imageTemplate });
+    const prepVideoStill = await NodeCanvasCompositor.prepare({ ...baseReq, template: videoTemplate });
+    const canvasImageStill = createCanvas(prepImageStill.width, prepImageStill.height);
+    const canvasVideoStill = createCanvas(prepVideoStill.width, prepVideoStill.height);
+    NodeCanvasCompositor.draw(canvasImageStill.getContext("2d"), prepImageStill, 1);
+    NodeCanvasCompositor.draw(canvasVideoStill.getContext("2d"), prepVideoStill, 1);
+    const imgStillBuf = canvasImageStill.toBuffer("image/png");
+    const vidStillBuf = canvasVideoStill.toBuffer("image/png");
+    expect(vidStillBuf.length).toBeGreaterThan(0);
+    expect(Buffer.from(vidStillBuf)).toEqual(Buffer.from(imgStillBuf));
+
+    // Motion path proof with zoom (ken-burns-in at t=0.5 where zoom !== 1)
+    const motionReq = {
+      ...baseReq,
+      durationSec: 8,
+      timeline: {
+        beats: [{ text: "Stay wild, stay hydrated", weight: 1 }],
+        transition: "cut" as const,
+        keyBeat: 1,
+      },
+    };
+    const prepImageMotion = await NodeCanvasCompositor.prepare({ ...motionReq, template: imageTemplate });
+    const prepVideoMotion = await NodeCanvasCompositor.prepare({ ...motionReq, template: videoTemplate });
+    const canvasImageMotion = createCanvas(prepImageMotion.width, prepImageMotion.height);
+    const canvasVideoMotion = createCanvas(prepVideoMotion.width, prepVideoMotion.height);
+    NodeCanvasCompositor.draw(canvasImageMotion.getContext("2d"), prepImageMotion, 0.5, "ken-burns-in", 0.5);
+    NodeCanvasCompositor.draw(canvasVideoMotion.getContext("2d"), prepVideoMotion, 0.5, "ken-burns-in", 0.5);
+    const imgMotionBuf = canvasImageMotion.toBuffer("image/png");
+    const vidMotionBuf = canvasVideoMotion.toBuffer("image/png");
+    expect(vidMotionBuf.length).toBeGreaterThan(0);
+    expect(Buffer.from(vidMotionBuf)).toEqual(Buffer.from(imgMotionBuf));
   });
 });
