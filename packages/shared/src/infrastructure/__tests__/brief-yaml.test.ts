@@ -280,6 +280,11 @@ describe("dumpBrief layer and props order (L3b, D134)", () => {
       enabled: false,
       props: { alpha: 0.5 },
     });
+    expect(parsed.template.layers[2]).toEqual({
+      id: "band",
+      kind: "accent",
+      enabled: true,
+    });
     expect(dumpBrief(parsed)).toBe(yaml);
   });
 
