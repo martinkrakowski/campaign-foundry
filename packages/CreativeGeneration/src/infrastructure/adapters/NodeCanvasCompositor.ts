@@ -1070,18 +1070,17 @@ function paintAccent(c: LayerDrawContext): void {
 
 /**
  * The static-text layer — the legacy copy block, extracted verbatim (D121):
- * fitted on the real blit context, so the layout pass's ctx.font state feeds
- * the blit. The logo's overlap snap no longer reads this drawer's output off
- * the context (C5) — it reads `prepared.logoAnchorLayout`, resolved ahead of
- * time in `prepare` — so this drawer's only job is painting.
+ * layout was resolved once in `prepare` (`prepared.logoAnchorLayout`, C5) and
+ * shared with `drawLogo`, so this drawer's only job is painting — text fitting
+ * is never repeated on the blit context. `ctx.font` is (re-)stated here per F5a.
  */
 function drawStaticText(c: LayerDrawContext): void {
   const { ctx, prepared, motion, eased, effectT } = c;
   const { width, height } = prepared;
   // Layer 4 — campaign copy, wrapped to the inset-reduced width and placed
   // in the inset rectangle per the prepared style's alignment (D10 amendment,
-  // T5). wrapText uses this ctx so metrics match the blit.
-  const headline = layoutHeadline(ctx, prepared);
+  // T5). Reads the layout `prepare` already resolved (C5).
+  const headline = prepared.logoAnchorLayout!;
   const rise = motion === "headline-rise";
   const riseDy = rise ? (1 - eased) * 0.12 * height : 0;
   const riseAlpha = rise ? eased : 1;
@@ -1099,6 +1098,7 @@ function drawStaticText(c: LayerDrawContext): void {
   // A ctx-state control (F5a): re-stated at the blit, not inherited from the
   // layout pass — the default 0px is a no-op, the goldens pin it.
   ctx.letterSpacing = `${prepared.style.letterSpacing * headline.fontSize}px`;
+  ctx.font = `${prepared.fontWeight} ${headline.fontSize}px ${prepared.fontFamily}, sans-serif`;
   const posed = openTextPose(ctx, alpha, fx.dx, dy, fx.scale, headline);
   let y = headline.firstY;
   for (const line of headline.lines) {

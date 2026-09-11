@@ -490,6 +490,24 @@ describe("NodeCanvasCompositor", () => {
       ),
     ).rejects.toThrow(/safeInsets\.left \+ safeInsets\.right/);
   });
+
+  test("a still render fits the headline once (C5)", async () => {
+    wrapCapture.maxWidths = [];
+    const req = request({ message: "Stay wild, stay hydrated" });
+    const prepared = await NodeCanvasCompositor.prepare(req);
+    expect(wrapCapture.maxWidths).toHaveLength(1);
+
+    const canvas = createCanvas(prepared.width, prepared.height);
+    const ctx = canvas.getContext("2d");
+    NodeCanvasCompositor.draw(ctx, prepared, 1);
+    // Draw reuses the layout prepare already resolved — fitting is not repeated.
+    expect(wrapCapture.maxWidths).toHaveLength(1);
+
+    // End-to-end compositeAsset also fits the headline exactly once.
+    wrapCapture.maxWidths = [];
+    await compositor.compositeAsset(req);
+    expect(wrapCapture.maxWidths).toHaveLength(1);
+  });
 });
 
 type BlitPoint = { x: number; y: number; text: string };
