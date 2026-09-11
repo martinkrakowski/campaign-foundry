@@ -1125,7 +1125,7 @@ function drawLogo(c: LayerDrawContext): void {
     const anchor = prepared.logoAnchorLayout;
     if (anchor === undefined) {
       throw new Error(
-        "NodeCanvasCompositor: the logo layer snaps to the text block, but no static-text layer ran before it",
+        "NodeCanvasCompositor: the logo layer snaps to the text block, but there is no text layer in the template at all",
       );
     }
     const { image, x, width: lw, height: lh } = prepared.logo;

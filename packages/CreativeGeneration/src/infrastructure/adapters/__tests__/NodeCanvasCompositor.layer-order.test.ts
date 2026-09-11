@@ -164,7 +164,7 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     );
   });
 
-  test("the logo layer snaps to the text block — a logo with no static-text before it throws, never guesses", async () => {
+  test("the logo layer snaps to the text block — a logo with no text layer in the template throws, never guesses", async () => {
     const template: BriefTemplate = {
       id: "canonical-image-text",
       version: 1,
@@ -178,7 +178,7 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     const prepared = await NodeCanvasCompositor.prepare(request({ template }));
     const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
     expect(() => NodeCanvasCompositor.draw(ctx, prepared, 1)).toThrow(
-      /no static-text layer ran before it/,
+      /there is no text layer in the template at all/,
     );
   });
 
