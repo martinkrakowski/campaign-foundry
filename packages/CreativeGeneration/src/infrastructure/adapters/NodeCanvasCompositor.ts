@@ -102,9 +102,12 @@ interface PreparedCreative {
    * first. Resolved once in `prepare` — the request's `template.layers` when
    * the caller passes the L1b brief template, else the canonical layers for
    * its creative type, else the `image-text` canonical list
-   * ({@link resolveLayerList}) — and iterated by both draw paths through the
-   * {@link LAYER_DRAWERS} table: `drawLegacy` over the whole list, `drawTimeline`
-   * (C1) over everything except the {@link SEQUENCED_KINDS} it draws itself.
+   * ({@link resolveLayerList}) — and iterated in full by both draw paths:
+   * `drawLegacy` over the whole list through the {@link LAYER_DRAWERS} table,
+   * `drawTimeline` (C1/C5) over the whole list too, dispatching the sequenced
+   * copy kinds to its own beat drawer at their list position instead of the
+   * table (see {@link logoAnchorLayout} for how the logo stays order-agnostic
+   * on both paths).
    */
   readonly layers: readonly CreativeTemplateLayer[];
   /**
@@ -118,8 +121,25 @@ interface PreparedCreative {
    * once in `prepare`, so `draw` never re-wraps (M4).
    */
   readonly beatLayouts?: ReadonlyMap<string, HeadlineLayout>;
-  /** The key beat's layout: what the poster shows (D7) and the logo rests against. */
+  /** The key beat's layout: what the poster shows (D7). */
   readonly anchorLayout?: HeadlineLayout;
+  /**
+   * What the logo drawer snaps against, on EITHER draw path (C5): the key
+   * beat's layout ({@link anchorLayout}) when the request resolved a
+   * timeline, else the message's own fitted layout, measured once here on a
+   * throwaway context the same way {@link resolveBeatLayouts} measures beats
+   * — SKIA's text metrics don't depend on the canvas's backing size, so this
+   * matches what the real blit context measures at draw time (proven already
+   * by the timeline path's byte-identity goldens). `undefined` when the
+   * resolved layer list carries no `static-text`/`animated-text` layer at
+   * all — there is no text block for the logo to snap to, and {@link drawLogo}
+   * throws rather than guessing one. Resolving this in `prepare`, independent
+   * of where `logo` sits in the list, is what lets a template put the logo
+   * ABOVE its text layer (order the still path used to refuse, and the
+   * motion path used to ignore) without either path caring which drawer ran
+   * first.
+   */
+  readonly logoAnchorLayout?: HeadlineLayout;
 }
 
 /**
@@ -131,9 +151,9 @@ type LayerDrawer = (c: LayerDrawContext) => void;
 /**
  * Everything a layer drawer reads: the real blit context, the prepared
  * creative, and the pose values the draw path computed once. One object serves
- * all five drawers (D121). `headline` is the `static-text` drawer's output
- * handed to the `logo` drawer — the overlap snap must see the same rest-pose
- * box the copy drew against — and is written only between those two drawers.
+ * every drawer (D121). The logo's overlap snap reads its anchor box off
+ * `prepared.logoAnchorLayout` (C5) — resolved once in `prepare`, independent
+ * of draw order — so this context carries no drawer-to-drawer handoff field.
  */
 interface LayerDrawContext {
   readonly ctx: SKRSContext2D;
@@ -141,8 +161,6 @@ interface LayerDrawContext {
   readonly motion: MotionKind | undefined;
   readonly eased: number;
   readonly effectT: number;
-  /** Set by the `static-text` drawer; read by the `logo` drawer's snap. */
-  headline?: HeadlineLayout;
 }
 
 /**
@@ -156,6 +174,12 @@ interface LayerDrawContext {
  * is a still image blit (with kenBurnsScale applied in motion).
  * Kinds this compositor cannot draw (`fill`, `html`) are absent, and
  * hitting one throws ({@link drawLayer}) instead of skipping.
+ * `drawTimeline` (C5) uses this same table for every kind except
+ * `static-text`/`animated-text` — whose sequenced beat-selection and
+ * crossfade ({@link drawBeat}) it calls directly at that layer's position —
+ * so `logo` reaches {@link drawLogo} on both draw paths, anchored from a
+ * layout `prepare` resolved ahead of time rather than one a prior drawer left
+ * on the draw context (see {@link PreparedCreative.logoAnchorLayout}).
  * Module-private: the `@generated` barrels `export *` this file, so a named
  * export would leak `SKRSContext2D` (through {@link LayerDrawContext}) from
  * the public package surface; the structural tests spy the table through the
@@ -170,26 +194,6 @@ const LAYER_DRAWERS: Readonly<Partial<Record<LayerKind, LayerDrawer>>> = {
   "animated-text": drawStaticText,
   logo: drawLogo,
 };
-
-/**
- * Kinds `drawTimeline` draws itself, after the ground loop, on their own
- * clocks (C1/C3): the sequenced copy (`static-text`/`animated-text`, via
- * {@link drawBeat}) and the logo (its own `drawImage` call, snapped to the
- * key beat's box). The ground loop in {@link drawTimeline} skips these and
- * runs every other kind through {@link drawLayer} — so `image`/`video`/`shade`/
- * `accent` draw exactly as `drawLegacy` draws them, and a kind neither loop
- * knows (`html`, `fill`) throws there too, the same message,
- * instead of silently skipping. Before C3 this was unreachable: no caller
- * passed a `template`, so the resolved list was always the canonical
- * `image`/`shade`/`accent`/`static-text`/`logo` five, and every kind was
- * either drawn or explicitly sequenced. C3 made a brief's own template
- * reach this loop for real; before VD this threw for `canonical-video`'s `video`
- * ground layer, which now draws through `paintBackground` alongside `image`.
- * An undrawable kind (`html`, `fill`) still throws here, the same message,
- * rather than disagreeing with the still path about what a template it cannot
- * draw means.
- */
-const SEQUENCED_KINDS: ReadonlySet<LayerKind> = new Set(["static-text", "animated-text", "logo"]);
 
 /**
  * NodeCanvasCompositor — CompositorPort adapter.
@@ -211,12 +215,16 @@ const SEQUENCED_KINDS: ReadonlySet<LayerKind> = new Set(["static-text", "animate
  * The draw order is data (D121): `prepare` resolves the layer list (the brief's
  * `template.layers` when present — C3, every production request carries one —
  * else the canonical layers for its creative type, else the `image-text`
- * canonical list) and both draw paths iterate it through the {@link LAYER_DRAWERS}
- * table — array position is z-order, bottom first (D128). The legacy blit
- * iterates the whole list; the motion path (C1) iterates it too, skipping only
- * the sequenced copy and logo, which keep their own sequencing and clocks (see
- * `drawTimeline`) — every other kind draws, or throws the same way the legacy
- * blit does for a kind neither path can draw.
+ * canonical list) and both draw paths iterate it — array position is z-order,
+ * bottom first (D128). The legacy blit runs every layer through the
+ * {@link LAYER_DRAWERS} table. The motion path (`drawTimeline`, C1/C5) iterates
+ * the same list in the same order: ground kinds (and `logo`) go through the
+ * same table, while the sequenced copy (`static-text`/`animated-text`) is
+ * drawn at its list position through its own beat-selection and crossfade
+ * ({@link drawBeat}) instead of the table's single-message drawer — so a
+ * template that places the logo below the shade, or the copy above the accent
+ * band, renders in that order on both paths (C5). A kind neither path can draw
+ * throws the same way on both.
  *
  * Still path: {@link NodeCanvasCompositor.prepare} (I/O) →
  * {@link NodeCanvasCompositor.draw} at `t = 1` with no `motion`.
@@ -270,7 +278,6 @@ export class NodeCanvasCompositor implements CompositorPort {
       const scenes: BeatScenes = {
         resolved: prepared.timeline,
         beats: prepared.beatLayouts,
-        anchor: prepared.anchorLayout,
       };
       drawTimeline(ctx, prepared, scenes, t, motion, copyT ?? t, effectT);
       return;
@@ -412,7 +419,10 @@ export class NodeCanvasCompositor implements CompositorPort {
     // shared state mid-draw.
     const logoApplied = logoLoaded && layers.some((layer) => layer.kind === "logo");
 
-    const base: Omit<PreparedCreative, "timeline" | "beatLayouts" | "anchorLayout"> = {
+    const base: Omit<
+      PreparedCreative,
+      "timeline" | "beatLayouts" | "anchorLayout" | "logoAnchorLayout"
+    > = {
       canvas,
       width,
       height,
@@ -432,13 +442,33 @@ export class NodeCanvasCompositor implements CompositorPort {
       layers,
     };
 
+    // What the logo snaps to (C5), resolved here independent of where `logo`
+    // sits in `layers` — see PreparedCreative.logoAnchorLayout. `undefined`
+    // when the resolved list carries no text-kind layer at all: there is
+    // nothing for the logo to snap against.
+    const hasTextLayer = layers.some(
+      (layer) => layer.kind === "static-text" || layer.kind === "animated-text",
+    );
+
     // Sequenced copy: resolve windows and fit every beat at one common type size
     // (D6) right here, so `draw` (every frame, the poster, and every sample) pays
     // nothing but the blit. Still requests have no durationSec and no windows.
     if (request.timeline !== undefined && request.durationSec !== undefined) {
-      return { ...base, ...resolveBeatLayouts(base, request.timeline, request.durationSec) };
+      const beatFields = resolveBeatLayouts(base, request.timeline, request.durationSec);
+      return {
+        ...base,
+        ...beatFields,
+        logoAnchorLayout: hasTextLayer ? beatFields.anchorLayout : undefined,
+      };
     }
-    return base;
+    // The still path's own rest layout, measured on a throwaway context —
+    // the same technique `resolveBeatLayouts` uses for the timeline path, and
+    // provably the same numbers `drawStaticText` measures on the real blit
+    // context (SKIA metrics don't depend on the canvas's backing size).
+    const logoAnchorLayout = hasTextLayer
+      ? layoutHeadline(createCanvas(1, 1).getContext("2d"), base)
+      : undefined;
+    return { ...base, logoAnchorLayout };
   }
 
   async compositeAsset(request: CompositeRequest): Promise<CompositeResult> {
@@ -775,11 +805,15 @@ function resolveOverlappingLogoY(
   return preferredY;
 }
 
-/** Everything `draw` needs once the request resolved a timeline (D6/D9). */
+/**
+ * Everything the sequenced-copy draw needs once the request resolved a
+ * timeline (D6/D9). The logo's anchor is not here (C5) — it reads
+ * `prepared.logoAnchorLayout` directly, so it stays available at the logo's
+ * list position whether or not copy has drawn yet.
+ */
 interface BeatScenes {
   readonly resolved: readonly ResolvedBeat[];
   readonly beats: ReadonlyMap<string, HeadlineLayout>;
-  readonly anchor: HeadlineLayout;
 }
 
 /**
@@ -835,16 +869,27 @@ function resolveBeatLayouts(
 }
 
 /**
- * The sequenced-copy draw path. Layers 1–3, the text layer, and the logo layer
- * each match the legacy blit for the same `motion` / `t`; the only differences
- * are that copy is chosen by `copyT` (passed by the caller — the poster passes
- * the key beat's mid-time, D7) and that `headline-rise` advances per beat on the
- * pose clock `t` (each beat rises on its own local progress). The text effect
- * keeps that beat-local clock unless the caller passed `effectT` (the poster
- * passes 1 — H4). The ground layers are read from `prepared.layers` (C1), the
- * same resolved list `drawLegacy` iterates — see {@link SEQUENCED_KINDS} — so
- * it matches the legacy blit's order exactly, not merely by coincidence of the
- * two bodies agreeing.
+ * The motion path (C1/C5). Every layer draws at its position in
+ * `prepared.layers` — the same resolved list `drawLegacy` iterates — so a
+ * template's order is honoured whole, not just among the ground kinds. Ground
+ * kinds and `logo` run through the same {@link LAYER_DRAWERS} table
+ * `drawLegacy` uses (one copy of each layer's code serves both paths); the
+ * sequenced copy (`static-text`/`animated-text`) is drawn at its list
+ * position through {@link drawSequencedCopy} instead of the table's
+ * single-message drawer, because its "how" is beat selection and crossfade,
+ * not a fixed message (copy is chosen by `copyT` — the poster passes the key
+ * beat's mid-time, D7 — and `headline-rise` advances per beat on the pose
+ * clock `t`, each beat rising on its own local progress). A kind neither path
+ * can draw (`html`, `fill`) throws the same "no drawer" error here as it does
+ * on the legacy blit. `effectT` is a value no ground drawer reads
+ * (`effectT ?? t` matches `draw()`'s clock shape).
+ *
+ * The logo's overlap snap reads `prepared.logoAnchorLayout` (C5) — resolved
+ * once in `prepare`, independent of where `logo` sits in the list — so it
+ * keeps its key-beat anchor (D7) whether it is drawn before or after the
+ * copy. A resolved list with no text-kind layer at all leaves
+ * `logoAnchorLayout` undefined and {@link drawLogo} throws, the same refusal
+ * the still path makes for the same reason.
  */
 function drawTimeline(
   ctx: SKRSContext2D,
@@ -856,36 +901,36 @@ function drawTimeline(
   effectT?: number,
 ): void {
   const eased = motion === undefined ? 1 : easeOutCubic(t);
-
-  // The ground layers — identical to the legacy blit for this motion / pose
-  // clock. Drawn through the same table drawLegacy iterates (D121): one copy
-  // of each layer's code serves both paths. `effectT` is a value no ground
-  // drawer reads (`effectT ?? t` matches draw()'s clock shape).
-  //
-  // READ from `prepared.layers`, the same resolved list `drawLegacy` iterates
-  // (C1/D121) — the one-source-of-order fix R-D1 calls for. The sequenced
-  // kinds (`static-text`/`animated-text`, `logo`) are skipped here, not
-  // thrown on: they keep their own positions and clocks, drawn explicitly
-  // below. Everything else runs through `drawLayer` exactly as the legacy
-  // blit runs it — so a kind neither path can draw (`html`, `fill`)
-  // throws the same "no drawer" error here as it does there (C3/{@link
-  // SEQUENCED_KINDS}): before C3 this loop only ever saw the canonical
-  // image/shade/accent trio, because no caller passed a `template`; now a
-  // brief's own template reaches it (`canonical-video`'s ground `video`
-  // draws through `paintBackground` per VD, while an undrawable kind still
-  // throws). The motion-goldens suite
-  // proves the canonical case unchanged; the reordered-template case in
-  // NodeCanvasCompositor.layer-order — which used to pin the by-kind order
-  // deliberately, as the tripwire for this change — now asserts the new
-  // contract instead.
-  const ground: LayerDrawContext = { ctx, prepared, motion, eased, effectT: effectT ?? t };
+  const c: LayerDrawContext = { ctx, prepared, motion, eased, effectT: effectT ?? t };
+  let copyDrawn = false;
   for (const layer of prepared.layers) {
-    if (SEQUENCED_KINDS.has(layer.kind)) continue;
-    drawLayer(layer.kind, ground);
+    if (layer.kind === "static-text" || layer.kind === "animated-text") {
+      // A creative type's shared budget caps text-kind layers at one (D124);
+      // this guard is defensive, not load-bearing — never draws the beat twice.
+      if (copyDrawn) continue;
+      drawSequencedCopy(ctx, prepared, scenes, copyT, t, motion, effectT);
+      copyDrawn = true;
+      continue;
+    }
+    drawLayer(layer.kind, c);
   }
+}
 
-  // Layer 4 — sequenced copy: the beat is selected by copyT, crossfaded with any
-  // incoming beat, and (for headline-rise) eased on its own local progress.
+/**
+ * Layer 4 — sequenced copy: the beat is selected by `copyT`, crossfaded with
+ * any incoming beat, and (for headline-rise) eased on its own local progress.
+ * Extracted verbatim from `drawTimeline`'s former fixed post-loop call (C5) —
+ * only WHEN this runs changed (at the copy layer's list position), never HOW.
+ */
+function drawSequencedCopy(
+  ctx: SKRSContext2D,
+  prepared: PreparedCreative,
+  scenes: BeatScenes,
+  copyT: number,
+  t: number,
+  motion: MotionKind | undefined,
+  effectT: number | undefined,
+): void {
   const pair = beatAt(scenes.resolved, copyT);
   const rise = motion === "headline-rise";
   if (pair.mix > 0 && pair.incoming !== undefined) {
@@ -893,22 +938,6 @@ function drawTimeline(
     drawBeat(ctx, prepared, scenes, pair.incoming, pair.mix, t, rise, effectT);
   } else {
     drawBeat(ctx, prepared, scenes, pair.current, 1, t, rise, effectT);
-  }
-
-  // Layer 5 — brand logo, anchored to the key beat's rest-pose box, so it neither
-  // jumps between beats nor drifts from the poster (D7). Gated on `logoApplied`,
-  // not merely `prepared.logo` (the file having loaded): `logoApplied` is also
-  // true only when the resolved layer list carries a `logo` layer (F2), and the
-  // motion path must draw exactly what the compliance record reports — never a
-  // logo the record says is absent.
-  if (prepared.logoApplied && prepared.logo) {
-    const { image, x, width: lw, height: lh } = prepared.logo;
-    let ly = prepared.logo.y;
-    const logoBox = { x, y: ly, width: lw, height: lh };
-    if (boxesOverlap(scenes.anchor.box, logoBox)) {
-      ly = resolveOverlappingLogoY(prepared, scenes.anchor.box, lw, lh, x);
-    }
-    ctx.drawImage(image, x, ly, lw, lh);
   }
 }
 
@@ -1034,9 +1063,10 @@ function paintAccent(c: LayerDrawContext): void {
 
 /**
  * The static-text layer — the legacy copy block, extracted verbatim (D121):
- * fitted on the real blit context (the layout pass's ctx.font state feeds the
- * blit), posed by the motion kind and the effect clock, and its layout handed
- * to the logo drawer through the context for the overlap snap.
+ * fitted on the real blit context, so the layout pass's ctx.font state feeds
+ * the blit. The logo's overlap snap no longer reads this drawer's output off
+ * the context (C5) — it reads `prepared.logoAnchorLayout`, resolved ahead of
+ * time in `prepare` — so this drawer's only job is painting.
  */
 function drawStaticText(c: LayerDrawContext): void {
   const { ctx, prepared, motion, eased, effectT } = c;
@@ -1045,7 +1075,6 @@ function drawStaticText(c: LayerDrawContext): void {
   // in the inset rectangle per the prepared style's alignment (D10 amendment,
   // T5). wrapText uses this ctx so metrics match the blit.
   const headline = layoutHeadline(ctx, prepared);
-  c.headline = headline;
   const rise = motion === "headline-rise";
   const riseDy = rise ? (1 - eased) * 0.12 * height : 0;
   const riseAlpha = rise ? eased : 1;
@@ -1075,11 +1104,16 @@ function drawStaticText(c: LayerDrawContext): void {
 }
 
 /**
- * The logo layer — the legacy logo block, extracted verbatim (D121). The
- * overlap snap reads the static-text layer's layout off the context: the
- * rest-pose headline box is what the logo must clear, so it exists only after
- * that drawer ran — a logo with no text layer before it is a template this
- * compositor cannot honour, and throws rather than guessing an anchor.
+ * The logo layer — the legacy logo block (D121), its anchor source changed
+ * for C5: the overlap snap now reads `prepared.logoAnchorLayout`, resolved in
+ * `prepare` independent of draw order, instead of a layout a prior drawer
+ * left on the shared context. That is what lets this same drawer serve both
+ * paths — legacy (whole-list order) and timeline (C5, via `drawTimeline`'s
+ * per-position dispatch) — for a template that places `logo` before its
+ * text-kind layer, or with no text-kind layer drawn in between. A resolved
+ * layer list with no text-kind layer at all leaves `logoAnchorLayout`
+ * undefined: there is nothing for the logo to snap to, and this throws rather
+ * than guessing an anchor.
  */
 function drawLogo(c: LayerDrawContext): void {
   const { ctx, prepared } = c;
@@ -1088,8 +1122,8 @@ function drawLogo(c: LayerDrawContext): void {
   // prepare; if the rest-pose headline block overlaps it, snap to an inset edge.
   // The rest-pose box (not the translated one) keeps the logo static across `t`.
   if (prepared.logo) {
-    const headline = c.headline;
-    if (headline === undefined) {
+    const anchor = prepared.logoAnchorLayout;
+    if (anchor === undefined) {
       throw new Error(
         "NodeCanvasCompositor: the logo layer snaps to the text block, but no static-text layer ran before it",
       );
@@ -1097,8 +1131,8 @@ function drawLogo(c: LayerDrawContext): void {
     const { image, x, width: lw, height: lh } = prepared.logo;
     let ly = prepared.logo.y;
     const logoBox = { x, y: ly, width: lw, height: lh };
-    if (boxesOverlap(headline.box, logoBox)) {
-      ly = resolveOverlappingLogoY(prepared, headline.box, lw, lh, x);
+    if (boxesOverlap(anchor.box, logoBox)) {
+      ly = resolveOverlappingLogoY(prepared, anchor.box, lw, lh, x);
     }
     ctx.drawImage(image, x, ly, lw, lh);
   }

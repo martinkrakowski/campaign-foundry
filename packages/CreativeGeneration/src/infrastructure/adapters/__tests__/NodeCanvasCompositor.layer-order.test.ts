@@ -182,21 +182,20 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     );
   });
 
-  test("the timeline path draws the ground trio in the resolved list's order, even when the template reorders them (C1/D121)", async () => {
-    // This used to pin the OLD behaviour deliberately — the motion path called
-    // the trio by kind, ignoring the template, so that a future list-driven
-    // change would be a red test instead of a silent motion diff (D10). C1 is
-    // that future: it fired as designed (this assertion went red the moment
-    // drawTimeline started iterating `prepared.layers`), and is rewritten here
-    // to assert the new contract instead of being deleted — a lane that
-    // deletes its own tripwire is indistinguishable from one that broke it.
+  test("the timeline path draws the ground trio AND the logo in the resolved list's order, even when the template reorders them (C1/C5/D121)", async () => {
+    // This used to pin an intermediate contract: C1 made the motion path
+    // honour the template's order for the ground trio, but `logo` (and copy)
+    // still drew in a fixed position after them, regardless of where the
+    // template put it (§4c of the reconciliation plan). C5 is what closes
+    // that gap — it fired as designed (this assertion went red the moment
+    // `drawTimeline` started dispatching `logo` through the same table at its
+    // list position) — and is rewritten here to assert the new contract
+    // instead of being deleted, the same way C1 rewrote its own predecessor.
     // Byte-neutrality for every caller today is proven separately, by
     // NodeCanvasCompositor.motion-goldens.test.ts: every existing caller's
-    // brief carries the canonical template (C3 wired the port, it did not
-    // change what any brief holds), so the resolved list is still the
-    // canonical trio order for them and this reordering is reachable only
-    // through a direct adapter call like this one, or a brief whose template
-    // actually differs from canonical.
+    // brief carries the canonical template, so this reordering is reachable
+    // only through a direct adapter call like this one, or a brief whose
+    // template actually differs from canonical.
     const template: BriefTemplate = {
       id: "canonical-image-text",
       version: 1,
@@ -204,10 +203,10 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
       unit: "standard-web",
       layers: [
         { id: "accent", kind: "accent" },
+        { id: "logo", kind: "logo" },
         { id: "shade", kind: "shade" },
         { id: "image", kind: "image" },
         { id: "static-text", kind: "static-text" },
-        { id: "logo", kind: "logo" },
       ],
     };
     const req: TemplateRequest & { durationSec: number; timeline: CopyTimeline } = {
@@ -223,12 +222,14 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
     const order = recordDrawOrder();
     NodeCanvasCompositor.draw(ctx, prepared, 0.5, undefined, 0.5);
-    // Copy and logo keep their own sequencing (this lane's scope): the
-    // template's static-text/logo entries never reach `LAYER_DRAWERS` on this
-    // path (drawTimeline paints them itself, through drawBeat and its own
-    // drawImage call), so only the ground trio — in the template's order —
-    // is ever recorded here.
-    expect(order).toEqual(["accent", "shade", "image"]);
+    // The sequenced copy keeps its own beat-selection/crossfade mechanism
+    // (this lane's explicit "how" boundary): the template's static-text entry
+    // never reaches `LAYER_DRAWERS` on this path (drawTimeline paints it
+    // through `drawBeat` instead), so it is never recorded here. `logo`,
+    // reordered ahead of `shade`/`image` in the template, now reaches the
+    // table at exactly that position — the ground trio and the logo appear
+    // here in the template's order, not the canonical one.
+    expect(order).toEqual(["accent", "logo", "shade", "image"]);
   });
 
   test("the timeline path throws on a ground kind it cannot draw, the same way the still path does (html)", async () => {
@@ -288,7 +289,10 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
 
     const orderMotion = recordDrawOrder();
     NodeCanvasCompositor.draw(ctxMotion, preparedMotion, 0.5, "ken-burns-out", 0.5);
-    expect(orderMotion).toEqual(["video", "shade"]);
+    // `animated-text` never reaches `LAYER_DRAWERS` on this path (its own
+    // beat-selection drawer paints it); `logo` does, at its canonical list
+    // position after `shade` (C5).
+    expect(orderMotion).toEqual(["video", "shade", "logo"]);
   });
 
   test("the video layer draws the exact same pixels the image layer would (VD)", async () => {
@@ -350,5 +354,138 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     const vidMotionBuf = canvasVideoMotion.toBuffer("image/png");
     expect(vidMotionBuf.length).toBeGreaterThan(0);
     expect(Buffer.from(vidMotionBuf)).toEqual(Buffer.from(imgMotionBuf));
+  });
+
+  test("a template that reorders a sequenced layer renders in that order in the motion frames, and matches the still path (C5)", async () => {
+    // The ordering table permits `logo` anywhere `above: image` — including
+    // BEFORE its own text-kind layer, so `shade` paints over it. Before C5
+    // the still path refused this order outright (the logo drawer required a
+    // static-text layer to have already run) and the motion path ignored it
+    // (logo always drew last, after copy). Neither is true any more: both
+    // read the logo's anchor from a layout `prepare` resolves independent of
+    // list order (`logoAnchorLayout`), so both draw it exactly where the
+    // template puts it.
+    const template: BriefTemplate = {
+      id: "canonical-image-text",
+      version: 1,
+      creativeType: "image-text",
+      unit: "standard-web",
+      layers: [
+        { id: "image", kind: "image" },
+        { id: "logo", kind: "logo" }, // below the shade — the reorder C5 must honour
+        { id: "shade", kind: "shade" },
+        { id: "static-text", kind: "static-text" },
+      ],
+    };
+    const req = request({ template });
+
+    // Still path: renders without throwing (the scope correction) — a logo
+    // with no static-text drawn before it in this order used to be refused.
+    const preparedStill = await NodeCanvasCompositor.prepare(req);
+    const ctxStill = createCanvas(preparedStill.width, preparedStill.height).getContext("2d");
+    expect(() => NodeCanvasCompositor.draw(ctxStill, preparedStill, 1)).not.toThrow();
+    const stillBuf = ctxStill.canvas.toBuffer("image/png");
+
+    // Motion path, structural proof: the table sees `logo` BEFORE `shade`,
+    // matching the template — not after copy, and not after the ground trio.
+    const motionReq: TemplateRequest & { durationSec: number; timeline: CopyTimeline } = {
+      ...req,
+      durationSec: 8,
+      timeline: {
+        beats: [{ text: req.message, weight: 1 }],
+        transition: "cut",
+        keyBeat: 1,
+      },
+    };
+    const preparedMotion = await NodeCanvasCompositor.prepare(motionReq);
+    const orderCtx = createCanvas(preparedMotion.width, preparedMotion.height).getContext("2d");
+    const order = recordDrawOrder();
+    NodeCanvasCompositor.draw(orderCtx, preparedMotion, 1, undefined, 0.5, 1);
+    expect(order).toEqual(["image", "logo", "shade"]);
+    vi.restoreAllMocks();
+
+    // Motion path, cross-path consistency: with one beat spanning the whole
+    // clip and no motion kind, the frame must be byte-identical to the still.
+    // (For THIS template the logo sits opposite the headline, where the
+    // shade's gradient is fully transparent either way, so this alone would
+    // not catch a "logo always drawn last" regression — the `order` spy
+    // above is the real proof for that. The copy-reorder test below is where
+    // pixels are the ONLY proof, because copy never reaches `LAYER_DRAWERS`
+    // on the motion path for the spy to see.)
+    const ctxMotion = createCanvas(preparedMotion.width, preparedMotion.height).getContext("2d");
+    NodeCanvasCompositor.draw(ctxMotion, preparedMotion, 1, undefined, 0.5, 1);
+    const motionBuf = ctxMotion.canvas.toBuffer("image/png");
+    expect(Buffer.from(motionBuf)).toEqual(Buffer.from(stillBuf));
+  });
+
+  test("a template that reorders copy relative to shade/accent renders in that order in the motion frames too (C5)", async () => {
+    // Copy never reaches `LAYER_DRAWERS` on the motion path (drawSequencedCopy
+    // paints it directly at its list position, not through the table), so no
+    // spy can see where it drew — pixels are the only available proof here.
+    // Putting `static-text` BELOW `shade`/`accent` makes the reorder
+    // pixel-discriminating: the shade darkens (and the accent tints) the
+    // headline-bottom region where the text sits, so "copy drawn before the
+    // tint" and "copy drawn after it" are visibly, byte-wise different.
+    const reordered: BriefTemplate = {
+      id: "canonical-image-text",
+      version: 1,
+      creativeType: "image-text",
+      unit: "standard-web",
+      layers: [
+        { id: "image", kind: "image" },
+        { id: "static-text", kind: "static-text" }, // under the tint — the reorder C5 must honour
+        { id: "shade", kind: "shade" },
+        { id: "accent", kind: "accent" },
+        { id: "logo", kind: "logo" },
+      ],
+    };
+    const reqReordered = request({ template: reordered });
+    const reqCanonical = request(); // no template — falls back to the canonical order
+
+    const timelineFields = (message: string) => ({
+      durationSec: 8,
+      timeline: {
+        beats: [{ text: message, weight: 1 }],
+        transition: "cut" as const,
+        keyBeat: 1,
+      },
+    });
+
+    // Still path: renders without throwing, copy tinted by the shade/accent
+    // drawn after it.
+    const preparedStill = await NodeCanvasCompositor.prepare(reqReordered);
+    const ctxStill = createCanvas(preparedStill.width, preparedStill.height).getContext("2d");
+    NodeCanvasCompositor.draw(ctxStill, preparedStill, 1);
+    const stillBuf = ctxStill.canvas.toBuffer("image/png");
+
+    // Motion path, reordered: must match the still exactly — same reorder,
+    // same tint over the copy, on both paths.
+    const preparedMotionReordered = await NodeCanvasCompositor.prepare({
+      ...reqReordered,
+      ...timelineFields(reqReordered.message),
+    });
+    const ctxMotionReordered = createCanvas(
+      preparedMotionReordered.width,
+      preparedMotionReordered.height,
+    ).getContext("2d");
+    NodeCanvasCompositor.draw(ctxMotionReordered, preparedMotionReordered, 1, undefined, 0.5, 1);
+    const motionReorderedBuf = ctxMotionReordered.canvas.toBuffer("image/png");
+    expect(Buffer.from(motionReorderedBuf)).toEqual(Buffer.from(stillBuf));
+
+    // Non-vacuousness: the reordered motion frame must differ from the
+    // canonical-order motion frame (same message, same everything else) — if
+    // it didn't, the reorder wouldn't actually be reaching the pixels, and
+    // the byte match above would prove nothing.
+    const preparedMotionCanonical = await NodeCanvasCompositor.prepare({
+      ...reqCanonical,
+      ...timelineFields(reqCanonical.message),
+    });
+    const ctxMotionCanonical = createCanvas(
+      preparedMotionCanonical.width,
+      preparedMotionCanonical.height,
+    ).getContext("2d");
+    NodeCanvasCompositor.draw(ctxMotionCanonical, preparedMotionCanonical, 1, undefined, 0.5, 1);
+    const motionCanonicalBuf = ctxMotionCanonical.canvas.toBuffer("image/png");
+    expect(Buffer.from(motionReorderedBuf)).not.toEqual(Buffer.from(motionCanonicalBuf));
   });
 });
