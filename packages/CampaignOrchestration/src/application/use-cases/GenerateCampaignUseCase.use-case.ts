@@ -745,6 +745,18 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         ),
       );
     }
+    // D122: The HTML family is its own output family; its markup is never rasterised.
+    // Refuse image-html until an HTML renderer exists: the HTML output family has no
+    // renderer yet, so no campaign can be produced for it. Delete this guard when
+    // the HTML renderer ships.
+    const creativeType = brief.template.creativeType;
+    if (creativeType === "image-html") {
+      return err(
+        new Error(
+          'Creative type "image-html" is not supported: the HTML output family has no renderer yet, so no campaign can be produced for it.',
+        ),
+      );
+    }
     // A timeline is only ever rendered by a motion variant, and `runLegalGate` sweeps its
     // beat text immediately after this. Both need it refused here rather than later:
     // a classic brief would otherwise halt on copy no output could show, and an unrunnable
