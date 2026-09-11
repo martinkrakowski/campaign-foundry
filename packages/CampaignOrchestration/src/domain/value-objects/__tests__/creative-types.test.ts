@@ -122,8 +122,9 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
     expect(CREATIVE_TYPE_RULES["video"]).toEqual({
       unit: "standard-web",
       accepts: ["video", "shade", "animated-text", "logo"],
-      required: ["video"],
+      required: ["video", "animated-text"],
       maxOf: { logo: 1, shade: 1 },
+      sharedBudgets: [{ kinds: ["animated-text"], max: 1 }],
       outputFamilies: ["motion"],
     });
   });

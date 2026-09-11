@@ -326,7 +326,14 @@ export class NodeCanvasCompositor implements CompositorPort {
     };
     // The draw order is the layer list (D121/D128): array position is z-order,
     // bottom first. A kind with no table entry throws — it never skips.
+    let copyDrawn = false;
     for (const layer of prepared.layers) {
+      if (layer.kind === "static-text" || layer.kind === "animated-text") {
+        // A creative type's shared budget caps text-kind layers at one (D124);
+        // this guard is defensive, not load-bearing — never draws copy twice.
+        if (copyDrawn) continue;
+        copyDrawn = true;
+      }
       drawLayer(layer.kind, c);
     }
   }

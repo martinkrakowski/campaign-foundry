@@ -347,13 +347,38 @@ describe("parseBrief", () => {
     });
 
     test("each creative type is measured against its own table row (D124)", () => {
-      // video caps logo and shade, and declares no shared budget — the canonical
+      // video caps logo and shade, and caps animated-text via shared budget — the canonical
       // video template (one of each capped kind) parses, so the caps are read
       // per type, not baked into the boundary.
       expect(
         parseBrief({ ...valid, template: templateFromCanonical("short-video") })
           .template.creativeType,
       ).toBe("video");
+    });
+
+    test("video creative type requires animated-text (D124)", () => {
+      const base = templateFromCanonical("short-video");
+      const noText = {
+        ...base,
+        layers: base.layers.filter((l) => l.kind !== "animated-text"),
+      };
+      expect(() => parseBrief({ ...valid, template: noText })).toThrow(
+        'Campaign brief field "template.layers" must include required layer kind "animated-text" for creative type "video".',
+      );
+    });
+
+    test("video creative type caps animated-text via shared budget (D124)", () => {
+      const base = templateFromCanonical("short-video");
+      const duplicateText = {
+        ...base,
+        layers: [
+          ...base.layers,
+          { id: "headline-anim-2", kind: "animated-text" },
+        ],
+      };
+      expect(() => parseBrief({ ...valid, template: duplicateText })).toThrow(
+        'Campaign brief field "template.layers" must contain at most 1 layer(s) of kind "animated-text" for creative type "video"; got 2.',
+      );
     });
 
     test("the two text kinds share one budget in image-text: both together are refused (D124)", () => {

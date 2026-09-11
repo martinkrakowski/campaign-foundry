@@ -260,21 +260,22 @@ describe("derive.ts", () => {
     });
 
     test("another creative type's table row drives the same derivations", () => {
-      // video caps logo and shade and declares no shared budget: the canonical
-      // video template holds one of each capped kind, so the two stay unoffered
-      // while the uncapped kinds remain — the fallback for an absent shared
-      // budget is table data too, not editor logic.
+      // video caps logo and shade and caps animated-text via shared budget: the canonical
+      // video template holds one of each capped kind, so they stay unoffered
+      // while video remains addable.
       const state = initialEditorState();
       const videoState = {
         ...state,
         template: templateFromCanonical("short-video"),
       };
-      expect(addableKinds(videoState)).toContain("animated-text");
+      expect(addableKinds(videoState)).not.toContain("animated-text");
       expect(addableKinds(videoState)).toContain("video");
       expect(addableKinds(videoState)).not.toContain("logo");
       expect(addableKinds(videoState)).not.toContain("shade");
       expect(removableLayerIds(videoState)).not.toContain("video");
+      expect(removableLayerIds(videoState)).not.toContain("animated-text");
       expect(removableLayerIds(videoState)).toContain("logo");
+      expect(removableLayerIds(videoState)).toContain("shade");
     });
 
     // Protects D121: CREATIVE_TYPE_RULES is the single source of what a creative

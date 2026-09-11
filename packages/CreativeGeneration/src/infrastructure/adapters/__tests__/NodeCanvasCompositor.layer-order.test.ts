@@ -490,11 +490,10 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
   });
 
   test("the timeline path draws sequenced copy at most once, even when the template lists two text-kind layers (defensive)", async () => {
-    // `video`'s CREATIVE_TYPE_RULES sets no `maxOf` for `animated-text` (only
-    // `logo` and `shade` are capped), so a template naming it twice is not a
-    // shape the domain rules reject — this is reachable, not merely
-    // theoretical, and the guard in `drawTimeline`'s loop is what keeps a
-    // second text-kind entry from drawing the beat a second time.
+    // `video`'s CREATIVE_TYPE_RULES caps `animated-text` via shared budget,
+    // but if an unvalidated template reaches the compositor directly,
+    // the guard in `drawTimeline`'s loop is what keeps a second text-kind
+    // entry from drawing the beat a second time.
     const timeline: CopyTimeline = {
       beats: [{ text: "Stay wild, stay hydrated", weight: 1 }],
       transition: "cut",
@@ -533,6 +532,39 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     // Without the guard, a second text-kind entry would draw the beat again —
     // doubling the fillText calls. With it, the count matches the one-entry
     // baseline exactly.
+    expect(await draw(twiceTemplate)).toBe(onePassCallCount);
+  });
+
+  test("the still path draws copy at most once, even when the template lists two text-kind layers (defensive)", async () => {
+    const onceTemplate: BriefTemplate = {
+      id: "canonical-video",
+      version: 1,
+      creativeType: "video",
+      unit: "standard-web",
+      layers: [
+        { id: "video", kind: "video" },
+        { id: "text-a", kind: "animated-text" },
+      ],
+    };
+    const twiceTemplate: BriefTemplate = {
+      ...onceTemplate,
+      layers: [...onceTemplate.layers, { id: "text-b", kind: "animated-text" }],
+    };
+
+    const draw = async (template: BriefTemplate): Promise<number> => {
+      const req = request({ template });
+      const prepared = await NodeCanvasCompositor.prepare(req);
+      const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
+      const fillText = vi.spyOn(ctx, "fillText");
+      NodeCanvasCompositor.draw(ctx, prepared, 1);
+      return fillText.mock.calls.length;
+    };
+
+    const onePassCallCount = await draw(onceTemplate);
+    expect(onePassCallCount).toBeGreaterThan(0);
+    // Without the guard in drawLegacy, a second text-kind entry would draw the
+    // copy again — doubling the fillText calls. With it, the count matches
+    // the one-entry baseline exactly.
     expect(await draw(twiceTemplate)).toBe(onePassCallCount);
   });
 });

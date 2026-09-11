@@ -113,8 +113,9 @@ export const CREATIVE_TYPE_RULES: Readonly<
   video: {
     unit: "standard-web",
     accepts: ["video", "shade", "animated-text", "logo"],
-    required: ["video"],
+    required: ["video", "animated-text"],
     maxOf: { logo: 1, shade: 1 },
+    sharedBudgets: [{ kinds: ["animated-text"], max: 1 }],
     outputFamilies: ["motion"],
   },
 };
