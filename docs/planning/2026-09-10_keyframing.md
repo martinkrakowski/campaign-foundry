@@ -30,7 +30,7 @@ compose.** That is the same defect as four layer orders — and this plan exists
 | **K-D3** | **A preset must expand to exactly the frames it renders today.** Byte-identity per frame is the acceptance test, not a similarity judgement. | There is **no video byte golden** — D10 freezes bytes nothing measures. So the freeze has to be demonstrated. |
 | **K-D4** | **Keyframes are per layer, addressed by layer `id`, and follow the layer list.** A track on a layer that is absent or disabled resolves to nothing, silently. | Anything else reintroduces a second addressing scheme beside `BriefTemplate.layers`. |
 | **K-D5** | **`restT` survives as a first-class idea.** Every preset declares the `t` at which its pose is the settled one, and the poster renders that frame. | D7 depends on it. A naive keyframe model loses the notion of "the frame the still should be". |
-| **K-D6** | **This cannot start before the motion path is list-driven (C1).** | Keyframed per-layer motion is meaningless while `drawTimeline` draws three of five layers by name. |
+| **K-D6** | **This cannot start before the motion path is list-driven — and that means VF1, not C1.** C1 made the *ground trio* list-driven; `static-text`, `animated-text` and `logo` are still drawn in fixed positions afterward. **Not because a track on them would be meaningless** — the logo's position comes from `prepare()` in both paths and copy already composes a per-frame pose — but because there is **no single site to resolve a track by `id`** (`drawBeat` never holds a layer record, and two text layers collapse to one beat block), and because **z would be silently wrong**: an opacity track on a text layer the template puts below the shade would fade it above the shade in motion. See `2026-09-10_finishing-video.md` §3. | Keyframed per-layer motion is meaningless while `drawTimeline` draws three of five layers by name. |
 
 ---
 
@@ -68,7 +68,7 @@ stays as it is, and text-effect tracks play on beat-local progress exactly as th
 | **K4** | **Author tracks directly in a brief**, alongside presets, with a stated precedence when both name one layer and property. | A hand-authored track renders; a track on an absent or disabled layer renders nothing and says nothing. |
 | **K5** | **The editor surface** — whatever minimum lets a user see and adjust a track. Scope deferred until K1–K4 land. | Out of scope for this document beyond naming it. |
 
-**Order.** C1 first, from the reconciliation, then K1 → K2 → K3 → K4. **K2 is the gate**: if the four
+**Order.** The video plan first — **VF2** (an MP4 byte golden) then **VF1** (the full order) — then K1 → K2 → K3 → K4. VF2 matters to K2 specifically: without a byte golden the "byte-identical preset expansion" gate can only compare frames, which is weaker than what D10 claims. **K2 is the gate**: if the four
 existing motions cannot be reproduced frame-for-frame as tracks, the model is wrong and the plan
 stops rather than shipping a second system beside the presets.
 
