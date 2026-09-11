@@ -22,6 +22,14 @@ export interface CreativeTemplateLayer {
   readonly id: string;
   readonly kind: LayerKind;
   /**
+   * Whether this layer is enabled (D129). Optional, and absent means
+   * enabled — every existing template and every stored brief keeps working
+   * untouched. A disabled layer is preserved in the brief's layer list and
+   * counts against budgets and caps (MP-D5), but will not be rendered (M3).
+   * Refused if disabling would leave a required kind with no enabled instances (MP-D4).
+   */
+  readonly enabled?: boolean;
+  /**
    * The layer's own props (D134): overrides of the geometry this layer already
    * reads. Optional, and absent means the resolved defaults — the canonical
    * library's own layers never carry props; only a brief's materialised copy

@@ -638,6 +638,178 @@ describe("parseBrief", () => {
     });
   });
 
+  describe("layer enabled (D129, MP-D4, MP-D5)", () => {
+    const base = templateFromCanonical("social-post");
+
+    test("a non-boolean enabled value is refused at the boundary with a message naming the field", () => {
+      const template = {
+        ...base,
+        layers: base.layers.map((l, i) =>
+          i === 1 ? { ...l, enabled: "yes" } : l,
+        ),
+      };
+      expect(() => parseBrief({ ...valid, template })).toThrow(
+        'Campaign brief field "template.layers[1].enabled" must be a boolean; got "yes".',
+      );
+      expect(() =>
+        parseBrief({ ...valid, template }, { enforceCapabilities: false }),
+      ).toThrow(
+        'Campaign brief field "template.layers[1].enabled" must be a boolean; got "yes".',
+      );
+      expect(() =>
+        validateTemplate(template, "social-post"),
+      ).toThrow(
+        'Campaign brief field "template.layers[1].enabled" must be a boolean; got "yes".',
+      );
+    });
+
+    test("other non-boolean enabled values (number, null) are refused with a message naming the field", () => {
+      const templateWithNumber = {
+        ...base,
+        layers: base.layers.map((l, i) =>
+          i === 1 ? { ...l, enabled: 1 } : l,
+        ),
+      };
+      expect(() => parseBrief({ ...valid, template: templateWithNumber })).toThrow(
+        'Campaign brief field "template.layers[1].enabled" must be a boolean; got 1.',
+      );
+
+      const templateWithNull = {
+        ...base,
+        layers: base.layers.map((l, i) =>
+          i === 1 ? { ...l, enabled: null } : l,
+        ),
+      };
+      expect(() => parseBrief({ ...valid, template: templateWithNull })).toThrow(
+        'Campaign brief field "template.layers[1].enabled" must be a boolean; got null.',
+      );
+    });
+
+    test("an enabled layer carries enabled: true, and absent enabled behaves as enabled", () => {
+      const template = {
+        ...base,
+        layers: base.layers.map((l, i) =>
+          i === 1 ? { ...l, enabled: true } : l,
+        ),
+      };
+      const parsed = parseBrief({ ...valid, template });
+      expect(parsed.template.layers[1]?.enabled).toBe(true);
+      expect(parsed.template.layers[0]?.enabled).toBeUndefined();
+    });
+
+    test("a disabled optional layer carries enabled: false", () => {
+      const template = {
+        ...base,
+        layers: base.layers.map((l, i) =>
+          i === 1 ? { ...l, enabled: false } : l,
+        ),
+      };
+      const parsed = parseBrief({ ...valid, template });
+      expect(parsed.template.layers[1]?.enabled).toBe(false);
+    });
+
+    test("two image layers both disabled is refused under D129 / MP-D4", () => {
+      // D129/MP-D4: 'Required' means at least one enabled instance of each required kind,
+      // not merely one present. image is uncapped in image-text, but both disabled leaves
+      // nothing to paint the ground.
+      const twoDisabledImages = {
+        ...base,
+        layers: [
+          { id: "image-1", kind: "image" as const, enabled: false },
+          { id: "image-2", kind: "image" as const, enabled: false },
+          ...base.layers.slice(1),
+        ],
+      };
+      expect(() => parseBrief({ ...valid, template: twoDisabledImages })).toThrow(
+        'Campaign brief field "template.layers" must include required layer kind "image" for creative type "image-text".',
+      );
+      expect(() =>
+        validateTemplate(twoDisabledImages, "social-post"),
+      ).toThrow(
+        'Campaign brief field "template.layers" must include required layer kind "image" for creative type "image-text".',
+      );
+    });
+
+    test("two image layers where one is enabled and one is disabled is accepted under D129 / MP-D4", () => {
+      const oneEnabledOneDisabled = {
+        ...base,
+        layers: [
+          { id: "image-1", kind: "image" as const, enabled: true },
+          { id: "image-2", kind: "image" as const, enabled: false },
+          ...base.layers.slice(1),
+        ],
+      };
+      const parsed = parseBrief({ ...valid, template: oneEnabledOneDisabled });
+      expect(parsed.template.layers).toHaveLength(6);
+      expect(parsed.template.layers[0]?.enabled).toBe(true);
+      expect(parsed.template.layers[1]?.enabled).toBe(false);
+    });
+
+    test("disabling a single required layer is refused under D129 (static-text or image)", () => {
+      const disabledStaticText = {
+        ...base,
+        layers: base.layers.map((l) =>
+          l.kind === "static-text" ? { ...l, enabled: false } : l,
+        ),
+      };
+      expect(() => parseBrief({ ...valid, template: disabledStaticText })).toThrow(
+        'Campaign brief field "template.layers" must include required layer kind "static-text" for creative type "image-text".',
+      );
+
+      const disabledImage = {
+        ...base,
+        layers: base.layers.map((l) =>
+          l.kind === "image" ? { ...l, enabled: false } : l,
+        ),
+      };
+      expect(() => parseBrief({ ...valid, template: disabledImage })).toThrow(
+        'Campaign brief field "template.layers" must include required layer kind "image" for creative type "image-text".',
+      );
+    });
+
+    test("a disabled layer still counts toward maxOf (MP-D5)", () => {
+      // MP-D5: A hidden layer still occupies its slot in the template; otherwise
+      // disabling a logo would let a second be added and re-enabling would exceed the cap.
+      const twoLogosOneDisabled = {
+        ...base,
+        layers: [
+          ...base.layers,
+          { id: "logo-2", kind: "logo" as const, enabled: false },
+        ],
+      };
+      const refusal =
+        'Campaign brief field "template.layers" must contain at most 1 layer(s) of kind "logo" for creative type "image-text"; got 2.';
+      expect(() =>
+        parseBrief({ ...valid, template: twoLogosOneDisabled }),
+      ).toThrow(refusal);
+      expect(() =>
+        validateTemplate(twoLogosOneDisabled, "social-post"),
+      ).toThrow(refusal);
+    });
+
+    test("a disabled layer still counts toward sharedBudgets (MP-D5)", () => {
+      // static-text and animated-text share a budget of 1 in image-text.
+      // Even with static-text disabled, having animated-text exceeds the budget of 1.
+      const sharedBudgetWithDisabled = {
+        ...base,
+        layers: [
+          ...base.layers.map((l) =>
+            l.kind === "static-text" ? { ...l, enabled: false } : l,
+          ),
+          { id: "anim-text", kind: "animated-text" as const, enabled: true },
+        ],
+      };
+      const refusal =
+        'Campaign brief field "template.layers" must contain at most 1 layer(s) of kind "static-text" or "animated-text" for creative type "image-text"; got 2.';
+      expect(() =>
+        parseBrief({ ...valid, template: sharedBudgetWithDisabled }),
+      ).toThrow(refusal);
+      expect(() =>
+        validateTemplate(sharedBudgetWithDisabled, "social-post"),
+      ).toThrow(refusal);
+    });
+  });
+
   describe("scalar shape checks (D68 — shape, not just presence)", () => {
     test.each([
       [
