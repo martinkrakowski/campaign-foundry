@@ -3882,11 +3882,12 @@ describe("the status page", () => {
     const root = await mkdir(join(tmpdir(), "wave-status-token-test-"), {
       recursive: true,
     });
+    if (!root) throw new Error("Failed to create temporary directory for wave-status-token-test");
     dirs.push(root);
     const handle = await startServer({
       port: 0,
       root,
-      collect: async () => statusAt(0),
+      collect: async () => statusAt(),
     });
     try {
       // Derive the set of tokens the page actually references from the real HTML
@@ -3947,11 +3948,12 @@ describe("the status page", () => {
     const root = await mkdir(join(tmpdir(), "wave-status-fallback-test-"), {
       recursive: true,
     });
+    if (!root) throw new Error("Failed to create temporary directory for wave-status-fallback-test");
     dirs.push(root);
     const handle = await startServer({
       port: 0,
       root,
-      collect: async () => statusAt(0),
+      collect: async () => statusAt(),
     });
     try {
       const html = await readFile(PAGE_PATH, "utf8");
@@ -4007,11 +4009,12 @@ describe("the status page", () => {
     const root = await mkdir(join(tmpdir(), "wave-status-missing-style-test-"), {
       recursive: true,
     });
+    if (!root) throw new Error("Failed to create temporary directory for wave-status-missing-style-test");
     dirs.push(root);
     const handle = await startServer({
       port: 0,
       root,
-      collect: async () => statusAt(0),
+      collect: async () => statusAt(),
     });
     try {
       const html = await readFile(PAGE_PATH, "utf8");
