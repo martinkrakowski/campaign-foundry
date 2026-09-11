@@ -1,8 +1,14 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Window } from "happy-dom";
 import { extractDarkBlock, extractRootBlock } from "../server.js";
+import { readEvents } from "../lib/events.js";
+import { mergeStatus } from "../lib/merge.js";
 import type { WaveStatus } from "../lib/types.js";
 
 const PAGE_PATH = fileURLToPath(
@@ -11,6 +17,10 @@ const PAGE_PATH = fileURLToPath(
 
 const realTokensPath = fileURLToPath(
   new URL("../../../apps/web/src/styles/tokens.css", import.meta.url),
+);
+
+const waveEventSh = fileURLToPath(
+  new URL("../../../scripts/wave-event.sh", import.meta.url),
 );
 
 class FakeEventSource {
@@ -57,12 +67,16 @@ interface PageHandle {
 }
 
 const windows: Window[] = [];
+const dirs: string[] = [];
 
 afterEach(() => {
   vi.useRealTimers();
   FakeEventSource.instances = [];
   while (windows.length > 0) {
     windows.pop()?.happyDOM.close();
+  }
+  for (const dir of dirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -3274,6 +3288,15 @@ describe("the status page", () => {
               },
               disagreements: [],
             },
+            {
+              wave: "P",
+              lane: "p5",
+              reported: { stage: "dispatch", event: "started", ts: "now" },
+              derived: {
+                alive: false,
+              },
+              disagreements: [],
+            },
           ],
         },
       ],
@@ -3297,6 +3320,7 @@ describe("the status page", () => {
     expectTone("started", "info");
     expectTone("failed", "bad");
     expectTone("settled", "ok");
+    expectTone("stalled", "warn");
     expectTone("pending", "warn");
     expectTone("none", "dim");
 
@@ -3305,6 +3329,102 @@ describe("the status page", () => {
     for (const el of pills) {
       expect(el.textContent?.trim().length).toBeGreaterThan(0);
     }
+  });
+
+  test("a lane with no live process and no terminal event renders as stalled, not running", async () => {
+    const stalledStatus: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "T",
+          lanes: [
+            {
+              wave: "T",
+              lane: "t1",
+              reported: { stage: "dispatch", event: "started", ts: "now" },
+              derived: { alive: false },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    const page = await loadPage(stalledStatus);
+    const doc = page.window.document;
+
+    const stagePill = doc.querySelector("tr.lane td.c-stage .pill");
+    expect(stagePill).not.toBeNull();
+    expect(stagePill!.textContent?.trim()).toBe("stalled");
+    expect(stagePill!.classList.contains("warn")).toBe(true);
+
+    const meta = doc.querySelector(".wave-meta")?.textContent ?? "";
+    expect(meta).toContain("1 stalled");
+    expect(meta).not.toContain("1 running");
+  });
+
+  test("an event emitted outside dispatch-lane.sh is read back correctly by the page", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wave-page-standalone-"));
+    dirs.push(dir);
+    const waveDir = join(dir, "wave-S");
+    mkdirSync(waveDir, { recursive: true });
+
+    execFileSync("sh", [
+      waveEventSh,
+      waveDir,
+      "S",
+      "s1",
+      "implement",
+      "settled",
+      "--pr",
+      "342",
+      "--round",
+      "1",
+      "--detail",
+      JSON.stringify({ fixed: 3, refuted: 1, mutations: 2 }),
+    ]);
+
+    const eventsPath = join(waveDir, "events.jsonl");
+    expect(existsSync(eventsPath)).toBe(true);
+    const { events } = readEvents(readFileSync(eventsPath, "utf8"));
+    expect(events.length).toBe(1);
+    expect(events[0]?.stage).toBe("implement");
+    expect(events[0]?.event).toBe("settled");
+    expect(events[0]?.pr).toBe(342);
+    expect(events[0]?.detail).toEqual({ fixed: 3, refuted: 1, mutations: 2 });
+
+    const status = mergeStatus(
+      events,
+      {
+        "S/s1": {
+          alive: false,
+          pr: { number: 342, state: "open", checks: "pass" },
+        },
+      },
+      "now",
+    );
+    const page = await loadPage(status);
+    const doc = page.window.document;
+
+    const row = doc.querySelector('tr.lane[data-wave="S"][data-lane="s1"]');
+    expect(row).not.toBeNull();
+
+    const stageCell = row!.querySelector("td.c-stage");
+    expect(stageCell).not.toBeNull();
+    expect(stageCell!.textContent).toContain("settled");
+
+    const stagePill = stageCell!.querySelector(".pill");
+    expect(stagePill).not.toBeNull();
+    expect(stagePill!.textContent?.trim()).toBe("settled");
+    expect(stagePill!.classList.contains("ok")).toBe(true);
+
+    const prCell = row!.querySelector("td.c-pr");
+    expect(prCell).not.toBeNull();
+    expect(prCell!.textContent).toContain("#342");
+
+    const findingsCell = row!.querySelector("td.c-find");
+    expect(findingsCell).not.toBeNull();
+    expect(findingsCell!.textContent).toContain("3 / 1 / 2");
   });
 
   test("the wave band exposes eyebrow, id and an outcome rollup inside the accordion button, and aria-controls resolves to that wave's own lane rows", async () => {

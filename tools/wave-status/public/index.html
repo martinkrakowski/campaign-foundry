@@ -384,6 +384,9 @@
       .wave-meta .wm-run {
         color: var(--color-info);
       }
+      .wave-meta .wm-warn {
+        color: var(--color-warning);
+      }
       .wave-meta .wm-ok {
         color: var(--color-success);
       }
@@ -1364,17 +1367,20 @@
 
       function stageCell(lane) {
         if (lane.reported === undefined) return '<span class="dim">no events</span>';
-        const tone =
-          lane.reported.event === "failed"
+        const isStalled = lane.reported.event === "started" && !lane.derived.alive;
+        const tone = isStalled
+          ? "warn"
+          : lane.reported.event === "failed"
             ? "bad"
             : lane.reported.event === "settled"
               ? "ok"
               : "info";
+        const eventText = isStalled ? "stalled" : lane.reported.event;
         const round =
           lane.reported.round === undefined
             ? ""
             : `<span class="round">round ${esc(lane.reported.round)}</span>`;
-        return `<span class="stage-name">${esc(lane.reported.stage)}</span> ${pill(tone, lane.reported.event, true)}${round}`;
+        return `<span class="stage-name">${esc(lane.reported.stage)}</span> ${pill(tone, eventText, true)}${round}`;
       }
 
       function liveness(lane) {
@@ -1433,14 +1439,19 @@
         let settled = 0;
         let failed = 0;
         let running = 0;
+        let stalled = 0;
         for (const lane of lanes) {
           const event = lane.reported === undefined ? undefined : lane.reported.event;
           if (event === "settled") settled++;
           else if (event === "failed") failed++;
-          else if (event === "started") running++;
+          else if (event === "started") {
+            if (lane.derived.alive) running++;
+            else stalled++;
+          }
         }
         let out = `${lanes.length} ${lanes.length === 1 ? "lane" : "lanes"}`;
         if (running > 0) out += ` · <span class="wm-run">${running} running</span>`;
+        if (stalled > 0) out += ` · <span class="wm-warn">${stalled} stalled</span>`;
         if (settled > 0) out += ` · <span class="wm-ok">${settled} settled</span>`;
         if (failed > 0) out += ` · <span class="wm-bad">${failed} failed</span>`;
         return out;
@@ -1505,8 +1516,9 @@
                 settled = (settled ?? 0) + 1;
               else if (lane.reported.event === "failed")
                 failed = (failed ?? 0) + 1;
-              else if (lane.reported.event === "started")
-                running = (running ?? 0) + 1;
+              else if (lane.reported.event === "started") {
+                if (lane.derived.alive) running = (running ?? 0) + 1;
+              }
             }
             const pr = lane.derived.pr;
             if (pr !== undefined) {

@@ -1,7 +1,11 @@
 #!/bin/sh
 # Append one wave-status event to <logdir>/events.jsonl (plan D103, §2.1).
 #
-#   wave-event.sh <logdir> <wave> <lane> <stage> <event> [--pr N] [--round N] [--detail '<json>']
+#   wave-event.sh [<logdir>] <wave> <lane> <stage> <event> [--pr N] [--round N] [--detail '<json>']
+#   wave-event.sh --logdir <dir> <wave> <lane> <stage> <event> [--pr N] [--round N] [--detail '<json>']
+#
+# When <logdir> is omitted, it defaults to $LOGDIR, or /tmp/wave-<wave> (or /tmp/<wave>).
+# May be called standalone around direct lane dispatches without dispatch-lane.sh.
 #
 # Output is byte-identical to formatEvent in tools/wave-status/lib/emit.ts for
 # the same input, so the two writers cannot drift apart. Two consequences for
@@ -15,14 +19,60 @@
 # reader would have to reject later.
 set -u
 
-[ $# -ge 5 ] || {
-  printf '%s\n' "usage: $0 <logdir> <wave> <lane> <stage> <event> [--pr N] [--round N] [--detail '<json>']" >&2
-  exit 2
-}
-LOGDIR="$1"; WAVE="$2"; LANE="$3"; STAGE="$4"; EVENT="$5"; shift 5
-
 stages="dispatch implement gate review remediate sweep merge record"
 kinds="started settled failed"
+
+is_stage() {
+  case " $stages " in
+    *" $1 "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+is_event() {
+  case " $kinds " in
+    *" $1 "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+LOGDIR="${LOGDIR:-}"
+if [ $# -ge 1 ] && [ "$1" = "--logdir" ]; then
+  [ $# -ge 2 ] || { printf '%s\n' "missing value for --logdir" >&2; exit 2; }
+  LOGDIR="$2"
+  shift 2
+fi
+
+if [ $# -ge 5 ] && is_stage "$4" && is_event "$5"; then
+  LOGDIR="$1"; WAVE="$2"; LANE="$3"; STAGE="$4"; EVENT="$5"; shift 5
+elif [ $# -ge 4 ] && is_stage "$3" && is_event "$4"; then
+  WAVE="$1"; LANE="$2"; STAGE="$3"; EVENT="$4"; shift 4
+elif [ -n "$LOGDIR" ] && [ $# -ge 4 ]; then
+  WAVE="$1"; LANE="$2"; STAGE="$3"; EVENT="$4"; shift 4
+elif [ $# -ge 5 ]; then
+  LOGDIR="$1"; WAVE="$2"; LANE="$3"; STAGE="$4"; EVENT="$5"; shift 5
+elif [ $# -ge 4 ]; then
+  WAVE="$1"; LANE="$2"; STAGE="$3"; EVENT="$4"; shift 4
+else
+  printf '%s\n' "usage: $0 [<logdir>] <wave> <lane> <stage> <event> [--pr N] [--round N] [--detail '<json>']" >&2
+  exit 2
+fi
+
+if [ -z "$LOGDIR" ]; then
+  root="${WAVE_LOG_ROOT:-/tmp}"
+  if [ -d "$root/wave-$WAVE" ]; then
+    LOGDIR="$root/wave-$WAVE"
+  elif [ -d "$root/$WAVE" ]; then
+    LOGDIR="$root/$WAVE"
+  elif [ -d "$root/wave$WAVE" ]; then
+    LOGDIR="$root/wave$WAVE"
+  else
+    case "$WAVE" in
+      wave*) LOGDIR="$root/$WAVE" ;;
+      *)     LOGDIR="$root/wave-$WAVE" ;;
+    esac
+  fi
+fi
 
 stage_ok=0
 for s in dispatch implement gate review remediate sweep merge record; do

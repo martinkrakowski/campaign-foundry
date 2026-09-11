@@ -251,6 +251,22 @@ describe("mergeStatus — disagreements are flagged, never resolved (D103)", () 
     ]);
   });
 
+  test("reported dispatch started, process dead, no EXIT marker — flags disagreement", () => {
+    const status = mergeStatus(
+      [event({ stage: "dispatch", event: "started" })],
+      {
+        "S/s4": observation({
+          alive: false,
+          log: { bytes: 5, mtimeMs: 1, tail: "buffered output only" },
+        }),
+      },
+      "now",
+    );
+    expect(status.waves[0]?.lanes[0]?.disagreements).toEqual([
+      "lane says dispatch started; the process is not alive and the log has no EXIT marker",
+    ]);
+  });
+
   test("sibling: implement started with the process alive agrees", () => {
     const status = mergeStatus(
       [event({ stage: "implement", event: "started" })],

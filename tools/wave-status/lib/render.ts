@@ -55,7 +55,9 @@ function stageCell(lane: LaneStatus): string {
   const reported = lane.reported;
   if (reported === undefined) return ABSENT;
   const round = reported.round === undefined ? "" : ` (round ${reported.round})`;
-  return `${reported.stage} ${reported.event}${round}`;
+  const isStalled = reported.event === "started" && !lane.derived.alive;
+  const event = isStalled ? "stalled" : reported.event;
+  return `${reported.stage} ${event}${round}`;
 }
 
 function livenessCell(lane: LaneStatus): string {
@@ -89,6 +91,7 @@ const COLUMNS: readonly Column[] = [
       if (event === undefined) return withCode(DIM, text);
       if (event === "failed") return withCode(RED, text);
       if (event === "settled") return withCode(GREEN, text);
+      if (event === "started" && !lane.derived.alive) return withCode(YELLOW, text);
       return withCode(CYAN, text);
     },
   },

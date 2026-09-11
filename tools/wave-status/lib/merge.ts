@@ -131,13 +131,12 @@ function findDisagreements(
   // there is "nobody looked", not "the process is dead".
   if (
     observed &&
-    reported.stage === "implement" &&
     reported.event === "started" &&
     !derived.alive &&
     derived.exit === undefined
   ) {
     disagreements.push(
-      "lane says implement started; the process is not alive and the log has no EXIT marker",
+      `lane says ${reported.stage} started; the process is not alive and the log has no EXIT marker`,
     );
   }
 
