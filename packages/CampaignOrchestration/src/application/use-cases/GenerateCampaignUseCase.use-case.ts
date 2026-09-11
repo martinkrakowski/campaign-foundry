@@ -809,7 +809,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
   private validateCopyTemplateCompatibility(brief: CampaignBrief): Result<true, Error> {
     if (brief.copy?.timeline !== undefined) {
       const templateRules = CREATIVE_TYPE_RULES[brief.template.creativeType];
-      const acceptsText = templateRules?.accepts.some(
+      const acceptsText = templateRules.accepts.some(
         (kind) => kind === "static-text" || kind === "animated-text",
       );
       if (!acceptsText) {
@@ -834,7 +834,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     }
     if (brief.variation?.axes?.headline !== undefined) {
       const templateRules = CREATIVE_TYPE_RULES[brief.template.creativeType];
-      const acceptsText = templateRules?.accepts.some(
+      const acceptsText = templateRules.accepts.some(
         (kind) => kind === "static-text" || kind === "animated-text",
       );
       if (!acceptsText) {

@@ -1355,6 +1355,30 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     expect(d.videoCompositor.compositeVideo).not.toHaveBeenCalled();
   });
 
+  test("variation.axes.headline on a brief whose template does not accept text layers is refused before generation (image-html)", async () => {
+    const d = deps();
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({
+        template: {
+          id: "canonical-image-html",
+          version: 1,
+          creativeType: "image-html",
+          unit: "standard-web",
+          layers: CANONICAL_TEMPLATES["image-html"].layers,
+        },
+        variation: { count: 3, seed: 42, axes: { headline: "pool://copy" } },
+      }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toMatch(
+        /does not accept text layers for "variation\.axes\.headline"/,
+      );
+    }
+    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+    expect(d.videoCompositor.compositeVideo).not.toHaveBeenCalled();
+  });
+
   test("E3.2 with no timeline the sampled times are exactly the fixed set (D10)", async () => {
     const d = deps({ planner: fakePlanner(fakePlan([motionVariant()])) });
     await new GenerateCampaignUseCase(d).execute(variationBrief());
