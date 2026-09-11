@@ -11,6 +11,7 @@ import {
   formatOcclusionReason,
   type CreativeType,
 } from "../creative-types.js";
+import type { ComplianceResult } from "../ComplianceResult.vo.js";
 import { isBriefTemplate, templateFromCanonical } from "../brief-template.js";
 
 describe("creative types and compatibility rules (D119, D124, D131)", () => {
@@ -518,6 +519,49 @@ describe("occlusion table and guard checks (D135, D136)", () => {
       ],
     };
     expect(isBriefTemplate(occludingSocialTemplate)).toBe(true);
+  });
+
+  test("an advisory finding is distinguished from a failure and clean pass without guessing (D136, T2a)", () => {
+    // Producer returns explicit advisory representation
+    const advisory = checkPairOcclusion("shade", "static-text");
+    expect(advisory.passed).toBe(true);
+    expect(advisory.severity).toBe("advisory");
+    expect(advisory.reason).toBe(
+      "the shade layer now sits above the headline and will mute it",
+    );
+
+    const repositionAdvisory = checkRepositionOcclusion(
+      [
+        { kind: "video" },
+        { kind: "animated-text" },
+        { kind: "shade" },
+        { kind: "logo" },
+      ],
+      2,
+      1,
+    );
+    expect(repositionAdvisory.passed).toBe(true);
+    expect(repositionAdvisory.severity).toBe("advisory");
+    expect(repositionAdvisory.reason).toBeDefined();
+
+    // Consumer discrimination: tell the three states apart without guessing
+    type Verdict = "pass" | "advisory" | "fail";
+    const classify = (r: ComplianceResult): Verdict => {
+      if (!r.passed) return "fail";
+      if (r.severity === "advisory") return "advisory";
+      return "pass";
+    };
+
+    const failure: ComplianceResult = {
+      passed: false,
+      reason: "Prohibited terminology detected: miracle",
+    };
+    const cleanPass: ComplianceResult = { passed: true };
+
+    expect(classify(advisory)).toBe("advisory");
+    expect(classify(repositionAdvisory)).toBe("advisory");
+    expect(classify(failure)).toBe("fail");
+    expect(classify(cleanPass)).toBe("pass");
   });
 
   describe("findOcclusionDelta (D135, D136, L8o-fix5)", () => {

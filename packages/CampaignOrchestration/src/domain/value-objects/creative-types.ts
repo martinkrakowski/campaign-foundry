@@ -13,8 +13,10 @@
  * Per D131, `fill` appears in no `accepts` list until L11 draws it.
  */
 import type { AdvertisingUnit } from "./advertising-units.js";
-import type { ComplianceResult } from "./ComplianceResult.vo.js";
+import type { ComplianceResult, ComplianceSeverity } from "./ComplianceResult.vo.js";
 import type { LayerKind } from "./layer-kinds.js";
+
+export type { ComplianceSeverity };
 
 export const CREATIVE_TYPES = ["image-text", "image-html", "video"] as const;
 
@@ -222,11 +224,11 @@ export function formatOcclusionReason(
  * Checks whether layer `above` sitting above layer `below` produces an occlusion (D135, D136).
  *
  * Advisory representation in ComplianceResult (D136):
- * Returns `{ passed: true, reason?: string }`.
- * An advisory finding never fails a compliance gate (`passed: true`), but conveys
- * the finding through `reason`. Adding a separate severity field to ComplianceResult
- * would alter the contract of existing checks (validateLegalCopy, validateBrandColorDensity).
- * Returning `passed: true` with `reason` preserves type compatibility across all gates.
+ * Returns `{ passed: true, severity: "advisory", reason: string }` on occlusion,
+ * or `{ passed: true }` when clear.
+ * An occlusion finding is an advisory: it never fails a compliance gate (`passed: true`),
+ * but explicitly declares `severity: "advisory"` alongside the explanatory `reason`
+ * so consumers can distinguish an advisory from a gate failure without inference.
  */
 export function checkPairOcclusion(
   above: LayerKind,
@@ -244,6 +246,7 @@ export function checkPairOcclusion(
   }
   return {
     passed: true,
+    severity: "advisory",
     reason: formatOcclusionReason(above, below, rule.behavior),
   };
 }
@@ -295,7 +298,7 @@ export function findOcclusionDelta(
     const above = taggedBefore[j]!;
     for (let i = 0; i < j; i++) {
       const below = taggedBefore[i]!;
-      if (checkPairOcclusion(above.kind, below.kind).reason !== undefined) {
+      if (checkPairOcclusion(above.kind, below.kind).severity === "advisory") {
         beforePairs.add(`${above.id}->${below.id}`);
       }
     }
@@ -307,7 +310,7 @@ export function findOcclusionDelta(
       const below = taggedAfter[i]!;
       const key = `${above.id}->${below.id}`;
       if (!beforePairs.has(key)) {
-        if (checkPairOcclusion(above.kind, below.kind).reason !== undefined) {
+        if (checkPairOcclusion(above.kind, below.kind).severity === "advisory") {
           return {
             above: above.kind,
             below: below.kind,
@@ -349,14 +352,14 @@ export function checkRepositionOcclusion(
     for (let j = to + 1; j < layers.length; j++) {
       const above = layers[j]!;
       const result = checkPairOcclusion(above.kind, subject.kind);
-      if (result.reason !== undefined) {
+      if (result.severity === "advisory") {
         return result;
       }
     }
     for (let i = to - 1; i >= 0; i--) {
       const below = layers[i]!;
       const result = checkPairOcclusion(subject.kind, below.kind);
-      if (result.reason !== undefined) {
+      if (result.severity === "advisory") {
         return result;
       }
     }
@@ -377,6 +380,7 @@ export function checkRepositionOcclusion(
   if (finding) {
     return {
       passed: true,
+      severity: "advisory",
       reason: formatOcclusionReason(
         finding.above,
         finding.below,
