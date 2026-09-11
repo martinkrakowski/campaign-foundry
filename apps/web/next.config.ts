@@ -7,6 +7,7 @@ import type { NextConfig } from "next";
 const API_ORIGIN = process.env.API_ORIGIN ?? "http://127.0.0.1:3001";
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ["@napi-rs/canvas"],
   transpilePackages: [
     "@campaignfoundry/CampaignOrchestration",
     "@campaignfoundry/CreativeGeneration",
@@ -17,12 +18,16 @@ const nextConfig: NextConfig = {
   ],
   // The workspace packages are raw TypeScript with NodeNext-style `.js` import
   // specifiers; map the alias so webpack resolves them to the `.ts` sources.
-  webpack(config) {
+  webpack(config, { isServer }) {
     config.resolve = {
       ...config.resolve,
       extensionAlias: {
         ...(config.resolve?.extensionAlias ?? {}),
         ".js": [".ts", ".tsx", ".js"],
+      },
+      alias: {
+        ...(config.resolve?.alias ?? {}),
+        ...(!isServer ? { "@napi-rs/canvas": false } : {}),
       },
     };
     return config;

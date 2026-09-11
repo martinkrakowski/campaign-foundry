@@ -6,7 +6,7 @@ import { Button, Eyebrow, Input } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import * as messages from "@/components/campaign/messages";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
-import { MAX_HEADLINE_LENGTH, type FieldErrors } from "@/components/campaign/validate";
+import { MAX_HEADLINE_LENGTH, type FieldErrors, type FieldWarnings } from "@/components/campaign/validate";
 import { SectionShell, Field } from "./IdentitySection";
 import { TimelineSection } from "@/components/campaign/TimelineSection";
 import { getPool } from "@/lib/briefs-api";
@@ -15,11 +15,13 @@ export function CopySection({
   state,
   dispatch,
   errors,
+  warnings = {},
   onOpenPool,
 }: {
   state: EditorState;
   dispatch: Dispatch<EditorAction>;
   errors: FieldErrors;
+  warnings?: FieldWarnings;
   onOpenPool?: () => void;
 }) {
   const { briefId, pool } = state;
@@ -51,7 +53,7 @@ export function CopySection({
       title="2 · Copy"
       errorCount={Object.keys(errors).filter((k) => k.startsWith("copy") || k === "campaignMessage" || k === "localizedMessage").length}
     >
-      <Field fieldKey="campaignMessage" label={messages.headlineLabel} error={errors.campaignMessage}>
+      <Field fieldKey="campaignMessage" label={messages.headlineLabel} error={errors.campaignMessage} warning={warnings.campaignMessage}>
         <div className="space-y-3">
           {suggestions.length > 0 ? (
             <div className="space-y-1.5">
@@ -122,7 +124,7 @@ export function CopySection({
         </div>
       </Field>
 
-      <Field fieldKey="localizedMessage" label={messages.localizedHeadlineLabel} error={errors.localizedMessage}>
+      <Field fieldKey="localizedMessage" label={messages.localizedHeadlineLabel} error={errors.localizedMessage} warning={warnings.localizedMessage}>
         <Input
           aria-label={messages.localizedHeadlineLabel}
           value={state.localizedMessage}
@@ -145,7 +147,7 @@ export function CopySection({
           Randomized brief can render motion, so a classic draft never offers a sequence. */}
       {state.mode === "variation" ? (
         <div data-slot="copy-timeline">
-          <TimelineSection state={state} dispatch={dispatch} />
+          <TimelineSection state={state} dispatch={dispatch} errors={errors} warnings={warnings} />
         </div>
       ) : null}
     </SectionShell>

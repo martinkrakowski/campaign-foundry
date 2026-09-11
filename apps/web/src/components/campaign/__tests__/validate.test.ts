@@ -1,4 +1,6 @@
-import { describe, test, expect } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
+import { describe, test, expect, vi } from "vitest";
 import * as messages from "@/components/campaign/messages";
 import {
   axisProductSize,
@@ -17,7 +19,14 @@ import {
   hasErrors,
   hasSectionErrors,
   getTotalErrorCount,
+  validateCopyWarnings,
+  validateWarnings,
+  hasWarnings,
+  hasSectionWarnings,
+  getTotalWarningCount,
+  PROHIBITED_TERMS,
 } from "../validate";
+import { PROHIBITED_TERMS as DOMAIN_PROHIBITED_TERMS } from "@campaignfoundry/GovernanceAndCompliance";
 import { initialEditorState, editorReducer, toBrief, type EditorState } from "../editor-state";
 // The real gate Save hits, imported across apps for the divergence tests below: tests
 // may cross package boundaries (arch test-double rules), and a mirror without the
@@ -45,6 +54,12 @@ const valid = (over: Partial<EditorState> = {}): EditorState => ({
   products: [product(), product({ key: 2, id: "beta", name: "B" })],
   ...over,
 });
+
+/**
+ * The real gate Save hits: the API's authoring-mode parse of exactly what `toBrief`
+ * sends. Defaults on purpose — the routes call `parseBrief` without options.
+ */
+const parse = (state: EditorState) => parseBrief(toBrief(state));
 
 describe("maxMinDistance", () => {
   test("is six axes by default and seven with the headline pool", () => {
@@ -552,10 +567,6 @@ describe("validateMotion — axes carrying values while Video is off", () => {
 });
 
 describe("the editor says what the parser refuses (B3 divergences)", () => {
-  // The real gate Save hits: the API's authoring-mode parse of exactly what `toBrief`
-  // sends. Defaults on purpose — the routes call `parseBrief` without options.
-  const parse = (state: EditorState) => parseBrief(toBrief(state));
-
   test("a clip length out of range with Video off is flagged here and refused by the parser", () => {
     // pick clip lengths in Randomized, turn Video off: the draft keeps the axis,
     // so the parser still refuses it on Save even though the editor showed no error
@@ -583,5 +594,154 @@ describe("the editor says what the parser refuses (B3 divergences)", () => {
     expect(getTotalErrorCount(validateState(valid({ mode: "variation" })))).toBe(0);
     expect(() => parse(valid())).not.toThrow();
     expect(() => parse(valid({ mode: "variation" }))).not.toThrow();
+  });
+});
+
+describe("inline legal lint warnings (R1)", () => {
+  test("a brief message containing a prohibited term produces the warning, and the brief still saves", () => {
+    // 1. Prohibited term in campaignMessage
+    const stateWithHeadline = valid({ campaignMessage: "Our miracle cure for everything" });
+    const warnings = validateWarnings(stateWithHeadline);
+    expect(warnings.copy.campaignMessage).toBe(
+      messages.prohibitedTerminology(["miracle", "cure"]),
+    );
+    // The brief still saves: 0 validation errors, structurally valid, and parseBrief accepts it
+    const errors = validateState(stateWithHeadline);
+    expect(getTotalErrorCount(errors)).toBe(0);
+    expect(hasErrors(errors.copy)).toBe(false);
+    expect(() => parse(stateWithHeadline)).not.toThrow();
+
+    // 2. Prohibited term in localizedMessage
+    const stateWithLocalized = valid({ localizedMessage: "100% safe und guaranteed" });
+    const localizedWarnings = validateWarnings(stateWithLocalized);
+    expect(localizedWarnings.copy.localizedMessage).toBe(
+      messages.prohibitedTerminology(["guaranteed", "100% safe"]),
+    );
+    expect(getTotalErrorCount(validateState(stateWithLocalized))).toBe(0);
+    expect(() => parse(stateWithLocalized)).not.toThrow();
+
+    // 3. Prohibited term in timeline beat text
+    const stateWithBeat = valid({
+      timeline: {
+        ...valid().timeline,
+        beats: [{ key: 1, text: "A risk-free trial today", weight: 1 }],
+      },
+    });
+    const beatWarnings = validateWarnings(stateWithBeat);
+    expect(beatWarnings.copy["copy-timeline-beat-0"]).toBe(
+      messages.prohibitedTerminology(["risk-free"]),
+    );
+    expect(getTotalErrorCount(validateState(stateWithBeat))).toBe(0);
+    expect(() => parse(stateWithBeat)).not.toThrow();
+  });
+
+  test("a clean message produces none", () => {
+    const cleanState = valid({
+      campaignMessage: "Stay wild. Stay hydrated.",
+      localizedMessage: "Bleib wild. Bleib hydriert.",
+      timeline: {
+        ...valid().timeline,
+        beats: [{ key: 1, text: "Natural freshness", weight: 1 }],
+      },
+    });
+    const warnings = validateWarnings(cleanState);
+    expect(getTotalWarningCount(warnings)).toBe(0);
+    expect(hasWarnings(warnings.copy)).toBe(false);
+    expect(hasSectionWarnings(warnings, "copy")).toBe(false);
+    expect(hasSectionWarnings(warnings, "nonexistent")).toBe(false);
+    expect(warnings.copy).toEqual({});
+
+    // Blank or whitespace message fields also produce no warnings
+    const blankState = valid({
+      campaignMessage: "   ",
+      localizedMessage: "   ",
+      timeline: {
+        ...valid().timeline,
+        beats: [{ key: 1, text: "   ", weight: 1 }],
+      },
+    });
+    const blankWarnings = validateWarnings(blankState);
+    expect(getTotalWarningCount(blankWarnings)).toBe(0);
+    expect(blankWarnings.copy).toEqual({});
+
+    // Helper functions coverage
+    expect(hasWarnings({ campaignMessage: "warning" })).toBe(true);
+    expect(hasSectionWarnings({ copy: { campaignMessage: "warning" } }, "copy")).toBe(true);
+    expect(getTotalWarningCount({ copy: { a: "1", b: "2" } })).toBe(2);
+  });
+
+  test("the warning text comes from messages.ts, not from a string built in validate.ts or in the domain package", () => {
+    const term = "miracle";
+    const expectedMessage = messages.prohibitedTerminology([term]);
+    const state = valid({ campaignMessage: `A real ${term}` });
+
+    const spy = vi.spyOn(messages, "prohibitedTerminology");
+    const warnings = validateCopyWarnings(state);
+    expect(spy).toHaveBeenCalledWith([term]);
+    expect(warnings.campaignMessage).toBe(expectedMessage);
+    expect(warnings.campaignMessage).toBe(spy.mock.results[0].value);
+    spy.mockRestore();
+  });
+
+  test("an accented word that merely contains a prohibited substring does not warn; the plain prohibited term still does", () => {
+    const accentedClean = valid({ localizedMessage: "Une maison sécure et confortable" });
+    expect(validateWarnings(accentedClean).copy.localizedMessage).toBeUndefined();
+
+    const plainProhibited = valid({ localizedMessage: "Une cure miracle pour tous" });
+    expect(validateWarnings(plainProhibited).copy.localizedMessage).toBe(
+      messages.prohibitedTerminology(["miracle", "cure"]),
+    );
+  });
+
+  test("a term preceded by a non-ASCII digit does not warn; a term at a real boundary still does", () => {
+    const nonAsciiDigitClean = valid({ localizedMessage: "Étape ٣cure rapide" });
+    expect(validateWarnings(nonAsciiDigitClean).copy.localizedMessage).toBeUndefined();
+
+    const nonAsciiDigitBoundary = valid({ localizedMessage: "Étape ٣ cure rapide" });
+    expect(validateWarnings(nonAsciiDigitBoundary).copy.localizedMessage).toBe(
+      messages.prohibitedTerminology(["cure"]),
+    );
+
+    const asciiDigitClean = valid({ localizedMessage: "Étape 3cure rapide" });
+    expect(validateWarnings(asciiDigitClean).copy.localizedMessage).toBeUndefined();
+
+    const asciiDigitBoundary = valid({ localizedMessage: "Étape 3 cure rapide" });
+    expect(validateWarnings(asciiDigitBoundary).copy.localizedMessage).toBe(
+      messages.prohibitedTerminology(["cure"]),
+    );
+  });
+
+  test("the term list has one source — fails if the web side grows its own copy", () => {
+    // 1. validate.ts re-exports the exact same array reference from GovernanceAndCompliance
+    expect(PROHIBITED_TERMS).toBe(DOMAIN_PROHIBITED_TERMS);
+
+    // 2. Scan web source files to ensure no second copy of the compliance term list exists
+    const webSrcDir = path.resolve(__dirname, "../../..");
+    const tsFiles: string[] = [];
+    function scanDir(dir: string) {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name !== "__tests__" && entry.name !== "node_modules") {
+            scanDir(full);
+          }
+        } else if (entry.isFile() && (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx"))) {
+          tsFiles.push(full);
+        }
+      }
+    }
+    scanDir(webSrcDir);
+
+    // Assert that no source file in apps/web/src declares a prohibited terms list
+    for (const file of tsFiles) {
+      const content = fs.readFileSync(file, "utf-8");
+      const matchedTerms = DOMAIN_PROHIBITED_TERMS.filter((term) =>
+        new RegExp(`["'\`]${term}["'\`]`).test(content),
+      );
+      expect(
+        matchedTerms.length,
+        `File ${path.relative(webSrcDir, file)} appears to duplicate prohibited terms: ${matchedTerms.join(", ")}`,
+      ).toBeLessThan(2);
+    }
   });
 });

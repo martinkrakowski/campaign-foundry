@@ -34,9 +34,13 @@ import { DWELL_TOLERANCE, resolveTimeline } from "@campaignfoundry/CampaignOrche
 export function TimelineSection({
   state,
   dispatch,
+  errors = {},
+  warnings = {},
 }: {
   state: EditorState;
   dispatch: Dispatch<EditorAction>;
+  errors?: Record<string, string>;
+  warnings?: Record<string, string>;
 }) {
   const beats = state.timeline.beats;
   const blocked = addBeatBlockedBy(state);
@@ -52,14 +56,18 @@ export function TimelineSection({
 
       {beats.length > 0 ? (
         <ol className="space-y-2">
-          {beats.map((beat, index) => (
-            <li key={beat.key} className="flex items-start gap-2">
-              <Input
-                aria-label={messages.timelineBeatTextLabel(index + 1)}
-                value={beat.text}
-                placeholder={messages.timelineBeatPlaceholder}
-                onChange={(e) => dispatch({ type: "setBeatText", index, text: e.target.value })}
-              />
+          {beats.map((beat, index) => {
+            const beatError = errors[`copy-timeline-beat-${index}`];
+            const beatWarning = warnings[`copy-timeline-beat-${index}`];
+            return (
+              <li key={beat.key} className="space-y-1">
+                <div className="flex items-start gap-2">
+                  <Input
+                    aria-label={messages.timelineBeatTextLabel(index + 1)}
+                    value={beat.text}
+                    placeholder={messages.timelineBeatPlaceholder}
+                    onChange={(e) => dispatch({ type: "setBeatText", index, text: e.target.value })}
+                  />
               <Stepper
                 aria-label={messages.timelineBeatWeightLabel(index + 1)}
                 value={String(beat.weight)}
@@ -107,9 +115,16 @@ export function TimelineSection({
               >
                 ×
               </button>
-            </li>
-          ))}
-        </ol>
+            </div>
+            {beatError ? (
+              <span className="block text-[11px] text-error">{beatError}</span>
+            ) : beatWarning ? (
+              <span className="block text-[11px] text-warning">{beatWarning}</span>
+            ) : null}
+          </li>
+        );
+      })}
+    </ol>
       ) : null}
 
       <div className="flex items-center gap-2">

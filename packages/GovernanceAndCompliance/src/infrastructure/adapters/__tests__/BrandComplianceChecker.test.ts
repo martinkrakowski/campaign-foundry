@@ -1,6 +1,11 @@
 import { describe, test, expect } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
-import { BrandComplianceChecker } from "../BrandComplianceChecker.js";
+import {
+  BrandComplianceChecker,
+  PROHIBITED_TERMS,
+  matchProhibitedTerms,
+  escapeRegExp,
+} from "../BrandComplianceChecker.js";
 
 /** A solid-colour PNG buffer for density sampling. */
 const solidPng = (hex: string, w = 20, h = 20): Uint8Array => {
@@ -149,5 +154,47 @@ describe("BrandComplianceChecker — brand-colour density", () => {
     // "#14e" → (17,68,238); a solid #1144ee image is an exact match.
     const r = await checker.validateBrandColorDensity(solidPng("#1144ee"), "#14e");
     expect(r.passed).toBe(true);
+  });
+});
+
+describe("matchProhibitedTerms and exports (R1)", () => {
+  test("exports PROHIBITED_TERMS as an array of 8 strings", () => {
+    expect(PROHIBITED_TERMS).toHaveLength(8);
+    expect(PROHIBITED_TERMS).toContain("cure");
+    expect(PROHIBITED_TERMS).toContain("miracle");
+    expect(PROHIBITED_TERMS).toContain("guaranteed");
+  });
+
+  test("escapeRegExp escapes regex metacharacters", () => {
+    expect(escapeRegExp("100% safe")).toBe("100% safe");
+    expect(escapeRegExp("a.b*c?")).toBe("a\\.b\\*c\\?");
+  });
+
+  test("matchProhibitedTerms returns matching terms", () => {
+    expect(matchProhibitedTerms("Clean text")).toEqual([]);
+    expect(matchProhibitedTerms("A miracle cure")).toEqual(["miracle", "cure"]);
+  });
+
+  test("an accented word that merely contains a prohibited substring does not warn; the plain prohibited term still does", () => {
+    expect(matchProhibitedTerms("sécure")).toEqual([]);
+    expect(matchProhibitedTerms("récure")).toEqual([]);
+    expect(matchProhibitedTerms("précure")).toEqual([]);
+    expect(matchProhibitedTerms("cure")).toEqual(["cure"]);
+  });
+
+  test("a term preceded by a non-ASCII digit does not warn; a term at a real boundary still does", () => {
+    // Non-ASCII digits (Arabic-Indic, Devanagari) do not form a word boundary
+    expect(matchProhibitedTerms("٣cure")).toEqual([]);
+    expect(matchProhibitedTerms("३miracle")).toEqual([]);
+    expect(matchProhibitedTerms("٣guaranteed")).toEqual([]);
+
+    // A term at a real boundary still matches
+    expect(matchProhibitedTerms("٣ cure")).toEqual(["cure"]);
+    expect(matchProhibitedTerms("३ miracle")).toEqual(["miracle"]);
+    expect(matchProhibitedTerms("cure")).toEqual(["cure"]);
+
+    // Existing ASCII cases stay green
+    expect(matchProhibitedTerms("3cure")).toEqual([]);
+    expect(matchProhibitedTerms("3 cure")).toEqual(["cure"]);
   });
 });

@@ -2,7 +2,7 @@ import { createCanvas, loadImage } from "@napi-rs/canvas";
 import type { CompliancePort, ComplianceResult } from "@campaignfoundry/CampaignOrchestration";
 
 /** Prohibited promotional terminology — any hit fails the legal gate (ZeroToleranceLegalGate). */
-const PROHIBITED_TERMS = [
+export const PROHIBITED_TERMS = [
   "guaranteed",
   "miracle",
   "cure",
@@ -14,19 +14,19 @@ const PROHIBITED_TERMS = [
 ];
 
 /** Escape regex metacharacters so the term list stays data, never a pattern — "100% safe" must not become a regex injection. */
-function escapeRegExp(term: string): string {
+export function escapeRegExp(term: string): string {
   return term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
  * One anchored matcher per term, built once at module scope. The head is a
- * lookbehind over [a-z0-9], NOT \b: \b counts "_" as a word character, so no
+ * lookbehind over [\p{L}\p{N}], NOT \b: \b counts "_" as a word character, so no
  * boundary exists beside it and terms adjacent to an underscore slipped past
  * ("_guaranteed", "results_guaranteed", "a_miracle" were lost true positives).
  * What the gate actually wants is that the term is not preceded by a letter or
  * a digit — text is lowercased before matching, so the lookbehind expresses
  * exactly that: embedded substrings ("secure", "obscure", "procurement",
- * "manicure") still do not match because "cure" there is preceded by a letter,
+ * "manicure", "sécure") still do not match because "cure" there is preceded by a letter,
  * while underscore-adjacent terms match again. The term may run on through
  * word characters, so inflections that extend it ("cure" → "cures", "cured")
  * still hit. Stem changes are not reached: "curing", "curative" are not
@@ -38,9 +38,17 @@ function escapeRegExp(term: string): string {
  * direction for a zero-tolerance gate; a tail lookahead could only turn that
  * into a miss ("cure_milk" escaping the gate).
  */
-const PROHIBITED_PATTERNS = PROHIBITED_TERMS.map(
-  (term) => [new RegExp(`(?<![a-z0-9])${escapeRegExp(term)}\\w*`), term] as const,
+export const PROHIBITED_PATTERNS = PROHIBITED_TERMS.map(
+  (term) => [new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(term)}\\w*`, "u"), term] as const,
 );
+
+/** Find all prohibited terms matched in the given text. */
+export function matchProhibitedTerms(text: string): string[] {
+  const lower = text.toLowerCase();
+  return PROHIBITED_PATTERNS.filter(([pattern]) => pattern.test(lower)).map(
+    ([, term]) => term,
+  );
+}
 
 /** A brand-colour pixel density below this fails the visual check (MinimumBrandColorDensity). */
 const MIN_BRAND_COLOR_DENSITY = 0.02;
@@ -72,10 +80,7 @@ function hexToRgb(hex: string): [number, number, number] {
  */
 export class BrandComplianceChecker implements CompliancePort {
   async validateLegalCopy(text: string): Promise<ComplianceResult> {
-    const lower = text.toLowerCase();
-    const hits = PROHIBITED_PATTERNS.filter(([pattern]) => pattern.test(lower)).map(
-      ([, term]) => term,
-    );
+    const hits = matchProhibitedTerms(text);
     return hits.length > 0
       ? { passed: false, reason: `Prohibited terminology: ${hits.join(", ")}` }
       : { passed: true };

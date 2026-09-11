@@ -62,6 +62,12 @@ export const extraHeadlinesAria = "Manage Headline Pool";
 export const moreIdeas = "More ideas…";
 export const moreIdeasAria = "Manage Headline Pool";
 export const headlineSuggestionsLabel = "Suggestions";
+/** Legal compliance warning for prohibited terminology in copy fields (R1). */
+export function prohibitedTerminology(terms: readonly string[] | string): string {
+  const list = Array.isArray(terms) ? terms : [terms];
+  const named = joinList(list.map((term) => `"${term}"`));
+  return `Contains prohibited ${list.length === 1 ? "term" : "terms"} ${named} — remove before generation.`;
+}
 
 // --- Products ---
 

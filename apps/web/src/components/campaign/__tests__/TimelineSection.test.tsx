@@ -8,6 +8,7 @@ import {
   initialEditorState,
   editorReducer,
   MAX_BEATS,
+  MAX_WEIGHT,
   MIN_DWELL_SEC,
   asCopyTimeline,
   type EditorState,
@@ -40,6 +41,35 @@ describe("TimelineSection — beat rows (E5.2)", () => {
     render(<TimelineSection state={withBeats([])} dispatch={vi.fn()} />);
     expect(screen.getByText(messages.timelineEmpty)).toBeTruthy();
     expect((screen.getByRole("button", { name: messages.timelineAddBeat }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  test("a beat with only a warning shows the warning", () => {
+    const state = withBeats([{ text: "Miracle cure", weight: 1 }]);
+    const warning = messages.prohibitedTerminology(["cure"]);
+    render(
+      <TimelineSection
+        state={state}
+        dispatch={vi.fn()}
+        warnings={{ "copy-timeline-beat-0": warning }}
+      />,
+    );
+    expect(screen.getByText(warning)).toBeTruthy();
+  });
+
+  test("a beat with both shows the error and not the warning", () => {
+    const state = withBeats([{ text: "Miracle cure", weight: 1 }]);
+    const warning = messages.prohibitedTerminology(["cure"]);
+    const error = messages.timelineBeatWeightOutOfRange(1, MAX_WEIGHT);
+    render(
+      <TimelineSection
+        state={state}
+        dispatch={vi.fn()}
+        errors={{ "copy-timeline-beat-0": error }}
+        warnings={{ "copy-timeline-beat-0": warning }}
+      />,
+    );
+    expect(screen.getByText(error)).toBeTruthy();
+    expect(screen.queryByText(warning)).toBeNull();
   });
 
   test("each beat gets a text field, a share stepper and a poster control", async () => {

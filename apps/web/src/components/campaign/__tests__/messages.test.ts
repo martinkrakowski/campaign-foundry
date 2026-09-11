@@ -209,6 +209,18 @@ describe("descriptor messages", () => {
   test("quotes pooled headline text", () => {
     expect(messages.descriptorHeadline("Stay wild")).toBe('"Stay wild"');
   });
+
+  test("formats singular and plural prohibited terms (R1)", () => {
+    expect(messages.prohibitedTerminology(["cure"])).toBe(
+      'Contains prohibited term "cure" — remove before generation.',
+    );
+    expect(messages.prohibitedTerminology(["guaranteed", "miracle"])).toBe(
+      'Contains prohibited terms "guaranteed" and "miracle" — remove before generation.',
+    );
+    expect(messages.prohibitedTerminology("cure")).toBe(
+      'Contains prohibited term "cure" — remove before generation.',
+    );
+  });
 });
 
 describe("readout.ratioFloor", () => {
