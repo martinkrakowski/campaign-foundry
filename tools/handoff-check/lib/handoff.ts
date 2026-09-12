@@ -64,9 +64,17 @@ export function parseHandoff(text: string): Handoff {
  * style. Deliberately syntactic: a handoff names tests as written, and a name
  * built at runtime cannot be checked against a brief by a reader either.
  */
-const NAME = /\b(?:test|it)\(\s*(["'`])((?:(?!\1).)*)\1/g;
+const NAME = /\b(?:test|it)\(\s*(["'`])((?:\\.|(?!\1)[^\\])*)\1/g;
+
+/**
+ * Escapes are decoded so a handoff can name a test whose title contains the
+ * quote character it is written with. `test("a \"quoted\" name")` is one test
+ * name, not a truncated one — and reading it as truncated made the rule look
+ * unbound, which blocks a handoff that was in fact complete.
+ */
+const unescape = (raw: string): string => raw.replace(/\\(.)/g, "$1");
 
 export function testNames(source: string): readonly string[] {
   NAME.lastIndex = 0;
-  return [...source.matchAll(NAME)].map((m) => m[2]);
+  return [...source.matchAll(NAME)].map((m) => unescape(m[2]));
 }

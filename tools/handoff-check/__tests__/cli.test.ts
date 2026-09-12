@@ -72,6 +72,46 @@ describe("runCli", () => {
     expect(logError.mock.calls[0]?.[0]).toContain("disk on fire");
   });
 
+  test("an unreadable declared file is unusable, not unready", async () => {
+    const { io: i, logError } = io({
+      deps: {
+        readFile: async () => {
+          throw new Error("ENOENT: a.test.ts");
+        },
+        failingTests: async () => [],
+      },
+    });
+    expect(await runCli(i)).toBe(EXIT_MALFORMED);
+    expect(logError.mock.calls[0]?.[0]).toContain("h.json: ENOENT: a.test.ts");
+  });
+
+  test("keeps a non-Error throw from the check", async () => {
+    const { io: i, logError } = io({
+      deps: {
+        readFile: async () => SRC,
+        failingTests: async () => {
+          // eslint-disable-next-line @typescript-eslint/only-throw-error
+          throw "runner vanished";
+        },
+      },
+    });
+    expect(await runCli(i)).toBe(EXIT_MALFORMED);
+    expect(logError.mock.calls[0]?.[0]).toContain("runner vanished");
+  });
+
+  test("a runner that produces nothing is reported, not scored", async () => {
+    const { io: i, logError } = io({
+      deps: {
+        readFile: async () => SRC,
+        failingTests: async () => {
+          throw new Error("vitest produced no JSON report");
+        },
+      },
+    });
+    expect(await runCli(i)).toBe(EXIT_MALFORMED);
+    expect(logError.mock.calls[0]?.[0]).toContain("no JSON report");
+  });
+
   test("reports a malformed handoff with its reason, prefixed by the path", async () => {
     const { io: i, logError } = io({ readFile: async () => '{"version":2}' });
     expect(await runCli(i)).toBe(EXIT_MALFORMED);

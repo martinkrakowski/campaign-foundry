@@ -66,6 +66,18 @@ describe("testNames", () => {
     expect(testNames(`test("a 'quoted' name", () => {})`)).toEqual(["a 'quoted' name"]);
   });
 
+  test("decodes an escaped quote of the same kind rather than truncating the name", () => {
+    // Reading this as truncated made a bound rule look unbound, which blocks a
+    // handoff that was complete — a false "not ready".
+    const src = 'test("a \\"quoted\\" name", () => {})';
+    expect(testNames(src)).toEqual(['a "quoted" name']);
+  });
+
+  test("does not run two adjacent tests together when the first name ends in a backslash escape", () => {
+    const src = 'test("first \\\\", () => {}); test("second", () => {})';
+    expect(testNames(src)).toEqual(["first \\", "second"]);
+  });
+
   test("ignores describe blocks, which are not tests", () => {
     expect(testNames(`describe("group", () => { test("real", () => {}) })`)).toEqual(["real"]);
   });

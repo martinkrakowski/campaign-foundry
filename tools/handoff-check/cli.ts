@@ -36,7 +36,16 @@ export async function runCli(io: HandoffCliIo): Promise<number> {
     io.logError(`${path}: ${error.message}`);
     return EXIT_MALFORMED;
   }
-  const report = await checkHandoff(handoff, io.deps);
+  let report;
+  try {
+    report = await checkHandoff(handoff, io.deps);
+  } catch (error) {
+    // A declared file that cannot be read, or a runner that produced no report:
+    // the handoff is unusable, not unready. Saying which is the difference
+    // between "add a test" and "fix your paths".
+    io.logError(`${path}: ${error instanceof Error ? error.message : String(error)}`);
+    return EXIT_MALFORMED;
+  }
   io.log(formatReport(report));
   return exitCodeFor(report);
 }
