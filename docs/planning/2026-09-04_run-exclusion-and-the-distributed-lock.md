@@ -232,11 +232,17 @@ corruption only. `rewriteBrief` still renames unconditionally, so a lock — not
 stops a lost update, and dropping the lock still needs the compare and the write fused. A premise for
 a closed lane is noise.
 
-```premise L10
-# PoolStorePort has no revision on the port interface; adding revision and
-# conditional write options (mirroring BriefStorePort) closes the gap.
-! grep -E -q '^[[:space:]]*(readonly[[:space:]]+)?(revision|expectedRevision|getRevision)[?:(]|\bexpectedRevision\b' apps/api/server/lib/ports/pool-store.port.ts
-```
+**L10 — closed by this lane; no premise is stated.** `PoolStorePort` now carries
+`StoredPool { pool, revision }` and `writePool(pool, { expectedRevision })`, mirroring
+`BriefStorePort`: `readPool` returns the digest of the bytes it read, a stale
+`expectedRevision` throws `ECONFLICT` carrying the fresh one, and `GET`, `PATCH` and
+`POST /campaigns/pools/copy` all return the revision while PATCH and POST accept
+`?revision=`. **D79 stands for pools exactly as it does for briefs**: the revision is a
+SHA-256 of the stored bytes, never a field on the document, and the compare and the write
+are still not fused — a filesystem has no compare-and-swap, so `withPoolLock` remains what
+makes a read→merge→write atomic on one instance. What the revision buys is that a write
+whose read has gone stale is now *refused* (409 with the fresh revision) instead of
+silently dropping another writer's edit, which is the prerequisite for the lock ever going.
 
 ```premise L11
 # The report merge is an unlocked read-modify-write; guarding it with a lock or

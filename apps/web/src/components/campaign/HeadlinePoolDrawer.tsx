@@ -12,8 +12,8 @@ import {
   isBriefsApiError,
   unknownErrorMessage,
   POOL_SUGGESTION_COUNT,
-  type CopyPool,
   type CopyPoolEntry,
+  type StoredPool,
 } from "@/lib/briefs-api";
 import { HEADLINE_POOL_REF } from "@/components/campaign/editor-state";
 
@@ -99,6 +99,13 @@ export function HeadlinePoolDrawer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
   const [unavailable, setUnavailable] = useState<string | undefined>();
+  /**
+   * The revision the pool was read at, sent back with every write so a stale one
+   * is refused instead of overwriting another writer's edit. Held here rather
+   * than in the editor state because it describes the stored bytes, not the
+   * draft: a restored draft's revision would be stale by construction.
+   */
+  const [revision, setRevision] = useState<string | undefined>();
   const currentBrief = useRef(briefId);
   currentBrief.current = briefId;
 
@@ -109,9 +116,12 @@ export function HeadlinePoolDrawer({
     setLoading(true);
     setUnavailable(undefined);
     setError(undefined);
+    setRevision(undefined);
     getPool(briefId, controller.signal)
       .then((loaded) => {
-        if (!cancelled) dispatch({ type: "loadPool", briefId, pool: loaded });
+        if (cancelled) return;
+        setRevision(loaded?.revision);
+        dispatch({ type: "loadPool", briefId, pool: loaded?.pool ?? null });
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(unknownErrorMessage(cause, "Could not load the headline pool"));
@@ -125,7 +135,7 @@ export function HeadlinePoolDrawer({
     };
   }, [briefId, dispatch, open]);
 
-  const apply = async (change: () => Promise<CopyPool>): Promise<boolean> => {
+  const apply = async (change: () => Promise<StoredPool>): Promise<boolean> => {
     // Scope the outcome to the brief that was current when the change started: the
     // reducer already drops a mismatched pool, but the local error and unavailable
     // states would otherwise surface the old brief's failure in the new drawer.
@@ -133,7 +143,11 @@ export function HeadlinePoolDrawer({
     setBusy(true);
     setError(undefined);
     try {
-      dispatch({ type: "setPool", briefId: forBrief, pool: await change() });
+      const stored = await change();
+      // The write answers with the revision it produced, so the next one guards
+      // against what is stored now rather than what was loaded.
+      setRevision(stored.revision);
+      dispatch({ type: "setPool", briefId: forBrief, pool: stored.pool });
       return true;
     } catch (cause) {
       if (currentBrief.current !== forBrief) return false;
@@ -166,7 +180,7 @@ export function HeadlinePoolDrawer({
             size="sm"
             disabled={busy || loading || unavailable !== undefined}
             isLoading={busy}
-            onClick={() => void apply(async () => (await generatePool(toBrief(state))).pool)}
+            onClick={() => void apply(async () => generatePool(toBrief(state), POOL_SUGGESTION_COUNT, { revision }))}
           >
             Generate {POOL_SUGGESTION_COUNT} suggestions
           </Button>
@@ -200,8 +214,10 @@ export function HeadlinePoolDrawer({
                 key={entry.id}
                 entry={entry}
                 busy={busy || loading}
-                onStatus={(status) => void apply(() => patchPool(briefId, [{ id: entry.id, status }]))}
-                onEdit={(text) => apply(() => patchPool(briefId, [{ id: entry.id, status: entry.status, text }]))}
+                onStatus={(status) => void apply(() => patchPool(briefId, [{ id: entry.id, status }], { revision }))}
+                onEdit={(text) =>
+                  apply(() => patchPool(briefId, [{ id: entry.id, status: entry.status, text }], { revision }))
+                }
               />
             ))}
           </ul>

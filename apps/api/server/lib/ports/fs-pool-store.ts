@@ -3,9 +3,9 @@ import { lstat, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promi
 import { dirname, resolve } from "node:path";
 import type { CopyPool } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage, projectRoot } from "@campaignfoundry/shared";
-import { isErrno, SYMLINK_WRITE_ERROR } from "../brief-files.js";
+import { hashBytes, isErrno, SYMLINK_WRITE_ERROR } from "../brief-files.js";
 import { resolveConfined } from "../confined-path.js";
-import { copyPoolProblem, InvalidCopyPoolError, type PoolStorePort } from "./pool-store.port.js";
+import { copyPoolProblem, InvalidCopyPoolError, type PoolStorePort, type StoredPool } from "./pool-store.port.js";
 
 /**
  * Filesystem implementation of PoolStorePort.
@@ -39,7 +39,17 @@ export class FsPoolStore implements PoolStorePort {
     }
   }
 
-  async readPool(briefId: string): Promise<CopyPool | undefined> {
+  /** The digest of the bytes stored at `path`; undefined when nothing is stored. */
+  private async revisionAt(path: string): Promise<string | undefined> {
+    try {
+      return hashBytes(await readFile(path));
+    } catch (error) {
+      if (isErrno(error, "ENOENT")) return undefined;
+      throw error;
+    }
+  }
+
+  async readPool(briefId: string): Promise<StoredPool | undefined> {
     let raw: string;
     try {
       raw = await readFile(this.poolPath(briefId), "utf8");
@@ -62,35 +72,51 @@ export class FsPoolStore implements PoolStorePort {
         `briefId "${pool.briefId}" does not match storage key "${briefId}"`,
       );
     }
-    return pool;
+    return { pool, revision: hashBytes(Buffer.from(raw, "utf8")) };
   }
 
   /**
    * Atomic write: unique temp sibling then rename, so a crash never leaves
    * half-written JSON and two overlapping writers never share a temp file.
+   *
+   * `expectedRevision` guards the write: the stored bytes are hashed and
+   * compared first, and a mismatch throws `ECONFLICT` carrying the fresh
+   * revision, so a read→merge→write whose read has gone stale cannot silently
+   * overwrite someone else's edit.
    */
-  async writePool(pool: CopyPool): Promise<void> {
+  async writePool(pool: CopyPool, options?: { expectedRevision?: string }): Promise<StoredPool> {
     const dest = this.poolPath(pool.briefId);
+    if (options?.expectedRevision !== undefined) {
+      const current = await this.revisionAt(dest);
+      if (current !== options.expectedRevision) {
+        const conflictErr = new Error("Copy pool was modified by another user.");
+        (conflictErr as { code?: string }).code = "ECONFLICT";
+        (conflictErr as { revision?: string }).revision = current;
+        throw conflictErr;
+      }
+    }
+    const content = `${JSON.stringify(pool, null, 2)}\n`;
     const tmp = `${dest}.${process.pid}-${randomBytes(4).toString("hex")}.tmp`;
     try {
       await mkdir(dirname(dest), { recursive: true });
-      await writeFile(tmp, `${JSON.stringify(pool, null, 2)}\n`, "utf8");
+      await writeFile(tmp, content, "utf8");
       await rename(tmp, dest);
     } catch (error) {
       await unlink(tmp).catch(() => undefined);
       throw error;
     }
+    return { pool, revision: hashBytes(Buffer.from(content, "utf8")) };
   }
 
   async copyPool(fromBriefId: string, toBriefId: string): Promise<CopyPool | undefined> {
     if (await this.isPoolDirSymlink(toBriefId)) {
       throw new Error(SYMLINK_WRITE_ERROR);
     }
-    const pool = await this.readPool(fromBriefId);
-    if (!pool) return undefined;
+    const stored = await this.readPool(fromBriefId);
+    if (!stored) return undefined;
     // The stored pool names the brief it belongs to; a byte copy would hand the
     // new brief a pool that still names the old one (C9/D71).
-    const copied = { ...pool, briefId: toBriefId };
+    const copied = { ...stored.pool, briefId: toBriefId };
     await this.writePool(copied);
     return copied;
   }

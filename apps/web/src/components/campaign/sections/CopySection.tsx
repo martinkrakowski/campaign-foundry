@@ -32,7 +32,7 @@ export function CopySection({
     const controller = new AbortController();
     getPool(briefId, controller.signal)
       .then((loaded) => {
-        if (!cancelled && loaded) dispatch({ type: "loadPool", briefId, pool: loaded });
+        if (!cancelled && loaded) dispatch({ type: "loadPool", briefId, pool: loaded.pool });
       })
       .catch(() => {
         // Benign fallback when network fails or 404

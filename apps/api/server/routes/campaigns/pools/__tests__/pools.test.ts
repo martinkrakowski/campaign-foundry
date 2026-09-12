@@ -1,8 +1,9 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, symlinkSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
+import { createHash } from "node:crypto";
 import type { CopyGeneratorError, CopyGeneratorPort } from "@campaignfoundry/CampaignOrchestration";
 
 const { copyGeneratorMock } = vi.hoisted(() => ({ copyGeneratorMock: vi.fn() }));
@@ -120,7 +121,13 @@ describe("copy pool routes", () => {
 
     const fetched = await get()(new Request("http://x/campaigns/pools/camp"));
     expect(fetched.status).toBe(200);
-    expect(await fetched.json()).toEqual({ pool: createdBody.pool });
+    const fetchedBody = (await fetched.json()) as { pool: unknown; revision: string };
+    expect(fetchedBody.pool).toEqual(createdBody.pool);
+    // The revision rides along: it is what the next PATCH guards its write with.
+    expect(fetchedBody.revision).toMatch(/^[0-9a-f]{64}$/);
+    expect(fetchedBody.revision).toBe(
+      createHash("sha256").update(readFileSync(join(dir, "briefs", "camp", "pools.json"))).digest("hex"),
+    );
 
     const patched = await patch()(
       jsonReq("http://x/campaigns/pools/camp", "PATCH", {
@@ -131,7 +138,11 @@ describe("copy pool routes", () => {
       }),
     );
     expect(patched.status).toBe(200);
-    const patchedBody = (await patched.json()) as { pool: { entries: Array<{ id: string; status: string; text: string }> } };
+    const patchedBody = (await patched.json()) as {
+      pool: { entries: Array<{ id: string; status: string; text: string }> };
+      revision: string;
+    };
+    expect(patchedBody.revision).not.toBe(fetchedBody.revision);
     expect(patchedBody.pool.entries).toEqual([
       { id: "h1", text: "Stay wild. Stay hydrated.", status: "approved" },
       { id: "h2", text: "Fresh alpine water", status: "approved" },
@@ -581,6 +592,129 @@ describe("copy pool routes", () => {
       "Second beta",
     ]);
     expect(new Set(body.pool.entries.map((e) => e.id)).size).toBe(4);
+  });
+
+  test("two overlapping PATCHes without a revision both answer 200 and one edit vanishes", async () => {
+    copyGeneratorMock.mockReturnValue(fakeGenerator(["Stay wild", "Stay hydrated"]));
+    const { generate, get } = await api();
+    await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+    // Two module registries, so two stores and two lock chains: the in-process
+    // lock cannot serialise what it does not share — the shape of two processes.
+    const patchA = (await import("../[briefId].patch.js")).default as EventHandler;
+    vi.resetModules();
+    const patchB = (await import("../[briefId].patch.js")).default as EventHandler;
+    const a = mount([{ method: "patch", path: "/campaigns/pools/:briefId", handler: patchA }]);
+    const b = mount([{ method: "patch", path: "/campaigns/pools/:briefId", handler: patchB }]);
+    const reject = (id: string) =>
+      jsonReq("http://x/campaigns/pools/camp", "PATCH", { entries: [{ id, status: "rejected" }] });
+
+    const [resA, resB] = await Promise.all([a(reject("h1")), b(reject("h2"))]);
+    expect([resA.status, resB.status]).toEqual([200, 200]);
+
+    const body = (await (await get()(new Request("http://x/campaigns/pools/camp"))).json()) as {
+      pool: { entries: Array<{ id: string; status: string }> };
+    };
+    // Both writers were told their edit landed; only one of them is there.
+    const rejected = body.pool.entries.filter((e) => e.status === "rejected").map((e) => e.id);
+    expect(rejected).toHaveLength(1);
+    expect(["h1", "h2"]).toContain(rejected[0]);
+  });
+
+  test("a PATCH carrying a stale revision is refused with 409 and the fresh one, losing neither edit", async () => {
+    copyGeneratorMock.mockReturnValue(fakeGenerator(["Stay wild", "Stay hydrated"]));
+    const { generate, get, patch } = await api();
+    await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+    const read = (await (await get()(new Request("http://x/campaigns/pools/camp"))).json()) as { revision: string };
+    const stale = read.revision;
+    const reject = (id: string, revision?: string) =>
+      jsonReq(
+        `http://x/campaigns/pools/camp${revision ? `?revision=${revision}` : ""}`,
+        "PATCH",
+        { entries: [{ id, status: "rejected" }] },
+      );
+
+    const first = await patch()(reject("h1", stale));
+    expect(first.status).toBe(200);
+    const fresh = ((await first.json()) as { revision: string }).revision;
+    expect(fresh).not.toBe(stale);
+
+    // The second writer read the same bytes the first one did; its write would
+    // have dropped the first edit, so the store refuses it and says what is there.
+    const second = await patch()(reject("h2", stale));
+    expect(second.status).toBe(409);
+    expect(await second.json()).toEqual({ error: "Copy pool was modified by another user.", revision: fresh });
+
+    const retried = await patch()(reject("h2", fresh));
+    expect(retried.status).toBe(200);
+    const final = (await (await get()(new Request("http://x/campaigns/pools/camp"))).json()) as {
+      pool: { entries: Array<{ id: string; status: string }> };
+    };
+    expect(final.pool.entries.map((e) => e.status)).toEqual(["rejected", "rejected"]);
+  });
+
+  test("PATCH takes the first ?revision= when the query repeats it", async () => {
+    copyGeneratorMock.mockReturnValue(fakeGenerator(["Stay wild"]));
+    const { generate, get, patch } = await api();
+    await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+    const read = (await (await get()(new Request("http://x/campaigns/pools/camp"))).json()) as { revision: string };
+
+    const res = await patch()(
+      jsonReq(`http://x/campaigns/pools/camp?revision=${read.revision}&revision=stale`, "PATCH", {
+        entries: [{ id: "h1", status: "rejected" }],
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  test("PATCH and POST rethrow a write failure rather than answering 409", async () => {
+    copyGeneratorMock.mockReturnValue(fakeGenerator(["Stay wild"]));
+    const { generate, patch } = await api();
+    await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+    const poolDir = join(dir, "briefs", "camp");
+    // Readable, not writable: the read succeeds and the write is what fails, so
+    // the route's conflict mapping is the only thing under test.
+    chmodSync(poolDir, 0o500);
+    try {
+      const patched = await patch()(
+        jsonReq("http://x/campaigns/pools/camp", "PATCH", { entries: [{ id: "h1", status: "rejected" }] }),
+      );
+      expect(patched.status).toBe(500);
+
+      copyGeneratorMock.mockReturnValue(fakeGenerator(["Second angle"]));
+      const generated = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+      expect(generated.status).toBe(500);
+    } finally {
+      chmodSync(poolDir, 0o755);
+    }
+  });
+
+  test("POST refuses a stale ?revision= with 409 carrying the fresh revision", async () => {
+    copyGeneratorMock.mockReturnValue(fakeGenerator(["Stay wild"]));
+    const { generate, get } = await api();
+    const created = await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+    const stale = ((await created.json()) as { revision: string }).revision;
+
+    copyGeneratorMock.mockReturnValue(fakeGenerator(["Second angle"]));
+    await generate()(jsonReq("http://x/campaigns/pools/copy", "POST", { briefId: "camp" }));
+    copyGeneratorMock.mockReturnValue(fakeGenerator(["Third angle"]));
+    const conflicted = await generate()(
+      jsonReq(`http://x/campaigns/pools/copy?revision=${stale}`, "POST", { briefId: "camp" }),
+    );
+    expect(conflicted.status).toBe(409);
+    const body = (await conflicted.json()) as { error: string; revision: string };
+    expect(body.error).toBe("Copy pool was modified by another user.");
+    expect(body.revision).toMatch(/^[0-9a-f]{64}$/);
+
+    copyGeneratorMock.mockReturnValue(fakeGenerator(["Third angle"]));
+    // A repeated query takes the first: two revisions cannot both be expected.
+    const retried = await generate()(
+      jsonReq(`http://x/campaigns/pools/copy?revision=${body.revision}&revision=stale`, "POST", { briefId: "camp" }),
+    );
+    expect(retried.status).toBe(201);
+    const final = (await (await get()(new Request("http://x/campaigns/pools/camp"))).json()) as {
+      pool: { entries: Array<{ text: string }> };
+    };
+    expect(final.pool.entries.map((e) => e.text)).toEqual(["Stay wild", "Second angle", "Third angle"]);
   });
 
   test("POST and PATCH refuse a symlinked briefs/<id> directory", async () => {

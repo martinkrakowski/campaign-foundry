@@ -214,6 +214,28 @@ describe("HeadlinePoolDrawer", () => {
     });
   });
 
+  test("a write carries the revision the pool was read at, and adopts the one it answered with", async () => {
+    const user = userEvent.setup();
+    const calls = routes({
+      get: () => json({ pool: { entries: [entry("a")] }, revision: "rev-1" }),
+      patch: () => json({ pool: { entries: [entry("a", "approved")] }, revision: "rev-2" }),
+    });
+    open();
+    await screen.findByText("headline a");
+
+    await user.click(screen.getByLabelText("Approve a"));
+    await waitFor(() => expect(calls.some((c) => c.method === "PATCH")).toBe(true));
+    expect(calls.find((c) => c.method === "PATCH")!.url).toContain("?revision=rev-1");
+
+    // The next write guards what the first one produced, not what was loaded:
+    // replaying the load-time revision is what the store refuses.
+    await user.click(await screen.findByLabelText("Reject a"));
+    await waitFor(() => {
+      const patches = calls.filter((c) => c.method === "PATCH");
+      expect(patches[patches.length - 1].url).toContain("?revision=rev-2");
+    });
+  });
+
   test("a load that fails after the drawer closes is dropped silently", async () => {
     vi.mocked(globalThis.fetch).mockImplementation(
       () => new Promise((_, rej) => setTimeout(() => rej(new Error("too late")), 50)),
