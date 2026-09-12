@@ -90,3 +90,49 @@ stops rather than shipping a second system beside the presets.
   compositor moves today. `blendMode`, `rotation` and the rest arrive when something renders them.
 - **It does not start before C1.** K-D6.
 - **It does not accept "looks the same" as proof.** K-D3.
+
+---
+
+## 5. Premises
+
+Each lane states the claim that makes it necessary, as a script that exits 0 **while the gap is still
+open**. `yarn plan:verify` runs them. K1 has no premise here: it is the model lane every other K
+lane is downstream of, and it was audited as open at the time these were written. **Probe the thing
+that decides, not a string near it** — a motion kind's *name* may live on as preset vocabulary after
+K2 ships, so these probes sit on the compositor's per-kind pose mechanism, not on the names.
+
+```premise K2
+# K2 moves preset application out of the compositor: the draw paths read a
+# resolved pose instead of branching on the motion kind, because the
+# preset→track expansion is a pure function beside beatAt (K-D2). These
+# per-kind pose branches are the mechanism K2 replaces — not a name the
+# vocabulary keeps (the names stay in the brief, but never in a `motion ===`
+# comparison inside the compositor).
+grep -qE 'motion === "(ken-burns-in|ken-burns-out|headline-rise|accent-wipe)"' packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts
+```
+
+```premise K3
+# K3 is the same lane for copy: the four text effects become entrance tracks,
+# so the per-effect switch that decides the pose today (`textEffectPose`'s
+# body) is resolved through the track model instead. The switch *is* the
+# mechanism, and it sits inside the compositor, so it cannot outlive the lane
+# the way W4's `.sort()` did.
+grep -qE 'case "(fade-in|rise-in|slide-in|scale-in)"' packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts
+```
+
+```premise K4
+# K4's deliverable is the written precedence rule for a preset and a
+# hand-authored track naming one layer and property (§2's DoD). "The brief can
+# carry a track" is K1's claim, not K4's — and no such rule exists on either
+# side of the boundary today. A shipped K4 states it somewhere in the motion
+# resolution code.
+! grep -rqi "precedence" packages/CampaignOrchestration/src packages/CreativeGeneration/src
+```
+
+```premise K5
+# K5 is the editor surface where a user sees and adjusts a track. The word
+# appears nowhere in the campaign editor's source today — only Tailwind
+# `tracking-*` utilities and prose that the word boundary excludes — and the
+# lane's own vocabulary is "track", so what ships names it.
+! grep -rqiE '\btracks?\b' apps/web/src/components/campaign --exclude-dir=__tests__
+```
