@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { lstat, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, resolve } from "node:path";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
@@ -166,8 +167,12 @@ export class FsBriefStore implements BriefStorePort {
       content = patchBriefYaml(filePath, raw.toString("utf8"), brief);
     }
     // Atomic replace: write a sibling temp file, then rename over the target, so
-    // a failure mid-write leaves the operator's original bytes untouched.
-    const tmpPath = `${filePath}.tmp`;
+    // a failure mid-write leaves the operator's original bytes untouched. The temp
+    // name is per-process and random (as the pool store's is) because a fixed one
+    // is shared by every overlapping writer: the first rename takes it and the
+    // second writer's rename fails, so what makes the write atomic would be the
+    // caller's lock rather than the rename.
+    const tmpPath = `${filePath}.${process.pid}-${randomBytes(4).toString("hex")}.tmp`;
     try {
       await writeFile(tmpPath, content, "utf8");
       await rename(tmpPath, filePath);

@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "lane": "l9",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "const tmpPath = `${filePath}.${process.pid}-${randomBytes(4).toString(\"hex\")}.tmp`;",
+      "after": "const tmpPath = `${filePath}.tmp`;",
+      "because": "The defect this lane fixes, restored: a fixed sibling temp name is shared by every overlapping writer, so the first rename consumes it and the second writer's rename fails with ENOENT although the brief and both writes were fine.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "randomBytes(4).toString(\"hex\")",
+      "after": "\"deadbeef\"",
+      "because": "The pid alone is not a unique name inside one process: two overlapping rewrites in the same server share pid, so without the random suffix they collide on one temp path exactly as a fixed name does. This mutation separates the random half from the pid half and shows the test needs both.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

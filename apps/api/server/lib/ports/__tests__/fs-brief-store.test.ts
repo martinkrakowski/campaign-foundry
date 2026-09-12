@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
-import { chmodSync, mkdtempSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync, symlinkSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -165,6 +165,30 @@ describe("FsBriefStore", () => {
     await expect(
       store.replaceBrief({ ...minimalBrief, id: "linked" }),
     ).rejects.toThrow(/Refusing to write through a symlink/);
+  });
+
+  // `rewriteBrief` stages its bytes in a sibling temp file and renames it over the
+  // brief. A *fixed* temp name means two overlapping writers share that one path:
+  // the first rename consumes it and the second writer's rename fails with ENOENT,
+  // though the brief is there and both writes were well-formed — and the writer
+  // that does resolve returns a revision for bytes the shared temp file no longer
+  // held. Both were observed in 100/100 paired runs before the fix. The pair is
+  // repeated because one interleaving — a writer finishing before the other reaches
+  // its write — hides the shared name entirely, and libuv picks it; twenty pairs
+  // do not leave the result to which one it picked.
+  test("two overlapping rewrites never fail each other", async () => {
+    await store.createBrief(minimalBrief);
+    const byA = { ...minimalBrief, campaignMessage: "written by A" };
+    const byB = { ...minimalBrief, campaignMessage: "written by B" };
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const settled = await Promise.allSettled([store.rewriteBrief(byA), store.rewriteBrief(byB)]);
+      const failures = settled.flatMap((s) => (s.status === "rejected" ? [String(s.reason)] : []));
+      expect(failures, `overlapping rewrites shared one temp file (attempt ${attempt})`).toEqual([]);
+
+      const text = readFileSync(join(dir, "test-camp.yaml"), "utf8");
+      expect(text.includes("written by A") || text.includes("written by B")).toBe(true);
+    }
   });
 
   test("replaceBrief propagates non-ENOENT errors such as ECONFLICT", async () => {
