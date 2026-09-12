@@ -105,3 +105,29 @@ than left as a note**, which is how it stayed unowned until now.
   cheap.
 - **It does not build the compliance-page aggregation** to close gap 5. Amending the decision is the
   smaller true thing.
+
+---
+
+## 9. Premises
+
+Each gap states the claim that makes its lane necessary, as a script that exits 0 **while the gap is
+still open**. `yarn plan:verify` runs them. This section exists because three lanes in this plan and
+its siblings were dispatched — or nearly dispatched — against gaps that had already been closed.
+
+```premise X1
+! test -f .prettierrc && ! test -f .prettierrc.json && ! test -f prettier.config.js
+```
+
+```premise X2
+! grep -rq '"alt"' packages/shared/src/infrastructure/brief-yaml.ts
+```
+
+**X3 — shipped in #335.** Its premise was retired when it landed; `plan:verify` no
+longer tracks it.
+
+**X4 — shipped in #327 (the serving) and #333 (the guard).** Its premise was retired when it landed; `plan:verify` no
+longer tracks it.
+
+**X5 — shipped in #334.** Its premise was retired when it landed; `plan:verify` no
+longer tracks it.
+
