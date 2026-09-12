@@ -222,7 +222,7 @@ still open**. `yarn plan:verify` runs them.
 ```premise L7
 # A job handle resolves only on this process while jobs.ts stores them in an
 # in-process Map; an out-of-process registry or port closes the gap.
-grep -q '^const jobs = new Map' apps/api/server/lib/jobs.ts
+grep -E -q '^[[:space:]]*(const|let)[[:space:]]+jobs[[:space:]:]+.*=[[:space:]]*new[[:space:]]+Map' apps/api/server/lib/jobs.ts
 ```
 
 ```premise L9
@@ -234,11 +234,12 @@ grep -q '\${filePath}\.tmp' apps/api/server/lib/ports/fs-brief-store.ts
 ```premise L10
 # PoolStorePort has no revision on the port interface; adding revision and
 # conditional write options (mirroring BriefStorePort) closes the gap.
-! grep -i -q "revision" apps/api/server/lib/ports/pool-store.port.ts
+! grep -E -q '^[[:space:]]*(readonly[[:space:]]+)?(revision|expectedRevision|getRevision)[?:(]|\bexpectedRevision\b' apps/api/server/lib/ports/pool-store.port.ts
 ```
 
 ```premise L11
 # The report merge is an unlocked read-modify-write; guarding it with a lock or
 # revision closes the gap.
-! grep -i -q -E "lock|revision" apps/api/server/lib/report.ts
+! grep -E -q '^[[:space:]]*((export[[:space:]]+)?(async[[:space:]]+)?function[[:space:]]+with[A-Za-z0-9_]*Lock|(await[[:space:]]+|return[[:space:]]+)?with[A-Za-z0-9_]*Lock\(|(readonly[[:space:]]+)?lock[?:])' apps/api/server/lib/report.ts && \
+! grep -E -q '^[[:space:]]*(readonly[[:space:]]+)?(revision|expectedRevision|getRevision)[?:(]|\bexpectedRevision\b' apps/api/server/lib/report.ts
 ```
