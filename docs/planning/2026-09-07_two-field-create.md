@@ -251,14 +251,17 @@ the evidence a reader can check instead of re-deriving.
 
 | Lane | Shipped | The evidence that closed it |
 |---|---|---|
-| **S4** | **#218** | `serialisedFormats` (`apps/web/src/components/campaign/editor-state.ts`) — `toBrief` drops `motion` whenever `mode === "brief"`, so a flip to Classic can no longer serialise the combination `load-brief.ts` refuses on every run path; `ModePanel` says so beside the tiles in one `role="status"` line (`messages.modeDroppedVideo`). |
+| **S4** | **#218** (`6217632`) | **The mechanism §3 wrote is not the mechanism that shipped, and the PR decided so.** §3 asks for a `setMode` state mutation. What closes the lane is a gate on serialisation: `serialisedFormats` (`apps/web/src/components/campaign/editor-state.ts:1646`), consumed by `toBrief` (`:1673`) and by `preview-props.ts` — `output.formats` cannot carry `motion` while `mode === "brief"`, however the draft got there — while `setMode` (`editor-state.ts:842`) deliberately **keeps** the draft's formats, and its comment says why: the D5 round-trip and the remedy ("switch back to Randomized") need them intact. The notice is derived, not latched: `BriefEditor.tsx:769` → `ModePanel.tsx:222` renders `messages.modeDroppedVideo` in one `role="status"` line beside the tiles. **#218 built §3's mutation first** (`formatDroppedByMode`, in the state, the reducer and `normalizeDraftState`) **and deleted it in the same PR** — *"a destructive setMode reds the D5 round-trip"* — so the lane is closed by a mode gate, not by a flip. Re-dispatching it literally would red D5 and re-argue a review already lost. **Mutation, run 2026-09-12:** a passthrough `serialisedFormats` fails 5 of the 9 tests in `editor-state.test.ts:3909`; the whole block is green again once reverted. |
 | **S3** | **#217**, then **#228** | `CreateCampaignInput` (`apps/web/src/lib/create-campaign.ts`) is `{ name, type, source? }` — `targetRegion` and `targetAudience` left the seam, and `isStoredSeed` **rejects** both retired shapes instead of half-applying them; `CreateCampaignDialog` stashes `IDENTITY_STEP`, so Create lands on Identity rather than past two empty required fields. |
 | **S1** | **#236** | The dialog is one name `Input` and one tile group (`apps/web/src/components/shell/CreateCampaignDialog.tsx`), `max-w-md`, a single `role="status"`; region, audience, the world map, the start-from rail, the numbered sections and the jump strip are all gone, and its test pins "exactly two controls". |
 | **S2** | **#225** | `IdentitySection` renders `WorldMap` above the existing chips, and `{!compact ? … : null}` omits it in the 320 px sidebar while the chips stay the accessible and keyboard path (D94). |
 | **P1** | **#240** | The domain-free kit moved to `@campaignfoundry/ui` (`packages/ui`). Outside this audit's four lanes, but §3 still lists it, so it is retired here too. |
 
-**Two of the four arrived in a different shape than §3 wrote them, and the plan never said so.**
+**Three of the four arrived in a different shape than §3 wrote them, and the plan never said so.**
 D100 aside, the dialog's second field is the **campaign type** (D108, four tiles), not D97's two-way
 mode — #217 shipped `{ name, mode }` exactly as written, and #228/#236 replaced it with the type
-whose preset carries the mode. Re-reading §3 literally and re-dispatching S1 or S3 today would
-delete shipped behaviour; that is precisely the drift this section exists to make visible.
+whose preset carries the mode. **And S4's drop is a mode gate on serialisation, not the `setMode`
+mutation §3 asked for** (see its row): #218 wrote the mutation and took it back out in the same PR,
+so the lane is finished, but §3 still describes work that review rejected. Re-reading §3 literally
+and re-dispatching S1, S3 or S4 today would delete shipped behaviour; that is precisely the drift
+this section exists to make visible.

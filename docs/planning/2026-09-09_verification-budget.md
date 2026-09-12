@@ -170,40 +170,77 @@ confirmed applied, and a merge requires the fix commit to exist.
 ```premise V3
 # V3 ends in an arithmetic decision about the two UI/API reviewers — disable them
 # if refuted stays above 60 %, or keep them on a recorded measurement — and
-# EITHER outcome closes the lane. So the gap is open only while they still run
-# AND no wave record has measured them per workflow.
+# EITHER outcome closes the lane. So the gap is open only while a reviewer still
+# runs AND no wave record has measured it per workflow.
 #
 # Per-bot is not enough: the 09-09 record has a per-bot table and calls it "not
 # yet a verdict" (three PRs of one wave). What decides is per-WORKFLOW
 # attribution — all three reviewers comment as github-actions[bot] and nothing
 # in a comment names the workflow that wrote it (pr-agent-arch.yml says so
-# itself), so a wave record that splits the three IS the measurement.
+# itself), so a wave record that splits the three IS the measurement. The
+# architecture reviewer is exempt from the DISABLE decision, not from being
+# measured: the lane says "per workflow", and asking for all three keeps this
+# premise retiring late rather than early.
 #
-# The reviewer identities are read from the workflow files rather than
-# hardcoded, so a renamed or added reviewer is picked up. A wave record naming a
-# workflow in passing would also close this — the cheap direction to be wrong,
-# and the opposite of a premise that outlives its lane.
-if ! grep -q "pragent/pr-agent" .github/workflows/pr-agent.yml .github/workflows/pr-agent-api.yml; then
-  exit 1
-fi
-for wf in .github/workflows/pr-agent*.yml; do
+# One loop, both halves decided per reviewer — a reviewer, not a file:
+#
+#   RUNS — the workflow's own `uses:` line invokes PR-Agent. The `uses:` is the
+#     thing that decides, not the bare image name: pr-agent.yml:19 quotes the
+#     image in a comment about the pin, and a premise that matched the comment
+#     would go on reporting a reviewer that has been switched off.
+#
+#     The earlier form passed two fixed paths to one grep, so the half was
+#     decided by whether two FILES existed rather than by whether a REVIEWER
+#     runs: on GNU grep (CI, ubuntu-latest) one absent argument exits 2 whatever
+#     the other file matched, so renaming or moving one workflow read as "the
+#     reviewer has been disabled" and retired a live lane. A workflow that no
+#     longer invokes PR-Agent is a reviewer that no longer runs — nothing to
+#     measure — and a renamed or added one is picked up without editing here.
+#
+#   MEASURED — that reviewer's own id appears in a wave record. Matched as a
+#     whole token so `pr-agent-api` cannot stand in for `pr-agent`, and matched
+#     case-SENSITIVELY so the per-bot row "PR-Agent" cannot stand in for the
+#     per-workflow attribution this lane is about: the old form matched both,
+#     so a record that measured pr-agent-api retired pr-agent, the reviewer
+#     carrying 58 % of the volume. Missing a mention leaves the lane live,
+#     which is the cheap direction.
+#
+# The gap is open while any running reviewer is unmeasured.
+for wf in .github/workflows/*.yml; do
+  grep -q "uses:.*pragent/pr-agent" "$wf" || continue
   id=${wf##*/}
   id=${id%.yml}
-  grep -qi "$id" docs/planning/*wave-record*.md || exit 0
+  grep -qE "(^|[^A-Za-z0-9_-])$id([^A-Za-z0-9_-]|$)" docs/planning/*wave-record*.md || exit 0
 done
 exit 1
 ```
 
 ```premise V4
-# V4 is the class-disposition tool (V-D2): one script that posts ONE disposition
-# and resolves the threads sharing it together. Resolving a review thread has no
-# `gh` subcommand and no REST endpoint — the GraphQL `resolveReviewThread`
-# mutation is the only way to do it — so its presence in a script is the
-# mechanism, whatever the file is called or where it lives.
+# V4 is the class-disposition tool (V-D2): one script that, given a PR and a set
+# of thread ids, posts ONE class disposition and resolves the threads sharing it
+# together. Resolving a review thread has no `gh` subcommand and no REST
+# endpoint — the GraphQL `resolveReviewThread` mutation is the only way to do it
+# — so the mutation is necessary, and it is not sufficient: a mention is not an
+# implementation.
 #
 # The string is already in docs/workflows/*.md: the operator's own copy of the
-# command, run by hand. Only tooling counts, so the docs are NOT searched —
-# grepping them would report the gap closed by the hand process this lane exists
-# to replace.
-! grep -rq "resolveReviewThread" tools scripts .claude .github
+# command, run by hand. That hand process is exactly what the lane exists to
+# replace, so prose is excluded by KIND, not by directory — a runbook or a skill
+# is instructions for a human, not tooling, and counting it would close the lane
+# with the thing it was raised to abolish. The directories stay broad, because
+# the lane does not say where the tool lives; only source is read.
+#
+# The lane is two verbs in one script, so both must appear in the SAME file:
+#
+#   RESOLVE — `resolveReviewThread`;
+#   POST    — one disposition onto the PR (`gh pr comment`, or the GraphQL
+#             addComment/createComment, should it ever move there).
+#
+# A file that only resolves is a resolver: the reply cost that IS the budget
+# (F2) is unchanged. A file that only posts is a comment. Either alone leaves
+# V-D2 unbuilt; only the two together close the lane.
+for f in $(grep -rl --include='*.sh' --include='*.ts' --include='*.mjs' 'resolveReviewThread' scripts tools .claude .github 2>/dev/null); do
+  grep -qE 'gh pr comment|gh issue comment|addComment|createComment' "$f" && exit 1
+done
+exit 0
 ```
