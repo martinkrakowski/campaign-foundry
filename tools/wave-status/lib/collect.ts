@@ -74,14 +74,14 @@ export async function collect(
   now: string,
   cachedPrByLane?: Readonly<Record<string, LaneObservation["pr"]>>,
 ): Promise<WaveStatus> {
-  // Gather first, order last: the newest-first wave list is decided here, the
-  // one place that has seen every lane log's mtime. Rows and events are
-  // bucketed by wave during the walk and fed to the merge in that order —
-  // mergeStatus groups in feed order, so both feeds must agree.
+  // Gather first, order last: the wave list is decided here, the one place
+  // that has seen every lane log's mtime, and it travels to the merge as an
+  // explicit order. Feeds are never asked to carry it — grouping by feed is
+  // how an evented old wave came to lead a live new one.
   const rows: { readonly wave: string; readonly lane: string; readonly obs: LaneObservation }[] = [];
-  const eventRows: { readonly wave: string; readonly event: WaveEvent }[] = [];
+  const events: WaveEvent[] = [];
   const newestByWave = new Map<string, number>();
-  const visited = new Set<string>();
+  const discovered = new Set<string>();
 
   const prByLane = cachedPrByLane ?? (await prFacts(deps));
   const worktrees = await worktreeFacts(deps);
@@ -106,6 +106,10 @@ export async function collect(
     } catch {
       continue;
     }
+    // Discovered is enough to list it: a wave directory with no lane log and
+    // no events yet is a dispatched wave, and that is the state an operator
+    // most wants to see. Absent is the one answer that is never useful.
+    discovered.add(wave);
 
     const laneLogs = entries
       .filter((entry) => entry.endsWith(".log") && !LANE_LOG_EXCLUDED.test(entry))
@@ -148,40 +152,35 @@ export async function collect(
         ...(prByLane[lane] !== undefined ? { pr: prByLane[lane] } : {}),
       };
       rows.push({ wave, lane, obs });
-      visited.add(wave);
     }
 
     if (entries.includes("events.jsonl")) {
       try {
         const text = await deps.readFile(join(dir, "events.jsonl"));
-        for (const event of readEvents(text).events) eventRows.push({ wave, event });
-        visited.add(wave);
+        for (const event of readEvents(text).events) events.push(event);
       } catch {
         // W3 writes events.jsonl; absent or unreadable is "nobody reported", not an error.
       }
     }
   }
 
-  // Both feeds carry the same newest-first wave order, so the merged list
-  // reads newest-first to the end that mergeStatus leaves it (its own
-  // "evented waves first" contract is unchanged and tested in merge).
-  const orderedWaves = [...visited].sort((a, b) =>
+  // The wave list order, decided once from the newest lane-log activity in each
+  // wave, is handed to the merge as data — not implied by the order two feeds
+  // happen to be walked in. Waves it cannot date keep the lexicographic base.
+  const orderedWaves = [...discovered].sort((a, b) =>
     compareRecency(newestByWave.get(a), newestByWave.get(b)),
   );
-  const events: WaveEvent[] = [];
-  const observed: Record<string, LaneObservation> = {};
-  for (const wave of orderedWaves) {
-    for (const pair of eventRows) if (pair.wave === wave) events.push(pair.event);
-    for (const row of rows) if (row.wave === wave) observed[`${wave}/${row.lane}`] = row.obs;
-  }
 
-  return mergeStatus(events, observed, now);
+  const observed: Record<string, LaneObservation> = {};
+  for (const row of rows) observed[`${row.wave}/${row.lane}`] = row.obs;
+
+  return mergeStatus(events, observed, now, orderedWaves);
 }
 
 /**
  * Wave order by newest lane-log activity: newer first; a wave nothing could
  * date sinks below every dated one; undated-vs-undated and equal mtimes keep
- * the visited (lexicographic) order — Array#sort is stable.
+ * the discovered (lexicographic) order — Array#sort is stable.
  */
 function compareRecency(a: number | undefined, b: number | undefined): number {
   if (a === undefined) return b === undefined ? 0 : 1;

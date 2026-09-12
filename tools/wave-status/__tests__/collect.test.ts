@@ -153,7 +153,10 @@ describe("collect", () => {
     const status = await collect(fakeDeps(TREE), ROOT, "2026-09-07T17:25:00Z");
 
     expect(status.generatedAt).toBe("2026-09-07T17:25:00Z");
-    expect(status.waves.map((wave) => wave.id)).toEqual(["T", "U", "V"]);
+    // W is the directory holding only `install-w.log`: no lane, no event, but
+    // a discovered wave — a wave that has written nothing yet is a state an
+    // operator needs to see, so it lists with no lanes, below every dated one.
+    expect(status.waves.map((wave) => wave.id)).toEqual(["T", "U", "V", "W"]);
 
     const t1 = status.waves[0]?.lanes[0];
     expect(t1?.lane).toBe("t1");
@@ -301,7 +304,7 @@ describe("collect", () => {
     const t1 = status.waves[0]?.lanes[0];
     expect(t1?.reported).toMatchObject({ stage: "implement" });
     expect(t1?.derived.pr).toBeUndefined();
-    expect(status.waves.map((wave) => wave.id)).toEqual(["T", "U", "V"]);
+    expect(status.waves.map((wave) => wave.id)).toEqual(["T", "U", "V", "W"]);
   });
 
   test("waves come out newest-first by their lanes' log mtimes, not in the directories' lexicographic order", async () => {
@@ -340,6 +343,70 @@ describe("collect", () => {
     const status = await collect(deps, ROOT, "now");
     expect(status.waves.map((wave) => wave.id)).toEqual(["9", "10", "7", "8"]);
     expect(status.waves[0]?.lanes.map((lane) => lane.lane)).toEqual(["a", "b"]);
+  });
+
+  test("a newer wave with observations and no events still leads an older wave that has events", async () => {
+    // The shape today's lanes are actually in: dispatched directly, writing a
+    // lane log, emitting no events at all. mergeStatus used to create every
+    // evented wave's group before any observation-only wave's, so wave 8 —
+    // which reported — led wave 9 — which was live — whatever the collector
+    // said about recency. Ordering may not depend on which feed a wave
+    // happens to appear in.
+    const mtimes: Record<string, number> = {
+      [`${ROOT}/wave-8/a.log`]: 1_000,
+      [`${ROOT}/wave-9/b.log`]: 5_000,
+    };
+    const files: Record<string, string> = {
+      [`${ROOT}/wave-8/a.log`]: "settled long ago\n",
+      [`${ROOT}/wave-8/events.jsonl`]:
+        '{"ts":"2026-09-07T16:55:43Z","wave":"8","lane":"a","stage":"merge","event":"settled","pr":301}\n',
+      [`${ROOT}/wave-9/b.log`]: "building right now\n",
+    };
+    const base = fakeDeps({
+      dirs: {
+        [ROOT]: ["wave-8", "wave-9"],
+        [`${ROOT}/wave-8`]: ["a.log", "events.jsonl"],
+        [`${ROOT}/wave-9`]: ["b.log"],
+      },
+      files,
+    });
+    const deps: CollectDeps = {
+      ...base,
+      open: async (path) => {
+        const text = files[path];
+        if (text === undefined) throw new Error(`ENOENT: open ${path}`);
+        return memoryHandle(Buffer.from(text, "utf8"), mtimes[path] ?? 1_000);
+      },
+    };
+    const status = await collect(deps, ROOT, "now");
+
+    expect(status.waves.map((wave) => wave.id)).toEqual(["9", "8"]);
+    // Ordering is not paid for with data: the older wave keeps its report.
+    expect(status.waves[1]?.lanes[0]?.reported).toMatchObject({
+      stage: "merge",
+      event: "settled",
+      pr: 301,
+    });
+  });
+
+  test("a wave directory holding nothing yet appears with no lanes, and sinks below dated waves", async () => {
+    // A dispatched wave whose dispatcher has not written a lane log or an
+    // event is the state an operator most wants to see. It used to be absent
+    // from the result entirely — invisible is worse than quiet.
+    const status = await collect(
+      fakeDeps({
+        dirs: {
+          [ROOT]: ["wave-10", "wave-9"],
+          [`${ROOT}/wave-10`]: [],
+          [`${ROOT}/wave-9`]: ["a.log"],
+        },
+        files: { [`${ROOT}/wave-9/a.log`]: "x\n" },
+      }),
+      ROOT,
+      "now",
+    );
+    expect(status.waves.map((wave) => wave.id)).toEqual(["9", "10"]);
+    expect(status.waves[1]?.lanes).toEqual([]);
   });
 
   test("malformed gh output is no PRs, not a crash", async () => {

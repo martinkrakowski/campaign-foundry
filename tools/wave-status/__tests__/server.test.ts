@@ -6,7 +6,7 @@ import { afterEach, describe, test, expect, vi, type Mock } from "vitest";
 vi.mock("node:child_process", () => ({ execFile: vi.fn() }));
 import { execFile } from "node:child_process";
 
-import { watch as fsWatch } from "node:fs";
+import { utimesSync, watch as fsWatch } from "node:fs";
 import {
   request as httpRequest,
   type IncomingMessage,
@@ -98,7 +98,13 @@ function expectStylesheetLink(html: string): void {
   }
 }
 
-/** A fixture wave-log root: waveT with a >1 KB log, waveU with a small one. */
+/**
+ * A fixture wave-log root: waveT with a >1 KB log, waveU with a small one.
+ * The two lane logs get pinned mtimes (T the newer, by a minute) so a test
+ * that reads the collected list back has one wave order to expect: the
+ * collector's newest-first rule is a function of lane-log activity, so
+ * sub-second write order here would make that assertion wall-clock luck.
+ */
 async function makeFixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "wave-status-server-"));
   roots.push(root);
@@ -122,6 +128,11 @@ async function makeFixture(): Promise<string> {
     })}\n`,
   );
   await writeFile(join(root, "waveU", "u2.log"), "short\n");
+  const base = Date.now();
+  const tMtime = new Date(base - 60_000);
+  const uMtime = new Date(base - 600_000);
+  utimesSync(join(root, "waveT", "t1.log"), tMtime, tMtime);
+  utimesSync(join(root, "waveU", "u2.log"), uMtime, uMtime);
   return root;
 }
 

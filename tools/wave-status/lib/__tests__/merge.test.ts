@@ -102,6 +102,46 @@ describe("mergeStatus — shape and ordering", () => {
     expect(status.waves[0]?.lanes.map((lane) => lane.lane)).toEqual(["s4", "s3"]);
   });
 
+  test("a declared wave order decides the list, not which feed a wave appears in", () => {
+    // Wave 9 is the live one and emits nothing; wave 8 reported and is older.
+    // Feed order puts 8 first — that is the defect this parameter exists for.
+    const status = mergeStatus(
+      [event({ wave: "8", lane: "a" })],
+      { "9/b": observation() },
+      "now",
+      ["9", "8"],
+    );
+    expect(status.waves.map((wave) => wave.id)).toEqual(["9", "8"]);
+    // Each wave keeps its own rows: the order changes nothing about content.
+    expect(status.waves[0]?.lanes.map((lane) => lane.lane)).toEqual(["b"]);
+    expect(status.waves[0]?.lanes[0]?.reported).toBeUndefined();
+    expect(status.waves[1]?.lanes[0]?.reported).toMatchObject({ stage: "implement" });
+  });
+
+  test("a wave in the declared order with nothing in either feed is an empty wave, not an absent one", () => {
+    const status = mergeStatus([], {}, "now", ["11"]);
+    expect(status.waves.map((wave) => wave.id)).toEqual(["11"]);
+    expect(status.waves[0]?.lanes).toEqual([]);
+  });
+
+  test("a wave the order does not mention still appears, after every wave it does", () => {
+    // The order is a collector's view of the tree; a feed naming a wave it
+    // never listed (an event whose body disagrees with its directory) must
+    // still show its rows rather than be dropped to keep the list tidy.
+    const status = mergeStatus(
+      [event({ wave: "ghost", lane: "g1" })],
+      { "9/b": observation() },
+      "now",
+      ["9"],
+    );
+    expect(status.waves.map((wave) => wave.id)).toEqual(["9", "ghost"]);
+  });
+
+  test("a wave named twice in the declared order is emitted once", () => {
+    const status = mergeStatus([], { "9/b": observation() }, "now", ["9", "9"]);
+    expect(status.waves.map((wave) => wave.id)).toEqual(["9"]);
+  });
+
   test("malformed observation keys are not lanes", () => {
     const status = mergeStatus(
       [],
