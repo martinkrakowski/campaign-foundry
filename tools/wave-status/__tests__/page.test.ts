@@ -12,7 +12,7 @@ import { collect, realDeps } from "../lib/collect.js";
 import { laneState, stallThresholdMs } from "../lib/lane-state.js";
 import { readEvents } from "../lib/events.js";
 import { mergeStatus } from "../lib/merge.js";
-import type { WaveStatus } from "../lib/types.js";
+import type { DerivedLane, LaneStatus, WaveStatus } from "../lib/types.js";
 
 const PAGE_PATH = fileURLToPath(
   new URL("../public/index.html", import.meta.url),
@@ -212,6 +212,7 @@ const stateFixture = (now: number): WaveStatus => {
           lane("no-log", { alive: true }),
           lane("vanished", { alive: false, exit: 0 }),
           lane("blocked", { alive: false, pr: { number: 5, state: "open", checks: "pending" } }),
+          lane("unstarted", { alive: false, pr: { number: 11, state: "open", checks: "none" } }),
           lane("ready", { alive: false, pr: { number: 6, state: "open", checks: "pass" } }),
           lane("merged", { alive: false, pr: { number: 7, state: "merged", checks: "pass" } }),
         ],
@@ -234,6 +235,7 @@ const EXPECTED_STATE_PILLS: ReadonlyArray<readonly [string, string, string]> = [
   ["no-log", "running", "info"],
   ["vanished", "vanished", "bad"],
   ["blocked", "blocked", "warn"],
+  ["unstarted", "blocked", "warn"],
   ["ready", "ready", "ok"],
   ["merged", "merged", "dim"],
 ];
@@ -3615,31 +3617,95 @@ describe("the status page", () => {
 
   test("the state cell says exactly what laneState() says for the same lane", async () => {
     // The page holds its own copy of the derivation — the inline script cannot
-    // import the module — so this test is the seam between them: every lane in
-    // the fixture is fed to the real `laneState` and to the rendered row, and
-    // the two answers must agree. Move either threshold, or reorder either
-    // precedence, and a lane starts disagreeing here.
+    // import the module — so this test is the seam between them. It is driven
+    // from the INPUT space, not from the list of states: every combination of
+    // `pr.state` × `pr.checks` the types permit, plus the no-PR cases, each fed
+    // to both implementations. A hand-listed set of outputs can only ever miss
+    // an input that maps to no output — which is precisely the gap that let an
+    // open PR with `checks: "none"` fall through to a throw on main while the
+    // page rendered "unknown" for it. The types enumerate the space; the test
+    // enumerates what the types enumerate. The state fixture rides along: the
+    // inputs that make the PR arms decide (exit, log age, disagreement) belong
+    // to the same seam, and dropping them would let a reordering of those arms
+    // survive here.
     const now = Date.now();
-    const status = stateFixture(now);
+    const lanes: Record<string, unknown>[] = [
+      ...stateFixture(now).waves[0].lanes,
+    ] as unknown as Record<string, unknown>[];
+    const noPrCases: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+      ["no-pr", { alive: false }],
+      ["no-pr-exit0", { alive: false, exit: 0 }],
+      ["no-pr-fail", { alive: false, exit: 1 }],
+      ["no-pr-alive", { alive: true }],
+    ];
+    for (const [id, derived] of noPrCases) {
+      lanes.push({ wave: "S", lane: id, derived, disagreements: [] });
+    }
+    // Derived from the declared union, not copied from it: a state or check
+    // value added to `LaneObservation["pr"]` without being listed here fails to
+    // compile (the `Record` is missing a key), and one listed that the types no
+    // longer permit fails too (an excess property). The input space can then
+    // only ever be as stale as the types themselves — a hand-listed set of
+    // *states* is how the first version of this seam missed an input that
+    // mapped to none of them.
+    type PermittedPr = NonNullable<DerivedLane["pr"]>;
+    const prStates = Object.keys({
+      open: true,
+      merged: true,
+      closed: true,
+    } satisfies Record<PermittedPr["state"], true>) as PermittedPr["state"][];
+    const prChecks = Object.keys({
+      none: true,
+      pending: true,
+      pass: true,
+      fail: true,
+    } satisfies Record<PermittedPr["checks"], true>) as PermittedPr["checks"][];
+    for (const state of prStates) {
+      for (const checks of prChecks) {
+        lanes.push({
+          wave: "S",
+          lane: `pr-${state}-${checks}`,
+          derived: { alive: false, pr: { number: 9, state, checks } },
+          disagreements: [],
+        });
+      }
+    }
+    const status = {
+      generatedAt: new Date(now).toISOString(),
+      waves: [{ id: "S", lanes }],
+    } as unknown as WaveStatus;
+
     const page = await loadPage(status);
     const doc = page.window.document;
-    for (const lane of status.waves[0].lanes) {
+    expect(doc.querySelectorAll("tr.lane").length).toBe(lanes.length);
+    for (const lane of lanes) {
+      const id = lane.lane as string;
       const pill = doc.querySelector(
-        `tr.lane[data-lane="${lane.lane}"] td.c-state .pill`,
+        `tr.lane[data-lane="${id}"] td.c-state .pill`,
       ) as unknown as HTMLElement | null;
-      expect(pill, `lane ${lane.lane} has no state pill`).toBeTruthy();
-      expect(pill!.textContent?.trim(), `lane ${lane.lane}`).toBe(
-        laneState(lane, now),
-      );
+      expect(pill, `lane ${id} has no state pill`).toBeTruthy();
+      // A thrown exception is an answer the page can never give, and a
+      // rendered word is one the module can never withhold: on this seam they
+      // are a difference, not an exemption — so the module's verdict is
+      // recorded in the same currency the row renders.
+      let said: string;
+      try {
+        said = laneState(lane as unknown as LaneStatus, now);
+      } catch (error) {
+        said = `threw: ${String(error)}`;
+      }
+      expect(pill!.textContent?.trim(), `lane ${id}`).toBe(said);
     }
   });
 
   test("a lane whose PR state the derivation cannot name renders as unknown, not as a guess", async () => {
     // The collector does produce `closed` PRs (collect.ts keeps open/merged/
-    // closed), and `laneState` has no member for one — it throws. A page that
-    // let that escape would lose every row to a single odd one, so the mirror
-    // says "unknown" rather than guessing "merged": an unnamed state is a
-    // question, a wrong state is a lie.
+    // closed), and the ranking has no verdict for one — the lane's PR was shut
+    // without merging, which is neither ready nor merged nor failed. Both
+    // implementations must say the gap plainly: an unnamed state is a question,
+    // a wrong state is a lie. It used to be that the module threw here and only
+    // the page could answer; a throw on this seam is exactly the divergence the
+    // parity test above exists to keep out.
     const now = Date.now();
     const closedStatus = {
       generatedAt: new Date(now).toISOString(),
@@ -3669,11 +3735,12 @@ describe("the status page", () => {
     expect(pill).toBeTruthy();
     expect(pill.textContent?.trim()).toBe("unknown");
     expect(pill.classList.contains("dim")).toBe(true);
-    // And the table is still whole: one row's oddity takes nothing else down.
-    expect(doc.querySelectorAll("tr.lane").length).toBe(11);
-    expect(() =>
-      laneState(closedStatus.waves[0].lanes[10], now),
-    ).toThrow(/unhandled PR state/);
+    // The module answers in the same word — and nothing about the row's
+    // oddity takes the rest of the table down.
+    expect(
+      laneState(closedStatus.waves[0].lanes[11], now),
+    ).toBe("unknown");
+    expect(doc.querySelectorAll("tr.lane").length).toBe(12);
   });
 
 

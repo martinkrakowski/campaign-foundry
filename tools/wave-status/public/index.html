@@ -1425,9 +1425,10 @@
      import a module (the server serves this file verbatim and the script runs
      inline), so this is a second implementation of one rule, exactly as
      STALLED_GRACE_MS above already is. Two tests hold the copies together: a
-     parity test feeds one lane per state to the module *and* to the rendered
-     row and fails if the words ever differ, and a pin test reads this file's
-     own threshold literal against `stallThresholdMs`. Fifteen minutes, then —
+     parity test feeds every PR input the types permit — state × checks, plus
+     the no-PR cases — to the module *and* to the rendered row and fails if the
+     words ever differ, and a pin test reads this file's own threshold literal
+     against `stallThresholdMs`. Fifteen minutes, then —
      a decision about patience rather than an inference from data, because a
      lane legitimately goes quiet through a build. */
       const STALL_THRESHOLD_MS = 900000;
@@ -1467,12 +1468,13 @@
         }
         if (derived.alive) return "running";
         if (derived.pr === undefined) return "vanished";
-        if (derived.pr.state === "open" && derived.pr.checks === "pending") return "blocked";
+        if (derived.pr.state === "open" && (derived.pr.checks === "pending" || derived.pr.checks === "none")) return "blocked";
         if (derived.pr.state === "open" && derived.pr.checks === "pass") return "ready";
         if (derived.pr.state === "merged") return "merged";
-        // A state the ranking has no name for — a closed PR, which the
-        // collector can legitimately hand back — is reported as unnamed.
-        // The module throws there; a page that threw would blank every row.
+        // The only PR state left is `closed` — the lane's PR was shut without
+        // merging, which is not a verdict this ranking owns. Say the gap rather
+        // than guess at it: an unnamed state is a question, a wrong state is a
+        // lie. The module states the same word for the same input.
         return "unknown";
       }
 

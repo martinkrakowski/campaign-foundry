@@ -89,6 +89,42 @@ it("blocked", () => {
   expect(laneState(s, now)).toBe("blocked");
 });
 
+// Every PR spends its first few seconds exactly like this: it exists, and CI
+// has reported nothing yet. `checks: "none"` is waiting for a verdict that has
+// not started — the same thing `blocked` already names — not a throw.
+it("open PR with checks none is blocked, not an unhandled state", () => {
+  const s = makeStatus({
+    derived: {
+      alive: false,
+      pr: { number: 1, state: "open", checks: "none" },
+    },
+  });
+  expect(laneState(s, now)).toBe("blocked");
+});
+
+// The collector does hand back closed PRs, and the ranking has no verdict for
+// one. Name the gap instead of guessing a state: an unnamed state is a
+// question, a wrong state is a lie.
+it("closed PR is unknown, not a guess", () => {
+  const s = makeStatus({
+    derived: {
+      alive: false,
+      pr: { number: 1, state: "closed", checks: "none" },
+    },
+  });
+  expect(laneState(s, now)).toBe("unknown");
+});
+
+it("merged PR with checks none is still merged", () => {
+  const s = makeStatus({
+    derived: {
+      alive: false,
+      pr: { number: 1, state: "merged", checks: "none" },
+    },
+  });
+  expect(laneState(s, now)).toBe("merged");
+});
+
 it("ready", () => {
   const s = makeStatus({
     derived: {

@@ -6,7 +6,10 @@ export type LaneState =
   | "vanished"
   | "blocked"
   | "ready"
-  | "merged";
+  | "merged"
+  // The ranking's own gap, named: a PR state with no verdict — a closed PR,
+  // which the collector can legitimately hand back. A question, never a guess.
+  | "unknown";
 
 // Decision: lanes go quiet during a build.
 export const stallThresholdMs = 15 * 60 * 1000;
@@ -34,16 +37,19 @@ export function laneState(status: LaneStatus, nowMs: number): LaneState {
   if (derived.pr === undefined) {
     return "vanished";
   }
-  if (derived.pr.state === "open" && derived.pr.checks === "pending") {
+  if (derived.pr.state === "open" && (derived.pr.checks === "pending" || derived.pr.checks === "none")) {
     return "blocked";
   }
   if (derived.pr.state === "open" && derived.pr.checks === "pass") {
     return "ready";
   }
-  /* istanbul ignore else -- closed PR has no LaneState member */
   if (derived.pr.state === "merged") {
     return "merged";
   }
-  /* istanbul ignore next -- closed PR has no LaneState member */
-  throw new Error(`unhandled PR state: ${String(derived.pr.state)}`);
+  // The only PR state left is `closed`: the lane's PR was shut without merging,
+  // which is not a verdict this ranking owns. Name the gap rather than guess at
+  // it — and rather than throw, which is where this function and its copy in
+  // the page first parted ways: the page could only render a word, so a throw
+  // here was the divergence, not an exemption from it.
+  return "unknown";
 }
