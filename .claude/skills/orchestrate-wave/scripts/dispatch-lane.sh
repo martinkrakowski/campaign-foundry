@@ -22,42 +22,38 @@ USAGE_FLAGS="${USAGE_FLAGS---format json}"
 STAGGER="${STAGGER:-45}"
 
 root="${WAVE_LOG_ROOT:-${HOME:-/tmp}/.waves}"
-if [ $# -ge 1 ] && [[ "$1" == *:* ]]; then
-  WAVE="${WAVE:-wave-default}"
-  if [[ -d "$root/wave-$WAVE" ]]; then
-    LOGDIR="$root/wave-$WAVE"
-  elif [[ -d "$root/$WAVE" ]]; then
-    LOGDIR="$root/$WAVE"
-  elif [[ -d "/tmp/wave-$WAVE" ]]; then
-    LOGDIR="/tmp/wave-$WAVE"
-  elif [[ -d "/tmp/$WAVE" ]]; then
-    LOGDIR="/tmp/$WAVE"
+resolve_wave_dir() {
+  local w="$1"
+  if [[ -d "$root/wave-$w" ]]; then
+    print "$root/wave-$w"
+  elif [[ -d "$root/wave$w" ]]; then
+    print "$root/wave$w"
+  elif case "$w" in wave*) [[ -d "$root/$w" ]] ;; *) false ;; esac; then
+    print "$root/$w"
+  elif [[ -d "/tmp/wave-$w" ]]; then
+    print "/tmp/wave-$w"
+  elif [[ -d "/tmp/wave$w" ]]; then
+    print "/tmp/wave$w"
+  elif case "$w" in wave*) [[ -d "/tmp/$w" ]] ;; *) false ;; esac; then
+    print "/tmp/$w"
   else
-    case "$WAVE" in
-      wave*) LOGDIR="$root/$WAVE" ;;
-      *)     LOGDIR="$root/wave-$WAVE" ;;
+    case "$w" in
+      wave*) print "$root/$w" ;;
+      *)     print "$root/wave-$w" ;;
     esac
   fi
+}
+
+if [ $# -ge 1 ] && [[ "$1" == *:* ]]; then
+  WAVE="${WAVE:-wave-default}"
+  LOGDIR="$(resolve_wave_dir "$WAVE")"
   mkdir -p "$LOGDIR"
 elif [ $# -ge 2 ]; then
   if [[ "$1" == */* || "$1" == .* || "$1" == ~* ]]; then
     LOGDIR="$1"; shift; mkdir -p "$LOGDIR"
   else
     WAVE="$1"; shift
-    if [[ -d "$root/wave-$WAVE" ]]; then
-      LOGDIR="$root/wave-$WAVE"
-    elif [[ -d "$root/$WAVE" ]]; then
-      LOGDIR="$root/$WAVE"
-    elif [[ -d "/tmp/wave-$WAVE" ]]; then
-      LOGDIR="/tmp/wave-$WAVE"
-    elif [[ -d "/tmp/$WAVE" ]]; then
-      LOGDIR="/tmp/$WAVE"
-    else
-      case "$WAVE" in
-        wave*) LOGDIR="$root/$WAVE" ;;
-        *)     LOGDIR="$root/wave-$WAVE" ;;
-      esac
-    fi
+    LOGDIR="$(resolve_wave_dir "$WAVE")"
     mkdir -p "$LOGDIR"
   fi
 else

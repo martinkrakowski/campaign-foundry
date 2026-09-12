@@ -11,6 +11,7 @@ import {
   parseChecks,
   pgrepPattern,
   realDeps,
+  resolveScanRoots,
   WAVE_LOG_ROOT,
   waveIdFromDirName,
   worktreeFacts,
@@ -507,6 +508,16 @@ describe("collect", () => {
   test("exports durable and legacy roots", () => {
     expect(WAVE_LOG_ROOT).toMatch(/\.waves$/);
     expect(LEGACY_WAVE_LOG_ROOT).toBe("/tmp");
+  });
+
+  test("resolveScanRoots deduplicates and resolves default legacy roots", () => {
+    expect(resolveScanRoots(WAVE_LOG_ROOT)).toEqual([WAVE_LOG_ROOT, LEGACY_WAVE_LOG_ROOT]);
+    expect(resolveScanRoots(WAVE_LOG_ROOT, [LEGACY_WAVE_LOG_ROOT])).toEqual([
+      WAVE_LOG_ROOT,
+      LEGACY_WAVE_LOG_ROOT,
+    ]);
+    expect(resolveScanRoots("/custom")).toEqual(["/custom"]);
+    expect(resolveScanRoots("/custom", ["/legacy", "/custom"])).toEqual(["/custom", "/legacy"]);
   });
 
   test("default legacy roots are scanned when root is WAVE_LOG_ROOT and legacyRoots is omitted", async () => {

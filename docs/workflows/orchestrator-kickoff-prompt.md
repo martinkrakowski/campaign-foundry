@@ -137,15 +137,15 @@ git worktree add "../wt-<lane>" -b "feat/<lane>" origin/<default-branch>
 
 - **Delegated:** write `/tmp/brief-<lane>.md` from **Template A** in the pipeline doc, filled
   from the plan, then launch the implement CLI **detached** so a harness timeout cannot kill it:
-  `nohup zsh -c 'CLI … > ~/.waves/wave-<id>/<lane>.log 2>&1; echo "EXIT $?" >> ~/.waves/wave-<id>/<lane>.log' >/dev/null 2>&1 & disown`.
+  `mkdir -p ~/.waves/wave-<id> && nohup zsh -c 'CLI … > ~/.waves/wave-<id>/<lane>.log 2>&1; echo "EXIT $?" >> ~/.waves/wave-<id>/<lane>.log' >/dev/null 2>&1 & disown`.
   Respect the parallelism cap. Then **wait for the `EXIT` marker with a command that blocks until
   it appears and then exits** — this one is portable and is the fallback if your harness offers
   nothing better:
 
   ```sh
   # blocks until the lane settles; prints the marker and exits
-  while ! grep -qE '^EXIT [0-9]+$' "~/.waves/wave-<id>/<lane>.log" 2>/dev/null; do sleep 30; done
-  grep -E '^EXIT [0-9]+$' "~/.waves/wave-<id>/<lane>.log" | tail -1
+  while ! grep -qE '^EXIT [0-9]+$' ~/.waves/wave-<id>/<lane>.log 2>/dev/null; do sleep 30; done
+  grep -E '^EXIT [0-9]+$' ~/.waves/wave-<id>/<lane>.log | tail -1
   ```
 
   If your harness has a background-task or event-stream facility (Claude Code exposes `Monitor`

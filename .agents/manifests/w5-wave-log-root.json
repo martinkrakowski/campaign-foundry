@@ -17,6 +17,21 @@
       "because": "Preserving existing waves under /tmp is required so in-flight waves are not lost. If LEGACY_WAVE_LOG_ROOT is not /tmp, legacy wave collection fails.",
       "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
       "verdict": "caught"
+    },
+    {
+      "file": ".claude/skills/orchestrate-wave/scripts/dispatch-lane.sh",
+      "before": "  elif [[ -d \"/tmp/wave$w\" ]]; then\n    print \"/tmp/wave$w\"",
+      "after": "  elif false; then\n    print \"/tmp/wave$w\"",
+      "because": "Resolving wave1-shaped directories (no dash) under legacy roots is required so in-flight waves like wave1 or waveA are found rather than duplicated into a new directory.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/lib/__tests__/emit.test.ts",
+        "-t",
+        "wave1-shaped"
+      ],
+      "verdict": "caught"
     }
   ]
 }

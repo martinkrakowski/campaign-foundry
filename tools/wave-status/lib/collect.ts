@@ -63,6 +63,20 @@ export function waveIdFromDirName(name: string): string {
   return name.replace(/^wave-?/, "");
 }
 
+export function resolveScanRoots(
+  root: string,
+  legacyRoots?: readonly string[],
+): readonly string[] {
+  const scanRoots = [root];
+  const resolvedLegacy = legacyRoots ?? (root === WAVE_LOG_ROOT ? [LEGACY_WAVE_LOG_ROOT] : []);
+  for (const legacy of resolvedLegacy) {
+    if (!scanRoots.includes(legacy)) {
+      scanRoots.push(legacy);
+    }
+  }
+  return scanRoots;
+}
+
 /**
  * Walk the wave log tree and build the one `WaveStatus` the server renders.
  * Every external result is data: a failing read or CLI call shrinks the
@@ -91,13 +105,7 @@ export async function collect(
   const prByLane = cachedPrByLane ?? (await prFacts(deps));
   const worktrees = await worktreeFacts(deps);
 
-  const scanRoots = [root];
-  const resolvedLegacy = legacyRoots ?? (root === WAVE_LOG_ROOT ? [LEGACY_WAVE_LOG_ROOT] : []);
-  for (const legacy of resolvedLegacy) {
-    if (!scanRoots.includes(legacy)) {
-      scanRoots.push(legacy);
-    }
-  }
+  const scanRoots = resolveScanRoots(root, legacyRoots);
 
   for (const scanRoot of scanRoots) {
     let dirNames: readonly string[];

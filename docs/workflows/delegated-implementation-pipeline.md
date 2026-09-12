@@ -406,6 +406,7 @@ sed -n '/^---$/,$p' docs/workflows/orchestrator-kickoff-prompt.md | tail -n +2 |
 
 ```bash
 # Stage 1 — one worktree + one detached grok per lane
+mkdir -p ~/.waves/wave-<id>
 git fetch origin main
 for lane in editor-shell editor-selector; do
   git worktree add "../wt-$lane" -b "feat/$lane" origin/main
@@ -421,6 +422,7 @@ claude -p "$(cat /tmp/review-65.md)" --model claude-opus-4-8 --output-format tex
   --disallowedTools "Edit Write NotebookEdit" > /tmp/review-65.json
 
 # Stage 3 — remediation on the same branch, smaller turn budget
+mkdir -p ~/.waves/wave-<id>
 nohup zsh -c "cd ../wt-editor-shell && claude -p \"$(cat /tmp/fix-65.md)\" \
     --model claude-opus-4-8 --permission-mode acceptEdits --output-format text \
     > ~/.waves/wave-<id>/fix-65.log 2>&1; echo \"EXIT \$?\" >> ~/.waves/wave-<id>/fix-65.log" >/dev/null 2>&1 &
