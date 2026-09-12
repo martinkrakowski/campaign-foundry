@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { readFile, mkdir } from "node:fs/promises";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
@@ -2077,6 +2077,117 @@ describe("the status page", () => {
     const waveRows = Array.from(doc.querySelectorAll("tr.wave"));
     const waveIds = waveRows.map((el) => el.getAttribute("data-wave"));
     expect(waveIds).toEqual(["W_new", "W_old", "W_nolog", "W_empty"]);
+  });
+
+  test("a collapsed page with sorting off lists the newest wave first because the collector sent it first, and every header states its wave's age", async () => {
+    // The state the sort defect hid in: waves collapsed and the recent-sort
+    // switch off, so the list order is purely what the server sent. The
+    // directories are named so that lexicographic order and recency disagree
+    // (wave-10 < wave-9), and the lane mtimes decide: wave-9 ran half an hour
+    // ago, wave-10 three days ago.
+    const root = mkdtempSync(join(tmpdir(), "wave-age-order-"));
+    dirs.push(root);
+    mkdirSync(join(root, "wave-9"));
+    mkdirSync(join(root, "wave-10"));
+    writeFileSync(join(root, "wave-9", "a.log"), "building\n");
+    writeFileSync(join(root, "wave-10", "b.log"), "settled long ago\n");
+    const base = Date.now();
+    const mtime9 = new Date(base - 30 * 60_000);
+    const mtime10 = new Date(base - 3 * 24 * 60 * 60_000);
+    utimesSync(join(root, "wave-9", "a.log"), mtime9, mtime9);
+    utimesSync(join(root, "wave-10", "b.log"), mtime10, mtime10);
+
+    const deps = {
+      ...realDeps,
+      pgrep: async () => 0,
+      gh: async () => "[]",
+      git: async () => "",
+    };
+    const status = await collect(deps, root, new Date().toISOString());
+
+    const page = await loadPage(status, "log-tail", {
+      storage: { "wave-status:sort": "false" },
+    });
+    const doc = page.window.document;
+
+    // Collapsed — the state where the old defect was invisible to expanded-only tests.
+    const waveRows = Array.from(doc.querySelectorAll("tr.wave")) as unknown as HTMLElement[];
+    for (const waveRow of waveRows) {
+      expect(waveRow.querySelector("button")?.getAttribute("aria-expanded")).toBe("false");
+    }
+    const laneRows = Array.from(doc.querySelectorAll("tr.lane")) as unknown as HTMLElement[];
+    expect(laneRows.length).toBe(2);
+    for (const laneRow of laneRows) {
+      expect(laneRow.hidden).toBe(true);
+    }
+
+    // Newest wave first, straight from the server payload.
+    expect(waveRows.map((el) => el.getAttribute("data-wave"))).toEqual(["9", "10"]);
+
+    // And each collapsed header carries its age in words a reader can see —
+    // not a hidden lane row, not just a helper's return value.
+    expect(waveRows[0]?.textContent).toContain("30m ago");
+    expect(waveRows[1]?.textContent).toContain("3d ago");
+  });
+
+  test("wave headers state age relative and short — now, minutes, hours, days — and say 'no dated activity' rather than lie", async () => {
+    const now = Date.now();
+    const dated = (id: string, mtimeMs: number): { id: string; lanes: unknown[] } => ({
+      id,
+      lanes: [
+        {
+          wave: id,
+          lane: "l",
+          derived: { alive: false, log: { bytes: 10, mtimeMs, tail: "" } },
+          disagreements: [],
+        },
+      ],
+    });
+    const ageStatus = {
+      generatedAt: "now",
+      waves: [
+        dated("W_secs", now - 30_000),
+        dated("W_mins", now - 22.5 * 60_000),
+        dated("W_hours", now - 3.5 * 60 * 60_000),
+        dated("W_days", now - 5.5 * 24 * 60 * 60_000),
+        dated("W_future", now + 10 * 60_000),
+        {
+          id: "W_nolog",
+          lanes: [{ wave: "W_nolog", lane: "l", derived: { alive: false }, disagreements: [] }],
+        },
+        { id: "W_empty", lanes: [] },
+      ],
+    } as unknown as WaveStatus;
+
+    const page = await loadPage(ageStatus, "log-tail", {
+      storage: { "wave-status:sort": "false" },
+    });
+    const doc = page.window.document;
+
+    // Every wave is collapsed; the header is the only thing the reader sees.
+    const waveRows = Array.from(doc.querySelectorAll("tr.wave")) as unknown as HTMLElement[];
+    for (const waveRow of waveRows) {
+      expect(waveRow.querySelector("button")?.getAttribute("aria-expanded")).toBe("false");
+    }
+
+    const ageOf = (id: string): string => {
+      const row = doc.querySelector(`tr.wave[data-wave="${id}"]`) as unknown as HTMLElement;
+      expect(row).not.toBeNull();
+      const expected = row.querySelector(".wave-age")?.textContent ?? "";
+      // The reader-visible string, asserted on the header's own text.
+      expect(row.textContent).toContain(expected);
+      return expected;
+    };
+
+    expect(ageOf("W_secs")).toBe("now");
+    expect(ageOf("W_mins")).toBe("22m ago");
+    expect(ageOf("W_hours")).toBe("3h ago");
+    expect(ageOf("W_days")).toBe("5d ago");
+    // A clock-ahead mtime must not render as a negative age.
+    expect(ageOf("W_future")).toBe("now");
+    // Nothing to date says so plainly — no fabricated age for an undated wave.
+    expect(ageOf("W_nolog")).toBe("no dated activity");
+    expect(ageOf("W_empty")).toBe("no dated activity");
   });
 
   test("an expanded wave stays expanded across a re-sort, and an open log stays open when its wave moves", async () => {

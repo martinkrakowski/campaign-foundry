@@ -381,6 +381,14 @@
         font-size: 11px;
         color: var(--color-text-muted);
       }
+      /* The header's age answers "is this current" before the reader opens
+       anything, so it sits beside the wave id in the same quiet mono as the
+       rollup — a fact about time, not a status to colour. */
+      .wave-age {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--color-text-muted);
+      }
       .wave-meta .wm-run {
         color: var(--color-info);
       }
@@ -1313,6 +1321,20 @@
         return compareMtimes(waveMtime(a), waveMtime(b));
       }
 
+      // Relative and short: the header answers *is this current*, not *what
+      // time was it*. Bins floor down — 22.5m reads "22m ago" — and a
+      // clock-ahead mtime is "now", never a negative age. A wave with nothing
+      // to date says so plainly: no fabricated age, no silent blank.
+      function waveAge(wave) {
+        const newest = waveMtime(wave);
+        if (newest === undefined) return "no dated activity";
+        const elapsed = Date.now() - newest;
+        if (elapsed < 60000) return "now";
+        if (elapsed < 3600000) return `${Math.floor(elapsed / 60000)}m ago`;
+        if (elapsed < 86400000) return `${Math.floor(elapsed / 3600000)}h ago`;
+        return `${Math.floor(elapsed / 86400000)}d ago`;
+      }
+
       function toggleWave(waveId) {
         if (expandedWaves.has(waveId)) {
           expandedWaves.delete(waveId);
@@ -1616,7 +1638,7 @@
           const rowHtml = [
             `<tr class="wave" data-wave="${esc(wave.id)}"><td colspan="7">` +
               `<button type="button" class="wave-band" tabindex="0" aria-expanded="${isExpanded ? "true" : "false"}" aria-controls="waves-${esc(wave.id)}">` +
-              `<span class="wave-eyebrow">wave</span> <span class="wave-id">${esc(wave.id)}</span><span class="wave-meta">${waveMeta(filteredLanes)}</span>` +
+              `<span class="wave-eyebrow">wave</span> <span class="wave-id">${esc(wave.id)}</span><span class="wave-age">${esc(waveAge(wave))}</span><span class="wave-meta">${waveMeta(filteredLanes)}</span>` +
               `</button></td></tr>`,
           ];
           if (filteredLanes.length === 0) {

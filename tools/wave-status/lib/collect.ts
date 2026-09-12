@@ -74,8 +74,14 @@ export async function collect(
   now: string,
   cachedPrByLane?: Readonly<Record<string, LaneObservation["pr"]>>,
 ): Promise<WaveStatus> {
-  const events: WaveEvent[] = [];
-  const observed: Record<string, LaneObservation> = {};
+  // Gather first, order last: the newest-first wave list is decided here, the
+  // one place that has seen every lane log's mtime. Rows and events are
+  // bucketed by wave during the walk and fed to the merge in that order —
+  // mergeStatus groups in feed order, so both feeds must agree.
+  const rows: { readonly wave: string; readonly lane: string; readonly obs: LaneObservation }[] = [];
+  const eventRows: { readonly wave: string; readonly event: WaveEvent }[] = [];
+  const newestByWave = new Map<string, number>();
+  const visited = new Set<string>();
 
   const prByLane = cachedPrByLane ?? (await prFacts(deps));
   const worktrees = await worktreeFacts(deps);
@@ -84,9 +90,12 @@ export async function collect(
   try {
     dirNames = await deps.readdir(root);
   } catch {
-    return mergeStatus(events, observed, now);
+    return mergeStatus([], {}, now);
   }
 
+  // Lexicographic is not the output order — it is the stable base the output
+  // order is a permutation of: waves of equal (or absent) newest activity must
+  // come out in a deterministic order, not readdir's.
   const waveDirs = dirNames.filter((name) => name.startsWith("wave")).sort();
   for (const name of waveDirs) {
     const dir = join(root, name);
@@ -109,6 +118,8 @@ export async function collect(
       try {
         const part = await readTail(deps.open, logPath, LOG_TAIL_BYTES);
         log = { bytes: part.size, mtimeMs: part.mtimeMs, tail: part.tail.toString("utf8") };
+        const prior = newestByWave.get(wave);
+        if (prior === undefined || part.mtimeMs > prior) newestByWave.set(wave, part.mtimeMs);
       } catch {
         log = undefined;
       }
@@ -130,25 +141,52 @@ export async function collect(
         }
       }
 
-      observed[`${wave}/${lane}`] = {
+      const obs: LaneObservation = {
         ...(log !== undefined ? { log } : {}),
         ...(gateLog !== undefined ? { gateLog } : {}),
         alive,
         ...(prByLane[lane] !== undefined ? { pr: prByLane[lane] } : {}),
       };
+      rows.push({ wave, lane, obs });
+      visited.add(wave);
     }
 
     if (entries.includes("events.jsonl")) {
       try {
         const text = await deps.readFile(join(dir, "events.jsonl"));
-        events.push(...readEvents(text).events);
+        for (const event of readEvents(text).events) eventRows.push({ wave, event });
+        visited.add(wave);
       } catch {
         // W3 writes events.jsonl; absent or unreadable is "nobody reported", not an error.
       }
     }
   }
 
+  // Both feeds carry the same newest-first wave order, so the merged list
+  // reads newest-first to the end that mergeStatus leaves it (its own
+  // "evented waves first" contract is unchanged and tested in merge).
+  const orderedWaves = [...visited].sort((a, b) =>
+    compareRecency(newestByWave.get(a), newestByWave.get(b)),
+  );
+  const events: WaveEvent[] = [];
+  const observed: Record<string, LaneObservation> = {};
+  for (const wave of orderedWaves) {
+    for (const pair of eventRows) if (pair.wave === wave) events.push(pair.event);
+    for (const row of rows) if (row.wave === wave) observed[`${wave}/${row.lane}`] = row.obs;
+  }
+
   return mergeStatus(events, observed, now);
+}
+
+/**
+ * Wave order by newest lane-log activity: newer first; a wave nothing could
+ * date sinks below every dated one; undated-vs-undated and equal mtimes keep
+ * the visited (lexicographic) order — Array#sort is stable.
+ */
+function compareRecency(a: number | undefined, b: number | undefined): number {
+  if (a === undefined) return b === undefined ? 0 : 1;
+  if (b === undefined) return -1;
+  return b - a;
 }
 
 /**

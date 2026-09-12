@@ -70,10 +70,10 @@ function fakeDeps({
   };
 }
 
-function memoryHandle(data: Buffer): TailHandle {
+function memoryHandle(data: Buffer, mtimeMs = 1_000): TailHandle {
   return {
     async stat() {
-      return { size: data.length, mtimeMs: 1_000 };
+      return { size: data.length, mtimeMs };
     },
     async read(buffer, offset, length, position) {
       const n = Math.max(0, Math.min(length, data.length - position));
@@ -302,6 +302,44 @@ describe("collect", () => {
     expect(t1?.reported).toMatchObject({ stage: "implement" });
     expect(t1?.derived.pr).toBeUndefined();
     expect(status.waves.map((wave) => wave.id)).toEqual(["T", "U", "V"]);
+  });
+
+  test("waves come out newest-first by their lanes' log mtimes, not in the directories' lexicographic order", async () => {
+    // Directory names sort wave-10 < wave-7 < wave-8 < wave-9; the lane mtimes
+    // tell a different story — 9 is the live wave, 10 is older, and 7 and 8
+    // have unreadable logs, so nothing dates them at all. Undated waves must
+    // sink below every dated one and keep the first-seen (lexicographic)
+    // order among themselves.
+    const mtimes: Record<string, number> = {
+      [`${ROOT}/wave-9/a.log`]: 3_000,
+      [`${ROOT}/wave-9/b.log`]: 5_000,
+      [`${ROOT}/wave-10/c.log`]: 2_000,
+      [`${ROOT}/wave-10/d.log`]: 1_000,
+    };
+    const files: Record<string, string> = Object.fromEntries(
+      Object.keys(mtimes).map((path) => [path, "x\n"]),
+    );
+    const base = fakeDeps({
+      dirs: {
+        [ROOT]: ["wave-9", "wave-10", "wave-8", "wave-7"],
+        [`${ROOT}/wave-9`]: ["a.log", "b.log"],
+        [`${ROOT}/wave-10`]: ["c.log", "d.log"],
+        [`${ROOT}/wave-8`]: ["e.log"],
+        [`${ROOT}/wave-7`]: ["f.log"],
+      },
+      files,
+    });
+    const deps: CollectDeps = {
+      ...base,
+      open: async (path) => {
+        const text = files[path];
+        if (text === undefined) throw new Error(`ENOENT: open ${path}`);
+        return memoryHandle(Buffer.from(text, "utf8"), mtimes[path]);
+      },
+    };
+    const status = await collect(deps, ROOT, "now");
+    expect(status.waves.map((wave) => wave.id)).toEqual(["9", "10", "7", "8"]);
+    expect(status.waves[0]?.lanes.map((lane) => lane.lane)).toEqual(["a", "b"]);
   });
 
   test("malformed gh output is no PRs, not a crash", async () => {
