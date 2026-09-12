@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "lane": "W3",
+  "mutations": [
+    {
+      "file": "tools/wave-status/public/index.html",
+      "before": "      function waveMeta(lanes, nowMs) {\n        const counts = laneStateCountsOf(lanes, nowMs);",
+      "after": "      function waveMeta(lanes, nowMs) {\n        const counts = {};",
+      "because": "The header's whole claim is that it counts the derived state the rows lead with. Stop sourcing its counts from laneStateCountsOf and the band reverts to an empty breakdown over rows that still say 2 running / 1 failed / 1 merged — the exact disagreement with the rows the lane was written to remove, caught here and not by a header-only assertion that shares the wrong basis.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/public/index.html",
+      "before": "        for (const state of NEEDS_HUMAN) attention += counts[state] ?? 0;",
+      "after": "        for (const state of LANE_STATE_ORDER) attention += counts[state] ?? 0;",
+      "because": "'How many need me' is the needs-a-human subset, not every lane: sum the full order and the lead number becomes the lane count, so a campaign of 11 where 6 need a human reads 11. The command monitor's headline answer is the one this mutation corrupts, and it is caught by the same fixture the rows are counted on.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/public/index.html",
+      "before": "      const NEEDS_HUMAN = [\"running\", \"stalled\", \"conflict\", \"failed\"];",
+      "after": "      const NEEDS_HUMAN = [\"running\", \"conflict\", \"failed\"];",
+      "because": "Hide inactive must leave exactly running, stalled, conflicted or failed. Drop a state from the page's copy of the set and the page hides stalled lanes while the module (and so the test's expectation) still counts them as needing a human — the two copies of one policy parting ways, caught on the same seam the derivation is held to.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/lane-state.ts",
+      "before": "  for (const lane of lanes) counts[laneState(lane, nowMs)] += 1;",
+      "after": "  for (const lane of lanes) counts[\"merged\"] += 1;",
+      "because": "laneStateCounts is the tiebreaker the page's own counts are measured against, and it is the module half of 'counts and rows come from one computation'. Bucket every lane into one state and it stops being a tally of laneState, so the fixture's real per-state numbers no longer match what either the page or the unit test derive.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/lib/__tests__/lane-state.test.ts", "tools/wave-status/__tests__/page.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/lane-state.ts",
+      "before": "export const NEEDS_HUMAN_STATES: readonly LaneState[] = [\n  \"conflict\",\n  \"failed\",\n  \"stalled\",\n  \"running\",\n];",
+      "after": "export const NEEDS_HUMAN_STATES: readonly LaneState[] = [\n  \"conflict\",\n  \"failed\",\n  \"running\",\n];",
+      "because": "The same set with the same state removed from the original instead of the copy: the module says stalled lanes no longer need a human while the page still keeps them, so the lead count and the hidden set both disagree with the reference. Two copies of one rule stay joined only if the seam is read from both sides, and the tests read it through the module.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
+      "verdict": "caught"
+    }
+  ]
+}
