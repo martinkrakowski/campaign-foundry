@@ -7,7 +7,7 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
-import { findBriefById, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
+import { findBriefById, isErrno, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
 import { assertSafeId, parseBrief } from "../../../lib/load-brief.js";
 import { copyGenerator } from "../../../lib/pipeline.js";
 import { InvalidCopyPoolError, isPoolDirSymlink, readPool, withPoolLock, writePool } from "../../../lib/pools.js";
@@ -123,6 +123,10 @@ function mapGeneratorError(error: CopyGeneratorError): HttpFailure {
  * Upstream failures: 502 auth/other, 429 (+ Retry-After) or 503 rate limit,
  * 503 network/timeout, 422 unreadable body. Approved entries feed the planner
  * when a brief sets `variation.axes.headline: pool://copy` (see lib/pools.ts).
+ *
+ * `?revision=` is the revision the caller read, when it has one: the merge is a
+ * read→merge→write like PATCH's, so a stale one is a 409 carrying the fresh
+ * revision instead of an overwrite that drops another writer's entries.
  */
 export default defineEventHandler(async (event) => {
   let brief: CampaignBrief | undefined;
@@ -182,20 +186,24 @@ export default defineEventHandler(async (event) => {
     return { error: "Copy generator returned no usable headlines" };
   }
 
+  const rawRevision = getQuery(event).revision;
+  const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
+
   // The slow LLM call is done; read→merge→write is serialised per brief so a
   // concurrent request's entries are merged into, never overwritten.
   return withPoolLock(briefId, async () => {
-    let existing: CopyPool | undefined;
+    let stored;
     try {
-      existing = await readPool(briefId);
+      stored = await readPool(briefId);
     } catch (error) {
       if (!(error instanceof InvalidCopyPoolError)) throw error;
       setResponseStatus(event, 422);
       return { error: error.message };
     }
+    const existing = stored?.pool;
     const headlines = newTexts(usable, existing?.entries ?? []).slice(0, count);
-    if (headlines.length === 0 && existing) {
-      return { pool: existing, added: 0 };
+    if (headlines.length === 0 && stored) {
+      return { pool: stored.pool, revision: stored.revision, added: 0 };
     }
     const incoming: CopyPool = {
       briefId,
@@ -204,8 +212,17 @@ export default defineEventHandler(async (event) => {
       entries: await gateEntries(headlines, new Set(existing?.entries.map((entry) => entry.id) ?? [])),
     };
     const next = mergePool(existing ?? incoming, incoming);
-    await writePool(next);
-    setResponseStatus(event, 201);
-    return { pool: next, added: headlines.length };
+    try {
+      const written = await writePool(next, { expectedRevision });
+      setResponseStatus(event, 201);
+      return { pool: written.pool, revision: written.revision, added: headlines.length };
+    } catch (error) {
+      if (!isErrno(error, "ECONFLICT")) throw error;
+      setResponseStatus(event, 409);
+      return {
+        error: "Copy pool was modified by another user.",
+        revision: (error as { revision?: string }).revision,
+      };
+    }
   });
 });

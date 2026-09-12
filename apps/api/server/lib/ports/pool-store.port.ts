@@ -50,6 +50,16 @@ export function isCopyPool(value: unknown): value is CopyPool {
 }
 
 /**
+ * A pool as persisted, with the revision of the bytes it was read from.
+ * `revision` is the SHA-256 digest of the stored document — never a field on it,
+ * so a hand-edited pool cannot claim one (D80).
+ */
+export interface StoredPool {
+  readonly pool: CopyPool;
+  readonly revision: string;
+}
+
+/**
  * Port for loading, writing, copying, and locking the per-brief copy pool.
  *
  * The pool is keyed by the brief's id — the same store key as the brief itself —
@@ -71,13 +81,20 @@ export interface PoolStorePort {
    * does not check this, because it also validates a pool that has not been
    * read from a keyed location.
    */
-  readPool(briefId: string): Promise<CopyPool | undefined>;
+  readPool(briefId: string): Promise<StoredPool | undefined>;
 
   /**
    * Write the pool under its own `pool.briefId`. Atomic: a crash never leaves
    * half-written JSON and two overlapping writers never share a temp file.
+   *
+   * With `expectedRevision`, verifies the stored bytes still hash to it before
+   * writing and otherwise throws an error with code `ECONFLICT` carrying the
+   * fresh `revision` — the conditional write `BriefStorePort.rewriteBrief`
+   * already offers. Without it the write is unconditional, as that one is: the
+   * compare and the write are not fused on a filesystem, so the caller's
+   * `withPoolLock` is still what makes a read→merge→write atomic (D79).
    */
-  writePool(pool: CopyPool): Promise<void>;
+  writePool(pool: CopyPool, options?: { expectedRevision?: string }): Promise<StoredPool>;
 
   /**
    * Copy the pool from `fromBriefId` to `toBriefId`, rewriting the copied

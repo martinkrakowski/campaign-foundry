@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "lane": "l10",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/fs-pool-store.ts",
+      "before": "      if (current !== options.expectedRevision) {",
+      "after": "      if (false) {",
+      "because": "The defect this lane fixes, restored: every write succeeds whatever revision the caller read, so the second of two overlapping read-modify-write sequences overwrites the first and its edit is gone with no error. The unconditional write is exactly what the ECONFLICT guard replaces.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-pool-store.test.ts",
+        "apps/api/server/routes/campaigns/pools/__tests__/pools.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/pools/[briefId].patch.ts",
+      "before": "      if (!isErrno(error, \"ECONFLICT\")) throw error;",
+      "after": "      if (false) throw error;",
+      "because": "Every write failure becomes a 409 with the pool's current revision, so a disk error is reported to HITL as 'someone else edited this' — the route would claim a conflict it never detected. The 500-vs-409 split is what the read-only-directory test pins.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/pools/__tests__/pools.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/pools/[briefId].get.ts",
+      "before": "  return { pool: stored.pool, revision: stored.revision };",
+      "after": "  return { pool: stored.pool };",
+      "because": "GET stops handing out the revision, so no caller can ever send one and the conditional write on the port is unreachable from the web client — the revision would exist on the port and nowhere else.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/pools/__tests__/pools.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/briefs-api.ts",
+      "before": "  const query = opts.revision ? `?revision=${encodeURIComponent(opts.revision)}` : \"\";\n  return asStoredPool(",
+      "after": "  const query = \"\";\n  return asStoredPool(",
+      "because": "The client reads the revision and then never sends it back, so the server's guard never sees one: the conditional write is decorative and the lost update this lane removes survives the whole feature.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/briefs-api.test.ts",
+        "apps/web/src/components/campaign/__tests__/headline-pool-drawer.test.tsx"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

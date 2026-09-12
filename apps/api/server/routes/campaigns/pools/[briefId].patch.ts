@@ -1,7 +1,7 @@
 import type { CopyPool, CopyPoolEntry, CopyPoolEntryStatus } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
-import { SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
+import { isErrno, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
 import { assertSafeId } from "../../../lib/load-brief.js";
 import { InvalidCopyPoolError, isPoolDirSymlink, readPool, withPoolLock, writePool } from "../../../lib/pools.js";
 
@@ -83,6 +83,10 @@ function collidingId(entries: readonly CopyPoolEntry[], id: string, text: string
  * failure is persisted as rejected with a reason (not 422) so HITL can see why.
  * An edit that duplicates another entry's text is a 422 naming that entry, and
  * a hand-edited pool file that is not a pool is a 422 naming the file.
+ *
+ * `?revision=` is the revision the caller read (GET hands it out). A write
+ * whose revision has gone stale is a 409 carrying the fresh one rather than an
+ * overwrite that silently drops another writer's edit.
  */
 export default defineEventHandler(async (event) => {
   let briefId: string;
@@ -107,19 +111,23 @@ export default defineEventHandler(async (event) => {
     return { error: SYMLINK_WRITE_ERROR };
   }
 
+  const rawRevision = getQuery(event).revision;
+  const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
+
   return withPoolLock(briefId, async () => {
-    let pool;
+    let stored;
     try {
-      pool = await readPool(briefId);
+      stored = await readPool(briefId);
     } catch (error) {
       if (!(error instanceof InvalidCopyPoolError)) throw error;
       setResponseStatus(event, 422);
       return { error: error.message };
     }
-    if (!pool) {
+    if (!stored) {
       setResponseStatus(event, 404);
       return { error: `Copy pool for brief "${briefId}" not found.` };
     }
+    const pool = stored.pool;
 
     const byId = new Map(pool.entries.map((entry) => [entry.id, entry]));
     for (const patch of patches) {
@@ -129,7 +137,7 @@ export default defineEventHandler(async (event) => {
       }
     }
     if (patches.length === 0) {
-      return { pool };
+      return { pool, revision: stored.revision };
     }
 
     let entries: readonly CopyPoolEntry[] = pool.entries;
@@ -148,7 +156,16 @@ export default defineEventHandler(async (event) => {
     }
 
     const next: CopyPool = { ...pool, entries };
-    await writePool(next);
-    return { pool: next };
+    try {
+      const written = await writePool(next, { expectedRevision });
+      return { pool: written.pool, revision: written.revision };
+    } catch (error) {
+      if (!isErrno(error, "ECONFLICT")) throw error;
+      setResponseStatus(event, 409);
+      return {
+        error: "Copy pool was modified by another user.",
+        revision: (error as { revision?: string }).revision,
+      };
+    }
   });
 });

@@ -942,7 +942,7 @@ describe("authoring briefs", () => {
       });
       const { getPoolStore } = await import("../../../lib/ports/index.js");
       // the source pool is untouched
-      expect(await getPoolStore().readPool("camp")).toMatchObject({ briefId: "camp" });
+      expect(await getPoolStore().readPool("camp")).toMatchObject({ pool: { briefId: "camp" } });
     });
 
     test("duplicate of a brief without a pool still creates, and leaves no pool", async () => {

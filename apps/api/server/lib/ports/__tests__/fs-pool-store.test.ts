@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
+import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,9 +35,15 @@ describe("FsPoolStore", () => {
 
   test("writePool then readPool round-trips JSON under briefs/<id>/pools.json", async () => {
     const value = pool();
-    await store.writePool(value);
-    expect(await store.readPool("camp")).toEqual(value);
-    expect(JSON.parse(readFileSync(join(dir, "camp", "pools.json"), "utf8"))).toEqual(value);
+    const stored = await store.writePool(value);
+    expect(stored.pool).toEqual(value);
+    expect((await store.readPool("camp"))?.pool).toEqual(value);
+    const raw = readFileSync(join(dir, "camp", "pools.json"), "utf8");
+    expect(JSON.parse(raw)).toEqual(value);
+    // The revision is the digest of the stored bytes, not a field on the document.
+    expect(stored.revision).toBe(createHash("sha256").update(raw).digest("hex"));
+    expect((await store.readPool("camp"))?.revision).toBe(stored.revision);
+    expect(raw).not.toContain("revision");
   });
 
   test("readPool returns undefined when the file is missing", async () => {
@@ -46,7 +53,7 @@ describe("FsPoolStore", () => {
   test("writePool overwrites atomically and does not leave a tmp sibling", async () => {
     await store.writePool(pool());
     await store.writePool(pool({ entries: [{ id: "h2", text: "Stay hydrated", status: "approved" }] }));
-    expect(await store.readPool("camp")).toMatchObject({ entries: [{ id: "h2" }] });
+    expect(await store.readPool("camp")).toMatchObject({ pool: { entries: [{ id: "h2" }] } });
     expect(readdirSync(join(dir, "camp"))).toEqual(["pools.json"]);
   });
 
@@ -127,8 +134,81 @@ describe("FsPoolStore", () => {
       store.writePool(pool()),
       store.writePool(pool({ entries: [{ id: "h2", text: "Stay hydrated", status: "approved" }] })),
     ]);
-    expect((await store.readPool("camp"))?.entries).toHaveLength(1);
+    expect((await store.readPool("camp"))?.pool.entries).toHaveLength(1);
     expect(readdirSync(join(dir, "camp"))).toEqual(["pools.json"]);
+  });
+
+  test("writePool refuses a stale expectedRevision with ECONFLICT carrying the fresh revision", async () => {
+    const first = await store.writePool(pool({ entries: [{ id: "h1", text: "Stay wild", status: "approved" }] }));
+    const second = await store.writePool(pool({ entries: [{ id: "h2", text: "Stay hydrated", status: "approved" }] }));
+    expect(second.revision).not.toBe(first.revision);
+
+    await expect(store.writePool(pool({ entries: [] }), { expectedRevision: first.revision })).rejects.toMatchObject({
+      code: "ECONFLICT",
+      revision: second.revision,
+    });
+    // The refused write left the stored bytes alone.
+    expect((await store.readPool("camp"))?.pool.entries).toHaveLength(1);
+  });
+
+  test("writePool accepts the revision it just read and returns the new one", async () => {
+    const stored = await store.writePool(pool());
+    const reread = await store.readPool("camp");
+    expect(reread?.revision).toBe(stored.revision);
+
+    const next = await store.writePool(pool({ entries: [] }), { expectedRevision: reread?.revision });
+    expect((await store.readPool("camp"))?.revision).toBe(next.revision);
+    expect((await store.readPool("camp"))?.pool.entries).toEqual([]);
+  });
+
+  test("a conditional write onto a deleted pool conflicts with no revision", async () => {
+    const stored = await store.writePool(pool());
+    const file = join(dir, "camp", "pools.json");
+    rmSync(file);
+    await expect(store.writePool(pool(), { expectedRevision: stored.revision })).rejects.toMatchObject({
+      code: "ECONFLICT",
+      revision: undefined,
+    });
+  });
+
+  test("a conditional write rethrows a revision read that fails for another reason", async () => {
+    mkdirSync(join(dir, "camp", "pools.json"), { recursive: true });
+    await expect(store.writePool(pool(), { expectedRevision: "stale" })).rejects.toThrow(/EISDIR/);
+  });
+
+  test("two overlapping read-modify-write sequences lose one edit unless the write is conditional", async () => {
+    const seeded = await store.writePool(
+      pool({
+        entries: [
+          { id: "h1", text: "Stay wild", status: "approved" },
+          { id: "h2", text: "Stay hydrated", status: "approved" },
+        ],
+      }),
+    );
+    // A second writer — another process, or any caller outside this store's
+    // in-process lock. Both read, both merge into what they read, both write.
+    const other = new FsPoolStore(dir);
+    const mine = await store.readPool("camp");
+    const theirs = await other.readPool("camp");
+    const reject = (from: CopyPool, id: string): CopyPool => ({
+      ...from,
+      entries: from.entries.map((entry) => (entry.id === id ? { ...entry, status: "rejected" as const } : entry)),
+    });
+
+    // Unconditional: the last writer wins and the first edit is gone, silently.
+    await store.writePool(reject(mine!.pool, "h1"));
+    await other.writePool(reject(theirs!.pool, "h2"));
+    expect((await store.readPool("camp"))?.pool.entries.map((e) => e.status)).toEqual(["approved", "rejected"]);
+
+    // Conditional: the second writer's stale read is refused instead, so the
+    // first edit survives and the conflict names what is there now.
+    const fresh = await store.readPool("camp");
+    const first = await store.writePool(reject(fresh!.pool, "h1"), { expectedRevision: fresh!.revision });
+    await expect(other.writePool(reject(theirs!.pool, "h2"), { expectedRevision: theirs!.revision })).rejects.toMatchObject(
+      { code: "ECONFLICT", revision: first.revision },
+    );
+    expect((await store.readPool("camp"))?.pool.entries.map((e) => e.status)).toEqual(["rejected", "rejected"]);
+    expect(seeded.revision).not.toBe(first.revision);
   });
 
   test("copyPool copies the pool and rewrites the pool's own briefId to the destination", async () => {
@@ -138,7 +218,7 @@ describe("FsPoolStore", () => {
     // the byte copy would have named the old brief — the stored pool must not
     expect(JSON.parse(readFileSync(join(dir, "copy", "pools.json"), "utf8")).briefId).toBe("copy");
     // the source pool is untouched
-    expect(await store.readPool("camp")).toMatchObject({ briefId: "camp" });
+    expect(await store.readPool("camp")).toMatchObject({ pool: { briefId: "camp" } });
   });
 
   test("copyPool resolves undefined when the source has no pool", async () => {
