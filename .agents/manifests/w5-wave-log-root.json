@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "lane": "w5-wave-log-root",
+  "mutations": [
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "export const WAVE_LOG_ROOT = join(homedir(), \".waves\");",
+      "after": "export const WAVE_LOG_ROOT = \"/tmp\";",
+      "because": "Moving WAVE_LOG_ROOT off /tmp to a durable ~/.waves directory prevents wave records and log history from disappearing on reboot. If it reverts to /tmp, tests fail.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "export const LEGACY_WAVE_LOG_ROOT = \"/tmp\";",
+      "after": "export const LEGACY_WAVE_LOG_ROOT = \"/var/empty\";",
+      "because": "Preserving existing waves under /tmp is required so in-flight waves are not lost. If LEGACY_WAVE_LOG_ROOT is not /tmp, legacy wave collection fails.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    }
+  ]
+}

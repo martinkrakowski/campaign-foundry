@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { open as fsOpen, readdir as fsReaddir, readFile as fsReadFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { readEvents } from "./events.js";
 import { mergeStatus } from "./merge.js";
@@ -34,8 +35,11 @@ export interface CollectDeps {
   readonly git?: (args: readonly string[]) => Promise<string>;
 }
 
-/** Wave log directories live directly under here: `/tmp/wave*`. */
-export const WAVE_LOG_ROOT = "/tmp";
+/** Wave log directories live directly under here: `~/.waves/wave*`. */
+export const WAVE_LOG_ROOT = join(homedir(), ".waves");
+
+/** Legacy root: in-flight waves from earlier runs are preserved here. */
+export const LEGACY_WAVE_LOG_ROOT = "/tmp";
 
 /** How much of a lane log travels with the observation (the EXIT marker lives at the end). */
 export const LOG_TAIL_BYTES = 16 * 1024;
@@ -73,6 +77,7 @@ export async function collect(
   root: string,
   now: string,
   cachedPrByLane?: Readonly<Record<string, LaneObservation["pr"]>>,
+  legacyRoots?: readonly string[],
 ): Promise<WaveStatus> {
   // Gather first, order last: the wave list is decided here, the one place
   // that has seen every lane log's mtime, and it travels to the merge as an
@@ -86,80 +91,92 @@ export async function collect(
   const prByLane = cachedPrByLane ?? (await prFacts(deps));
   const worktrees = await worktreeFacts(deps);
 
-  let dirNames: readonly string[];
-  try {
-    dirNames = await deps.readdir(root);
-  } catch {
-    return mergeStatus([], {}, now);
+  const scanRoots = [root];
+  const resolvedLegacy = legacyRoots ?? (root === WAVE_LOG_ROOT ? [LEGACY_WAVE_LOG_ROOT] : []);
+  for (const legacy of resolvedLegacy) {
+    if (!scanRoots.includes(legacy)) {
+      scanRoots.push(legacy);
+    }
   }
 
-  // Lexicographic is not the output order — it is the stable base the output
-  // order is a permutation of: waves of equal (or absent) newest activity must
-  // come out in a deterministic order, not readdir's.
-  const waveDirs = dirNames.filter((name) => name.startsWith("wave")).sort();
-  for (const name of waveDirs) {
-    const dir = join(root, name);
-    const wave = waveIdFromDirName(name);
-    let entries: readonly string[];
+  for (const scanRoot of scanRoots) {
+    let dirNames: readonly string[];
     try {
-      entries = await deps.readdir(dir);
+      dirNames = await deps.readdir(scanRoot);
     } catch {
       continue;
     }
-    // Discovered is enough to list it: a wave directory with no lane log and
-    // no events yet is a dispatched wave, and that is the state an operator
-    // most wants to see. Absent is the one answer that is never useful.
-    discovered.add(wave);
 
-    const laneLogs = entries
-      .filter((entry) => entry.endsWith(".log") && !LANE_LOG_EXCLUDED.test(entry))
-      .sort();
-    for (const fileName of laneLogs) {
-      const lane = fileName.slice(0, -".log".length);
-      const logPath = join(dir, fileName);
+    // Lexicographic is not the output order — it is the stable base the output
+    // order is a permutation of: waves of equal (or absent) newest activity must
+    // come out in a deterministic order, not readdir's.
+    const waveDirs = dirNames.filter((name) => name.startsWith("wave")).sort();
+    for (const name of waveDirs) {
+      const wave = waveIdFromDirName(name);
+      if (discovered.has(wave)) continue;
 
-      let log: LaneObservation["log"];
+      const dir = join(scanRoot, name);
+      let entries: readonly string[];
       try {
-        const part = await readTail(deps.open, logPath, LOG_TAIL_BYTES);
-        log = { bytes: part.size, mtimeMs: part.mtimeMs, tail: part.tail.toString("utf8") };
-        const prior = newestByWave.get(wave);
-        if (prior === undefined || part.mtimeMs > prior) newestByWave.set(wave, part.mtimeMs);
+        entries = await deps.readdir(dir);
       } catch {
-        log = undefined;
+        continue;
       }
+      // Discovered is enough to list it: a wave directory with no lane log and
+      // no events yet is a dispatched wave, and that is the state an operator
+      // most wants to see. Absent is the one answer that is never useful.
+      discovered.add(wave);
 
-      let alive = false;
-      try {
-        alive = (await deps.pgrep(pgrepPattern(lane, worktrees))) > 0;
-      } catch {
-        alive = false;
-      }
+      const laneLogs = entries
+        .filter((entry) => entry.endsWith(".log") && !LANE_LOG_EXCLUDED.test(entry))
+        .sort();
+      for (const fileName of laneLogs) {
+        const lane = fileName.slice(0, -".log".length);
+        const logPath = join(dir, fileName);
 
-      const gateName = newestGateLog(entries, lane);
-      let gateLog: string | undefined;
-      if (gateName !== undefined) {
+        let log: LaneObservation["log"];
         try {
-          gateLog = await deps.readFile(join(dir, gateName));
+          const part = await readTail(deps.open, logPath, LOG_TAIL_BYTES);
+          log = { bytes: part.size, mtimeMs: part.mtimeMs, tail: part.tail.toString("utf8") };
+          const prior = newestByWave.get(wave);
+          if (prior === undefined || part.mtimeMs > prior) newestByWave.set(wave, part.mtimeMs);
         } catch {
-          gateLog = undefined;
+          log = undefined;
         }
+
+        let alive = false;
+        try {
+          alive = (await deps.pgrep(pgrepPattern(lane, worktrees))) > 0;
+        } catch {
+          alive = false;
+        }
+
+        const gateName = newestGateLog(entries, lane);
+        let gateLog: string | undefined;
+        if (gateName !== undefined) {
+          try {
+            gateLog = await deps.readFile(join(dir, gateName));
+          } catch {
+            gateLog = undefined;
+          }
+        }
+
+        const obs: LaneObservation = {
+          ...(log !== undefined ? { log } : {}),
+          ...(gateLog !== undefined ? { gateLog } : {}),
+          alive,
+          ...(prByLane[lane] !== undefined ? { pr: prByLane[lane] } : {}),
+        };
+        rows.push({ wave, lane, obs });
       }
 
-      const obs: LaneObservation = {
-        ...(log !== undefined ? { log } : {}),
-        ...(gateLog !== undefined ? { gateLog } : {}),
-        alive,
-        ...(prByLane[lane] !== undefined ? { pr: prByLane[lane] } : {}),
-      };
-      rows.push({ wave, lane, obs });
-    }
-
-    if (entries.includes("events.jsonl")) {
-      try {
-        const text = await deps.readFile(join(dir, "events.jsonl"));
-        for (const event of readEvents(text).events) events.push(event);
-      } catch {
-        // W3 writes events.jsonl; absent or unreadable is "nobody reported", not an error.
+      if (entries.includes("events.jsonl")) {
+        try {
+          const text = await deps.readFile(join(dir, "events.jsonl"));
+          for (const event of readEvents(text).events) events.push(event);
+        } catch {
+          // W3 writes events.jsonl; absent or unreadable is "nobody reported", not an error.
+        }
       }
     }
   }

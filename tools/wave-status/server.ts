@@ -82,8 +82,10 @@ export type WatchFn = (path: string, listener: () => void) => Pick<FSWatcher, "c
 
 export interface StartOptions {
   readonly port: number;
-  /** The wave log root (`/tmp` in production — bin.ts passes it). */
+  /** The wave log root (`~/.waves` in production — bin.ts passes it). */
   readonly root: string;
+  /** Additional roots to scan (e.g. legacy `/tmp`). When omitted, `collect` defaults to legacy roots if `root === WAVE_LOG_ROOT`. */
+  readonly legacyRoots?: readonly string[];
   /** Collection is injected so tests never shell out to `gh`. */
   readonly collect?: (now: string) => Promise<WaveStatus>;
   /**
@@ -147,7 +149,7 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
     if (refreshPr) {
       prCache = await prFacts(deps);
     }
-    return collect(deps, options.root, now, prCache);
+    return collect(deps, options.root, now, prCache, options.legacyRoots);
   };
 
   const refresh = async (refreshPr: boolean): Promise<void> => {

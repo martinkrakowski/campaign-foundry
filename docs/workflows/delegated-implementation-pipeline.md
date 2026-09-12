@@ -412,7 +412,7 @@ for lane in editor-shell editor-selector; do
   (cd "../wt-$lane" && yarn install --immutable)
   nohup zsh -c "cd ../wt-$lane && grok --prompt-file /tmp/brief-$lane.md \
       --always-approve --effort high --output-format plain --max-turns 600 \
-      > /tmp/$lane.log 2>&1; echo \"EXIT \$?\" >> /tmp/$lane.log" >/dev/null 2>&1 &
+      > ~/.waves/wave-<id>/$lane.log 2>&1; echo \"EXIT \$?\" >> ~/.waves/wave-<id>/$lane.log" >/dev/null 2>&1 &
   disown
 done
 
@@ -423,7 +423,7 @@ claude -p "$(cat /tmp/review-65.md)" --model claude-opus-4-8 --output-format tex
 # Stage 3 — remediation on the same branch, smaller turn budget
 nohup zsh -c "cd ../wt-editor-shell && claude -p \"$(cat /tmp/fix-65.md)\" \
     --model claude-opus-4-8 --permission-mode acceptEdits --output-format text \
-    > /tmp/fix-65.log 2>&1; echo \"EXIT \$?\" >> /tmp/fix-65.log" >/dev/null 2>&1 &
+    > ~/.waves/wave-<id>/fix-65.log 2>&1; echo \"EXIT \$?\" >> ~/.waves/wave-<id>/fix-65.log" >/dev/null 2>&1 &
 disown
 
 # Stage 4 — sweep (orchestrator itself, no agent CLI)
