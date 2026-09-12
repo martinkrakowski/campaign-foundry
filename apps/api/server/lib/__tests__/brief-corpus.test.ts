@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -240,10 +240,16 @@ describe("fail-closed writes (R4.1 — never fall back to a whole-object dump)",
     const path = copy("comments.yaml");
     const original = readFileSync(path);
     const brief = loadBrief(path);
-    mkdirSync(`${path}.tmp`); // block the temp write with a directory
-    await expect(store.rewriteBrief({ ...brief, campaignMessage: "Nope." })).rejects.toThrow();
+    // Block the temp write. There is no longer a name to aim a blocker at — the
+    // temp file is per-process and random (L9) — so refuse new files instead.
+    chmodSync(dir, 0o500);
+    try {
+      await expect(store.rewriteBrief({ ...brief, campaignMessage: "Nope." })).rejects.toThrow();
+      expect(readdirSync(dir)).toEqual(["comments.yaml"]); // no debris; unlink of a missing temp fails harmlessly
+    } finally {
+      chmodSync(dir, 0o755);
+    }
     expect(readFileSync(path)).toEqual(original);
-    expect(existsSync(`${path}.tmp`)).toBe(true); // unlink of a directory fails harmlessly
   });
 });
 

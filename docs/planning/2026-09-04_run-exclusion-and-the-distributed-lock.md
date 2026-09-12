@@ -225,11 +225,12 @@ still open**. `yarn plan:verify` runs them.
 grep -E -q '^[[:space:]]*(const|let)[[:space:]]+jobs[[:space:]:]+.*=[[:space:]]*new[[:space:]]+Map' apps/api/server/lib/jobs.ts
 ```
 
-```premise L9
-# The brief store writes to a fixed sibling temp file rather than a unique one;
-# copying the pool store's pid-and-random pattern closes the gap.
-grep -q '\${filePath}\.tmp' apps/api/server/lib/ports/fs-brief-store.ts
-```
+**L9 — closed by this lane; no premise is stated.** `rewriteBrief` now writes to
+`` `${filePath}.${process.pid}-${randomBytes(4).toString("hex")}.tmp` `` — the pool store's pattern —
+so two overlapping writers no longer share one temp path. **D79 stands**: this closes the shared-temp
+corruption only. `rewriteBrief` still renames unconditionally, so a lock — not the rename — is what
+stops a lost update, and dropping the lock still needs the compare and the write fused. A premise for
+a closed lane is noise.
 
 ```premise L10
 # PoolStorePort has no revision on the port interface; adding revision and
