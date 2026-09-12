@@ -66,6 +66,11 @@ it("vanished", () => {
   expect(laneState(s, now)).toBe("vanished");
 });
 
+it("not vanished when exit is zero and not alive", () => {
+  const s = makeStatus({ derived: { alive: false, exit: 0 } });
+  expect(laneState(s, now)).not.toBe("vanished");
+});
+
 it("blocked", () => {
   const s = makeStatus({
     derived: {
