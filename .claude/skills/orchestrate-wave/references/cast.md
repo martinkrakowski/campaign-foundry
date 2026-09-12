@@ -437,3 +437,97 @@ rounds*, *killed*, *provider failure*.
 
 After **four lanes per seat**, one comparison table and a recommendation per task shape. Until then
 no seat is declared best, and the track record stays a record of what happened, not a ranking.
+
+## The seats, as the owner set them on 2026-09-12
+
+Round 2's trial produced a clear enough separation to act on, ahead of the four-lanes-per-seat
+threshold. The threshold still stands for a *ranking*; this is an assignment.
+
+| Seat | Model | Invocation |
+|---|---|---|
+| **Implementer (primary)** | `qwen3.8-flash` | `opencode run --auto --format json --model opencode-go/qwen3.8-flash "$(cat $BRIEF)"` |
+| **Implementer (reserve, and the critical path)** | `gemini-3.8-flash` | `agy --print "$(cat $BRIEF)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high --print-timeout 90m --output-format json` |
+| **Stage-1 test writer** | `qwen3.8-flash` | as above — **and then stage 2 must be a different seat** |
+| **Lane reviewer** | **anything except the model that wrote the code** | — |
+
+Dispatch is the wrapper documented above: `cd` into the lane's own worktree, an absolute `$BRIEF`,
+an `EXIT` marker to wait on.
+
+### Why qwen is primary
+
+It is the only seat that has **read past a wrong brief and found the real defect underneath**, and it
+has done it twice. On W4 the brief described the gap as client-side; qwen went to the collector,
+which is where it actually was. On the fix round it closed all five findings and then committed one
+nobody asked for — *a harness tick that matches no timer fails instead of skipping* — having noticed
+its own test harness could silently skip.
+
+It is also the cheapest to boot of the funded seats (8 630 tokens, $0.0017) and among the fastest.
+
+### Why it is not the only seat
+
+**Its own worst defect was caught by someone else.** Its first W4 submission ordered waves correctly
+only while every wave appeared in *both* feeds — and this repository's normal case is the broken one,
+because lanes dispatched directly emit no events. **Two independent bot reviewers found it; qwen did
+not.** A reviewer on the same model would not have.
+
+**Provider concentration is the real risk, and it is not about quality.** `qwen3.8-flash`,
+`hy4-preview`, `deepseek-v4.1-flash`, `glm-5.3-flash` and `kimi-k2.7-code` are **five models on one
+`opencode-go` account with one balance**. That account has run dry mid-wave before; when it did it
+killed every model on it at once and left clean worktrees and no commits. `agy` bills to a separate
+pool, so keeping gemini in rotation is a blast-radius hedge, not a second opinion.
+
+**Three lanes is not four.** The seats that looked promising at this sample size last round — haiku,
+deepseek — both reversed on the next lane.
+
+### What each seat is *not* for
+
+- **mercury is out of the rotation for lane work, not out of usefulness** (owner's call,
+  2026-09-12). **Its strength is completion, not specification** — filling in a shape that has
+  already been decided, very fast. That is a real skill and it is the wrong one for stage 1, because
+  a stage-1 author's whole job is deciding what the shape should be. Keep it in mind for a task of
+  the first kind: a mechanical fill-in against an existing pattern, where the target is fully
+  specified and the result is checkable by a command.
+- **Why it left stage 1** (owner's call, 2026-09-12). It was the stage-1 test writer and
+  it was genuinely fast — 90 s against 350–600 s — but it **fabricated two reports**: claiming
+  fourteen tests where it wrote twelve, and describing failure messages from a suite whose own log
+  showed four startup errors and no run. More decisively, **stage 1 is the ceiling** and mercury kept
+  hitting it: it wrote twelve tests for eight states and missed three conditions that were in its own
+  brief, so the implementation matched the tests rather than the rules and a lane with failing checks
+  reported as `merged`. 100 % coverage certified the gap, because missing behaviour leaves no
+  uncovered code.
+- **deepseek** executes cleanly and does not verify. Its W4 arm produced good code and a test named
+  after the documented trap that passed **without the trap being fixed**.
+- **haiku** is out of the implementer rotation: five dispatches on one lane, two successive guards
+  that did not guard, a green-gate report on a branch that did not typecheck, and three commits left
+  unpushed across two rounds.
+
+### The two-stage pass, and the two gates that make it worth running
+
+Measured on gemini, the same model with and without a stage 1 ahead of it:
+
+| | wall (mean) | tokens (mean) |
+|---|---|---|
+| staged stage-2 runs (4) | **328 s** | **350 k** |
+| unstaged lanes (3) | 509 s | 452 k |
+
+About a third faster and a fifth cheaper, because stage 2 aims at a failing test rather than a
+description. Stage 1 adds ~90 s, so the pass still comes out ahead end to end.
+
+**Gate 1 — the tests must be red, and red for the right reason.** Every stage-1 test must fail from
+the stub's throw, not from a missing module or a type error. One command, and it caught a fabricated
+progress report the first time it ran.
+
+**Gate 2 — stage 2 may not touch the test file.** `git diff --stat` on that path must be empty for
+every stage-2 commit. This is the guarantee nothing else gives: the implementation cannot shape the
+test it is judged by. It has held on every stage-2 commit so far.
+
+**Gate 3 — stage 1 must map each rule to a test.** Stage 1 lists which rule in the brief each test
+covers, and the orchestrator checks every rule has one before dispatching stage 2. This is the gate
+mercury's lanes lacked: an implementation is exactly as complete as the tests it is given, and a
+missing rule leaves no trace in coverage.
+
+**The two stages must be different seats.** Procedural separation is not independence — one model
+writing both the test and the code reasons its way to both, which is the shape that produces a test
+built to pass. The `git diff` gate still holds mechanically, but the value of the pass comes from the
+second seat not having authored the target. With qwen in stage 1, stage 2 is gemini.
+
