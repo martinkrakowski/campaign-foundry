@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "lane": "l7",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/fs-job-store.ts",
+      "before": "await this.writeJobEntry(entry);",
+      "after": "/* do not persist to storage */",
+      "because": "The defect this lane fixes, restored: if createJob does not persist the minted handle to storage, the handle only exists in the local process and any other process fails to resolve it (404 / lost).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-job-store.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-job-store.ts",
+      "before": "raw = await readFile(this.jobPath(id), \"utf8\");",
+      "after": "return undefined;",
+      "because": "If getStoredJob fails to read from filesystem storage, handles minted out-of-process return undefined and the client encounters a manufactured 404 / lost error.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-job-store.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-job-store.ts",
+      "before": "if (entry.job.status !== \"running\") {",
+      "after": "if (false) {",
+      "because": "Eviction must drop settled jobs before running ones; disabling the settled check causes running jobs to be prematurely evicted.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-job-store.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

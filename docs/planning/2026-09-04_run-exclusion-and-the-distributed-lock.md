@@ -219,11 +219,7 @@ conclusion, and it was the author's error.
 Each gap states the claim that makes its lane necessary, as a script that exits 0 **while the gap is
 still open**. `yarn plan:verify` runs them.
 
-```premise L7
-# A job handle resolves only on this process while jobs.ts stores them in an
-# in-process Map; an out-of-process registry or port closes the gap.
-grep -E -q '^[[:space:]]*(const|let)[[:space:]]+jobs[[:space:]:]+.*=[[:space:]]*new[[:space:]]+Map' apps/api/server/lib/jobs.ts
-```
+**L7 — closed by this lane; no premise is stated.** Job handles are no longer stored in an in-process `Map` in `jobs.ts`; the registry is behind `JobStorePort` and its filesystem adapter `FsJobStore` (via `getJobStore()` / `setJobStore()` in `ports/index.ts`), storing records atomically under `<outputRoot>/jobs/<id>.json`. A handle survives the process that minted it and resolves across separate server instances, eliminating the manufactured 404 / *lost* error. A premise for a closed lane is noise.
 
 **L9 — closed by this lane; no premise is stated.** `rewriteBrief` now writes to
 `` `${filePath}.${process.pid}-${randomBytes(4).toString("hex")}.tmp` `` — the pool store's pattern —

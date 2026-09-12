@@ -1,70 +1,15 @@
-import type { PipelineResult } from "@campaignfoundry/CampaignOrchestration";
+import { getJobStore } from "./ports/index.js";
+import type { Job, JobResult, JobStatus, StoredJob } from "./ports/job-store.port.js";
 
-export type JobStatus = "running" | "completed" | "failed";
+export type { JobStatus, JobResult, Job, StoredJob };
+export { MAX_JOBS, JOB_TTL_MS } from "./ports/fs-job-store.js";
 
-/** The `{ halted, assets, log }` payload a completed run used to return on POST. */
-export interface JobResult {
-  halted: boolean;
-  assets: PipelineResult["assets"];
-  log: PipelineResult["log"];
-  policyHash?: string;
-  seed?: number;
+export async function createJob(campaignId: string): Promise<string> {
+  return getJobStore().createJob(campaignId);
 }
 
-export interface Job {
-  status: JobStatus;
-  done: number;
-  total: number;
-  log: PipelineResult["log"] | null;
-  result?: JobResult;
-  error?: string;
-}
-
-/** Most jobs kept in memory; the oldest are evicted first (terminal ones before running). */
-export const MAX_JOBS = 50;
-/** How long a settled job stays pollable after it completes or fails. */
-export const JOB_TTL_MS = 10 * 60_000;
-
-interface Entry {
-  campaignId: string;
-  job: Job;
-}
-
-/**
- * In-process only — a restart empties this map and GET /campaigns/jobs/:id 404s.
- * Bounded two ways so a long-lived API can't grow without limit: a size cap on
- * create, and a TTL that drops settled jobs once the poller has had ample time
- * to read them. A cleared TTL timer is `unref`'d so it never keeps the process up.
- */
-const jobs = new Map<string, Entry>();
-
-function evictToFit(): void {
-  if (jobs.size < MAX_JOBS) return;
-  // Insertion order == age. Evict on every create, so the store is never more than
-  // one over: drop the oldest settled job, else the oldest runner.
-  for (const [id, entry] of jobs) {
-    if (entry.job.status !== "running") {
-      jobs.delete(id);
-      return;
-    }
-  }
-  jobs.delete(jobs.keys().next().value as string);
-}
-
-function expireLater(id: string): void {
-  const timer = setTimeout(() => jobs.delete(id), JOB_TTL_MS);
-  timer.unref();
-}
-
-export function createJob(campaignId: string): string {
-  evictToFit();
-  const id = crypto.randomUUID();
-  jobs.set(id, { campaignId, job: { status: "running", done: 0, total: 0, log: null } });
-  return id;
-}
-
-export function getJob(id: string): Job | undefined {
-  return jobs.get(id)?.job;
+export async function getJob(id: string): Promise<Job | undefined> {
+  return getJobStore().getJob(id);
 }
 
 /**
@@ -72,33 +17,21 @@ export function getJob(id: string): Job | undefined {
  * 409 "already in progress" hands back, so the second press can adopt the run that
  * is actually in flight instead of discarding it.
  */
-export function getRunningJobId(campaignId: string): string | undefined {
-  for (const [id, entry] of jobs) {
-    if (entry.campaignId === campaignId && entry.job.status === "running") return id;
-  }
-  return undefined;
+export async function getRunningJobId(campaignId: string): Promise<string | undefined> {
+  return getJobStore().getRunningJobId(campaignId);
 }
 
 /** True while a job for this campaign is still running — one run per campaign at a time. */
-export function hasRunningJob(campaignId: string): boolean {
-  return getRunningJobId(campaignId) !== undefined;
+export async function hasRunningJob(campaignId: string): Promise<boolean> {
+  return getJobStore().hasRunningJob(campaignId);
 }
 
-function settle(id: string, job: Job): void {
-  const entry = jobs.get(id);
-  /* istanbul ignore next -- a job can only settle after createJob; evicted-then-settled is a no-op */
-  if (!entry) return;
-  entry.job = job;
-  expireLater(id);
+export async function completeJob(id: string, payload: JobResult): Promise<void> {
+  return getJobStore().completeJob(id, payload);
 }
 
-export function completeJob(id: string, payload: JobResult): void {
-  const n = payload.halted ? 0 : payload.assets.length;
-  settle(id, { status: "completed", done: n, total: n, log: payload.log, result: payload });
-}
-
-export function failJob(id: string, error: string): void {
-  settle(id, { status: "failed", done: 0, total: 0, log: null, error });
+export async function failJob(id: string, error: string): Promise<void> {
+  return getJobStore().failJob(id, error);
 }
 
 /**
@@ -110,12 +43,12 @@ export function runJob(id: string, work: () => Promise<void>): void {
     try {
       await work();
     } catch (reason) {
-      failJob(id, reason instanceof Error ? reason.message : "Job failed");
+      await failJob(id, reason instanceof Error ? reason.message : "Job failed");
     }
   })();
 }
 
-/** Test seam: forget every job (the map is module state). */
-export function resetJobs(): void {
-  jobs.clear();
+/** Test seam: forget every job. */
+export async function resetJobs(): Promise<void> {
+  return getJobStore().clear();
 }
