@@ -173,6 +173,15 @@ status wins and your summary says so.
   seats reported green gates they had started and never watched; one of those branches did not
   typecheck.
 
+**A two-stage lane hands over a handoff file, not a claim.** Stage 1 writes
+`.agents/handoff/<lane>.json` binding every rule in its brief to the test that pins it, and
+`yarn handoff:check` refuses the handoff unless **every rule names a test that exists and is
+currently failing**. A missing rule caps the implementation at stage 1's completeness and leaves no
+trace in coverage; a test that already passes pins nothing, because stage 2 can satisfy it by
+changing nothing. Both have happened: one stage-1 author wrote twelve tests for eight states, missed
+three conditions from its own brief, and the lane shipped reporting a failing PR as `merged` at
+100 % coverage.
+
 **And every lane brief opens by asking the lane to prove the defect before changing anything:**
 
 > Restate the defect in your own words and demonstrate it — the failing test, the wrong output, the

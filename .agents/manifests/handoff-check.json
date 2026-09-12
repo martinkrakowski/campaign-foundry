@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "lane": "handoff-check",
+  "mutations": [
+    {
+      "file": "tools/handoff-check/lib/check.ts",
+      "before": "status: !declared.has(rule.test) ? \"missing\" : failing.has(rule.test) ? \"red\" : \"passing\",",
+      "after": "status: \"red\",",
+      "because": "If every rule reports as red, a handoff missing three rules passes the gate - which is the exact omission this tool exists to catch, and the one that let a lane ship with failing PR checks reported as merged.",
+      "command": ["yarn", "vitest", "run", "tools/handoff-check"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/handoff-check/lib/check.ts",
+      "before": "return report.bindings.every((b) => b.status === \"red\") ? EXIT_READY : EXIT_NOT_READY;",
+      "after": "return EXIT_READY;",
+      "because": "If the exit code is always ready, the report still reads correctly but nothing refuses the handoff. A gate that prints a warning and exits 0 is not a gate.",
+      "command": ["yarn", "vitest", "run", "tools/handoff-check"],
+      "verdict": "caught"
+    }
+  ]
+}
