@@ -211,3 +211,35 @@ migration question rather than a hypothetical.
 **Both reviewers independently rejected v1's D79**, from different angles — grok that the compare and
 the write are not fused, gemini that lost updates survive a unique temp name. Two failures, one
 conclusion, and it was the author's error.
+
+---
+
+## 9. Premises
+
+Each gap states the claim that makes its lane necessary, as a script that exits 0 **while the gap is
+still open**. `yarn plan:verify` runs them.
+
+```premise L7
+# A job handle resolves only on this process while jobs.ts stores them in an
+# in-process Map; an out-of-process registry or port closes the gap.
+grep -E -q '^[[:space:]]*(const|let)[[:space:]]+jobs[[:space:]:]+.*=[[:space:]]*new[[:space:]]+Map' apps/api/server/lib/jobs.ts
+```
+
+```premise L9
+# The brief store writes to a fixed sibling temp file rather than a unique one;
+# copying the pool store's pid-and-random pattern closes the gap.
+grep -q '\${filePath}\.tmp' apps/api/server/lib/ports/fs-brief-store.ts
+```
+
+```premise L10
+# PoolStorePort has no revision on the port interface; adding revision and
+# conditional write options (mirroring BriefStorePort) closes the gap.
+! grep -E -q '^[[:space:]]*(readonly[[:space:]]+)?(revision|expectedRevision|getRevision)[?:(]|\bexpectedRevision\b' apps/api/server/lib/ports/pool-store.port.ts
+```
+
+```premise L11
+# The report merge is an unlocked read-modify-write; guarding it with a lock or
+# revision closes the gap.
+! grep -E -q '^[[:space:]]*((export[[:space:]]+)?(async[[:space:]]+)?function[[:space:]]+with[A-Za-z0-9_]*Lock|(await[[:space:]]+|return[[:space:]]+)?with[A-Za-z0-9_]*Lock\(|(readonly[[:space:]]+)?lock[?:])' apps/api/server/lib/report.ts && \
+! grep -E -q '^[[:space:]]*(readonly[[:space:]]+)?(revision|expectedRevision|getRevision)[?:(]|\bexpectedRevision\b' apps/api/server/lib/report.ts
+```
