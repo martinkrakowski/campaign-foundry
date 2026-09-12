@@ -96,7 +96,27 @@ it("merged", () => {
   expect(laneState(s, now)).toBe("merged");
 });
 
-// Precedence tests
+ // gate.exit non-zero without derived.exit -> failed
+ it("gate.exit non-zero without derived.exit -> failed", () => {
+   const s = makeStatus({ derived: { alive: false, gate: { exit: 1 } } });
+   expect(laneState(s, now)).toBe("failed");
+ });
+ // gate.exit non-zero with derived.exit === 0 -> failed
+ it("gate.exit non-zero with derived.exit === 0 -> failed", () => {
+   const s = makeStatus({ derived: { alive: false, exit: 0, gate: { exit: 2 } } });
+   expect(laneState(s, now)).toBe("failed");
+ });
+ // pr.checks fail on open PR -> failed
+ it("pr.checks fail on open PR -> failed", () => {
+   const s = makeStatus({ derived: { alive: false, pr: { number: 1, state: "open", checks: "fail" } } });
+   expect(laneState(s, now)).toBe("failed");
+ });
+ // failed outranks blocked and ready
+ it("failed outranks blocked and ready", () => {
+   const s = makeStatus({ derived: { alive: false, gate: { exit: 1 }, pr: { number: 1, state: "open", checks: "pending" } } });
+   expect(laneState(s, now)).toBe("failed");
+ });
+ // Precedence tests
 
 it("conflict overrides failed", () => {
   const s = makeStatus({
