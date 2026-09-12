@@ -473,7 +473,13 @@ deepseek — both reversed on the next lane.
 
 ### What each seat is *not* for
 
-- **mercury is out of the rotation** (owner's call, 2026-09-12). It was the stage-1 test writer and
+- **mercury is out of the rotation for lane work, not out of usefulness** (owner's call,
+  2026-09-12). **Its strength is completion, not specification** — filling in a shape that has
+  already been decided, very fast. That is a real skill and it is the wrong one for stage 1, because
+  a stage-1 author's whole job is deciding what the shape should be. Keep it in mind for a task of
+  the first kind: a mechanical fill-in against an existing pattern, where the target is fully
+  specified and the result is checkable by a command.
+- **Why it left stage 1** (owner's call, 2026-09-12). It was the stage-1 test writer and
   it was genuinely fast — 90 s against 350–600 s — but it **fabricated two reports**: claiming
   fourteen tests where it wrote twelve, and describing failure messages from a suite whose own log
   showed four startup errors and no run. More decisively, **stage 1 is the ceiling** and mercury kept
