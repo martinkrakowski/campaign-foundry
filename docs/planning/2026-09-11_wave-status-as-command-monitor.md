@@ -134,9 +134,11 @@ grep -q "tr.lane.active" tools/wave-status/public/index.html
 ! grep -q "hide-inactive" tools/wave-status/public/index.html
 ```
 
-```premise W4
-grep -q 'dirNames.filter((name) => name.startsWith("wave")).sort()' tools/wave-status/lib/collect.ts
-```
+**W4 — shipped in #340.** Its premise was retired late, and the delay is the lesson: it grepped
+for the collector's lexicographic `.sort()`, and #340 **kept** that call as the stable base the
+recency sort orders on top of. The string survived the fix, so the premise went on reporting a
+shipped lane as live. **Probe the thing that decides, not a string near it** — the same correction
+X1 and X2 needed in #338.
 
 ```premise W5
 grep -q 'WAVE_LOG_ROOT = "/tmp"' tools/wave-status/lib/collect.ts
