@@ -15,6 +15,7 @@ export * from "./creative-style.js";
 export * from "./creative-templates.js";
 export * from "./creative-types.js";
 export * from "./display-sizes.js";
+export * from "./html-element.js";
 export * from "./layer-kinds.js";
 export * from "./LogEntry.vo.js";
 export * from "./MotionKind.vo.js";

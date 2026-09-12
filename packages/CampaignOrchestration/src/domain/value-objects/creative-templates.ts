@@ -8,6 +8,7 @@
 import type { AdvertisingUnit } from "./advertising-units.js";
 import type { LayerProps } from "./brief-template.js";
 import type { CreativeType } from "./creative-types.js";
+import type { HtmlElement } from "./html-element.js";
 import type { LayerKind } from "./layer-kinds.js";
 
 export const CANONICAL_TEMPLATE_IDS = [
@@ -36,6 +37,13 @@ export interface CreativeTemplateLayer {
    * can.
    */
   readonly props?: LayerProps;
+  /**
+   * The `html` layer's element list (HL1, HL-D1). Optional, and absent means no
+   * elements; only the `html` layer kind may carry a defined list, so the
+   * canonical templates — which carry their own `props`-less layers — never
+   * grow the key.
+   */
+  readonly elements?: readonly HtmlElement[];
 }
 
 export interface CreativeTemplate {
