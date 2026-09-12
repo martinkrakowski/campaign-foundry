@@ -1,8 +1,11 @@
+import { pathToFileURL } from "node:url";
 import { parseManifest, ManifestError } from "./lib/manifest.js";
 import { exitCodeFor, formatChecks, replayManifest, type ScratchDeps } from "./lib/replay.js";
 import type { MutationDeps } from "../mutate/lib/types.js";
 
 export const EXIT_MALFORMED = 2;
+/** A signal arrived and the mutation could not be put back: report it, never a verdict. */
+export const EXIT_UNRESTORED = 2;
 
 export interface ManifestCliIo {
   readonly argv: readonly string[];
@@ -12,6 +15,67 @@ export interface ManifestCliIo {
   readonly deps: MutationDeps;
   readonly scratch: ScratchDeps;
 }
+
+/**
+ * Puts the file back before the process dies, so an interrupt during a
+ * verification cannot leave the working tree mutated — the one thing a mutate
+ * tool must never do. Same shape as `tools/mutate/cli.ts`, which this mirrors.
+ */
+export const onSignal: NonNullable<MutationDeps["onSignal"]> = (cleanup) => {
+  let cleanPromise: Promise<void> | null = null;
+  const handler = () => {
+    if (!cleanPromise) {
+      cleanPromise = (async () => {
+        try {
+          await cleanup();
+          process.exit(130);
+        } catch (error) {
+          console.error(error instanceof Error ? error.message : String(error));
+          process.exit(EXIT_UNRESTORED);
+        }
+      })();
+    }
+  };
+  process.on("SIGINT", handler);
+  process.on("SIGTERM", handler);
+  process.on("SIGHUP", handler);
+  return () => {
+    process.off("SIGINT", handler);
+    process.off("SIGTERM", handler);
+    process.off("SIGHUP", handler);
+  };
+};
+
+/* Deferred imports: importing this module — a test does — must cost nothing. */
+const nodeFs = () => import("node:fs/promises");
+
+export const realDeps: MutationDeps = {
+  readFile: async (path) => (await nodeFs()).readFile(path, "utf8"),
+  readFileBuffer: async (path) => (await nodeFs()).readFile(path),
+  writeFileBuffer: async (path, content) => (await nodeFs()).writeFile(path, content),
+  execute: async (command) => {
+    const { execFile } = await import("node:child_process");
+    return new Promise((resolve) => {
+      const [bin, ...rest] = command;
+      execFile(bin as string, rest, (error, stdout, stderr) => {
+        if (error === null) {
+          resolve({ exitCode: 0, stdout, stderr });
+          return;
+        }
+        const code = (error as NodeJS.ErrnoException & { code?: number }).code;
+        // A numeric code is the exit status of a process that ran and failed. Any other
+        // code means it never launched, so the 1 below is a placeholder rather than a
+        // result: name the failure instead of letting the 1 be read as a catch.
+        resolve(
+          typeof code === "number"
+            ? { exitCode: code, stdout, stderr }
+            : { exitCode: 1, stdout, stderr, launchError: error.message },
+        );
+      });
+    });
+  },
+  onSignal,
+};
 
 export async function runCli(io: ManifestCliIo): Promise<number> {
   const [path] = io.argv;
@@ -41,52 +105,31 @@ export async function runCli(io: ManifestCliIo): Promise<number> {
   return exitCodeFor(checks);
 }
 
-/* istanbul ignore next -- CLI entry: thin wrappers over node:fs and node:child_process, plus the
-   entry guard. runCli() and every branch it feeds are covered directly in tests. */
-if (process.argv[1]) {
-  const { execFile } = await import("node:child_process");
-  const { mkdtemp, readFile, rm, writeFile } = await import("node:fs/promises");
+/* istanbul ignore next -- CLI entry: a thin scratch directory and the entry guard. runCli(),
+   realDeps() and every branch they feed are covered directly in tests. */
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  const { pathToFileURL } = await import("node:url");
-  if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-    const deps: MutationDeps = {
-      readFile: (path) => readFile(path, "utf8"),
-      readFileBuffer: (path) => readFile(path),
-      writeFileBuffer: (path, content) => writeFile(path, content),
-      execute: (command) =>
-        new Promise((resolve) => {
-          const [bin, ...rest] = command;
-          execFile(bin as string, rest, (error, stdout, stderr) => {
-            const raw = (error as (NodeJS.ErrnoException & { code?: number }) | null)?.code;
-            resolve({
-              exitCode: error === null ? 0 : typeof raw === "number" ? raw : 1,
-              stdout,
-              stderr,
-            });
-          });
-        }),
-    };
-    const scratch: ScratchDeps = {
-      makeDir: () => mkdtemp(join(tmpdir(), "mutate-manifest-")),
-      writeText: (path, text) => writeFile(path, text, "utf8"),
-      removeDir: (path) => rm(path, { recursive: true, force: true }),
-      join,
-    };
-    runCli({
-      argv: process.argv.slice(2),
-      log: (text) => console.log(text),
-      logError: (text) => console.error(text),
-      readFile: (path) => readFile(path, "utf8"),
-      deps,
-      scratch,
+  const scratch: ScratchDeps = {
+    makeDir: () => mkdtemp(join(tmpdir(), "mutate-manifest-")),
+    writeText: (path, text) => writeFile(path, text, "utf8"),
+    removeDir: (path) => rm(path, { recursive: true, force: true }),
+    join,
+  };
+  runCli({
+    argv: process.argv.slice(2),
+    log: (text) => console.log(text),
+    logError: (text) => console.error(text),
+    readFile: realDeps.readFile,
+    deps: realDeps,
+    scratch,
+  })
+    .then((code) => {
+      process.exitCode = code;
     })
-      .then((code) => {
-        process.exitCode = code;
-      })
-      .catch((error: unknown) => {
-        console.error(error instanceof Error ? error.message : String(error));
-        process.exitCode = EXIT_MALFORMED;
-      });
-  }
+    .catch((error: unknown) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = EXIT_MALFORMED;
+    });
 }

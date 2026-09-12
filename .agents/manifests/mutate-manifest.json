@@ -17,6 +17,22 @@
       "because": "A manifest recording a survived mutation is a lane shipping a test it knows does not catch. Accepting one would let the record say the opposite of what happened.",
       "command": ["yarn", "vitest", "run", "tools/mutate-manifest"],
       "verdict": "caught"
+    },
+    {
+      "file": "tools/mutate-manifest/lib/replay.ts",
+      "before": "      if (baseline.exitCode !== 0) {",
+      "after": "      if (false as boolean) {",
+      "because": "Without the baseline a suite that is already red verifies every claim made against it: the replay would issue a green check on a branch whose tests never passed. That is the false green the verifier exists to prevent.",
+      "command": ["yarn", "vitest", "run", "tools/mutate-manifest"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/mutate-manifest/lib/replay.ts",
+      "before": "      if (baseline.launchError !== undefined) {",
+      "after": "      if (false as boolean) {",
+      "because": "A command that never launched has no exit code to read, so the placeholder 1 would be counted as a catch and a typo in the command would certify the claim. The gate must report the launch failure instead.",
+      "command": ["yarn", "vitest", "run", "tools/mutate-manifest"],
+      "verdict": "caught"
     }
   ]
 }

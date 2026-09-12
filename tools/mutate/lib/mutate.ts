@@ -220,6 +220,7 @@ export async function runMutation(
       because: args.because,
       stdout: execResult.stdout,
       stderr: execResult.stderr,
+      launchError: execResult.launchError,
     };
   } finally {
     unregisterSignal?.();

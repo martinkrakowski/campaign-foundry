@@ -23,10 +23,19 @@ export interface Manifest {
   readonly mutations: readonly ManifestMutation[];
 }
 
-export type CheckStatus = "verified" | "mismatch";
+/**
+ * `red-baseline` — the command already fails with the source untouched, so its
+ * exit code says nothing about the mutation. `launch-failure` — the command
+ * never ran at all. Both are findings about the branch under test, not about
+ * the claim, and neither is a verdict.
+ */
+export type CheckStatus = "verified" | "mismatch" | "red-baseline" | "launch-failure";
 
 export interface MutationCheck {
   readonly mutation: ManifestMutation;
   readonly status: CheckStatus;
-  readonly observed: Verdict;
+  /** Absent unless the mutation actually ran: a blocked check observes nothing. */
+  readonly observed?: Verdict;
+  /** Set only with `launch-failure` — why there was no exit code to read. */
+  readonly launchError?: string;
 }

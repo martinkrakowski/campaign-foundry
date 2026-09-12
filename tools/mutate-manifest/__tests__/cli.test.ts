@@ -1,5 +1,8 @@
-import { describe, expect, test, vi } from "vitest";
-import { EXIT_MALFORMED, runCli, type ManifestCliIo } from "../cli.js";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { EXIT_MALFORMED, EXIT_UNRESTORED, onSignal, realDeps, runCli, type ManifestCliIo } from "../cli.js";
 import { EXIT_MISMATCH, EXIT_VERIFIED, type ScratchDeps } from "../lib/replay.js";
 import type { MutationDeps } from "../../mutate/lib/types.js";
 
@@ -18,6 +21,7 @@ const manifestText = JSON.stringify({
   ],
 });
 
+/** Green on the untouched source — the baseline — and `commandExit` once mutated. */
 const deps = (commandExit: number): MutationDeps => {
   let current = Buffer.from("alpha", "utf8");
   return {
@@ -26,9 +30,24 @@ const deps = (commandExit: number): MutationDeps => {
     writeFileBuffer: async (_p, buffer) => {
       current = Buffer.from(buffer);
     },
-    execute: async () => ({ exitCode: commandExit, stdout: "", stderr: "" }),
+    execute: async () => ({
+      exitCode: current.toString("utf8") === "alpha" ? 0 : commandExit,
+      stdout: "",
+      stderr: "",
+    }),
   };
 };
+
+const dirs: string[] = [];
+const tempDir = (): string => {
+  const dir = mkdtempSync(join(tmpdir(), "mutate-manifest-cli-"));
+  dirs.push(dir);
+  return dir;
+};
+
+afterEach(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 const scratch: ScratchDeps = {
   makeDir: async () => "/scratch",
@@ -104,5 +123,117 @@ describe("runCli", () => {
     const { io: i, logError } = io({ readFile: async () => '{"version":2}' });
     expect(await runCli(i)).toBe(EXIT_MALFORMED);
     expect(logError.mock.calls[0]?.[0]).toContain("m.json: version must be 1");
+  });
+
+  test("reports a red baseline rather than verifying a claim it never checked", async () => {
+    const { io: i, log } = io({ deps: execBaseline(1) });
+    expect(await runCli(i)).toBe(EXIT_MISMATCH);
+    expect(log.mock.calls[0]?.[0]).toContain("RED BASELINE  target.ts");
+  });
+});
+
+/** A command that exits `baselineExit` on the untouched source, `1` once mutated. */
+const execBaseline = (baselineExit: number): MutationDeps => {
+  let current = Buffer.from("alpha", "utf8");
+  return {
+    ...deps(1),
+    writeFileBuffer: async (_p, buffer) => {
+      current = Buffer.from(buffer);
+    },
+    execute: async () => ({
+      exitCode: current.toString("utf8") === "alpha" ? baselineExit : 1,
+      stdout: "",
+      stderr: "",
+    }),
+  };
+};
+
+describe("realDeps", () => {
+  test("wires onSignal, which runMutation calls to restore before the process dies", () => {
+    expect(realDeps.onSignal).toBe(onSignal);
+  });
+
+  test("restores on an interrupt instead of leaving the file mutated", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const cleanup = vi.fn(async () => undefined);
+    const unregister = realDeps.onSignal!(cleanup);
+
+    process.emit("SIGINT");
+    process.emit("SIGTERM");
+    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(130));
+    expect(cleanup).toHaveBeenCalledTimes(1);
+
+    unregister();
+    exitSpy.mockRestore();
+  });
+
+  test("onSignal says so loudly and refuses when the restore fails", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const unregister = realDeps.onSignal!(async () => {
+      throw new Error("disk full");
+    });
+
+    process.emit("SIGINT");
+    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(EXIT_UNRESTORED));
+    expect(errSpy).toHaveBeenCalledWith("disk full");
+
+    unregister();
+    exitSpy.mockRestore();
+    errSpy.mockRestore();
+  });
+
+  test("onSignal reports a restore failure that is not an Error", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const unregister = realDeps.onSignal!(async () => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      throw "raw restore failure";
+    });
+
+    process.emit("SIGHUP");
+    await vi.waitFor(() => expect(errSpy).toHaveBeenCalledWith("raw restore failure"));
+    expect(exitSpy).toHaveBeenCalledWith(EXIT_UNRESTORED);
+
+    unregister();
+    exitSpy.mockRestore();
+    errSpy.mockRestore();
+  });
+
+  test("onSignal unregisters, so a later signal is not ours to answer", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const cleanup = vi.fn(async () => undefined);
+    realDeps.onSignal!(cleanup)();
+    process.emit("SIGINT");
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
+    exitSpy.mockRestore();
+  });
+
+  test("execute reports the exit code and the output of a command that ran", async () => {
+    const green = await realDeps.execute([process.execPath, "-e", "process.stdout.write('out')"]);
+    expect(green).toMatchObject({ exitCode: 0, stdout: "out", stderr: "" });
+    expect(green.launchError).toBeUndefined();
+    const red = await realDeps.execute([
+      process.execPath,
+      "-e",
+      "process.stderr.write('err'); process.exit(3)",
+    ]);
+    expect(red).toMatchObject({ exitCode: 3, stdout: "", stderr: "err" });
+    expect(red.launchError).toBeUndefined();
+  });
+
+  test("execute reports a launch failure as one, not as an exit code", async () => {
+    const res = await realDeps.execute(["/nonexistent/binary/that/cannot/launch"]);
+    expect(res.exitCode).toBe(1);
+    expect(res.launchError).toContain("ENOENT");
+  });
+
+  test("reads and writes the target file through the real filesystem", async () => {
+    const path = join(tempDir(), "target.ts");
+    await realDeps.writeFileBuffer(path, Buffer.from("alpha", "utf8"));
+    expect(await realDeps.readFile(path)).toBe("alpha");
+    expect(readFileSync(path, "utf8")).toBe("alpha");
+    expect((await realDeps.readFileBuffer(path)).toString("utf8")).toBe("alpha");
   });
 });
