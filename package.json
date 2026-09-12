@@ -15,7 +15,7 @@
     "build": "turbo build",
     "dev": "turbo dev",
     "lint": "turbo lint",
-    "typecheck": "turbo typecheck && tsc -p tools/wave-status --noEmit && tsc -p tools/mutate --noEmit && tsc -p tools/plan-verify --noEmit && tsc -p tools/mutate-manifest --noEmit",
+    "typecheck": "turbo typecheck && tsc -p tools/wave-status --noEmit && tsc -p tools/mutate --noEmit && tsc -p tools/plan-verify --noEmit && tsc -p tools/mutate-manifest --noEmit && tsc -p tools/handoff-check --noEmit",
     "test": "vitest run",
     "test:cov": "vitest run --coverage",
     "test:watch": "vitest",
@@ -29,7 +29,8 @@
     "templates:validate": "hexagen validate-templates",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "plan:verify": "tsx tools/plan-verify/cli.ts",
-    "mutate:verify": "tsx tools/mutate-manifest/cli.ts"
+    "mutate:verify": "tsx tools/mutate-manifest/cli.ts",
+    "handoff:check": "tsx tools/handoff-check/cli.ts"
   },
   "devDependencies": {
     "@hexagen-monaco/arch-linter": "^0.12.1",
