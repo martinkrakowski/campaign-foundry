@@ -1,7 +1,7 @@
 import { describe, test, expect, afterEach } from "vitest";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { formatEvent, appendEvent } from "../emit.js";
@@ -288,7 +288,7 @@ describe("scripts/wave-event.sh agrees with formatEvent byte-for-byte", () => {
 
   test("standalone invocation with default logdir derived from wave name", () => {
     const waveName = `WTest${Date.now()}`;
-    const expectedDir = `/tmp/wave-${waveName}`;
+    const expectedDir = join(homedir(), ".waves", `wave-${waveName}`);
     dirs.push(expectedDir);
     execFileSync("sh", [waveEventSh, waveName, "l1", "dispatch", "started"], {
       env: { ...process.env, LOGDIR: "" },
@@ -300,6 +300,30 @@ describe("scripts/wave-event.sh agrees with formatEvent byte-for-byte", () => {
     expect(parsed.lane).toBe("l1");
     expect(parsed.stage).toBe("dispatch");
     expect(parsed.event).toBe("started");
+  });
+
+  test("standalone invocation respects WAVE_LOG_ROOT env var", () => {
+    const customRoot = tempDir();
+    const waveName = `WTestEnv${Date.now()}`;
+    const expectedDir = join(customRoot, `wave-${waveName}`);
+    execFileSync("sh", [waveEventSh, waveName, "l1", "dispatch", "started"], {
+      env: { ...process.env, LOGDIR: "", WAVE_LOG_ROOT: customRoot },
+    });
+    expect(existsSync(join(expectedDir, "events.jsonl"))).toBe(true);
+  });
+
+  test("standalone invocation appends to existing in-flight wave in /tmp", () => {
+    const waveName = `WLegacy${Date.now()}`;
+    const legacyDir = join("/tmp", `wave-${waveName}`);
+    mkdirSync(legacyDir, { recursive: true });
+    dirs.push(legacyDir);
+    execFileSync("sh", [waveEventSh, waveName, "l1", "dispatch", "started"], {
+      env: { ...process.env, LOGDIR: "" },
+    });
+    expect(existsSync(join(legacyDir, "events.jsonl"))).toBe(true);
+    const written = readFileSync(join(legacyDir, "events.jsonl"), "utf8");
+    const parsed = JSON.parse(written);
+    expect(parsed.wave).toBe(waveName);
   });
 
   test("invocation with fewer than 4 arguments exits 2 with usage", () => {
@@ -373,6 +397,97 @@ describe("scripts/dispatch-lane.sh emits its events", () => {
       });
       const { events } = readEvents(readFileSync(join(logdir, "events.jsonl"), "utf8"));
       expect(events.map((event) => event.wave)).toEqual(["wavedefault", "wavedefault"]);
+    },
+  );
+
+  test.skipIf(!hasZsh)(
+    zshSkip ?? "dispatch-lane resolves wave name against existing in-flight /tmp wave",
+    () => {
+      const waveName = `WLegacyDisp${Date.now()}`;
+      const legacyDir = join("/tmp", `wave-${waveName}`);
+      mkdirSync(legacyDir, { recursive: true });
+      dirs.push(legacyDir);
+      const wt = tempDir();
+      const brief = join(tempDir(), "brief.md");
+      writeFileSync(brief, "x\n");
+      execFileSync("zsh", [dispatchLaneSh, waveName, `l1:${wt}:${brief}`], {
+        timeout: 20_000,
+        env: { ...process.env, STAGGER: "0", POLL: "1", LANE_CMD: "true" },
+      });
+      const { events } = readEvents(readFileSync(join(legacyDir, "events.jsonl"), "utf8"));
+      expect(events.length).toBeGreaterThan(0);
+    },
+  );
+
+  test.skipIf(!hasZsh)(
+    zshSkip ?? "dispatch-lane resolves existing wave1-shaped directory (no dash) rather than duplicating it",
+    () => {
+      const id = `Num${Date.now()}`;
+      const legacyDir = join("/tmp", `wave${id}`);
+      mkdirSync(legacyDir, { recursive: true });
+      dirs.push(legacyDir);
+      const rootDir = join(tempDir(), "waves");
+      mkdirSync(rootDir, { recursive: true });
+      const wt = tempDir();
+      const brief = join(tempDir(), "brief.md");
+      writeFileSync(brief, "x\n");
+      execFileSync("zsh", [dispatchLaneSh, id, `l1:${wt}:${brief}`], {
+        timeout: 20_000,
+        env: { ...process.env, WAVE_LOG_ROOT: rootDir, STAGGER: "0", POLL: "1", LANE_CMD: "true" },
+      });
+      const { events } = readEvents(readFileSync(join(legacyDir, "events.jsonl"), "utf8"));
+      expect(events.length).toBeGreaterThan(0);
+      expect(existsSync(join(rootDir, `wave-${id}`))).toBe(false);
+      expect(existsSync(join(rootDir, `wave${id}`))).toBe(false);
+    },
+  );
+
+  test.skipIf(!hasZsh)(
+    zshSkip ?? "dispatch-lane resolves existing wave1-shaped directory from WAVE env when logdir argument omitted",
+    () => {
+      const id = `EnvNum${Date.now()}`;
+      const legacyDir = join("/tmp", `wave${id}`);
+      mkdirSync(legacyDir, { recursive: true });
+      dirs.push(legacyDir);
+      const rootDir = join(tempDir(), "waves");
+      mkdirSync(rootDir, { recursive: true });
+      const wt = tempDir();
+      const brief = join(tempDir(), "brief.md");
+      writeFileSync(brief, "x\n");
+      execFileSync("zsh", [dispatchLaneSh, `l1:${wt}:${brief}`], {
+        timeout: 20_000,
+        env: { ...process.env, WAVE: id, WAVE_LOG_ROOT: rootDir, STAGGER: "0", POLL: "1", LANE_CMD: "true" },
+      });
+      const { events } = readEvents(readFileSync(join(legacyDir, "events.jsonl"), "utf8"));
+      expect(events.length).toBeGreaterThan(0);
+      expect(existsSync(join(rootDir, `wave-${id}`))).toBe(false);
+      expect(existsSync(join(rootDir, `wave${id}`))).toBe(false);
+    },
+  );
+
+  test.skipIf(!hasZsh)(
+    zshSkip ?? "documented launch example creates log directory from a fresh root and logs EXIT marker",
+    () => {
+      const freshRoot = join(tempDir(), "fresh-waves");
+      expect(existsSync(freshRoot)).toBe(false);
+      const waveId = `fresh-${Date.now()}`;
+      const lane = "l1";
+      const logDir = join(freshRoot, `wave-${waveId}`);
+      const logFile = join(logDir, `${lane}.log`);
+
+      execFileSync(
+        "zsh",
+        [
+          "-c",
+          `mkdir -p "${logDir}" && nohup zsh -c 'echo "lane running" > "${logFile}" 2>&1; echo "EXIT $?" >> "${logFile}"' >/dev/null 2>&1`,
+        ],
+        { timeout: 10_000 },
+      );
+
+      expect(existsSync(logFile)).toBe(true);
+      const content = readFileSync(logFile, "utf8");
+      expect(content).toContain("lane running");
+      expect(content).toContain("EXIT 0");
     },
   );
 

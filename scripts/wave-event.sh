@@ -4,7 +4,8 @@
 #   wave-event.sh [<logdir>] <wave> <lane> <stage> <event> [--pr N] [--round N] [--detail '<json>']
 #   wave-event.sh --logdir <dir> <wave> <lane> <stage> <event> [--pr N] [--round N] [--detail '<json>']
 #
-# When <logdir> is omitted, it defaults to $LOGDIR, or /tmp/wave-<wave> (or /tmp/<wave>).
+# When <logdir> is omitted, it defaults to $LOGDIR, or $WAVE_LOG_ROOT/wave-<wave>
+# (~/.waves/wave-<wave>, or existing /tmp/wave-<wave>).
 # May be called standalone around direct lane dispatches without dispatch-lane.sh.
 #
 # Output is byte-identical to formatEvent in tools/wave-status/lib/emit.ts for
@@ -59,13 +60,20 @@ else
 fi
 
 if [ -z "$LOGDIR" ]; then
-  root="${WAVE_LOG_ROOT:-/tmp}"
+  default_root="${HOME:-/tmp}/.waves"
+  root="${WAVE_LOG_ROOT:-$default_root}"
   if [ -d "$root/wave-$WAVE" ]; then
     LOGDIR="$root/wave-$WAVE"
   elif [ -d "$root/wave$WAVE" ]; then
     LOGDIR="$root/wave$WAVE"
   elif case "$WAVE" in wave*) [ -d "$root/$WAVE" ] ;; *) false ;; esac; then
     LOGDIR="$root/$WAVE"
+  elif [ -d "/tmp/wave-$WAVE" ]; then
+    LOGDIR="/tmp/wave-$WAVE"
+  elif [ -d "/tmp/wave$WAVE" ]; then
+    LOGDIR="/tmp/wave$WAVE"
+  elif case "$WAVE" in wave*) [ -d "/tmp/$WAVE" ] ;; *) false ;; esac; then
+    LOGDIR="/tmp/$WAVE"
   else
     case "$WAVE" in
       wave*) LOGDIR="$root/$WAVE" ;;

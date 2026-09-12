@@ -142,6 +142,4 @@ recency sort orders on top of. The string survived the fix, so the premise went 
 shipped lane as live. **Probe the thing that decides, not a string near it** — the same correction
 X1 and X2 needed in #338.
 
-```premise W5
-grep -q 'WAVE_LOG_ROOT = "/tmp"' tools/wave-status/lib/collect.ts
-```
+**W5 — shipped.** WAVE_LOG_ROOT moved off /tmp to ~/.waves, with backward-compatible collection for in-flight waves under /tmp.

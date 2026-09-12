@@ -6,10 +6,13 @@ import { execFile } from "node:child_process";
 import {
   collect,
   derivePrefix,
+  LEGACY_WAVE_LOG_ROOT,
   LOG_TAIL_BYTES,
   parseChecks,
   pgrepPattern,
   realDeps,
+  resolveScanRoots,
+  WAVE_LOG_ROOT,
   waveIdFromDirName,
   worktreeFacts,
 } from "../lib/collect.js";
@@ -500,6 +503,128 @@ describe("collect", () => {
     expect(x1?.lane).toBe("x1");
     expect(x1?.derived.log).toBeUndefined();
     expect(x1?.derived.alive).toBe(false);
+  });
+
+  test("exports durable and legacy roots", () => {
+    expect(WAVE_LOG_ROOT).toMatch(/\.waves$/);
+    expect(LEGACY_WAVE_LOG_ROOT).toBe("/tmp");
+  });
+
+  test("resolveScanRoots deduplicates and resolves default legacy roots", () => {
+    expect(resolveScanRoots(WAVE_LOG_ROOT)).toEqual([WAVE_LOG_ROOT, LEGACY_WAVE_LOG_ROOT]);
+    expect(resolveScanRoots(WAVE_LOG_ROOT, [LEGACY_WAVE_LOG_ROOT])).toEqual([
+      WAVE_LOG_ROOT,
+      LEGACY_WAVE_LOG_ROOT,
+    ]);
+    expect(resolveScanRoots("/custom")).toEqual(["/custom"]);
+    expect(resolveScanRoots("/custom", ["/legacy", "/custom"])).toEqual(["/custom", "/legacy"]);
+  });
+
+  test("default legacy roots are scanned when root is WAVE_LOG_ROOT and legacyRoots is omitted", async () => {
+    const status = await collect(
+      fakeDeps({
+        dirs: {
+          [WAVE_LOG_ROOT]: ["waveDurable"],
+          [`${WAVE_LOG_ROOT}/waveDurable`]: ["d1.log"],
+          [LEGACY_WAVE_LOG_ROOT]: ["waveLegacy"],
+          [`${LEGACY_WAVE_LOG_ROOT}/waveLegacy`]: ["l1.log"],
+        },
+        files: {
+          [`${WAVE_LOG_ROOT}/waveDurable/d1.log`]: "durable\nEXIT 0\n",
+          [`${LEGACY_WAVE_LOG_ROOT}/waveLegacy/l1.log`]: "legacy\nEXIT 0\n",
+        },
+      }),
+      WAVE_LOG_ROOT,
+      "now",
+    );
+    expect(status.waves.map((w) => w.id)).toEqual(["Durable", "Legacy"]);
+  });
+
+  test("collects waves from both root and legacy roots when configured", async () => {
+    const status = await collect(
+      fakeDeps({
+        dirs: {
+          "/durable": ["waveDurable"],
+          "/durable/waveDurable": ["d1.log"],
+          "/tmp": ["waveLegacy"],
+          "/tmp/waveLegacy": ["l1.log"],
+        },
+        files: {
+          "/durable/waveDurable/d1.log": "durable\nEXIT 0\n",
+          "/tmp/waveLegacy/l1.log": "legacy\nEXIT 0\n",
+        },
+      }),
+      "/durable",
+      "now",
+      undefined,
+      ["/tmp"],
+    );
+    expect(status.waves.map((w) => w.id)).toEqual(["Durable", "Legacy"]);
+  });
+
+  test("primary root takes precedence when a wave exists in both root and legacy root", async () => {
+    const status = await collect(
+      fakeDeps({
+        dirs: {
+          "/durable": ["waveShared"],
+          "/durable/waveShared": ["lane1.log"],
+          "/tmp": ["waveShared"],
+          "/tmp/waveShared": ["lane2.log"],
+        },
+        files: {
+          "/durable/waveShared/lane1.log": "from durable\nEXIT 0\n",
+          "/tmp/waveShared/lane2.log": "from legacy\nEXIT 0\n",
+        },
+      }),
+      "/durable",
+      "now",
+      undefined,
+      ["/tmp"],
+    );
+    expect(status.waves.map((w) => w.id)).toEqual(["Shared"]);
+    expect(status.waves[0]?.lanes.map((l) => l.lane)).toEqual(["lane1"]);
+  });
+
+  test("unreadable primary root recovers in-flight waves from legacy root", async () => {
+    const status = await collect(
+      fakeDeps({
+        dirs: {
+          "/tmp": ["waveLegacyOnly"],
+          "/tmp/waveLegacyOnly": ["l1.log"],
+        },
+        files: {
+          "/tmp/waveLegacyOnly/l1.log": "legacy data\nEXIT 0\n",
+        },
+      }),
+      "/unreadable-primary",
+      "now",
+      undefined,
+      ["/tmp"],
+    );
+    expect(status.waves.map((w) => w.id)).toEqual(["LegacyOnly"]);
+  });
+
+  test("skips duplicate legacy roots if legacy root equals primary root", async () => {
+    let readdirCount = 0;
+    const deps = fakeDeps({
+      dirs: {
+        "/same": ["waveOne"],
+        "/same/waveOne": ["l1.log"],
+      },
+      files: {
+        "/same/waveOne/l1.log": "data\nEXIT 0\n",
+      },
+    });
+    const countingDeps = {
+      ...deps,
+      readdir: async (dir: string) => {
+        if (dir === "/same") readdirCount++;
+        return deps.readdir(dir);
+      },
+    };
+    const status = await collect(countingDeps, "/same", "now", undefined, ["/same"]);
+    expect(status.waves.map((w) => w.id)).toEqual(["One"]);
+    expect(readdirCount).toBe(1);
   });
 });
 

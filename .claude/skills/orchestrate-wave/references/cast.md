@@ -98,8 +98,8 @@ a quota does.
 Launch every lane detached so a harness timeout cannot kill it, and wait on the marker:
 
 ```bash
-nohup zsh -c 'CLI … > /tmp/<lane>.log 2>&1; echo "EXIT $?" >> /tmp/<lane>.log' >/dev/null 2>&1 & disown
-while ! grep -qE '^EXIT [0-9]+$' /tmp/<lane>.log 2>/dev/null; do sleep 30; done
+nohup zsh -c 'CLI … > ~/.waves/wave-<id>/<lane>.log 2>&1; echo "EXIT $?" >> ~/.waves/wave-<id>/<lane>.log' >/dev/null 2>&1 & disown
+while ! grep -qE '^EXIT [0-9]+$' ~/.waves/wave-<id>/<lane>.log 2>/dev/null; do sleep 30; done
 ```
 
 `scripts/dispatch-lane.sh` does both, with the stagger below.

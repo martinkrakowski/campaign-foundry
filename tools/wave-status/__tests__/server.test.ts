@@ -870,6 +870,31 @@ describe("the server over real HTTP", () => {
     expect(capped.status).toBe(400);
   });
 
+  test("GET /api/log/:wave/:lane serves logs from legacy roots when wave is only in legacy root", async () => {
+    const primaryRoot = await mkdtemp(join(tmpdir(), "wave-status-pri-"));
+    const legacyRoot = await mkdtemp(join(tmpdir(), "wave-status-leg-"));
+    roots.push(primaryRoot, legacyRoot);
+    await mkdir(join(legacyRoot, "waveLegacy"));
+    const payload = Buffer.from("LEGACY_TAIL_CONTENT\n");
+    const logPath = join(legacyRoot, "waveLegacy", "l1.log");
+    await writeFile(logPath, payload);
+
+    const handle = await start({
+      port: 0,
+      root: primaryRoot,
+      legacyRoots: [legacyRoot],
+      collect: async () => statusAt(0),
+    });
+
+    const tailRes = await get(handle.port, "/api/log/Legacy/l1?tail=1");
+    expect(tailRes.status).toBe(200);
+    expect(tailRes.body.toString("utf8")).toBe("LEGACY_TAIL_CONTENT\n");
+
+    const fullRes = await get(handle.port, "/api/log/Legacy/l1?full=1");
+    expect(fullRes.status).toBe(200);
+    expect(fullRes.body.toString("utf8")).toBe("LEGACY_TAIL_CONTENT\n");
+  });
+
   test("a full export returns the entire file, not the tail; carries attachment and Content-Length", async () => {
     const root = await mkdtemp(join(tmpdir(), "wave-status-full-"));
     roots.push(root);

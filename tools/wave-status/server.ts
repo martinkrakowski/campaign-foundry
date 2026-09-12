@@ -9,6 +9,7 @@ import {
   prFacts,
   readTail,
   realDeps,
+  resolveScanRoots,
   waveIdFromDirName,
   type CollectDeps,
   type TailHandle,
@@ -82,8 +83,10 @@ export type WatchFn = (path: string, listener: () => void) => Pick<FSWatcher, "c
 
 export interface StartOptions {
   readonly port: number;
-  /** The wave log root (`/tmp` in production — bin.ts passes it). */
+  /** The wave log root (`~/.waves` in production — bin.ts passes it). */
   readonly root: string;
+  /** Additional roots to scan (e.g. legacy `/tmp`). When omitted, `collect` defaults to legacy roots if `root === WAVE_LOG_ROOT`. */
+  readonly legacyRoots?: readonly string[];
   /** Collection is injected so tests never shell out to `gh`. */
   readonly collect?: (now: string) => Promise<WaveStatus>;
   /**
@@ -147,7 +150,7 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
     if (refreshPr) {
       prCache = await prFacts(deps);
     }
-    return collect(deps, options.root, now, prCache);
+    return collect(deps, options.root, now, prCache, options.legacyRoots);
   };
 
   const refresh = async (refreshPr: boolean): Promise<void> => {
@@ -184,6 +187,7 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
     });
   };
 
+  const scanRoots = resolveScanRoots(options.root, options.legacyRoots);
   const syncWatchers = async (): Promise<void> => {
     try {
       const names = await readdir(options.root);
@@ -247,7 +251,7 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
       res.on("close", () => clients.delete(res));
       return;
     }
-    await serveLog(res, options.root, route.wave, route.lane, route.search, deps.open);
+    await serveLog(res, scanRoots, route.wave, route.lane, route.search, deps.open);
   };
 
   await refresh(true);
@@ -289,14 +293,14 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
 /** `/api/log/:wave/:lane` — tail of the lane log or a full export with `?full=1`. */
 async function serveLog(
   res: ServerResponse,
-  root: string,
+  roots: readonly string[],
   wave: string,
   lane: string,
   search: URLSearchParams,
   open: (path: string) => Promise<TailHandle>,
 ): Promise<void> {
   if (search.get("full") === "1") {
-    const logPath = await resolveLogPath(root, wave, lane);
+    const logPath = await resolveLogPath(roots, wave, lane);
     if (logPath === undefined) {
       res.writeHead(404);
       res.end();
@@ -330,7 +334,7 @@ async function serveLog(
     res.end();
     return;
   }
-  const logPath = await resolveLogPath(root, wave, lane);
+  const logPath = await resolveLogPath(roots, wave, lane);
   if (logPath === undefined) {
     res.writeHead(404);
     res.end();
@@ -466,20 +470,25 @@ export function extractRootBlock(css: string): string | undefined {
   return extractTopLevelBlock(css, ":root");
 }
 
-/** Map a wave id back to its log directory by re-deriving ids from the root. */
+/** Map a wave id back to its log directory by re-deriving ids from the roots. */
 async function resolveLogPath(
-  root: string,
+  roots: readonly string[],
   wave: string,
   lane: string,
 ): Promise<string | undefined> {
-  let names: readonly string[];
-  try {
-    names = await readdir(root);
-  } catch {
-    return undefined;
+  for (const root of roots) {
+    let names: readonly string[];
+    try {
+      names = await readdir(root);
+    } catch {
+      continue;
+    }
+    const dir = names.find((name) => name.startsWith("wave") && waveIdFromDirName(name) === wave);
+    if (dir !== undefined) {
+      return join(root, dir, `${lane}.log`);
+    }
   }
-  const dir = names.find((name) => name.startsWith("wave") && waveIdFromDirName(name) === wave);
-  return dir === undefined ? undefined : join(root, dir, `${lane}.log`);
+  return undefined;
 }
 
 function tailKb(raw: string | null): number | undefined {

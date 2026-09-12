@@ -5,8 +5,8 @@ import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { main, resolveRoot } from "../bin.js";
-import { WAVE_LOG_ROOT } from "../lib/collect.js";
+import { main, resolveLegacyRoots, resolveRoot } from "../bin.js";
+import { LEGACY_WAVE_LOG_ROOT, WAVE_LOG_ROOT } from "../lib/collect.js";
 
 type ExecCallback = (error: Error | null, stdout: string) => void;
 (execFile as unknown as Mock).mockImplementation(
@@ -44,6 +44,14 @@ describe("resolveRoot", () => {
     expect(resolveRoot({ root: "/injected" })).toBe("/injected");
     expect(resolveRoot({ WAVE_LOG_ROOT: "/from-env" })).toBe("/from-env");
     expect(resolveRoot({})).toBe(WAVE_LOG_ROOT);
+  });
+});
+
+describe("resolveLegacyRoots", () => {
+  test("explicit test root suppresses legacy roots; default includes LEGACY_WAVE_LOG_ROOT", () => {
+    expect(resolveLegacyRoots({ root: "/injected" })).toEqual([]);
+    expect(resolveLegacyRoots({})).toEqual([LEGACY_WAVE_LOG_ROOT]);
+    expect(resolveLegacyRoots({ WAVE_LOG_ROOT: "/from-env" })).toEqual([LEGACY_WAVE_LOG_ROOT]);
   });
 });
 

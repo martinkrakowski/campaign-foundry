@@ -1,10 +1,10 @@
 import { pathToFileURL } from "node:url";
 import { resolvePort, startServer, type ServerHandle } from "./server.js";
-import { WAVE_LOG_ROOT } from "./lib/collect.js";
+import { LEGACY_WAVE_LOG_ROOT, WAVE_LOG_ROOT } from "./lib/collect.js";
 
 export interface MainEnv {
   readonly PORT?: string;
-  /** Explicit root wins; tests inject a temp dir so collection never walks `/tmp`. */
+  /** Explicit root wins; tests inject a temp dir so collection never walks the durable root. */
   readonly root?: string;
   readonly WAVE_LOG_ROOT?: string;
 }
@@ -13,9 +13,20 @@ export function resolveRoot(env: MainEnv): string {
   return env.root ?? env.WAVE_LOG_ROOT ?? WAVE_LOG_ROOT;
 }
 
+export function resolveLegacyRoots(env: MainEnv): readonly string[] | undefined {
+  if (env.root !== undefined) {
+    return [];
+  }
+  return [LEGACY_WAVE_LOG_ROOT];
+}
+
 export async function main(env: MainEnv): Promise<ServerHandle> {
   const port = resolvePort(env);
-  const handle = await startServer({ port, root: resolveRoot(env) });
+  const handle = await startServer({
+    port,
+    root: resolveRoot(env),
+    legacyRoots: resolveLegacyRoots(env),
+  });
   console.log(`  wave-status serving ${handle.url} — read-only: it starts, kills and merges nothing.`);
   return handle;
 }
