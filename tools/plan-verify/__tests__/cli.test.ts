@@ -52,4 +52,9 @@ describe("runCli", () => {
     expect(await runCli(i)).toBe(0);
     expect(log).toHaveBeenCalledWith("0 premise(s) hold; no lane is stale.");
   });
+
+  test("an emptied premise fails the run, naming the plan and the lane", async () => {
+    const { io: i } = io({ readFile: async () => "```premise W9\n   \n```" });
+    await expect(runCli(i)).rejects.toThrow(/EMPTY\s+W9\s+\(docs\/planning\/a\.md\)/);
+  });
 });

@@ -115,11 +115,15 @@ still open**. `yarn plan:verify` runs them. This section exists because three la
 its siblings were dispatched — or nearly dispatched — against gaps that had already been closed.
 
 ```premise X1
-! test -f .prettierrc && ! test -f .prettierrc.json && ! test -f prettier.config.js
+# Ask Prettier itself: an rc file, a prettier.config.*, or a package.json
+# "prettier" key all close the gap — three literal filenames do not.
+! npx --no-install prettier --find-config-path package.json
 ```
 
 ```premise X2
-! grep -rq '"alt"' packages/shared/src/infrastructure/brief-yaml.ts
+# LAYER_PROPS in brief-template.ts is the props vocabulary (D134) that decides
+# whether a layer may carry `alt`; nothing else does.
+! grep -q '"alt"' packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts
 ```
 
 **X3 — shipped in #335.** Its premise was retired when it landed; `plan:verify` no

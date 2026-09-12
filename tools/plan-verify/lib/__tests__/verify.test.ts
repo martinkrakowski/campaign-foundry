@@ -1,11 +1,23 @@
 import { describe, expect, test } from "vitest";
 import type { Premise } from "../types.js";
-import { EXIT_ALL_HOLD, EXIT_STALE_FOUND, exitCodeFor, formatReport, verifyPremises } from "../verify.js";
+import {
+  EXIT_ALL_HOLD,
+  EXIT_STALE_FOUND,
+  EXIT_TIMED_OUT,
+  exitCodeFor,
+  formatReport,
+  verifyPremises,
+} from "../verify.js";
 
 const premise = (lane: string, script = "true"): Premise => ({ plan: "p.md", lane, script });
 
 const execWith = (codes: Record<string, number>, output = "") =>
   async (script: string) => ({ exitCode: codes[script] ?? 0, output });
+
+const killed = async (script: string) =>
+  script === "hang"
+    ? { exitCode: 1, output: "", timedOut: true }
+    : { exitCode: 0, output: "", timedOut: false };
 
 describe("verifyPremises", () => {
   test("exit 0 means the gap is still open, so the lane holds", async () => {
@@ -23,6 +35,16 @@ describe("verifyPremises", () => {
       execute: execWith({ a: 0, b: 1 }),
     });
     expect(r.map((x) => [x.premise.lane, x.status])).toEqual([["A", "holds"], ["B", "stale"]]);
+  });
+
+  test("a premise killed by the timeout is timed-out, not holds and not stale", async () => {
+    const r = await verifyPremises([premise("W1", "hang")], { execute: killed });
+    expect(r[0]?.status).toBe("timed-out");
+  });
+
+  test("a hanging premise does not stop the premises queued after it", async () => {
+    const r = await verifyPremises([premise("W1", "hang"), premise("W2", "ok")], { execute: killed });
+    expect(r.map((x) => x.status)).toEqual(["timed-out", "holds"]);
   });
 });
 
@@ -53,6 +75,39 @@ describe("formatReport", () => {
     });
     expect(formatReport(r)).toContain("1 stale, 1 holding.");
   });
+
+  test("separates the finding block from the summary with a blank line", async () => {
+    const r = await verifyPremises([premise("B", "b")], { execute: execWith({ b: 1 }) });
+    expect(formatReport(r)).toContain("\n\n1 stale, 0 holding.");
+  });
+
+  test("names a timed-out premise and calls it inconclusive, not stale", async () => {
+    const r = await verifyPremises([premise("W1", "hang")], { execute: killed });
+    const text = formatReport(r);
+    expect(text).toContain("TIMED-OUT  W1  (p.md)");
+    expect(text).toContain("no verdict");
+    expect(text).toContain("may still be live");
+    expect(text).not.toContain("Do not dispatch it");
+    expect(text).toContain("1 timed out, 0 holding.");
+  });
+
+  test("shows a timed-out premise's own output when it produced any", async () => {
+    const r = await verifyPremises([premise("W1", "hang")], {
+      execute: async () => ({ exitCode: 1, output: "stuck on a network mount", timedOut: true }),
+    });
+    expect(formatReport(r)).toContain("stuck on a network mount");
+  });
+
+  test("counts all three outcomes when a run has each", async () => {
+    const r = await verifyPremises(
+      [premise("A", "a"), premise("B", "b"), premise("H", "hang")],
+      {
+        execute: async (script: string) =>
+          script === "b" ? { exitCode: 1, output: "" } : killed(script),
+      },
+    );
+    expect(formatReport(r)).toContain("1 stale, 1 timed out, 1 holding.");
+  });
 });
 
 describe("exitCodeFor", () => {
@@ -66,5 +121,18 @@ describe("exitCodeFor", () => {
   test("is zero when every premise holds", async () => {
     const r = await verifyPremises([premise("A", "a")], { execute: execWith({ a: 0 }) });
     expect(exitCodeFor(r)).toBe(EXIT_ALL_HOLD);
+  });
+
+  test("is its own code when a premise only timed out, so CI sees a check that could not decide", async () => {
+    const r = await verifyPremises([premise("H", "hang")], { execute: killed });
+    expect(exitCodeFor(r)).toBe(EXIT_TIMED_OUT);
+  });
+
+  test("stale outranks a timeout because it is the actionable verdict", async () => {
+    const r = await verifyPremises([premise("H", "hang"), premise("B", "b")], {
+      execute: async (script: string) =>
+        script === "b" ? { exitCode: 1, output: "" } : killed(script),
+    });
+    expect(exitCodeFor(r)).toBe(EXIT_STALE_FOUND);
   });
 });

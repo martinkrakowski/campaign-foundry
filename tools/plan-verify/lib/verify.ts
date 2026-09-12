@@ -2,6 +2,14 @@ import type { Premise, PremiseResult, VerifyDeps } from "./types.js";
 
 export const EXIT_ALL_HOLD = 0;
 export const EXIT_STALE_FOUND = 1;
+export const EXIT_TIMED_OUT = 2;
+
+/**
+ * How long a premise may run before the executor kills it. A premise is a
+ * grep or a test — one that hangs is a bug in the premise, and without a
+ * ceiling it would stop every lane checked after it.
+ */
+export const PREMISE_TIMEOUT_MS = 10_000;
 
 export async function verifyPremises(
   premises: readonly Premise[],
@@ -9,10 +17,10 @@ export async function verifyPremises(
 ): Promise<readonly PremiseResult[]> {
   const results: PremiseResult[] = [];
   for (const premise of premises) {
-    const { exitCode, output } = await deps.execute(premise.script);
+    const { exitCode, output, timedOut } = await deps.execute(premise.script);
     results.push({
       premise,
-      status: exitCode === 0 ? "holds" : "stale",
+      status: timedOut === true ? "timed-out" : exitCode === 0 ? "holds" : "stale",
       exitCode,
       output,
     });
@@ -26,6 +34,7 @@ export async function verifyPremises(
  */
 export function formatReport(results: readonly PremiseResult[]): string {
   const stale = results.filter((r) => r.status === "stale");
+  const timedOut = results.filter((r) => r.status === "timed-out");
   const lines: string[] = [];
   for (const r of stale) {
     lines.push(
@@ -35,15 +44,34 @@ export function formatReport(results: readonly PremiseResult[]): string {
     );
     if (r.output !== "") lines.push(`  ${r.output.split("\n").join("\n  ")}`);
   }
-  const held = results.length - stale.length;
+  for (const r of timedOut) {
+    lines.push(
+      `TIMED-OUT  ${r.premise.lane}  (${r.premise.plan})`,
+      `  the premise was killed after ${PREMISE_TIMEOUT_MS}ms: no verdict on this lane.`,
+      `  Not stale — the lane may still be live. Make the premise decide quickly.`,
+    );
+    if (r.output !== "") lines.push(`  ${r.output.split("\n").join("\n  ")}`);
+  }
+  const held = results.length - stale.length - timedOut.length;
+  if (stale.length > 0 || timedOut.length > 0) lines.push("");
   lines.push(
-    stale.length === 0
+    stale.length === 0 && timedOut.length === 0
       ? `${held} premise(s) hold; no lane is stale.`
-      : `${stale.length} stale, ${held} holding.`,
+      : [
+          ...(stale.length > 0 ? [`${stale.length} stale`] : []),
+          ...(timedOut.length > 0 ? [`${timedOut.length} timed out`] : []),
+          `${held} holding`,
+        ].join(", ") + ".",
   );
   return lines.join("\n");
 }
 
+/**
+ * A timed-out premise exits non-zero too — a check that could not decide did
+ * not pass. Stale wins when both appear because it is the actionable verdict.
+ */
 export function exitCodeFor(results: readonly PremiseResult[]): number {
-  return results.some((r) => r.status === "stale") ? EXIT_STALE_FOUND : EXIT_ALL_HOLD;
+  if (results.some((r) => r.status === "stale")) return EXIT_STALE_FOUND;
+  if (results.some((r) => r.status === "timed-out")) return EXIT_TIMED_OUT;
+  return EXIT_ALL_HOLD;
 }

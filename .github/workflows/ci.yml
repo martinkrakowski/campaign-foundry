@@ -87,6 +87,14 @@ jobs:
       - name: Architecture lint (hexagen arch validate)
         run: "yarn lint:arch"
 
+      # A plan lane states a falsifiable premise about the code it intends to
+      # change (docs/planning/, ```premise``` fences). A premise that stopped
+      # holding means the gap was closed elsewhere and the lane must not be
+      # dispatched; a premise that times out is inconclusive. Both fail the PR,
+      # so a plan can never drift from the code un-noticed.
+      - name: Verify plan premises (yarn plan:verify)
+        run: "yarn plan:verify"
+
       # Turbo caches task outputs keyed by input hash, so unchanged packages are
       # skipped on warm runs (cache_strategy = turbo-cache). Set TURBO_TOKEN
       # and TURBO_TEAM below for the cross-run remote cache.

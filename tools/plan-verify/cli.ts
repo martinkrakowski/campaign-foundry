@@ -1,5 +1,10 @@
 import { parsePremises } from "./lib/premises.js";
-import { exitCodeFor, formatReport, verifyPremises } from "./lib/verify.js";
+import {
+  PREMISE_TIMEOUT_MS,
+  exitCodeFor,
+  formatReport,
+  verifyPremises,
+} from "./lib/verify.js";
 import type { Premise, VerifyDeps } from "./lib/types.js";
 
 export interface PlanVerifyIo {
@@ -38,11 +43,14 @@ if (process.argv[1]) {
     const deps: VerifyDeps = {
       execute: (script) =>
         new Promise((resolve) => {
-          execFile("sh", ["-c", script], (error, stdout, stderr) => {
-            const raw = (error as (NodeJS.ErrnoException & { code?: number }) | null)?.code;
+          execFile("sh", ["-c", script], { timeout: PREMISE_TIMEOUT_MS }, (error, stdout, stderr) => {
+            const err = (error ?? null) as
+              | (NodeJS.ErrnoException & { code?: number; killed?: boolean })
+              | null;
             resolve({
-              exitCode: error === null ? 0 : typeof raw === "number" ? raw : 1,
+              exitCode: err === null ? 0 : typeof err.code === "number" ? err.code : 1,
               output: `${stdout}${stderr}`.trim(),
+              timedOut: err?.killed === true,
             });
           });
         }),

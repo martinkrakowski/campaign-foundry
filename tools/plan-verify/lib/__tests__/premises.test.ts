@@ -28,9 +28,12 @@ describe("parsePremises", () => {
     expect(parsePremises("p.md", md)).toEqual([]);
   });
 
-  test("ignores an empty premise — a lane that claims nothing is not falsifiable", () => {
+  test("an empty premise is an error naming the plan and the lane", () => {
     const md = ["```premise W9", "   ", "```"].join("\n");
-    expect(parsePremises("p.md", md)).toEqual([]);
+    expect(() => parsePremises("docs/planning/p.md", md)).toThrow(
+      /EMPTY\s+W9\s+\(docs\/planning\/p\.md\)/,
+    );
+    expect(() => parsePremises("docs/planning/p.md", md)).toThrow(/hides the lane/);
   });
 
   test("is re-entrant: the shared global regex cannot skip a document", () => {
