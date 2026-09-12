@@ -122,9 +122,9 @@ open**. `yarn plan:verify` runs them. A non-zero exit means the gap has been clo
 and the lane would re-implement shipped behaviour — which happened three times in one day before this
 existed, because nothing could tell a live lane from a finished one.
 
-```premise W1
-! test -f tools/wave-status/lib/lane-state.ts
-```
+**W1 — shipped in #337.** `laneState` derives the state and `plan:verify` no longer tracks
+it. The premise was retired as part of merging, which is the rule: a premise left behind after its
+lane ships turns the check into noise.
 
 ```premise W2
 grep -q "tr.lane.active" tools/wave-status/public/index.html
