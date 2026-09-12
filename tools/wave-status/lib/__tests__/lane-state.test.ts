@@ -61,14 +61,22 @@ it("running", () => {
   expect(laneState(s2, now)).toBe("running");
 });
 
+it("boundary: log mtime exactly at stall threshold is running (< reads strictly older)", () => {
+  const s = makeStatus({ derived: { alive: true } });
+  const s2 = withLog(s, now - stallThresholdMs);
+  expect(laneState(s2, now)).toBe("running");
+});
+
 it("vanished", () => {
   const s = makeStatus({});
   expect(laneState(s, now)).toBe("vanished");
 });
 
-it("not vanished when exit is zero and not alive", () => {
+// The silent no-op exits 0: a run that billed and produced nothing.
+// A lane that is not alive and has no PR is vanished, whatever its exit code.
+it("vanished when exit is zero and not alive (silent no-op)", () => {
   const s = makeStatus({ derived: { alive: false, exit: 0 } });
-  expect(laneState(s, now)).not.toBe("vanished");
+  expect(laneState(s, now)).toBe("vanished");
 });
 
 it("blocked", () => {

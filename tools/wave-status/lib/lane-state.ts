@@ -32,11 +32,7 @@ export function laneState(status: LaneStatus, nowMs: number): LaneState {
     return "running";
   }
   if (derived.pr === undefined) {
-    if (derived.exit === undefined) {
-      return "vanished";
-    }
-    // Placeholder: clean finish (exit 0, not alive, no PR) has no LaneState member yet
-    return "ready";
+    return "vanished";
   }
   if (derived.pr.state === "open" && derived.pr.checks === "pending") {
     return "blocked";
