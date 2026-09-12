@@ -165,6 +165,26 @@ still exist is thrashing, not progress. A lane with **no PR has not started stag
 is the only stage that finds defects. If the derived status contradicts the report, the derived
 status wins and your summary says so.
 
+**Every lane brief ends with two lines, and they are not optional.** Both were earned:
+
+- *If a finding is wrong, say so with the mechanism rather than changing code to match it.* Counters
+  the failure that rots a suite quietly — an assertion weakened until it passes.
+- *Run the gate in the foreground and read its exit code. A task you launched is not a result.* Two
+  seats reported green gates they had started and never watched; one of those branches did not
+  typecheck.
+
+**And every lane brief opens by asking the lane to prove the defect before changing anything:**
+
+> Restate the defect in your own words and demonstrate it — the failing test, the wrong output, the
+> command that misbehaves. If you cannot reproduce it, **stop and report that**. Do not implement
+> against a defect you have not seen.
+
+This exists because the orchestrator's briefs are wrong often enough to matter: a brief this week
+described a client-side sort as absent when it had shipped, and the only seat that found the real
+defect was the one that went and looked before writing code. A lane that cannot reproduce the defect
+has found something more valuable than the fix — and the alternative is a lane that implements the
+brief's mistake faithfully, which costs the full cycle and passes review.
+
 **Every cell of your final table is command output, not recollection.** If you cannot produce the
 output for a cell, the cell is *unknown* — a valid answer. A confident wrong one is not.
 
@@ -181,6 +201,9 @@ output for a cell, the cell is *unknown* — a valid answer. A confident wrong o
 4. **Red-team each lane brief against the code before dispatching it.** Every path, symbol and line
    number a brief cites must exist; every acceptance criterion must be able to fail. This step has
    caught false premises that would have stalled a lane at its mandatory mutation check.
+5. **Check the plan's premises first.** `yarn plan:verify` fails when a lane's stated gap has already
+   been closed. Four lanes in one week were dispatched, or nearly dispatched, to re-implement shipped
+   behaviour. A lane whose premise no longer holds is not a lane.
 
 ## The six stages
 

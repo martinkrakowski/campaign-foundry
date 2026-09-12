@@ -409,7 +409,15 @@ that, and a seat whose cost column is blank cannot be compared with one whose is
 seat is that same model; when hy4 implements, the review goes to an `Agent` · `claude` reviewer. A
 clean bill from the model that wrote the code is worth nothing.
 
-**Two lines go in every trial brief**, both earned:
+**Three lines go in every trial brief**, all earned:
+
+- *Restate the defect in your own words and demonstrate it before changing anything. If you cannot
+  reproduce it, stop and report that.* The orchestrator's briefs are wrong often enough to matter —
+  one this week described a shipped feature as missing, and the only seat that found the real defect
+  went and looked first. A lane that cannot reproduce the defect has found something worth more than
+  the fix.
+
+**And the two that preceded it:**
 
 - *If a finding is wrong, say so with the mechanism rather than changing code to match it.*
   (Counters the assertion-weakening that rots a suite silently.)
