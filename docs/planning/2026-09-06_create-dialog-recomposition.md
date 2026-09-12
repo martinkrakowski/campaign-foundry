@@ -529,3 +529,9 @@ Wave 1 is gated on none of the above: **K1 depends only on D87 and D88**, both a
 ## 9. Review record
 
 *(to be completed by the two-reviewer pass)*
+
+---
+
+## Premises
+
+**K1 — shipped in #199.** Four domain-free kit primitives (`OptionTile`, `SectionBlock`, `JumpStrip`, `GuardBar`) exported from `apps/web/src/components/ui/index.ts`, `ModePanel` moved to `apps/web/src/components/campaign/ModePanel.tsx`, and boundary test in `apps/web/src/components/ui/__tests__/kit-boundaries.test.ts`.

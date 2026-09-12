@@ -424,3 +424,11 @@ Each item carries the evidence that exists on `main` as of 2026-08-26 (test name
 - **Structured logger** — `AGENTS.md` mandates `logger.*`; the api routes/plugins still use `console.warn` for skipped briefs, the ffmpeg probe, and provider detection (exempt as "server startup" only in part).
 - **Linux inset golden** — record `compositor-goldens-insets.json` for `linux-x64` from CI (items 3 and 7 above).
 - **Desktop Field Guide PDF refresh** (P7) — still lags the code.
+
+---
+
+## Premises
+
+**C4 — shipped in #48, #49, and #58.** Packaging uses platform profiles without re-rendering (`PackageForPlatformUseCase`, `PlatformProfile.vo.ts`), and safe insets are applied at generation (`CompositeRequest.safeInsets`).
+
+**M3 — shipped in #54.** The brand floor is static across `t` by construction (`NodeCanvasCompositor.ts` via D12), so per-frame density holds.
