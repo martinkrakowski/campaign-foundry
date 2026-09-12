@@ -18,7 +18,11 @@ export function laneState(status: LaneStatus, nowMs: number): LaneState {
   if (status.disagreements.length > 0) {
     return "conflict";
   }
-  if (derived.exit !== undefined && derived.exit !== 0) {
+  if (
+    (derived.exit !== undefined && derived.exit !== 0) ||
+    (derived.gate?.exit !== undefined && derived.gate.exit !== 0) ||
+    derived.pr?.checks === "fail"
+  ) {
     return "failed";
   }
   if (derived.alive && derived.log !== undefined && derived.log.mtimeMs < nowMs - stallThresholdMs) {
@@ -36,5 +40,10 @@ export function laneState(status: LaneStatus, nowMs: number): LaneState {
   if (derived.pr.state === "open" && derived.pr.checks === "pass") {
     return "ready";
   }
-  return "merged";
+  /* istanbul ignore else -- closed PR has no LaneState member */
+  if (derived.pr.state === "merged") {
+    return "merged";
+  }
+  /* istanbul ignore next -- closed PR has no LaneState member */
+  throw new Error(`unhandled PR state: ${String(derived.pr.state)}`);
 }
