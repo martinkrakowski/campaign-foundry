@@ -213,6 +213,13 @@ output for a cell, the cell is *unknown* — a valid answer. A confident wrong o
 5. **Check the plan's premises first.** `yarn plan:verify` fails when a lane's stated gap has already
    been closed. Four lanes in one week were dispatched, or nearly dispatched, to re-implement shipped
    behaviour. A lane whose premise no longer holds is not a lane.
+6. **Send the plan to the plan reviewer** (`Agent` · `subagent_type: "Plan"` · `model: "fable"`)
+   **before dispatching any lane from it**, whenever the plan *introduces or rewrites lanes* or
+   *changes a premise*. It is read-only by construction, so it returns a review and cannot patch
+   around what it finds. On its first use it caught a rule in an **already-dispatched** brief that
+   contradicted both the plan and the code — `restT` per track, where `REST_T` is per motion kind —
+   which the lane would otherwise have pinned in a test. The lane was stopped with nothing committed.
+   Nothing else needs this seat; it is not a review gate on prose.
 
 ## The six stages
 
