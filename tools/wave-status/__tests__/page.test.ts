@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { readFile, mkdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -4162,10 +4162,7 @@ describe("the status page", () => {
 
   test("every token the page references resolves in /tokens.css", async () => {
     // Start a real server to test what actually gets served
-    const root = await mkdir(join(tmpdir(), "wave-status-token-test-"), {
-      recursive: true,
-    });
-    if (!root) throw new Error("Failed to create temporary directory for wave-status-token-test");
+    const root = mkdtempSync(join(tmpdir(), "wave-status-token-test-"));
     dirs.push(root);
     const handle = await startServer({
       port: 0,
@@ -4228,10 +4225,7 @@ describe("the status page", () => {
   });
 
   test("a reference with a fallback like var(--missing, #fff) is caught as unserved", async () => {
-    const root = await mkdir(join(tmpdir(), "wave-status-fallback-test-"), {
-      recursive: true,
-    });
-    if (!root) throw new Error("Failed to create temporary directory for wave-status-fallback-test");
+    const root = mkdtempSync(join(tmpdir(), "wave-status-fallback-test-"));
     dirs.push(root);
     const handle = await startServer({
       port: 0,
@@ -4289,10 +4283,7 @@ describe("the status page", () => {
   });
 
   test("a missing <style> block fails loudly, not silently", async () => {
-    const root = await mkdir(join(tmpdir(), "wave-status-missing-style-test-"), {
-      recursive: true,
-    });
-    if (!root) throw new Error("Failed to create temporary directory for wave-status-missing-style-test");
+    const root = mkdtempSync(join(tmpdir(), "wave-status-missing-style-test-"));
     dirs.push(root);
     const handle = await startServer({
       port: 0,
