@@ -9,19 +9,34 @@ import {
   getPoolStore,
   setPoolStore,
   resetPoolStore,
+  getTemplateStore,
+  setTemplateStore,
+  resetTemplateStore,
+  getJobStore,
+  setJobStore,
+  resetJobStore,
+  getJobRegistry,
+  setJobRegistry,
+  resetJobRegistry,
   FsBriefStore,
   FsAssetStore,
   FsPoolStore,
+  FsTemplateStore,
+  FsJobStore,
 } from "../index.js";
 import type { BriefStorePort } from "../brief-store.port.js";
 import type { AssetStorePort } from "../asset-store.port.js";
 import type { PoolStorePort } from "../pool-store.port.js";
+import type { TemplateStorePort } from "../template-store.port.js";
+import type { JobStorePort } from "../job-store.port.js";
 
 describe("ports registry", () => {
   afterEach(() => {
     resetBriefStore();
     resetAssetStore();
     resetPoolStore();
+    resetTemplateStore();
+    resetJobStore();
   });
 
   test("getBriefStore returns default FsBriefStore and allows override", () => {
@@ -58,5 +73,35 @@ describe("ports registry", () => {
 
     resetPoolStore();
     expect(getPoolStore()).toBeInstanceOf(FsPoolStore);
+  });
+
+  test("getTemplateStore returns default FsTemplateStore and allows override", () => {
+    const initial = getTemplateStore();
+    expect(initial).toBeInstanceOf(FsTemplateStore);
+
+    const mockStore = {} as TemplateStorePort;
+    setTemplateStore(mockStore);
+    expect(getTemplateStore()).toBe(mockStore);
+
+    resetTemplateStore();
+    expect(getTemplateStore()).toBeInstanceOf(FsTemplateStore);
+  });
+
+  test("getJobStore returns default FsJobStore and allows override", () => {
+    const initial = getJobStore();
+    expect(initial).toBeInstanceOf(FsJobStore);
+
+    const mockStore = {} as JobStorePort;
+    setJobStore(mockStore);
+    expect(getJobStore()).toBe(mockStore);
+
+    resetJobStore();
+    expect(getJobStore()).toBeInstanceOf(FsJobStore);
+  });
+
+  test("job registry aliases point to the job store functions", () => {
+    expect(getJobRegistry).toBe(getJobStore);
+    expect(setJobRegistry).toBe(setJobStore);
+    expect(resetJobRegistry).toBe(resetJobStore);
   });
 });

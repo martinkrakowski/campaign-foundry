@@ -75,8 +75,8 @@ beforeEach(() => {
   setCapabilities({ motion: false, reason: NOT_PROBED_REASON });
 });
 
-afterEach(() => {
-  resetJobs();
+afterEach(async () => {
+  await resetJobs();
   probeWait.timeoutMs = defaultWait;
   setCapabilities({ motion: false, reason: NOT_PROBED_REASON });
   if (origOut === undefined) delete process.env.OUTPUT_DIR;

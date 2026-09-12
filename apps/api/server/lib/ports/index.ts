@@ -2,19 +2,23 @@ import { FsBriefStore } from "./fs-brief-store.js";
 import { FsAssetStore } from "./fs-asset-store.js";
 import { FsPoolStore } from "./fs-pool-store.js";
 import { FsTemplateStore } from "./fs-template-store.js";
+import { FsJobStore } from "./fs-job-store.js";
 import type { BriefStorePort } from "./brief-store.port.js";
 import type { AssetStorePort } from "./asset-store.port.js";
 import type { PoolStorePort } from "./pool-store.port.js";
 import type { TemplateStorePort } from "./template-store.port.js";
+import type { JobStorePort } from "./job-store.port.js";
 
 export * from "./brief-store.port.js";
 export * from "./asset-store.port.js";
 export * from "./pool-store.port.js";
 export * from "./template-store.port.js";
+export * from "./job-store.port.js";
 export * from "./fs-brief-store.js";
 export * from "./fs-asset-store.js";
 export * from "./fs-pool-store.js";
 export * from "./fs-template-store.js";
+export * from "./fs-job-store.js";
 
 let currentBriefStore: BriefStorePort | undefined;
 let currentAssetStore: AssetStorePort | undefined;
@@ -81,3 +85,24 @@ export function setTemplateStore(store: TemplateStorePort): void {
 export function resetTemplateStore(): void {
   currentTemplateStore = undefined;
 }
+
+let currentJobStore: JobStorePort | undefined;
+
+export function getJobStore(): JobStorePort {
+  if (!currentJobStore) {
+    currentJobStore = new FsJobStore();
+  }
+  return currentJobStore;
+}
+
+export function setJobStore(store: JobStorePort): void {
+  currentJobStore = store;
+}
+
+export function resetJobStore(): void {
+  currentJobStore = undefined;
+}
+
+export const getJobRegistry = getJobStore;
+export const setJobRegistry = setJobStore;
+export const resetJobRegistry = resetJobStore;

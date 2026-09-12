@@ -48,8 +48,8 @@ export function parseByteRange(
 export default defineEventHandler(async (event) => {
   const relative = getRouterParam(event, "path") ?? "";
   const posix = relative.replace(/\\/g, "/");
-  // The GenAI seed cache lives under output/cache but is not a downloadable creative.
-  if (posix === "cache" || posix.startsWith("cache/")) {
+  // The GenAI seed cache lives under output/cache and jobs under output/jobs, but neither is a downloadable creative.
+  if (posix === "cache" || posix.startsWith("cache/") || posix === "jobs" || posix.startsWith("jobs/")) {
     setResponseStatus(event, 404);
     return { error: "Not found" };
   }

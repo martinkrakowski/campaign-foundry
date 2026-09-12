@@ -70,27 +70,27 @@ export default defineEventHandler(async (event) => {
   // carries the running job's handle (`jobId`) so the second press can adopt the run
   // in progress and keep polling it — the pipeline really is running, and discarding
   // it threw away a campaign that succeeded.
-  if (hasRunningJob(brief.id)) {
+  if (await hasRunningJob(brief.id)) {
     setResponseStatus(event, 409);
     return {
       error: `A run for campaign "${brief.id}" is already in progress.`,
-      jobId: getRunningJobId(brief.id),
+      jobId: await getRunningJobId(brief.id),
       campaignId: brief.id,
     };
   }
 
-  const jobId = createJob(brief.id);
+  const jobId = await createJob(brief.id);
   runJob(jobId, async () => {
     const expectedPolicyHash = await persistedPolicyHash(brief, regenerateOnly !== undefined);
     const result = await runCampaign(brief, imageModel, regenerateOnly, expectedPolicyHash);
     if (!result.success) {
-      failJob(jobId, result.error.message);
+      await failJob(jobId, result.error.message);
       return;
     }
     // A selective run produced only the regenerated cells — merge them into the
     // persisted report so the full campaign survives a partial run.
     await writeReport(result.value, { merge: regenerateOnly !== undefined });
-    completeJob(jobId, {
+    await completeJob(jobId, {
       halted: result.value.halted,
       assets: result.value.assets,
       log: result.value.log,
