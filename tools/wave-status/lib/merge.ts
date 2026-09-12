@@ -7,21 +7,36 @@ import type {
   WaveStatus,
 } from "./types.js";
 
+/**
+ * Merge the reported (events) and observed (derived from disk) feeds into one
+ * `WaveStatus`.
+ *
+ * `waveOrder` is the caller's declared order for the wave list — newest first,
+ * as the collector reads it from the log tree. When it is given, groups come
+ * out in exactly that order and a wave named there with nothing in either feed
+ * still gets a group (a wave directory that has written nothing yet is a state
+ * worth showing). Waves the order does not mention are appended in first-seen
+ * order, so a feed can never lose a row it carries.
+ *
+ * Without `waveOrder` the list falls back to first-seen order across both
+ * feeds. That is the whole reason the parameter exists: an order inferred from
+ * which feed a wave happens to appear in puts every evented wave above every
+ * observation-only one, which breaks the moment a lane stops emitting.
+ */
 export function mergeStatus(
   events: readonly WaveEvent[],
   observed: Readonly<Record<string, LaneObservation>>,
   now: string,
+  waveOrder?: readonly string[],
 ): WaveStatus {
-  const groups: { id: string; lanes: string[] }[] = [];
-  const groupByWave = new Map<string, { id: string; lanes: string[] }>();
+  const groups = new Map<string, { id: string; lanes: string[] }>();
   const latestByKey = new Map<string, WaveEvent>();
 
   const remember = (wave: string, lane: string): void => {
-    let group = groupByWave.get(wave);
+    let group = groups.get(wave);
     if (group === undefined) {
       group = { id: wave, lanes: [] };
-      groupByWave.set(wave, group);
-      groups.push(group);
+      groups.set(wave, group);
     }
     if (!group.lanes.includes(lane)) group.lanes.push(lane);
   };
@@ -37,9 +52,24 @@ export function mergeStatus(
     remember(parsed.wave, parsed.lane);
   }
 
+  const ordered: { id: string; lanes: string[] }[] = [];
+  if (waveOrder === undefined) {
+    ordered.push(...groups.values());
+  } else {
+    const emitted = new Set<string>();
+    for (const wave of waveOrder) {
+      if (emitted.has(wave)) continue;
+      emitted.add(wave);
+      ordered.push(groups.get(wave) ?? { id: wave, lanes: [] });
+    }
+    for (const group of groups.values()) {
+      if (!emitted.has(group.id)) ordered.push(group);
+    }
+  }
+
   return {
     generatedAt: now,
-    waves: groups.map((group) => ({
+    waves: ordered.map((group) => ({
       id: group.id,
       lanes: group.lanes.map((lane) =>
         buildLane(group.id, lane, latestByKey.get(`${group.id}/${lane}`), observed[`${group.id}/${lane}`]),

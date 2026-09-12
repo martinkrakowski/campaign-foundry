@@ -74,8 +74,14 @@ export async function collect(
   now: string,
   cachedPrByLane?: Readonly<Record<string, LaneObservation["pr"]>>,
 ): Promise<WaveStatus> {
+  // Gather first, order last: the wave list is decided here, the one place
+  // that has seen every lane log's mtime, and it travels to the merge as an
+  // explicit order. Feeds are never asked to carry it — grouping by feed is
+  // how an evented old wave came to lead a live new one.
+  const rows: { readonly wave: string; readonly lane: string; readonly obs: LaneObservation }[] = [];
   const events: WaveEvent[] = [];
-  const observed: Record<string, LaneObservation> = {};
+  const newestByWave = new Map<string, number>();
+  const discovered = new Set<string>();
 
   const prByLane = cachedPrByLane ?? (await prFacts(deps));
   const worktrees = await worktreeFacts(deps);
@@ -84,9 +90,12 @@ export async function collect(
   try {
     dirNames = await deps.readdir(root);
   } catch {
-    return mergeStatus(events, observed, now);
+    return mergeStatus([], {}, now);
   }
 
+  // Lexicographic is not the output order — it is the stable base the output
+  // order is a permutation of: waves of equal (or absent) newest activity must
+  // come out in a deterministic order, not readdir's.
   const waveDirs = dirNames.filter((name) => name.startsWith("wave")).sort();
   for (const name of waveDirs) {
     const dir = join(root, name);
@@ -97,6 +106,10 @@ export async function collect(
     } catch {
       continue;
     }
+    // Discovered is enough to list it: a wave directory with no lane log and
+    // no events yet is a dispatched wave, and that is the state an operator
+    // most wants to see. Absent is the one answer that is never useful.
+    discovered.add(wave);
 
     const laneLogs = entries
       .filter((entry) => entry.endsWith(".log") && !LANE_LOG_EXCLUDED.test(entry))
@@ -109,6 +122,8 @@ export async function collect(
       try {
         const part = await readTail(deps.open, logPath, LOG_TAIL_BYTES);
         log = { bytes: part.size, mtimeMs: part.mtimeMs, tail: part.tail.toString("utf8") };
+        const prior = newestByWave.get(wave);
+        if (prior === undefined || part.mtimeMs > prior) newestByWave.set(wave, part.mtimeMs);
       } catch {
         log = undefined;
       }
@@ -130,25 +145,47 @@ export async function collect(
         }
       }
 
-      observed[`${wave}/${lane}`] = {
+      const obs: LaneObservation = {
         ...(log !== undefined ? { log } : {}),
         ...(gateLog !== undefined ? { gateLog } : {}),
         alive,
         ...(prByLane[lane] !== undefined ? { pr: prByLane[lane] } : {}),
       };
+      rows.push({ wave, lane, obs });
     }
 
     if (entries.includes("events.jsonl")) {
       try {
         const text = await deps.readFile(join(dir, "events.jsonl"));
-        events.push(...readEvents(text).events);
+        for (const event of readEvents(text).events) events.push(event);
       } catch {
         // W3 writes events.jsonl; absent or unreadable is "nobody reported", not an error.
       }
     }
   }
 
-  return mergeStatus(events, observed, now);
+  // The wave list order, decided once from the newest lane-log activity in each
+  // wave, is handed to the merge as data — not implied by the order two feeds
+  // happen to be walked in. Waves it cannot date keep the lexicographic base.
+  const orderedWaves = [...discovered].sort((a, b) =>
+    compareRecency(newestByWave.get(a), newestByWave.get(b)),
+  );
+
+  const observed: Record<string, LaneObservation> = {};
+  for (const row of rows) observed[`${row.wave}/${row.lane}`] = row.obs;
+
+  return mergeStatus(events, observed, now, orderedWaves);
+}
+
+/**
+ * Wave order by newest lane-log activity: newer first; a wave nothing could
+ * date sinks below every dated one; undated-vs-undated and equal mtimes keep
+ * the discovered (lexicographic) order — Array#sort is stable.
+ */
+function compareRecency(a: number | undefined, b: number | undefined): number {
+  if (a === undefined) return b === undefined ? 0 : 1;
+  if (b === undefined) return -1;
+  return b - a;
 }
 
 /**

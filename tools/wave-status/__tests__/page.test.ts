@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { readFile, mkdir } from "node:fs/promises";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
@@ -61,15 +61,24 @@ class FakeEventSource {
 interface PageHandle {
   readonly window: Window;
   readonly fetches: string[];
-  readonly intervals: Set<number>;
+  // Every interval the page registered, keyed by its own id and carrying its
+  // period: the page keeps more than one timer (the poll fallback and the age
+  // tick), so a test must say which one it wants to fire.
+  readonly intervals: ReadonlyMap<number, { readonly ms: number; readonly handler: () => void }>;
   readonly source: FakeEventSource;
-  // Invokes the most recently registered setInterval handler once, as if a
-  // real 10 s poll tick had fired — the harness never runs timers itself.
+  // Invokes the most recently registered setInterval handler with that period,
+  // as if a real tick had fired — the harness never runs timers itself. A
+  // period with no registered timer throws rather than doing nothing.
+  readonly fireInterval: (ms: number) => void;
   readonly firePoll: () => void;
 }
 
 const windows: Window[] = [];
 const dirs: string[] = [];
+
+// The page's SSE-fallback poll period. Named here because the harness fires
+// timers by period, and a test that says "a tick fired" must say which one.
+const POLL_INTERVAL_MS = 10_000;
 
 afterEach(() => {
   vi.useRealTimers();
@@ -310,21 +319,28 @@ async function loadPage(
     return new Response("not found", { status: 404 });
   };
 
-  const intervals = new Set<number>();
-  let lastIntervalHandler: (() => void) | null = null;
+  const intervals = new Map<number, { ms: number; handler: () => void }>();
   let nextId = 1;
-  const setIntervalImpl = (handler: () => void): number => {
-    const id = nextId++;
-    intervals.add(id);
-    lastIntervalHandler = handler;
-    return id;
+  const setIntervalImpl = (handler: () => void, ms?: number): number => {
+    intervals.set(nextId, { ms: ms ?? 0, handler });
+    return nextId++;
   };
   const clearIntervalImpl = (id: number): void => {
     intervals.delete(id);
   };
-  const firePoll = (): void => {
-    lastIntervalHandler?.();
+  // Loud, never a silent no-op: a test that believes it fired a tick must not
+  // pass because the page stopped registering that timer.
+  const fireInterval = (ms: number): void => {
+    let latest: { ms: number; handler: () => void } | undefined;
+    for (const timer of intervals.values()) {
+      if (timer.ms === ms) latest = timer;
+    }
+    if (latest === undefined) {
+      throw new Error(`no interval registered with period ${ms} ms`);
+    }
+    latest.handler();
   };
+  const firePoll = (): void => fireInterval(POLL_INTERVAL_MS);
 
   const run = new Function(
     "document",
@@ -362,7 +378,7 @@ async function loadPage(
   const source = FakeEventSource.instances[0];
   if (source === undefined) throw new Error("EventSource was not constructed");
 
-  return { window, fetches, intervals, source, firePoll };
+  return { window, fetches, intervals, source, fireInterval, firePoll };
 }
 
 // happy-dom implements no activation behaviour for <button>: a real browser
@@ -464,7 +480,12 @@ describe("the status page", () => {
     const page = await loadPage(statusAt());
     page.source.onerror?.();
     page.source.onerror?.();
-    expect(page.intervals.size).toBe(1);
+    // Counted by period, not by total: the page also keeps its own age tick,
+    // which is registered once at load and is not this test's subject.
+    const polls = [...page.intervals.values()].filter(
+      (timer) => timer.ms === POLL_INTERVAL_MS,
+    );
+    expect(polls).toHaveLength(1);
   });
 
   test("a detail value of <b> renders as text, not markup", async () => {
@@ -2077,6 +2098,268 @@ describe("the status page", () => {
     const waveRows = Array.from(doc.querySelectorAll("tr.wave"));
     const waveIds = waveRows.map((el) => el.getAttribute("data-wave"));
     expect(waveIds).toEqual(["W_new", "W_old", "W_nolog", "W_empty"]);
+  });
+
+  test("a collapsed page with sorting off lists the newest wave first because the collector sent it first, and every header states its wave's age", async () => {
+    // The state the sort defect hid in: waves collapsed and the recent-sort
+    // switch off, so the list order is purely what the server sent. The
+    // directories are named so that lexicographic order and recency disagree
+    // (wave-10 < wave-9), and the lane mtimes decide: wave-9 ran half an hour
+    // ago, wave-10 three days ago.
+    const root = mkdtempSync(join(tmpdir(), "wave-age-order-"));
+    dirs.push(root);
+    mkdirSync(join(root, "wave-9"));
+    mkdirSync(join(root, "wave-10"));
+    writeFileSync(join(root, "wave-9", "a.log"), "building\n");
+    writeFileSync(join(root, "wave-10", "b.log"), "settled long ago\n");
+    const base = Date.now();
+    const mtime9 = new Date(base - 30 * 60_000);
+    const mtime10 = new Date(base - 3 * 24 * 60 * 60_000);
+    utimesSync(join(root, "wave-9", "a.log"), mtime9, mtime9);
+    utimesSync(join(root, "wave-10", "b.log"), mtime10, mtime10);
+
+    const deps = {
+      ...realDeps,
+      pgrep: async () => 0,
+      gh: async () => "[]",
+      git: async () => "",
+    };
+    const status = await collect(deps, root, new Date().toISOString());
+
+    const page = await loadPage(status, "log-tail", {
+      storage: { "wave-status:sort": "false" },
+    });
+    const doc = page.window.document;
+
+    // Collapsed — the state where the old defect was invisible to expanded-only tests.
+    const waveRows = Array.from(doc.querySelectorAll("tr.wave")) as unknown as HTMLElement[];
+    for (const waveRow of waveRows) {
+      expect(waveRow.querySelector("button")?.getAttribute("aria-expanded")).toBe("false");
+    }
+    const laneRows = Array.from(doc.querySelectorAll("tr.lane")) as unknown as HTMLElement[];
+    expect(laneRows.length).toBe(2);
+    for (const laneRow of laneRows) {
+      expect(laneRow.hidden).toBe(true);
+    }
+
+    // Newest wave first, straight from the server payload.
+    expect(waveRows.map((el) => el.getAttribute("data-wave"))).toEqual(["9", "10"]);
+
+    // And each collapsed header carries its age in words a reader can see —
+    // not a hidden lane row, not just a helper's return value.
+    expect(waveRows[0]?.textContent).toContain("30m ago");
+    expect(waveRows[1]?.textContent).toContain("3d ago");
+  });
+
+  test("a collapsed page puts a silent newer wave ahead of an older wave that reported events", async () => {
+    // The one-feed shape: wave-8 reported its merge and went quiet; wave-9 is
+    // the live wave and emits nothing at all. With the client's own sort off,
+    // the list order is purely what the collector sent — which is where the
+    // event-feed-first ordering used to surface, as an old wave on top.
+    const root = mkdtempSync(join(tmpdir(), "wave-quiet-order-"));
+    dirs.push(root);
+    mkdirSync(join(root, "wave-8"));
+    mkdirSync(join(root, "wave-9"));
+    writeFileSync(
+      join(root, "wave-8", "events.jsonl"),
+      '{"ts":"2026-09-07T16:55:43Z","wave":"8","lane":"a","stage":"merge","event":"settled","pr":301}\n',
+    );
+    writeFileSync(join(root, "wave-8", "a.log"), "settled long ago\n");
+    writeFileSync(join(root, "wave-9", "b.log"), "building right now\n");
+    const base = Date.now();
+    const mtime8 = new Date(base - 60 * 60_000);
+    const mtime9 = new Date(base - 2 * 60_000);
+    utimesSync(join(root, "wave-8", "a.log"), mtime8, mtime8);
+    utimesSync(join(root, "wave-9", "b.log"), mtime9, mtime9);
+
+    const deps = {
+      ...realDeps,
+      pgrep: async () => 0,
+      gh: async () => "[]",
+      git: async () => "",
+    };
+    const status = await collect(deps, root, new Date().toISOString());
+
+    const page = await loadPage(status, "log-tail", {
+      storage: { "wave-status:sort": "false" },
+    });
+    const doc = page.window.document;
+
+    const waveRows = Array.from(doc.querySelectorAll("tr.wave")) as unknown as HTMLElement[];
+    for (const waveRow of waveRows) {
+      expect(waveRow.querySelector("button")?.getAttribute("aria-expanded")).toBe("false");
+    }
+    expect(waveRows.map((el) => el.getAttribute("data-wave"))).toEqual(["9", "8"]);
+  });
+
+  test("wave headers state age relative and short — now, minutes, hours, days — and say 'no dated activity' rather than lie", async () => {
+    const now = Date.now();
+    const dated = (id: string, mtimeMs: number): { id: string; lanes: unknown[] } => ({
+      id,
+      lanes: [
+        {
+          wave: id,
+          lane: "l",
+          derived: { alive: false, log: { bytes: 10, mtimeMs, tail: "" } },
+          disagreements: [],
+        },
+      ],
+    });
+    const ageStatus = {
+      generatedAt: "now",
+      waves: [
+        dated("W_secs", now - 30_000),
+        dated("W_mins", now - 22.5 * 60_000),
+        dated("W_hours", now - 3.5 * 60 * 60_000),
+        dated("W_days", now - 5.5 * 24 * 60 * 60_000),
+        dated("W_future", now + 10 * 60_000),
+        {
+          id: "W_nolog",
+          lanes: [{ wave: "W_nolog", lane: "l", derived: { alive: false }, disagreements: [] }],
+        },
+        { id: "W_empty", lanes: [] },
+      ],
+    } as unknown as WaveStatus;
+
+    const page = await loadPage(ageStatus, "log-tail", {
+      storage: { "wave-status:sort": "false" },
+    });
+    const doc = page.window.document;
+
+    // Every wave is collapsed; the header is the only thing the reader sees.
+    const waveRows = Array.from(doc.querySelectorAll("tr.wave")) as unknown as HTMLElement[];
+    for (const waveRow of waveRows) {
+      expect(waveRow.querySelector("button")?.getAttribute("aria-expanded")).toBe("false");
+    }
+
+    const ageOf = (id: string): string => {
+      const row = doc.querySelector(`tr.wave[data-wave="${id}"]`) as unknown as HTMLElement;
+      expect(row).not.toBeNull();
+      const expected = row.querySelector(".wave-age")?.textContent ?? "";
+      // The reader-visible string, asserted on the header's own text.
+      expect(row.textContent).toContain(expected);
+      return expected;
+    };
+
+    expect(ageOf("W_secs")).toBe("now");
+    expect(ageOf("W_mins")).toBe("22m ago");
+    expect(ageOf("W_hours")).toBe("3h ago");
+    expect(ageOf("W_days")).toBe("5d ago");
+    // A clock-ahead mtime must not render as a negative age.
+    expect(ageOf("W_future")).toBe("now");
+    // Nothing to date says so plainly — no fabricated age for an undated wave.
+    expect(ageOf("W_nolog")).toBe("no dated activity");
+    expect(ageOf("W_empty")).toBe("no dated activity");
+  });
+
+  test("a quiet wave's age keeps advancing on the page's own tick, with no status arriving", async () => {
+    // The defect: the live path renders only when the server pushes, and the
+    // server is silent while nothing changes — so a quiet wave's header froze
+    // at the first age it read and went on telling a reader the lane had been
+    // active more recently than it was.
+    const html = await readFile(PAGE_PATH, "utf8");
+    const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? "";
+    const tick = Number(
+      /AGE_TICK_MS\s*=\s*([0-9_]+)/
+        .exec(script)?.[1]
+        ?.replace(/_/g, ""),
+    );
+    // The tick must exist, and run finer than the smallest bin the header
+    // displays (a minute) — a coarser one just re-freezes the age between ticks.
+    expect(Number.isFinite(tick)).toBe(true);
+    expect(tick).toBeGreaterThan(0);
+    expect(tick).toBeLessThanOrEqual(60_000);
+
+    const base = Date.UTC(2026, 8, 11, 12, 0, 0);
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => base);
+    try {
+      const quietStatus = {
+        generatedAt: "now",
+        waves: [
+          {
+            id: "9",
+            lanes: [
+              {
+                wave: "9",
+                lane: "a",
+                derived: {
+                  alive: false,
+                  log: { bytes: 10, mtimeMs: base - 90_000, tail: "" },
+                },
+                disagreements: [],
+              },
+            ],
+          },
+        ],
+      } as unknown as WaveStatus;
+
+      const page = await loadPage(quietStatus, "log-tail", {
+        storage: { "wave-status:sort": "false" },
+      });
+      const doc = page.window.document;
+      const header = (): string =>
+        (doc.querySelector('tr.wave[data-wave="9"]') as unknown as HTMLElement)
+          ?.textContent ?? "";
+
+      expect(header()).toContain("1m ago");
+
+      // Two minutes of real time pass with nothing new from the server. The
+      // fetch count is the proof no status arrived; the header must have aged.
+      const fetches = page.fetches.length;
+      nowSpy.mockImplementation(() => base + 120_000);
+      page.fireInterval(tick);
+
+      expect(page.fetches.length).toBe(fetches);
+      expect(header()).toContain("3m ago");
+      expect(header()).not.toContain("1m ago");
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  test("a collapsed header separates the wave id from its age, so one number is never read for two", async () => {
+    const base = Date.UTC(2026, 8, 11, 12, 0, 0);
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => base);
+    try {
+      const page = await loadPage(
+        {
+          generatedAt: "now",
+          waves: [
+            {
+              id: "9",
+              lanes: [
+                {
+                  wave: "9",
+                  lane: "a",
+                  derived: {
+                    alive: false,
+                    log: { bytes: 10, mtimeMs: base - 2 * 60_000, tail: "" },
+                  },
+                  disagreements: [],
+                },
+              ],
+            },
+          ],
+        } as unknown as WaveStatus,
+        "log-tail",
+        { storage: { "wave-status:sort": "false" } },
+      );
+      const button = page.window.document.querySelector(
+        'tr.wave[data-wave="9"] button',
+      ) as unknown as HTMLElement;
+      const name = button.textContent ?? "";
+
+      // The id and the age are flex children separated by `gap` alone, and gap
+      // adds nothing to a flat accessible name: this header used to announce
+      // "92m ago" for a wave that was two minutes old.
+      expect(name).not.toContain("92m ago");
+      expect(name).toContain("9 · 2m ago");
+      // The separator belongs to the header, not to the age span the tick
+      // rewrites, so no age can ever be rendered without one.
+      expect(button.querySelector(".wave-age")?.textContent).toBe("2m ago");
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   test("an expanded wave stays expanded across a re-sort, and an open log stays open when its wave moves", async () => {
