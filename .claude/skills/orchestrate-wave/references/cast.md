@@ -15,7 +15,7 @@ unfunded, hangs (0-byte log at five minutes), or dies on arrival twice. **grok n
 | **implementer 3** | `MODEL=opencode-go/glm-5.3-flash dispatch-lane.sh …`. Note the provider: `opencode-go/`, which is funded; `opencode/glm-5.3-flash` answers *Insufficient balance* on the same account. |
 | **PR reviewer** | `opencode run --format json --model opencode-go/hy4-preview "$(cat REVIEW.md)"` in a **throwaway worktree** of the branch (so nothing it writes can matter). It answers a one-word probe with a paragraph of planning: give it a schema for the verdict and read past the preamble. |
 | **remediator** | the lane's own implementer, at **medium** effort on a narrow brief (see Spending rules 3–4), then the next in the rotation. (Proposed, not yet the owner's rule: grok returns as remediator only — its 4/4 record — after its quota resets **2026-09-14 16:28**, and still never implements.) |
-| **plan reviewer** | `agy --print "$(cat PLAN-REVIEW.md)" --dangerously-skip-permissions --effort high --model gemini-3.1-pro-high --output-format json` — one reviewer. (The id resolves again as of 2026-09-08; it did not on 09-07.) |
+| **plan reviewer** | ~~`agy … --model gemini-3.1-pro-high`~~ — **superseded**; the seat is `Agent` · `Plan` · `fable`, in the 2026-09-12 table below. This row is kept because the external record is evidence, not a menu. |
 | **orchestrator, final sweep, merge** | you, never delegated |
 
 ## Spending rules (2026-09-08, after a gemini weekly quota went from ~97 % to 76 % in four runs)
@@ -449,6 +449,22 @@ threshold. The threshold still stands for a *ranking*; this is an assignment.
 | **Implementer (reserve, and the critical path)** | `gemini-3.8-flash` | `agy --print "$(cat $BRIEF)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high --print-timeout 90m --output-format json` |
 | **Stage-1 test writer** | `qwen3.8-flash` | as above — **and then stage 2 must be a different seat** |
 | **Lane reviewer** | **anything except the model that wrote the code** | — |
+| **Plan reviewer** | `Agent` · `subagent_type: "Plan"` · `model: "fable"` | Owner's choice, 2026-09-09, **restored 2026-09-12**. `Plan` cannot Write or Edit, so the seat is read-only by construction rather than by instruction. |
+
+**When the plan reviewer fires**, because a seat with no trigger is a seat that quietly stops
+existing — which is what happened to this one:
+
+- **any plan that introduces or rewrites lanes**, and
+- **any change to a premise.**
+
+Both are things that cost a full lane when they are wrong, and both went unreviewed this week. The
+wave-status plan shipped with a premise that grepped a `.sort()` call the fix then **kept**, so a
+merged lane went on reporting as live; and the same plan described a client-side sort as absent when
+it had shipped, which sent a seat to build a test that passed without the trap being fixed. A
+read-only reviewer reading the plan **against the code** is the cheap check for both, and it is
+cheaper than finding them a lane later.
+
+Nothing else needs it. This is not a review gate on prose.
 
 Dispatch is the wrapper documented above: `cd` into the lane's own worktree, an absolute `$BRIEF`,
 an `EXIT` marker to wait on.
