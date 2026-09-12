@@ -153,8 +153,12 @@ still open**. `yarn plan:verify` runs them. **Probe the thing that decides, not 
 # shape in brief-template.ts / creative-templates.ts. The html layer carries
 # nothing today (`html: []` in LAYER_PROPS is the props vocabulary — D134's
 # lesson from X2), no element type exists anywhere in the domain, and no
-# "elements" field exists at the boundary.
-grep -q '^  html: \[\],' packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts && ! grep -rqi "HtmlElement" packages/CampaignOrchestration/src && ! grep -rq '"elements"' packages/CampaignOrchestration/src apps/api/server
+# `elements` field is declared at the boundary. The field is probed as a
+# declaration — an `elements:` property line in the two layer shapes — not
+# as the quoted word: a differently-formatted declaration would keep a
+# word-search holding after the lane ships, and the word in a comment or an
+# unrelated string would retire the lane before it does.
+grep -q '^  html: \[\],' packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts && ! grep -rqi "HtmlElement" packages/CampaignOrchestration/src && ! grep -qE '^[[:space:]]*(readonly[[:space:]]+)?elements[[:space:]]*\??:' packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts packages/CampaignOrchestration/src/domain/value-objects/creative-templates.ts
 ```
 
 ```premise HL2
@@ -178,10 +182,13 @@ grep -q '"image-html" is not supported' packages/CampaignOrchestration/src/appli
 ```premise HL4
 # What decides HL4 is the generation path emitting format "html" and setting
 # htmlBundlePath — §2's explicit requirement, and the two fields packageHtml
-# already checks. Today GenerateCampaignUseCase emits only static/motion and
-# never names htmlBundlePath; the field existing in the entity type does not
-# close this, only writing it there does.
-! grep -qE 'format: "html"|htmlBundlePath' packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts
+# already checks. The lane ships both, so the premise retires only when both
+# have landed. Two explicit probes, joined so either half still outstanding
+# keeps the lane live: `! grep -qE 'A|B'` negates a disjunction, and dies the
+# moment the first half lands. The field existing in the entity type does not
+# count; only writing it in the use case does, so both probes stay on the
+# generation path's own file.
+! grep -q 'format: "html"' packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts || ! grep -q 'htmlBundlePath' packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts
 ```
 
 ```premise HL5

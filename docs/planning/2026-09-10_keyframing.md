@@ -123,10 +123,15 @@ grep -qE 'case "(fade-in|rise-in|slide-in|scale-in)"' packages/CreativeGeneratio
 ```premise K4
 # K4's deliverable is the written precedence rule for a preset and a
 # hand-authored track naming one layer and property (§2's DoD). "The brief can
-# carry a track" is K1's claim, not K4's — and no such rule exists on either
-# side of the boundary today. A shipped K4 states it somewhere in the motion
-# resolution code.
-! grep -rqi "precedence" packages/CampaignOrchestration/src packages/CreativeGeneration/src
+# carry a track" is K1's claim, not K4's — and no such rule exists today. The
+# probe verifies the rule, not the word: `precedence` naming its subjects —
+# a track, a preset, the authored side — on the deciding line, inside the
+# motion resolver's mandated home (K-D2: the pure resolution function beside
+# `beatAt`, in `CampaignOrchestration/domain`; `CreativeGeneration` is
+# adapters-only). The old probe read the bare word across both packages'
+# every source file, and retired the lane on any unrelated comment —
+# z-order prose is one `precedence` away from a live lane never getting done.
+! grep -rqiE '\b(tracks?|presets?|authored)\b.{0,160}precedence|precedence.{0,160}\b(tracks?|presets?|authored)\b' packages/CampaignOrchestration/src/domain
 ```
 
 ```premise K5
