@@ -67,7 +67,8 @@ interface PageHandle {
   readonly intervals: ReadonlyMap<number, { readonly ms: number; readonly handler: () => void }>;
   readonly source: FakeEventSource;
   // Invokes the most recently registered setInterval handler with that period,
-  // as if a real tick had fired — the harness never runs timers itself.
+  // as if a real tick had fired — the harness never runs timers itself. A
+  // period with no registered timer throws rather than doing nothing.
   readonly fireInterval: (ms: number) => void;
   readonly firePoll: () => void;
 }
@@ -327,12 +328,17 @@ async function loadPage(
   const clearIntervalImpl = (id: number): void => {
     intervals.delete(id);
   };
+  // Loud, never a silent no-op: a test that believes it fired a tick must not
+  // pass because the page stopped registering that timer.
   const fireInterval = (ms: number): void => {
     let latest: { ms: number; handler: () => void } | undefined;
     for (const timer of intervals.values()) {
       if (timer.ms === ms) latest = timer;
     }
-    latest?.handler();
+    if (latest === undefined) {
+      throw new Error(`no interval registered with period ${ms} ms`);
+    }
+    latest.handler();
   };
   const firePoll = (): void => fireInterval(POLL_INTERVAL_MS);
 
