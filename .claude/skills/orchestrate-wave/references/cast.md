@@ -439,7 +439,7 @@ threshold. The threshold still stands for a *ranking*; this is an assignment.
 |---|---|---|
 | **Implementer (primary)** | `qwen3.8-flash` | `opencode run --auto --format json --model opencode-go/qwen3.8-flash "$(cat $BRIEF)"` |
 | **Implementer (reserve, and the critical path)** | `gemini-3.8-flash` | `agy --print "$(cat $BRIEF)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high --print-timeout 90m --output-format json` |
-| **Stage-1 test writer** | `mercury-2` | `opencode run --auto --format json --model inception/mercury-2 "$(cat $BRIEF)"` |
+| **Stage-1 test writer** | `qwen3.8-flash` | as above — **and then stage 2 must be a different seat** |
 | **Lane reviewer** | **anything except the model that wrote the code** | — |
 
 Dispatch is the wrapper documented above: `cd` into the lane's own worktree, an absolute `$BRIEF`,
@@ -473,14 +473,47 @@ deepseek — both reversed on the next lane.
 
 ### What each seat is *not* for
 
-- **mercury** writes stage-1 tests and nothing else. It is the fastest seat by a wide margin (90 s
-  against 350–600 s) and it has **fabricated two reports** — claiming fourteen tests where it wrote
-  twelve, and describing failure messages from a suite whose log showed four startup errors and no
-  run. It is safe in stage 1 only because that output is mechanically checkable: every test must be
-  red, and red *from the stub*. Never give it work whose result cannot be verified by a command.
+- **mercury is out of the rotation** (owner's call, 2026-09-12). It was the stage-1 test writer and
+  it was genuinely fast — 90 s against 350–600 s — but it **fabricated two reports**: claiming
+  fourteen tests where it wrote twelve, and describing failure messages from a suite whose own log
+  showed four startup errors and no run. More decisively, **stage 1 is the ceiling** and mercury kept
+  hitting it: it wrote twelve tests for eight states and missed three conditions that were in its own
+  brief, so the implementation matched the tests rather than the rules and a lane with failing checks
+  reported as `merged`. 100 % coverage certified the gap, because missing behaviour leaves no
+  uncovered code.
 - **deepseek** executes cleanly and does not verify. Its W4 arm produced good code and a test named
   after the documented trap that passed **without the trap being fixed**.
 - **haiku** is out of the implementer rotation: five dispatches on one lane, two successive guards
   that did not guard, a green-gate report on a branch that did not typecheck, and three commits left
   unpushed across two rounds.
+
+### The two-stage pass, and the two gates that make it worth running
+
+Measured on gemini, the same model with and without a stage 1 ahead of it:
+
+| | wall (mean) | tokens (mean) |
+|---|---|---|
+| staged stage-2 runs (4) | **328 s** | **350 k** |
+| unstaged lanes (3) | 509 s | 452 k |
+
+About a third faster and a fifth cheaper, because stage 2 aims at a failing test rather than a
+description. Stage 1 adds ~90 s, so the pass still comes out ahead end to end.
+
+**Gate 1 — the tests must be red, and red for the right reason.** Every stage-1 test must fail from
+the stub's throw, not from a missing module or a type error. One command, and it caught a fabricated
+progress report the first time it ran.
+
+**Gate 2 — stage 2 may not touch the test file.** `git diff --stat` on that path must be empty for
+every stage-2 commit. This is the guarantee nothing else gives: the implementation cannot shape the
+test it is judged by. It has held on every stage-2 commit so far.
+
+**Gate 3 — stage 1 must map each rule to a test.** Stage 1 lists which rule in the brief each test
+covers, and the orchestrator checks every rule has one before dispatching stage 2. This is the gate
+mercury's lanes lacked: an implementation is exactly as complete as the tests it is given, and a
+missing rule leaves no trace in coverage.
+
+**The two stages must be different seats.** Procedural separation is not independence — one model
+writing both the test and the code reasons its way to both, which is the shape that produces a test
+built to pass. The `git diff` gate still holds mechanically, but the value of the pass comes from the
+second seat not having authored the target. With qwen in stage 1, stage 2 is gemini.
 
