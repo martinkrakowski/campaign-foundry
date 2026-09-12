@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdir } from "node:fs/promises";
+import { request as httpRequest, type IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Window } from "happy-dom";
-import { extractDarkBlock, extractRootBlock } from "../server.js";
+import { extractDarkBlock, extractRootBlock, startServer } from "../server.js";
 import { collect, realDeps } from "../lib/collect.js";
 import { readEvents } from "../lib/events.js";
 import { mergeStatus } from "../lib/merge.js";
@@ -189,6 +190,18 @@ const EXPECTED_METRICS: ReadonlyArray<readonly [string, string, string]> = [
 const pageStyle = async (): Promise<string> => {
   const html = await readFile(PAGE_PATH, "utf8");
   return /<style>([\s\S]*?)<\/style>/.exec(html)?.[1] ?? "";
+};
+
+const scanReferencedTokens = (html: string): Set<string> => {
+  const styleMatch = /<style>([\s\S]*?)<\/style>/.exec(html);
+  if (!styleMatch || !styleMatch[1]) {
+    throw new Error("page has no <style> block or it is empty");
+  }
+  const referencedTokens = new Set<string>();
+  for (const match of styleMatch[1].matchAll(/var\(\s*(--[a-z0-9-]+)\s*(?:,|\))/gi)) {
+    referencedTokens.add(match[1]);
+  }
+  return referencedTokens;
 };
 
 type LogPayload =
@@ -3862,5 +3875,156 @@ describe("the status page", () => {
     ) as unknown as HTMLElement;
     expect(brokenWarning?.hidden).toBe(false);
     expect(brokenWarning?.textContent).toContain("--color-brand-primary");
+  });
+
+  test("every token the page references resolves in /tokens.css", async () => {
+    // Start a real server to test what actually gets served
+    const root = await mkdir(join(tmpdir(), "wave-status-token-test-"), {
+      recursive: true,
+    });
+    if (!root) throw new Error("Failed to create temporary directory for wave-status-token-test");
+    dirs.push(root);
+    const handle = await startServer({
+      port: 0,
+      root,
+      collect: async () => statusAt(),
+    });
+    try {
+      // Derive the set of tokens the page actually references from the real HTML
+      const html = await readFile(PAGE_PATH, "utf8");
+      const referencedTokens = scanReferencedTokens(html);
+
+      // Fetch what the server actually serves for /tokens.css
+      const res = await new Promise<{
+        status: number;
+        body: string;
+      }>((resolve, reject) => {
+        const req = httpRequest(
+          { host: "127.0.0.1", port: handle.port, path: "/tokens.css" },
+          (res) => {
+            const chunks: Buffer[] = [];
+            res.on("data", (chunk) => chunks.push(chunk));
+            res.on("end", () =>
+              resolve({
+                status: res.statusCode ?? 0,
+                body: Buffer.concat(chunks).toString("utf8"),
+              }),
+            );
+            res.on("error", reject);
+          },
+        );
+        req.on("error", reject);
+        req.end();
+      });
+
+      expect(res.status).toBe(200);
+
+      // Extract tokens from the served response body
+      const servedTokens = new Set<string>();
+      for (const match of res.body.matchAll(/(--[a-z0-9-]+)\s*:/gi)) {
+        servedTokens.add(match[1].toLowerCase());
+      }
+
+      // Every referenced token must be served
+      const missing = Array.from(referencedTokens)
+        .map((t) => t.toLowerCase())
+        .filter((token) => !servedTokens.has(token));
+      if (missing.length > 0) {
+        throw new Error(
+          `Unresolved tokens: ${missing.join(", ")}. ` +
+            `Referenced: ${Array.from(referencedTokens)
+              .map((t) => t.toLowerCase())
+              .join(", ")}. ` +
+            `Served: ${Array.from(servedTokens).join(", ")}.`,
+        );
+      }
+      expect(missing).toEqual([]);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  test("a reference with a fallback like var(--missing, #fff) is caught as unserved", async () => {
+    const root = await mkdir(join(tmpdir(), "wave-status-fallback-test-"), {
+      recursive: true,
+    });
+    if (!root) throw new Error("Failed to create temporary directory for wave-status-fallback-test");
+    dirs.push(root);
+    const handle = await startServer({
+      port: 0,
+      root,
+      collect: async () => statusAt(),
+    });
+    try {
+      const html = await readFile(PAGE_PATH, "utf8");
+      // Create a modified HTML with a fallback reference to an unserved token
+      const modifiedHtml = html.replace(
+        "</style>",
+        "      .test { color: var(--color-missing-token, #ff0000); }\n    </style>",
+      );
+      const referencedTokens = scanReferencedTokens(modifiedHtml);
+
+      // Fetch what the server actually serves for /tokens.css
+      const res = await new Promise<{
+        status: number;
+        body: string;
+      }>((resolve, reject) => {
+        const req = httpRequest(
+          { host: "127.0.0.1", port: handle.port, path: "/tokens.css" },
+          (res) => {
+            const chunks: Buffer[] = [];
+            res.on("data", (chunk) => chunks.push(chunk));
+            res.on("end", () =>
+              resolve({
+                status: res.statusCode ?? 0,
+                body: Buffer.concat(chunks).toString("utf8"),
+              }),
+            );
+            res.on("error", reject);
+          },
+        );
+        req.on("error", reject);
+        req.end();
+      });
+
+      expect(res.status).toBe(200);
+
+      // Extract tokens from the served response body
+      const servedTokens = new Set<string>();
+      for (const match of res.body.matchAll(/(--[a-z0-9-]+)\s*:/gi)) {
+        servedTokens.add(match[1].toLowerCase());
+      }
+
+      // The missing token should now be detected even with the fallback
+      const missing = Array.from(referencedTokens)
+        .map((t) => t.toLowerCase())
+        .filter((token) => !servedTokens.has(token));
+      expect(missing).toContain("--color-missing-token");
+    } finally {
+      await handle.close();
+    }
+  });
+
+  test("a missing <style> block fails loudly, not silently", async () => {
+    const root = await mkdir(join(tmpdir(), "wave-status-missing-style-test-"), {
+      recursive: true,
+    });
+    if (!root) throw new Error("Failed to create temporary directory for wave-status-missing-style-test");
+    dirs.push(root);
+    const handle = await startServer({
+      port: 0,
+      root,
+      collect: async () => statusAt(),
+    });
+    try {
+      const html = await readFile(PAGE_PATH, "utf8");
+      // Remove the style block entirely
+      const htmlWithoutStyle = html.replace(/<style>[\s\S]*?<\/style>/g, "");
+      expect(() => {
+        scanReferencedTokens(htmlWithoutStyle);
+      }).toThrow("page has no <style> block or it is empty");
+    } finally {
+      await handle.close();
+    }
   });
 });
