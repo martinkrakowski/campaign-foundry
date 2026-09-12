@@ -176,6 +176,8 @@ lane, so the merge resolver keeps both. **P1 goes last**: every other lane impor
 
 **Waves.** A: **S4 ‖ S3** (disjoint). B: **S1 ‖ S2**. C: **P1**, alone.
 
+**Every lane in this table has since shipped.** §8 names the PR and the symbol that closed each one.
+
 ---
 
 ## 4. Definition of Done
@@ -234,3 +236,29 @@ Standing gate per lane (`build`, `typecheck`, `lint`, `lint:arch`, `sync:check`,
 - **The map and the rail shipped in the dialog hours before this plan moved them.** Not waste: the
   kit components are unchanged and the map simply lands where the region lives. Recorded because
   the arc's cost is only honest if the churn is counted.
+
+---
+
+## 8. Premises — audited 2026-09-12, every lane shipped
+
+`yarn plan:verify` reads a ```` ```premise <lane> ```` fence from each plan: a POSIX `sh` script that
+exits 0 **while the gap the lane describes is still open**, and fails once the gap has closed — four
+lanes were dispatched, or nearly dispatched, against gaps that had already shipped. This plan has no
+premises left to write, and that is the finding: **all five of its lanes landed** and the plan's own
+text was never amended. A premise added now to a lane that has shipped can never hold — it would
+report a finished lane as open, which is the expensive direction — so each lane is retired here with
+the evidence a reader can check instead of re-deriving.
+
+| Lane | Shipped | The evidence that closed it |
+|---|---|---|
+| **S4** | **#218** | `serialisedFormats` (`apps/web/src/components/campaign/editor-state.ts`) — `toBrief` drops `motion` whenever `mode === "brief"`, so a flip to Classic can no longer serialise the combination `load-brief.ts` refuses on every run path; `ModePanel` says so beside the tiles in one `role="status"` line (`messages.modeDroppedVideo`). |
+| **S3** | **#217**, then **#228** | `CreateCampaignInput` (`apps/web/src/lib/create-campaign.ts`) is `{ name, type, source? }` — `targetRegion` and `targetAudience` left the seam, and `isStoredSeed` **rejects** both retired shapes instead of half-applying them; `CreateCampaignDialog` stashes `IDENTITY_STEP`, so Create lands on Identity rather than past two empty required fields. |
+| **S1** | **#236** | The dialog is one name `Input` and one tile group (`apps/web/src/components/shell/CreateCampaignDialog.tsx`), `max-w-md`, a single `role="status"`; region, audience, the world map, the start-from rail, the numbered sections and the jump strip are all gone, and its test pins "exactly two controls". |
+| **S2** | **#225** | `IdentitySection` renders `WorldMap` above the existing chips, and `{!compact ? … : null}` omits it in the 320 px sidebar while the chips stay the accessible and keyboard path (D94). |
+| **P1** | **#240** | The domain-free kit moved to `@campaignfoundry/ui` (`packages/ui`). Outside this audit's four lanes, but §3 still lists it, so it is retired here too. |
+
+**Two of the four arrived in a different shape than §3 wrote them, and the plan never said so.**
+D100 aside, the dialog's second field is the **campaign type** (D108, four tiles), not D97's two-way
+mode — #217 shipped `{ name, mode }` exactly as written, and #228/#236 replaced it with the type
+whose preset carries the mode. Re-reading §3 literally and re-dispatching S1 or S3 today would
+delete shipped behaviour; that is precisely the drift this section exists to make visible.

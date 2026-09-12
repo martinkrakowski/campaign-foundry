@@ -123,6 +123,7 @@ never worked.
 
 **Order.** V5 first — it is documentation and prevents the worst outcome. Then V1 → V3 (gated). V4
 whenever convenient. **V2 is withdrawn** and V-D3 survives only as the human-side disposal rule.
+**§5 tracks which of these are still open.**
 
 ---
 
@@ -149,3 +150,60 @@ whenever convenient. **V2 is withdrawn** and V-D3 survives only as the human-sid
   candidate cuts. Both were measured and both were kept. **A plan that only ever confirms its own
   first guess is not measuring anything** — this one lost two of its four levers to the data, and an
   earlier draft of F1 was false in exactly the way V-D4 warns about.
+
+---
+
+## 5. Premises
+
+Each open lane states the claim that makes it necessary, as a script that exits 0 **while the gap is
+still open**. `yarn plan:verify` runs them. Audited 2026-09-12 against `main` at `7a4b8ab`.
+
+**V1 — shipped in #290.** `.pr_agent.toml` carries it: `patch_extra_lines_before = 25`, and
+`[pr_code_suggestions].extra_instructions` forbids the absence claim outright (*"YOU ARE READING A
+PATCH, NOT A FILE"*). The one wave recorded since found **zero** refuted findings in that class.
+
+**V2 — withdrawn in §2 on evidence**, not shipped, and not tracked.
+
+**V5 — shipped in #289.** The skill states both rules — a mutation is read from the file and
+confirmed applied, and a merge requires the fix commit to exist.
+
+```premise V3
+# V3 ends in an arithmetic decision about the two UI/API reviewers — disable them
+# if refuted stays above 60 %, or keep them on a recorded measurement — and
+# EITHER outcome closes the lane. So the gap is open only while they still run
+# AND no wave record has measured them per workflow.
+#
+# Per-bot is not enough: the 09-09 record has a per-bot table and calls it "not
+# yet a verdict" (three PRs of one wave). What decides is per-WORKFLOW
+# attribution — all three reviewers comment as github-actions[bot] and nothing
+# in a comment names the workflow that wrote it (pr-agent-arch.yml says so
+# itself), so a wave record that splits the three IS the measurement.
+#
+# The reviewer identities are read from the workflow files rather than
+# hardcoded, so a renamed or added reviewer is picked up. A wave record naming a
+# workflow in passing would also close this — the cheap direction to be wrong,
+# and the opposite of a premise that outlives its lane.
+if ! grep -q "pragent/pr-agent" .github/workflows/pr-agent.yml .github/workflows/pr-agent-api.yml; then
+  exit 1
+fi
+for wf in .github/workflows/pr-agent*.yml; do
+  id=${wf##*/}
+  id=${id%.yml}
+  grep -qi "$id" docs/planning/*wave-record*.md || exit 0
+done
+exit 1
+```
+
+```premise V4
+# V4 is the class-disposition tool (V-D2): one script that posts ONE disposition
+# and resolves the threads sharing it together. Resolving a review thread has no
+# `gh` subcommand and no REST endpoint — the GraphQL `resolveReviewThread`
+# mutation is the only way to do it — so its presence in a script is the
+# mechanism, whatever the file is called or where it lives.
+#
+# The string is already in docs/workflows/*.md: the operator's own copy of the
+# command, run by hand. Only tooling counts, so the docs are NOT searched —
+# grepping them would report the gap closed by the hand process this lane exists
+# to replace.
+! grep -rq "resolveReviewThread" tools scripts .claude .github
+```
