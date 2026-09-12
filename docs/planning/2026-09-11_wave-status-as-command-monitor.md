@@ -126,9 +126,11 @@ existed, because nothing could tell a live lane from a finished one.
 it. The premise was retired as part of merging, which is the rule: a premise left behind after its
 lane ships turns the check into noise.
 
-```premise W2
-grep -q "tr.lane.active" tools/wave-status/public/index.html
-```
+**W2 — shipped.** A derived-state cell leads every lane row (colour *and* the state word, with
+*quiet Nm* on a running lane), and `.selected` has replaced the class that lied — so the string this
+premise grepped for is gone by construction, and it is retired in the same commit that closes it.
+Probing a string that *names* the defect rather than the behaviour was the right call here: the
+rename cannot survive the fix, so the premise cannot outlive its lane the way W4's did.
 
 ```premise W3
 ! grep -q "hide-inactive" tools/wave-status/public/index.html

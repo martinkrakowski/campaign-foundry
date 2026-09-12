@@ -9,9 +9,10 @@ import { fileURLToPath } from "node:url";
 import { Window } from "happy-dom";
 import { extractDarkBlock, extractRootBlock, startServer } from "../server.js";
 import { collect, realDeps } from "../lib/collect.js";
+import { laneState, stallThresholdMs } from "../lib/lane-state.js";
 import { readEvents } from "../lib/events.js";
 import { mergeStatus } from "../lib/merge.js";
-import type { WaveStatus } from "../lib/types.js";
+import type { DerivedLane, LaneStatus, WaveStatus } from "../lib/types.js";
 
 const PAGE_PATH = fileURLToPath(
   new URL("../public/index.html", import.meta.url),
@@ -182,6 +183,62 @@ const mixedStatus: WaveStatus = {
     },
   ],
 } as WaveStatus;
+
+// One lane in every state `laneState` can name, built around `now` so the two
+// lanes that straddle the stall threshold stay on their own side of it while the
+// page and the lib function each read their own clock: the stalled one is a
+// minute past the threshold, the long-running one five minutes short of it. If
+// either implementation's threshold moves — the page's literal or the exported
+// constant — one of these two lanes starts disagreeing with the other, which is
+// what the parity test below is for.
+const stateFixture = (now: number): WaveStatus => {
+  const logQuietFor = (ms: number) => ({ bytes: 128, mtimeMs: now - ms, tail: "" });
+  const lane = (
+    id: string,
+    derived: Record<string, unknown>,
+    disagreements: string[] = [],
+  ): Record<string, unknown> => ({ wave: "S", lane: id, derived, disagreements });
+  return {
+    generatedAt: new Date(now).toISOString(),
+    waves: [
+      {
+        id: "S",
+        lanes: [
+          lane("conflict", { alive: true, exit: 1 }, ["reported settled, EXIT is 1"]),
+          lane("failed", { alive: false, exit: 1 }),
+          lane("stalled", { alive: true, log: logQuietFor(stallThresholdMs + 60_000) }),
+          lane("running", { alive: true, log: logQuietFor(4 * 60_000) }),
+          lane("patient", { alive: true, log: logQuietFor(stallThresholdMs - 5 * 60_000) }),
+          lane("no-log", { alive: true }),
+          lane("vanished", { alive: false, exit: 0 }),
+          lane("blocked", { alive: false, pr: { number: 5, state: "open", checks: "pending" } }),
+          lane("unstarted", { alive: false, pr: { number: 11, state: "open", checks: "none" } }),
+          lane("ready", { alive: false, pr: { number: 6, state: "open", checks: "pass" } }),
+          lane("merged", { alive: false, pr: { number: 7, state: "merged", checks: "pass" } }),
+        ],
+      },
+    ],
+  } as unknown as WaveStatus;
+};
+
+// The state word each lane's leading cell must carry, and the tone it is
+// painted in. Eight states share the page's five existing tones — conflict and
+// failed are both red, stalled and blocked both amber — because the word is
+// what names the state (WCAG 1.4.1); the tone only ranks it. The tones are the
+// ones already in the stylesheet, so no new colour enters the palette.
+const EXPECTED_STATE_PILLS: ReadonlyArray<readonly [string, string, string]> = [
+  ["conflict", "conflict", "bad"],
+  ["failed", "failed", "bad"],
+  ["stalled", "stalled", "warn"],
+  ["running", "running", "info"],
+  ["patient", "running", "info"],
+  ["no-log", "running", "info"],
+  ["vanished", "vanished", "bad"],
+  ["blocked", "blocked", "warn"],
+  ["unstarted", "blocked", "warn"],
+  ["ready", "ready", "ok"],
+  ["merged", "merged", "dim"],
+];
 
 // name, label, value — counts for mixedStatus above.
 const EXPECTED_METRICS: ReadonlyArray<readonly [string, string, string]> = [
@@ -2461,7 +2518,7 @@ describe("the status page", () => {
       ).toBe(false);
     });
     expect(doc.getElementById("log-lane")?.textContent).toBe("W_A/l_a");
-    expect(laneA.classList.contains("active")).toBe(true);
+    expect(laneA.classList.contains("selected")).toBe(true);
 
     // Emit new status where W_A becomes newer (3000 > 2000)
     // This moves W_A from second to first row!
@@ -2484,11 +2541,11 @@ describe("the status page", () => {
     ) as unknown as HTMLElement;
     expect(laneAAfter.hidden).toBe(false);
 
-    // The open log is still open and active row is preserved on the moved lane
+    // The open log is still open and the selected row is preserved on the moved lane
     const logPane = doc.getElementById("log-pane") as HTMLElement | null;
     expect(logPane?.hidden).toBe(false);
     expect(doc.getElementById("log-lane")?.textContent).toBe("W_A/l_a");
-    expect(laneAAfter.classList.contains("active")).toBe(true);
+    expect(laneAAfter.classList.contains("selected")).toBe(true);
 
     // Now flip the sort switch off to restore server order (W_A, W_B)
     const switchEl = doc.getElementById(
@@ -2499,7 +2556,7 @@ describe("the status page", () => {
     expect(waveAButtonAfter.getAttribute("aria-expanded")).toBe("true");
     expect(logPane?.hidden).toBe(false);
     expect(doc.getElementById("log-lane")?.textContent).toBe("W_A/l_a");
-    expect(laneAAfter.classList.contains("active")).toBe(true);
+    expect(laneAAfter.classList.contains("selected")).toBe(true);
   });
 
   test("the switch has an accessible name, flipping it restores the server order without a refresh, and the choice survives a reload", async () => {
@@ -3519,6 +3576,7 @@ describe("the status page", () => {
     const page = await loadPage(mixedStatus);
     const doc = page.window.document;
     const columnClasses = [
+      "c-state",
       "c-lane",
       "c-stage",
       "c-live",
@@ -3534,6 +3592,199 @@ describe("the status page", () => {
     expect(row).not.toBeNull();
     const cells = Array.from(row!.querySelectorAll("td"));
     expect(cells.map((td) => td.className)).toEqual(columnClasses);
+  });
+
+  test("the derived state leads every lane row, as a word in a coloured pill with a dot", async () => {
+    const page = await loadPage(stateFixture(Date.now()));
+    const doc = page.window.document;
+    for (const [laneId, state, tone] of EXPECTED_STATE_PILLS) {
+      const row = doc.querySelector(`tr.lane[data-lane="${laneId}"]`);
+      expect(row, `lane ${laneId} never rendered`).not.toBeNull();
+      // Leading the row: the state is the first cell a reader meets, so the
+      // verdict never depends on scanning the other six.
+      const cell = row!.querySelector("td");
+      expect(cell?.className, `lane ${laneId}'s first cell is not the state cell`).toBe(
+        "c-state",
+      );
+      const pill = cell?.querySelector(".pill") as unknown as HTMLElement;
+      expect(pill, `lane ${laneId} has no state pill`).toBeTruthy();
+      expect(pill.textContent?.trim()).toBe(state);
+      expect(pill.classList.contains(tone)).toBe(true);
+      // Form as well as colour: every state pill carries its dot.
+      expect(pill.querySelector(".pill-dot")).not.toBeNull();
+    }
+  });
+
+  test("the state cell says exactly what laneState() says for the same lane", async () => {
+    // The page holds its own copy of the derivation — the inline script cannot
+    // import the module — so this test is the seam between them. It is driven
+    // from the INPUT space, not from the list of states: every combination of
+    // `pr.state` × `pr.checks` the types permit, plus the no-PR cases, each fed
+    // to both implementations. A hand-listed set of outputs can only ever miss
+    // an input that maps to no output — which is precisely the gap that let an
+    // open PR with `checks: "none"` fall through to a throw on main while the
+    // page rendered "unknown" for it. The types enumerate the space; the test
+    // enumerates what the types enumerate. The state fixture rides along: the
+    // inputs that make the PR arms decide (exit, log age, disagreement) belong
+    // to the same seam, and dropping them would let a reordering of those arms
+    // survive here.
+    const now = Date.now();
+    const lanes: Record<string, unknown>[] = [
+      ...stateFixture(now).waves[0].lanes,
+    ] as unknown as Record<string, unknown>[];
+    const noPrCases: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+      ["no-pr", { alive: false }],
+      ["no-pr-exit0", { alive: false, exit: 0 }],
+      ["no-pr-fail", { alive: false, exit: 1 }],
+      ["no-pr-alive", { alive: true }],
+    ];
+    for (const [id, derived] of noPrCases) {
+      lanes.push({ wave: "S", lane: id, derived, disagreements: [] });
+    }
+    // Derived from the declared union, not copied from it: a state or check
+    // value added to `LaneObservation["pr"]` without being listed here fails to
+    // compile (the `Record` is missing a key), and one listed that the types no
+    // longer permit fails too (an excess property). The input space can then
+    // only ever be as stale as the types themselves — a hand-listed set of
+    // *states* is how the first version of this seam missed an input that
+    // mapped to none of them.
+    type PermittedPr = NonNullable<DerivedLane["pr"]>;
+    const prStates = Object.keys({
+      open: true,
+      merged: true,
+      closed: true,
+    } satisfies Record<PermittedPr["state"], true>) as PermittedPr["state"][];
+    const prChecks = Object.keys({
+      none: true,
+      pending: true,
+      pass: true,
+      fail: true,
+    } satisfies Record<PermittedPr["checks"], true>) as PermittedPr["checks"][];
+    for (const state of prStates) {
+      for (const checks of prChecks) {
+        lanes.push({
+          wave: "S",
+          lane: `pr-${state}-${checks}`,
+          derived: { alive: false, pr: { number: 9, state, checks } },
+          disagreements: [],
+        });
+      }
+    }
+    const status = {
+      generatedAt: new Date(now).toISOString(),
+      waves: [{ id: "S", lanes }],
+    } as unknown as WaveStatus;
+
+    const page = await loadPage(status);
+    const doc = page.window.document;
+    expect(doc.querySelectorAll("tr.lane").length).toBe(lanes.length);
+    for (const lane of lanes) {
+      const id = lane.lane as string;
+      const pill = doc.querySelector(
+        `tr.lane[data-lane="${id}"] td.c-state .pill`,
+      ) as unknown as HTMLElement | null;
+      expect(pill, `lane ${id} has no state pill`).toBeTruthy();
+      // A thrown exception is an answer the page can never give, and a
+      // rendered word is one the module can never withhold: on this seam they
+      // are a difference, not an exemption — so the module's verdict is
+      // recorded in the same currency the row renders.
+      let said: string;
+      try {
+        said = laneState(lane as unknown as LaneStatus, now);
+      } catch (error) {
+        said = `threw: ${String(error)}`;
+      }
+      expect(pill!.textContent?.trim(), `lane ${id}`).toBe(said);
+    }
+  });
+
+  test("a lane whose PR state the derivation cannot name renders as unknown, not as a guess", async () => {
+    // The collector does produce `closed` PRs (collect.ts keeps open/merged/
+    // closed), and the ranking has no verdict for one — the lane's PR was shut
+    // without merging, which is neither ready nor merged nor failed. Both
+    // implementations must say the gap plainly: an unnamed state is a question,
+    // a wrong state is a lie. It used to be that the module threw here and only
+    // the page could answer; a throw on this seam is exactly the divergence the
+    // parity test above exists to keep out.
+    const now = Date.now();
+    const closedStatus = {
+      generatedAt: new Date(now).toISOString(),
+      waves: [
+        {
+          id: "S",
+          lanes: [
+            ...stateFixture(now).waves[0].lanes,
+            {
+              wave: "S",
+              lane: "closed",
+              derived: {
+                alive: false,
+                pr: { number: 8, state: "closed", checks: "none" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as unknown as WaveStatus;
+    const page = await loadPage(closedStatus);
+    const doc = page.window.document;
+    const pill = doc.querySelector(
+      'tr.lane[data-lane="closed"] td.c-state .pill',
+    ) as unknown as HTMLElement;
+    expect(pill).toBeTruthy();
+    expect(pill.textContent?.trim()).toBe("unknown");
+    expect(pill.classList.contains("dim")).toBe(true);
+    // The module answers in the same word — and nothing about the row's
+    // oddity takes the rest of the table down.
+    expect(
+      laneState(closedStatus.waves[0].lanes[11], now),
+    ).toBe("unknown");
+    expect(doc.querySelectorAll("tr.lane").length).toBe(12);
+  });
+
+
+  test("the page mirrors the exported stall threshold, to the millisecond", async () => {
+    // The inline script cannot import the module, so it carries its own copy of
+    // the constant — and this is what stops the two from drifting: the page's
+    // literal, read from its own source, must equal `stallThresholdMs`. The
+    // behavioural parity test above only pins it to within the fixture's
+    // margins; this one pins the number.
+    const html = await readFile(PAGE_PATH, "utf8");
+    const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? "";
+    const literal = /const STALL_THRESHOLD_MS = (\d+);/.exec(script);
+    expect(literal, "the page no longer states its stall threshold").not.toBeNull();
+    expect(Number(literal![1])).toBe(stallThresholdMs);
+  });
+
+  test("a running lane states how long it has been quiet, from the log's mtime", async () => {
+    const page = await loadPage(stateFixture(Date.now()));
+    const doc = page.window.document;
+    expect(
+      (doc.querySelector('tr.lane[data-lane="running"] td.c-state') as unknown as HTMLElement)
+        .textContent,
+    ).toContain("quiet 4m");
+    expect(
+      (doc.querySelector('tr.lane[data-lane="patient"] td.c-state') as unknown as HTMLElement)
+        .textContent,
+    ).toContain(`quiet ${Math.floor((stallThresholdMs - 5 * 60_000) / 60_000)}m`);
+    // Nothing to be quiet about: a lane with no log gets no invented number,
+    // and the quiet time belongs to the living states only.
+    const noLog = doc.querySelector('tr.lane[data-lane="no-log"] td.c-state') as unknown as HTMLElement;
+    expect(noLog.textContent).not.toContain("quiet");
+    for (const laneId of ["stalled", "blocked", "ready", "merged", "vanished", "failed", "conflict"]) {
+      const cell = doc.querySelector(`tr.lane[data-lane="${laneId}"] td.c-state`) as unknown as HTMLElement;
+      expect(cell.textContent, `lane ${laneId}`).not.toContain("quiet");
+    }
+  });
+
+  test("the state cell keeps the lane's own identity in the next cell, so a verdict never replaces a name", async () => {
+    const page = await loadPage(stateFixture(Date.now()));
+    const doc = page.window.document;
+    const row = doc.querySelector('tr.lane[data-lane="ready"]');
+    const cells = Array.from(row!.querySelectorAll("td"));
+    expect(cells[1]?.className).toBe("c-lane");
+    expect(cells[1]?.textContent?.trim()).toBe("S/ready");
   });
 
   test("a pill renders per state with the right variant, and its accessible text is the state — not colour alone", async () => {
@@ -3826,7 +4077,7 @@ describe("the status page", () => {
     expect(button!.getAttribute("aria-expanded")).toBe("false");
   });
 
-  test("the open lane's row carries .active, survives a re-render, and clears on close", async () => {
+  test("the open lane's row carries .selected, survives a re-render, and clears on close", async () => {
     const page = await loadPage(mixedStatus);
     const doc = page.window.document;
     (
@@ -3840,19 +4091,26 @@ describe("the status page", () => {
     await vi.waitFor(() => {
       expect(page.fetches).toContain("/api/log/T/t1?tail=16");
     });
-    expect(row.classList.contains("active")).toBe(true);
+    expect(row.classList.contains("selected")).toBe(true);
+    // `.active` is retired, and not merely as a synonym: a class named *active*
+    // on exactly one row is read as "this is the live lane", which is a lie
+    // whenever the open log belongs to a lane that stopped an hour ago. The
+    // page now has a true liveness column, so the false one must be gone
+    // everywhere — in the markup and in the stylesheet.
+    expect(doc.querySelectorAll(".active").length).toBe(0);
+    expect(row.classList.contains("active")).toBe(false);
     // A different lane in the same wave never carries it.
     const other = doc.querySelector(
       'tr.lane[data-wave="T"][data-lane="t2"]',
     ) as unknown as HTMLElement;
-    expect(other.classList.contains("active")).toBe(false);
+    expect(other.classList.contains("selected")).toBe(false);
 
     page.source.emit("status", JSON.stringify(mixedStatus));
     const reRendered = doc.querySelector(
       'tr.lane[data-wave="T"][data-lane="t1"]',
     ) as unknown as HTMLElement;
     expect(reRendered).not.toBe(row);
-    expect(reRendered.classList.contains("active")).toBe(true);
+    expect(reRendered.classList.contains("selected")).toBe(true);
 
     (
       doc.getElementById("log-close") as unknown as HTMLElement
@@ -3860,7 +4118,14 @@ describe("the status page", () => {
     const afterClose = doc.querySelector(
       'tr.lane[data-wave="T"][data-lane="t1"]',
     ) as unknown as HTMLElement;
-    expect(afterClose.classList.contains("active")).toBe(false);
+    expect(afterClose.classList.contains("selected")).toBe(false);
+  });
+
+  test("the stylesheet highlights the selected row and defines no .active rule at all", async () => {
+    const style = await pageStyle();
+    expect(style).toContain("tr.lane.selected td");
+    expect(style).not.toMatch(/tr\.lane\.active\b/);
+    expect(style).not.toMatch(/\.active\b/);
   });
 
   test("with no waves at all, the table shows a single empty row instead of nothing", async () => {
@@ -3890,13 +4155,14 @@ describe("the status page", () => {
     const bodyRow = doc.querySelector('tr.lane[data-wave="T"][data-lane="t1"]');
     expect(bodyRow).not.toBeNull();
 
-    // All seven semantic column classes the header and body share — a
+    // All eight semantic column classes the header and body share — a
     // body-cell rule scoped only to its own class (no tbody/td qualifier)
     // beats `thead th` on specificity and repaints that one heading as a
     // body cell, regardless of source order. Checking every column, not
     // just the ones already known to collide, catches a future column that
     // repeats the same unscoped shape.
     const columns = [
+      "c-state",
       "c-lane",
       "c-stage",
       "c-live",
@@ -3981,14 +4247,14 @@ describe("the status page", () => {
     expect(logPane?.hidden).toBe(false);
     expect(doc.getElementById("log-lane")?.textContent).toBe("T/t1");
 
-    // Clearing restores all rows and the active row indicator
+    // Clearing restores all rows and the selected-row indicator
     filter.value = "";
     dispatchInput();
     expect(doc.querySelectorAll("tr.lane").length).toBe(5);
     const restoredT1 = doc.querySelector(
       'tr.lane[data-wave="T"][data-lane="t1"]',
     );
-    expect(restoredT1?.classList.contains("active")).toBe(true);
+    expect(restoredT1?.classList.contains("selected")).toBe(true);
     expect(logPane?.hidden).toBe(false);
   });
 

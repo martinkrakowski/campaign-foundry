@@ -280,10 +280,13 @@
         border-radius: var(--radius-sm);
       }
       /* Separate borders so the sticky thead keeps its underline while scrolled
-     (collapse would let it be painted away by the rows beneath). */
+     (collapse would let it be painted away by the rows beneath). The floor is
+     the sum of the column widths plus a little: the state column added 128px,
+     and a table squeezed below its own widths stops being a table and starts
+     being a wrapped paragraph. */
       table {
         width: 100%;
-        min-width: 1080px;
+        min-width: 1208px;
         border-collapse: separate;
         border-spacing: 0;
       }
@@ -314,6 +317,10 @@
         text-transform: uppercase;
         letter-spacing: 0.08em;
         color: var(--color-text-muted);
+      }
+      th.c-state {
+        /* the widest word ("conflict") plus its dot and a quiet time ("quiet 14m") */
+        width: 128px;
       }
       th.c-lane {
         width: 200px;
@@ -420,12 +427,32 @@
       tr.lane:focus-within td {
         background: var(--color-surface-2);
       }
-      tr.lane:focus-within td:first-child,
-      tr.lane.active td:first-child {
+      /* The one highlight on a row that means "this lane's log is open here" —
+     and nothing else. It used to carry the name *active*, which a reader scanning
+     for liveness took to mean *this row is the live one*: exactly one row
+     carried it — whichever log happened to be open, however long ago that
+     lane stopped — and no running lane carried anything at all. The derived
+     state column now says who is live, so this class is renamed to what it
+     has always meant. */
+      /* The state pill is the row's leftmost thing now, so the lane's name is
+     no longer `td:first-child`: the bar is scoped to `td.c-lane` by name
+     rather than by position, and marks the name either way. */
+      tr.lane:focus-within td.c-lane,
+      tr.lane.selected td.c-lane {
         box-shadow: inset 2px 0 0 var(--color-brand-primary);
       }
-      tr.lane.active td {
+      tr.lane.selected td {
         background: var(--color-brand-tint);
+      }
+      /* The quiet time beside a state pill is a measurement, not a state — mono
+     and small, the same read as `.round`. Its ink is *secondary*, not muted:
+     muted on a selected row's brand tint measures 4.0 : 1, and this label has
+     to stay legible on every ground a row can be on. */
+      .quiet {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--color-text-secondary);
+        margin-left: 6px; /* see .row-go above — same in-between value, same reason */
       }
       /* tr.lane .key, for the same specificity reason as tr.wave .wave-band
      above: it needs to beat the shared button reset's own color/font. */
@@ -484,6 +511,9 @@
      selector is (0,1,0), which already beats thead th's (0,0,2) on
      specificity alone regardless of source order. */
       tbody td.c-live {
+        font-size: 12px;
+      }
+      tbody td.c-state {
         font-size: 12px;
       }
       .live-ok {
@@ -894,6 +924,7 @@
           <caption class="visually-hidden">Lane status by wave</caption>
           <thead>
             <tr>
+              <th class="c-state" scope="col">state</th>
               <th class="c-lane" scope="col">lane</th>
               <th class="c-stage" scope="col">stage</th>
               <th class="c-live" scope="col">liveness</th>
@@ -1082,8 +1113,8 @@
       // older response landing after a newer one is silently discarded, and
       // two follow refreshes for the same lane can never race each other.
       let requestSeq = 0;
-      let activeWave = null;
-      let activeLane = null;
+      let selectedWave = null;
+      let selectedLane = null;
       let following = false;
       const metricValues = {};
       for (const metric of document.querySelectorAll(
@@ -1160,8 +1191,8 @@
                         following = checkbox.checked;
                         if (
                           following &&
-                          activeWave !== null &&
-                          activeLane !== null
+                          selectedWave !== null &&
+                          selectedLane !== null
                         ) {
                           void maybeFollow();
                         }
@@ -1240,13 +1271,13 @@
 
       async function maybeFollow() {
         if (!following) return;
-        if (activeWave === null || activeLane === null) return;
+        if (selectedWave === null || selectedLane === null) return;
         // Each call claims its own generation, even for the same lane —
         // without this, two overlapping refreshes for one lane share a
         // sequence and cannot tell which of them is newer.
         const seq = ++requestSeq;
         try {
-          await loadTail(activeWave, activeLane, seq);
+          await loadTail(selectedWave, selectedLane, seq);
         } catch {
           // loadTail already reports its own failures (see stopFollowOnError).
           // This only guards the callers below, which invoke maybeFollow with
@@ -1388,6 +1419,86 @@
         '<svg class="row-go" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m5.2 3.6 3.4 3.4-3.4 3.4"/></svg>';
 
       const STALLED_GRACE_MS = 60000;
+
+      /* The derived lane state — the row's verdict — computed here from the
+     same facts `lib/lane-state.ts` computes it from. The page's script cannot
+     import a module (the server serves this file verbatim and the script runs
+     inline), so this is a second implementation of one rule, exactly as
+     STALLED_GRACE_MS above already is. Two tests hold the copies together: a
+     parity test feeds every PR input the types permit — state × checks, plus
+     the no-PR cases — to the module *and* to the rendered row and fails if the
+     words ever differ, and a pin test reads this file's own threshold literal
+     against `stallThresholdMs`. Fifteen minutes, then —
+     a decision about patience rather than an inference from data, because a
+     lane legitimately goes quiet through a build. */
+      const STALL_THRESHOLD_MS = 900000;
+
+      const STATE_TONE = {
+        conflict: "bad",
+        failed: "bad",
+        stalled: "warn",
+        running: "info",
+        vanished: "bad",
+        blocked: "warn",
+        ready: "ok",
+        merged: "dim",
+        unknown: "dim",
+      };
+
+      // First match wins, in the order lib/lane-state.ts states it: a lane that
+      // reports success while reality disagrees outranks an honest failure,
+      // because the honest one is the one a reader would otherwise skip.
+      function laneStateOf(lane, nowMs) {
+        const derived = lane.derived;
+        if (lane.disagreements.length > 0) return "conflict";
+        const gateExit = derived.gate === undefined ? undefined : derived.gate.exit;
+        if (
+          (derived.exit !== undefined && derived.exit !== 0) ||
+          (gateExit !== undefined && gateExit !== 0) ||
+          (derived.pr !== undefined && derived.pr.checks === "fail")
+        ) {
+          return "failed";
+        }
+        if (
+          derived.alive &&
+          derived.log !== undefined &&
+          derived.log.mtimeMs < nowMs - STALL_THRESHOLD_MS
+        ) {
+          return "stalled";
+        }
+        if (derived.alive) return "running";
+        if (derived.pr === undefined) return "vanished";
+        if (derived.pr.state === "open" && (derived.pr.checks === "pending" || derived.pr.checks === "none")) return "blocked";
+        if (derived.pr.state === "open" && derived.pr.checks === "pass") return "ready";
+        if (derived.pr.state === "merged") return "merged";
+        // The only PR state left is `closed` — the lane's PR was shut without
+        // merging, which is not a verdict this ranking owns. Say the gap rather
+        // than guess at it: an unnamed state is a question, a wrong state is a
+        // lie. The module states the same word for the same input.
+        return "unknown";
+      }
+
+      // Bins floor down and a clock-ahead mtime reads as quiet now, never as a
+      // negative age — the same honesty `waveAge` keeps in the header.
+      function quietSpan(elapsedMs) {
+        if (elapsedMs < 0) return "quiet now";
+        if (elapsedMs < 60000) return `quiet ${Math.floor(elapsedMs / 1000)}s`;
+        if (elapsedMs < 3600000) return `quiet ${Math.floor(elapsedMs / 60000)}m`;
+        if (elapsedMs < 86400000) return `quiet ${Math.floor(elapsedMs / 3600000)}h`;
+        return `quiet ${Math.floor(elapsedMs / 86400000)}d`;
+      }
+
+      function stateCell(lane) {
+        // One reading of the clock per cell: the state and the quiet time beside
+        // it are the same measurement, and must not straddle a tick.
+        const now = Date.now();
+        const state = laneStateOf(lane, now);
+        const quiet =
+          state === "running" && lane.derived.log !== undefined
+            ? `<span class="quiet">${esc(quietSpan(now - lane.derived.log.mtimeMs))}</span>`
+            : "";
+        return pill(STATE_TONE[state], state, true) + quiet;
+      }
 
       function isLaneStalled(lane) {
         if (lane.reported === undefined || lane.reported.event !== "started" || lane.derived.alive) {
@@ -1597,13 +1708,13 @@
       }
 
       // Marks the one lane row (if any) whose log is currently open — the
-      // only place `.active` is written, so it can never drift from
-      // activeWave/activeLane.
-      function syncActiveRow() {
+      // only place the selection class is written, so it can never drift from
+      // selectedWave/selectedLane.
+      function syncSelectedRow() {
         for (const row of table.querySelectorAll("tr.lane")) {
           row.classList.toggle(
-            "active",
-            row.dataset.wave === activeWave && row.dataset.lane === activeLane,
+            "selected",
+            row.dataset.wave === selectedWave && row.dataset.lane === selectedLane,
           );
         }
       }
@@ -1641,7 +1752,7 @@
           // and it sits outside the age span, so no age ever renders without
           // one.
           const rowHtml = [
-            `<tr class="wave" data-wave="${esc(wave.id)}"><td colspan="7">` +
+            `<tr class="wave" data-wave="${esc(wave.id)}"><td colspan="8">` +
               `<button type="button" class="wave-band" tabindex="0" aria-expanded="${isExpanded ? "true" : "false"}" aria-controls="waves-${esc(wave.id)}">` +
               `<span class="wave-eyebrow">wave</span> <span class="wave-id">${esc(wave.id)}</span><span class="sep"> · </span><span class="wave-age">${esc(waveAge(wave))}</span><span class="wave-meta">${waveMeta(filteredLanes)}</span>` +
               `</button></td></tr>`,
@@ -1651,13 +1762,14 @@
               ? "No lanes in wave"
               : `No lanes match “${esc(filterInput ? filterInput.value : "")}”`;
             rowHtml.push(
-              `<tr class="empty" data-wave="${esc(wave.id)}"><td colspan="7">${emptyMsg}</td></tr>`,
+              `<tr class="empty" data-wave="${esc(wave.id)}"><td colspan="8">${emptyMsg}</td></tr>`,
             );
           } else {
             for (const lane of filteredLanes) {
               const key = `${esc(wave.id)}/${esc(lane.lane)}`;
               rowHtml.push(
                 `<tr class="lane" data-wave="${esc(wave.id)}" data-lane="${esc(lane.lane)}"${isExpanded ? "" : " hidden"}>` +
+                  `<td class="c-state">${stateCell(lane)}</td>` +
                   `<td class="c-lane"><button type="button" class="key" tabindex="0">${key}</button></td>` +
                   `<td class="c-stage">${stageCell(lane)}</td>` +
                   `<td class="c-live">${liveness(lane)}</td>` +
@@ -1670,7 +1782,7 @@
               // A banner per disagreement, in the lane's own words (D103).
               for (const disagreement of lane.disagreements) {
                 rowHtml.push(
-                  `<tr class="disagreement" data-wave="${esc(wave.id)}"${isExpanded ? "" : " hidden"}><td colspan="7">${esc(disagreement)}</td></tr>`,
+                  `<tr class="disagreement" data-wave="${esc(wave.id)}"${isExpanded ? "" : " hidden"}><td colspan="8">${esc(disagreement)}</td></tr>`,
                 );
               }
             }
@@ -1682,7 +1794,7 @@
           groups.push({
             id: "none",
             rowHtml: [
-              '<tr class="empty"><td colspan="7">No waves yet — the table fills in as soon as the first status event arrives.</td></tr>',
+              '<tr class="empty"><td colspan="8">No waves yet — the table fills in as soon as the first status event arrives.</td></tr>',
             ],
           });
         }
@@ -1701,7 +1813,7 @@
             }
           }
         }
-        syncActiveRow();
+        syncSelectedRow();
         const m = metricsOf(status);
         setMetric("lanes", m.lanes);
         setMetric("alive", m.alive);
@@ -1713,11 +1825,11 @@
         setMetric("failing", m.failing);
         setMetric("waves", m.waves);
 
-        // Update follow control visibility based on active lane's alive state
-        if (activeWave !== null && activeLane !== null) {
-          const activeLaneData = laneOf(status, activeWave, activeLane);
+        // Update follow control visibility based on the selected lane's alive state
+        if (selectedWave !== null && selectedLane !== null) {
+          const selectedLaneData = laneOf(status, selectedWave, selectedLane);
           syncFollowControl(
-            activeLaneData !== null && activeLaneData.derived.alive === true,
+            selectedLaneData !== null && selectedLaneData.derived.alive === true,
           );
         }
 
@@ -1787,7 +1899,7 @@
         const wave = row.dataset.wave;
         const lane = row.dataset.lane;
         const laneKey = `${wave}/${lane}`;
-        // Settle the active lane's identity — and turn follow off — before
+        // Settle the selected lane's identity — and turn follow off — before
         // the request starts, not after it resolves. A render that lands
         // while this fetch is in flight (SSE fires independently of any
         // fetch) must already see the new lane, never the outgoing one: it
@@ -1795,9 +1907,9 @@
         // from starting a follow refresh for the lane being switched away
         // from.
         following = false;
-        activeWave = wave;
-        activeLane = lane;
-        syncActiveRow();
+        selectedWave = wave;
+        selectedLane = lane;
+        syncSelectedRow();
         logPane.hidden = false;
         logView.hidden = false;
         pageGrid.classList.add("with-log");
@@ -1842,9 +1954,9 @@
         copyBtn.setAttribute("aria-label", "copy");
         copyBtn.classList.remove("ok", "bad");
         requestSeq++;
-        activeWave = null;
-        activeLane = null;
-        syncActiveRow();
+        selectedWave = null;
+        selectedLane = null;
+        syncSelectedRow();
         following = false;
         logPane.hidden = true;
         logView.hidden = true;
@@ -1905,8 +2017,8 @@
       });
 
       downloadBtn.addEventListener("click", () => {
-        const wave = activeWave;
-        const lane = activeLane;
+        const wave = selectedWave;
+        const lane = selectedLane;
         if (!wave || !lane) return;
         const a = document.createElement("a");
         a.href = `/api/log/${wave}/${lane}?full=1`;

@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "lane": "W2",
+  "mutations": [
+    {
+      "file": "tools/wave-status/public/index.html",
+      "before": "                  `<td class=\"c-state\">${stateCell(lane)}</td>` +\n                  `<td class=\"c-lane\"><button type=\"button\" class=\"key\" tabindex=\"0\">${key}</button></td>` +",
+      "after": "                  `<td class=\"c-lane\"><button type=\"button\" class=\"key\" tabindex=\"0\">${key}</button></td>` +\n                  `<td class=\"c-state\">${stateCell(lane)}</td>` +",
+      "because": "If the state cell trails the lane name instead of leading the row, every state is still rendered and every assertion about its text still passes — but the reader has to scan again to find it, which is the defect the column exists to remove. Order is the deliverable, so the order is pinned.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/public/index.html",
+      "before": "toggle(\n            \"selected\",",
+      "after": "toggle(\n            \"active\",",
+      "because": "The rename is the removal of a false signal, not a synonym: a class named active lands on exactly one row — whichever log is open — and a reader hunting for the live lane reads that row as the live one. Put the name back and the lie returns even though the new state column is untouched and still correct.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/public/index.html",
+      "before": "        if (elapsedMs < 3600000) return `quiet ${Math.floor(elapsedMs / 60000)}m`;",
+      "after": "        if (elapsedMs < 3600000) return `quiet ${Math.floor(elapsedMs / 1000)}s`;",
+      "because": "The quiet time is the answer to 'how long has this running lane been silent', so its bin is the claim. A minutes lane rendered as 240s is the same fact stated in a unit nobody can read at a glance — and the row's own threshold crossing (15m) stops being visible in the number.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/lane-state.ts",
+      "before": "export const stallThresholdMs = 15 * 60 * 1000;",
+      "after": "export const stallThresholdMs = 5 * 60 * 1000;",
+      "because": "The page cannot import the module, so it carries its own copy of the threshold. Change one side and the two disagree about who is stalled — which is the drift this lane's parity test and its threshold-pin test exist to catch, not a lib-unit test written against the same constant.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/lane-state.ts",
+      "before": "  if (status.disagreements.length > 0) {\n    return \"conflict\";\n  }",
+      "after": "  if (false as boolean) {\n    return \"conflict\";\n  }",
+      "because": "Conflict outranks failure deliberately: a lane that reports success while the derived facts say otherwise is the one a human would otherwise skip. Silence the first arm and that lane reads as an ordinary failed row; the page's leading cell changes its word with it, so the ranking is owned by the rendered row and not only by the unit test that shares the function's own assumptions.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/lane-state.ts",
+      "before": "  if (derived.pr.state === \"open\" && (derived.pr.checks === \"pending\" || derived.pr.checks === \"none\")) {",
+      "after": "  if (derived.pr.state === \"open\" && derived.pr.checks === \"pending\") {",
+      "because": "An open PR whose checks read none is every PR for its first few seconds — waiting on a CI run that has not started, which is what blocked already means. Drop \"none\" from the arm and the module answers a different word than the page for an input the types permit: the exact divergence the input-space parity test was rewritten to catch, so it is caught here and not by the state list that missed it the first time.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/lib/__tests__/lane-state.test.ts", "tools/wave-status/__tests__/page.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/public/index.html",
+      "before": "        if (derived.pr.state === \"open\" && (derived.pr.checks === \"pending\" || derived.pr.checks === \"none\")) return \"blocked\";",
+      "after": "        if (derived.pr.state === \"open\" && derived.pr.checks === \"pending\") return \"blocked\";",
+      "because": "The same rule with the same word removed from the copy instead of the original: the page falls through to \"unknown\" and the module still says \"blocked\". Two implementations of one rule only stay joined if the seam is tested from both sides, and the parity test reads both — which side drifts must not decide whether the drift is seen.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
+      "verdict": "caught"
+    }
+  ]
+}
