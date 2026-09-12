@@ -1,4 +1,11 @@
-import { laneState, stallThresholdMs } from "../lane-state";
+import {
+  laneState,
+  laneStateCounts,
+  stallThresholdMs,
+  LANE_STATES,
+  NEEDS_HUMAN_STATES,
+  isNeedsHumanState,
+} from "../lane-state";
 import type { LaneStatus } from "../types.js";
 import { it, expect } from "vitest";
 
@@ -197,3 +204,66 @@ it("stalled overrides running", () => {
   const s2 = withLog(s, now - stallThresholdMs - 1);
   expect(laneState(s2, now)).toBe("stalled");
 });
+
+// The rollup: per-wave and page counts are `laneStateCounts` over the lanes,
+// bucketed by `laneState` — the very function the row's leading cell reads. So
+// the count of `running` here is the count of rows that will render `running`,
+// by construction: one computation, not two that must be kept in step.
+it("laneStateCounts buckets every state once each, keyed by LANE_STATES", () => {
+  const oneOfEach: LaneStatus[] = [
+    makeStatus({ disagreements: ["a"] }), // conflict
+    makeStatus({ derived: { alive: false, exit: 1 } }), // failed
+    withLog(makeStatus({ derived: { alive: true } }), now - stallThresholdMs - 1), // stalled
+    withLog(makeStatus({ derived: { alive: true } }), now - stallThresholdMs + 1), // running
+    makeStatus({ derived: { alive: false } }), // vanished
+    makeStatus({ derived: { alive: false, pr: { number: 1, state: "open", checks: "pending" } } }), // blocked
+    makeStatus({ derived: { alive: false, pr: { number: 1, state: "open", checks: "pass" } } }), // ready
+    makeStatus({ derived: { alive: false, pr: { number: 1, state: "merged", checks: "pass" } } }), // merged
+    makeStatus({ derived: { alive: false, pr: { number: 1, state: "closed", checks: "none" } } }), // unknown
+  ];
+  expect(laneStateCounts(oneOfEach, now)).toEqual({
+    conflict: 1,
+    failed: 1,
+    stalled: 1,
+    running: 1,
+    vanished: 1,
+    blocked: 1,
+    ready: 1,
+    merged: 1,
+    unknown: 1,
+  });
+  // Every state is a key — a known zero, not a missing one — and the keys are
+  // exactly LANE_STATES, so the rollup can never be shown a state it cannot name.
+  expect(Object.keys(laneStateCounts(oneOfEach, now)).sort()).toEqual(
+    [...LANE_STATES].sort(),
+  );
+});
+
+it("laneStateCounts tallies repeats and sums to the lanes given", () => {
+  const running = makeStatus({ derived: { alive: true } });
+  const merged = makeStatus({
+    derived: { alive: false, pr: { number: 2, state: "merged", checks: "none" } },
+  });
+  const counts = laneStateCounts([running, running, running, merged], now);
+  expect(counts.running).toBe(3);
+  expect(counts.merged).toBe(1);
+  expect(Object.values(counts).reduce((a, b) => a + b, 0)).toBe(4);
+});
+
+it("laneStateCounts of no lanes is every state at zero — a known nothing, not a blank", () => {
+  const empty = laneStateCounts([], now);
+  expect(Object.values(empty)).toEqual(LANE_STATES.map(() => 0));
+});
+
+// The *hide inactive* set: what a human is wanted for. The page mirrors this list
+// and a test holds them to the same fixture; here it is the rule stated once.
+it("isNeedsHumanState names exactly the states a human is wanted for", () => {
+  for (const state of NEEDS_HUMAN_STATES) {
+    expect(isNeedsHumanState(state)).toBe(true);
+  }
+  for (const state of LANE_STATES) {
+    const wants = NEEDS_HUMAN_STATES.includes(state);
+    expect(isNeedsHumanState(state)).toBe(wants);
+  }
+});
+

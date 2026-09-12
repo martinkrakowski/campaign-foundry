@@ -271,6 +271,52 @@
         font-size: 11px;
         margin-left: 3px;
       }
+      /* The page-level answer to "how many need me": the derived-state rollup,
+      bucketed from the same laneStateOf the rows lead with. The lead count is
+      the needs-a-human total (running, stalled, conflict, failed); the chips
+      break it down by state in the rollup's order, only the states present, so
+      the bar never shows "0 merged". Its ink is the same tone vocabulary as the
+      pills — a count can never disagree with the rows it counts. */
+      #state-summary {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: var(--space-2) var(--space-4);
+        margin-top: var(--space-3);
+        font-size: 12px;
+      }
+      #state-summary .ss-lead {
+        display: inline-flex;
+        align-items: baseline;
+        gap: var(--space-1);
+      }
+      #state-summary .ss-lead .value {
+        font-family: var(--font-mono);
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        color: var(--color-text-primary);
+      }
+      #state-summary .ss-lead .value.hot {
+        color: var(--color-error);
+      }
+      #state-summary .ss-lead .label {
+        color: var(--color-text-muted);
+        font-size: 11px;
+      }
+      #state-summary .ss-chips {
+        display: inline-flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: var(--space-1) var(--space-3);
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+      }
+      #state-summary .ss-chip {
+        color: var(--color-text-muted);
+      }
+      #state-summary .ss-chip .n {
+        font-weight: 600;
+      }
       #table-pane {
         min-height: 0;
         overflow: auto; /* wide content scrolls inside its own box; the page never scrolls sideways */
@@ -386,6 +432,10 @@
         margin-left: auto;
         font-family: var(--font-mono);
         font-size: 11px;
+        /* Tabular so the per-state counts — the same tone ink as the pills they
+        summarise (see .ok/.warn/.bad/.info/.dim) — do not jitter as a number
+        rolls over a poll tick. */
+        font-variant-numeric: tabular-nums;
         color: var(--color-text-muted);
       }
       /* The header's age answers "is this current" before the reader opens
@@ -395,18 +445,6 @@
         font-family: var(--font-mono);
         font-size: 11px;
         color: var(--color-text-muted);
-      }
-      .wave-meta .wm-run {
-        color: var(--color-info);
-      }
-      .wave-meta .wm-warn {
-        color: var(--color-warning);
-      }
-      .wave-meta .wm-ok {
-        color: var(--color-success);
-      }
-      .wave-meta .wm-bad {
-        color: var(--color-error);
       }
       /* Lanes open the log on a click anywhere on the row; hover, focus and
      the open state all say so, because a clickable row that looks like
@@ -419,6 +457,7 @@
         cursor: pointer;
       }
       tr.lane td {
+
         transition:
           background 150ms ease,
           box-shadow 150ms ease;
@@ -625,6 +664,38 @@
       #sort-switch:hover {
         background: var(--color-surface);
         border-color: var(--color-border-control-hover);
+      }
+      /* The hide-inactive switch is the sort switch's sibling in every way that
+      matters — same control edge, same mono, same hover — so it restates the
+      rule rather than sharing a grouped selector, which would put the sort
+      switch's own border-token test in front of a comma. When it is on it is
+      doing something, so it tints to say so: aria-checked is the state, and the
+      box reads its condition from the attribute, never from a class the script
+      would have to keep in step with it. */
+      #hide-inactive {
+        display: inline-flex;
+        align-items: center;
+        height: 26px;
+        background: transparent;
+        border: 1px solid var(--color-border-control);
+        border-radius: var(--radius-sm);
+        color: var(--color-text-primary);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        padding: 0 var(--space-2);
+        cursor: pointer;
+      }
+      #hide-inactive:hover {
+        background: var(--color-surface);
+        border-color: var(--color-border-control-hover);
+      }
+      #hide-inactive[aria-checked="true"] {
+        color: var(--color-info);
+        border-color: color-mix(
+          in srgb,
+          var(--color-info) 45%,
+          var(--color-border-control)
+        );
       }
       #log-pane {
         display: flex;
@@ -855,6 +926,15 @@
             >
               <span class="label">sort:</span> <span class="value">recent</span>
             </button>
+            <button
+              type="button"
+              role="switch"
+              id="hide-inactive"
+              aria-checked="false"
+              aria-label="hide inactive lanes — show only those running, stalled, conflicted or failed"
+            >
+              <span class="label">show:</span> <span class="value">all</span>
+            </button>
             <span id="connection" class="connecting" role="status">
               <span class="conn-dot" aria-hidden="true"></span
               ><span class="conn-text">connecting…</span>
@@ -917,6 +997,12 @@
               >
             </div>
           </div>
+        </div>
+        <div id="state-summary" role="group" aria-label="Lanes by derived state">
+          <span class="ss-lead" data-state="attention"
+            ><span class="value">—</span> <span class="label">need a human</span></span
+          >
+          <span class="ss-chips"></span>
         </div>
       </header>
       <section id="table-pane">
@@ -1039,9 +1125,15 @@
       const closeBtn = document.getElementById("log-close");
       const pageGrid = document.getElementById("page");
       const sortSwitch = document.getElementById("sort-switch");
+      const hideInactiveSwitch = document.getElementById("hide-inactive");
+      const stateSummaryValue = document.querySelector(
+        '#state-summary [data-state="attention"] .value',
+      );
+      const stateSummaryChips = document.querySelector("#state-summary .ss-chips");
       const defaultExpanded = false;
       const expandedWaves = new Set();
       const SORT_STORAGE_KEY = "wave-status:sort";
+      const HIDE_INACTIVE_STORAGE_KEY = "wave-status:hide-inactive";
       let lastStatus = null;
       let filterText = "";
       let connState = "connecting";
@@ -1089,7 +1181,13 @@
 
       checkPalette();
 
-      function laneMatches(wave, lane) {
+      function laneMatches(wave, lane, nowMs) {
+        // Hide-inactive first: a lane that is not running, stalled, conflicted
+        // or failed is not a question for a human, so it leaves the view
+        // whatever the text filter says. The clock is the render's own — the
+        // same instant that paints the row's state and the header's count of it —
+        // so the row that is hidden and the state that hides it can never disagree.
+        if (hideInactive && !isLaneActive(lane, nowMs)) return false;
         if (filterText === "") return true;
         const key = `${wave.id}/${lane.lane}`.toLowerCase();
         const name = (lane.lane || "").toLowerCase();
@@ -1149,6 +1247,38 @@
       }
 
       let sortByRecent = loadSortPreference();
+
+      // Hide-inactive is off by default — the opposite polarity of the sort,
+      // which defaults to its more useful setting. A monitor that hides
+      // something you did not ask it to hide is a monitor you stop trusting;
+      // the owner asked to hide what is not moving, so the choice is offered and
+      // then kept, exactly as the sort is, across a refresh. Only an explicit
+      // truthy read turns it on: a throw (no storage at all) is a page that has
+      // never been told, which is off.
+      function loadHideInactive() {
+        try {
+          const storage = (typeof window !== "undefined" ? window : globalThis)
+            .localStorage;
+          const stored = storage ? storage.getItem(HIDE_INACTIVE_STORAGE_KEY) : null;
+          return stored === "true" || stored === "on" || stored === "1";
+        } catch {
+          return false;
+        }
+      }
+
+      function saveHideInactive(val) {
+        try {
+          const storage = (typeof window !== "undefined" ? window : globalThis)
+            .localStorage;
+          if (storage) {
+            storage.setItem(HIDE_INACTIVE_STORAGE_KEY, val ? "true" : "false");
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      let hideInactive = loadHideInactive();
 
       function laneOf(status, wave, lane) {
         if (status === null) return null;
@@ -1309,6 +1439,31 @@
       }
 
       updateSortSwitch();
+
+      function updateHideInactiveSwitch() {
+        if (!hideInactiveSwitch) return;
+        hideInactiveSwitch.setAttribute("aria-checked", String(hideInactive));
+        hideInactiveSwitch.innerHTML = hideInactive
+          ? '<span class="label">show:</span> <span class="value">active</span>'
+          : '<span class="label">show:</span> <span class="value">all</span>';
+      }
+
+      if (hideInactiveSwitch) {
+        Object.defineProperty(hideInactiveSwitch, "checked", {
+          get: () => hideInactive,
+          configurable: true,
+        });
+        hideInactiveSwitch.addEventListener("click", () => {
+          hideInactive = !hideInactive;
+          updateHideInactiveSwitch();
+          saveHideInactive(hideInactive);
+          if (lastStatus !== null) {
+            render(lastStatus, { skipFollow: true });
+          }
+        });
+      }
+
+      updateHideInactiveSwitch();
 
       function laneMtime(lane) {
         return lane.derived &&
@@ -1478,6 +1633,42 @@
         return "unknown";
       }
 
+      // The rollup's vocabulary and ranking, the second copy — like laneStateOf
+      // itself, and pinned to the module by a test over the state fixture: the
+      // states in the order a reader is shown them (highest-consequence first),
+      // and the states that mean "a human is wanted" — the set *hide inactive*
+      // keeps. A count bucketed off a different list, or a filter that dropped a
+      // state the rollup still shows, is the same drift the parity test exists to
+      // keep out of the derivation, so both lists live here beside it.
+      const LANE_STATE_ORDER = [
+        "conflict",
+        "failed",
+        "stalled",
+        "running",
+        "vanished",
+        "blocked",
+        "ready",
+        "merged",
+        "unknown",
+      ];
+      const NEEDS_HUMAN = ["running", "stalled", "conflict", "failed"];
+
+      // Count lanes by state, through `laneStateOf` — the same call the row's
+      // leading cell makes. One computation for the number and the word beside
+      // it: a header can only ever say what its rows say.
+      function laneStateCountsOf(lanes, nowMs) {
+        const counts = {};
+        for (const lane of lanes) {
+          const state = laneStateOf(lane, nowMs);
+          counts[state] = (counts[state] ?? 0) + 1;
+        }
+        return counts;
+      }
+
+      function isLaneActive(lane, nowMs) {
+        return NEEDS_HUMAN.includes(laneStateOf(lane, nowMs));
+      }
+
       // Bins floor down and a clock-ahead mtime reads as quiet now, never as a
       // negative age — the same honesty `waveAge` keeps in the header.
       function quietSpan(elapsedMs) {
@@ -1488,14 +1679,16 @@
         return `quiet ${Math.floor(elapsedMs / 86400000)}d`;
       }
 
-      function stateCell(lane) {
-        // One reading of the clock per cell: the state and the quiet time beside
-        // it are the same measurement, and must not straddle a tick.
-        const now = Date.now();
-        const state = laneStateOf(lane, now);
+      // One reading of the clock for a whole render (see render): the row's
+      // state and the header's count of it must be the same measurement, taken
+      // the same instant, or a lane could render as `running` in its cell and be
+      // counted as `stalled` beside it by the millisecond it crossed the
+      // threshold. The quiet time beside the state reads from that same clock.
+      function stateCell(lane, nowMs) {
+        const state = laneStateOf(lane, nowMs);
         const quiet =
           state === "running" && lane.derived.log !== undefined
-            ? `<span class="quiet">${esc(quietSpan(now - lane.derived.log.mtimeMs))}</span>`
+            ? `<span class="quiet">${esc(quietSpan(nowMs - lane.derived.log.mtimeMs))}</span>`
             : "";
         return pill(STATE_TONE[state], state, true) + quiet;
       }
@@ -1576,29 +1769,53 @@
         return exit + cov;
       }
 
-      // The wave band's rollup: a lane count, plus a breakdown by outcome —
-      // only the outcomes actually present, so a wave with nothing failed
-      // never shows "0 failed".
-      function waveMeta(lanes) {
-        let settled = 0;
-        let failed = 0;
-        let running = 0;
-        let stalled = 0;
-        for (const lane of lanes) {
-          const event = lane.reported === undefined ? undefined : lane.reported.event;
-          if (event === "settled") settled++;
-          else if (event === "failed") failed++;
-          else if (event === "started") {
-            if (isLaneStalled(lane)) stalled++;
-            else running++;
+      // The wave band's rollup: a lane count, plus a breakdown by *derived
+      // state* — the same verdict each lane's leading cell renders, not the
+      // event the lane reported. The rows now lead with state, so a header that
+      // counted reported events disagreed with them: it said "1 settled" over a
+      // row that said "running". Only the states actually present are shown, so
+      // a wave with nothing failed never reads "0 failed".
+      function waveMeta(lanes, nowMs) {
+        const counts = laneStateCountsOf(lanes, nowMs);
+        let out = `${lanes.length} ${lanes.length === 1 ? "lane" : "lanes"}`;
+        for (const state of LANE_STATE_ORDER) {
+          const n = counts[state] ?? 0;
+          if (n > 0) {
+            out += ` · <span class="${STATE_TONE[state]}">${n} ${state}</span>`;
           }
         }
-        let out = `${lanes.length} ${lanes.length === 1 ? "lane" : "lanes"}`;
-        if (running > 0) out += ` · <span class="wm-run">${running} running</span>`;
-        if (stalled > 0) out += ` · <span class="wm-warn">${stalled} stalled</span>`;
-        if (settled > 0) out += ` · <span class="wm-ok">${settled} settled</span>`;
-        if (failed > 0) out += ` · <span class="wm-bad">${failed} failed</span>`;
         return out;
+      }
+
+      // The page-level summary bar: across every lane row that is rendered, the
+      // derived-state rollup — the leading number is how many need a human, then
+      // the states present. It is `laneStateCountsOf` over the *same* lanes the
+      // wave headers just counted through the same `laneStateOf` the rows lead
+      // with, so the campaign total is literally the sum of the rows on screen,
+      // never a second opinion. Reported events live in the `#metrics` strip
+      // (what the agent claimed); this bar is what is true — and the two
+      // disagreeing is the page's whole thesis, not a drift to reconcile.
+      function renderSummaryBar(lanes, nowMs) {
+        const counts = laneStateCountsOf(lanes, nowMs);
+        let attention = 0;
+        for (const state of NEEDS_HUMAN) attention += counts[state] ?? 0;
+        if (stateSummaryValue !== null) {
+          stateSummaryValue.textContent = String(attention);
+          stateSummaryValue.classList.toggle("hot", attention > 0);
+        }
+        if (stateSummaryChips !== null) {
+          const chips = [];
+          for (const state of LANE_STATE_ORDER) {
+            const n = counts[state] ?? 0;
+            if (n > 0) {
+              chips.push(
+                `<span class="ss-chip ${STATE_TONE[state]}"><span class="n">${n}</span> ${esc(state)}</span>`,
+              );
+            }
+          }
+          stateSummaryChips.innerHTML = chips.join("");
+        }
+        return counts;
       }
 
       function findingsCell(lane) {
@@ -1737,12 +1954,23 @@
           ? [...status.waves].sort(compareWaves)
           : status.waves;
         const groups = [];
+        // One reading of the clock for the whole render. A lane's state is a
+        // function of `Date.now()` through the stall threshold, so if the row,
+        // its wave header and the campaign bar each grabbed their own instant a
+        // lane could lead `running`, be counted `stalled`, and be hidden or shown
+        // on a third reading. One clock: the count and the filter can only ever
+        // say what the row says.
+        const nowMs = Date.now();
+        const renderedLanes = [];
         for (const wave of waves) {
           const isExpanded = expandedWaves.has(wave.id) || defaultExpanded;
           const lanes = sortByRecent
             ? [...wave.lanes].sort(compareLanes)
             : wave.lanes;
-          const filteredLanes = lanes.filter((lane) => laneMatches(wave, lane));
+          const filteredLanes = lanes.filter((lane) =>
+            laneMatches(wave, lane, nowMs),
+          );
+          for (const lane of filteredLanes) renderedLanes.push(lane);
           // One tbody per wave: a group of rows a <tr> could never own, and
           // a single real element for aria-controls to name (a <div> cannot
           // wrap rows inside a table).
@@ -1754,13 +1982,18 @@
           const rowHtml = [
             `<tr class="wave" data-wave="${esc(wave.id)}"><td colspan="8">` +
               `<button type="button" class="wave-band" tabindex="0" aria-expanded="${isExpanded ? "true" : "false"}" aria-controls="waves-${esc(wave.id)}">` +
-              `<span class="wave-eyebrow">wave</span> <span class="wave-id">${esc(wave.id)}</span><span class="sep"> · </span><span class="wave-age">${esc(waveAge(wave))}</span><span class="wave-meta">${waveMeta(filteredLanes)}</span>` +
+              `<span class="wave-eyebrow">wave</span> <span class="wave-id">${esc(wave.id)}</span><span class="sep"> · </span><span class="wave-age">${esc(waveAge(wave))}</span><span class="wave-meta">${waveMeta(filteredLanes, nowMs)}</span>` +
               `</button></td></tr>`,
           ];
           if (filteredLanes.length === 0) {
-            const emptyMsg = filterText === ""
-              ? "No lanes in wave"
-              : `No lanes match “${esc(filterInput ? filterInput.value : "")}”`;
+            let emptyMsg;
+            if (filterText !== "") {
+              emptyMsg = `No lanes match “${esc(filterInput ? filterInput.value : "")}”`;
+            } else if (lanes.length === 0) {
+              emptyMsg = "No lanes in wave";
+            } else {
+              emptyMsg = "No lanes need a human here";
+            }
             rowHtml.push(
               `<tr class="empty" data-wave="${esc(wave.id)}"><td colspan="8">${emptyMsg}</td></tr>`,
             );
@@ -1769,7 +2002,7 @@
               const key = `${esc(wave.id)}/${esc(lane.lane)}`;
               rowHtml.push(
                 `<tr class="lane" data-wave="${esc(wave.id)}" data-lane="${esc(lane.lane)}"${isExpanded ? "" : " hidden"}>` +
-                  `<td class="c-state">${stateCell(lane)}</td>` +
+                  `<td class="c-state">${stateCell(lane, nowMs)}</td>` +
                   `<td class="c-lane"><button type="button" class="key" tabindex="0">${key}</button></td>` +
                   `<td class="c-stage">${stageCell(lane)}</td>` +
                   `<td class="c-live">${liveness(lane)}</td>` +
@@ -1824,6 +2057,11 @@
         setMetric("merged", m.merged);
         setMetric("failing", m.failing);
         setMetric("waves", m.waves);
+        // The page-level derived-state bar is the sum of the rows just rendered,
+        // counted through the same laneStateOf — so it can never out-rank a wave
+        // header into a different total, and with the default view (no filter,
+        // hide-inactive off) it is every lane on the page.
+        renderSummaryBar(renderedLanes, nowMs);
 
         // Update follow control visibility based on the selected lane's alive state
         if (selectedWave !== null && selectedLane !== null) {
