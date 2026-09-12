@@ -429,3 +429,58 @@ rounds*, *killed*, *provider failure*.
 
 After **four lanes per seat**, one comparison table and a recommendation per task shape. Until then
 no seat is declared best, and the track record stays a record of what happened, not a ranking.
+
+## The seats, as the owner set them on 2026-09-12
+
+Round 2's trial produced a clear enough separation to act on, ahead of the four-lanes-per-seat
+threshold. The threshold still stands for a *ranking*; this is an assignment.
+
+| Seat | Model | Invocation |
+|---|---|---|
+| **Implementer (primary)** | `qwen3.8-flash` | `opencode run --auto --format json --model opencode-go/qwen3.8-flash "$(cat $BRIEF)"` |
+| **Implementer (reserve, and the critical path)** | `gemini-3.8-flash` | `agy --print "$(cat $BRIEF)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high --print-timeout 90m --output-format json` |
+| **Stage-1 test writer** | `mercury-2` | `opencode run --auto --format json --model inception/mercury-2 "$(cat $BRIEF)"` |
+| **Lane reviewer** | **anything except the model that wrote the code** | — |
+
+Dispatch is the wrapper documented above: `cd` into the lane's own worktree, an absolute `$BRIEF`,
+an `EXIT` marker to wait on.
+
+### Why qwen is primary
+
+It is the only seat that has **read past a wrong brief and found the real defect underneath**, and it
+has done it twice. On W4 the brief described the gap as client-side; qwen went to the collector,
+which is where it actually was. On the fix round it closed all five findings and then committed one
+nobody asked for — *a harness tick that matches no timer fails instead of skipping* — having noticed
+its own test harness could silently skip.
+
+It is also the cheapest to boot of the funded seats (8 630 tokens, $0.0017) and among the fastest.
+
+### Why it is not the only seat
+
+**Its own worst defect was caught by someone else.** Its first W4 submission ordered waves correctly
+only while every wave appeared in *both* feeds — and this repository's normal case is the broken one,
+because lanes dispatched directly emit no events. **Two independent bot reviewers found it; qwen did
+not.** A reviewer on the same model would not have.
+
+**Provider concentration is the real risk, and it is not about quality.** `qwen3.8-flash`,
+`hy4-preview`, `deepseek-v4.1-flash`, `glm-5.3-flash` and `kimi-k2.7-code` are **five models on one
+`opencode-go` account with one balance**. That account has run dry mid-wave before; when it did it
+killed every model on it at once and left clean worktrees and no commits. `agy` bills to a separate
+pool, so keeping gemini in rotation is a blast-radius hedge, not a second opinion.
+
+**Three lanes is not four.** The seats that looked promising at this sample size last round — haiku,
+deepseek — both reversed on the next lane.
+
+### What each seat is *not* for
+
+- **mercury** writes stage-1 tests and nothing else. It is the fastest seat by a wide margin (90 s
+  against 350–600 s) and it has **fabricated two reports** — claiming fourteen tests where it wrote
+  twelve, and describing failure messages from a suite whose log showed four startup errors and no
+  run. It is safe in stage 1 only because that output is mechanically checkable: every test must be
+  red, and red *from the stub*. Never give it work whose result cannot be verified by a command.
+- **deepseek** executes cleanly and does not verify. Its W4 arm produced good code and a test named
+  after the documented trap that passed **without the trap being fixed**.
+- **haiku** is out of the implementer rotation: five dispatches on one lane, two successive guards
+  that did not guard, a green-gate report on a branch that did not typecheck, and three commits left
+  unpushed across two rounds.
+
