@@ -663,6 +663,109 @@ describe("parseBrief", () => {
     });
   });
 
+  describe("html layer elements (HL1)", () => {
+    const frame = { x: 0.1, y: 0.2, w: 0.5, h: 0.3, anchor: "top" };
+
+    /** The canonical image-html template with `elements` swapped onto one layer. */
+    const withElements = (layerId: string, elements: unknown) => ({
+      id: "canonical-image-html",
+      version: 1,
+      creativeType: "image-html",
+      unit: "standard-web",
+      layers: [
+        { id: "image", kind: "image" },
+        { id: "html", kind: "html" },
+        { id: "logo", kind: "logo" },
+      ].map((layer) =>
+        layer.id === layerId ? { ...layer, elements } : layer,
+      ),
+    });
+
+    test("an html layer carrying each element kind parses and carries the list verbatim", () => {
+      const elements = [
+        { kind: "text", text: "Buy now", frame },
+        { kind: "button", text: "Shop", frame },
+        { kind: "image", frame },
+      ];
+      const parsed = parseBrief({
+        ...valid,
+        template: withElements("html", elements),
+      });
+      expect(
+        parsed.template.layers.find((layer) => layer.kind === "html")?.elements,
+      ).toEqual(elements);
+    });
+
+    test("an html layer with no elements, or an empty list, parses", () => {
+      expect(() =>
+        parseBrief({ ...valid, template: withElements("html", undefined) }),
+      ).not.toThrow();
+      expect(() =>
+        parseBrief({ ...valid, template: withElements("html", []) }),
+      ).not.toThrow();
+    });
+
+    test("elements on a non-html layer are refused — the kind carries none", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: withElements("image", [{ kind: "image", frame }]),
+        }),
+      ).toThrow(
+        'Campaign brief field "template.layers[0].elements" must be absent for layer kind "image"; got [{"kind":"image","frame":{"x":0.1,"y":0.2,"w":0.5,"h":0.3,"anchor":"top"}}].',
+      );
+    });
+
+    test("elements that are not an array are refused", () => {
+      expect(() =>
+        parseBrief({ ...valid, template: withElements("html", "nope") }),
+      ).toThrow(
+        'Campaign brief field "template.layers[1].elements" must be an array of elements; got "nope".',
+      );
+    });
+
+    test("a malformed element names its index and field", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: withElements("html", [{ kind: "link", text: "x", frame }]),
+        }),
+      ).toThrow(
+        'Campaign brief field "template.layers[1].elements[0].kind" must be one of "text", "button", "image"; got "link".',
+      );
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: withElements("html", [
+            { kind: "text", text: "x", frame: { ...frame, x: 2 } },
+          ]),
+        }),
+      ).toThrow(
+        'Campaign brief field "template.layers[1].elements[0].frame.x" must be a number in [0, 1]; got 2.',
+      );
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: withElements("html", [{ kind: "image", text: "x", frame }]),
+        }),
+      ).toThrow(
+        'Campaign brief field "template.layers[1].elements[0].text" must be one of "kind", "frame" for element kind "image"; got "x".',
+      );
+    });
+
+    test("the refusal holds with enforceCapabilities: false (authoring mode too)", () => {
+      expect(() =>
+        parseBrief(
+          {
+            ...valid,
+            template: withElements("image", [{ kind: "image", frame }]),
+          },
+          { enforceCapabilities: false },
+        ),
+      ).toThrow(/template.layers\[0\]\.elements/);
+    });
+  });
+
   describe("layer enabled (D129, MP-D4, MP-D5)", () => {
     const base = templateFromCanonical("social-post");
 

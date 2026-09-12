@@ -148,18 +148,10 @@ fallback being reverse-engineered from markup and quietly diverging.
 Each lane states the claim that makes it necessary, as a script that exits 0 **while the gap is
 still open**. `yarn plan:verify` runs them. **Probe the thing that decides, not a string near it.**
 
-```premise HL1
-# What decides HL1 is the brief boundary's element vocabulary: the layer
-# shape in brief-template.ts / creative-templates.ts. The html layer carries
-# nothing today (`html: []` in LAYER_PROPS is the props vocabulary — D134's
-# lesson from X2), no element type exists anywhere in the domain, and no
-# `elements` field is declared at the boundary. The field is probed as a
-# declaration — an `elements:` property line in the two layer shapes — not
-# as the quoted word: a differently-formatted declaration would keep a
-# word-search holding after the lane ships, and the word in a comment or an
-# unrelated string would retire the lane before it does.
-grep -q '^  html: \[\],' packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts && ! grep -rqi "HtmlElement" packages/CampaignOrchestration/src && ! grep -qE '^[[:space:]]*(readonly[[:space:]]+)?elements[[:space:]]*\??:' packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts packages/CampaignOrchestration/src/domain/value-objects/creative-templates.ts
-```
+**HL1 — shipped.** `HtmlElement`, its per-kind fields (`text`, `button`, `image`) and the D130 frame
+now live in `html-element.ts`; both layer shapes declare `elements`, and the shared
+`layerElementsProblem` validates them at the domain guard (`isBriefTemplate`) and the API boundary
+(`validateTemplate`). No rendering — that is HL3 onward.
 
 ```premise HL2
 # HL-D3's gap is "no click destination anywhere in this codebase". The thing

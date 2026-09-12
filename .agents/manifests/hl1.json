@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "lane": "HL1",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/html-element.ts",
+      "before": "  if (kind !== \"html\") {",
+      "after": "  if (false as boolean) {",
+      "because": "Only an html layer carries elements; that rule is the whole reason the field is per-layer. Disable the guard and an image layer's list passes the boundary, so the stored-draft guard and the API accept a layer shape the renderers have no drawer for.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/html-element.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/html-element.ts",
+      "before": "      value < 0 ||\n      value > 1",
+      "after": "      value < 0 ||\n      value > 1.5",
+      "because": "A frame fraction is canvas-relative, so [0, 1] is the contract, not a near-enough guess. Widening the ceiling to 1.5 admits 1.4, and the renderer would place an element at a fraction no canvas has.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/html-element.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/html-element.ts",
+      "before": "  image: [\"kind\", \"frame\"],",
+      "after": "  image: [\"kind\", \"text\", \"frame\"],",
+      "because": "The per-kind field table is the mechanism that refuses copy on an image, not a comment beside it. Add text to image's row and an element the compositor cannot draw rides the guard in.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/html-element.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
+      "before": "  return (\n    layerElementsProblem(rec.kind as LayerKind, rec.elements) === undefined\n  );",
+      "after": "  return true;",
+      "because": "A validator no boundary calls is a vocabulary nothing enforces. Drop the call from the per-layer guard and a malformed element passes `isBriefTemplate` even though `layerElementsProblem` still refuses it in isolation — the two boundaries would drift exactly as D134's props check exists to prevent.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

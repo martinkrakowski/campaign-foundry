@@ -397,3 +397,56 @@ describe("isBriefTemplate layer enabled (D129)", () => {
   });
 });
 
+describe("isBriefTemplate layer elements (HL1)", () => {
+  const frame = { x: 0.1, y: 0.2, w: 0.5, h: 0.3, anchor: "top" as const };
+
+  /** An image-html template with `elements` swapped onto its html layer. */
+  const withElements = (elements: unknown): boolean =>
+    isBriefTemplate({
+      id: "canonical-image-html",
+      version: 1,
+      creativeType: "image-html",
+      unit: "standard-web",
+      layers: [
+        { id: "image", kind: "image" },
+        { id: "html", kind: "html", elements },
+        { id: "logo", kind: "logo" },
+      ],
+    });
+
+  test("accepts an html layer carrying each element kind, and absent or empty elements", () => {
+    expect(withElements(undefined)).toBe(true);
+    expect(withElements([])).toBe(true);
+    expect(
+      withElements([
+        { kind: "text", text: "Buy now", frame },
+        { kind: "button", text: "Shop", frame },
+        { kind: "image", frame },
+      ]),
+    ).toBe(true);
+  });
+
+  test("refuses elements on a layer that is not html", () => {
+    expect(
+      isBriefTemplate({
+        id: "canonical-image-html",
+        version: 1,
+        creativeType: "image-html",
+        unit: "standard-web",
+        layers: [
+          { id: "image", kind: "image", elements: [] },
+          { id: "html", kind: "html" },
+          { id: "logo", kind: "logo" },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  test("refuses a malformed element — an unknown kind, a non-string copy, a bad frame", () => {
+    expect(withElements([{ kind: "link", text: "x", frame }])).toBe(false);
+    expect(withElements([{ kind: "text", text: 5, frame }])).toBe(false);
+    expect(withElements([{ kind: "text", text: "x", frame: { ...frame, x: 2 } }])).toBe(false);
+    expect(withElements([{ kind: "image", text: "x", frame }])).toBe(false);
+  });
+});
+
