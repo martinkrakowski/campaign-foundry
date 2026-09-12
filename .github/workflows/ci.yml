@@ -40,6 +40,10 @@ jobs:
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v5
+        with:
+          # The manifest-replay step below diffs against the base ref to find
+          # which manifests this change touches; a depth-1 clone has no base.
+          fetch-depth: 0
 
       # Corepack ships with the runner's pre-installed Node and must be enabled
       # BEFORE setup-node: the `cache: yarn` step below probes the cache folder
@@ -94,6 +98,16 @@ jobs:
       # so a plan can never drift from the code un-noticed.
       - name: Verify plan premises (yarn plan:verify)
         run: "yarn plan:verify"
+
+      # A mutation manifest records the mutations a lane claims its tests catch.
+      # Replaying it is what makes the claim evidence rather than a report: two
+      # seats this week stated verdicts they had never observed, one quoting
+      # failure messages from a suite whose own log showed it had not started.
+      # Only manifests this change touches are replayed — each mutation runs a
+      # real test command, so replaying all of them every time would grow
+      # without bound. A claim is checked when it is made.
+      - name: Replay changed mutation manifests
+        run: "sh scripts/verify-manifests.sh"
 
       # Turbo caches task outputs keyed by input hash, so unchanged packages are
       # skipped on warm runs (cache_strategy = turbo-cache). Set TURBO_TOKEN

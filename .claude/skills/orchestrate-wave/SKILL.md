@@ -173,6 +173,18 @@ status wins and your summary says so.
   seats reported green gates they had started and never watched; one of those branches did not
   typecheck.
 
+**Which gates are machinery, and which are you.** Know the difference before trusting the green:
+
+| Gate | Enforced by |
+|---|---|
+| `yarn plan:verify` | **CI.** A lane dispatched against a closed gap fails the build. |
+| a lane retiring its own premise | **CI**, as a consequence of the above: a shipped lane that leaves its fence behind fails its own PR. |
+| `yarn mutate:verify` on a **changed** manifest | **CI** (`scripts/verify-manifests.sh`). |
+| **a manifest existing at all** | **you.** Nothing can require one without punishing the docs PR, the refactor and the premise audit that legitimately have none. It is a line in every lane brief, and it stops being applied the moment an orchestrator forgets to write it. |
+| `yarn handoff:check` | **you**, when you set up a two-stage lane. |
+
+The two in the last rows are habits, not gates. Say so when you hand this over.
+
 **A two-stage lane hands over a handoff file, not a claim.** Stage 1 writes
 `.agents/handoff/<lane>.json` binding every rule in its brief to the test that pins it, and
 `yarn handoff:check` refuses the handoff unless **every rule names a test that exists and is
