@@ -152,3 +152,11 @@ real behaviour change or a bug, and both want a decision.
   from and must prove the bytes are unchanged.
 - **It does not re-open D136.** It records the shipped half honestly and leaves the aggregation to
   whoever owns the compliance page.
+
+---
+
+## Premises
+
+**M4 — shipped in an earlier motion lane — `prepare` memoises per-text layout, so `draw` never re-wraps.** Its premise was retired when it landed; `plan:verify` no
+longer tracks it.
+

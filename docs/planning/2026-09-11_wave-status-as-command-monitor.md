@@ -112,3 +112,32 @@ the counts and the rows come to disagree. **W5 is independent** and must not be 
 - The wave list makes an old wave look old.
 - Full gate green, all four counters at 100 %, and the stall threshold has a test that fails if the
   constant changes meaning.
+
+---
+
+## 7. Premises
+
+Each lane states the claim that makes it necessary, as a script that exits 0 **while the gap is still
+open**. `yarn plan:verify` runs them. A non-zero exit means the gap has been closed by something else
+and the lane would re-implement shipped behaviour — which happened three times in one day before this
+existed, because nothing could tell a live lane from a finished one.
+
+**W1 — shipped in #337.** `laneState` derives the state and `plan:verify` no longer tracks
+it. The premise was retired as part of merging, which is the rule: a premise left behind after its
+lane ships turns the check into noise.
+
+```premise W2
+grep -q "tr.lane.active" tools/wave-status/public/index.html
+```
+
+```premise W3
+! grep -q "hide-inactive" tools/wave-status/public/index.html
+```
+
+```premise W4
+grep -q 'dirNames.filter((name) => name.startsWith("wave")).sort()' tools/wave-status/lib/collect.ts
+```
+
+```premise W5
+grep -q 'WAVE_LOG_ROOT = "/tmp"' tools/wave-status/lib/collect.ts
+```
