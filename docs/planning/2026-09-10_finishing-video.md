@@ -43,7 +43,10 @@
 | **C5** | `2026-09-10_reconciliation.md` §4c | The motion path honours the **full** order. **Scope correction below.** |
 | **VG1–VG3** | `2026-09-10_the-mp4-byte-golden.md` | The MP4 byte golden, or D10's claim withdrawn. |
 | **L11 (`fill` half)** | `2026-09-08_creative-templates-and-units.md`, D131 | The `fill` drawer. |
-| **VF4** | *new, and the only one* | Retire the `SEQUENCED_KINDS` split once C5 lands — it exists only to describe the exception C5 removes. |
+
+**VF4 — shipped in #328 (C5).** C5's own merge deleted `SEQUENCED_KINDS`; the split this lane existed
+to retire is gone (`grep -c SEQUENCED_KINDS packages/` finds nothing), and the §2 DoD clause
+"`SEQUENCED_KINDS` is gone" holds. No premise is stated — a premise for a closed lane is noise.
 
 **A scope correction C5 needs, found in review.** VF-D1 claimed a reordered template "is honoured in
 the still and ignored in the video". **The still path cannot honour it either in one case**:

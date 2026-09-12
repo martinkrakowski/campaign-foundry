@@ -140,3 +140,62 @@ fallback being reverse-engineered from markup and quietly diverging.
 - **Free-form HTML or CSS entry.** It cannot have a faithful fallback and cannot be weight-bounded.
 - **A second style source.** HL-D4.
 - **A CSS animation editor.** If HTML animates, keyframing drives it.
+
+---
+
+## 5. Premises
+
+Each lane states the claim that makes it necessary, as a script that exits 0 **while the gap is
+still open**. `yarn plan:verify` runs them. **Probe the thing that decides, not a string near it.**
+
+```premise HL1
+# What decides HL1 is the brief boundary's element vocabulary: the layer
+# shape in brief-template.ts / creative-templates.ts. The html layer carries
+# nothing today (`html: []` in LAYER_PROPS is the props vocabulary — D134's
+# lesson from X2), no element type exists anywhere in the domain, and no
+# `elements` field is declared at the boundary. The field is probed as a
+# declaration — an `elements:` property line in the two layer shapes — not
+# as the quoted word: a differently-formatted declaration would keep a
+# word-search holding after the lane ships, and the word in a comment or an
+# unrelated string would retire the lane before it does.
+grep -q '^  html: \[\],' packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts && ! grep -rqi "HtmlElement" packages/CampaignOrchestration/src && ! grep -qE '^[[:space:]]*(readonly[[:space:]]+)?elements[[:space:]]*\??:' packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts packages/CampaignOrchestration/src/domain/value-objects/creative-templates.ts
+```
+
+```premise HL2
+# HL-D3's gap is "no click destination anywhere in this codebase". The thing
+# that decides is a field for it under any sane identifier; today none
+# exists — only prose ("the blocked click through the guard") and build
+# caches, so the probe runs over source files and identifier shapes.
+! grep -rqiE "clicktag|clickurl|clickdestination|clickthrough|landingurl|landingpage|destinationurl" packages apps tools --include='*.ts' --include='*.tsx'
+```
+
+```premise HL3
+# Two sites decide HL3 and it changes both: the X6 boundary guard (#331)
+# refuses image-html precisely because no renderer exists, and the fallback
+# canvas rendition is impossible while `html` has no entry in the
+# LAYER_DRAWERS table. Exit 0 requires the guard live AND the drawer absent;
+# either landing flips it — the safe direction, since a guard still live
+# with no drawer is exactly the state that makes this lane necessary.
+grep -q '"image-html" is not supported' packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts && ! grep -qE '^  html: ' packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts
+```
+
+```premise HL4
+# What decides HL4 is the generation path emitting format "html" and setting
+# htmlBundlePath — §2's explicit requirement, and the two fields packageHtml
+# already checks. The lane ships both, so the premise retires only when both
+# have landed. Two explicit probes, joined so either half still outstanding
+# keeps the lane live: `! grep -qE 'A|B'` negates a disjunction, and dies the
+# moment the first half lands. The field existing in the entity type does not
+# count; only writing it in the use case does, so both probes stay on the
+# generation path's own file.
+! grep -q 'format: "html"' packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts || ! grep -q 'htmlBundlePath' packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts
+```
+
+```premise HL5
+# The tooling lane's deciding facts are the element palette and the live
+# weight meter reading profile.maxBytes (HL-D6). maxBytes is enforced in
+# Distribution today and reaches neither apps/web nor packages/ui; no element
+# tooling exists either. When the drawer ships, the number it must display
+# crosses into the web surface and this flips.
+! grep -rqiE "maxBytes|weight.?meter|budget.?meter|addelement|element.?kind" apps/web/src packages/ui/src
+```
