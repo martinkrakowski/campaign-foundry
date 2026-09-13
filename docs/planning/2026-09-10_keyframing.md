@@ -27,7 +27,7 @@ compose.** That is the same defect as four layer orders — and this plan exists
 |---|---|---|
 | **K-D1** | **Keyframes are the primitive. The three existing vocabularies become named presets that expand to keyframe tracks.** They stay in the brief vocabulary and stay the default way a user asks for motion; underneath, each resolves to the same track model. | One source of truth for motion, the way `BriefTemplate.layers` is one source for order. A fourth parallel system is the thing the reconciliation was written to stop. |
 | **K-D2** | **No new bounded context.** Tracks are value objects in `CampaignOrchestration/domain`; resolution is a pure function beside `beatAt`; the compositor reads a resolved pose. | `CreativeGeneration` is adapters-only — every `domain/` and `application/` under it holds a `.gitkeep`, and ports live in `CampaignOrchestration`. A package owning its own ports would be the first, and needs a manifest change and a new inter-context dependency to pass `hexagen arch validate`. |
-| **K-D3** | **A preset must expand to exactly the frames it renders today.** Byte-identity per frame is the acceptance test, not a similarity judgement. | There is **no video byte golden** — D10 freezes bytes nothing measures. So the freeze has to be demonstrated. |
+| **K-D3** | **A preset must expand to exactly the frames it renders today.** Byte-identity per frame is the acceptance test, not a similarity judgement. | ~~There is no video byte golden — D10 freezes bytes nothing measures.~~ **Corrected 2026-09-13: the MP4 byte golden shipped in #326**, so the freeze is measurable today and K2's gate is checkable rather than aspirational. |
 | **K-D4** | **Keyframes are per layer, addressed by layer `id`, and follow the layer list.** A track on a layer that is absent or disabled resolves to nothing, silently. | Anything else reintroduces a second addressing scheme beside `BriefTemplate.layers`. |
 | **K-D5** | **`restT` survives as a first-class idea, and it is per *preset*, not per track.** Every preset declares the `t` at which its pose is the settled one, and the poster renders that frame. **Amended 2026-09-13 after plan review:** a K1 brief asked for it per track, which has no poster semantics — two tracks declaring different rest times leave no single frame for the still — and the code already agrees with the plan: `REST_T` is `Record<MotionKind, number>` (`MotionKind.vo.ts:9`), one rest frame per render. | D7 depends on it. A naive keyframe model loses the notion of "the frame the still should be". |
 | **K-D6** | **This cannot start before the motion path is list-driven — and that means VF1, not C1.** C1 made the *ground trio* list-driven; `static-text`, `animated-text` and `logo` are still drawn in fixed positions afterward. **Not because a track on them would be meaningless** — the logo's position comes from `prepare()` in both paths and copy already composes a per-frame pose — but because there is **no single site to resolve a track by `id`** (`drawBeat` never holds a layer record, and two text layers collapse to one beat block), and because **z would be silently wrong**: an opacity track on a text layer the template puts below the shade would fade it above the shade in motion. See `2026-09-10_finishing-video.md` §3. | Keyframed per-layer motion is meaningless while `drawTimeline` draws three of five layers by name. |
@@ -67,13 +67,15 @@ stays as it is, and text-effect tracks play on beat-local progress exactly as th
 
 | Lane | Task | Proof |
 |---|---|---|
-| **K1** | **The track model and its resolver.** Value objects, validation at the brief boundary, the pure resolve function. **No compositor change, no rendering.** | Round-trips through YAML in declared key order; an invalid track is refused at both boundaries. |
+| **K1** | ⛔ **BLOCKED — see §Amendments: three model decisions are open.** **The track model and its resolver.** Value objects, validation at the brief boundary, the pure resolve function. **No compositor change, no rendering.** | Round-trips through YAML in declared key order; an invalid track is refused at both boundaries. |
 | **K2** | **Express the four `MOTION_KINDS` as tracks and render from the resolver.** The vocabulary the user writes does not change. | **Per-frame byte-identity** for every motion kind across the canonical templates. Any drift stops the lane. |
 | **K3** | **Express the four text effects the same way.** | Per-frame byte-identity, including the beat-local windows and the settled-pose behaviour. |
 | **K4** | **Author tracks directly in a brief**, alongside presets, with a stated precedence when both name one layer and property. | A hand-authored track renders; a track on an absent or disabled layer renders nothing and says nothing. |
 | **K5** | **The editor surface** — whatever minimum lets a user see and adjust a track. Scope deferred until K1–K4 land. | Out of scope for this document beyond naming it. |
 
 **Order.** The video plan first — **VF2** (an MP4 byte golden) then **VF1** (the full order) — then K1 → K2 → K3 → K4. VF2 matters to K2 specifically: without a byte golden the "byte-identical preset expansion" gate can only compare frames, which is weaker than what D10 claims. **K2 is the gate**: if the four
+
+> **Corrected 2026-09-13:** both VF1 (#328) and VF2 (#326) have **shipped**. This ordering reads as if they are ahead; they are behind, and K2's byte gate is checkable now.
 existing motions cannot be reproduced frame-for-frame as tracks, the model is wrong and the plan
 stops rather than shipping a second system beside the presets.
 
@@ -93,7 +95,7 @@ stops rather than shipping a second system beside the presets.
 - **It does not create `packages/MotionComposition`.** K-D2.
 - **It does not widen the property set speculatively.** Four properties, because four are what the
   compositor moves today. `blendMode`, `rotation` and the rest arrive when something renders them.
-- **It does not start before C1.** K-D6.
+- **It does not start before VF1 (= C1's successor, #328).** K-D6 — and this line used to say *C1*, which K-D6 explicitly corrects: C1 made the ground trio list-driven, and what K1 needs is the whole motion path, which is VF1.
 - **It does not accept "looks the same" as proof.** K-D3.
 
 ---
