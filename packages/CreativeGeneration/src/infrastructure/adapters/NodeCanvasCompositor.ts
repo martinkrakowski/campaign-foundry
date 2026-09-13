@@ -90,9 +90,10 @@ interface PreparedCreative {
     | undefined;
   /**
    * Brand-compliance signal: whether the logo drawer actually painted. Derived
-   * in `prepare` as *logo file loaded AND the resolved layer list contains a
-   * `logo` layer* — the load alone is not the signal, the layer is optional
-   * (F2), and a template that omits it draws no logo pixels.
+   * in `prepare` as *logo file loaded AND the resolved layer list contains an
+   * enabled `logo` layer* — the load alone is not the signal, the layer is
+   * optional (F2), and a disabled one draws nothing (X9), so a template that
+   * omits or switches it off draws no logo pixels.
    */
   readonly logoApplied: boolean;
   /** Normalized safe-zone insets; zeros when the request omitted them. */
@@ -231,7 +232,10 @@ const LAYER_DRAWERS: Readonly<Partial<Record<LayerKind, LayerDrawer>>> = {
  * ({@link drawBeat}) instead of the table's single-message drawer — so a
  * template that places the logo below the shade, or the copy above the accent
  * band, renders in that order on both paths (C5). A kind neither path can draw
- * throws the same way on both.
+ * throws the same way on both. A layer the brief disabled (`enabled: false`,
+ * D129 — absence means enabled) draws on neither path: the skip is in the two
+ * dispatch loops, ahead of the copy-budget guard, so it holds for every kind at
+ * once, and a disabled layer never spends the enabled one's turn (X9).
  *
  * Still path: {@link NodeCanvasCompositor.prepare} (I/O) →
  * {@link NodeCanvasCompositor.draw} at `t = 1` with no `motion`.
@@ -335,6 +339,10 @@ export class NodeCanvasCompositor implements CompositorPort {
     // bottom first. A kind with no table entry throws — it never skips.
     let copyDrawn = false;
     for (const layer of prepared.layers) {
+      // A layer the brief disabled does not draw (X9). The check runs BEFORE
+      // the copy guard below: a disabled copy layer that set `copyDrawn` would
+      // silently drop the enabled copy that follows it.
+      if (isDisabledLayer(layer)) continue;
       if (layer.kind === "static-text" || layer.kind === "animated-text") {
         // A creative type's shared budget caps text-kind layers at one (D124);
         // this guard is defensive, not load-bearing — never draws copy twice.
@@ -428,10 +436,12 @@ export class NodeCanvasCompositor implements CompositorPort {
     // layer is optional, so a template that omits it paints no logo pixels
     // even with the file loaded — and the load alone must not credit
     // brand-compliance for a logo that never rendered. "Loaded AND the
-    // resolved list carries a `logo` layer" is exactly the logo drawer
-    // painting; computed here, where the list is resolved, never by mutating
+    // resolved list carries an ENABLED `logo` layer" is exactly the logo drawer
+    // painting (X9: a disabled layer draws nothing, so it cannot have applied
+    // the brand); computed here, where the list is resolved, never by mutating
     // shared state mid-draw.
-    const logoApplied = logoLoaded && layers.some((layer) => layer.kind === "logo");
+    const logoApplied =
+      logoLoaded && layers.some((layer) => layer.kind === "logo" && layer.enabled !== false);
 
     const base: Omit<
       PreparedCreative,
@@ -918,6 +928,10 @@ function drawTimeline(
   const c: Omit<LayerDrawContext, "layer"> = { ctx, prepared, motion, eased, effectT: effectT ?? t };
   let copyDrawn = false;
   for (const layer of prepared.layers) {
+    // A layer the brief disabled does not draw (X9), and the check runs BEFORE
+    // the copy guard below: a disabled copy layer that consumed the budget
+    // would silently drop the enabled copy that follows it.
+    if (isDisabledLayer(layer)) continue;
     if (layer.kind === "static-text" || layer.kind === "animated-text") {
       // A creative type's shared budget caps text-kind layers at one (D124);
       // this guard is defensive, not load-bearing — never draws the beat twice.
@@ -1282,4 +1296,18 @@ function drawLayer(layer: CreativeTemplateLayer, c: Omit<LayerDrawContext, "laye
     );
   }
   drawer({ ...c, layer });
+}
+
+/**
+ * Whether a dispatch loop skips this layer (X9): an explicit `enabled: false`
+ * (D129 — absence means enabled) hides a layer this compositor CAN draw, so a
+ * disabled layer renders exactly what the same template with that layer absent
+ * renders. A kind with no drawer is never skipped here: it still reaches
+ * {@link drawLayer} and throws, because a brief naming an unsupported kind has
+ * declared something this renderer cannot draw whether or not the operator
+ * switched it off — silently dropping it would turn L6's refusal into the same
+ * accepted-then-not-rendered promise this rule exists to keep.
+ */
+function isDisabledLayer(layer: CreativeTemplateLayer): boolean {
+  return layer.enabled === false && LAYER_DRAWERS[layer.kind] !== undefined;
 }
