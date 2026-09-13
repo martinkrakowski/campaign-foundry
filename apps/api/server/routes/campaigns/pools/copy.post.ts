@@ -220,7 +220,7 @@ export default defineEventHandler(async (event) => {
       if (!isErrno(error, "ECONFLICT")) throw error;
       setResponseStatus(event, 409);
       return {
-        error: "Copy pool was modified by another user.",
+        error: "Headline pool was modified by another user.",
         revision: (error as { revision?: string }).revision,
       };
     }

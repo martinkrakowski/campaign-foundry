@@ -93,6 +93,36 @@
         "apps/web/src/components/campaign/__tests__/headline-pool-drawer.test.tsx"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/pools/[briefId].patch.ts",
+      "before": "        error: \"Headline pool was modified by another user.\",",
+      "after": "        error: \"Copy pool was modified by another user.\",",
+      "because": "PATCH's conflict goes back to naming the internal type in a sentence an editor reads, and stops saying the same thing as POST's: the two routes answer one condition with two different words for it, and one of them is domain jargon.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/pools/__tests__/pools.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/pools/copy.post.ts",
+      "before": "        error: \"Headline pool was modified by another user.\",",
+      "after": "        error: \"Copy pool was modified by another user.\",",
+      "because": "POST's conflict goes back to naming the internal type: the sentence an editor reads is the domain object's name rather than the 'Headline Pool' the drawer is titled, and it drifts from the wording the sibling route was given.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/pools/__tests__/pools.test.ts"
+      ],
+      "verdict": "caught"
     }
   ]
 }

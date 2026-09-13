@@ -125,7 +125,7 @@ export default defineEventHandler(async (event) => {
     }
     if (!stored) {
       setResponseStatus(event, 404);
-      return { error: `Copy pool for brief "${briefId}" not found.` };
+      return { error: `Headline pool for brief "${briefId}" not found.` };
     }
     const pool = stored.pool;
 
@@ -163,7 +163,7 @@ export default defineEventHandler(async (event) => {
       if (!isErrno(error, "ECONFLICT")) throw error;
       setResponseStatus(event, 409);
       return {
-        error: "Copy pool was modified by another user.",
+        error: "Headline pool was modified by another user.",
         revision: (error as { revision?: string }).revision,
       };
     }

@@ -285,7 +285,7 @@ describe("copy pool routes", () => {
     const { get } = await api();
     const missing = await get()(new Request("http://x/campaigns/pools/camp"));
     expect(missing.status).toBe(404);
-    expect(await missing.json()).toEqual({ error: 'Copy pool for brief "camp" not found.' });
+    expect(await missing.json()).toEqual({ error: 'Headline pool for brief "camp" not found.' });
 
     const unsafe = await get()(new Request("http://x/campaigns/pools/Bad"));
     expect(unsafe.status).toBe(400);
@@ -410,6 +410,7 @@ describe("copy pool routes", () => {
       jsonReq("http://x/campaigns/pools/camp", "PATCH", { entries: [{ id: "h1", status: "approved" }] }),
     );
     expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'Headline pool for brief "camp" not found.' });
   });
 
   test("PATCH returns 400 for invalid payloads", async () => {
@@ -642,7 +643,7 @@ describe("copy pool routes", () => {
     // have dropped the first edit, so the store refuses it and says what is there.
     const second = await patch()(reject("h2", stale));
     expect(second.status).toBe(409);
-    expect(await second.json()).toEqual({ error: "Copy pool was modified by another user.", revision: fresh });
+    expect(await second.json()).toEqual({ error: "Headline pool was modified by another user.", revision: fresh });
 
     const retried = await patch()(reject("h2", fresh));
     expect(retried.status).toBe(200);
@@ -702,7 +703,7 @@ describe("copy pool routes", () => {
     );
     expect(conflicted.status).toBe(409);
     const body = (await conflicted.json()) as { error: string; revision: string };
-    expect(body.error).toBe("Copy pool was modified by another user.");
+    expect(body.error).toBe("Headline pool was modified by another user.");
     expect(body.revision).toMatch(/^[0-9a-f]{64}$/);
 
     copyGeneratorMock.mockReturnValue(fakeGenerator(["Third angle"]));

@@ -28,7 +28,7 @@ export default defineEventHandler(async (event) => {
   }
   if (!stored) {
     setResponseStatus(event, 404);
-    return { error: `Copy pool for brief "${briefId}" not found.` };
+    return { error: `Headline pool for brief "${briefId}" not found.` };
   }
   return { pool: stored.pool, revision: stored.revision };
 });
