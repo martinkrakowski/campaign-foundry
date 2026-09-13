@@ -1,5 +1,5 @@
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { completeJob, createJob, failJob, getRunningJobId, hasRunningJob, runJob } from "../../lib/jobs.js";
+import { acquireJob, completeJob, failJob, runJob } from "../../lib/jobs.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
 import { outputRoot } from "../../lib/config.js";
 import { ALLOWED_IMAGE_MODELS, runCampaign } from "../../lib/pipeline.js";
@@ -70,27 +70,28 @@ export default defineEventHandler(async (event) => {
   // carries the running job's handle (`jobId`) so the second press can adopt the run
   // in progress and keep polling it — the pipeline really is running, and discarding
   // it threw away a campaign that succeeded.
-  if (hasRunningJob(brief.id)) {
+  const claim = await acquireJob(brief.id);
+  if (!claim.acquired) {
     setResponseStatus(event, 409);
     return {
       error: `A run for campaign "${brief.id}" is already in progress.`,
-      jobId: getRunningJobId(brief.id),
+      jobId: claim.runningJobId,
       campaignId: brief.id,
     };
   }
 
-  const jobId = createJob(brief.id);
+  const jobId = claim.jobId;
   runJob(jobId, async () => {
     const expectedPolicyHash = await persistedPolicyHash(brief, regenerateOnly !== undefined);
     const result = await runCampaign(brief, imageModel, regenerateOnly, expectedPolicyHash);
     if (!result.success) {
-      failJob(jobId, result.error.message);
+      await failJob(jobId, result.error.message);
       return;
     }
     // A selective run produced only the regenerated cells — merge them into the
     // persisted report so the full campaign survives a partial run.
     await writeReport(result.value, { merge: regenerateOnly !== undefined });
-    completeJob(jobId, {
+    await completeJob(jobId, {
       halted: result.value.halted,
       assets: result.value.assets,
       log: result.value.log,

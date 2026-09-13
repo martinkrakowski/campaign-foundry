@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
 import { createCanvas } from "@napi-rs/canvas";
-import { createJob, failJob } from "../../lib/jobs.js";
+import { createJob, failJob, resetJobs } from "../../lib/jobs.js";
 import { setCapabilities } from "../../lib/capabilities.js";
 import indexHandler from "../index.js";
 import generateHandler from "../campaigns/generate.post.js";
@@ -53,7 +53,8 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "cf-routes-"));
   process.env.OUTPUT_DIR = dir;
 });
-afterEach(() => {
+afterEach(async () => {
+  await resetJobs();
   rmSync(dir, { recursive: true, force: true });
   for (const k of KEYS) {
     if (snap[k] === undefined) delete process.env[k];
@@ -381,7 +382,7 @@ describe("POST /campaigns/generate", () => {
   });
 
   test("refuses a second run for a campaign whose job is still running with 409, handing back the running job's handle", async () => {
-    const id = createJob("camp");
+    const id = await createJob("camp");
     try {
       const res = await call(brief());
       expect(res.status).toBe(409);
@@ -393,7 +394,7 @@ describe("POST /campaigns/generate", () => {
         campaignId: "camp",
       });
     } finally {
-      failJob(id, "test teardown");
+      await failJob(id, "test teardown");
     }
   });
 
@@ -409,7 +410,7 @@ describe("POST /campaigns/generate", () => {
 
 describe("GET /campaigns/jobs/:id", () => {
   test("returns a running job by id", async () => {
-    const id = createJob("camp");
+    const id = await createJob("camp");
     const res = await jobCall(id);
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ status: "running", done: 0, total: 0, log: null });
