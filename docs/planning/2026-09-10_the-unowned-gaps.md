@@ -160,3 +160,72 @@ without evidence is how a flaky test becomes a deleted one.
 **X7 — retired.** The bind-conflict test binds an exclusive blocker directly,
 eliminating the racy second-server overhead; `plan:verify` no longer tracks it.
 
+
+---
+
+## 11. A second load-sensitive test in the same file (X8)
+
+**Evidence.** `tools/wave-status/__tests__/server.test.ts > cleanup > close() shuts the server, its
+watchers and its interval down` failed once during the 2026-09-13 overnight run, in a full suite,
+while another lane's gate was running. It took **5 142 ms** — a timeout shape, and suspiciously
+close to vitest's 5 000 ms default, meaning `close()` did not resolve rather than resolving wrongly.
+It passes alone (62 tests in that file) and passes on a second full run (250 files).
+
+**This is not X7 returning, and not a regression from X7's fix.** `main` with X7 merged passes the
+full suite cleanly, and X7's change was to `listen`, not to `close`. X7 fixed one instance; the file
+has another.
+
+**One hypothesis is already refuted.** The obvious candidate — `server.close()` waiting out a
+keep-alive socket — does not apply: `close()` already calls `server.closeAllConnections()` inside
+the same promise, after ending every SSE client. The mechanism is still unknown.
+
+**No premise yet — diagnosis comes first.** `plan:verify` does not track X8, deliberately: a premise
+asserts the shape of a fix, and writing one now would pin a guess. The lane's first job is to
+reproduce the hang deterministically — the second shutdown path at `server.ts:276`, which calls
+`server.close()` with no `closeAllConnections()`, is where to start looking, as is whether an
+in-flight `void syncWatchers()` outlives the close. **Only once the mechanism is named does X8 get a
+premise and a fix.**
+
+**The rule X7 established still governs**: find the mechanism before changing the test. A suite that
+fails at random teaches its readers that red means *try again*.
+
+---
+
+## 12. The compositor cannot see a disabled layer (X9)
+
+**Evidence.** `enabled` is a validated field on every layer — D129 gives it a dedicated problem
+type, and both boundaries read the same decision — yet `NodeCanvasCompositor.ts` contains **zero**
+occurrences of the word. Every layer draws, whether or not the brief disabled it.
+
+**Why this matters.** An operator who disables a layer is told the brief is valid and then watches
+the layer render anyway. This is worse than an unsupported field: the boundary's acceptance is read
+as a promise the renderer never made.
+
+**Scope.** This is pre-existing and applies to *every* kind, not to `html` alone. It was found while
+reviewing HL3 and deliberately kept out of that lane — folding it in would have turned a drawer into
+a dispatch-loop change touching every layer kind.
+
+```premise X9
+# The compositor never reads a layer's `enabled` (D129) — every layer draws.
+! grep -q 'enabled' packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts
+```
+
+---
+
+## 13. Html text can leave its own frame (X10)
+
+**Evidence.** `drawHtml` paints `text` and `button` labels with `fillText` at a size derived from
+the frame's height, and the compositor performs no clipping anywhere — `.clip()` appears **0** times
+in the file. A label longer than its frame is wide therefore paints straight across whatever sits
+beside it.
+
+**Why it is a deferral and not an HL3 defect.** HL3's acceptance criteria are that the element list
+draws in template order and that the fallback exists before the markup does. Fidelity between the
+raster fallback and the markup cannot be asserted until HL4 writes the markup — and the one thing
+worse than an overflowing label is two renderers each clipping differently. **The lane that can test
+this is HL4's successor, not HL3.**
+
+```premise X10
+# drawHtml paints labels with no clipping; nothing in the compositor clips.
+! grep -q '\.clip()' packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts
+```
