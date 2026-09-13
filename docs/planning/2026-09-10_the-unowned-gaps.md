@@ -227,3 +227,45 @@ this is HL4's successor, not HL3.**
 # drawHtml paints labels with no clipping; nothing in the compositor clips.
 ! grep -q '\.clip()' packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts
 ```
+
+---
+
+## 14. The editor guard and the API disagree about required layers (X11)
+
+**Evidence.** Two boundaries validate the same persisted template and apply different rules.
+
+- The API enforces the real rule. `load-brief.ts` collects `enabledKinds` from layers whose `enabled`
+  is not `false` (`:253`, `:296`) and rejects at `:360` unless there is **at least one enabled
+  instance of every required kind** (D129/MP-D4). `CREATIVE_TYPE_RULES.required` is
+  `["image", "static-text"]`, `["image", "html"]`, `["video", "animated-text"]` — and its own comment
+  says a required kind "cannot be removed or disabled".
+- `isBriefTemplate` (`brief-template.ts:326`) checks id, version, creativeType, unit, layer shape,
+  unique ids and order constraints — and **does not check required kinds at all**. The word
+  `required` does not occur in the file.
+
+So a persisted draft that the API refuses is accepted by the editor guard and handed to the
+compositor, which renders it incomplete.
+
+**The scope is wider than the case that surfaced it.** Found via a review finding on X9 (#374) about
+a *disabled* required layer, but the gap is not about `enabled`: a template **missing** a required
+layer entirely has always passed this guard too.
+
+**A false claim to delete while fixing it.** The doc comment above `isBriefTemplate` says unique ids
+are checked, "the rule the API's `validateTemplate` already applies, **so the two boundaries cannot
+disagree about a draft's shape**." On required kinds they do disagree, and did before X9. Whoever
+closes this lane should correct that sentence rather than leave a comment asserting an invariant the
+function does not hold.
+
+**X9 is not the cause and was right not to fix it.** Before X9 a disabled required layer drew, so the
+preview looked complete while the brief was invalid; after it the preview is blank. Neither is
+correct, but the compositor's job is to honour a validated field. The fix belongs to the boundary
+validator, in a different package.
+
+**Reference semantics: the API's rule**, mirrored into the editor guard — at least one enabled
+instance of each required kind, absence of `enabled` meaning enabled. Whether a restored draft that
+fails should fall back to the canonical template is the lane's to decide and to state.
+
+```premise X11
+# isBriefTemplate does not enforce required kinds at all — the API does.
+! grep -q 'required' packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts
+```
