@@ -50,7 +50,15 @@ export const MAX_TAIL_KB = 1024;
 /** Prefixed families are pipeline artefacts, not lane logs. */
 const LANE_LOG_EXCLUDED = /^(install|gate|review|fix)-/;
 
-const PR_BRANCH_PREFIX = "feat/";
+/**
+ * One PR as the collector sees it: the observation's facts plus the
+ * normalised branch tail (`headRefName` minus any `feat/`-style prefix,
+ * lowercased) that the fallback join runs on. The lane's own event `pr`
+ * number is the preferred join; the tail is only a fallback.
+ */
+export interface PrFact extends NonNullable<LaneObservation["pr"]> {
+  readonly branchTail: string;
+}
 
 interface GhPrListEntry {
   readonly number: number;
@@ -82,7 +90,7 @@ export function resolveScanRoots(
  * Every external result is data: a failing read or CLI call shrinks the
  * observation (no log, no gate, no PR) — it never throws (D103, D106).
  *
- * `cachedPrByLane`, when provided, is reused as-is: a watcher-triggered
+ * `knownPrFacts`, when provided, is reused as-is: a watcher-triggered
  * refresh re-reads local state without waiting on `gh`. Omit it (or pass
  * nothing) to fetch PR facts now — startup, the slow poll, on-demand.
  */
@@ -90,7 +98,7 @@ export async function collect(
   deps: CollectDeps,
   root: string,
   now: string,
-  cachedPrByLane?: Readonly<Record<string, LaneObservation["pr"]>>,
+  knownPrFacts?: readonly PrFact[],
   legacyRoots?: readonly string[],
 ): Promise<WaveStatus> {
   // Gather first, order last: the wave list is decided here, the one place
@@ -102,7 +110,7 @@ export async function collect(
   const newestByWave = new Map<string, number>();
   const discovered = new Set<string>();
 
-  const prByLane = cachedPrByLane ?? (await prFacts(deps));
+  const facts = knownPrFacts ?? (await prFacts(deps));
   const worktrees = await worktreeFacts(deps);
 
   const scanRoots = resolveScanRoots(root, legacyRoots);
@@ -134,6 +142,22 @@ export async function collect(
       // no events yet is a dispatched wave, and that is the state an operator
       // most wants to see. Absent is the one answer that is never useful.
       discovered.add(wave);
+
+      // Events are read before the lane logs because a lane's own event `pr`
+      // is the preferred join key: the directory that holds a log also holds
+      // the events reporting that log's PR, whatever its wave field says.
+      const reportedPrByLane = new Map<string, number>();
+      if (entries.includes("events.jsonl")) {
+        try {
+          const text = await deps.readFile(join(dir, "events.jsonl"));
+          for (const event of readEvents(text).events) {
+            events.push(event);
+            if (event.pr !== undefined) reportedPrByLane.set(event.lane, event.pr);
+          }
+        } catch {
+          // W3 writes events.jsonl; absent or unreadable is "nobody reported", not an error.
+        }
+      }
 
       const laneLogs = entries
         .filter((entry) => entry.endsWith(".log") && !LANE_LOG_EXCLUDED.test(entry))
@@ -169,22 +193,14 @@ export async function collect(
           }
         }
 
+        const pr = joinPrForLane(lane, reportedPrByLane.get(lane), facts);
         const obs: LaneObservation = {
           ...(log !== undefined ? { log } : {}),
           ...(gateLog !== undefined ? { gateLog } : {}),
           alive,
-          ...(prByLane[lane] !== undefined ? { pr: prByLane[lane] } : {}),
+          ...(pr !== undefined ? { pr } : {}),
         };
         rows.push({ wave, lane, obs });
-      }
-
-      if (entries.includes("events.jsonl")) {
-        try {
-          const text = await deps.readFile(join(dir, "events.jsonl"));
-          for (const event of readEvents(text).events) events.push(event);
-        } catch {
-          // W3 writes events.jsonl; absent or unreadable is "nobody reported", not an error.
-        }
       }
     }
   }
@@ -237,12 +253,13 @@ export async function readTail(
 }
 
 /**
- * One `gh pr list` plus check-runs for open heads, mapped to lanes by
- * branch name `feat/<lane>`. Any `gh` failure, or a well-formed body of the
- * wrong shape, yields no PRs — never a throw.
+ * One `gh pr list --state all --limit 1000` (the default limit of 30 hides
+ * every merged PR, which is where most lanes land) plus check-runs for open
+ * PRs, returned as facts a lane can join to. Any `gh` failure, or a
+ * well-formed body of the wrong shape, yields no facts — never a throw.
  */
-export async function prFacts(deps: CollectDeps): Promise<Record<string, LaneObservation["pr"]>> {
-  const byLane: Record<string, LaneObservation["pr"]> = {};
+export async function prFacts(deps: CollectDeps): Promise<readonly PrFact[]> {
+  const facts: PrFact[] = [];
 
   let listed: readonly GhPrListEntry[] | undefined;
   try {
@@ -252,18 +269,18 @@ export async function prFacts(deps: CollectDeps): Promise<Record<string, LaneObs
         "list",
         "--state",
         "all",
+        "--limit",
+        "1000",
         "--json",
         "number,state,headRefName,headRefOid",
       ]),
     );
   } catch {
-    return byLane;
+    return facts;
   }
-  if (listed === undefined) return byLane;
+  if (listed === undefined) return facts;
 
   for (const entry of listed) {
-    if (!entry.headRefName.startsWith(PR_BRANCH_PREFIX)) continue;
-    const lane = entry.headRefName.slice(PR_BRANCH_PREFIX.length);
     const state = entry.state.toLowerCase();
     if (state !== "open" && state !== "merged" && state !== "closed") continue;
 
@@ -279,10 +296,56 @@ export async function prFacts(deps: CollectDeps): Promise<Record<string, LaneObs
       }
     }
 
-    byLane[lane] = { number: entry.number, state, checks };
+    facts.push({
+      number: entry.number,
+      state,
+      checks,
+      branchTail: branchTail(entry.headRefName),
+    });
   }
 
-  return byLane;
+  return facts;
+}
+
+/** `feat/l3b-layer-props` → `l3b-layer-props`; `main` → `main`. Lowercased. */
+function branchTail(headRefName: string): string {
+  const slash = headRefName.lastIndexOf("/");
+  return (slash === -1 ? headRefName : headRefName.slice(slash + 1)).toLowerCase();
+}
+
+/**
+ * The PR for one lane: the lane's own reported `pr` number if the events
+ * carry one and `gh` knows that PR; otherwise the best normalised branch
+ * match — an exact case-folded tail, then a `<lane>-` descendant, and among
+ * equals the newest PR. `null` is the answer when neither exists.
+ */
+export function joinPrForLane(
+  lane: string,
+  eventPr: number | undefined,
+  facts: readonly PrFact[],
+): LaneObservation["pr"] | undefined {
+  if (eventPr !== undefined) {
+    const reported = facts.find((fact) => fact.number === eventPr);
+    if (reported !== undefined) return asPr(reported);
+  }
+
+  const wanted = lane.toLowerCase();
+  let best: PrFact | undefined;
+  let bestScore = 0;
+  for (const fact of facts) {
+    const score =
+      fact.branchTail === wanted ? 2 : fact.branchTail.startsWith(`${wanted}-`) ? 1 : 0;
+    if (score === 0) continue;
+    if (best === undefined || score > bestScore || (score === bestScore && fact.number > best.number)) {
+      best = fact;
+      bestScore = score;
+    }
+  }
+  return best === undefined ? undefined : asPr(best);
+}
+
+function asPr(fact: PrFact): LaneObservation["pr"] {
+  return { number: fact.number, state: fact.state, checks: fact.checks };
 }
 
 /**

@@ -6,17 +6,21 @@ import { execFile } from "node:child_process";
 import {
   collect,
   derivePrefix,
+  joinPrForLane,
   LEGACY_WAVE_LOG_ROOT,
   LOG_TAIL_BYTES,
   parseChecks,
   pgrepPattern,
+  prFacts,
   realDeps,
   resolveScanRoots,
   WAVE_LOG_ROOT,
   waveIdFromDirName,
   worktreeFacts,
+  type CollectDeps,
+  type PrFact,
+  type TailHandle,
 } from "../lib/collect.js";
-import type { CollectDeps, TailHandle } from "../lib/collect.js";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -290,9 +294,9 @@ describe("collect", () => {
     const gh = vi.fn(async () => {
       throw new Error("gh should not run on a cached collect");
     });
-    const status = await collect(fakeDeps({ ...TREE, gh }), ROOT, "now", {
-      t1: { number: 7, state: "open", checks: "pass" },
-    });
+    const status = await collect(fakeDeps({ ...TREE, gh }), ROOT, "now", [
+      { number: 7, state: "open", checks: "pass", branchTail: "t1" },
+    ]);
     expect(gh).not.toHaveBeenCalled();
     expect(status.waves[0]?.lanes[0]?.derived.pr).toEqual({ number: 7, state: "open", checks: "pass" });
     expect(status.waves[1]?.lanes[0]?.derived.pr).toBeUndefined();
@@ -625,6 +629,235 @@ describe("collect", () => {
     const status = await collect(countingDeps, "/same", "now", undefined, ["/same"]);
     expect(status.waves.map((w) => w.id)).toEqual(["One"]);
     expect(readdirCount).toBe(1);
+  });
+});
+
+describe("prFacts", () => {
+  function prListDeps(list: unknown, checkRuns = async (): Promise<string> => "not json"): CollectDeps {
+    return fakeDeps({
+      gh: async (args) => {
+        if (args[0] === "pr") return JSON.stringify(list);
+        return checkRuns();
+      },
+    });
+  }
+
+  test("asks gh for the full list: the 30-entry default hides every merged PR", async () => {
+    const gh = vi.fn(async () => "[]");
+    await prFacts(fakeDeps({ gh }));
+    expect(gh).toHaveBeenCalledWith([
+      "pr",
+      "list",
+      "--state",
+      "all",
+      "--limit",
+      "1000",
+      "--json",
+      "number,state,headRefName,headRefOid",
+    ]);
+  });
+
+  test("every PR becomes a fact with its case-folded branch tail, slash or no slash", async () => {
+    const facts = await prFacts(
+      prListDeps([
+        { number: 285, state: "MERGED", headRefName: "fix/H2-hit-testing", headRefOid: "o1" },
+        { number: 221, state: "CLOSED", headRefName: "main", headRefOid: "o2" },
+        { number: 222, state: "DRAFTED", headRefName: "feat/t9", headRefOid: "o3" },
+      ]),
+    );
+    expect(facts).toEqual([
+      { number: 285, state: "merged", checks: "none", branchTail: "h2-hit-testing" },
+      { number: 221, state: "closed", checks: "none", branchTail: "main" },
+    ]);
+  });
+
+  test("open PRs carry their checks; a check-runs failure is none, not a loss", async () => {
+    const facts = await prFacts(
+      prListDeps(
+        [
+          { number: 218, state: "OPEN", headRefName: "feat/t1", headRefOid: "good" },
+          { number: 220, state: "OPEN", headRefName: "feat/v3", headRefOid: "bad" },
+        ],
+        async () => {
+          throw new Error("gh api failed");
+        },
+      ),
+    );
+    expect(facts.map((fact) => fact.checks)).toEqual(["none", "none"]);
+  });
+});
+
+describe("joinPrForLane", () => {
+  function fact(
+    number: number,
+    branchTail: string,
+    state: "open" | "merged" | "closed" = "merged",
+    checks: "none" | "pending" | "pass" | "fail" = "none",
+  ): PrFact {
+    return { number, state, checks, branchTail };
+  }
+
+  const facts = [
+    fact(273, "l3b-layer-props"),
+    fact(265, "l2a-layer-list"),
+    fact(221, "main"),
+  ];
+
+  test("the event's own pr number wins over any branch match", () => {
+    const withExact = [...facts, fact(999, "l3b-layer-props", "open", "pending")];
+    expect(joinPrForLane("L3b-layer-props", 273, withExact)).toEqual({
+      number: 273,
+      state: "merged",
+      checks: "none",
+    });
+  });
+
+  test("an event pr gh does not know falls back to the branch", () => {
+    expect(joinPrForLane("L3b-layer-props", 111111, facts)).toEqual({
+      number: 273,
+      state: "merged",
+      checks: "none",
+    });
+  });
+
+  test("the branch fallback is case- and prefix-insensitive", () => {
+    expect(joinPrForLane("L3b-layer-props", undefined, facts)?.number).toBe(273);
+    expect(joinPrForLane("h2-hit-testing", undefined, [fact(285, "h2-hit-testing")])?.number).toBe(285);
+  });
+
+  test("an exact tail beats a descendant even with an older number", () => {
+    const candidates = [
+      fact(300, "l5-template-editor-2"),
+      fact(278, "l5-template-editor"),
+    ];
+    expect(joinPrForLane("L5-template-editor", undefined, candidates)?.number).toBe(278);
+  });
+
+  test("among descendants the newest PR wins, and an older one keeps the seat", () => {
+    expect(
+      joinPrForLane("l5", undefined, [fact(300, "l5-editor"), fact(290, "l5-editor-2")])?.number,
+    ).toBe(300);
+    expect(
+      joinPrForLane("l5", undefined, [fact(290, "l5-editor-2"), fact(300, "l5-editor")])?.number,
+    ).toBe(300);
+  });
+
+  test("a lane never joins a sibling that merely shares a prefix", () => {
+    expect(joinPrForLane("w1", undefined, [fact(282, "w1a-status-cli"), fact(221, "main")])).toBeUndefined();
+  });
+});
+
+describe("collect — the PR-to-lane join", () => {
+  const joinTree = (files: Record<string, string>, ghList: unknown): FakeTree => ({
+    dirs: {
+      [ROOT]: ["waveJ"],
+      [`${ROOT}/waveJ`]: [...Object.keys(files).map((p) => p.slice(`${ROOT}/waveJ/`.length))],
+    },
+    files,
+    gh: async (args) => (args[0] === "pr" ? JSON.stringify(ghList) : "not json"),
+  });
+
+  test("a lane whose event carries pr shows that PR when no branch could have found it", async () => {
+    const status = await collect(
+      fakeDeps(
+        joinTree(
+          {
+            [`${ROOT}/waveJ/L2a-compositor-layer-list.log`]: "done\n",
+            [`${ROOT}/waveJ/events.jsonl`]:
+              '{"ts":"2026-09-08T22:07:15Z","wave":"J","lane":"L2a-compositor-layer-list","stage":"implement","event":"settled","pr":265}\n',
+          },
+          [{ number: 265, state: "MERGED", headRefName: "feat/l2a-layer-list", headRefOid: "o" }],
+        ),
+      ),
+      ROOT,
+      "now",
+    );
+    const row = status.waves[0]?.lanes.find((lane) => lane.lane === "L2a-compositor-layer-list");
+    expect(row?.derived.pr).toEqual({ number: 265, state: "merged", checks: "none" });
+  });
+
+  test("a lane with no event joins by the normalised branch tail", async () => {
+    const status = await collect(
+      fakeDeps(
+        joinTree(
+          { [`${ROOT}/waveJ/H1a-tokens-selector.log`]: "done\n" },
+          [{ number: 280, state: "MERGED", headRefName: "fix/h1a-tokens-selector", headRefOid: "o" }],
+        ),
+      ),
+      ROOT,
+      "now",
+    );
+    expect(status.waves[0]?.lanes[0]?.derived.pr).toEqual({
+      number: 280,
+      state: "merged",
+      checks: "none",
+    });
+  });
+
+  test("the event pr wins when it disagrees with the branch match", async () => {
+    const status = await collect(
+      fakeDeps(
+        joinTree(
+          {
+            [`${ROOT}/waveJ/L3b-layer-props.log`]: "done\n",
+            [`${ROOT}/waveJ/events.jsonl`]:
+              '{"ts":"2026-09-08T22:07:15Z","wave":"J","lane":"L3b-layer-props","stage":"implement","event":"settled","pr":273}\n',
+          },
+          [
+            { number: 273, state: "MERGED", headRefName: "feat/l3b-layer-props", headRefOid: "o" },
+            { number: 999, state: "OPEN", headRefName: "feat/l3b-layer-props-suffix", headRefOid: "o" },
+          ],
+        ),
+      ),
+      ROOT,
+      "now",
+    );
+    expect(status.waves[0]?.lanes[0]?.derived.pr?.number).toBe(273);
+  });
+
+  test("a later event without pr does not unjoin the earlier one that carried it", async () => {
+    const status = await collect(
+      fakeDeps(
+        joinTree(
+          {
+            [`${ROOT}/waveJ/L3b-layer-props.log`]: "done\n",
+            [`${ROOT}/waveJ/events.jsonl`]:
+              '{"ts":"2026-09-08T22:07:15Z","wave":"J","lane":"L3b-layer-props","stage":"implement","event":"settled","pr":273}\n' +
+              '{"ts":"2026-09-08T22:08:15Z","wave":"J","lane":"L3b-layer-props","stage":"merge","event":"started"}\n',
+          },
+          [{ number: 273, state: "MERGED", headRefName: "feat/l3b-layer-props", headRefOid: "o" }],
+        ),
+      ),
+      ROOT,
+      "now",
+    );
+    expect(status.waves[0]?.lanes[0]?.reported?.stage).toBe("merge");
+    expect(status.waves[0]?.lanes[0]?.derived.pr?.number).toBe(273);
+  });
+
+  test("events from another wave's directory cannot leak a pr into this one", async () => {
+    const status = await collect(
+      fakeDeps({
+        dirs: {
+          [ROOT]: ["waveJ", "waveK"],
+          [`${ROOT}/waveJ`]: ["L3b.log"],
+          [`${ROOT}/waveK`]: ["events.jsonl"],
+        },
+        files: {
+          [`${ROOT}/waveJ/L3b.log`]: "done\n",
+          [`${ROOT}/waveK/events.jsonl`]:
+            '{"ts":"2026-09-08T22:07:15Z","wave":"K","lane":"L3b","stage":"implement","event":"settled","pr":273}\n',
+        },
+        gh: async () =>
+          JSON.stringify([
+            { number: 273, state: "MERGED", headRefName: "feat/other-lane", headRefOid: "o" },
+          ]),
+      }),
+      ROOT,
+      "now",
+    );
+    const row = status.waves.find((wave) => wave.id === "J")?.lanes[0];
+    expect(row?.derived.pr).toBeUndefined();
   });
 });
 

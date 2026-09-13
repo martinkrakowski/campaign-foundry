@@ -97,14 +97,6 @@ omitted this and S1 would have hit it first.
 
 ## 7. Premises
 
-```premise S1
-# The join key: PR facts are looked up by a branch-derived lane slug. The lane
-# is done when the event's own `pr` number is what joins. Probing the lookup,
-# not the prefix constant, because adding prefixes to a broken join changes
-# nothing.
-grep -q 'prByLane\[' tools/wave-status/lib/collect.ts
-```
-
 ```premise S2
 # Rows have exactly one source: the lane-log loop. An event-only lane therefore
 # never reaches the PR attachment or the liveness probe. S2 adds a second source

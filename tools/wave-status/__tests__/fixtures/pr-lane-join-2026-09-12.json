@@ -1,0 +1,2380 @@
+{
+ "source": "Recorded 2026-09-12 from real state on this machine: the verbatim directory listing and events.jsonl of /tmp/wave-creative-templates (wave creative-templates-w01, 21 events carrying a top-level pr) and `gh pr list --state all --limit 1000 --json number,state,headRefName,headRefOid`. Not hand-built: the branch slugs, prefix families and lane-id casing are exactly what the orchestrator actually produced.",
+ "ghPrList": [
+  {
+   "headRefName": "docs/keyframing-amendment",
+   "headRefOid": "6880864638112e23af1fe1a6f735162c5ad8e39a",
+   "number": 361,
+   "state": "OPEN"
+  },
+  {
+   "headRefName": "docs/roster-to-openrouter",
+   "headRefOid": "fb01665fca4eafdcd2123beff46f792a2a30b688",
+   "number": 360,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/manifest-base-unreachable",
+   "headRefOid": "c7146bf6051c0bbbd5f992e1d517c8cd719e7074",
+   "number": 359,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/ci-replay-manifests",
+   "headRefOid": "504e9a79d8d7cf4824647990c03a6513744389e4",
+   "number": 358,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w3-rollup-and-filter",
+   "headRefOid": "a312c684c30205c9881fe2c6b1c7c5ac234e585b",
+   "number": 357,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l10-pool-store-revision",
+   "headRefOid": "abed506ddfb766e77bf3dc6b54e76628039c2818",
+   "number": 356,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l7-job-handle-scope",
+   "headRefOid": "504d2057d1fe92e6fc156376486670ad4d4acd3c",
+   "number": 355,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/hl1-element-vocabulary",
+   "headRefOid": "f1a9347e45edc0e5af02ee2fbf18a55538be5c20",
+   "number": 354,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/status-without-asking",
+   "headRefOid": "4555314510ddc1f4536eaa1d8d7c64d5ddda9a60",
+   "number": 353,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/restore-plan-reviewer",
+   "headRefOid": "98271133021107f9a206a183a89eb8eb34947dc4",
+   "number": 352,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w2-render-lane-state",
+   "headRefOid": "bec1f69991c5b56a87d4a484950fca4c8f258014",
+   "number": 351,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/test-temp-dirs-collide",
+   "headRefOid": "5bba22329e907f373fc608e7696c092e065bd1a5",
+   "number": 350,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w5-wave-log-root",
+   "headRefOid": "3b3517af1a29a3482f973bdbaee358f79ea36d99",
+   "number": 349,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l9-brief-store-temp-name",
+   "headRefOid": "a3e86dffa79e3c6d6efc40f0d467ef0197801e9b",
+   "number": 348,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/handoff-check",
+   "headRefOid": "4115fb5811f3a5a4978997ee48d865499cd5a9c3",
+   "number": 347,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "audit/premises-keyframing-html",
+   "headRefOid": "3be5a369163d61f33d891fd71250a349674e43f5",
+   "number": 346,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "audit/premises-editor-verification",
+   "headRefOid": "c328bc70d01a3f36a1e620140a31769446b3c77b",
+   "number": 345,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/seat-config-qwen-primary",
+   "headRefOid": "fd9021f9b35dc76809d0aa0ff60aacd501316f09",
+   "number": 344,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "audit/premises-legacy-plans",
+   "headRefOid": "0cfde5947598853876b304ef43b62d9f51a1ffcb",
+   "number": 343,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/prove-the-defect-first",
+   "headRefOid": "4049e5215df967b6273d8a4892d515ede6a30724",
+   "number": 342,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/retire-w4-premise",
+   "headRefOid": "d33d5a392c0b3ca0785000f3d53d9cca0bb17328",
+   "number": 341,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w4-screen-b",
+   "headRefOid": "a06ec176d3dc5fae6314d38dd9ead28e8b2d306a",
+   "number": 340,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/mutation-manifest",
+   "headRefOid": "144cf7193f8ca459a28c61d8a138e3491bd69f59",
+   "number": 339,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/plan-verify",
+   "headRefOid": "b3a964e748ec32f398fe60fee687a9f7d195b660",
+   "number": 338,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w1-lane-state",
+   "headRefOid": "de0d3f1892a676d1e5c0e0f86813383f35db034a",
+   "number": 337,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/wave-status-command-monitor",
+   "headRefOid": "55bceab2af6875cf16fea0ae55a67e81e314c0a6",
+   "number": 336,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/t2c-golden-platform-caveat",
+   "headRefOid": "35e92e918d9d024b3e7cf48a107c1773868ff64c",
+   "number": 335,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/t2a-occlusion-encoding",
+   "headRefOid": "ba3a865cde589e11da6218c25419470e3348181a",
+   "number": 334,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/t2b-wave-status-token-test",
+   "headRefOid": "5bfe60d5fd3c9b67a5aa959135f1b19ebe014eee",
+   "number": 333,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/cast-round2-trial",
+   "headRefOid": "f5b375c8b487415bab11cc22e782f78b6fdbc1a3",
+   "number": 332,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/x6-html-guard",
+   "headRefOid": "f92df67abd6a9f71c0d693ada88fdaebbc68d0e6",
+   "number": 331,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/m2-enabled-at-the-boundary",
+   "headRefOid": "3ec327e5b0c6a1536a44bd7741bd93a4347c7a34",
+   "number": 330,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/wave-status-monitoring",
+   "headRefOid": "20893c61a6472fe66d57a0184a60ff2ece9c614a",
+   "number": 329,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/c5-motion-full-order",
+   "headRefOid": "8482b147c0d3ec4928e51574cad502954f86795f",
+   "number": 328,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/t4-filter-and-tokens",
+   "headRefOid": "157bf9efce8d4dd857992e863600db964d6ccb12",
+   "number": 327,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/vg-mp4-byte-golden",
+   "headRefOid": "469b728c98b922689d87bf1c54b1cba0b6491f45",
+   "number": 326,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/goldens-and-gaps",
+   "headRefOid": "19b3e5bbffd872e85e2bb8471d82cab37c93623b",
+   "number": 325,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/the-html-layer",
+   "headRefOid": "a77f7f25dab5c3b7cfb4e562d81bcf16099e63fe",
+   "number": 324,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/finishing-video",
+   "headRefOid": "c4a46e8a4eaa38997fdb42275c621d9079a32c29",
+   "number": 323,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/vd-video-and-html-drawers",
+   "headRefOid": "0d6c07163819888577971f3bc8ac8d56d0bb5ee7",
+   "number": 322,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/immutable-install-gap",
+   "headRefOid": "aef6664f292072fc29ac2d844490cf18cb0565c0",
+   "number": 321,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/phase-0-outcome",
+   "headRefOid": "871287359fabc901bcdbff2d6744655a5111c0ec",
+   "number": 320,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/c3-wire-the-template",
+   "headRefOid": "0d47c1bbb1978bab07394195d7a93792375399ac",
+   "number": 319,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/r1-inline-legal-lint",
+   "headRefOid": "431f149473e7ff20f7d1decb9cfcfcfff49d956b",
+   "number": 318,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "chore/agy-implementer-seat",
+   "headRefOid": "07313a8cbd64a35dc120daa29d7ad6ea4344075e",
+   "number": 317,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/t3-log-pane-theme",
+   "headRefOid": "78537caa3881a517d3d00487489a66f552a8f4e7",
+   "number": 316,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/c2-previews-one-order",
+   "headRefOid": "80b617e0c103e6ddcfde7c81c389efb7ccbac54d",
+   "number": 315,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/retire-the-sept8-plans",
+   "headRefOid": "3623217b86c9aeb76a8e7385c5adb3d9329c793f",
+   "number": 314,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/c1-motion-reads-the-list",
+   "headRefOid": "49445dae698e40a04dd688752763dff096e59445",
+   "number": 313,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/the-master-sequence",
+   "headRefOid": "45f559d377e9b43644e55eabf7db2e149fcfc6c0",
+   "number": 312,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/keyframing-plan",
+   "headRefOid": "c8b3c7947c692d86f47b229dcf9b40bcc2fc922a",
+   "number": 311,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/the-reconciliation",
+   "headRefOid": "2ceec79f4a47be25fce745b4a0c84c2edc46a31c",
+   "number": 310,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/preserve-sept8-plans",
+   "headRefOid": "d9a162d752228592335088be5e5aa25086bd4441",
+   "number": 309,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/t2-table-theme",
+   "headRefOid": "f697ff0a6a2648306157157b99723688e12c12fc",
+   "number": 308,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/compositor-and-l9-gate",
+   "headRefOid": "90741e9002190ae2279fc53a33da1bdca237939f",
+   "number": 307,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/t1-shell-theme",
+   "headRefOid": "da2a9c7b7751a9b3fd746121e7c3ab15bc58d93e",
+   "number": 306,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/seat-selection-plan",
+   "headRefOid": "0c7a1fd79c20fd25ebb4927c56613bbe89b9a00f",
+   "number": 305,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/ws2-tail-follow",
+   "headRefOid": "abe708b5503095f8edef497086a49cdddee54fca",
+   "number": 304,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/timeline-logo-gate",
+   "headRefOid": "14edbd4d8060435f5e0a7dba50ee4f311d012911",
+   "number": 303,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "chore/fable-plan-reviewer",
+   "headRefOid": "bae65cbb5d421559925a646e17070ade2884dc45",
+   "number": 302,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "chore/in-house-cast",
+   "headRefOid": "cca51f279df018a87d5d781c6268efda491505f0",
+   "number": 301,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/computed-style-fact",
+   "headRefOid": "2f68402e3cec3a2d376e40c5e09330e51214a4a7",
+   "number": 300,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/ws1-accordion-sort",
+   "headRefOid": "7ce77ac5daf23dcaa7c181bec4c012aa64693898",
+   "number": 299,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l8o-occlusion",
+   "headRefOid": "8e430b6ea9ec30e85102ba889d4e7ccf2ac9ee6e",
+   "number": 298,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l8m-move-and-order",
+   "headRefOid": "27772432a4ba572df743c0c6d404f2ed67ec9315",
+   "number": 297,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "chore/mutate-in-skill",
+   "headRefOid": "8a70f3327e0fe4e3cc41236fd25c9c27ad110c7b",
+   "number": 296,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/mutation-harness",
+   "headRefOid": "4271f82c247af21a2d1f1215a610df27690fba95",
+   "number": 295,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/record-ct-waves3-6",
+   "headRefOid": "e7cf3810a826ef6358cc47b5f834c386d09324ae",
+   "number": 294,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w2b2-log-export",
+   "headRefOid": "5eddee2d88137dd6e1ad09ffff62c8e008c73d8e",
+   "number": 293,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/seat-trial-w2b1",
+   "headRefOid": "45953e298210ac59bd855c30a41d76bdd40e7011",
+   "number": 292,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w2b1-log-toolbar",
+   "headRefOid": "a500deab81533c6b719a60d4eb0c154bfe892db7",
+   "number": 291,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "chore/v1-absence-claims",
+   "headRefOid": "c5f1e997139db6e703043597ba6a2ab9e952ca5b",
+   "number": 290,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "chore/v5-verification-discipline",
+   "headRefOid": "77e9b7c68b2c15a1fa8988a5c13dc0a48feb8bac",
+   "number": 289,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/verification-budget-plan",
+   "headRefOid": "d9f1dd9e51938c7390561121c7cdead6b148e45e",
+   "number": 288,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/w1c-cli-hardening",
+   "headRefOid": "d08538c2e3c74b4254beb021d1b37c649ce3627a",
+   "number": 287,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w2a-status-layout",
+   "headRefOid": "ab23b0dffe002aa7a67b0dc4d52443cccc35f325",
+   "number": 286,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/h2-hit-testing",
+   "headRefOid": "4bdbaf11774ffb8196010d05f5d8e0882ef09087",
+   "number": 285,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l8a-reorder",
+   "headRefOid": "56334cadab757bb1aece59153f8309ead205eb07",
+   "number": 284,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "chore/seat-trial-protocol",
+   "headRefOid": "bf2bf461b0cb23eef71c3c0f595e0fc686c327fe",
+   "number": 283,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w1a-status-cli",
+   "headRefOid": "1c5958f3ae50bed6fc824db12ec8fabefb0d64f1",
+   "number": 282,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/h1b-extract-skips-comments",
+   "headRefOid": "9afdfe4dc0f05c3ed7f4eb9a9b875da2326b3af8",
+   "number": 281,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/h1a-tokens-selector",
+   "headRefOid": "d2e1b09281de103c1c50c947f9b90802bbbebb0f",
+   "number": 280,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/d135-occlusion-guards",
+   "headRefOid": "f9c550331278693ddeecad4662485adf4eb3d74e",
+   "number": 279,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l5-template-editor",
+   "headRefOid": "8dae53ce6216884c9dfcb90a96fe45bdf2f333d2",
+   "number": 278,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l6-html-output-family",
+   "headRefOid": "965ff3d09fa52b50366c0e8acc77fcfed347e76b",
+   "number": 277,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l4-compatibility-rules",
+   "headRefOid": "bc44f462fbd89bc58ece4e089db29c02b36d443f",
+   "number": 276,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/h1-tokens-route",
+   "headRefOid": "117db6e854697db2dbe52964706abf956e865897",
+   "number": 275,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l7a1-template-store",
+   "headRefOid": "861309d8f46f8cd3618ef52038d2ece57433281b",
+   "number": 274,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l3b-layer-props",
+   "headRefOid": "76dfab99f351e50dce50d9933acbbed0309f7394",
+   "number": 273,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "chore/readable-lane-names",
+   "headRefOid": "c0506bbd4a2ed84557335deab88a7bd83beb1468",
+   "number": 272,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/record-ct-wave2",
+   "headRefOid": "5d06235b031e4de341f29d1132555b8d44578f8c",
+   "number": 271,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/d134-table-row",
+   "headRefOid": "866ee483c20802233a7500ecedf07d02d6d20d59",
+   "number": 270,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/props-vocabulary",
+   "headRefOid": "0974ca2601ec2ea2bb322fa07e3459ef959a834a",
+   "number": 269,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l3a-template-required",
+   "headRefOid": "bd54e8960a886a29ee06aa42b612b79695ce2b92",
+   "number": 268,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "chore/gate-superset",
+   "headRefOid": "0d5acfac3b342b1d75ff4ee062422f16ab8075b0",
+   "number": 267,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l2b-preview-order",
+   "headRefOid": "637b2dafbb2cce2411ed84144ef90991acf1f83e",
+   "number": 266,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l2a-layer-list",
+   "headRefOid": "6ed67a355c2df59af22412402079c143389049fc",
+   "number": 265,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/record-ct-wave1",
+   "headRefOid": "13ba15a2286fc7a70a717f8671eb35f80dd3d4bb",
+   "number": 264,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l1b-brief-template",
+   "headRefOid": "aad6fbb3cb726e560fbc339126b97f90028a57db",
+   "number": 263,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/cast-usage-instrumentation",
+   "headRefOid": "1d4d4e5ec290fee97a3ec59c773a1197f484fd0a",
+   "number": 262,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/cast-burn-rules",
+   "headRefOid": "57705cde8d962c89b3971dfd7fe8484eb49b46e2",
+   "number": 261,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l1a-creative-vocabulary",
+   "headRefOid": "948701e824ca6c226bd2cd9e20d8623ba9f84c56",
+   "number": 260,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/cast-order-2",
+   "headRefOid": "3861979bf3ecc4889d22948fc2d99fd1a178a2e2",
+   "number": 259,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/cast-2026-09-08",
+   "headRefOid": "487ef1fb7551013ba6591a64a6ad3c34d01da3fb",
+   "number": 258,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/create-dialog-design-audit",
+   "headRefOid": "379629b3af94f1a605aa1bad961395f77fa0e121",
+   "number": 257,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/record-l12",
+   "headRefOid": "e888da125a59028a3b0a50a10751701da34f16fa",
+   "number": 256,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l12-schema-version",
+   "headRefOid": "35dd7ad3bd366f7a43565bff44a5b52f8d49a19a",
+   "number": 255,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/creative-templates-plan",
+   "headRefOid": "4364ccdece773a5793c05560e62cedbac1723983",
+   "number": 254,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/display-close-out",
+   "headRefOid": "755a9d19742e640f3c3c6aaeeebc7fa6f67c5bed",
+   "number": 253,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/a5-display-ad-type",
+   "headRefOid": "02b54526819fda3bb76fec51192abf95528bf294",
+   "number": 252,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/a4b-run-path-sizes",
+   "headRefOid": "3632c79f90782017195a18108c6a202d149a8801",
+   "number": 251,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/display-wave-3-record",
+   "headRefOid": "4dd3174206aa538ba63a6df32bf55795117e1de5",
+   "number": 250,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/a4-kit-union",
+   "headRefOid": "82e8bae39c5aef776e385a2a20fb43bc6e547cb0",
+   "number": 249,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/a3-display-profiles",
+   "headRefOid": "3802a6cc804907770072d33ac92a36377f3af039",
+   "number": 248,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/display-wave-2-record",
+   "headRefOid": "40372177030415fe6a267bd266dedc942c651d15",
+   "number": 247,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/a2-short-side-scale",
+   "headRefOid": "7f59686acaf12f0329b262670c9d34bb4131c268",
+   "number": 246,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/display-wave-1-record",
+   "headRefOid": "86a0e97dd642d5e4ae2d17611b150d76bccd94fb",
+   "number": 245,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/a0-linux-goldens",
+   "headRefOid": "dcbfaf9a3f28cf54968b04a167c9f75e118af368",
+   "number": 244,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/a1-display-sizes",
+   "headRefOid": "813a6446bfce3e19ef106a743187e6acc475346d",
+   "number": 243,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/p1-close-out",
+   "headRefOid": "32c7a07740585ca641f2b3a375b8030643b7a8e2",
+   "number": 242,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/wave-status-close-out",
+   "headRefOid": "e0fabe640ca597e16026da64aa782b13914dc1f3",
+   "number": 241,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/p1-packages-ui",
+   "headRefOid": "67c68d990f9f92ae31ac96a8ed08b91d5d6227bb",
+   "number": 240,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/campaign-type-wave-c-record",
+   "headRefOid": "32a884b91413b1274244a6b0604d4bf3d061b8b2",
+   "number": 239,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/wave-status-server",
+   "headRefOid": "4d610e624f5cbf9796c0c86aac673ab037b3fa00",
+   "number": 238,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/cast-model-ids",
+   "headRefOid": "196c50bfe35d7f68557e6e4f26528dcaf51f0629",
+   "number": 237,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/t3",
+   "headRefOid": "35b1fb98014e3e774397b31bfac7b4886b8ce390",
+   "number": 236,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/identity-map-after-frame",
+   "headRefOid": "bd0b3d583e7eaf0e3b60ad4f58c64bc3fca8d488",
+   "number": 235,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/t4",
+   "headRefOid": "838f4fb0cb521dbd68f801107ae9615c228a77f6",
+   "number": 234,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/campaign-type-wave-b-record",
+   "headRefOid": "3c9eac27c7bc3456e4c10009402a78d87638302d",
+   "number": 233,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/wave-status-emit",
+   "headRefOid": "b893f32482c4265e3914d55cfe1cde3c040a0a02",
+   "number": 232,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/identity-map-after-first-paint",
+   "headRefOid": "bacbf1ea0a28ff6529255eb6d0510577f504a86c",
+   "number": 231,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/two-field-wave-b-record",
+   "headRefOid": "fb802a4ec5124cabd4d82c102f32661889f99eca",
+   "number": 230,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/wave-status-core",
+   "headRefOid": "b9f387557f00eb4c21ed3780d84b117270825d78",
+   "number": 229,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/t2",
+   "headRefOid": "d95e851a9365ac93ac40d5a23136628e2ac5802e",
+   "number": 228,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/campaign-type-wave-a-record",
+   "headRefOid": "65bac1e9f6491af8a46610650ee1257fed9f798b",
+   "number": 227,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/merge-poll-pushed-sha",
+   "headRefOid": "b8d524e39d60392c8c8fd562d5e7b23e514755c3",
+   "number": 226,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/s2",
+   "headRefOid": "d224f336b2e227cb6f82da4a1184797eb397a6c0",
+   "number": 225,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/t1",
+   "headRefOid": "330b6c62dddd1c457f4b7d149119fe2d16a2d6db",
+   "number": 224,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/merge-poll-required-check",
+   "headRefOid": "3469bdb531c31347749f52227321fccc66b484cf",
+   "number": 223,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/wave-a-record",
+   "headRefOid": "884b3d4b9f18ddd06968fd3619dc7d4034a498c0",
+   "number": 222,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/campaign-type-and-display-plans",
+   "headRefOid": "36243501992077f8f16cbf9d0d72066ad1f75c10",
+   "number": 221,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/merge-script-no-watch",
+   "headRefOid": "7cd56914493cd7ff50ab81379c5d1c08dc43cb87",
+   "number": 220,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/wave-status-server-plan",
+   "headRefOid": "5816e0bcfa6fbc0f68733eb009abacde040c0c10",
+   "number": 219,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/s4",
+   "headRefOid": "8bef7d86a566bb29d465345a5578ba0b09a480aa",
+   "number": 218,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/s3",
+   "headRefOid": "33a49f6b47ca09a2d7f806b2652b3a427f40c3cd",
+   "number": 217,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/two-field-create-plan",
+   "headRefOid": "af847d59e894b2490eadbd9b22cf239f316bf190",
+   "number": 216,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/wave-c-record",
+   "headRefOid": "baebbee665e17dc5157ef3a85d7b79f0911d3c78",
+   "number": 215,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/m2",
+   "headRefOid": "6332d4767d317e781e804bb1f15ec43ba0c9ada2",
+   "number": 214,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/wave-b-record",
+   "headRefOid": "fd6067ff7a7bd38eaf71f0cc9b97df99543a85c1",
+   "number": 213,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/merge-script-head-checks",
+   "headRefOid": "5d023f9817b52412f393b4359431b1073fc5ea02",
+   "number": 212,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "chore/orchestrator-close-out",
+   "headRefOid": "f98c0a253f5bff7ad28bed7aaabe24948282a932",
+   "number": 211,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/orchestrator-wave-records",
+   "headRefOid": "e9b471b4bafe320971abefe583e554307ea93353",
+   "number": 210,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/g3",
+   "headRefOid": "f54fb949b05ff6b97bfe075b1a458b21092c6ba2",
+   "number": 209,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/g2",
+   "headRefOid": "129f6073c136962122f464fea4f9e3004e0cc479",
+   "number": 208,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/m1",
+   "headRefOid": "008f710ad8be76b28dd5b1ad563f0acee434de56",
+   "number": 207,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/g1",
+   "headRefOid": "d8fe76ab7232a02ee5d66f91ffeb2795817e170b",
+   "number": 206,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/graphics-and-world-map-plan",
+   "headRefOid": "d39d5b1a76b5a2c32e864e841625967ec40c1c06",
+   "number": 205,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w2a",
+   "headRefOid": "a7c23b6d3ed7cb4ed83b9589922457299cc202b4",
+   "number": 204,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w1",
+   "headRefOid": "b5ce0a200914ba9c3a68851ecd09cc9e94ec7a3e",
+   "number": 203,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/b2",
+   "headRefOid": "27b5591dab7dd7f9f53ad121933dfbf8014e848f",
+   "number": 202,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/b1",
+   "headRefOid": "1f2eb5b800d8140819fa66c919219f1028d24329",
+   "number": 201,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/wave1-session-log",
+   "headRefOid": "e0fdf4a712e236f48bf69eee109781cd3c19202f",
+   "number": 200,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/k1-kit-primitives",
+   "headRefOid": "e376a0469aa9913ddc82a858855f17d98841109c",
+   "number": 199,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/create-dialog-recomposition-plan",
+   "headRefOid": "e334d0175578076475c7396b85e2699549f8b8a9",
+   "number": 198,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/fa-failed-listing-state",
+   "headRefOid": "a57f7c6899b743af4b11b56135b701b8293699a4",
+   "number": 197,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/f5-focus-trap-containment",
+   "headRefOid": "37d1ef09a278e4368deee7847780a0c072171166",
+   "number": 196,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/remaining-work-plan",
+   "headRefOid": "d92aa33e3c8f8275a1d202efa3f86c03d7b55c2a",
+   "number": 195,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/correct-opencode-provider",
+   "headRefOid": "2748bc26c5e9cc2e23d06c8be6674441ac9feeef",
+   "number": 194,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "chore/orchestrate-wave-skill",
+   "headRefOid": "913a736cd785158d962a5fcf2c7bc8ccd1b6bc0d",
+   "number": 193,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/run-exclusion-plan",
+   "headRefOid": "122f22a8eb7e44ee860a5ba564cb68439242cf4b",
+   "number": 192,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "refactor/c-mode-display-name",
+   "headRefOid": "01f7200a7c437f50bb61f49162c2968405f2377e",
+   "number": 191,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/b-null-scalar-prompt-context",
+   "headRefOid": "1d9b3dcf904bcd443e05a8bd38960cf886fe49de",
+   "number": 190,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/a-listing-failures-visible",
+   "headRefOid": "e9eecf30f793dbf053e8368bee37e0b6c4f32337",
+   "number": 189,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w2-start-from-existing",
+   "headRefOid": "9f94f4e606ccfc51d465ff849bd0fd20a5d5be4a",
+   "number": 188,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/p2-pool-store-port",
+   "headRefOid": "74194c2caefa5594bd6362dc23019bfeb75eacca",
+   "number": 187,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w3-seed-draft-guard",
+   "headRefOid": "4ee2701c5d01372d22dcfe81256640befb59759c",
+   "number": 186,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w1-create-dialog",
+   "headRefOid": "32c0c77e706d3c66fe4c2803dfad17e1e19a2387",
+   "number": 185,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/p1-brief-shape-checks",
+   "headRefOid": "82ce6b23c9b6fd3e95e1d9b082de289b47038e0e",
+   "number": 184,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/create-moment-plan",
+   "headRefOid": "996e0e436bb3b513d25a3a3bbd6d5fe6ea1ff0d9",
+   "number": 183,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "chore/reviewer-tuning",
+   "headRefOid": "4a4f91c4c6655591cf579778e08a4e45d8e03758",
+   "number": 182,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/m7-and-confirm-dialogs",
+   "headRefOid": "2c3284f2420c31523294f668515249237a8b4968",
+   "number": 181,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/poster-effect-clock",
+   "headRefOid": "b91026936c49b02f88b832e62606f1da901bfc78",
+   "number": 180,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/t6-text-effects",
+   "headRefOid": "dc22927436f95b802ef24f4773a750b5e60d30a6",
+   "number": 179,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/t7-layout-step",
+   "headRefOid": "94b738b7370d0dfea0c8aebed403598375b9b325",
+   "number": 178,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/t1b-preview-frame",
+   "headRefOid": "036dfe16bef5502b4833a71e2f6262ca16a42faa",
+   "number": 177,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/t5-style-block",
+   "headRefOid": "acd91bf655adb590574ced8ca00763409e5823ff",
+   "number": 176,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/t4-anchor-axis",
+   "headRefOid": "6928e1984259614d58cfe76e840730a1a0e333f8",
+   "number": 175,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/r7b-preview-rail",
+   "headRefOid": "589d79e8c5809829e29d1693d33f9a7e98319e8b",
+   "number": 174,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/contrast-and-model-selector",
+   "headRefOid": "96230045321f76de08405db5d028b3bf2a702c8f",
+   "number": 173,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/sidebar-edit-link",
+   "headRefOid": "5fb8f9ebaabb9d075f360919f7d6adce99c63318",
+   "number": 172,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/t1a-preview-numbers",
+   "headRefOid": "e82c8efacadcab1d6d0dc0e07b25dfc023a23bb1",
+   "number": 171,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/r7a-review-figure-cap",
+   "headRefOid": "99474f329a69d817902217a9fa69c82cfce5bb84",
+   "number": 170,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/t2-axis-copy",
+   "headRefOid": "86413a8682c90f78da0f5e6ec6e644aff17d3bc3",
+   "number": 169,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/template-authoring-preview",
+   "headRefOid": "73319025e1bb7c177dbb3fb87f3e93320527a12d",
+   "number": 168,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "chore/ignore-operator-data",
+   "headRefOid": "04bdf542306ed9f9251f05be0827a1635e5b673b",
+   "number": 167,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/r5-brief-route",
+   "headRefOid": "7f3911d78930910e6970bb2fb20ef4262c48ccc8",
+   "number": 166,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/r7-preview-panel-plan",
+   "headRefOid": "fbda59fcd34589b28f7408447a46d0eb6f4d51e2",
+   "number": 165,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/menu-arrow-keys",
+   "headRefOid": "c18b7a7e50d506e09b1891cec66cff30e927be7d",
+   "number": 164,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/overflow-menu-dismiss",
+   "headRefOid": "015f42181fd226496b1c21ab0406d2575fb5ea9e",
+   "number": 163,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/r6-verb-model",
+   "headRefOid": "776aa589838d82eae97a12187646ddfa2a9d2280",
+   "number": 162,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/r4-nondestructive-brief-writes",
+   "headRefOid": "6dd959b8b7dc5085fcf1f21c8c11cb8b7773f619",
+   "number": 161,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/r3-run-channel",
+   "headRefOid": "e575cd2603d2c9d54877af523e7d035a2221542d",
+   "number": 160,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/r2-refusal-speaks",
+   "headRefOid": "42758ad23876c37e7dd62e584ac507d696eedc26",
+   "number": 159,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/kickoff-prompt-verified-cast",
+   "headRefOid": "a1d22bebbc2de2d263198ad2b53b28656960890b",
+   "number": 158,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/h2-execute-never-dead",
+   "headRefOid": "1bf742207f69a3dd95d695b5c517d7547a07f442",
+   "number": 157,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/h1-preview-font-size",
+   "headRefOid": "72e226c2af09070f07428bade4f3bad27469c101",
+   "number": 156,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/brief-flow-remediation-plan",
+   "headRefOid": "fd3db8a02dcd7c6194e242666c3b3a2943cd406d",
+   "number": 155,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/b4-capability-probe-race",
+   "headRefOid": "355e4c3a992b6cd15f4a75097ac58039378122d7",
+   "number": 154,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/b3-validator-blind-spots",
+   "headRefOid": "3d2087af02272ada5e0c4c3509fe55afc1f250ae",
+   "number": 153,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/b1-save-round-trip",
+   "headRefOid": "f1f8f7ea9adf1d73055da0f633e0169effabd421",
+   "number": 152,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/b2-dirty-on-load",
+   "headRefOid": "180b773afad898146482cd2d29bdb0d2af51385f",
+   "number": 151,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/n2-single-subject-campaigns",
+   "headRefOid": "98724dd414833b49cfdf595d58b9918ccb26f529",
+   "number": 150,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/n1-legal-gate-word-boundaries",
+   "headRefOid": "1b07c73aebadb32111106186de7ef8bf479c19a8",
+   "number": 149,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "refactor/e1-eyebrow-sweep",
+   "headRefOid": "25b6d78959939b149fe4c316dc5071dc8b286785",
+   "number": 148,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "test/t1-step-header",
+   "headRefOid": "02f6253100ab7e6cc81abcc5f353e58f370353ef",
+   "number": 147,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/c1b-border-control-sweep",
+   "headRefOid": "44bdceda5345998db4e11408c05a7376e56f1e0d",
+   "number": 146,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/c1-border-control",
+   "headRefOid": "b153f888ea94d3fe69ce250882a93a76095c955e",
+   "number": 145,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w8-review-step",
+   "headRefOid": "810f711dae4cd016b68355634b3ed9ed98df1f7c",
+   "number": 144,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w7-segbar-transitions",
+   "headRefOid": "e51a2f0ae8783fd751fe55c84a87e2934d1da937",
+   "number": 143,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/s1-grid-contrast",
+   "headRefOid": "98755689a3b020d2c1ee431c7101eb9fdd0c89a2",
+   "number": 142,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/s2-coverage-and-copy-a11y",
+   "headRefOid": "59c399f62e99c5039d61752ff509708208cc2c82",
+   "number": 141,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w6-guided-engine",
+   "headRefOid": "e189c6fe5b2053daa70f6c9c96e37ca9accaf2fa",
+   "number": 140,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w5-header",
+   "headRefOid": "7ce1aecc420d6da73042ad100f704b9735ee3e0b",
+   "number": 139,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w3-theme",
+   "headRefOid": "195f73066f4d5aea42dd1e686a15ccb0e0c2fd45",
+   "number": 138,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "chore/hexagen-sync-upgrade",
+   "headRefOid": "9c6eef77069360d70132b06972b59cdd2505e5d8",
+   "number": 137,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w2a-kit",
+   "headRefOid": "f78e6edeb7787701a124646548f61b378f937a73",
+   "number": 136,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w4-sidebar-estimate",
+   "headRefOid": "c27f2b67e3274d9eada04d7b100bf748d130a88e",
+   "number": 135,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w10-polish",
+   "headRefOid": "9fffd5f5b7bb4fb8db8d34d0cb271b862b51dfe2",
+   "number": 134,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w9-preview",
+   "headRefOid": "c4de48ff9abeadec47c44fdcee3cb99c3f30401e",
+   "number": 133,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w2b-cards",
+   "headRefOid": "d21b72597f27eec38ef97afef9a7c726b4e65ea6",
+   "number": 132,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w0b-sweep",
+   "headRefOid": "5e1b8cc8f74da105d3d3f75ff9fd5a3c296d630c",
+   "number": 131,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/wave1-session-log",
+   "headRefOid": "7c176edce39cf9e9e544e1e81dfffd148c379bb6",
+   "number": 130,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w1-defects",
+   "headRefOid": "a53c1b7919a0e581c82414572141bdb032350f5d",
+   "number": 129,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/w0-alpha-scale",
+   "headRefOid": "f78d17e64291f4b9f5ce1aa29f74e2d71e808165",
+   "number": 128,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/brief-wizard-inspiration-plan",
+   "headRefOid": "b801a6aa2159c90b28d36be08807a9e16c1651be",
+   "number": 127,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/regenerate-single-noop",
+   "headRefOid": "a29f136a2a229551ce5ecea0d566aa7e6da6a303",
+   "number": 126,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/arch-reviewer-verified",
+   "headRefOid": "da23bb43cbe9d1960ef44498d5ccb9b93d5cd1f1",
+   "number": 125,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "test/arch-reviewer-finds",
+   "headRefOid": "27e4ce173a052168be09c99b9c13479366347526",
+   "number": 124,
+   "state": "CLOSED"
+  },
+  {
+   "headRefName": "test/p24-run4",
+   "headRefOid": "59278d85145352bd952f86f22cbcb6d2d848910b",
+   "number": 123,
+   "state": "CLOSED"
+  },
+  {
+   "headRefName": "test/p24-run3",
+   "headRefOid": "aa3f8df23eb48f26f47a00de5b1b7abc48709a2e",
+   "number": 122,
+   "state": "CLOSED"
+  },
+  {
+   "headRefName": "test/p24-rerun",
+   "headRefOid": "04962dba4582a46bad51e2c996ae1bf09341c716",
+   "number": 121,
+   "state": "CLOSED"
+  },
+  {
+   "headRefName": "fix/palette-shift-hardening",
+   "headRefOid": "2fb557c24170f8322d05b0066dc420c56e22b221",
+   "number": 120,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/descriptor-narrow-at-boundary",
+   "headRefOid": "25fe5e8cc267b84a2e97f2685792617f7632714a",
+   "number": 119,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "test/p24-real",
+   "headRefOid": "fd5703d9f373ebd8470b13bdeb92f97a695474d2",
+   "number": 118,
+   "state": "CLOSED"
+  },
+  {
+   "headRefName": "docs/p2.4-experiment",
+   "headRefOid": "5bfe61d9dd25e91715d157c954d48befbdef1bfb",
+   "number": 117,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "test/p24-arch-reviewer-deference",
+   "headRefOid": "e55156b15b9e2b5d66f52d5b4b46b14a613cea09",
+   "number": 116,
+   "state": "CLOSED"
+  },
+  {
+   "headRefName": "fix/r1-arch-linter-and-hash",
+   "headRefOid": "b879632b2360a640f86e475df0744447afd2ff86",
+   "number": 115,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/remediation-plan-correction",
+   "headRefOid": "016cd7d3f423312d11a5edbf245bb16baa8cc40a",
+   "number": 114,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/r2-descriptor-reachability",
+   "headRefOid": "d7b1b1900704ed2540204d5bb2aa67b9c7c58775",
+   "number": 113,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/remediation-plan",
+   "headRefOid": "55fc79a5fda0f190291fe584cfe3a7e3dd695847",
+   "number": 112,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "chore/reattach-orphaned-comments",
+   "headRefOid": "cf34725f0cccec6c60f0fd40fe0b1cc9b033e989",
+   "number": 111,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l6-e5-validate-pool-docs",
+   "headRefOid": "97ee67249e390c9e35a3052b8fbc45e5cb57d96c",
+   "number": 110,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l6-e5-timeline-section",
+   "headRefOid": "97a13adbe5f38bbeb4b7b03947b637adacb6d6f5",
+   "number": 109,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l6-e3-orchestration",
+   "headRefOid": "3ae40b775ee4fd017b060eab8ef0e3512d5a7abd",
+   "number": 108,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/validate-timeline-at-use-case",
+   "headRefOid": "fe97d77035ef9e443ff6cc88890c8909df1ddd3f",
+   "number": 107,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l6-e5-editor",
+   "headRefOid": "bd0d63adc01f8a9260e85452910f52b9311056dc",
+   "number": 106,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/estimate-post-flakes-save-refusal",
+   "headRefOid": "77a3ce4b284d8676f567c05300057a1e4953af8a",
+   "number": 105,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l6-e3-orchestration",
+   "headRefOid": "380804f63c255938120006e3ce3584461a602302",
+   "number": 104,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l6-e3-orchestration",
+   "headRefOid": "639aeebfa53339ac8d119e17022130d630bf6e72",
+   "number": 103,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "ci/pr-agent-api-and-arch",
+   "headRefOid": "0d62de2e99c6c150a41b0448feac3dcdef6ea54f",
+   "number": 102,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/mode-brief-round-trip",
+   "headRefOid": "a8e1697216eb406b9198a15eb27a3348996735a3",
+   "number": 101,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/pr-agent-api-arch",
+   "headRefOid": "a276520cef2c39a14be9686846b05609f6eb3f1c",
+   "number": 100,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l6-e2-compositor-timeline",
+   "headRefOid": "78a33151864dda4bc020c16ad196ca00dd8a5474",
+   "number": 99,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l6-e4-brief-parsing",
+   "headRefOid": "fed0ad2ad7c5624ad94a850893028dec3fc909cb",
+   "number": 98,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l6-e1-timeline-domain",
+   "headRefOid": "2e5ef00d1cd2be5137664276fb7216a991d1131f",
+   "number": 97,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "ci/pr-agent",
+   "headRefOid": "d546d7bbfc69af9f39851ce537e931fc82f782eb",
+   "number": 96,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l4-output-panels-strip",
+   "headRefOid": "62c680ebbc4a306d557d2bc9ec291ad5528046fa",
+   "number": 95,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l3-identity-copy-products",
+   "headRefOid": "07c60e103cd85cd2acf8241de6aa91a60384b516",
+   "number": 94,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l5-storage-port-asset-picker",
+   "headRefOid": "f5261f6aaa5a5c9355ea6a0bd91b58cba39880c6",
+   "number": 93,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/brief-new-route",
+   "headRefOid": "1e213f4a210122d96922169539d21b4cc0a9bf01",
+   "number": 92,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l2-sidebar-mode-variety",
+   "headRefOid": "d496769f2a77e5cd1120747e1a84093ffc306d06",
+   "number": 91,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l1-error-model-copy-bar",
+   "headRefOid": "51a45dc5ed4689636e5aafa160238cdeae8a9125",
+   "number": 90,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/l0-deterministic-product-keys",
+   "headRefOid": "7e542fc1fe7ae2c538c8fab53fea3b8040d96936",
+   "number": 89,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/graphical-brief-editor-v1.2",
+   "headRefOid": "97140d6d3d8d46861d10b96e55ca6b8f0d9a3828",
+   "number": 88,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/graphical-brief-editor-plan",
+   "headRefOid": "553834b1df9babfc46c172dca5772af40bd3bb43",
+   "number": 87,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/legacy-draft-migration",
+   "headRefOid": "07fb9732f9a921ca160b35f628d6ed7bd15a58be",
+   "number": 86,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/ratio-panels",
+   "headRefOid": "42528540b4ee707b4d2756eb09f4428ff90075d8",
+   "number": 85,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/axis-glyph",
+   "headRefOid": "790f068aee4a9eb7d619abeac0cff108d06e3bd1",
+   "number": 84,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/motion-copy-timeline-plan",
+   "headRefOid": "f5635f293ffa7b22f3bcc233e0f3e83bcef3a134",
+   "number": 83,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/editor-field-controls",
+   "headRefOid": "30155443514baa7c6f171551f736f015e292eb25",
+   "number": 82,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/brief-scroll-scope",
+   "headRefOid": "90d532efafe16ca8f3e7b87a9f7669b08dfe5413",
+   "number": 81,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/design-md",
+   "headRefOid": "e5b214830953310e2605d660cad94f993fd7f164",
+   "number": 80,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/editor-chrome",
+   "headRefOid": "7b0fd350f495ddf724cacff4a3a5008e637bfe45",
+   "number": 79,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/reroll-mode-mismatch",
+   "headRefOid": "e60cb67ca93b852e09324ab569c0257b2abf6ce3",
+   "number": 78,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/plan-capacity-and-shortfall",
+   "headRefOid": "0ace97af90133ca9a9f49e2b966c5718e493f83c",
+   "number": 77,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/motion-requires-variation",
+   "headRefOid": "ea884fe6c9af6c3c01cdd499b083ec9815b0d0f6",
+   "number": 76,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/motion-only-ratio-axis",
+   "headRefOid": "fcbbdfdad7c1e1ce3da3b426f51a03ede7493792",
+   "number": 75,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/editor-apply-and-duration",
+   "headRefOid": "cec5f90c2bfa876aa62b438596a818cf2650368a",
+   "number": 74,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/e2-capability-followups",
+   "headRefOid": "562f8f725ab8762a7361a877ca5bc05288354efc",
+   "number": 73,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/e2-motion",
+   "headRefOid": "98550c9542527e25ba4c857e92a54d75350bc391",
+   "number": 72,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/e2-api",
+   "headRefOid": "16cfe739a0bf05558036771f4b91e0991b4cced4",
+   "number": 71,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/e2-web",
+   "headRefOid": "060616d336467708241383a05859593a67cfacd4",
+   "number": 70,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/derived-lane-status",
+   "headRefOid": "649370e3615ca760057b5004b945990d405491f1",
+   "number": 69,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/flaky-editor-gating-test",
+   "headRefOid": "198dae6a20944299a927844b870ec7a762605517",
+   "number": 68,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/e1-web",
+   "headRefOid": "d6544df945df51b13e2305b398b8a6627c8d4b59",
+   "number": 67,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/e1-api",
+   "headRefOid": "a23b9ee55e552b7a75c6f74346908aab9e2a40aa",
+   "number": 66,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/self-configuring-kickoff",
+   "headRefOid": "52d73fb80b6d36c100c6ebd1914e1f7f5c535408",
+   "number": 65,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/delegated-implementation-pipeline",
+   "headRefOid": "2223d902ce94a1926c55eae0b63dd4bbc081e552",
+   "number": 64,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/unified-campaign-editor-plan",
+   "headRefOid": "15e7004719b8886d91207a76d67ce1de34b5c6c5",
+   "number": 63,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/new-campaign-nav",
+   "headRefOid": "12e571de0e5cdd36b4ddbbc62c8226192176137a",
+   "number": 62,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/nitro-config-ffmpeg-optional",
+   "headRefOid": "548a4a4220af6bc1ba7aa6c10c0fb7fa9008a38b",
+   "number": 61,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/wave-table-cells",
+   "headRefOid": "e56ff6ecad3e7472732f2241e186650527e30fca",
+   "number": 60,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/session-log-waves-2-5",
+   "headRefOid": "0b21af5f0605ba8ee51e2fdd875ae4be94b3c856",
+   "number": 59,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/motion-generation",
+   "headRefOid": "ae8626ea71b122e8088700c69bb97d773defb569",
+   "number": 58,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/pool-headlines",
+   "headRefOid": "7a5702a99dd6bc2a8c80ed616eecce7a5febcb72",
+   "number": 57,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/plan-implemented",
+   "headRefOid": "aa60d08642e3fd1637f0c3615c2a263cda0a08eb",
+   "number": 56,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/zip-empty-chunk",
+   "headRefOid": "424280abca7d8557e8b0f40fb72b316e8fed3ae6",
+   "number": 55,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/video-compositor",
+   "headRefOid": "b8e072bc9a5d3300fa848d408c93459cf5af2820",
+   "number": 54,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/review-ui-scale",
+   "headRefOid": "738d4201325a1ae44f2364a9ca05e7a08d89a659",
+   "number": 53,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/copy-pools",
+   "headRefOid": "74352fc9ffad2e033ee64e139b3113e856465675",
+   "number": 52,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/brief-save-and-wizard",
+   "headRefOid": "3decec91fb0813070f14e6ca2eed9b57a8f6c4fc",
+   "number": 51,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/generate-from-plan",
+   "headRefOid": "6eeaad87be53fbfa0559bc833950f1c0dd5cdebf",
+   "number": 50,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/compositor-safe-insets",
+   "headRefOid": "10d9cabaf3fc8ffed55fa2fd0d0a453e7d73a67c",
+   "number": 49,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/platform-packaging",
+   "headRefOid": "3928886a09ee30fe7f230247f72acc696ccf5d6b",
+   "number": 48,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/briefs-api",
+   "headRefOid": "541df454063f2b72995bdb5106712e7a4d9a8d13",
+   "number": 47,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/variation-planner",
+   "headRefOid": "4389465650065d6d8ce85d4783d04482896631d1",
+   "number": 46,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "refactor/draw-creative",
+   "headRefOid": "fbecb11def0b11a683a1d6f73a7e8b891aebeb06",
+   "number": 45,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "test/mock-pipeline-api",
+   "headRefOid": "ee163905babf7f3999384715b202f36a8f5c4152",
+   "number": 44,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "refactor/log-clock",
+   "headRefOid": "77f2f9736348c3e3827f7d121f7107a8d0b41605",
+   "number": 43,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/generate-job-handle",
+   "headRefOid": "aed84bb8194f49ac919d869c75aea328892f55af",
+   "number": 42,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/seeded-random",
+   "headRefOid": "64dbbc0fe16f701bed1e426201809f49d1f58d3c",
+   "number": 41,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/brief-schema-v2",
+   "headRefOid": "403b07a467c13a7ffd56eaa0acc63764d7cfc1ce",
+   "number": 40,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/randomized-campaigns-plan",
+   "headRefOid": "e33b9cbf7fb9472eb53425bede0c8e9e19ef052a",
+   "number": 39,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/session-log-0.8.0",
+   "headRefOid": "20ced3c4210ab24ccb269b627b2b875c5b4b4224",
+   "number": 38,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/hexagen-tooling",
+   "headRefOid": "6ad76dc43f07ef1ec0615f34165ac44f524be29c",
+   "number": 37,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/firefly-adapter",
+   "headRefOid": "a69be63af315dc74269bf04af078b3aee6786041",
+   "number": 36,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "ci/api-boot-smoke",
+   "headRefOid": "21ddca87731212bce450f760c1ad21c50fe48686",
+   "number": 35,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feat/test-coverage",
+   "headRefOid": "308cc484ff3e816295df4423f654f7c1239feb6f",
+   "number": 34,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feature/per-campaign-report-persistence",
+   "headRefOid": "e5723f66045e58e741ef7ff4eb64ab6f72e52056",
+   "number": 33,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feature/distinct-sample-briefs",
+   "headRefOid": "f80e1a6f26784e18790b8fd26b57936aef7979fe",
+   "number": 32,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/clear-grid-on-brief-switch",
+   "headRefOid": "a0de6ed35b7d1a0f0b2d0680d15fa0555a7b1d4d",
+   "number": 31,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feature/tile-border-only",
+   "headRefOid": "adcd41409e642e026bbcd3d953111f79a19d11bb",
+   "number": 30,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/orange-brief-generate",
+   "headRefOid": "f1461abc5adb4d3c75251455cfc984deb4553c08",
+   "number": 29,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feature/env-boot-log",
+   "headRefOid": "09bf29ad12b4fcfbe917076040ce00cc760321b5",
+   "number": 28,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feature/model-reuse-hint",
+   "headRefOid": "505aa8baa4891dc8cd0aaaa79779d35f4a4a5e0f",
+   "number": 27,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feature/orange-brief",
+   "headRefOid": "cc7587eafab43a3be994217f561fd41eb95b4262",
+   "number": 26,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feature/brief-picker",
+   "headRefOid": "2113900f052b4e5338c018369f57bfae1c4b13e3",
+   "number": 25,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "docs/readme-genai",
+   "headRefOid": "1ffb077cc96e9e4bd29151ea485a7a2baba4c730",
+   "number": 24,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feature/parallel-backgrounds",
+   "headRefOid": "b79c4cfd82f77b5a210052c4ef91fadc816f180e",
+   "number": 23,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feature/center-views",
+   "headRefOid": "10ba8e15b541bb8fcd9096b9613bea325fa77745",
+   "number": 22,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feature/logo-upload",
+   "headRefOid": "554f263bc5fa8e537514e3beaadba5d8da58612c",
+   "number": 21,
+   "state": "CLOSED"
+  },
+  {
+   "headRefName": "feature/mobile-responsive",
+   "headRefOid": "6b68ad6770a34795899aee13c22450076a6def83",
+   "number": 20,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feature/regenerate-rejected",
+   "headRefOid": "eb8eabf805d775183194953118f028458fc5e549",
+   "number": 19,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feature/execute-confirm",
+   "headRefOid": "a3fbb3aebbc873125de2c31e02194bdf4ce12e7d",
+   "number": 18,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feature/hitl-decisions",
+   "headRefOid": "b8756a8eeb6b4a476dba6c1d56804750a3222c1a",
+   "number": 17,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feature/model-selector",
+   "headRefOid": "87ddafd5a43fa2e2d4215e254e778601eb3f6747",
+   "number": 16,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feature/grid-telemetry-ui",
+   "headRefOid": "0d958287aa97ae9b3bc7d3d1360645a7ac285443",
+   "number": 15,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/server-env-loading",
+   "headRefOid": "43b8067499d85c94d7d3514c0175d139539804ec",
+   "number": 14,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/dev-proxy-ipv4-and-asset-cwd",
+   "headRefOid": "44034e091a03a878156981c0ffa73d1daf8579b2",
+   "number": 13,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "feature/brand-accent-compliance",
+   "headRefOid": "0d329545ed37698c654d28a7ee2cadb6f8dc400f",
+   "number": 12,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "fix/ci-pipeline",
+   "headRefOid": "7768d5291b0a2c0168f580f0982ea2de71c7d075",
+   "number": 11,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "dependabot/npm_and_yarn/napi-rs/canvas-1.0.0",
+   "headRefOid": "93f9061effd591df36561b6d651c53728f8e4dd5",
+   "number": 10,
+   "state": "CLOSED"
+  },
+  {
+   "headRefName": "dependabot/npm_and_yarn/next-16.2.7",
+   "headRefOid": "f7f64287f23b523b2689ee61a2e7ed2746eb124a",
+   "number": 9,
+   "state": "CLOSED"
+  },
+  {
+   "headRefName": "dependabot/npm_and_yarn/google/genai-2.8.0",
+   "headRefOid": "406979eff0aad316c75204553c44ef9d7810c10e",
+   "number": 8,
+   "state": "CLOSED"
+  },
+  {
+   "headRefName": "dependabot/npm_and_yarn/tailwind-merge-3.6.0",
+   "headRefOid": "2615d27ee5fddf58f7694bbe2f591f70d0f85fc7",
+   "number": 7,
+   "state": "CLOSED"
+  },
+  {
+   "headRefName": "dependabot/npm_and_yarn/dev-dependencies-b690fa18a9",
+   "headRefOid": "b68aaa8a4ebf53b872d3e44d59e0f3da86bfa9d1",
+   "number": 6,
+   "state": "CLOSED"
+  },
+  {
+   "headRefName": "feature/imagen-refinements",
+   "headRefOid": "09e01e2a96edc5d56bc95f22b80bce980ee63f57",
+   "number": 5,
+   "state": "MERGED"
+  },
+  {
+   "headRefName": "dependabot/github_actions/actions/cache-5",
+   "headRefOid": "02bd833f00e96e413712a6b2c8d936f602096458",
+   "number": 4,
+   "state": "CLOSED"
+  },
+  {
+   "headRefName": "dependabot/github_actions/actions/checkout-6",
+   "headRefOid": "eadabf33a5354352c928c4814504d8049c41d542",
+   "number": 3,
+   "state": "CLOSED"
+  },
+  {
+   "headRefName": "dependabot/github_actions/actions/setup-node-6",
+   "headRefOid": "5a6d993bf683ec3ca9bb23656272c9520e99b496",
+   "number": 2,
+   "state": "CLOSED"
+  },
+  {
+   "headRefName": "dependabot/github_actions/actions/github-script-9",
+   "headRefOid": "2d0cb9980dbc1f8bf96dd71bbebac39187d09c43",
+   "number": 1,
+   "state": "CLOSED"
+  }
+ ],
+ "waveDirName": "wave-creative-templates",
+ "entries": [
+  "C5-fix.md",
+  "C5-fix2.md",
+  "C5-fix3.md",
+  "C5-fix4.md",
+  "C5.before",
+  "C5fix.before",
+  "C5fix.log",
+  "C5fix2.before",
+  "C5fix2.log",
+  "C5fix3.before",
+  "C5fix3.log",
+  "C5fix4.before",
+  "C5fix4.log",
+  "H1-tokens-route.log",
+  "H1a-tokens-selector-fix.md",
+  "H1a-tokens-selector.log",
+  "H1b-extract-comments.log",
+  "H1b-extract-skips-comments.md",
+  "H2-fix.log",
+  "H2-fix.md",
+  "H2-hit-testing.log",
+  "H2-hit-testing.md",
+  "L12-schema-version.log",
+  "L1a-creative-vocabulary.log",
+  "L1b-brief-template.log",
+  "L2a-compositor-layer-list.log",
+  "L2b-preview-layer-order.log",
+  "L3a-template-required.log",
+  "L3b-layer-props.log",
+  "L4-compatibility-rules.log",
+  "L4-compatibility-rules.md",
+  "L5-template-editor.log",
+  "L5-template-editor.md",
+  "L6-html-output-family.log",
+  "L6-html-output-family.md",
+  "L7a-template-library.log",
+  "L7a1-template-store.log",
+  "L8-reorder-and-occlusion.md",
+  "L8-reorder-occlusion.log",
+  "L8a-fix.log",
+  "L8a-fix.md",
+  "L8a-reorder.log",
+  "L8a-reorder.md",
+  "L8m-fix.md",
+  "L8m.before",
+  "L8m.log",
+  "L8m.md",
+  "L8mfix.before",
+  "L8mfix.log",
+  "L8o-fix.md",
+  "L8o-fix2.md",
+  "L8o-fix3.md",
+  "L8o-fix4.md",
+  "L8o-fix5.md",
+  "L8o.before",
+  "L8o.log",
+  "L8o.md",
+  "L8ofix.before",
+  "L8ofix.log",
+  "L8ofix2.before",
+  "L8ofix2.log",
+  "L8ofix3.before",
+  "L8ofix3.log",
+  "L8ofix4.before",
+  "L8ofix4.log",
+  "L8ofix5.before",
+  "L8ofix5.log",
+  "M2.before",
+  "M2.log",
+  "M2.md",
+  "MON-fix.md",
+  "MON-fix2.md",
+  "MON.before",
+  "MON.log",
+  "MON.md",
+  "MONfix.before",
+  "MONfix.log",
+  "MONfix2.before",
+  "MONfix2.log",
+  "MUT-fix.md",
+  "MUT-fix2.md",
+  "MUT-fix3.md",
+  "MUT-harness.md",
+  "MUT.before",
+  "MUT.log",
+  "MUTfix.before",
+  "MUTfix.log",
+  "MUTfix2.before",
+  "MUTfix2.log",
+  "MUTfix3.before",
+  "MUTfix3.log",
+  "R1-fix.md",
+  "R1-fix2.md",
+  "R1.before",
+  "R1.log",
+  "R1.md",
+  "R1fix.before",
+  "R1fix.log",
+  "R1fix2.before",
+  "R1fix2.log",
+  "T1.before",
+  "T1fix.before",
+  "T2.before",
+  "T3-fix.md",
+  "T3fix.before",
+  "T3fix.log",
+  "T4-fix.md",
+  "T4-fix2.md",
+  "T4.before",
+  "T4.log",
+  "T4.md",
+  "T4fix.before",
+  "T4fix.log",
+  "T4fix2.before",
+  "T4fix2.log",
+  "VD.before",
+  "VD.log",
+  "VD.md",
+  "VG-fix.md",
+  "VG.before",
+  "VGfix.before",
+  "VGfix.log",
+  "W1-status-cli-and-pr-links.md",
+  "W1-status-cli.log",
+  "W1a-status-cli.log",
+  "W1a-status-cli.md",
+  "W1b-cli-hardening.log",
+  "W1b-cli-hardening.md",
+  "W1c-cli-hardening.log",
+  "W1c-cli-hardening.md",
+  "W1c-fix.log",
+  "W1c-fix.md",
+  "W2a-status-layout.log",
+  "W2a-status-layout.md",
+  "W2b-log-viewer.log",
+  "W2b-log-viewer.md",
+  "W2b1-fix.md",
+  "W2b1-fix2.md",
+  "W2b1-log-toolbar.log",
+  "W2b1-log-toolbar.md",
+  "W2b1fix.before",
+  "W2b1fix.log",
+  "W2b1fix2.before",
+  "W2b1fix2.log",
+  "W2b1r-dispatch.out",
+  "W2b1r.log",
+  "W2b2-fix.md",
+  "W2b2-log-export.md",
+  "W2b2.before",
+  "W2b2.log",
+  "W2b2fix.before",
+  "W2b2fix.log",
+  "WS1-fix.md",
+  "WS1-fix2.md",
+  "WS1-fix3.md",
+  "WS1.before",
+  "WS1.log",
+  "WS1.md",
+  "WS1b-dispatch.out",
+  "WS1b.log",
+  "WS1b.md",
+  "WS1fix.before",
+  "WS1fix.log",
+  "WS1fix2.before",
+  "WS1fix2.log",
+  "WS1fix3.before",
+  "WS1fix3.log",
+  "WS2fix.before",
+  "WS2fix2.before",
+  "WS2fix3.before",
+  "artefacts",
+  "events.jsonl",
+  "events.jsonl.bak",
+  "gate-H1-tokens-route.log",
+  "gate-H1a-tokens-selector.log",
+  "gate-H1b-extract-comments.log",
+  "gate-H2-hit-testing.log",
+  "gate-L4-compatibility-rules.log",
+  "gate-L5-template-editor-2.log",
+  "gate-L5-template-editor.log",
+  "gate-L6-html-output-family.log",
+  "gate-L8a-reorder.log",
+  "gate-W1a-status-cli.log",
+  "gate-W1c-cli-hardening.log",
+  "gate-W2a-status-layout.log",
+  "h1-brief.md",
+  "l12-brief.md",
+  "l1a-brief.md",
+  "l1a-fix.md",
+  "l1a-fix2.md",
+  "l1b-brief.md",
+  "l2a-brief.md",
+  "l2a-fix.md",
+  "l2b-brief.md",
+  "l3a-brief.md",
+  "l3a-fix.md",
+  "l3a-fix2.md",
+  "l3b-brief.md",
+  "l3b-fix.md",
+  "l5-fix.log",
+  "l5-fix.md",
+  "l7a-brief.md",
+  "l7a1-brief.md",
+  "l7a1-fix.md",
+  "record-draft.md"
+ ],
+ "events": "{\"ts\":\"2026-09-08T18:02:20Z\",\"wave\":\"creative-templates-w01\",\"lane\":\"L12-schema-version\",\"stage\":\"implement\",\"event\":\"started\",\"detail\":{\"seat\":\"agy gemini-3.8-flash-high\",\"pr\":null}}\n{\"ts\":\"2026-09-08T20:36:48Z\",\"wave\":\"creative-templates-w01\",\"lane\":\"L1a-creative-vocabulary\",\"stage\":\"implement\",\"event\":\"started\",\"detail\":{\"seat\":\"agy gemini-3.8-flash-high\"}}\n{\"ts\":\"2026-09-08T21:44:45Z\",\"wave\":\"creative-templates-w01\",\"lane\":\"L1b-brief-template\",\"stage\":\"implement\",\"event\":\"started\",\"detail\":{\"seat\":\"agy gemini-3.8-flash-high\",\"effort\":\"high (opening lane, per spending rule 4)\"}}\n{\"ts\":\"2026-09-08T22:07:15Z\",\"wave\":\"creative-templates-w01\",\"lane\":\"L12-schema-version\",\"stage\":\"implement\",\"event\":\"settled\",\"pr\":255}\n{\"ts\":\"2026-09-08T22:07:15Z\",\"wave\":\"creative-templates-w01\",\"lane\":\"L12-schema-version\",\"stage\":\"merge\",\"event\":\"settled\",\"pr\":255}\n{\"ts\":\"2026-09-08T22:07:15Z\",\"wave\":\"creative-templates-w01\",\"lane\":\"L1a-creative-vocabulary\",\"stage\":\"implement\",\"event\":\"settled\",\"pr\":260}\n{\"ts\":\"2026-09-08T22:07:15Z\",\"wave\":\"creative-templates-w01\",\"lane\":\"L1a-creative-vocabulary\",\"stage\":\"remediate\",\"event\":\"settled\",\"pr\":260,\"round\":2}\n{\"ts\":\"2026-09-08T22:07:15Z\",\"wave\":\"creative-templates-w01\",\"lane\":\"L1a-creative-vocabulary\",\"stage\":\"merge\",\"event\":\"settled\",\"pr\":260}\n{\"ts\":\"2026-09-08T22:07:15Z\",\"wave\":\"creative-templates-w01\",\"lane\":\"L1b-brief-template\",\"stage\":\"implement\",\"event\":\"settled\",\"pr\":263}\n{\"ts\":\"2026-09-08T23:14:25Z\",\"wave\":\"creative-templates-w02\",\"lane\":\"L2a-compositor-layer-list\",\"stage\":\"implement\",\"event\":\"started\",\"detail\":{\"seat\":\"opencode-go/glm-5.3-flash\",\"measured\":true}}\n{\"ts\":\"2026-09-08T23:47:12Z\",\"wave\":\"creative-templates-w02\",\"lane\":\"L2a-compositor-layer-list\",\"stage\":\"merge\",\"event\":\"settled\",\"pr\":265}\n{\"ts\":\"2026-09-08T23:47:12Z\",\"wave\":\"creative-templates-w02\",\"lane\":\"L2b-preview-layer-order\",\"stage\":\"implement\",\"event\":\"started\",\"detail\":{\"seat\":\"opencode-go/glm-5.3-flash\",\"measured\":true}}\n{\"ts\":\"2026-09-08T23:56:47Z\",\"wave\":\"creative-templates-w02\",\"lane\":\"L3a-template-required\",\"stage\":\"implement\",\"event\":\"started\",\"detail\":{\"seat\":\"opencode/big-pickle\",\"measured\":true}}\n{\"ts\":\"2026-09-09T01:39:48Z\",\"wave\":\"creative-templates-w03\",\"lane\":\"L3b-layer-props\",\"stage\":\"implement\",\"event\":\"started\",\"detail\":{\"seat\":\"opencode-go/glm-5.3-flash\"}}\n{\"ts\":\"2026-09-09T01:39:48Z\",\"wave\":\"creative-templates-w03\",\"lane\":\"L7a-template-library\",\"stage\":\"implement\",\"event\":\"started\",\"detail\":{\"seat\":\"opencode/big-pickle\"}}\n{\"ts\":\"2026-09-09T01:59:20Z\",\"wave\":\"creative-templates-w03\",\"lane\":\"L3b-layer-props\",\"stage\":\"implement\",\"event\":\"settled\",\"pr\":273}\n{\"ts\":\"2026-09-09T02:01:23Z\",\"wave\":\"creative-templates-w03\",\"lane\":\"L7a-template-library\",\"stage\":\"implement\",\"event\":\"failed\",\"detail\":{\"reason\":\"no production in 21 min; 342k in burned; peak ctx 140k; 57 files read, 0 edits\"}}\n{\"ts\":\"2026-09-09T02:02:02Z\",\"wave\":\"creative-templates-w03\",\"lane\":\"L7a1-template-store\",\"stage\":\"implement\",\"event\":\"started\",\"detail\":{\"seat\":\"opencode-go/glm-5.3-flash\",\"note\":\"re-cut after L7a burned 342k with 0 edits\"}}\n{\"ts\":\"2026-09-09T03:27:31Z\",\"wave\":\"creative-templates-w03\",\"lane\":\"H1-tokens-route\",\"stage\":\"implement\",\"event\":\"started\",\"detail\":{\"seat\":\"opencode/big-pickle\"}}\n{\"ts\":\"2026-09-09T03:37:17Z\",\"wave\":\"creative-templates-w02\",\"lane\":\"L2b-preview-layer-order\",\"stage\":\"implement\",\"event\":\"settled\",\"pr\":266}\n{\"ts\":\"2026-09-09T03:37:17Z\",\"wave\":\"creative-templates-w02\",\"lane\":\"L3a-template-required\",\"stage\":\"implement\",\"event\":\"settled\",\"pr\":268}\n{\"ts\":\"2026-09-09T03:37:17Z\",\"wave\":\"creative-templates-w03\",\"lane\":\"L7a1-template-store\",\"stage\":\"implement\",\"event\":\"settled\",\"pr\":274}\n{\"ts\":\"2026-09-09T03:37:17Z\",\"wave\":\"creative-templates-w02\",\"lane\":\"L2b-preview-layer-order\",\"stage\":\"merge\",\"event\":\"settled\",\"pr\":266}\n{\"ts\":\"2026-09-09T03:37:17Z\",\"wave\":\"creative-templates-w02\",\"lane\":\"L3a-template-required\",\"stage\":\"merge\",\"event\":\"settled\",\"pr\":268}\n{\"ts\":\"2026-09-09T03:41:59Z\",\"wave\":\"creative-templates-w03\",\"lane\":\"H1-tokens-route\",\"stage\":\"implement\",\"event\":\"settled\",\"pr\":275}\n{\"ts\":\"2026-09-09T04:03:24Z\",\"wave\":\"creative-templates-w04\",\"lane\":\"L4-compatibility-rules\",\"stage\":\"implement\",\"event\":\"started\",\"detail\":{\"seat\":\"opencode-go/glm-5.3-flash\"}}\n{\"ts\":\"2026-09-09T04:04:14Z\",\"wave\":\"creative-templates-w04\",\"lane\":\"L6-html-output-family\",\"stage\":\"implement\",\"event\":\"started\",\"detail\":{\"seat\":\"opencode/big-pickle\"}}\n{\"ts\":\"2026-09-09T04:23:56Z\",\"wave\":\"creative-templates-w04\",\"lane\":\"L4-compatibility-rules\",\"stage\":\"implement\",\"event\":\"settled\",\"pr\":276}\n{\"ts\":\"2026-09-09T04:24:49Z\",\"wave\":\"creative-templates-w04\",\"lane\":\"L6-html-output-family\",\"stage\":\"implement\",\"event\":\"settled\",\"pr\":277}\n{\"ts\":\"2026-09-09T04:33:06Z\",\"wave\":\"creative-templates-w05\",\"lane\":\"L5-template-editor\",\"stage\":\"implement\",\"event\":\"started\",\"detail\":{\"seat\":\"opencode-go/glm-5.3-flash\"}}\n{\"ts\":\"2026-09-09T05:09:03Z\",\"wave\":\"creative-templates-w05\",\"lane\":\"L5-template-editor\",\"stage\":\"implement\",\"event\":\"settled\",\"pr\":278}\n{\"ts\":\"2026-09-09T14:21:45Z\",\"wave\":\"wave-status-w01\",\"lane\":\"W1-status-cli\",\"stage\":\"implement\",\"event\":\"started\",\"detail\":{\"seat\":\"opencode/big-pickle\"}}\n{\"ts\":\"2026-09-09T14:56:37Z\",\"wave\":\"wave-status-w01\",\"lane\":\"H1a-tokens-selector\",\"stage\":\"implement\",\"event\":\"started\"}\n{\"ts\":\"2026-09-09T15:45:07Z\",\"wave\":\"creative-templates-w06\",\"lane\":\"L8-reorder-occlusion\",\"stage\":\"implement\",\"event\":\"started\"}\n{\"ts\":\"2026-09-09T16:25:36Z\",\"wave\":\"creative-templates-w06\",\"lane\":\"H2-hit-testing\",\"stage\":\"implement\",\"event\":\"started\"}\n{\"ts\":\"2026-09-09T16:29:04Z\",\"wave\":\"creative-templates-w06\",\"lane\":\"H2-hit-testing\",\"stage\":\"implement\",\"event\":\"started\",\"detail\":{\"note\":\"re-dispatch after provider 503\"}}\n{\"ts\":\"2026-09-09T16:30:39Z\",\"wave\":\"creative-templates-w06\",\"lane\":\"L8-reorder-occlusion\",\"stage\":\"implement\",\"event\":\"failed\",\"detail\":{\"reason\":\"45min 13 steps 904k billed 0 writes; 5-deliverable brief, same shape as L7a\"}}\n{\"ts\":\"2026-09-09T16:31:11Z\",\"wave\":\"creative-templates-w06\",\"lane\":\"L8a-reorder\",\"stage\":\"implement\",\"event\":\"started\"}\n{\"ts\":\"2026-09-09T16:48:23Z\",\"wave\":\"creative-templates-w06\",\"lane\":\"L8a-reorder\",\"stage\":\"implement\",\"event\":\"settled\",\"pr\":284}\n{\"ts\":\"2026-09-09T16:52:24Z\",\"wave\":\"creative-templates-w06\",\"lane\":\"H2-hit-testing\",\"stage\":\"implement\",\"event\":\"settled\",\"pr\":285}\n{\"ts\":\"2026-09-09T17:32:10Z\",\"wave\":\"wave-status-w02\",\"lane\":\"W2a-status-layout\",\"stage\":\"implement\",\"event\":\"started\",\"detail\":{\"seat\":\"opencode-go/glm-5.3-flash\",\"trial_index\":2}}\n{\"ts\":\"2026-09-09T17:38:08Z\",\"wave\":\"wave-status-w02\",\"lane\":\"W1c-cli-hardening\",\"stage\":\"implement\",\"event\":\"started\",\"detail\":{\"seat\":\"opencode/big-pickle\",\"trial_index\":3}}\n{\"ts\":\"2026-09-09T17:42:36Z\",\"wave\":\"wave-status-w02\",\"lane\":\"W2a-status-layout\",\"stage\":\"implement\",\"event\":\"settled\",\"pr\":286}\n{\"ts\":\"2026-09-09T17:46:02Z\",\"wave\":\"wave-status-w02\",\"lane\":\"W2b-log-viewer\",\"stage\":\"implement\",\"event\":\"started\",\"detail\":{\"seat\":\"opencode-go/glm-5.3-flash\",\"trial_index\":5}}\n{\"ts\":\"2026-09-09T17:58:52Z\",\"wave\":\"wave-status-w02\",\"lane\":\"W1c-cli-hardening\",\"stage\":\"implement\",\"event\":\"settled\",\"pr\":287}\n{\"ts\":\"2026-09-09T18:01:22Z\",\"wave\":\"wave-status-w02\",\"lane\":\"W2b1-log-toolbar\",\"stage\":\"implement\",\"event\":\"started\"}\n{\"ts\":\"2026-09-09T18:19:03Z\",\"wave\":\"wave-ct-1\",\"lane\":\"W2b1r\",\"stage\":\"dispatch\",\"event\":\"started\"}\n{\"ts\":\"2026-09-10T02:08:23Z\",\"wave\":\"wave-ct-1\",\"lane\":\"WS1b\",\"stage\":\"dispatch\",\"event\":\"started\"}\n"
+}

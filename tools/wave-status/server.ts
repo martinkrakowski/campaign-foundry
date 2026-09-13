@@ -12,9 +12,10 @@ import {
   resolveScanRoots,
   waveIdFromDirName,
   type CollectDeps,
+  type PrFact,
   type TailHandle,
 } from "./lib/collect.js";
-import type { LaneObservation, WaveStatus } from "./lib/types.js";
+import type { WaveStatus } from "./lib/types.js";
 
 const DEFAULT_PORT = 4317;
 const DEFAULT_TAIL_KB = 16;
@@ -138,7 +139,7 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
   let refreshRunning = false;
   let refreshQueued = false;
   let queuedRefreshPr = false;
-  let prCache: Readonly<Record<string, LaneObservation["pr"]>> = {};
+  let prCache: readonly PrFact[] | undefined;
 
   /**
    * Startup, the 15 s poll, and on-demand `/api/status` refresh PR facts.
