@@ -3585,6 +3585,7 @@ describe("the status page", () => {
     const columnClasses = [
       "c-state",
       "c-lane",
+      "c-seat",
       "c-stage",
       "c-live",
       "c-log",
@@ -3599,6 +3600,69 @@ describe("the status page", () => {
     expect(row).not.toBeNull();
     const cells = Array.from(row!.querySelectorAll("td"));
     expect(cells.map((td) => td.className)).toEqual(columnClasses);
+  });
+
+  test("the seat that ran a lane names it; a lane dispatched without one says unknown", async () => {
+    const seatStatus: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "T",
+          lanes: [
+            {
+              wave: "T",
+              lane: "named",
+              seat: "opencode-go/glm-5.3-flash",
+              derived: { alive: false },
+              disagreements: [],
+            },
+            {
+              wave: "T",
+              lane: "unnamed",
+              derived: { alive: false },
+              disagreements: [],
+            },
+            {
+              wave: "T",
+              lane: "hostile",
+              seat: "<img src=x onerror=alert(1)>",
+              derived: { alive: false },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+
+    const page = await loadPage(seatStatus);
+    const doc = page.window.document;
+    const seatOf = (lane: string): string =>
+      doc.querySelector(`tr.lane[data-lane="${lane}"] td.c-seat`)?.textContent?.trim() ?? "";
+
+    expect(seatOf("named")).toBe("opencode-go/glm-5.3-flash");
+    // An absent record is the word unknown — never blank, never a guess.
+    expect(seatOf("unnamed")).toBe("unknown");
+    // The word is the cell's whole content: no span, no class a screen reader
+    // would have to traverse, and no styling left carrying the meaning.
+    const unnamedCell = doc.querySelector('tr.lane[data-lane="unnamed"] td.c-seat');
+    expect(unnamedCell?.innerHTML).toBe("unknown");
+    expect(unnamedCell?.querySelector("span")).toBeNull();
+    // The seat is a value from disk, like every other cell: it renders as text.
+    expect(seatOf("hostile")).toBe("<img src=x onerror=alert(1)>");
+    const hostileCell = doc.querySelector('tr.lane[data-lane="hostile"] td.c-seat');
+    expect(hostileCell?.querySelector("img")).toBeNull();
+    expect(hostileCell?.innerHTML).toContain("&lt;img");
+  });
+
+  test("the seat header keeps its visible label inside an accessible name", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    const th = doc.querySelector("thead th.c-seat");
+    expect(th).not.toBeNull();
+    expect(th!.textContent?.trim()).toBe("seat");
+    // WCAG 2.5.3 (Label in Name): the accessible name contains the visible label.
+    expect(th!.getAttribute("aria-label")).toBe("seat (model that ran the lane)");
+    expect(th!.getAttribute("aria-label")).toContain(th!.textContent!.trim());
   });
 
   test("the derived state leads every lane row, as a word in a coloured pill with a dot", async () => {
@@ -4300,6 +4364,26 @@ describe("the status page", () => {
         waveEventSh,
         "creative-templates-w03",
         "s1",
+        "dispatch",
+        "started",
+        "--detail",
+        JSON.stringify({ seat: "agy gemini-3.8-flash-high" }),
+      ],
+      {
+        env: {
+          ...process.env,
+          WAVE_LOG_ROOT: root,
+          LOGDIR: "",
+        },
+      },
+    );
+
+    execFileSync(
+      "sh",
+      [
+        waveEventSh,
+        "creative-templates-w03",
+        "s1",
         "implement",
         "settled",
         "--pr",
@@ -4321,11 +4405,13 @@ describe("the status page", () => {
     const waveDir = join(root, "wave-creative-templates-w03");
     expect(existsSync(join(waveDir, "events.jsonl"))).toBe(true);
     const { events } = readEvents(readFileSync(join(waveDir, "events.jsonl"), "utf8"));
-    expect(events.length).toBe(1);
+    expect(events.length).toBe(2);
     expect(events[0]?.wave).toBe("creative-templates-w03");
-    expect(events[0]?.stage).toBe("implement");
-    expect(events[0]?.event).toBe("settled");
-    expect(events[0]?.pr).toBe(342);
+    expect(events[0]?.stage).toBe("dispatch");
+    expect(events[0]?.event).toBe("started");
+    expect(events[1]?.stage).toBe("implement");
+    expect(events[1]?.event).toBe("settled");
+    expect(events[1]?.pr).toBe(342);
 
     writeFileSync(join(waveDir, "s1.log"), "done\nEXIT 0\n");
 
@@ -4372,6 +4458,12 @@ describe("the status page", () => {
     const findingsCell = row!.querySelector("td.c-find");
     expect(findingsCell).not.toBeNull();
     expect(findingsCell!.textContent).toContain("3 / 1 / 2");
+
+    // The seat was recorded on the dispatch line; the implement-settled line
+    // that overwrote `reported` did not carry it, yet the row still names it.
+    const seatCell = row!.querySelector("td.c-seat");
+    expect(seatCell).not.toBeNull();
+    expect(seatCell!.textContent?.trim()).toBe("agy gemini-3.8-flash-high");
   });
 
   test("a corpus that was not read whole never renders as no PR", async () => {
@@ -4517,7 +4609,7 @@ describe("the status page", () => {
     const bodyRow = doc.querySelector('tr.lane[data-wave="T"][data-lane="t1"]');
     expect(bodyRow).not.toBeNull();
 
-    // All eight semantic column classes the header and body share — a
+    // All nine semantic column classes the header and body share — a
     // body-cell rule scoped only to its own class (no tbody/td qualifier)
     // beats `thead th` on specificity and repaints that one heading as a
     // body cell, regardless of source order. Checking every column, not
@@ -4526,6 +4618,7 @@ describe("the status page", () => {
     const columns = [
       "c-state",
       "c-lane",
+      "c-seat",
       "c-stage",
       "c-live",
       "c-log",

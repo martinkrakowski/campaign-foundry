@@ -371,6 +371,13 @@
       th.c-lane {
         width: 200px;
       }
+      th.c-seat {
+        /* the widest recorded seat ("agy gemini-3.8-flash-high") plus room for a second.
+           A column width is not a design token: tokens.css carries none, and the page's
+           own resolution guard rejects a token it cannot serve, so every column width
+           here is a literal like this one. */
+        width: 190px;
+      }
       th.c-stage {
         width: 160px;
       }
@@ -554,6 +561,11 @@
       }
       tbody td.c-state {
         font-size: 12px;
+      }
+      tbody td.c-seat {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--color-text-secondary);
       }
       .live-ok {
         color: var(--color-success);
@@ -1012,6 +1024,7 @@
             <tr>
               <th class="c-state" scope="col">state</th>
               <th class="c-lane" scope="col">lane</th>
+              <th class="c-seat" scope="col" aria-label="seat (model that ran the lane)">seat</th>
               <th class="c-stage" scope="col">stage</th>
               <th class="c-live" scope="col">liveness</th>
               <th class="c-log" scope="col">log</th>
@@ -1855,6 +1868,14 @@
         return counts;
       }
 
+      // The seat that ran the lane, or an honest "unknown" when no event ever
+      // named one. It is never inferred from the lane's name, its worktree or
+      // its model family: an absent record is a gap, not a guess. The word is
+      // plain text so a screen reader hears it without a styling node around it.
+      function seatCell(lane) {
+        return lane.seat === undefined ? "unknown" : esc(lane.seat);
+      }
+
       function findingsCell(lane) {
         const detail =
           lane.reported === undefined ? undefined : lane.reported.detail;
@@ -2020,7 +2041,7 @@
           // and it sits outside the age span, so no age ever renders without
           // one.
           const rowHtml = [
-            `<tr class="wave" data-wave="${esc(wave.id)}"><td colspan="8">` +
+            `<tr class="wave" data-wave="${esc(wave.id)}"><td colspan="9">` +
               `<button type="button" class="wave-band" tabindex="0" aria-expanded="${isExpanded ? "true" : "false"}" aria-controls="waves-${esc(wave.id)}">` +
               `<span class="wave-eyebrow">wave</span> <span class="wave-id">${esc(wave.id)}</span><span class="sep"> · </span><span class="wave-age">${esc(waveAge(wave))}</span><span class="wave-meta">${waveMeta(filteredLanes, nowMs)}</span>` +
               `</button></td></tr>`,
@@ -2032,7 +2053,7 @@
               textMatches,
             );
             rowHtml.push(
-              `<tr class="empty" data-wave="${esc(wave.id)}"><td colspan="8">${emptyMsg}</td></tr>`,
+              `<tr class="empty" data-wave="${esc(wave.id)}"><td colspan="9">${emptyMsg}</td></tr>`,
             );
           } else {
             for (const lane of filteredLanes) {
@@ -2041,6 +2062,7 @@
                 `<tr class="lane" data-wave="${esc(wave.id)}" data-lane="${esc(lane.lane)}"${isExpanded ? "" : " hidden"}>` +
                   `<td class="c-state">${stateCell(lane, nowMs)}</td>` +
                   `<td class="c-lane"><button type="button" class="key" tabindex="0">${key}</button></td>` +
+                  `<td class="c-seat">${seatCell(lane)}</td>` +
                   `<td class="c-stage">${stageCell(lane)}</td>` +
                   `<td class="c-live">${liveness(lane)}</td>` +
                   `<td class="c-log">${logCell(lane)}${ROW_GO}</td>` +
@@ -2052,7 +2074,7 @@
               // A banner per disagreement, in the lane's own words (D103).
               for (const disagreement of lane.disagreements) {
                 rowHtml.push(
-                  `<tr class="disagreement" data-wave="${esc(wave.id)}"${isExpanded ? "" : " hidden"}><td colspan="8">${esc(disagreement)}</td></tr>`,
+                  `<tr class="disagreement" data-wave="${esc(wave.id)}"${isExpanded ? "" : " hidden"}><td colspan="9">${esc(disagreement)}</td></tr>`,
                 );
               }
             }
@@ -2064,7 +2086,7 @@
           groups.push({
             id: "none",
             rowHtml: [
-              '<tr class="empty"><td colspan="8">No waves yet — the table fills in as soon as the first status event arrives.</td></tr>',
+              '<tr class="empty"><td colspan="9">No waves yet — the table fills in as soon as the first status event arrives.</td></tr>',
             ],
           });
         }

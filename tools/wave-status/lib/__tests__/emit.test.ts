@@ -351,7 +351,15 @@ describe("scripts/dispatch-lane.sh emits its events", () => {
     try {
       execFileSync("zsh", [dispatchLaneSh, logdir, `l1:${wt}:${brief}`], {
         timeout: 20_000,
-        env: { ...process.env, STAGGER: "0", POLL: "1", WAVE: "W3T", LANE_CMD: cli, ...env },
+        env: {
+          ...process.env,
+          STAGGER: "0",
+          POLL: "1",
+          WAVE: "W3T",
+          MODEL: "opencode/big-pickle",
+          LANE_CMD: cli,
+          ...env,
+        },
       });
     } catch {
       /* expected for failing lanes */
@@ -365,9 +373,26 @@ describe("scripts/dispatch-lane.sh emits its events", () => {
       runDispatch("true", logdir);
       const { events } = readEvents(readFileSync(join(logdir, "events.jsonl"), "utf8"));
       expect(events).toEqual([
-        { ts: expect.any(String), wave: "W3T", lane: "l1", stage: "dispatch", event: "started" },
+        {
+          ts: expect.any(String),
+          wave: "W3T",
+          lane: "l1",
+          stage: "dispatch",
+          event: "started",
+          detail: { seat: "opencode/big-pickle" },
+        },
         { ts: expect.any(String), wave: "W3T", lane: "l1", stage: "implement", event: "settled" },
       ]);
+    },
+  );
+
+  test.skipIf(!hasZsh)(
+    zshSkip ?? "the dispatched MODEL is the seat carried on the dispatch event",
+    () => {
+      const logdir = join(tempDir(), "waveSeat");
+      runDispatch("true", logdir, { MODEL: "opencode-go/glm-5.3-flash" });
+      const { events } = readEvents(readFileSync(join(logdir, "events.jsonl"), "utf8"));
+      expect(events[0]?.detail?.seat).toBe("opencode-go/glm-5.3-flash");
     },
   );
 

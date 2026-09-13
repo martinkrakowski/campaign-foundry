@@ -13,6 +13,13 @@
 set -u
 MODEL="${MODEL:-opencode/big-pickle}"
 VARIANT="${VARIANT:-high}"
+# The seat that runs this dispatch is known here and nowhere later, so it
+# travels on the dispatch event — a lane's record names its seat (S4). Escaped
+# for JSON so a model id can never inject structure; wave-event.sh validates
+# the result and refuses loudly rather than logging garbage.
+seat_model="${MODEL//\\/\\\\}"
+seat_model="${seat_model//\"/\\\"}"
+SEAT_DETAIL="{\"seat\":\"$seat_model\"}"
 # Rule 7 (references/cast.md): every delegated run reports its own cost, because there is
 # no retroactive accounting — nothing on disk keeps a per-conversation token record, so a
 # run launched without this can never be costed. `--format json` makes opencode emit raw
@@ -90,7 +97,7 @@ for spec in "$@"; do
   lane_wt[$lane]="$wt"
   lane_tip[$lane]=$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)
   log="$LOGDIR/$lane.log"; : > "$log"; lanes+=("$lane")
-  emit_event "$lane" dispatch started
+  emit_event "$lane" dispatch started --detail "$SEAT_DETAIL"
   [ $first -eq 1 ] || sleep "$STAGGER"
   first=0
   if [[ -n "$LANE_CMD" ]]; then

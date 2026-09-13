@@ -8,6 +8,7 @@ function makeLane(
   lane: string,
   overrides: {
     wave?: string;
+    seat?: string;
     reported?: LaneStatus["reported"];
     alive?: boolean;
     pr?: LaneStatus["derived"]["pr"];
@@ -17,6 +18,7 @@ function makeLane(
   return {
     wave: overrides.wave ?? "T",
     lane,
+    ...(overrides.seat === undefined ? {} : { seat: overrides.seat }),
     ...(overrides.reported === undefined ? {} : { reported: overrides.reported }),
     derived: {
       alive: overrides.alive ?? false,
@@ -67,7 +69,37 @@ describe("renderStatus", () => {
     const withPr = rows.find((line) => line.includes("T/t1"));
     const withoutPr = rows.find((line) => line.includes("T/t2"));
     expect(withPr).toContain("#12 open pass");
-    expect(withoutPr).toMatch(/T\/t2\s+—\s+not alive\s+—\s+—$/);
+    expect(withoutPr).toMatch(/T\/t2\s+unknown\s+—\s+not alive\s+—\s+—$/);
+  });
+
+  test("the seat column sits between lane and stage, and renders the seat or the honest unknown", () => {
+    const out = renderStatus(
+      makeStatus([
+        makeLane("t1", { seat: "opencode-go/glm-5.3-flash", alive: true }),
+        makeLane("t2", { alive: true }),
+      ]),
+      { color: false },
+    );
+    const lines = out.split("\n");
+    const header = lines.find((line) => line.includes("lane") && line.includes("seat"));
+    expect(header).toBeDefined();
+    expect(header!.indexOf("lane")).toBeLessThan(header!.indexOf("seat"));
+    expect(header!.indexOf("seat")).toBeLessThan(header!.indexOf("stage"));
+
+    const named = lines.find((line) => line.includes("T/t1"));
+    const absent = lines.find((line) => line.includes("T/t2"));
+    expect(named).toContain("opencode-go/glm-5.3-flash");
+    // A lane no event ever named a seat for says unknown — never blank, never guessed.
+    expect(absent).toMatch(/T\/t2\s+unknown\s+—/);
+  });
+
+  test("a seat carrying a bare escape character is stripped, not painted", () => {
+    const out = renderStatus(makeStatus([makeLane("t1", { seat: "agy\x1b[2Jgemini", alive: true })]), {
+      color: false,
+    });
+    const row = out.split("\n").find((line) => line.includes("T/t1"));
+    expect(row).toContain("agy[2Jgemini");
+    expect(row).not.toContain("\x1b");
   });
 
   test("{ color: false } output contains no ANSI escape — and so does the default", () => {
@@ -177,7 +209,7 @@ describe("renderStatus", () => {
     expect(out).toContain("exit 0 · 98/95/97/98%");
     expect(out).toContain("exit 3\n");
     expect(out).toContain("· 50/60/70/80%");
-    expect(out).toMatch(/T\/t3\s+—\s+not alive\s+—\s+—$/m);
+    expect(out).toMatch(/T\/t3\s+unknown\s+—\s+not alive\s+—\s+—$/m);
   });
 
   test("colour is opt-in and paints the page's tones", () => {

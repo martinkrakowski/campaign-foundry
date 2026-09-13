@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "lane": "S4",
+  "mutations": [
+    {
+      "file": "tools/wave-status/lib/merge.ts",
+      "before": "    if (typeof seat === \"string\" && seat !== \"\") seatByKey.set(key, seat);",
+      "after": "    if (typeof seat === \"string\" && seat !== \"\" && !seatByKey.has(key)) seatByKey.set(key, seat);",
+      "because": "The seat is a property of the lane, so the most recent event that names one must win when a lane is re-dispatched. Keep the first seat instead and a lane that fell back to a stronger model still reports the seat that first failed it — the re-dispatch test pins the value, so this cannot slip through as a silent choice.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/lib/__tests__/merge.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/render.ts",
+      "before": "  return lane.seat === undefined ? \"unknown\" : sanitize(lane.seat);",
+      "after": "  return lane.seat === undefined ? \"unknown\" : lane.seat;",
+      "because": "The seat comes off disk, so the terminal renderer must strip control bytes before it paints one; skipping the sanitiser lets a recorded seat carry an escape run into the operator's terminal. The bare-escape test pins that the byte is gone and the row never contains ESC.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/lib/__tests__/render.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/render.ts",
+      "before": "  return lane.seat === undefined ? \"unknown\" : sanitize(lane.seat);",
+      "after": "  return lane.seat === undefined ? \"\" : sanitize(lane.seat);",
+      "because": "The terminal face and the page must answer the same question the same way: a lane no event ever named a seat for says unknown, never blank. Render nothing and the absent record is indistinguishable from a seat that failed to reach the terminal — the gap the column exists to surface.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/lib/__tests__/render.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/public/index.html",
+      "before": "        return lane.seat === undefined ? \"unknown\" : esc(lane.seat);",
+      "after": "        return lane.seat === undefined ? \"\" : esc(lane.seat);",
+      "because": "A lane whose record never named a seat has one honest answer: the word unknown. Render nothing instead and the gap reads as an empty cell — a lane the reader cannot tell from one whose seat failed to render, which is the exact failure the field was added to remove.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/public/index.html",
+      "before": "              <th class=\"c-seat\" scope=\"col\" aria-label=\"seat (model that ran the lane)\">seat</th>",
+      "after": "              <th class=\"c-seat\" scope=\"col\">seat</th>",
+      "because": "The seat heading is house jargon, so its bare word is not enough for a reader who has never run the pipeline. Removing the accessible name leaves only the vocabulary the label assumes, and the page test pins that the column is announced as the seat that ran the lane.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
+      "verdict": "caught"
+    }
+  ]
+}

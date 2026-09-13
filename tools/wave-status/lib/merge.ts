@@ -31,6 +31,11 @@ export function mergeStatus(
 ): WaveStatus {
   const groups = new Map<string, { id: string; lanes: string[] }>();
   const latestByKey = new Map<string, WaveEvent>();
+  // The seat is a property of the lane, not of its latest event: the dispatch
+  // event names who ran it, but a later `settled`/`merge` line does not, and
+  // `reported` is only the last one. Keep the most recent seat any event
+  // recorded, so a lane that finished still renders the seat that ran it.
+  const seatByKey = new Map<string, string>();
 
   const remember = (wave: string, lane: string): void => {
     let group = groups.get(wave);
@@ -42,8 +47,11 @@ export function mergeStatus(
   };
 
   for (const event of events) {
+    const key = `${event.wave}/${event.lane}`;
     remember(event.wave, event.lane);
-    latestByKey.set(`${event.wave}/${event.lane}`, event);
+    latestByKey.set(key, event);
+    const seat = event.detail?.seat;
+    if (typeof seat === "string" && seat !== "") seatByKey.set(key, seat);
   }
 
   for (const key of Object.keys(observed)) {
@@ -72,7 +80,13 @@ export function mergeStatus(
     waves: ordered.map((group) => ({
       id: group.id,
       lanes: group.lanes.map((lane) =>
-        buildLane(group.id, lane, latestByKey.get(`${group.id}/${lane}`), observed[`${group.id}/${lane}`]),
+        buildLane(
+          group.id,
+          lane,
+          latestByKey.get(`${group.id}/${lane}`),
+          observed[`${group.id}/${lane}`],
+          seatByKey.get(`${group.id}/${lane}`),
+        ),
       ),
     })),
   };
@@ -92,12 +106,14 @@ function buildLane(
   lane: string,
   latest: WaveEvent | undefined,
   obs: LaneObservation | undefined,
+  seat: string | undefined,
 ): LaneStatus {
   const derived: DerivedLane = obs === undefined ? { alive: false } : deriveLane(obs);
   const reported = latest === undefined ? undefined : reportedFrom(latest);
   return {
     wave,
     lane,
+    ...(seat !== undefined ? { seat } : {}),
     ...(reported !== undefined ? { reported } : {}),
     derived,
     disagreements: findDisagreements(reported, derived, obs !== undefined),
