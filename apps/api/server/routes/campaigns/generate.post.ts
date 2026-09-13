@@ -3,7 +3,7 @@ import { acquireJob, completeJob, failJob, runJob } from "../../lib/jobs.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
 import { outputRoot } from "../../lib/config.js";
 import { ALLOWED_IMAGE_MODELS, runCampaign } from "../../lib/pipeline.js";
-import { readReport, writeReport } from "../../lib/report.js";
+import { readReport, reportRevision, writeReport } from "../../lib/report.js";
 import { NOT_PROBED_REASON, PROBE_PENDING_ERROR, waitForCapabilities } from "../../lib/capabilities.js";
 
 /**
@@ -80,17 +80,27 @@ export default defineEventHandler(async (event) => {
     };
   }
 
+  // A re-roll is a read-modify-write over the persisted report: it read this campaign's
+  // report when the run was accepted (the same read the policy-hash pin comes from) and
+  // overlays its cells onto it when the run lands. So it carries the revision it started
+  // from and is refused with ECONFLICT if that report moved meanwhile — a second re-roll
+  // no longer silently replaces the first. A full run replaces the report outright and
+  // folds nothing in, so it writes unconditionally.
+  const reroll = regenerateOnly !== undefined;
+  const expectedRevision = reroll ? await reportRevision(outputRoot(), brief.id) : undefined;
+
   const jobId = claim.jobId;
   runJob(jobId, async () => {
-    const expectedPolicyHash = await persistedPolicyHash(brief, regenerateOnly !== undefined);
+    const expectedPolicyHash = await persistedPolicyHash(brief, reroll);
     const result = await runCampaign(brief, imageModel, regenerateOnly, expectedPolicyHash);
     if (!result.success) {
       await failJob(jobId, result.error.message);
       return;
     }
     // A selective run produced only the regenerated cells — merge them into the
-    // persisted report so the full campaign survives a partial run.
-    await writeReport(result.value, { merge: regenerateOnly !== undefined });
+    // persisted report so the full campaign survives a partial run. `runJob` fails the
+    // job with the message if the merge is refused.
+    await writeReport(result.value, { merge: reroll, expectedRevision });
     await completeJob(jobId, {
       halted: result.value.halted,
       assets: result.value.assets,

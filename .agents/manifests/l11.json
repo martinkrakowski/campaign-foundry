@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "lane": "l11",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/report.ts",
+      "before": "    if (current !== expectedRevision) {",
+      "after": "    if (false) {",
+      "because": "The defect this lane fixes, restored: the compare never refuses, so the second of two overlapping merges writes over the first and its entry is gone with no error. This is the 187-of-200 lost-update the lane measured before the guard existed.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/report.test.ts",
+        "apps/api/server/routes/campaigns/__tests__/generate-report-conflict.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/report.ts",
+      "before": "  if (expectedRevision !== undefined) {",
+      "after": "  if (expectedRevision === undefined) {",
+      "because": "The guard inverts: a write that names no revision — every full run, every CLI run, every existing caller — is now refused whenever a report happens to be stored, and the one that names a revision is never checked. The opt-in contract both stores have is that an absent revision means unconditional.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/report.test.ts",
+        "apps/api/server/routes/campaigns/__tests__/generate-report-conflict.test.ts",
+        "apps/api/server/routes/__tests__/routes.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/report.ts",
+      "before": "      (conflict as { revision?: string }).revision = current;",
+      "after": "      (conflict as { revision?: string }).revision = expectedRevision;",
+      "because": "The refusal carries back the revision that just lost instead of the one stored now, so a caller that adopts it retries into the same refusal forever — the stuck-drawer failure L10 fixed in the pool's own commit. The fresh revision is the whole point of carrying one.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/report.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/report.ts",
+      "before": "    return hashBytes(await readFile(path));",
+      "after": "    return hashBytes(Buffer.from(\"stored\", \"utf8\"));",
+      "because": "The revision stops being the digest of the stored bytes and becomes a constant, so every write's base looks unchanged, no merge is ever refused, and the lost update this lane removes is back in full. A revision that is not the bytes is not a revision (D80).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/report.test.ts",
+        "apps/api/server/routes/campaigns/__tests__/generate-report-conflict.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/generate.post.ts",
+      "before": "  const expectedRevision = reroll ? await reportRevision(outputRoot(), brief.id) : undefined;",
+      "after": "  const expectedRevision = undefined;",
+      "because": "The only merge caller reads a revision and never sends it, so the conditional write on writeReport is unreachable from the route: the guard would exist on the function and nowhere else, and two overlapping re-rolls would still lose one. The route-level test holds the run open precisely to pin this.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/generate-report-conflict.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

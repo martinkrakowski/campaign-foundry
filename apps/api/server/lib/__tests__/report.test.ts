@@ -7,7 +7,14 @@ import {
   type GeneratedAsset,
   type PipelineResult,
 } from "@campaignfoundry/CampaignOrchestration";
-import { campaignReportPath, isPersistedAsset, latestReportPath, readReport, writeReport } from "../report.js";
+import {
+  campaignReportPath,
+  isPersistedAsset,
+  latestReportPath,
+  readReport,
+  reportRevision,
+  writeReport,
+} from "../report.js";
 
 type ReportAsset = GeneratedAsset & { brandCompliant: boolean };
 
@@ -24,6 +31,7 @@ const asset = (over: Partial<GeneratedAsset> = {}): GeneratedAsset => ({
   ...over,
 });
 const beta = (over: Partial<GeneratedAsset> = {}) => asset({ productId: "beta", outputPath: "beta/1x1.png", ...over });
+const gamma = (over: Partial<GeneratedAsset> = {}) => asset({ productId: "gamma", outputPath: "gamma/1x1.png", ...over });
 const result = (assets: GeneratedAsset[], campaignId = "camp"): PipelineResult => ({
   assets,
   log: new PipelineExecutionLog(campaignId, () => new Date("2026-01-01T00:00:00.000Z")),
@@ -53,6 +61,27 @@ describe("report persistence", () => {
 
   test("latestReportPath points at report.json", () => {
     expect(latestReportPath(root)).toBe(resolve(root, "report.json"));
+  });
+
+  test("reportRevision is the digest of the stored bytes, and moves when they do", async () => {
+    expect(await reportRevision(root, "camp")).toBeUndefined();
+
+    await writeReport(result([asset()]));
+    const first = await reportRevision(root, "camp");
+    // Not a field on the document: the digest of the file, absent from the payload.
+    expect(typeof first).toBe("string");
+    expect(readFileSync(campaignReportPath(root, "camp")!, "utf8")).not.toContain(first!);
+
+    await writeReport(result([asset({ complianceScore: 0.7 })]));
+    expect(await reportRevision(root, "camp")).not.toBe(first);
+  });
+
+  test("reportRevision is undefined for an unsafe id and throws when the file cannot be read", async () => {
+    expect(await reportRevision(root, "../evil")).toBeUndefined();
+
+    // A directory where the report should be: not ENOENT, so it is not "nothing stored".
+    mkdirSync(campaignReportPath(root, "camp")!, { recursive: true });
+    await expect(reportRevision(root, "camp")).rejects.toThrow();
   });
 
   test("readReport returns the parsed per-campaign report", async () => {
@@ -99,6 +128,62 @@ describe("report persistence", () => {
   test("merge from a missing prior report starts empty", async () => {
     const path = await writeReport(result([asset()]), { merge: true });
     expect(readAssets(path)).toHaveLength(1);
+  });
+
+  test("a merge whose report moved under it is refused, and writes nothing", async () => {
+    await writeReport(result([asset(), beta()]));
+    const stale = await reportRevision(root, "camp");
+
+    // Another run's re-roll lands while this one is still going.
+    await writeReport(result([asset({ complianceScore: 0.7 })]), { merge: true });
+    const current = await reportRevision(root, "camp");
+
+    // Before this lane: both merges answered 200 and one of the two was gone.
+    await expect(
+      writeReport(result([gamma()]), { merge: true, expectedRevision: stale }),
+    ).rejects.toMatchObject({
+      code: "ECONFLICT",
+      revision: current,
+      message: 'Report for campaign "camp" was modified by another run.',
+    });
+
+    // The refused run wrote nothing — the report still holds the run that landed.
+    const per = readAssets(resolve(root, "reports", "camp.json"));
+    expect(per.find((a) => a.productId === "alpha")?.complianceScore).toBe(0.7);
+    expect(per.map((a) => a.productId)).not.toContain("gamma");
+  });
+
+  test("a merge carrying the revision it read is accepted", async () => {
+    await writeReport(result([asset(), beta()]));
+    const revision = await reportRevision(root, "camp");
+
+    const path = await writeReport(result([asset({ complianceScore: 0.9 })]), {
+      merge: true,
+      expectedRevision: revision,
+    });
+    expect(readAssets(path).find((a) => a.productId === "alpha")?.complianceScore).toBe(0.9);
+  });
+
+  test("without expectedRevision the write is unconditional, as both stores are", async () => {
+    await writeReport(result([asset(), beta()]));
+    // The report moves on disk; a write that named no revision is still not refused.
+    writeFileSync(campaignReportPath(root, "camp")!, JSON.stringify({ assets: [beta()] }));
+
+    const path = await writeReport(result([gamma()]), { merge: true });
+    expect(readAssets(path).map((a) => a.productId).sort()).toEqual(["beta", "gamma"]);
+  });
+
+  test("a refused merge with no campaign id names no campaign", async () => {
+    await writeReport(result([asset()]));
+    const stale = await reportRevision(root, "camp");
+    await writeReport(result([asset({ complianceScore: 0.7 })]));
+
+    await expect(
+      writeReport(
+        { halted: false, assets: [asset()], log: undefined } as unknown as PipelineResult,
+        { merge: true, expectedRevision: stale },
+      ),
+    ).rejects.toMatchObject({ code: "ECONFLICT", message: "Report was modified by another run." });
   });
 
   test("isPersistedAsset requires the four string identity/path fields", () => {

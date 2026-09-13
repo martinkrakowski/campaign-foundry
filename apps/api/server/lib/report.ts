@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { assetIdentity, SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import type { GeneratedAsset, PipelineResult } from "@campaignfoundry/CampaignOrchestration";
+import { hashBytes, isErrno } from "./brief-files.js";
 import { outputRoot } from "./config.js";
 
 /** Persisted asset = the entity plus the derived `brandCompliant` view field. */
@@ -40,6 +41,32 @@ export async function readReport(root: string, campaignId: string): Promise<unkn
 
 /** The "latest run" pointer — read by GET /campaigns/result when no campaignId is given. */
 export const latestReportPath = (root: string): string => resolve(root, "report.json");
+
+/**
+ * The revision of the report stored at `path` — the SHA-256 digest of the stored
+ * bytes, never a field on the document (D80): a report is hand-editable, and a
+ * revision it could name would not be the digest `writeReport`'s guard hashes.
+ * Undefined when nothing is stored there.
+ */
+async function revisionAt(path: string): Promise<string | undefined> {
+  try {
+    return hashBytes(await readFile(path));
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return undefined;
+    throw error;
+  }
+}
+
+/**
+ * The revision of a campaign's persisted report, or undefined when the id is
+ * unsafe or nothing is stored — the value a caller passes back as
+ * `writeReport`'s `expectedRevision`. Mirrors `BriefStorePort.getRevision`.
+ */
+export async function reportRevision(root: string, campaignId: string): Promise<string | undefined> {
+  const path = campaignReportPath(root, campaignId);
+  if (!path) return undefined;
+  return revisionAt(path);
+}
 
 /**
  * A persisted report row that can be keyed. Every row — classic or variation —
@@ -147,16 +174,28 @@ async function readPersistedAssets(path: string): Promise<ReportAsset[]> {
  * With `merge` (a selective/HITL re-roll), the run's assets are overlaid onto this
  * campaign's previously persisted set by identity — replacing the regenerated cells
  * and keeping everything else — so a full report survives a partial run (and a reload).
+ *
+ * A merge is a read-modify-write, so with `expectedRevision` it is a conditional
+ * write, exactly as `writePool` and `rewriteBrief` are: the bytes the merge is
+ * against must still be the bytes stored, and otherwise it throws an error with
+ * code `ECONFLICT` carrying the fresh revision — a run whose report has moved
+ * under it is refused instead of silently overwriting the run that moved it
+ * (which is what two overlapping merges do: both answer 200 and one is gone).
+ * Without `expectedRevision` the write is unconditional, as both stores are: the
+ * compare and the write are not fused on a filesystem (D79), so this narrows the
+ * race rather than closing it.
  */
 export async function writeReport(
   result: PipelineResult,
-  { merge = false }: { merge?: boolean } = {},
+  { merge = false, expectedRevision }: { merge?: boolean; expectedRevision?: string } = {},
 ): Promise<string> {
   const root = outputRoot();
   const latest = latestReportPath(root);
   // The campaign id is the report's identity. Fall back to the latest-only pointer if a
   // run somehow lacks one (defensive — the use case always stamps the brief id).
   const perCampaign = result.log?.campaignId ? campaignReportPath(root, result.log.campaignId) : null;
+  // The file a merge reads and the one its revision guards: this campaign's own report.
+  const base = perCampaign ?? latest;
 
   await mkdir(root, { recursive: true });
   if (perCampaign) await mkdir(resolve(root, "reports"), { recursive: true });
@@ -173,12 +212,26 @@ export async function writeReport(
     // Merge against this campaign's own prior report (not the global latest), so a
     // re-roll of one brief never folds in another brief's creatives. Map preserves
     // existing order; re-keying an existing entry updates it in place, new cells append.
-    const base = perCampaign ?? latest;
     const byKey = new Map(
       (await readPersistedAssets(base)).map((a) => [keyOf(a), a] as const),
     );
     for (const a of fresh) byKey.set(keyOf(a), a);
     assets = [...byKey.values()];
+  }
+
+  if (expectedRevision !== undefined) {
+    const current = await revisionAt(base);
+    if (current !== expectedRevision) {
+      const campaignId = result.log?.campaignId;
+      const conflict = new Error(
+        campaignId
+          ? `Report for campaign "${campaignId}" was modified by another run.`
+          : "Report was modified by another run.",
+      );
+      (conflict as { code?: string }).code = "ECONFLICT";
+      (conflict as { revision?: string }).revision = current;
+      throw conflict;
+    }
   }
 
   const payload = JSON.stringify(
