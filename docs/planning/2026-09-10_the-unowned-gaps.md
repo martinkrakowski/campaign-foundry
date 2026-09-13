@@ -157,12 +157,6 @@ remove a wait, do not loosen the assertion), or a second bind that intermittentl
 which case the assertion is right and the server's listen options are the defect. Deciding which
 without evidence is how a flaky test becomes a deleted one.
 
-```premise X7
-# The bind-conflict test still races: it takes the ephemeral port from a live
-# server and expects a second listen to reject, with nothing pinning how long
-# that rejection may take or whether the socket forbids reuse. Probing the
-# construct, not the file — the lane is done when this test no longer depends on
-# timing, however it is rewritten.
-grep -q 'start({ port: first.port, root, collect: async () => statusAt(0) })' tools/wave-status/__tests__/server.test.ts
-```
+**X7 — retired.** The bind-conflict test binds an exclusive blocker directly,
+eliminating the racy second-server overhead; `plan:verify` no longer tracks it.
 

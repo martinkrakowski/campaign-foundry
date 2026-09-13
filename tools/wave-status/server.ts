@@ -508,7 +508,7 @@ function tailKb(raw: string | null): number | undefined {
 function listen(server: Server, port: number): Promise<void> {
   return new Promise((resolve, reject) => {
     server.once("error", reject);
-    server.listen(port, "127.0.0.1", () => {
+    server.listen({ port, host: "127.0.0.1", exclusive: true }, () => {
       server.removeListener("error", reject);
       resolve();
     });
