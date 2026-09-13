@@ -120,11 +120,11 @@ its siblings were dispatched — or nearly dispatched — against gaps that had 
 ! npx --no-install prettier --find-config-path package.json
 ```
 
-```premise X2
-# LAYER_PROPS in brief-template.ts is the props vocabulary (D134) that decides
-# whether a layer may carry `alt`; nothing else does.
-! grep -q '"alt"' packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts
-```
+**X2 — shipped in #370.** `alt` is in the props vocabulary for the `image` kind alone — the one kind
+whose whole content is a picture a reader may not see, and therefore the only kind that can *mean* a
+text alternative — validated as a string by the shared `layerPropsProblem`, so both boundaries read
+one decision. Its premise grepped for the key in the vocabulary that decides, not a string near it,
+so it cannot survive the fix; it is retired in the same commit that closes the lane.
 
 **X3 — shipped in #335.** Its premise was retired when it landed; `plan:verify` no
 longer tracks it.

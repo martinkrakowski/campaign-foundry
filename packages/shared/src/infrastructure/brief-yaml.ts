@@ -39,11 +39,11 @@ const FRAME_KEY_ORDER = ["x", "y", "w", "h", "anchor"] as const;
 /**
  * The props' canonical key order: the order the domain's `LayerProps` union
  * declares its members (D134) — shade's `alpha`, accent's heights, logo's
- * widths, then the text layers' `anchor` and `typeFloor`. A valid props object
- * carries one kind's keys only, so one flat list orders them all; keys the
+ * widths, the text layers' `anchor` and `typeFloor`, then the image layer's
+ * `alt` (X2). A valid props object carries one kind's keys only, so one flat list orders them all; keys the
  * union does not name keep their written order at the end.
  */
-const PROPS_KEY_ORDER = ["alpha", "solidHeight", "fadeHeight", "width", "margin", "anchor", "typeFloor"] as const;
+const PROPS_KEY_ORDER = ["alpha", "solidHeight", "fadeHeight", "width", "margin", "anchor", "typeFloor", "alt"] as const;
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
