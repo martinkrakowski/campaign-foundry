@@ -107,6 +107,11 @@ jobs:
       # real test command, so replaying all of them every time would grow
       # without bound. A claim is checked when it is made.
       - name: Replay changed mutation manifests
+        env:
+          # On a push, origin/main IS the pushed commit, so diffing against it
+          # finds nothing and every manifest is skipped in silence. The pre-push
+          # SHA is what "what this push changed" actually means.
+          MANIFEST_DIFF_BASE: ${{ github.event.before }}
         run: "sh scripts/verify-manifests.sh"
 
       # Turbo caches task outputs keyed by input hash, so unchanged packages are
