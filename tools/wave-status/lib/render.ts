@@ -51,6 +51,15 @@ function laneCell(lane: LaneStatus): string {
   return `${sanitize(lane.wave)}/${sanitize(lane.lane)}`;
 }
 
+/**
+ * The seat that ran the lane, or the honest word `unknown` when no event ever
+ * named one — the same answer the page gives. Never inferred from the lane name
+ * or worktree, and sanitized because the value comes off disk.
+ */
+function seatCell(lane: LaneStatus): string {
+  return lane.seat === undefined ? "unknown" : sanitize(lane.seat);
+}
+
 export const STALLED_GRACE_MS = 60_000;
 
 export function isLaneStalled(lane: LaneStatus, nowMs?: number): boolean {
@@ -95,6 +104,12 @@ function gateCell(lane: LaneStatus): string {
 /** The tones mirror the page: failed red, settled green, started cyan, absent dim. */
 const COLUMNS: readonly Column[] = [
   { header: "lane", cell: laneCell, paint: (_lane, text) => text },
+  {
+    header: "seat",
+    cell: seatCell,
+    // A seat is a fact, not a status: like the lane name, it carries no tone.
+    paint: (_lane, text) => text,
+  },
   {
     header: "stage",
     cell: stageCell,

@@ -372,7 +372,10 @@
         width: 200px;
       }
       th.c-seat {
-        /* the widest recorded seat ("agy gemini-3.8-flash-high") plus room for a second */
+        /* the widest recorded seat ("agy gemini-3.8-flash-high") plus room for a second.
+           A column width is not a design token: tokens.css carries none, and the page's
+           own resolution guard rejects a token it cannot serve, so every column width
+           here is a literal like this one. */
         width: 190px;
       }
       th.c-stage {
@@ -1021,7 +1024,7 @@
             <tr>
               <th class="c-state" scope="col">state</th>
               <th class="c-lane" scope="col">lane</th>
-              <th class="c-seat" scope="col">seat</th>
+              <th class="c-seat" scope="col" aria-label="seat (model that ran the lane)">seat</th>
               <th class="c-stage" scope="col">stage</th>
               <th class="c-live" scope="col">liveness</th>
               <th class="c-log" scope="col">log</th>
@@ -1859,11 +1862,10 @@
 
       // The seat that ran the lane, or an honest "unknown" when no event ever
       // named one. It is never inferred from the lane's name, its worktree or
-      // its model family: an absent record is a gap, not a guess.
+      // its model family: an absent record is a gap, not a guess. The word is
+      // plain text so a screen reader hears it without a styling node around it.
       function seatCell(lane) {
-        return lane.seat === undefined
-          ? '<span class="dim">unknown</span>'
-          : esc(lane.seat);
+        return lane.seat === undefined ? "unknown" : esc(lane.seat);
       }
 
       function findingsCell(lane) {

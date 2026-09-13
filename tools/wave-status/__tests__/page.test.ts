@@ -3642,11 +3642,27 @@ describe("the status page", () => {
     expect(seatOf("named")).toBe("opencode-go/glm-5.3-flash");
     // An absent record is the word unknown — never blank, never a guess.
     expect(seatOf("unnamed")).toBe("unknown");
+    // The word is the cell's whole content: no span, no class a screen reader
+    // would have to traverse, and no styling left carrying the meaning.
+    const unnamedCell = doc.querySelector('tr.lane[data-lane="unnamed"] td.c-seat');
+    expect(unnamedCell?.innerHTML).toBe("unknown");
+    expect(unnamedCell?.querySelector("span")).toBeNull();
     // The seat is a value from disk, like every other cell: it renders as text.
     expect(seatOf("hostile")).toBe("<img src=x onerror=alert(1)>");
     const hostileCell = doc.querySelector('tr.lane[data-lane="hostile"] td.c-seat');
     expect(hostileCell?.querySelector("img")).toBeNull();
     expect(hostileCell?.innerHTML).toContain("&lt;img");
+  });
+
+  test("the seat header keeps its visible label inside an accessible name", async () => {
+    const page = await loadPage(mixedStatus);
+    const doc = page.window.document;
+    const th = doc.querySelector("thead th.c-seat");
+    expect(th).not.toBeNull();
+    expect(th!.textContent?.trim()).toBe("seat");
+    // WCAG 2.5.3 (Label in Name): the accessible name contains the visible label.
+    expect(th!.getAttribute("aria-label")).toBe("seat (model that ran the lane)");
+    expect(th!.getAttribute("aria-label")).toContain(th!.textContent!.trim());
   });
 
   test("the derived state leads every lane row, as a word in a coloured pill with a dot", async () => {
