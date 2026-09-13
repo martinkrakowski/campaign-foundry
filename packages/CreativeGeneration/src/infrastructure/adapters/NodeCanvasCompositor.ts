@@ -150,14 +150,20 @@ type LayerDrawer = (c: LayerDrawContext) => void;
 
 /**
  * Everything a layer drawer reads: the real blit context, the prepared
- * creative, and the pose values the draw path computed once. One object serves
- * every drawer (D121). The logo's overlap snap reads its anchor box off
- * `prepared.logoAnchorLayout` (C5) — resolved once in `prepare`, independent
- * of draw order — so this context carries no drawer-to-drawer handoff field.
+ * creative, the layer being dispatched, and the pose values the draw path
+ * computed once. One object serves every drawer (D121). The logo's overlap
+ * snap reads its anchor box off `prepared.logoAnchorLayout` (C5) — resolved
+ * once in `prepare`, independent of draw order — so this context carries no
+ * drawer-to-drawer handoff field. `layer` is the dispatched entry itself
+ * (HL3): the compositor iterates the list per layer, and a template may carry
+ * more than one layer of a kind — a drawer with per-layer data (today only
+ * {@link drawHtml}) must read it from what it was dispatched for, never by
+ * hunting the list. Siblings ignore the field.
  */
 interface LayerDrawContext {
   readonly ctx: SKRSContext2D;
   readonly prepared: PreparedCreative;
+  readonly layer: CreativeTemplateLayer;
   readonly motion: MotionKind | undefined;
   readonly eased: number;
   readonly effectT: number;
@@ -172,7 +178,7 @@ interface LayerDrawContext {
  * `video` maps to the same drawer as `image` (VD): video is the output frame
  * sequence rather than an input asset, and on any single frame the background
  * is a still image blit (with kenBurnsScale applied in motion).
- * Kinds this compositor cannot draw (`fill`, `html`) are absent, and
+ * Kinds this compositor cannot draw (`fill`) are absent, and
  * hitting one throws ({@link drawLayer}) instead of skipping.
  * `drawTimeline` (C5) uses this same table for every kind except
  * `static-text`/`animated-text` — whose sequenced beat-selection and
@@ -193,6 +199,7 @@ const LAYER_DRAWERS: Readonly<Partial<Record<LayerKind, LayerDrawer>>> = {
   "static-text": drawStaticText,
   "animated-text": drawStaticText,
   logo: drawLogo,
+  html: drawHtml,
 };
 
 /**
@@ -317,7 +324,7 @@ export class NodeCanvasCompositor implements CompositorPort {
     motion?: MotionKind,
     effectT: number = t,
   ): void {
-    const c: LayerDrawContext = {
+    const c: Omit<LayerDrawContext, "layer"> = {
       ctx,
       prepared,
       motion,
@@ -334,7 +341,7 @@ export class NodeCanvasCompositor implements CompositorPort {
         if (copyDrawn) continue;
         copyDrawn = true;
       }
-      drawLayer(layer.kind, c);
+      drawLayer(layer, c);
     }
   }
 
@@ -887,7 +894,7 @@ function resolveBeatLayouts(
  * not a fixed message (copy is chosen by `copyT` — the poster passes the key
  * beat's mid-time, D7 — and `headline-rise` advances per beat on the pose
  * clock `t`, each beat rising on its own local progress). A kind neither path
- * can draw (`html`, `fill`) throws the same "no drawer" error here as it does
+ * can draw (`fill`) throws the same "no drawer" error here as it does
  * on the legacy blit. `effectT` is a value no ground drawer reads
  * (`effectT ?? t` matches `draw()`'s clock shape).
  *
@@ -908,7 +915,7 @@ function drawTimeline(
   effectT?: number,
 ): void {
   const eased = motion === undefined ? 1 : easeOutCubic(t);
-  const c: LayerDrawContext = { ctx, prepared, motion, eased, effectT: effectT ?? t };
+  const c: Omit<LayerDrawContext, "layer"> = { ctx, prepared, motion, eased, effectT: effectT ?? t };
   let copyDrawn = false;
   for (const layer of prepared.layers) {
     if (layer.kind === "static-text" || layer.kind === "animated-text") {
@@ -919,7 +926,7 @@ function drawTimeline(
       copyDrawn = true;
       continue;
     }
-    drawLayer(layer.kind, c);
+    drawLayer(layer, c);
   }
 }
 
@@ -1111,6 +1118,101 @@ function drawStaticText(c: LayerDrawContext): void {
 }
 
 /**
+ * The html layer (HL3, HL-D5) — draws the dispatched layer's element list
+ * (text, button, image) directly onto the canvas, producing the static raster
+ * fallback rendition (D122) before the markup assembler (HL4) is built. The
+ * elements come from `c.layer` — the layer this draw was dispatched for (the
+ * compositor iterates per layer, and nothing caps how many `html` layers a
+ * template may carry, so hunting `prepared.layers` for "the" html layer would
+ * paint the first list twice and never paint the second). Absent or empty
+ * elements (e.g. the canonical template) is a no-op blit.
+ */
+function drawHtml(c: LayerDrawContext): void {
+  const { ctx, prepared, layer } = c;
+  if (layer.elements === undefined || layer.elements.length === 0) {
+    return;
+  }
+  const { width, height } = prepared;
+  for (const element of layer.elements) {
+    const boxX = element.frame.x * width;
+    const boxY = element.frame.y * height;
+    const boxW = element.frame.w * width;
+    const boxH = element.frame.h * height;
+
+    switch (element.kind) {
+      case "button": {
+        const radius = Math.min(8, boxH / 2, boxW / 2);
+        ctx.save();
+        ctx.fillStyle = prepared.brandColor;
+        ctx.beginPath();
+        ctx.roundRect(boxX, boxY, boxW, boxH, radius);
+        ctx.fill();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        const fontSize = Math.min(
+          Math.round(boxH * 0.45),
+          Math.round(scaleBasis(prepared.canvas, width, height) * 0.6),
+        );
+        ctx.font = `${prepared.fontWeight} ${fontSize}px ${prepared.fontFamily}, sans-serif`;
+        ctx.fillText(element.text!, boxX + boxW / 2, boxY + boxH / 2);
+        ctx.restore();
+        break;
+      }
+      case "text": {
+        ctx.save();
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = prepared.style.align;
+        ctx.textBaseline = "alphabetic";
+        const fontSize = Math.min(
+          Math.max(12, Math.round(boxH * 0.7)),
+          Math.round(scaleBasis(prepared.canvas, width, height) * prepared.style.sizeScale),
+        );
+        ctx.font = `${prepared.fontWeight} ${fontSize}px ${prepared.fontFamily}, sans-serif`;
+        ctx.letterSpacing = `${prepared.style.letterSpacing * fontSize}px`;
+
+        const lines = wrapText(ctx, element.text!, boxW);
+        const lineHeight = fontSize * prepared.style.lineHeight;
+        const totalSpan = (lines.length - 1) * lineHeight;
+
+        let startY: number;
+        if (element.frame.anchor === "top") {
+          startY = boxY + fontSize;
+        } else if (element.frame.anchor === "middle") {
+          startY = boxY + (boxH - totalSpan) / 2 + fontSize * 0.35;
+        } else {
+          startY = boxY + boxH - totalSpan;
+        }
+
+        let lineX: number;
+        if (prepared.style.align === "left") {
+          lineX = boxX;
+        } else if (prepared.style.align === "right") {
+          lineX = boxX + boxW;
+        } else {
+          lineX = boxX + boxW / 2;
+        }
+
+        let currY = startY;
+        for (const line of lines) {
+          ctx.fillText(line, lineX, currY);
+          currY += lineHeight;
+        }
+        ctx.restore();
+        break;
+      }
+      case "image": {
+        ctx.save();
+        ctx.drawImage(prepared.background, boxX, boxY, boxW, boxH);
+        ctx.restore();
+        break;
+      }
+    }
+  }
+}
+
+/**
  * The logo layer — the legacy logo block (D121), its anchor source changed
  * for C5: the overlap snap now reads `prepared.logoAnchorLayout`, resolved in
  * `prepare` independent of draw order, instead of a layout a prior drawer
@@ -1131,15 +1233,19 @@ function drawLogo(c: LayerDrawContext): void {
   if (prepared.logo) {
     const anchor = prepared.logoAnchorLayout;
     if (anchor === undefined) {
-      throw new Error(
-        "NodeCanvasCompositor: the logo layer snaps to the text block, but there is no text layer in the template at all",
-      );
+      if (!prepared.layers.some((layer) => layer.kind === "html")) {
+        throw new Error(
+          "NodeCanvasCompositor: the logo layer snaps to the text block, but there is no text layer in the template at all",
+        );
+      }
     }
     const { image, x, width: lw, height: lh } = prepared.logo;
     let ly = prepared.logo.y;
-    const logoBox = { x, y: ly, width: lw, height: lh };
-    if (boxesOverlap(anchor.box, logoBox)) {
-      ly = resolveOverlappingLogoY(prepared, anchor.box, lw, lh, x);
+    if (anchor !== undefined) {
+      const logoBox = { x, y: ly, width: lw, height: lh };
+      if (boxesOverlap(anchor.box, logoBox)) {
+        ly = resolveOverlappingLogoY(prepared, anchor.box, lw, lh, x);
+      }
     }
     ctx.drawImage(image, x, ly, lw, lh);
   }
@@ -1162,16 +1268,18 @@ function resolveLayerList(
 }
 
 /**
- * One layer of the draw: look the kind up in the dispatch table and paint it.
- * A kind with no entry — `fill`, `html` (L6) — throws, never skips: a
- * silently dropped layer is a redesign the goldens cannot see.
+ * One layer of the draw: look the kind up in the dispatch table and paint it,
+ * handing the drawer the layer it was dispatched for (HL3) — a template may
+ * carry several layers of one kind, and the loop position is the only identity
+ * the drawer can trust. A kind with no entry — `fill` (L6) — throws, never
+ * skips: a silently dropped layer is a redesign the goldens cannot see.
  */
-function drawLayer(kind: LayerKind, c: LayerDrawContext): void {
-  const drawer = LAYER_DRAWERS[kind];
+function drawLayer(layer: CreativeTemplateLayer, c: Omit<LayerDrawContext, "layer">): void {
+  const drawer = LAYER_DRAWERS[layer.kind];
   if (drawer === undefined) {
     throw new Error(
-      `NodeCanvasCompositor: layer kind "${kind}" has no drawer in this compositor — it draws image, video, shade, accent, static-text, animated-text and logo only`,
+      `NodeCanvasCompositor: layer kind "${layer.kind}" has no drawer in this compositor — it draws image, video, shade, accent, static-text, animated-text, logo and html only`,
     );
   }
-  drawer(c);
+  drawer({ ...c, layer });
 }
