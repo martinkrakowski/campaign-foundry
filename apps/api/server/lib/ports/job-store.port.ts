@@ -52,6 +52,16 @@ export interface JobStorePort {
   getStoredJob(id: string): Promise<StoredJob | undefined>;
 
   /**
+   * Conditionally acquire a running job slot for a campaign.
+   * If a job is already running for this campaign, returns { acquired: false, runningJobId }.
+   * If no job is running, creates the job and returns { acquired: true, jobId }.
+   */
+  acquireJob(
+    campaignId: string,
+    customId?: string,
+  ): Promise<{ acquired: true; jobId: string } | { acquired: false; runningJobId: string }>;
+
+  /**
    * Create a new running job for a campaign.
    */
   createJob(campaignId: string, customId?: string): Promise<string>;

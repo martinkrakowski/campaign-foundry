@@ -1,10 +1,13 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
+import { spawnSync } from "node:child_process";
 import { PipelineExecutionLog } from "@campaignfoundry/CampaignOrchestration";
 import {
   JOB_TTL_MS,
   MAX_JOBS,
+  acquireJob,
   completeJob,
   createJob,
+  deleteJob,
   failJob,
   getJob,
   getRunningJobId,
@@ -13,7 +16,6 @@ import {
   runJob,
   type JobResult,
 } from "../jobs.js";
-import { getJobStore } from "../ports/index.js";
 
 const payload = (over: Partial<JobResult> = {}): JobResult => ({
   halted: false,
@@ -136,10 +138,70 @@ describe("jobs port facade", () => {
     await vi.waitFor(async () => expect((await getJob(id))?.error).toBe("Job failed"));
   });
 
-  test("handle minted survives across separate store instances", async () => {
-    const store = getJobStore();
+  test("runJob handles failJob storage error by deleting job and unblocking campaign", async () => {
+    const id = await createJob("camp");
+    const store = (await import("../ports/index.js")).getJobStore();
+    vi.spyOn(store, "failJob").mockRejectedValueOnce(new Error("disk error"));
+    runJob(id, async () => {
+      throw new Error("work failed");
+    });
+    await vi.waitFor(async () => expect(await hasRunningJob("camp")).toBe(false));
+    expect(await getJob(id)).toBeUndefined();
+  });
+
+  test("runJob ignores error if deleteJob also fails after failJob failure", async () => {
+    const id = await createJob("camp");
+    const store = (await import("../ports/index.js")).getJobStore();
+    vi.spyOn(store, "failJob").mockRejectedValueOnce(new Error("fail error"));
+    vi.spyOn(store, "deleteJob").mockRejectedValueOnce(new Error("delete error"));
+    runJob(id, async () => {
+      throw new Error("work failed");
+    });
+    await new Promise((r) => setTimeout(r, 20));
+  });
+
+  test("acquireJob conditionally creates a running job or returns incumbent", async () => {
+    const first = await acquireJob("camp");
+    expect(first.acquired).toBe(true);
+    if (first.acquired) {
+      expect(first.jobId).toBeDefined();
+      const second = await acquireJob("camp");
+      expect(second).toEqual({ acquired: false, runningJobId: first.jobId });
+      await completeJob(first.jobId, payload());
+      const third = await acquireJob("camp");
+      expect(third.acquired).toBe(true);
+    }
+  });
+
+  test("deleteJob removes a job from storage", async () => {
+    const id = await createJob("camp");
+    expect(await getJob(id)).toBeDefined();
+    await deleteJob(id);
+    expect(await getJob(id)).toBeUndefined();
+  });
+
+  test("handle minted survives across separate processes", async () => {
     const id = await createJob("survives");
-    const job = await store.getJob(id);
-    expect(job).toEqual({ status: "running", done: 0, total: 0, log: null });
+    const result = spawnSync(
+      "yarn",
+      [
+        "tsx",
+        "--input-type=module",
+        "-e",
+        `import { getJob } from "./apps/api/server/lib/jobs.js";
+const job = await getJob(process.argv[1]);
+if (!job) process.exit(1);
+console.log(JSON.stringify(job));`,
+        id,
+      ],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, OUTPUT_DIR: process.env.OUTPUT_DIR },
+        encoding: "utf8",
+      },
+    );
+    expect(result.status).toBe(0);
+    const parsed = JSON.parse(result.stdout.trim());
+    expect(parsed).toEqual({ status: "running", done: 0, total: 0, log: null });
   });
 });

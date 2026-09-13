@@ -255,6 +255,46 @@ describe("FsJobStore", () => {
     expect(await store.getJob(id)).toMatchObject({ status: "failed", error: "second" });
   });
 
+  test("expireLater catches deleteJob rejection without unhandled rejection", async () => {
+    vi.useFakeTimers();
+    const id = await store.createJob("camp");
+    vi.spyOn(store, "deleteJob").mockRejectedValueOnce(new Error("unlink error"));
+    await store.failJob(id, "err");
+    vi.advanceTimersByTime(JOB_TTL_MS);
+    vi.useRealTimers();
+  });
+
+  test("acquireJob conditionally creates a new job or returns running incumbent", async () => {
+    const first = await store.acquireJob("camp");
+    expect(first.acquired).toBe(true);
+    if (first.acquired) {
+      expect(first.jobId).toBeDefined();
+      const second = await store.acquireJob("camp");
+      expect(second).toEqual({ acquired: false, runningJobId: first.jobId });
+      // createJob returns the running id if job is already running
+      const third = await store.createJob("camp");
+      expect(third).toBe(first.jobId);
+    }
+  });
+
+  test("evictToFit loops while capacity exceeds MAX_JOBS", async () => {
+    // Manually create MAX_JOBS + 2 files
+    for (let i = 0; i < MAX_JOBS + 2; i++) {
+      const entry: StoredJob = {
+        id: `overflow-${i}`,
+        campaignId: `c-${i}`,
+        job: { status: i < 3 ? "completed" : "running", done: 0, total: 0, log: null },
+        createdAt: Date.now() + i,
+        seq: i,
+      };
+      writeFileSync(store.jobPath(`overflow-${i}`), JSON.stringify(entry));
+    }
+    const newId = await store.createJob("brand-new");
+    expect(newId).toBeDefined();
+    const remaining = await store.listJobs();
+    expect(remaining.length).toBeLessThanOrEqual(MAX_JOBS);
+  });
+
   test("completeJob and failJob do nothing if job does not exist", async () => {
     await expect(store.completeJob("missing", payload())).resolves.toBeUndefined();
     await expect(store.failJob("missing", "err")).resolves.toBeUndefined();

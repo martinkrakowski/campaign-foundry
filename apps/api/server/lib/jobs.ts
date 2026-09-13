@@ -4,8 +4,18 @@ import type { Job, JobResult, JobStatus, StoredJob } from "./ports/job-store.por
 export type { JobStatus, JobResult, Job, StoredJob };
 export { MAX_JOBS, JOB_TTL_MS } from "./ports/fs-job-store.js";
 
+export async function acquireJob(
+  campaignId: string,
+): Promise<{ acquired: true; jobId: string } | { acquired: false; runningJobId: string }> {
+  return getJobStore().acquireJob(campaignId);
+}
+
 export async function createJob(campaignId: string): Promise<string> {
   return getJobStore().createJob(campaignId);
+}
+
+export async function deleteJob(id: string): Promise<void> {
+  return getJobStore().deleteJob(id);
 }
 
 export async function getJob(id: string): Promise<Job | undefined> {
@@ -43,7 +53,11 @@ export function runJob(id: string, work: () => Promise<void>): void {
     try {
       await work();
     } catch (reason) {
-      await failJob(id, reason instanceof Error ? reason.message : "Job failed");
+      try {
+        await failJob(id, reason instanceof Error ? reason.message : "Job failed");
+      } catch {
+        await deleteJob(id).catch(() => undefined);
+      }
     }
   })();
 }

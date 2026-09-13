@@ -63,23 +63,21 @@ export class FsJobStore implements JobStorePort {
   }
 
   private async evictToFit(): Promise<void> {
-    const jobs = await this.listJobs();
-    if (jobs.length < MAX_JOBS) return;
-    // Evict oldest settled job first, else oldest runner.
-    for (const entry of jobs) {
-      if (entry.job.status !== "running") {
-        await this.deleteJob(entry.id);
-        return;
-      }
+    const jobs = (await this.listJobs()).slice();
+    while (jobs.length >= MAX_JOBS) {
+      // Evict oldest settled job first, else oldest runner.
+      const settledIndex = jobs.findIndex((entry) => entry.job.status !== "running");
+      const evictIndex = settledIndex !== -1 ? settledIndex : 0;
+      const [evicted] = jobs.splice(evictIndex, 1);
+      await this.deleteJob(evicted!.id);
     }
-    await this.deleteJob(jobs[0]!.id);
   }
 
   private expireLater(id: string): void {
     const existing = this.timers.get(id);
     if (existing) clearTimeout(existing);
     const timer = setTimeout(() => {
-      void this.deleteJob(id);
+      void this.deleteJob(id).catch(() => undefined);
     }, JOB_TTL_MS);
     timer.unref();
     this.timers.set(id, timer);
@@ -136,20 +134,34 @@ export class FsJobStore implements JobStorePort {
     return entry?.job;
   }
 
-  async createJob(campaignId: string, customId?: string): Promise<string> {
+  async acquireJob(
+    campaignId: string,
+    customId?: string,
+  ): Promise<{ acquired: true; jobId: string } | { acquired: false; runningJobId: string }> {
     return this.withJobLock(campaignId, async () => {
-      await this.evictToFit();
-      const id = customId ?? crypto.randomUUID();
-      const entry: StoredJob = {
-        id,
-        campaignId,
-        job: { status: "running", done: 0, total: 0, log: null },
-        createdAt: Date.now(),
-        seq: ++globalJobSeq,
-      };
-      await this.writeJobEntry(entry);
-      return id;
+      const runningId = await this.getRunningJobId(campaignId);
+      if (runningId !== undefined) {
+        return { acquired: false, runningJobId: runningId };
+      }
+      return this.withJobLock("__capacity__", async () => {
+        await this.evictToFit();
+        const id = customId ?? crypto.randomUUID();
+        const entry: StoredJob = {
+          id,
+          campaignId,
+          job: { status: "running", done: 0, total: 0, log: null },
+          createdAt: Date.now(),
+          seq: ++globalJobSeq,
+        };
+        await this.writeJobEntry(entry);
+        return { acquired: true, jobId: id };
+      });
     });
+  }
+
+  async createJob(campaignId: string, customId?: string): Promise<string> {
+    const claim = await this.acquireJob(campaignId, customId);
+    return claim.acquired ? claim.jobId : claim.runningJobId;
   }
 
   async getRunningJobId(campaignId: string): Promise<string | undefined> {

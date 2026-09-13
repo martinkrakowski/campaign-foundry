@@ -13,7 +13,7 @@
         "run",
         "--project",
         "api",
-        "apps/api/server/lib/ports/__tests__/fs-job-store.test.ts"
+        "apps/api/server/lib/__tests__/jobs.test.ts"
       ],
       "verdict": "caught"
     },
@@ -34,9 +34,54 @@
     },
     {
       "file": "apps/api/server/lib/ports/fs-job-store.ts",
-      "before": "if (entry.job.status !== \"running\") {",
-      "after": "if (false) {",
+      "before": "const settledIndex = jobs.findIndex((entry) => entry.job.status !== \"running\");",
+      "after": "const settledIndex = -1;",
       "because": "Eviction must drop settled jobs before running ones; disabling the settled check causes running jobs to be prematurely evicted.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-job-store.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/generate.post.ts",
+      "before": "if (!claim.acquired) {",
+      "after": "if (false) {",
+      "because": "Acquiring a job must refuse concurrent runs for the same campaign with 409; bypassing this check allows duplicate runs to be started.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/routes.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/jobs.ts",
+      "before": "await deleteJob(id).catch(() => undefined);",
+      "after": "/* do not cleanup dangling job */",
+      "because": "When recording a job failure fails due to a storage error, the dangling job must be deleted so the campaign is not blocked forever.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/jobs.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-job-store.ts",
+      "before": "while (jobs.length >= MAX_JOBS) {",
+      "after": "while (false) {",
+      "because": "createJob must evict jobs in a loop while stored count meets or exceeds MAX_JOBS to prevent retention from exceeding its cap.",
       "command": [
         "yarn",
         "vitest",
