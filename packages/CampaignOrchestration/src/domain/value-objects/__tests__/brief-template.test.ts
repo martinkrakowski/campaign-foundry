@@ -448,5 +448,10 @@ describe("isBriefTemplate layer elements (HL1)", () => {
     expect(withElements([{ kind: "text", text: "x", frame: { ...frame, x: 2 } }])).toBe(false);
     expect(withElements([{ kind: "image", text: "x", frame }])).toBe(false);
   });
+
+  test("refuses a text or button element with no copy", () => {
+    expect(withElements([{ kind: "text", frame }])).toBe(false);
+    expect(withElements([{ kind: "button", frame }])).toBe(false);
+  });
 });
 

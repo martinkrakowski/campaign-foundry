@@ -124,6 +124,16 @@ describe("layerElementsProblem (HL1)", () => {
     }
   });
 
+  test("refuses a text or button element that carries no copy — it would render nothing", () => {
+    for (const kind of ["text", "button"] as const) {
+      expect(layerElementsProblem("html", [{ kind, frame }])).toEqual({
+        path: "[0].text",
+        must: "be present",
+        value: undefined,
+      });
+    }
+  });
+
   test("refuses a frame that is not an object", () => {
     for (const value of [undefined, null, "frame", 5, []]) {
       expect(

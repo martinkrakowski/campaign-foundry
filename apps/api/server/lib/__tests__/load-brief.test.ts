@@ -753,6 +753,19 @@ describe("parseBrief", () => {
       );
     });
 
+    test("a text or button element with no copy is refused, naming the absent field", () => {
+      for (const kind of ["text", "button"]) {
+        expect(() =>
+          parseBrief({
+            ...valid,
+            template: withElements("html", [{ kind, frame }]),
+          }),
+        ).toThrow(
+          'Campaign brief field "template.layers[1].elements[0].text" must be present; got undefined.',
+        );
+      }
+    });
+
     test("the refusal holds with enforceCapabilities: false (authoring mode too)", () => {
       expect(() =>
         parseBrief(

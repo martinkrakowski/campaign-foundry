@@ -45,8 +45,11 @@ export interface Frame {
 
 /**
  * One element inside an `html` layer. `text` is the copy the `text` and
- * `button` kinds carry and the `image` kind must not; every element positions
- * itself with a `frame`.
+ * `button` kinds carry and cannot render without, and the `image` kind must
+ * not; every element positions itself with a `frame`. The interface keeps
+ * `text` optional because an untrusted value reaches the domain as `unknown`
+ * and only `layerElementsProblem` may admit it — but the validator requires it
+ * on the kinds whose field table marks it required.
  */
 export interface HtmlElement {
   readonly kind: HtmlElementKind;
@@ -65,14 +68,29 @@ export interface LayerElementsProblem {
 }
 
 /**
- * The keys each element kind may carry, in declaration order. The `image` kind
- * names no `text`, so the field table — not a second branch — refuses copy on
- * an image, exactly as `LAYER_PROPS` refuses another kind's props.
+ * One kind's fields: the keys it may carry, in declaration order, and which of
+ * them it cannot mean anything without. `required` is a subset of `allowed`;
+ * keeping both in one table means the two can never disagree about a kind, the
+ * way a parallel `if` branch could.
  */
-const ELEMENT_FIELDS: Readonly<Record<HtmlElementKind, readonly string[]>> = {
-  text: ["kind", "text", "frame"],
-  button: ["kind", "text", "frame"],
-  image: ["kind", "frame"],
+interface ElementFieldSpec {
+  /** The keys the kind may carry, in declaration order. */
+  readonly allowed: readonly string[];
+  /** The keys every element of the kind must carry; absent means the element renders nothing. */
+  readonly required: readonly string[];
+}
+
+/**
+ * The fields each element kind carries. The `image` kind names no `text`, so
+ * the field table — not a second branch — refuses copy on an image, exactly as
+ * `LAYER_PROPS` refuses another kind's props; and the `text` and `button` kinds
+ * mark `text` required, so the same table refuses an element that would render
+ * nothing rather than letting one reach HL2.
+ */
+const ELEMENT_FIELDS: Readonly<Record<HtmlElementKind, ElementFieldSpec>> = {
+  text: { allowed: ["kind", "text", "frame"], required: ["text"] },
+  button: { allowed: ["kind", "text", "frame"], required: ["text"] },
+  image: { allowed: ["kind", "frame"], required: [] },
 };
 
 /** A frame's fields (D130), in declaration order. */
@@ -112,8 +130,9 @@ export function layerElementsProblem(
 
 /**
  * One element's contract: a non-null, non-array object naming a vocabulary
- * `kind`, carrying only that kind's fields, and a well-formed `frame`. `text`,
- * when present, is a string; the `image` kind may not carry it at all.
+ * `kind`, carrying only that kind's fields, carrying every field the kind marks
+ * required, and a well-formed `frame`. `text`, when present, is a string; the
+ * `image` kind may not carry it at all.
  */
 function elementProblem(element: unknown): LayerElementsProblem | undefined {
   if (typeof element !== "object" || element === null || Array.isArray(element)) {
@@ -128,7 +147,7 @@ function elementProblem(element: unknown): LayerElementsProblem | undefined {
       value: kind,
     };
   }
-  const allowed = ELEMENT_FIELDS[kind as HtmlElementKind];
+  const { allowed, required } = ELEMENT_FIELDS[kind as HtmlElementKind];
   for (const [field, value] of Object.entries(record)) {
     if (!allowed.includes(field)) {
       return {
@@ -136,6 +155,11 @@ function elementProblem(element: unknown): LayerElementsProblem | undefined {
         must: `be one of ${allowed.map((key) => `"${key}"`).join(", ")} for element kind "${kind}"`,
         value,
       };
+    }
+  }
+  for (const field of required) {
+    if (record[field] === undefined) {
+      return { path: `.${field}`, must: "be present", value: record[field] };
     }
   }
   if (record.text !== undefined && typeof record.text !== "string") {

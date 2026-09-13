@@ -34,9 +34,39 @@
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/html-element.ts",
-      "before": "  image: [\"kind\", \"frame\"],",
-      "after": "  image: [\"kind\", \"text\", \"frame\"],",
-      "because": "The per-kind field table is the mechanism that refuses copy on an image, not a comment beside it. Add text to image's row and an element the compositor cannot draw rides the guard in.",
+      "before": "  image: { allowed: [\"kind\", \"frame\"], required: [] },",
+      "after": "  image: { allowed: [\"kind\", \"text\", \"frame\"], required: [] },",
+      "because": "The per-kind field table is the mechanism that refuses copy on an image, not a comment beside it. Add text to image's allowed row and an element the compositor cannot draw rides the guard in.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/html-element.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/html-element.ts",
+      "before": "  text: { allowed: [\"kind\", \"text\", \"frame\"], required: [\"text\"] },",
+      "after": "  text: { allowed: [\"kind\", \"text\", \"frame\"], required: [] },",
+      "because": "The field table is what makes copy required for the kinds that cannot render without it, not a branch beside it. Empty the text row's required list and a text element with no copy passes the boundary and reaches HL2 as an element that draws nothing.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/html-element.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/html-element.ts",
+      "before": "  button: { allowed: [\"kind\", \"text\", \"frame\"], required: [\"text\"] },",
+      "after": "  button: { allowed: [\"kind\", \"text\", \"frame\"], required: [] },",
+      "because": "button is the second kind that cannot mean anything without its label, and it gets the requirement from the same table. Empty the button row's required list and a blank button passes both boundaries.",
       "command": [
         "yarn",
         "vitest",
