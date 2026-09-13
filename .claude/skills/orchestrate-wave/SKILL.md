@@ -301,6 +301,13 @@ locked decision; or a seat runs out of credit.
 
 ## House rules that bite here
 
+- **Before `git reset --hard`, save the diff.** `git diff > /tmp/<name>.patch` (and
+  `git diff --cached` if anything is staged) first. A hard reset silently destroys uncommitted work,
+  and the moment it costs most is the one where you are resetting *because* something went wrong —
+  which is exactly when the work you are discarding was the fix. It cost a hardened script here that
+  had to be written twice. **Commit before you test, not after**, for the same reason.
+
+
 - **A mutation you did not confirm applied is not a mutation.** Before believing a green run means
   "this test is weak", check the edit landed — `grep` for the mutated text, or diff the file. A
   `sed`/`perl` substitution that silently misses produces a passing suite that is indistinguishable
