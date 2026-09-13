@@ -50,13 +50,14 @@ export class FsPoolStore implements PoolStorePort {
   }
 
   async readPool(briefId: string): Promise<StoredPool | undefined> {
-    let raw: string;
+    let bytes: Buffer;
     try {
-      raw = await readFile(this.poolPath(briefId), "utf8");
+      bytes = await readFile(this.poolPath(briefId));
     } catch (error) {
       if (isErrno(error, "ENOENT")) return undefined;
       throw error;
     }
+    const raw = bytes.toString("utf8");
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
@@ -72,7 +73,11 @@ export class FsPoolStore implements PoolStorePort {
         `briefId "${pool.briefId}" does not match storage key "${briefId}"`,
       );
     }
-    return { pool, revision: hashBytes(Buffer.from(raw, "utf8")) };
+    // The digest of the bytes as they are stored, which is what `writePool`'s
+    // guard hashes: re-encoding the decoded text would be the same bytes for any
+    // valid UTF-8 file, and a different digest for one that is not — a revision
+    // that could never match what the guard reads.
+    return { pool, revision: hashBytes(bytes) };
   }
 
   /**
@@ -89,7 +94,7 @@ export class FsPoolStore implements PoolStorePort {
     if (options?.expectedRevision !== undefined) {
       const current = await this.revisionAt(dest);
       if (current !== options.expectedRevision) {
-        const conflictErr = new Error("Copy pool was modified by another user.");
+        const conflictErr = new Error("Headline pool was modified by another user.");
         (conflictErr as { code?: string }).code = "ECONFLICT";
         (conflictErr as { revision?: string }).revision = current;
         throw conflictErr;

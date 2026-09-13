@@ -123,6 +123,21 @@
         "apps/api/server/routes/campaigns/pools/__tests__/pools.test.ts"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-pool-store.ts",
+      "before": "    return { pool, revision: hashBytes(bytes) };",
+      "after": "    return { pool, revision: hashBytes(Buffer.from(raw, \"utf8\")) };",
+      "because": "readPool's revision goes back to being the digest of a re-encoding of the decoded text instead of the stored bytes. For a file whose bytes are not valid UTF-8 \u2014 the only file where the round-trip is not the identity \u2014 it then disagrees with the digest writePool's guard computes, and a hand-edited pool is reported as a conflict no write can clear.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-pool-store.test.ts"
+      ],
+      "verdict": "caught"
     }
   ]
 }

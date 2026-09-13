@@ -46,6 +46,19 @@ describe("FsPoolStore", () => {
     expect(raw).not.toContain("revision");
   });
 
+  test("readPool's revision is the digest of the stored bytes, not of a re-encoding of them", async () => {
+    mkdirSync(join(dir, "camp"), { recursive: true });
+    // A pool whose stored bytes are not valid UTF-8: decoded, the two bad bytes
+    // are U+FFFD, and re-encoding that is a different byte sequence than the one
+    // on disk. The revision must still be the digest of what is stored, because
+    // that is what `writePool`'s guard hashes — anything else is a conflict no
+    // write can clear.
+    const raw = JSON.stringify(pool({ entries: [{ id: "h1", text: "BAD", status: "approved" }] }));
+    const stored = Buffer.from(raw.replace("BAD", "\xff\xfe"), "latin1");
+    writeFileSync(join(dir, "camp", "pools.json"), stored);
+    expect((await store.readPool("camp"))?.revision).toBe(createHash("sha256").update(stored).digest("hex"));
+  });
+
   test("readPool returns undefined when the file is missing", async () => {
     expect(await store.readPool("camp")).toBeUndefined();
   });
