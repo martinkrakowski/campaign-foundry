@@ -153,13 +153,7 @@ now live in `html-element.ts`; both layer shapes declare `elements`, and the sha
 `layerElementsProblem` validates them at the domain guard (`isBriefTemplate`) and the API boundary
 (`validateTemplate`). No rendering — that is HL3 onward.
 
-```premise HL2
-# HL-D3's gap is "no click destination anywhere in this codebase". The thing
-# that decides is a field for it under any sane identifier; today none
-# exists — only prose ("the blocked click through the guard") and build
-# caches, so the probe runs over source files and identifier shapes.
-! grep -rqiE "clicktag|clickurl|clickdestination|clickthrough|landingurl|landingpage|destinationurl" packages apps tools --include='*.ts' --include='*.tsx'
-```
+**HL2 — shipped.** The click destination (`clickDestination`) is a first-class field on `CampaignBrief`, validated as an absolute URL (`clickDestinationProblem`) at the boundary (`load-brief.ts`), with the `clickTag` emission rule stated for HL4 in `click-destination.ts`.
 
 ```premise HL3
 # Two sites decide HL3 and it changes both: the X6 boundary guard (#331)

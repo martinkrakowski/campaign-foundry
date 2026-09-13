@@ -113,4 +113,10 @@ export interface CampaignBrief {
     readonly platforms?: readonly string[];
     readonly sizes?: readonly DisplaySize[];
   };
+  /**
+   * The brief's click destination URL (HL2, HL-D3).
+   * Validated as an absolute URL at the boundary.
+   * Emitted as a standard `clickTag` variable in HTML units (HL4), never as an `href`.
+   */
+  readonly clickDestination?: string;
 }

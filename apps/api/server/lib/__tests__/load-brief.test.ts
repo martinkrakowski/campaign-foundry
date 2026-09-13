@@ -779,6 +779,79 @@ describe("parseBrief", () => {
     });
   });
 
+  describe("click destination (HL2, HL-D3)", () => {
+    test("a brief with a valid absolute http/https destination parses and carries it verbatim", () => {
+      const parsed = parseBrief({
+        ...valid,
+        clickDestination: "https://example.com/landing?utm_source=ad",
+      });
+      expect(parsed.clickDestination).toBe(
+        "https://example.com/landing?utm_source=ad",
+      );
+
+      const httpParsed = parseBrief({
+        ...valid,
+        clickDestination: "http://example.com",
+      });
+      expect(httpParsed.clickDestination).toBe("http://example.com");
+    });
+
+    test("a brief with absent clickDestination parses without error", () => {
+      const parsed = parseBrief({
+        ...valid,
+        clickDestination: undefined,
+      });
+      expect(parsed.clickDestination).toBeUndefined();
+    });
+
+    test("a non-string clickDestination is refused, naming the field", () => {
+      for (const value of [null, 123, true, {}, ["https://example.com"]]) {
+        expect(() =>
+          parseBrief({
+            ...valid,
+            clickDestination: value,
+          }),
+        ).toThrow(
+          `Campaign brief field "clickDestination" must be an absolute URL; got ${JSON.stringify(value)}.`,
+        );
+      }
+    });
+
+    test("an invalid or relative URL is refused, naming the field", () => {
+      for (const value of [
+        "",
+        "not-a-url",
+        "/landing",
+        "example.com",
+        "javascript:alert(1)",
+        "ftp://example.com",
+      ]) {
+        expect(() =>
+          parseBrief({
+            ...valid,
+            clickDestination: value,
+          }),
+        ).toThrow(
+          `Campaign brief field "clickDestination" must be an absolute URL; got ${JSON.stringify(value)}.`,
+        );
+      }
+    });
+
+    test("the refusal holds with enforceCapabilities: false (authoring mode too)", () => {
+      expect(() =>
+        parseBrief(
+          {
+            ...valid,
+            clickDestination: "bad-url",
+          },
+          { enforceCapabilities: false },
+        ),
+      ).toThrow(
+        'Campaign brief field "clickDestination" must be an absolute URL; got "bad-url".',
+      );
+    });
+  });
+
   describe("layer enabled (D129, MP-D4, MP-D5)", () => {
     const base = templateFromCanonical("social-post");
 

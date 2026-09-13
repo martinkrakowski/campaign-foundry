@@ -23,6 +23,7 @@ import {
   TONE_VALUES,
   isPaletteShift,
   isSupportedBriefSchemaVersion,
+  clickDestinationProblem,
   layerElementsProblem,
   layerEnabledProblem,
   layerPropsProblem,
@@ -941,6 +942,20 @@ function validateStyle(value: unknown): void {
 }
 
 /**
+ * The brief-level `clickDestination` (HL2, HL-D3): optional, validated as an
+ * absolute URL at the boundary. The domain's `clickDestinationProblem` decides,
+ * shared with the use case so the API and domain cannot drift.
+ */
+function validateClickDestination(value: unknown): void {
+  const problem = clickDestinationProblem(value);
+  if (problem !== undefined) {
+    throw new Error(
+      `Campaign brief field "${problem.field}" must ${problem.must}; got ${JSON.stringify(problem.value)}.`,
+    );
+  }
+}
+
+/**
  * Structurally validate an untrusted value into a CampaignBrief. Business rules
  * live in the use case. `capabilities` gates the motion allowlist (D8); it defaults
  * to the boot probe's snapshot and is injectable so tests can flip it.
@@ -1036,6 +1051,7 @@ export function parseBrief(
   }
   validateTreatments(record.treatments);
   validateStyle(record.style);
+  validateClickDestination(record.clickDestination);
   validateMode(record.mode);
   validateType(record.type);
   const template = validateTemplate(

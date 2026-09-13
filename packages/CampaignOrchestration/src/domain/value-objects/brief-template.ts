@@ -28,6 +28,11 @@ import { layerElementsProblem, type HtmlElement } from "./html-element.js";
 import { LAYER_KINDS, type LayerKind } from "./layer-kinds.js";
 import { ANCHOR_VALUES, type AnchorKind } from "./variation-defaults.js";
 
+export {
+  clickDestinationProblem,
+  type ClickDestinationProblem,
+} from "./click-destination.js";
+
 /**
  * The per-layer props (D134): overrides of the geometry each layer already
  * reads — nothing invented. Numbers are fractions of the canvas in the same

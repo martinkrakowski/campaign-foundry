@@ -24,6 +24,7 @@ export const BRIEF_KEY_ORDER = [
   "type",
   "variation",
   "output",
+  "clickDestination",
 ] as const;
 
 /** A template layer's canonical key order (L3b, D134, D129, HL1): identity, kind, enabled, then its props and elements. */
