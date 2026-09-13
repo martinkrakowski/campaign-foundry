@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "lane": "HL3",
+  "mutations": [
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "  logo: drawLogo,\n  html: drawHtml,\n};",
+      "after": "  logo: drawLogo,\n};",
+      "because": "The LAYER_DRAWERS dispatch table must register the html layer drawer so that templates with an html layer can render their backup image on the canvas rather than throwing.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.layer-order.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "      `NodeCanvasCompositor: layer kind \"${kind}\" has no drawer in this compositor — it draws image, video, shade, accent, static-text, animated-text, logo and html only`,",
+      "after": "      `NodeCanvasCompositor: layer kind \"${kind}\" has no drawer in this compositor — it draws image, video, shade, accent, static-text, animated-text and logo only`,",
+      "because": "The error message in drawLayer must list html among the supported layer kinds when an unknown kind is encountered, keeping diagnostic messages accurate for unsupported layers.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.layer-order.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "    if (anchor === undefined) {\n      if (!prepared.layers.some((layer) => layer.kind === \"html\")) {\n        throw new Error(\n          \"NodeCanvasCompositor: the logo layer snaps to the text block, but there is no text layer in the template at all\",\n        );\n      }\n    }",
+      "after": "    if (anchor === undefined) {\n      throw new Error(\n        \"NodeCanvasCompositor: the logo layer snaps to the text block, but there is no text layer in the template at all\",\n      );\n    }",
+      "because": "drawLogo must allow rendering when anchor is undefined if the template has an html layer, allowing canonical image-html templates with a logo to render without requiring a static-text layer.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.layer-order.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts",
+      "before": "    const copyCompat = this.validateCopyTemplateCompatibility(brief);\n    if (!copyCompat.success) return copyCompat;\n\n    return ok(true);",
+      "after": "    const copyCompat = this.validateCopyTemplateCompatibility(brief);\n    if (!copyCompat.success) return copyCompat;\n\n    if (brief.template.creativeType === \"image-html\") {\n      return err(\n        new Error(\n          'Campaign brief template creative type \"image-html\" is not supported: HTML ad delivery is deferred until HL4/HL5 (#331)',\n        ),\n      );\n    }\n\n    return ok(true);",
+      "because": "GenerateCampaignUseCase must not reject image-html creative types at the boundary guard now that the compositor has an HTML layer drawer to produce backup renditions.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/GenerateCampaignUseCase.use-case.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "      case \"button\": {\n        const radius = Math.min(8, boxH / 2, boxW / 2);\n        ctx.save();\n        ctx.fillStyle = prepared.brandColor;\n        ctx.beginPath();\n        ctx.roundRect(boxX, boxY, boxW, boxH, radius);\n        ctx.fill();\n\n        ctx.fillStyle = \"#ffffff\";\n        ctx.textAlign = \"center\";\n        ctx.textBaseline = \"middle\";\n        const fontSize = Math.min(\n          Math.round(boxH * 0.45),\n          Math.round(scaleBasis(prepared.canvas, width, height) * 0.6),\n        );\n        ctx.font = `${prepared.fontWeight} ${fontSize}px ${prepared.fontFamily}, sans-serif`;\n        ctx.fillText(element.text!, boxX + boxW / 2, boxY + boxH / 2);\n        ctx.restore();\n        break;\n      }",
+      "after": "      case \"button\": {\n        break;\n      }",
+      "because": "The drawHtml drawer must handle button elements by rendering the rounded button background with brandColor and drawing the button text label onto the canvas.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.layer-order.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "      case \"image\": {\n        ctx.save();\n        ctx.drawImage(prepared.background, boxX, boxY, boxW, boxH);\n        ctx.restore();\n        break;\n      }",
+      "after": "      case \"image\": {\n        break;\n      }",
+      "because": "The drawHtml drawer must render image elements using the prepared background asset into the element's bounding box frame.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.layer-order.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -8,6 +8,7 @@ import {
   type CreativeType,
   type CopyTimeline,
   type LayerKind,
+  type HtmlElement,
 } from "@campaignfoundry/CampaignOrchestration";
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
@@ -51,6 +52,7 @@ const DRAWABLE_KINDS = [
   "static-text",
   "animated-text",
   "logo",
+  "html",
 ] as const;
 
 /**
@@ -141,11 +143,11 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     const prepared = await NodeCanvasCompositor.prepare(request({ template }));
     const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
     expect(() => NodeCanvasCompositor.draw(ctx, prepared, 1)).toThrow(
-      /layer kind "fill" has no drawer/,
+      /layer kind "fill" has no drawer in this compositor — it draws image, video, shade, accent, static-text, animated-text, logo and html only/,
     );
   });
 
-  test("a layer kind this compositor cannot draw throws the named error (html)", async () => {
+  test("a canonical-image-html template renders without throwing on the still path and records order (HL3)", async () => {
     const template: BriefTemplate = {
       id: "canonical-image-html",
       version: 1,
@@ -157,11 +159,13 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
         { id: "logo", kind: "logo" },
       ],
     };
-    const prepared = await NodeCanvasCompositor.prepare(request({ template }));
+    const req = request({ template });
+    const prepared = await NodeCanvasCompositor.prepare(req);
     const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
-    expect(() => NodeCanvasCompositor.draw(ctx, prepared, 1)).toThrow(
-      /layer kind "html" has no drawer/,
-    );
+    expect(() => NodeCanvasCompositor.draw(ctx, prepared, 1)).not.toThrow();
+
+    const order = await drawWithRecorder(req);
+    expect(order).toEqual(["image", "html", "logo"]);
   });
 
   test("the logo layer snaps to the text block — a logo with no text layer in the template throws, never guesses", async () => {
@@ -235,8 +239,36 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
   test("the timeline path throws on a ground kind it cannot draw, the same way the still path does (html)", async () => {
     // The GROUND_KINDS asymmetry C1 flagged forward: `drawTimeline` used to
     // skip every kind but the canonical trio, silently. When a template's
-    // order reaches this loop, an undrawable ground kind (e.g. html, fill)
+    // order reaches this loop, an undrawable ground kind (e.g. fill)
     // throws rather than silently skipping.
+    const template: BriefTemplate = {
+      id: "canonical-image-text",
+      version: 1,
+      creativeType: "image-text",
+      unit: "standard-web",
+      layers: [
+        { id: "image", kind: "image" },
+        { id: "wash", kind: "fill" },
+        { id: "logo", kind: "logo" },
+      ],
+    };
+    const req: TemplateRequest & { durationSec: number; timeline: CopyTimeline } = {
+      ...request({ template }),
+      durationSec: 8,
+      timeline: {
+        beats: [{ text: "Stay wild, stay hydrated", weight: 1 }],
+        transition: "cut",
+        keyBeat: 1,
+      },
+    };
+    const prepared = await NodeCanvasCompositor.prepare(req);
+    const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
+    expect(() => NodeCanvasCompositor.draw(ctx, prepared, 0.5, undefined, 0.5)).toThrow(
+      /layer kind "fill" has no drawer/,
+    );
+  });
+
+  test("the timeline path renders a canonical-image-html template without throwing (HL3)", async () => {
     const template: BriefTemplate = {
       id: "canonical-image-html",
       version: 1,
@@ -259,9 +291,7 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     };
     const prepared = await NodeCanvasCompositor.prepare(req);
     const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
-    expect(() => NodeCanvasCompositor.draw(ctx, prepared, 0.5, undefined, 0.5)).toThrow(
-      /layer kind "html" has no drawer/,
-    );
+    expect(() => NodeCanvasCompositor.draw(ctx, prepared, 0.5, undefined, 0.5)).not.toThrow();
   });
 
   test("a canonical-video template renders without throwing on the still path and in motion frames (VD)", async () => {
@@ -566,5 +596,117 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
     // copy again — doubling the fillText calls. With it, the count matches
     // the one-entry baseline exactly.
     expect(await draw(twiceTemplate)).toBe(onePassCallCount);
+  });
+
+  describe("html layer drawer (HL3, HL-D5)", () => {
+    test("drawHtml is a no-op when htmlLayer is absent, elements is undefined, or elements is empty", async () => {
+      const prepNoHtml = await NodeCanvasCompositor.prepare(request({ template: templateFromCanonical("social-post") }));
+      const ctx = createCanvas(prepNoHtml.width, prepNoHtml.height).getContext("2d");
+      const cNoHtml = { ctx, prepared: prepNoHtml, motion: undefined, eased: 1, effectT: 1 };
+      const drawer = (NodeCanvasCompositor as unknown as { layerDrawers: Record<string, (c: unknown) => void> }).layerDrawers.html;
+      expect(() => drawer(cNoHtml)).not.toThrow();
+
+      const templateAbsentElements: BriefTemplate = {
+        id: "canonical-image-html",
+        version: 1,
+        creativeType: "image-html",
+        unit: "standard-web",
+        layers: [{ id: "html", kind: "html" }],
+      };
+      const prepAbsent = await NodeCanvasCompositor.prepare(request({ template: templateAbsentElements }));
+      const cAbsent = { ctx, prepared: prepAbsent, motion: undefined, eased: 1, effectT: 1 };
+      expect(() => drawer(cAbsent)).not.toThrow();
+
+      const templateEmptyElements: BriefTemplate = {
+        id: "canonical-image-html",
+        version: 1,
+        creativeType: "image-html",
+        unit: "standard-web",
+        layers: [{ id: "html", kind: "html", elements: [] }],
+      };
+      const prepEmpty = await NodeCanvasCompositor.prepare(request({ template: templateEmptyElements }));
+      const cEmpty = { ctx, prepared: prepEmpty, motion: undefined, eased: 1, effectT: 1 };
+      expect(() => drawer(cEmpty)).not.toThrow();
+    });
+
+    test("draws button, text, and image elements with various anchors and alignments", async () => {
+      const elements: readonly HtmlElement[] = [
+        {
+          kind: "button",
+          text: "Shop Now",
+          frame: { x: 0.1, y: 0.7, w: 0.3, h: 0.1, anchor: "middle" },
+        },
+        {
+          kind: "text",
+          text: "Top Left Headline",
+          frame: { x: 0.05, y: 0.05, w: 0.9, h: 0.2, anchor: "top" },
+        },
+        {
+          kind: "image",
+          frame: { x: 0.2, y: 0.2, w: 0.6, h: 0.4, anchor: "middle" },
+        },
+      ];
+
+      const template: BriefTemplate = {
+        id: "canonical-image-html",
+        version: 1,
+        creativeType: "image-html",
+        unit: "standard-web",
+        layers: [
+          { id: "image", kind: "image" },
+          { id: "html", kind: "html", elements },
+        ],
+      };
+
+      // Left align
+      const prepLeft = await NodeCanvasCompositor.prepare(
+        request({ template, style: { align: "left" } }),
+      );
+      const ctxLeft = createCanvas(prepLeft.width, prepLeft.height).getContext("2d");
+      const fillTextSpy = vi.spyOn(ctxLeft, "fillText");
+      const roundRectSpy = vi.spyOn(ctxLeft, "roundRect");
+      const drawImageSpy = vi.spyOn(ctxLeft, "drawImage");
+
+      NodeCanvasCompositor.draw(ctxLeft, prepLeft, 1);
+
+      expect(roundRectSpy).toHaveBeenCalled();
+      expect(fillTextSpy).toHaveBeenCalledWith("Shop Now", expect.any(Number), expect.any(Number));
+      expect(fillTextSpy).toHaveBeenCalledWith("Top Left Headline", expect.any(Number), expect.any(Number));
+      expect(drawImageSpy).toHaveBeenCalledTimes(2);
+
+      // Middle anchor text & center align
+      const elementsCenter: readonly HtmlElement[] = [
+        {
+          kind: "text",
+          text: "Centered Headline",
+          frame: { x: 0.1, y: 0.3, w: 0.8, h: 0.3, anchor: "middle" },
+        },
+      ];
+      const prepCenter = await NodeCanvasCompositor.prepare(
+        request({
+          template: { ...template, layers: [{ id: "html", kind: "html", elements: elementsCenter }] },
+          style: { align: "center" },
+        }),
+      );
+      const ctxCenter = createCanvas(prepCenter.width, prepCenter.height).getContext("2d");
+      expect(() => NodeCanvasCompositor.draw(ctxCenter, prepCenter, 1)).not.toThrow();
+
+      // Bottom anchor text & right align
+      const elementsRight: readonly HtmlElement[] = [
+        {
+          kind: "text",
+          text: "Bottom Right Headline",
+          frame: { x: 0.1, y: 0.6, w: 0.8, h: 0.3, anchor: "bottom" },
+        },
+      ];
+      const prepRight = await NodeCanvasCompositor.prepare(
+        request({
+          template: { ...template, layers: [{ id: "html", kind: "html", elements: elementsRight }] },
+          style: { align: "right" },
+        }),
+      );
+      const ctxRight = createCanvas(prepRight.width, prepRight.height).getContext("2d");
+      expect(() => NodeCanvasCompositor.draw(ctxRight, prepRight, 1)).not.toThrow();
+    });
   });
 });

@@ -172,7 +172,7 @@ interface LayerDrawContext {
  * `video` maps to the same drawer as `image` (VD): video is the output frame
  * sequence rather than an input asset, and on any single frame the background
  * is a still image blit (with kenBurnsScale applied in motion).
- * Kinds this compositor cannot draw (`fill`, `html`) are absent, and
+ * Kinds this compositor cannot draw (`fill`) are absent, and
  * hitting one throws ({@link drawLayer}) instead of skipping.
  * `drawTimeline` (C5) uses this same table for every kind except
  * `static-text`/`animated-text` — whose sequenced beat-selection and
@@ -193,6 +193,7 @@ const LAYER_DRAWERS: Readonly<Partial<Record<LayerKind, LayerDrawer>>> = {
   "static-text": drawStaticText,
   "animated-text": drawStaticText,
   logo: drawLogo,
+  html: drawHtml,
 };
 
 /**
@@ -887,7 +888,7 @@ function resolveBeatLayouts(
  * not a fixed message (copy is chosen by `copyT` — the poster passes the key
  * beat's mid-time, D7 — and `headline-rise` advances per beat on the pose
  * clock `t`, each beat rising on its own local progress). A kind neither path
- * can draw (`html`, `fill`) throws the same "no drawer" error here as it does
+ * can draw (`fill`) throws the same "no drawer" error here as it does
  * on the legacy blit. `effectT` is a value no ground drawer reads
  * (`effectT ?? t` matches `draw()`'s clock shape).
  *
@@ -1111,6 +1112,98 @@ function drawStaticText(c: LayerDrawContext): void {
 }
 
 /**
+ * The html layer (HL3, HL-D5) — draws the element list (text, button, image)
+ * directly onto the canvas, producing the static raster fallback rendition
+ * (D122) before the markup assembler (HL4) is built. Absent or empty elements
+ * (e.g. the canonical template) is a no-op blit.
+ */
+function drawHtml(c: LayerDrawContext): void {
+  const { ctx, prepared } = c;
+  const htmlLayer = prepared.layers.find((layer) => layer.kind === "html");
+  if (htmlLayer === undefined || htmlLayer.elements === undefined || htmlLayer.elements.length === 0) {
+    return;
+  }
+  const { width, height } = prepared;
+  for (const element of htmlLayer.elements) {
+    const boxX = element.frame.x * width;
+    const boxY = element.frame.y * height;
+    const boxW = element.frame.w * width;
+    const boxH = element.frame.h * height;
+
+    switch (element.kind) {
+      case "button": {
+        const radius = Math.min(8, boxH / 2, boxW / 2);
+        ctx.save();
+        ctx.fillStyle = prepared.brandColor;
+        ctx.beginPath();
+        ctx.roundRect(boxX, boxY, boxW, boxH, radius);
+        ctx.fill();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        const fontSize = Math.min(
+          Math.round(boxH * 0.45),
+          Math.round(scaleBasis(prepared.canvas, width, height) * 0.6),
+        );
+        ctx.font = `${prepared.fontWeight} ${fontSize}px ${prepared.fontFamily}, sans-serif`;
+        ctx.fillText(element.text!, boxX + boxW / 2, boxY + boxH / 2);
+        ctx.restore();
+        break;
+      }
+      case "text": {
+        ctx.save();
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = prepared.style.align;
+        ctx.textBaseline = "alphabetic";
+        const fontSize = Math.min(
+          Math.max(12, Math.round(boxH * 0.7)),
+          Math.round(scaleBasis(prepared.canvas, width, height) * prepared.style.sizeScale),
+        );
+        ctx.font = `${prepared.fontWeight} ${fontSize}px ${prepared.fontFamily}, sans-serif`;
+        ctx.letterSpacing = `${prepared.style.letterSpacing * fontSize}px`;
+
+        const lines = wrapText(ctx, element.text!, boxW);
+        const lineHeight = fontSize * prepared.style.lineHeight;
+        const totalSpan = (lines.length - 1) * lineHeight;
+
+        let startY: number;
+        if (element.frame.anchor === "top") {
+          startY = boxY + fontSize;
+        } else if (element.frame.anchor === "middle") {
+          startY = boxY + (boxH - totalSpan) / 2 + fontSize * 0.35;
+        } else {
+          startY = boxY + boxH - totalSpan;
+        }
+
+        let lineX: number;
+        if (prepared.style.align === "left") {
+          lineX = boxX;
+        } else if (prepared.style.align === "right") {
+          lineX = boxX + boxW;
+        } else {
+          lineX = boxX + boxW / 2;
+        }
+
+        let currY = startY;
+        for (const line of lines) {
+          ctx.fillText(line, lineX, currY);
+          currY += lineHeight;
+        }
+        ctx.restore();
+        break;
+      }
+      case "image": {
+        ctx.save();
+        ctx.drawImage(prepared.background, boxX, boxY, boxW, boxH);
+        ctx.restore();
+        break;
+      }
+    }
+  }
+}
+
+/**
  * The logo layer — the legacy logo block (D121), its anchor source changed
  * for C5: the overlap snap now reads `prepared.logoAnchorLayout`, resolved in
  * `prepare` independent of draw order, instead of a layout a prior drawer
@@ -1131,15 +1224,19 @@ function drawLogo(c: LayerDrawContext): void {
   if (prepared.logo) {
     const anchor = prepared.logoAnchorLayout;
     if (anchor === undefined) {
-      throw new Error(
-        "NodeCanvasCompositor: the logo layer snaps to the text block, but there is no text layer in the template at all",
-      );
+      if (!prepared.layers.some((layer) => layer.kind === "html")) {
+        throw new Error(
+          "NodeCanvasCompositor: the logo layer snaps to the text block, but there is no text layer in the template at all",
+        );
+      }
     }
     const { image, x, width: lw, height: lh } = prepared.logo;
     let ly = prepared.logo.y;
-    const logoBox = { x, y: ly, width: lw, height: lh };
-    if (boxesOverlap(anchor.box, logoBox)) {
-      ly = resolveOverlappingLogoY(prepared, anchor.box, lw, lh, x);
+    if (anchor !== undefined) {
+      const logoBox = { x, y: ly, width: lw, height: lh };
+      if (boxesOverlap(anchor.box, logoBox)) {
+        ly = resolveOverlappingLogoY(prepared, anchor.box, lw, lh, x);
+      }
     }
     ctx.drawImage(image, x, ly, lw, lh);
   }
@@ -1163,14 +1260,14 @@ function resolveLayerList(
 
 /**
  * One layer of the draw: look the kind up in the dispatch table and paint it.
- * A kind with no entry — `fill`, `html` (L6) — throws, never skips: a
+ * A kind with no entry — `fill` (L6) — throws, never skips: a
  * silently dropped layer is a redesign the goldens cannot see.
  */
 function drawLayer(kind: LayerKind, c: LayerDrawContext): void {
   const drawer = LAYER_DRAWERS[kind];
   if (drawer === undefined) {
     throw new Error(
-      `NodeCanvasCompositor: layer kind "${kind}" has no drawer in this compositor — it draws image, video, shade, accent, static-text, animated-text and logo only`,
+      `NodeCanvasCompositor: layer kind "${kind}" has no drawer in this compositor — it draws image, video, shade, accent, static-text, animated-text, logo and html only`,
     );
   }
   drawer(c);
