@@ -12,6 +12,7 @@ import {
   parseChecks,
   pgrepPattern,
   prFacts,
+  PR_PULLS_JQ,
   realDeps,
   resolveScanRoots,
   WAVE_LOG_ROOT,
@@ -129,7 +130,7 @@ const TREE: FakeTree = {
     return 0;
   },
   gh: async (args) => {
-    if (args[0] === "pr") {
+    if ((args[0] === "api" && args[1].includes("pulls")) || args[0] === "pr") {
       return JSON.stringify([
         { number: 218, state: "OPEN", headRefName: "feat/t1", headRefOid: "oid1" },
         { number: 220, state: "OPEN", headRefName: "feat/v3", headRefOid: "oid3" },
@@ -302,16 +303,14 @@ describe("collect", () => {
     expect(status.waves[1]?.lanes[0]?.derived.pr).toBeUndefined();
   });
 
-  test("a failing gh yields the same rows with pr absent, never a throw", async () => {
-    const status = await collect(
-      fakeDeps({ ...TREE, gh: async () => { throw new Error("gh: no auth"); } }),
-      ROOT,
-      "now",
-    );
-    const t1 = status.waves[0]?.lanes[0];
-    expect(t1?.reported).toMatchObject({ stage: "implement" });
-    expect(t1?.derived.pr).toBeUndefined();
-    expect(status.waves.map((wave) => wave.id)).toEqual(["T", "U", "V", "W"]);
+  test("a failing gh rejects with could not fetch, never an empty list", async () => {
+    await expect(
+      collect(
+        fakeDeps({ ...TREE, gh: async () => { throw new Error("gh: no auth"); } }),
+        ROOT,
+        "now",
+      ),
+    ).rejects.toThrow("could not fetch PRs");
   });
 
   test("waves come out newest-first by their lanes' log mtimes, not in the directories' lexicographic order", async () => {
@@ -636,56 +635,70 @@ describe("prFacts", () => {
   function prListDeps(list: unknown, checkRuns = async (): Promise<string> => "not json"): CollectDeps {
     return fakeDeps({
       gh: async (args) => {
-        if (args[0] === "pr") return JSON.stringify(list);
+        if ((args[0] === "api" && args[1].includes("pulls")) || args[0] === "pr") {
+          return typeof list === "string" ? list : JSON.stringify(list);
+        }
         return checkRuns();
       },
     });
   }
 
-  test("asks gh for the full list: the 30-entry default hides every merged PR", async () => {
+  test("a gh failure rejects with could not fetch, never an empty list", async () => {
+    const gh = vi.fn(async () => {
+      throw new Error("unknown flag: --page");
+    });
+    await expect(prFacts(fakeDeps({ gh }))).rejects.toThrow("could not fetch PRs");
+  });
+
+  test("a non-Error gh rejection surfaces its string value", async () => {
+    const gh = vi.fn(async () => {
+      throw "network timeout";
+    });
+    await expect(prFacts(fakeDeps({ gh }))).rejects.toThrow("could not fetch PRs: network timeout");
+  });
+
+  test("an empty gh response yields no facts", async () => {
+    const facts = await prFacts(fakeDeps({ gh: async () => "   " }));
+    expect(facts).toEqual([]);
+  });
+
+  test("asks gh api for pulls with pagination and jq projection", async () => {
     const gh = vi.fn(async () => "[]");
     await prFacts(fakeDeps({ gh }));
     expect(gh).toHaveBeenCalledWith([
-      "pr",
-      "list",
-      "--state",
-      "all",
-      "--limit",
-      "1000",
-      "--page",
-      "1",
-      "--json",
-      "number,state,headRefName,headRefOid",
+      "api",
+      "repos/{owner}/{repo}/pulls?state=all&per_page=100",
+      "--paginate",
+      "--jq",
+      PR_PULLS_JQ,
     ]);
   });
 
-  test("a full page is not the corpus: gh is asked again, a short page is the last", async () => {
-    const full = Array.from({ length: 1000 }, (_, i) => ({
-      number: 1000 - i,
-      state: "MERGED",
-      headRefName: `feat/lane-${i}`,
-      headRefOid: `o${i}`,
-    }));
-    const older = [{ number: 1, state: "MERGED", headRefName: "feat/oldest", headRefOid: "oz" }];
-    const gh = vi.fn(async (args: readonly string[]) => {
-      const page = Number(args[args.indexOf("--page") + 1] ?? "1");
-      return JSON.stringify(page === 1 ? full : page === 2 ? older : []);
-    });
+  test("parses paginated PR stream into facts", async () => {
+    const lines = [
+      JSON.stringify({ number: 1000, state: "OPEN", headRefName: "feat/lane-0", headRefOid: "o0" }),
+      JSON.stringify({ number: 1, state: "MERGED", headRefName: "feat/oldest", headRefOid: "oz" }),
+    ].join("\n");
+    const gh = vi.fn(async () => lines);
     const facts = await prFacts(fakeDeps({ gh }));
-    // 1001 PRs across two pages — the oldest lane would be lost on one page.
-    expect(facts).toHaveLength(1001);
-    expect(facts[facts.length - 1]).toEqual({
+    expect(facts).toHaveLength(2);
+    expect(facts[0]).toEqual({
+      number: 1000,
+      state: "open",
+      checks: "none",
+      branchTail: "lane-0",
+    });
+    expect(facts[1]).toEqual({
       number: 1,
       state: "merged",
       checks: "none",
       branchTail: "oldest",
     });
-    expect(gh).toHaveBeenCalledTimes(2);
   });
 
   test("a check-runs fetch is scoped to the heads a lane claims, not every open PR", async () => {
     const gh = vi.fn(async (args: readonly string[]) => {
-      if (args[0] === "pr") {
+      if ((args[0] === "api" && args[1].includes("pulls")) || args[0] === "pr") {
         return JSON.stringify([
           { number: 218, state: "OPEN", headRefName: "feat/t1", headRefOid: "exact" },
           { number: 217, state: "OPEN", headRefName: "feat/t1-descendant", headRefOid: "desc" },
@@ -702,7 +715,7 @@ describe("prFacts", () => {
     expect(facts.map((fact) => fact.number)).toEqual([218, 217, 219]);
     const apiArgs = gh.mock.calls
       .map((call) => call[0] as readonly string[])
-      .filter((args) => args[0] === "api")
+      .filter((args) => args[0] === "api" && args[1].includes("check-runs"))
       .map((args) => args[1] ?? "");
     expect(apiArgs).toHaveLength(2);
     expect(apiArgs.join(" ")).toContain("exact");
@@ -711,7 +724,7 @@ describe("prFacts", () => {
 
   test("a reported pr claims its open head even when no branch matches", async () => {
     const gh = vi.fn(async (args: readonly string[]) => {
-      if (args[0] === "pr") {
+      if ((args[0] === "api" && args[1].includes("pulls")) || args[0] === "pr") {
         return JSON.stringify([
           { number: 218, state: "OPEN", headRefName: "feat/reworded-slug", headRefOid: "mine" },
         ]);
@@ -819,7 +832,10 @@ describe("collect — the PR-to-lane join", () => {
       [`${ROOT}/waveJ`]: [...Object.keys(files).map((p) => p.slice(`${ROOT}/waveJ/`.length))],
     },
     files,
-    gh: async (args) => (args[0] === "pr" ? JSON.stringify(ghList) : "not json"),
+    gh: async (args) =>
+      ((args[0] === "api" && args[1].includes("pulls")) || args[0] === "pr"
+        ? JSON.stringify(ghList)
+        : "not json"),
   });
 
   test("a lane whose event carries pr shows that PR when no branch could have found it", async () => {

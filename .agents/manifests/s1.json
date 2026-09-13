@@ -28,9 +28,17 @@
     },
     {
       "file": "tools/wave-status/lib/collect.ts",
-      "before": "for (let page = 1; ; page++) {",
-      "after": "for (let page = 1; page <= 1; page++) {",
-      "because": "One gh pr list response is a page, not the corpus: the repository passed 360 PRs in a session and will pass 1000. Cap the sweep at page one and the recorded full-page case loses the 1001st PR and its page-two call — older lanes silently un-join even though the join and the 1000 page size are perfect. Caught by the two-page pagination assertion.",
+      "before": "\"--paginate\",",
+      "after": "\"--no-paginate\",",
+      "because": "The PR corpus exceeds a single page: without --paginate, gh api returns only the first page and drops older PRs. Caught by the pagination flag assertion.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "throw new Error(\n      `could not fetch PRs:",
+      "after": "return []; throw new Error(\n      `could not fetch PRs:",
+      "because": "Swallowing a gh failure hides API errors and renders as if the repository has no PRs at all. A gh error must surface by throwing, caught by the rejection assertion.",
       "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
       "verdict": "caught"
     },

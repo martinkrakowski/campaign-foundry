@@ -46,7 +46,10 @@ async function recordedFixture(): Promise<{ readonly lanes: readonly LaneStatus[
       throw new Error(`ENOENT: open ${path}`);
     },
     pgrep: async () => 0,
-    gh: async (args) => (args[0] === "pr" ? JSON.stringify(fixture.ghPrList) : "not json"),
+    gh: async (args) =>
+      ((args[0] === "api" && args[1].includes("pulls")) || args[0] === "pr"
+        ? JSON.stringify(fixture.ghPrList)
+        : "not json"),
   };
   const status = await collect(deps, ROOT, "2026-09-12T00:00:00Z");
   return {

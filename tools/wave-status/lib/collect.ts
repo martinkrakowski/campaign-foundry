@@ -97,8 +97,9 @@ export function resolveScanRoots(
 
 /**
  * Walk the wave log tree and build the one `WaveStatus` the server renders.
- * Every external result is data: a failing read or CLI call shrinks the
- * observation (no log, no gate, no PR) — it never throws (D103, D106).
+ * Failing reads shrink the observation (no log, no gate). A `gh` failure rejects
+ * so PR facts are never silently dropped as an empty list (which would falsely
+ * indicate no pull requests exist).
  *
  * `knownPrFacts`, when provided, is reused as-is: a watcher-triggered
  * refresh re-reads local state without waiting on `gh`. Omit it (or pass
@@ -287,54 +288,48 @@ export async function readTail(
   }
 }
 
-/** Page size for the PR sweep; a page under this is the last one. */
-const PR_LIST_PAGE = 1000;
+/**
+ * Projection from REST API pull object to the GhPrListEntry shape prFacts consumes.
+ * Maps .head.ref to headRefName, .head.sha to headRefOid, and normalises merged state.
+ */
+export const PR_PULLS_JQ =
+  '.[] | {number: .number, state: (if .merged_at then "merged" else .state end), headRefName: .head.ref, headRefOid: .head.sha}';
 
 /**
- * The PR corpus, walked page by page. One `gh pr list` response is a page, not
- * the corpus, and the repository passes 360 PRs in a session — so `--page` is
- * advanced until a short page marks the end, rather than pretending 1000 is the
- * whole history and silently dropping the oldest lanes.
+ * The PR corpus, walked through the REST API. `gh api` with `--paginate`
+ * follows Link headers and streams every PR in the repository, projecting each
+ * to `{number, state, headRefName, headRefOid}` via jq.
  *
  * `scope`, when provided, bounds the check-runs sweep to the open heads a lane
  * actually claims: the event's own `pr`, or a branch tail some lane matches.
  * An unclaimed open PR is still listed (checks none) but costs no `api` call —
  * so a refresh grows with the wave, not with every open PR in the repository.
  * Omit `scope` to fetch checks for every open head (the standalone behaviour).
- * Any `gh` failure, or a well-formed body of the wrong shape, yields no facts
- * on the first page — never a throw; a failure on a later page keeps what came
- * before.
+ * Any `gh` failure surfaces as an error ("could not fetch PRs"), never an empty
+ * list that would render as if the repository had no pull requests.
  */
 export async function prFacts(
   deps: CollectDeps,
   scope?: PrScope,
 ): Promise<readonly PrFact[]> {
-  const listed: GhPrListEntry[] = [];
-
-  for (let page = 1; ; page++) {
-    let part: readonly GhPrListEntry[] | undefined;
-    try {
-      part = parsePrList(
-        await deps.gh([
-          "pr",
-          "list",
-          "--state",
-          "all",
-          "--limit",
-          String(PR_LIST_PAGE),
-          "--page",
-          String(page),
-          "--json",
-          "number,state,headRefName,headRefOid",
-        ]),
-      );
-    } catch {
-      break;
-    }
-    if (part === undefined) break;
-    listed.push(...part);
-    if (part.length < PR_LIST_PAGE) break;
+  let stdout: string;
+  try {
+    stdout = await deps.gh([
+      "api",
+      "repos/{owner}/{repo}/pulls?state=all&per_page=100",
+      "--paginate",
+      "--jq",
+      PR_PULLS_JQ,
+    ]);
+  } catch (error) {
+    throw new Error(
+      `could not fetch PRs: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
   }
+
+  const listed = parsePrList(stdout);
+  if (listed === undefined) return [];
 
   const facts: PrFact[] = [];
   for (const entry of listed) {
@@ -448,20 +443,38 @@ export function parseChecks(json: string): "none" | "pending" | "pass" | "fail" 
 }
 
 /**
- * `gh --json` is well-formed JSON of the wrong shape more often than it is
- * truncated: an object, a scalar, an array of partial rows. Anything other
- * than an array of `{number, state, headRefName, headRefOid}` is "no facts".
+ * Parse PR list output. Supports both a single JSON array (e.g. from test fixtures)
+ * and newline-delimited JSON (NDJSON streamed by gh api --paginate --jq '.[] | ...').
+ * Anything other than valid entries of `{number, state, headRefName, headRefOid}` is undefined.
  */
-function parsePrList(json: string): readonly GhPrListEntry[] | undefined {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(json);
-  } catch {
-    return undefined;
+export function parsePrList(stdout: string): readonly GhPrListEntry[] | undefined {
+  const trimmed = stdout.trim();
+  if (trimmed === "") return [];
+
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (Array.isArray(parsed) && parsed.every(isGhPrListEntry)) {
+        return parsed;
+      }
+    } catch {
+      // Not valid JSON array; fall through to line-by-line parsing
+    }
   }
-  if (!Array.isArray(parsed)) return undefined;
-  if (!parsed.every(isGhPrListEntry)) return undefined;
-  return parsed;
+
+  const lines = trimmed.split("\n").filter((line) => line.trim() !== "");
+  const entries: GhPrListEntry[] = [];
+  for (const line of lines) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      return undefined;
+    }
+    if (!isGhPrListEntry(parsed)) return undefined;
+    entries.push(parsed);
+  }
+  return entries;
 }
 
 function isGhPrListEntry(value: unknown): value is GhPrListEntry {
