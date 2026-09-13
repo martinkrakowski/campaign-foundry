@@ -19,8 +19,8 @@
     },
     {
       "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
-      "before": "      `NodeCanvasCompositor: layer kind \"${kind}\" has no drawer in this compositor — it draws image, video, shade, accent, static-text, animated-text, logo and html only`,",
-      "after": "      `NodeCanvasCompositor: layer kind \"${kind}\" has no drawer in this compositor — it draws image, video, shade, accent, static-text, animated-text and logo only`,",
+      "before": "      `NodeCanvasCompositor: layer kind \"${layer.kind}\" has no drawer in this compositor — it draws image, video, shade, accent, static-text, animated-text, logo and html only`,",
+      "after": "      `NodeCanvasCompositor: layer kind \"${layer.kind}\" has no drawer in this compositor — it draws image, video, shade, accent, static-text, animated-text and logo only`,",
       "because": "The error message in drawLayer must list html among the supported layer kinds when an unknown kind is encountered, keeping diagnostic messages accurate for unsupported layers.",
       "command": [
         "yarn",
@@ -82,6 +82,21 @@
       "before": "      case \"image\": {\n        ctx.save();\n        ctx.drawImage(prepared.background, boxX, boxY, boxW, boxH);\n        ctx.restore();\n        break;\n      }",
       "after": "      case \"image\": {\n        break;\n      }",
       "because": "The drawHtml drawer must render image elements using the prepared background asset into the element's bounding box frame.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.layer-order.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "  const { ctx, prepared, layer } = c;\n  if (layer.elements === undefined || layer.elements.length === 0) {\n    return;\n  }\n  const { width, height } = prepared;\n  for (const element of layer.elements) {",
+      "after": "  const { ctx, prepared } = c;\n  const htmlLayer = prepared.layers.find((layer) => layer.kind === \"html\");\n  if (htmlLayer === undefined || htmlLayer.elements === undefined || htmlLayer.elements.length === 0) {\n    return;\n  }\n  const { width, height } = prepared;\n  for (const element of htmlLayer.elements) {",
+      "because": "drawHtml must read its elements from the dispatched layer on the draw context — a template may carry two html layers, and hunting prepared.layers for \"the\" html layer paints the first list twice and never paints the second.",
       "command": [
         "yarn",
         "vitest",

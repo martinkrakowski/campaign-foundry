@@ -599,13 +599,11 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
   });
 
   describe("html layer drawer (HL3, HL-D5)", () => {
-    test("drawHtml is a no-op when htmlLayer is absent, elements is undefined, or elements is empty", async () => {
-      const prepNoHtml = await NodeCanvasCompositor.prepare(request({ template: templateFromCanonical("social-post") }));
-      const ctx = createCanvas(prepNoHtml.width, prepNoHtml.height).getContext("2d");
-      const cNoHtml = { ctx, prepared: prepNoHtml, motion: undefined, eased: 1, effectT: 1 };
+    test("drawHtml is a no-op when the dispatched layer's elements are undefined or empty", async () => {
+      // The drawer reads the layer it was dispatched for (HL3) — a missing
+      // html layer is no longer an input it can receive, and the dispatch
+      // loop never calls it for other kinds.
       const drawer = (NodeCanvasCompositor as unknown as { layerDrawers: Record<string, (c: unknown) => void> }).layerDrawers.html;
-      expect(() => drawer(cNoHtml)).not.toThrow();
-
       const templateAbsentElements: BriefTemplate = {
         id: "canonical-image-html",
         version: 1,
@@ -614,7 +612,8 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
         layers: [{ id: "html", kind: "html" }],
       };
       const prepAbsent = await NodeCanvasCompositor.prepare(request({ template: templateAbsentElements }));
-      const cAbsent = { ctx, prepared: prepAbsent, motion: undefined, eased: 1, effectT: 1 };
+      const ctx = createCanvas(prepAbsent.width, prepAbsent.height).getContext("2d");
+      const cAbsent = { ctx, prepared: prepAbsent, layer: prepAbsent.layers[0], motion: undefined, eased: 1, effectT: 1 };
       expect(() => drawer(cAbsent)).not.toThrow();
 
       const templateEmptyElements: BriefTemplate = {
@@ -625,7 +624,7 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
         layers: [{ id: "html", kind: "html", elements: [] }],
       };
       const prepEmpty = await NodeCanvasCompositor.prepare(request({ template: templateEmptyElements }));
-      const cEmpty = { ctx, prepared: prepEmpty, motion: undefined, eased: 1, effectT: 1 };
+      const cEmpty = { ctx, prepared: prepEmpty, layer: prepEmpty.layers[0], motion: undefined, eased: 1, effectT: 1 };
       expect(() => drawer(cEmpty)).not.toThrow();
     });
 
@@ -707,6 +706,87 @@ describe("the compositor's draw order is the template's layer list (L2a, D121)",
       );
       const ctxRight = createCanvas(prepRight.width, prepRight.height).getContext("2d");
       expect(() => NodeCanvasCompositor.draw(ctxRight, prepRight, 1)).not.toThrow();
+    });
+
+    test("the still path paints BOTH html layers' element lists, in template order — the drawer draws the layer it was dispatched for (HL3)", async () => {
+      // Nothing caps the number of html layers a template may carry, so a
+      // drawer that finds "the" html layer in `prepared.layers` paints the
+      // first list twice and never paints the second. The dispatched layer
+      // must travel on the draw context.
+      const template: BriefTemplate = {
+        id: "canonical-image-html",
+        version: 1,
+        creativeType: "image-html",
+        unit: "standard-web",
+        layers: [
+          { id: "image", kind: "image" },
+          {
+            id: "html-a",
+            kind: "html",
+            elements: [
+              { kind: "text", text: "First html layer copy", frame: { x: 0.05, y: 0.2, w: 0.9, h: 0.1, anchor: "top" } },
+            ],
+          },
+          {
+            id: "html-b",
+            kind: "html",
+            elements: [
+              { kind: "text", text: "Second html layer copy", frame: { x: 0.05, y: 0.6, w: 0.9, h: 0.1, anchor: "top" } },
+            ],
+          },
+        ],
+      };
+      const prepared = await NodeCanvasCompositor.prepare(request({ template }));
+      const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
+      const fillText = vi.spyOn(ctx, "fillText");
+      NodeCanvasCompositor.draw(ctx, prepared, 1);
+      expect(fillText.mock.calls.map((call) => call[0])).toEqual([
+        "First html layer copy",
+        "Second html layer copy",
+      ]);
+    });
+
+    test("the sequenced path paints BOTH html layers' element lists, in template order (HL3)", async () => {
+      const template: BriefTemplate = {
+        id: "canonical-image-html",
+        version: 1,
+        creativeType: "image-html",
+        unit: "standard-web",
+        layers: [
+          { id: "image", kind: "image" },
+          {
+            id: "html-a",
+            kind: "html",
+            elements: [
+              { kind: "text", text: "First html layer copy", frame: { x: 0.05, y: 0.2, w: 0.9, h: 0.1, anchor: "top" } },
+            ],
+          },
+          {
+            id: "html-b",
+            kind: "html",
+            elements: [
+              { kind: "text", text: "Second html layer copy", frame: { x: 0.05, y: 0.6, w: 0.9, h: 0.1, anchor: "top" } },
+            ],
+          },
+        ],
+      };
+      const req: TemplateRequest & { durationSec: number; timeline: CopyTimeline } = {
+        ...request({ template }),
+        durationSec: 8,
+        timeline: {
+          beats: [{ text: "Stay wild, stay hydrated", weight: 1 }],
+          transition: "cut",
+          keyBeat: 1,
+        },
+      };
+      const prepared = await NodeCanvasCompositor.prepare(req);
+      const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
+      const fillText = vi.spyOn(ctx, "fillText");
+      NodeCanvasCompositor.draw(ctx, prepared, 0.5, undefined, 0.5);
+      expect(fillText.mock.calls.map((call) => call[0])).toEqual([
+        "First html layer copy",
+        "Second html layer copy",
+      ]);
     });
   });
 });

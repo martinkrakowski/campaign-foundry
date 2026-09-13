@@ -150,14 +150,20 @@ type LayerDrawer = (c: LayerDrawContext) => void;
 
 /**
  * Everything a layer drawer reads: the real blit context, the prepared
- * creative, and the pose values the draw path computed once. One object serves
- * every drawer (D121). The logo's overlap snap reads its anchor box off
- * `prepared.logoAnchorLayout` (C5) — resolved once in `prepare`, independent
- * of draw order — so this context carries no drawer-to-drawer handoff field.
+ * creative, the layer being dispatched, and the pose values the draw path
+ * computed once. One object serves every drawer (D121). The logo's overlap
+ * snap reads its anchor box off `prepared.logoAnchorLayout` (C5) — resolved
+ * once in `prepare`, independent of draw order — so this context carries no
+ * drawer-to-drawer handoff field. `layer` is the dispatched entry itself
+ * (HL3): the compositor iterates the list per layer, and a template may carry
+ * more than one layer of a kind — a drawer with per-layer data (today only
+ * {@link drawHtml}) must read it from what it was dispatched for, never by
+ * hunting the list. Siblings ignore the field.
  */
 interface LayerDrawContext {
   readonly ctx: SKRSContext2D;
   readonly prepared: PreparedCreative;
+  readonly layer: CreativeTemplateLayer;
   readonly motion: MotionKind | undefined;
   readonly eased: number;
   readonly effectT: number;
@@ -318,7 +324,7 @@ export class NodeCanvasCompositor implements CompositorPort {
     motion?: MotionKind,
     effectT: number = t,
   ): void {
-    const c: LayerDrawContext = {
+    const c: Omit<LayerDrawContext, "layer"> = {
       ctx,
       prepared,
       motion,
@@ -335,7 +341,7 @@ export class NodeCanvasCompositor implements CompositorPort {
         if (copyDrawn) continue;
         copyDrawn = true;
       }
-      drawLayer(layer.kind, c);
+      drawLayer(layer, c);
     }
   }
 
@@ -909,7 +915,7 @@ function drawTimeline(
   effectT?: number,
 ): void {
   const eased = motion === undefined ? 1 : easeOutCubic(t);
-  const c: LayerDrawContext = { ctx, prepared, motion, eased, effectT: effectT ?? t };
+  const c: Omit<LayerDrawContext, "layer"> = { ctx, prepared, motion, eased, effectT: effectT ?? t };
   let copyDrawn = false;
   for (const layer of prepared.layers) {
     if (layer.kind === "static-text" || layer.kind === "animated-text") {
@@ -920,7 +926,7 @@ function drawTimeline(
       copyDrawn = true;
       continue;
     }
-    drawLayer(layer.kind, c);
+    drawLayer(layer, c);
   }
 }
 
@@ -1112,19 +1118,22 @@ function drawStaticText(c: LayerDrawContext): void {
 }
 
 /**
- * The html layer (HL3, HL-D5) — draws the element list (text, button, image)
- * directly onto the canvas, producing the static raster fallback rendition
- * (D122) before the markup assembler (HL4) is built. Absent or empty elements
- * (e.g. the canonical template) is a no-op blit.
+ * The html layer (HL3, HL-D5) — draws the dispatched layer's element list
+ * (text, button, image) directly onto the canvas, producing the static raster
+ * fallback rendition (D122) before the markup assembler (HL4) is built. The
+ * elements come from `c.layer` — the layer this draw was dispatched for (the
+ * compositor iterates per layer, and nothing caps how many `html` layers a
+ * template may carry, so hunting `prepared.layers` for "the" html layer would
+ * paint the first list twice and never paint the second). Absent or empty
+ * elements (e.g. the canonical template) is a no-op blit.
  */
 function drawHtml(c: LayerDrawContext): void {
-  const { ctx, prepared } = c;
-  const htmlLayer = prepared.layers.find((layer) => layer.kind === "html");
-  if (htmlLayer === undefined || htmlLayer.elements === undefined || htmlLayer.elements.length === 0) {
+  const { ctx, prepared, layer } = c;
+  if (layer.elements === undefined || layer.elements.length === 0) {
     return;
   }
   const { width, height } = prepared;
-  for (const element of htmlLayer.elements) {
+  for (const element of layer.elements) {
     const boxX = element.frame.x * width;
     const boxY = element.frame.y * height;
     const boxW = element.frame.w * width;
@@ -1259,16 +1268,18 @@ function resolveLayerList(
 }
 
 /**
- * One layer of the draw: look the kind up in the dispatch table and paint it.
- * A kind with no entry — `fill` (L6) — throws, never skips: a
- * silently dropped layer is a redesign the goldens cannot see.
+ * One layer of the draw: look the kind up in the dispatch table and paint it,
+ * handing the drawer the layer it was dispatched for (HL3) — a template may
+ * carry several layers of one kind, and the loop position is the only identity
+ * the drawer can trust. A kind with no entry — `fill` (L6) — throws, never
+ * skips: a silently dropped layer is a redesign the goldens cannot see.
  */
-function drawLayer(kind: LayerKind, c: LayerDrawContext): void {
-  const drawer = LAYER_DRAWERS[kind];
+function drawLayer(layer: CreativeTemplateLayer, c: Omit<LayerDrawContext, "layer">): void {
+  const drawer = LAYER_DRAWERS[layer.kind];
   if (drawer === undefined) {
     throw new Error(
-      `NodeCanvasCompositor: layer kind "${kind}" has no drawer in this compositor — it draws image, video, shade, accent, static-text, animated-text, logo and html only`,
+      `NodeCanvasCompositor: layer kind "${layer.kind}" has no drawer in this compositor — it draws image, video, shade, accent, static-text, animated-text, logo and html only`,
     );
   }
-  drawer(c);
+  drawer({ ...c, layer });
 }
