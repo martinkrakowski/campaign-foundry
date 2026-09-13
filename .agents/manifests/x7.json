@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "lane": "X7",
+  "mutations": [
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "    throw error;",
+      "after": "    return { server, port: 0, url: \"\", close: async () => {} };",
+      "because": "When port binding fails, startServer must rethrow the error so callers know startup failed with EADDRINUSE rather than silently returning an un-listening handle.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "listen rejects when the requested port is already bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/server.ts",
+      "before": "    for (const watcher of watchers) watcher.close();\n    server.close();",
+      "after": "    server.close();",
+      "because": "When port binding fails after watchers are opened during startup, startServer must close them in cleanup. If watchers are not closed, resources leak and the cleanup test catches it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/__tests__/server.test.ts",
+        "-t",
+        "listen rejects when the requested port is already bound"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

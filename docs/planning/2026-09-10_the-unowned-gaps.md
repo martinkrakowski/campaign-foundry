@@ -135,3 +135,28 @@ longer tracks it.
 **X5 — shipped in #334.** Its premise was retired when it landed; `plan:verify` no
 longer tracks it.
 
+---
+
+## 10. A load-sensitive test fails CI at random (X7)
+
+**Evidence.** `tools/wave-status/__tests__/server.test.ts > cleanup > listen rejects when the
+requested port is already bound` failed once during the 2026-09-13 overnight run, in a full suite,
+while several lanes and gates were running concurrently. It took **5 785 ms** — a timeout shape, not
+a wrong assertion — and passes on its own (62 tests in that file).
+
+The test starts a server on port 0, reads the ephemeral port, and expects a second `start()` on that
+port to reject with `EADDRINUSE`.
+
+**Why this matters more than one test.** A suite that fails at random teaches its readers that red
+means *try again*, and this repository's entire discipline rests on a green mark meaning something.
+**One flake is cheaper to fix than the habit it creates.**
+
+**Recommended default: find the mechanism before changing the test.** Two candidates, and they want
+opposite fixes — a rejection that arrives slower than the runner's patience under load (raise or
+remove a wait, do not loosen the assertion), or a second bind that intermittently **succeeds**, in
+which case the assertion is right and the server's listen options are the defect. Deciding which
+without evidence is how a flaky test becomes a deleted one.
+
+**X7 — retired.** The bind-conflict test binds an exclusive blocker directly,
+eliminating the racy second-server overhead; `plan:verify` no longer tracks it.
+

@@ -8,6 +8,7 @@ import { execFile } from "node:child_process";
 
 import { utimesSync, watch as fsWatch } from "node:fs";
 import {
+  createServer,
   request as httpRequest,
   type IncomingMessage,
   type RequestOptions,
@@ -1312,16 +1313,30 @@ describe("the server over real HTTP", () => {
 describe("cleanup", () => {
   test("listen rejects when the requested port is already bound", async () => {
     const root = await makeFixture();
-    const first = await start({
-      port: 0,
-      root,
-      collect: async () => statusAt(0),
+    const blocker = createServer();
+    await new Promise<void>((resolve) => {
+      blocker.listen({ port: 0, host: "127.0.0.1", exclusive: true }, () => resolve());
     });
-    await expect(
-      start({ port: first.port, root, collect: async () => statusAt(0) }),
-    ).rejects.toMatchObject({
-      code: "EADDRINUSE",
-    });
+    const port = (blocker.address() as { port: number }).port;
+    const watcherClose = vi.fn();
+
+    try {
+      await expect(
+        startServer({
+          port,
+          root,
+          collect: async () => statusAt(0),
+          watch: () => ({ close: watcherClose }),
+        }),
+      ).rejects.toMatchObject({
+        code: "EADDRINUSE",
+      });
+      expect(watcherClose).toHaveBeenCalled();
+    } finally {
+      await new Promise<void>((resolve) => {
+        blocker.close(() => resolve());
+      });
+    }
   });
 
   test("close() shuts the server, its watchers and its interval down", async () => {
