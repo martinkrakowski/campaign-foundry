@@ -450,7 +450,8 @@ threshold. The threshold still stands for a *ranking*; this is an assignment.
 | **Implementer (primary)** | `qwen3.8-flash` | `opencode run --auto --format json --model openrouter/qwen/qwen3.8-flash "$(cat $BRIEF)"` |
 | **Implementer (reserve, and the critical path)** | `gemini-3.8-flash` | `agy --print "$(cat $BRIEF)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high --print-timeout 90m --output-format json` |
 | **Stage-1 test writer** | `qwen3.8-flash` | as above — **and then stage 2 must be a different seat** |
-| *(alternates)* | `hy4-preview`, `deepseek-v4.1-flash` | `openrouter/tencent/hy4-preview`, `openrouter/deepseek/deepseek-v4.1-flash` |
+| *(alternate)* | `hy4-preview` | `opencode run --auto --format json --model openrouter/tencent/hy4-preview "$(cat $BRIEF)"` |
+| *(alternate)* | `deepseek-v4.1-flash` | `opencode run --auto --format json --model openrouter/deepseek/deepseek-v4.1-flash "$(cat $BRIEF)"` |
 | **Lane reviewer** | **anything except the model that wrote the code** | — |
 | **Plan reviewer** | `Agent` · `subagent_type: "Plan"` · `model: "fable"` | Owner's choice, 2026-09-09, **restored 2026-09-12**. `Plan` cannot Write or Edit, so the seat is read-only by construction rather than by instruction. |
 
@@ -554,9 +555,9 @@ second seat not having authored the target. With qwen in stage 1, stage 2 is gem
 
 | seat | id | floor | cost |
 |---|---|---|---|
-| qwen3.8-flash | `openrouter/qwen/qwen3.8-flash` | 8 167 | $0.0012 |
-| hy4-preview | `openrouter/tencent/hy4-preview` | 7 935 | $0.0067 |
-| deepseek-v4.1-flash | `openrouter/deepseek/deepseek-v4.1-flash` | 8 060 | $0.0012 |
+| qwen3.8-flash | `openrouter/qwen/qwen3.8-flash` | 8167 | $0.0012 |
+| hy4-preview | `openrouter/tencent/hy4-preview` | 7935 | $0.0067 |
+| deepseek-v4.1-flash | `openrouter/deepseek/deepseek-v4.1-flash` | 8060 | $0.0012 |
 
 Same models, same floors, on the funded account. qwen and deepseek are **5.6× cheaper** per boot here
 than the `opencode-go` route they were on.
