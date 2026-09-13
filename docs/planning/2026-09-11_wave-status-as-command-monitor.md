@@ -132,9 +132,11 @@ premise grepped for is gone by construction, and it is retired in the same commi
 Probing a string that *names* the defect rather than the behaviour was the right call here: the
 rename cannot survive the fix, so the premise cannot outlive its lane the way W4's did.
 
-```premise W3
-! grep -q "hide-inactive" tools/wave-status/public/index.html
-```
+**W3 — shipped.** Per-wave counts in the band and a page-level summary bar, both bucketed
+from the same `laneStateOf`/`laneState` the rows lead with, and a *hide inactive* switch that
+keeps exactly running / stalled / conflicted / failed and is persisted like the sort preference.
+Its premise grepped for the `hide-inactive` id the toggle ships under — a string that *names* the
+feature — so it cannot survive the lane; it is retired here, in the commit that closes it.
 
 **W4 — shipped in #340.** Its premise was retired late, and the delay is the lesson: it grepped
 for the collector's lexicographic `.sort()`, and #340 **kept** that call as the stable base the

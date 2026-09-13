@@ -9,7 +9,14 @@ import { fileURLToPath } from "node:url";
 import { Window } from "happy-dom";
 import { extractDarkBlock, extractRootBlock, startServer } from "../server.js";
 import { collect, realDeps } from "../lib/collect.js";
-import { laneState, stallThresholdMs } from "../lib/lane-state.js";
+import {
+  laneState,
+  laneStateCounts,
+  stallThresholdMs,
+  LANE_STATES,
+  NEEDS_HUMAN_STATES,
+  isNeedsHumanState,
+} from "../lib/lane-state.js";
 import { readEvents } from "../lib/events.js";
 import { mergeStatus } from "../lib/merge.js";
 import type { DerivedLane, LaneStatus, WaveStatus } from "../lib/types.js";
@@ -3698,6 +3705,319 @@ describe("the status page", () => {
     }
   });
 
+  test("the rollup counts every lane exactly as its row leads, and both match the module", async () => {
+    // The counts and the rows must come from ONE computation. This asserts the
+    // three against each other on the *same* fixture the row pills are asserted
+    // on — `stateFixture`, one lane per state — so a header number can never
+    // drift from the rows under it, and neither can drift from `laneState`:
+    //   (a) tally of the rendered row pills,
+    //   (b) the wave band's `.wave-meta` counts,
+    //   (c) the page-level `#state-summary` bar,
+    //   (d) the module's `laneStateCounts`, which is `laneState` bucketed.
+    // A wrong count is the more dangerous for agreeing with a wrong row, so the
+    // module — the page cannot import it — is the tiebreaker on all three.
+    const now = Date.now();
+    const status = stateFixture(now);
+    const lanes = status.waves[0].lanes as unknown as LaneStatus[];
+    const moduleCounts = laneStateCounts(lanes, now);
+    const present = (Object.entries(moduleCounts) as [string, number][]).filter(
+      ([, n]) => n > 0,
+    );
+
+    const page = await loadPage(status);
+    const doc = page.window.document;
+
+    // (a) The rows: tally the word each lane's leading cell renders. Only the
+    // states present produce a pill, so the tally matches the non-zero slice of
+    // the module's counts exactly.
+    const rowTally: Record<string, number> = {};
+    for (const pill of doc.querySelectorAll("tr.lane td.c-state .pill")) {
+      const word = pill.textContent?.trim() ?? "";
+      rowTally[word] = (rowTally[word] ?? 0) + 1;
+    }
+    expect(rowTally).toEqual(Object.fromEntries(present));
+
+    // (b) The wave band's per-wave counts, over the same lanes — asserted
+    // exactly, not with `toContain`: "1 running" is a substring of "12 running",
+    // so a loose assertion on a count passes on a wrong count, and a roll-up
+    // whose numbers are merely plausible is not a roll-up. The expected string is
+    // built from the module's counts in the module's `LANE_STATES` order, which
+    // also pins the page's copy of that order to the module's.
+    const meta = doc.querySelector(
+      'tr.wave[data-wave="S"] .wave-meta',
+    )?.textContent ?? "";
+    expect(meta).toBe(
+      [
+        `${lanes.length} ${lanes.length === 1 ? "lane" : "lanes"}`,
+        ...LANE_STATES.filter((s) => moduleCounts[s] > 0).map(
+          (s) => `${moduleCounts[s]} ${s}`,
+        ),
+      ].join(" · "),
+    );
+    expect(present.length).toBeGreaterThan(0);
+
+    // (c) The page-level summary bar: the needs-a-human lead and per-state chips.
+    // The lead is pinned to the module's NEEDS_HUMAN_STATES, not a list copied
+    // into this file — the same reason the row pill is pinned to `laneState`:
+    // the page holds a second copy of the set, and this is the seam between them.
+    const attention =
+      doc.querySelector('#state-summary [data-state="attention"] .value')
+        ?.textContent ?? "";
+    const wantsHuman = NEEDS_HUMAN_STATES.reduce(
+      (sum, s) => sum + (moduleCounts[s] ?? 0),
+      0,
+    );
+    expect(Number(attention)).toBe(wantsHuman);
+    // The lead only turns red when there is someone to call.
+    expect(
+      (
+        doc.querySelector(
+          '#state-summary [data-state="attention"] .value',
+        ) as unknown as HTMLElement
+      ).classList.contains("hot"),
+    ).toBe(wantsHuman > 0);
+    const chipText = [...doc.querySelectorAll("#state-summary .ss-chip")].map(
+      (el) => el.textContent?.trim() ?? "",
+    );
+    expect(chipText.sort()).toEqual(
+      present.map(([s, n]) => `${n} ${s}`).sort(),
+    );
+  });
+
+  test("hide inactive leaves exactly the lanes that need a human, and survives a reload", async () => {
+    const now = Date.now();
+    const status = stateFixture(now);
+    const lanes = status.waves[0].lanes as unknown as LaneStatus[];
+    // The set the toggle keeps, derived here from the module — `isNeedsHumanState`
+    // over `laneState` — not copied from the page's inline list, so the test is
+    // the seam and not an echo: a page that drops a state the module still keeps
+    // (or the reverse) is caught here, exactly as a divergent word is caught by
+    // the row-pill parity test.
+    const activeIds = lanes
+      .filter((lane) => isNeedsHumanState(laneState(lane, now)))
+      .map((lane) => lane.lane);
+    const inactiveIds = lanes
+      .map((lane) => lane.lane)
+      .filter((id) => !activeIds.includes(id));
+    expect(activeIds.length).toBeGreaterThan(0);
+    expect(inactiveIds.length).toBeGreaterThan(0);
+
+    const page = await loadPage(status);
+    const doc = page.window.document;
+    const toggle = doc.getElementById("hide-inactive") as unknown as HTMLElement;
+    expect(toggle).not.toBeNull();
+    expect(toggle.getAttribute("role")).toBe("switch");
+    expect(toggle.getAttribute("aria-label")).toMatch(/inactive/i);
+    // Off by default: everything is shown.
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(doc.querySelectorAll("tr.lane").length).toBe(lanes.length);
+
+    // Turn it on: only the needs-a-human lanes remain.
+    toggle.click();
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    const shown = [...doc.querySelectorAll("tr.lane[data-wave=\"S\"]")].map(
+      (row) => row.getAttribute("data-lane"),
+    );
+    expect(shown.sort()).toEqual([...activeIds].sort());
+    for (const id of inactiveIds) {
+      expect(doc.querySelector(`tr.lane[data-lane="${id}"]`)).toBeNull();
+    }
+
+    // The preference is written where the sort preference is written.
+    expect(page.window.localStorage.getItem("wave-status:hide-inactive")).toBe(
+      "true",
+    );
+
+    // Turn it back off: everything returns, and the choice is persisted false.
+    toggle.click();
+    expect(doc.querySelectorAll("tr.lane").length).toBe(lanes.length);
+    expect(page.window.localStorage.getItem("wave-status:hide-inactive")).toBe(
+      "false",
+    );
+
+    // A reload with the stored choice starts hidden, without a click.
+    const reloaded = await loadPage(status, undefined, {
+      storage: { "wave-status:hide-inactive": "true" },
+    });
+    const reloadedToggle = reloaded.window.document.getElementById(
+      "hide-inactive",
+    ) as unknown as HTMLElement;
+    expect(reloadedToggle.getAttribute("aria-checked")).toBe("true");
+    expect(
+      [...reloaded.window.document.querySelectorAll("tr.lane[data-wave=\"S\"]")].map(
+        (row) => row.getAttribute("data-lane"),
+      ).sort(),
+    ).toEqual([...activeIds].sort());
+
+    // A wave whose every lane is inactive says so, rather than vanishing blank.
+    // A live lane rides in a second wave so the page has a row to render at all
+    // (loadPage waits for one) — the hidden wave is what this asserts.
+    const allDone = {
+      generatedAt: new Date(now).toISOString(),
+      waves: [
+        {
+          id: "D",
+          lanes: [
+            { wave: "D", lane: "ready", derived: { alive: false, pr: { number: 1, state: "open", checks: "pass" } }, disagreements: [] },
+            { wave: "D", lane: "merged", derived: { alive: false, pr: { number: 2, state: "merged", checks: "pass" } }, disagreements: [] },
+          ],
+        },
+        {
+          id: "A",
+          lanes: [
+            { wave: "A", lane: "live", derived: { alive: true }, disagreements: [] },
+          ],
+        },
+      ],
+    } as unknown as WaveStatus;
+    const hiddenPage = await loadPage(allDone, undefined, {
+      storage: { "wave-status:hide-inactive": "true" },
+    });
+    const hiddenDoc = hiddenPage.window.document;
+    // Wave A's running lane survives; wave D's inactive lanes are all hidden.
+    expect(hiddenDoc.querySelectorAll("tr.lane[data-wave=\"A\"]").length).toBe(1);
+    expect(hiddenDoc.querySelector("tr.lane[data-wave=\"D\"]")).toBeNull();
+    const empty = hiddenDoc.querySelector('tr.empty[data-wave="D"]');
+    // The empty row names the control that emptied the wave, and how many rows it
+    // took: "no lanes need a human" is the fact, "hide inactive is hiding 2 lanes"
+    // is the remedy.
+    expect(empty?.textContent).toBe(
+      "No lanes need a human here — “hide inactive” is hiding 2 lanes",
+    );
+  });
+
+  test("a wave emptied by hide inactive is never reported as a failed search", async () => {
+    // The failure this whole redesign exists to remove: with both controls active
+    // and a query that matches only lanes that do not need a human, the page used
+    // to say "No lanes match" — a confidently wrong answer. The lane DID match;
+    // the state control hid it. *Not found* and *hidden* are different facts, so
+    // the empty row must say which control took the rows out, and the query must
+    // still be blamed for the rows it really did remove.
+    const bothControls = {
+      generatedAt: new Date().toISOString(),
+      waves: [
+        {
+          id: "V",
+          lanes: [
+            { wave: "V", lane: "v-live", derived: { alive: true }, disagreements: [] },
+            { wave: "V", lane: "v-ready", derived: { alive: false, pr: { number: 20, state: "open", checks: "pass" } }, disagreements: [] },
+          ],
+        },
+        {
+          id: "W",
+          lanes: [
+            { wave: "W", lane: "w-merged", derived: { alive: false, pr: { number: 21, state: "merged", checks: "pass" } }, disagreements: [] },
+            { wave: "W", lane: "w-blocked", derived: { alive: false, pr: { number: 22, state: "open", checks: "pending" } }, disagreements: [] },
+          ],
+        },
+        { id: "X", lanes: [] },
+      ],
+    } as unknown as WaveStatus;
+
+    const page = await loadPage(bothControls, undefined, {
+      storage: { "wave-status:hide-inactive": "true" },
+    });
+    const doc = page.window.document;
+    const filter = doc.getElementById("filter") as unknown as HTMLInputElement;
+    const setInput = (value: string) => {
+      filter.value = value;
+      filter.dispatchEvent(
+        new (doc.defaultView as unknown as { Event: typeof Event }).Event(
+          "input",
+          { bubbles: true },
+        ),
+      );
+    };
+
+    // A query that matches only hidden lanes: hidden, not missing — and named
+    // after the switch that hid them, in the plural form.
+    setInput("w-");
+    const hiddenW = doc.querySelector('tr.empty[data-wave="W"]');
+    expect(hiddenW?.textContent).toBe(
+      "2 lanes matching “w-” hidden by “hide inactive”",
+    );
+    // The same render, the other direction: wave V's rows really do not answer
+    // the query, and that is what the row says. Two waves, two different answers,
+    // because two different controls emptied them.
+    const unmatchedV = doc.querySelector('tr.empty[data-wave="V"]');
+    expect(unmatchedV?.textContent).toBe("No lanes match “w-”");
+
+    // A wave with no lanes at all: nothing to match and nothing hidden. The query
+    // must not be blamed for an empty wave either.
+    expect(doc.querySelector('tr.empty[data-wave="X"]')?.textContent).toBe(
+      "No lanes in wave",
+    );
+
+    // A singular match, and the query echoed back exactly as typed — the case the
+    // reader searched for, in the reader's own spelling.
+    setInput("V-Ready");
+    expect(doc.querySelector('tr.empty[data-wave="V"]')?.textContent).toBe(
+      "1 lane matching “V-Ready” hidden by “hide inactive”",
+    );
+    expect(doc.querySelector('tr.empty[data-wave="W"]')?.textContent).toBe(
+      "No lanes match “V-Ready”",
+    );
+
+    // Clear the query and the switch is the only story left.
+    setInput("");
+    expect(doc.querySelector('tr.empty[data-wave="W"]')?.textContent).toBe(
+      "No lanes need a human here — “hide inactive” is hiding 2 lanes",
+    );
+    // Wave V still carries its running lane and its hidden ready lane: the row
+    // count on the band is the visible set, and the empty row is nowhere.
+    expect(doc.querySelectorAll('tr.lane[data-wave="V"]').length).toBe(1);
+    expect(doc.querySelector('tr.empty[data-wave="V"]')).toBeNull();
+    expect(doc.querySelectorAll('tr.empty[data-wave="X"]').length).toBe(1);
+  });
+
+  test("every caller of the page's clock-taking helpers hands over a clock", async () => {
+    // None of these takes a default, and none can: a `nowMs` that defaults to
+    // `Date.now()` lets the row, its header and the campaign bar read three
+    // different instants, which is the drift the single clock in `render` exists
+    // to remove — and an omitted clock fails silently, because `mtimeMs < NaN` is
+    // simply false, so a stalled lane would render as `running` and be counted as
+    // `running` by a header reading a fourth clock. The page defines no globals,
+    // so no caller outside this file can omit it; this pins the call sites in the
+    // file itself.
+    const html = await readFile(PAGE_PATH, "utf8");
+    const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? "";
+    const clockTaking = [
+      "stateCell",
+      "waveMeta",
+      "renderSummaryBar",
+      "laneHiddenByInactive",
+      "isLaneActive",
+      "laneStateCountsOf",
+      "laneStateOf",
+    ];
+    let occurrences = 0;
+    for (const name of clockTaking) {
+      for (const call of script.matchAll(new RegExp(`${name}\\(([^)]*)\\)`, "g"))) {
+        occurrences++;
+        expect(
+          call[1],
+          `${name} must be called with a clock, not a defaulted one`,
+        ).toMatch(/\bnowMs\b/);
+      }
+    }
+    // Each name appears at least as a definition and a call: a helper nobody
+    // calls is not a seam, and this test would then pass on an empty sweep.
+    expect(occurrences).toBeGreaterThanOrEqual(clockTaking.length * 2);
+  });
+
+  test("a localStorage read that throws leaves hide-inactive off, not stuck on", async () => {
+    // The same resilience the sort preference has: an unreadable store is a page
+    // that was never told, which is the honest default — show everything.
+    const page = await loadPage(stateFixture(Date.now()), undefined, {
+      mockStorageError: true,
+    });
+    const toggle = page.window.document.getElementById(
+      "hide-inactive",
+    ) as unknown as HTMLElement;
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(page.window.document.querySelectorAll("tr.lane").length).toBe(11);
+  });
+
   test("a lane whose PR state the derivation cannot name renders as unknown, not as a guess", async () => {
     // The collector does produce `closed` PRs (collect.ts keeps open/merged/
     // closed), and the ranking has no verdict for one — the lane's PR was shut
@@ -3914,9 +4234,15 @@ describe("the status page", () => {
     expect(stagePill!.textContent?.trim()).toBe("stalled");
     expect(stagePill!.classList.contains("warn")).toBe(true);
 
+    // The wave band now rolls up the *derived state* the leading cell renders,
+    // not the reported event the stage cell shows. This lane is `alive: false`
+    // with no PR and no exit, so its state is `vanished`; the stage column still
+    // says `stalled` (its own reported-vs-grace logic). A header that counted
+    // reported events would read "1 stalled" over a row that says "vanished" —
+    // the disagreement this lane exists to remove.
     const meta = doc.querySelector(".wave-meta")?.textContent ?? "";
-    expect(meta).toContain("1 stalled");
-    expect(meta).not.toContain("1 running");
+    expect(meta).toBe("1 lane · 1 vanished");
+    expect(meta).not.toContain("running");
   });
 
   test("a lane that has just emitted started and is not yet visible to pgrep does not read as stalled", async () => {
@@ -3951,9 +4277,14 @@ describe("the status page", () => {
     expect(stagePill!.classList.contains("info")).toBe(true);
     expect(stagePill!.classList.contains("warn")).toBe(false);
 
+    // The stage column reads `started` (within the launch grace), which is the
+    // point of this lane. The band rolls up the derived state, and this lane is
+    // `alive: false` with nothing else to say for it — `vanished` — so the
+    // header says `vanished`, agreeing with the row it sits over rather than
+    // with the reported event the stage cell shows.
     const meta = doc.querySelector(".wave-meta")?.textContent ?? "";
-    expect(meta).toContain("1 running");
-    expect(meta).not.toContain("1 stalled");
+    expect(meta).toBe("1 lane · 1 vanished");
+    expect(meta).not.toContain("stalled");
   });
 
   test("an event emitted outside dispatch-lane.sh is read back correctly by the page", async () => {
@@ -4043,7 +4374,7 @@ describe("the status page", () => {
     expect(findingsCell!.textContent).toContain("3 / 1 / 2");
   });
 
-  test("the wave band exposes eyebrow, id and an outcome rollup inside the accordion button, and aria-controls resolves to that wave's own lane rows", async () => {
+  test("the wave band exposes eyebrow, id and a derived-state rollup inside the accordion button, and aria-controls resolves to that wave's own lane rows", async () => {
     const page = await loadPage(mixedStatus);
     const doc = page.window.document;
     const waveT = doc.querySelector(
@@ -4053,11 +4384,14 @@ describe("the status page", () => {
     expect(button).not.toBeNull();
     expect(button!.querySelector(".wave-eyebrow")?.textContent).toBe("wave");
     expect(button!.querySelector(".wave-id")?.textContent).toBe("T");
+    // The rollup is the derived state, counted the way the rows lead with it, and
+    // asserted exactly: "2 running" would also be satisfied by a roll-up that
+    // printed "12 running", which is the one thing a count must never be. Wave T
+    // is t1 running, t2 failed, t3 running, t4 merged. It is NOT the reported
+    // events (which would say one settled), and that is the whole point: the
+    // header agrees with the rows.
     const meta = button!.querySelector(".wave-meta")?.textContent ?? "";
-    expect(meta).toContain("4 lanes");
-    expect(meta).toContain("1 running");
-    expect(meta).toContain("1 settled");
-    expect(meta).toContain("1 failed");
+    expect(meta).toBe("4 lanes · 1 failed · 2 running · 1 merged");
 
     const controlsId = button!.getAttribute("aria-controls");
     expect(controlsId).toBeTruthy();
