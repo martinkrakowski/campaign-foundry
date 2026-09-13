@@ -226,3 +226,69 @@ replaced lives on only as the operator's fallback copy in the Stage 4 runbook
 (`docs/workflows/delegated-implementation-pipeline.md`). Its premise fence is retired here, in
 the shape `plan:verify` accepts: deleted, not blanked and not left to exit 1 — a stale fence is
 a STALE report, not a closed lane.
+
+---
+
+## 8. V3's first measurement — wave of 2026-09-13
+
+V3 requires threads and verified-real **per bot and per workflow**. This is what the wave produced,
+and what it could not produce.
+
+### Scope
+
+Three PRs — **#369, #370, #371** — dispositioned finding by finding, every verdict verified against
+the branch before it was written. Earlier PRs in the same wave (#363–#368) are **excluded**: their
+dispositions were written as prose and cannot be counted per finding without re-deriving verdicts
+after the fact, which is not measurement.
+
+### Per bot
+
+| Bot | Threads | Verified real | Refuted | Refuted % |
+|---|---|---|---|---|
+| **PR-Agent** (`github-actions[bot]`) | 6 | 0 | 6 | **100 %** |
+| **Qodo** (`qodo-code-review[bot]`) | 7 | 4 | 3 | **43 %** |
+| **CodeRabbit** (`coderabbitai[bot]`) | 0 | 0 | 0 | — (rate limited on all three) |
+
+Qodo's four real findings: the event-only row dropping its gate log (#369, blocking, fixed); the html
+drawer painting the first layer for every dispatched layer (#371, blocking, fixed); and two real
+overflow defects deferred as X10. **Both blocking defects this wave came from Qodo**, and both were
+in the lane's own new code.
+
+PR-Agent's six: two style preferences, two assertions about validation ordering that the code already
+handles, one fallback that would have masked a boundary escape, and one request to draw an asset the
+element vocabulary does not define.
+
+### Per workflow — not recoverable, and that is the finding
+
+The decision rule V3 states is **specifically about the UI and API reviewers, exempting
+Architecture**. That split cannot be made from the artifacts:
+
+- All three PR-Agent workflows post as `github-actions[bot]` with identical formatting and **no
+  workflow marker in the comment body**.
+- Only the check-run list attributes a PR's comments, and only when one workflow ran. **#369** lists
+  UI alone (2 threads, both refuted). **#371** lists Architecture *and* UI, so its 2 threads cannot be
+  split. **#370** lists neither PR-Agent run at all, though it changed both `apps/api/**` and
+  `packages/*/src/**` and carries 2 PR-Agent threads.
+
+So: **2 threads attributable to UI Review (100 % refuted), 4 unattributable (100 % refuted).**
+
+Note that UI Review has **no `paths` filter** — it fires on every PR opened — while API is scoped to
+`apps/api/**` and Architecture to `packages/*/src/**`. That makes UI the highest-volume of the three
+and the one the arithmetic most needs to isolate.
+
+### The decision V3 asks for is not yet takeable
+
+The raw arithmetic (6 of 6 refuted) sits far above the 60 % line, and on this wave's evidence the two
+scoped reviewers look like the cut V-D1 anticipated. **It is still not enough to act on**: n = 6, and
+of those only 2 are attributable to a workflow the rule names. Disabling Architecture by accident —
+the one reviewer the plan exempts because it already passes — is precisely the error the per-workflow
+requirement exists to prevent.
+
+**V3 stays open, and its blocker is a recording gap, not a measurement gap.** The counts must be
+written **at sweep time**, when the sweeper knows which check run produced which thread, rather than
+reconstructed afterwards from artifacts that do not carry the attribution. Until a wave is recorded
+that way, V3 has no arithmetic to run.
+
+One further caution for whoever closes this lane: of PR-Agent's six refutations, **every one was
+refuted with a named mechanism and line numbers**, not with a judgement call — which is the standard
+V-D4 sets. A refuted rate assembled from softer refutations would not support the same decision.
