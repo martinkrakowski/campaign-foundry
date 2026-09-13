@@ -193,12 +193,17 @@ export async function collect(
       // Events are read before the lane logs because a lane's own event `pr`
       // is the preferred join key: the directory that holds a log also holds
       // the events reporting that log's PR, whatever its wave field says.
+      // Every lane an event names is also a lane of this directory — dispatch
+      // through the Agent tool writes events and no lane log at all, and a
+      // lane that reaches no row gets neither the probe nor the PR join.
       const reportedPrByLane = new Map<string, number>();
+      const eventLanes = new Set<string>();
       if (entries.includes("events.jsonl")) {
         try {
           const text = await deps.readFile(join(dir, "events.jsonl"));
           for (const event of readEvents(text).events) {
             events.push(event);
+            eventLanes.add(event.lane);
             if (event.pr !== undefined) reportedPrByLane.set(event.lane, event.pr);
           }
         } catch {
@@ -223,31 +228,26 @@ export async function collect(
           log = undefined;
         }
 
-        let alive = false;
-        try {
-          alive = (await deps.pgrep(pgrepPattern(lane, worktrees))) > 0;
-        } catch {
-          alive = false;
-        }
-
-        const gateName = newestGateLog(entries, lane);
-        let gateLog: string | undefined;
-        if (gateName !== undefined) {
-          try {
-            gateLog = await deps.readFile(join(dir, gateName));
-          } catch {
-            gateLog = undefined;
-          }
-        }
-
         const reportedPr = reportedPrByLane.get(lane);
         lanes.add(lane);
         if (reportedPr !== undefined) reportedPrs.add(reportedPr);
-        const obs: Omit<LaneObservation, "pr"> = {
-          ...(log !== undefined ? { log } : {}),
-          ...(gateLog !== undefined ? { gateLog } : {}),
-          alive,
-        };
+        const obs = await buildObservation(deps, dir, entries, lane, worktrees, log);
+        rows.push({ wave, lane, reportedPr, obs });
+      }
+
+      // The second source: lanes an event named that wrote no log. They are
+      // lanes, so they get the row's observations — the same shared build the
+      // log loop uses, probe, gate and all, and the same PR join every row
+      // goes through. Without this push an event-only lane is merged as
+      // `{ alive: false }` with no probe behind it: a default wearing the
+      // mask of a measurement.
+      const loggedLanes = new Set(laneLogs.map((f) => f.slice(0, -".log".length)));
+      for (const lane of [...eventLanes].sort()) {
+        if (loggedLanes.has(lane)) continue;
+        const obs = await buildObservation(deps, dir, entries, lane, worktrees);
+        const reportedPr = reportedPrByLane.get(lane);
+        lanes.add(lane);
+        if (reportedPr !== undefined) reportedPrs.add(reportedPr);
         rows.push({ wave, lane, reportedPr, obs });
       }
     }
@@ -281,6 +281,45 @@ export async function collect(
   // lane that joined no PR may be a lane whose PR was in an unreadable row.
   // Name the gap so no face of this tool can render it as "no PR".
   return corpus.skipped > 0 ? { ...status, prs: { skipped: corpus.skipped } } : status;
+}
+
+/**
+ * The observation both row sources build: one probe, one gate lookup, one
+ * assembly — so a field one source carries cannot be missing from the other.
+ * Two copies of this block are how an event-only lane lost its gate exit and
+ * its coverage while `gate-<lane>.log` sat beside its events: the loop that
+ * found the lane forgot the lookup the other loop had.
+ */
+async function buildObservation(
+  deps: CollectDeps,
+  dir: string,
+  entries: readonly string[],
+  lane: string,
+  worktrees: readonly string[],
+  log?: LaneObservation["log"],
+): Promise<Omit<LaneObservation, "pr">> {
+  let alive = false;
+  try {
+    alive = (await deps.pgrep(pgrepPattern(lane, worktrees))) > 0;
+  } catch {
+    alive = false;
+  }
+
+  const gateName = newestGateLog(entries, lane);
+  let gateLog: string | undefined;
+  if (gateName !== undefined) {
+    try {
+      gateLog = await deps.readFile(join(dir, gateName));
+    } catch {
+      gateLog = undefined;
+    }
+  }
+
+  return {
+    ...(log !== undefined ? { log } : {}),
+    ...(gateLog !== undefined ? { gateLog } : {}),
+    alive,
+  };
 }
 
 /**

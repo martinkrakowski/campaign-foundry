@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "lane": "S2",
+  "mutations": [
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "            eventLanes.add(event.lane);",
+      "after": "            eventLanes.add(event.wave);",
+      "because": "The second source is built from the event's lane field — that is the whole lane. Read the wave field instead and no event-only lane ever reaches the row table, which is C2 exactly as measured: the live page answering neither 'what is running' nor 'what landed' for the lanes dispatched today.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "        if (loggedLanes.has(lane)) continue;",
+      "after": "        if (loggedLanes.has(`${lane}-quiet`)) continue;",
+      "because": "A lane with both a log and events must keep exactly the row the log loop built. A guard that never fires pushes a second row without the log, the observed map key collides, and the log row is overwritten by the event row — the log lane loses its tail and EXIT marker to its own events, and the probe runs twice.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "  let alive = false;\n  try {\n    alive = (await deps.pgrep(pgrepPattern(lane, worktrees))) > 0;\n  } catch {\n    alive = false;\n  }",
+      "after": "  const alive = true;",
+      "because": "Liveness must be the probe's answer, not the builder's optimism. Hardcode it and every lane — log row and event-only alike — looks alive forever, a default wearing the mask of a measurement. The probe-call assertion sees pgrep was never run.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "    alive = (await deps.pgrep(pgrepPattern(lane, worktrees))) > 0;\n  } catch {\n    alive = false;\n  }",
+      "after": "    alive = (await deps.pgrep(pgrepPattern(lane, worktrees))) > 0;\n  } catch {\n    alive = true;\n  }",
+      "because": "A probe that cannot run shrinks the observation to alive:false — the same shrink the log loop always accepted. Answer true instead and a probe failure is reported as a measurement, the inverse fault of the hardcoded one: the page swears a lane whose process nothing could confirm is running.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "        const obs = await buildObservation(deps, dir, entries, lane, worktrees);\n        const reportedPr = reportedPrByLane.get(lane);\n        lanes.add(lane);\n        if (reportedPr !== undefined) reportedPrs.add(reportedPr);\n        rows.push({ wave, lane, reportedPr, obs });",
+      "after": "        const obs = await buildObservation(deps, dir, entries, lane, worktrees);\n        const reportedPr = reportedPrByLane.get(lane);\n        rows.push({ wave, lane, reportedPr, obs });",
+      "because": "The row is only half of 'shows its PR': the event-only lane must also claim its reported head for the check-runs sweep. Drop the claim and the PR still joins by number but its checks come back none forever — CI state on the page becomes a guess that happens to look like an answer.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "        if (reportedPr !== undefined) reportedPrs.add(reportedPr);\n        rows.push({ wave, lane, reportedPr, obs });",
+      "after": "        if (reportedPr !== undefined) reportedPrs.add(reportedPr);\n        void obs;",
+      "because": "The premise's own claim, mutated: remove the second push and rows again have exactly one source. The event-only lane is back to being merged as { alive: false } with no probe behind it and no PR in front of it — the invisible lane this lane exists to retire.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "        const obs = await buildObservation(deps, dir, entries, lane, worktrees);",
+      "after": "        let alive = false;\n        try {\n          alive = (await deps.pgrep(pgrepPattern(lane, worktrees))) > 0;\n        } catch {\n          alive = false;\n        }\n        const obs: Omit<LaneObservation, \"pr\"> = { alive };",
+      "because": "The remediation itself, mutated: put the event-only row back to its own inline build of obs:{alive} — the shape that shipped. The probe and the PR join survive, the gate lookup does not, so a lane dispatched through the Agent tool loses its gate exit and its coverage while gate-<lane>.log sits beside its events. S2's subject matter, one field further in: a second row source that copies the observation instead of sharing it drifts.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    }
+  ]
+}

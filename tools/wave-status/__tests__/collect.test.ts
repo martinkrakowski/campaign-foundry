@@ -1067,6 +1067,140 @@ describe("collect — the PR-to-lane join", () => {
   });
 });
 
+describe("collect — event-only lanes", () => {
+  test("a lane with events and no log shows its PR and its liveness", async () => {
+    // The shape lanes are dispatched in today: `events.jsonl` and no lane log.
+    // The row used to exist only in the merge's event feed — `{ alive: false }`
+    // with no probe behind it and no PR behind that — so the page answered
+    // neither "what is running" nor "what landed" for it.
+    const seen: string[] = [];
+    const status = await collect(
+      fakeDeps({
+        dirs: { [ROOT]: ["wave-E"], [`${ROOT}/wave-E`]: ["events.jsonl"] },
+        files: {
+          [`${ROOT}/wave-E/events.jsonl`]:
+            '{"ts":"2026-09-12T10:00:00Z","wave":"E","lane":"e1","stage":"implement","event":"settled","pr":350}\n',
+        },
+        pgrep: async (pattern) => {
+          seen.push(pattern);
+          return pattern === "cf-e1(/|$| )" ? 1 : 0;
+        },
+        gh: async (args) => {
+          if (args[0] === "api" && args[1].includes("pulls")) {
+            return JSON.stringify([
+              { number: 350, state: "OPEN", headRefName: "feat/renamed-props", headRefOid: "oidE" },
+            ]);
+          }
+          if (args[0] === "api" && args[1].includes("check-runs")) {
+            return JSON.stringify({
+              check_runs: [{ name: "Build", status: "completed", conclusion: "success" }],
+            });
+          }
+          throw new Error(`unexpected gh call: ${args.join(" ")}`);
+        },
+      }),
+      ROOT,
+      "now",
+    );
+    const lane = status.waves[0]?.lanes[0];
+    expect(lane?.lane).toBe("e1");
+    expect(lane?.reported).toMatchObject({ stage: "implement", event: "settled", pr: 350 });
+    // Liveness is a probe result, not a default: the pattern was run.
+    expect(seen).toEqual(["cf-e1(/|$| )"]);
+    expect(lane?.derived.alive).toBe(true);
+    expect(lane?.derived.log).toBeUndefined();
+    // The event's own pr is the join, and the head it names is claimed for
+    // checks — the branch tail matches nothing here.
+    expect(lane?.derived.pr).toEqual({ number: 350, state: "open", checks: "pass" });
+  });
+
+  test("an event-only lane gets a row; a lane with a log keeps its one row and one probe", async () => {
+    const seen: string[] = [];
+    const status = await collect(
+      fakeDeps({
+        dirs: { [ROOT]: ["wave-F"], [`${ROOT}/wave-F`]: ["f1.log", "events.jsonl"] },
+        files: {
+          [`${ROOT}/wave-F/f1.log`]: "building\n",
+          [`${ROOT}/wave-F/events.jsonl`]:
+            '{"ts":"2026-09-12T10:00:00Z","wave":"F","lane":"f1","stage":"implement","event":"started"}\n' +
+            '{"ts":"2026-09-12T10:01:00Z","wave":"F","lane":"f2","stage":"gate","event":"started"}\n',
+        },
+        pgrep: async (pattern) => {
+          seen.push(pattern);
+          return 0;
+        },
+      }),
+      ROOT,
+      "now",
+    );
+    const lanes = status.waves[0]?.lanes ?? [];
+    expect(lanes.map((lane) => lane.lane)).toEqual(["f1", "f2"]);
+    expect(seen).toEqual(["cf-f1(/|$| )", "cf-f2(/|$| )"]);
+    // The log lane is unchanged by the second source: same row, log intact.
+    expect(lanes[0]?.derived.log?.tail).toBe("building\n");
+    expect(lanes[1]?.derived.log).toBeUndefined();
+  });
+
+  test("a failed probe on an event-only lane still lists the lane, alive:false, and the hang surfaces", async () => {
+    // A probe that cannot run shrinks the observation to `alive: false` — the
+    // same shrink the log loop accepts — but never removes the row: a lane
+    // that reported `started` and cannot be confirmed alive is exactly what
+    // the operator needs to see.
+    const status = await collect(
+      fakeDeps({
+        dirs: { [ROOT]: ["wave-G"], [`${ROOT}/wave-G`]: ["events.jsonl"] },
+        files: {
+          [`${ROOT}/wave-G/events.jsonl`]:
+            '{"ts":"2026-09-12T10:00:00Z","wave":"G","lane":"g1","stage":"implement","event":"started"}\n',
+        },
+        pgrep: async () => {
+          throw new Error("pgrep exploded");
+        },
+      }),
+      ROOT,
+      "now",
+    );
+    const lane = status.waves[0]?.lanes[0];
+    expect(lane?.lane).toBe("g1");
+    expect(lane?.derived.alive).toBe(false);
+    expect(lane?.disagreements).toEqual([
+      "lane says implement started; the process is not alive and the log has no EXIT marker",
+    ]);
+  });
+
+  test("an event-only lane carries its gate log: the exit and the coverage beside the events", async () => {
+    // The gate runs whether or not the lane wrote a log, and it writes
+    // `gate-<lane>.log` into the same directory the events live in. A row
+    // built from the event feed that skips the gate lookup renders the single
+    // most important field — did the gate pass — as empty for exactly the
+    // lanes S2 exists to surface.
+    const status = await collect(
+      fakeDeps({
+        dirs: {
+          [ROOT]: ["wave-H"],
+          [`${ROOT}/wave-H`]: ["events.jsonl", "gate-h1.log", "gate-h1-2.log"],
+        },
+        files: {
+          [`${ROOT}/wave-H/events.jsonl`]:
+            '{"ts":"2026-09-12T10:00:00Z","wave":"H","lane":"h1","stage":"gate","event":"settled"}\n',
+          [`${ROOT}/wave-H/gate-h1.log`]: "GATE EXIT 1\n",
+          [`${ROOT}/wave-H/gate-h1-2.log`]:
+            "Statements   : 100% ( 100/100 )\nBranches     : 100% ( 578/578 )\nFunctions    : 100% ( 20/20 )\nLines        : 100% ( 100/100 )\nGATE EXIT 0\n",
+        },
+      }),
+      ROOT,
+      "now",
+    );
+    const lane = status.waves[0]?.lanes[0];
+    expect(lane?.lane).toBe("h1");
+    expect(lane?.derived.log).toBeUndefined();
+    expect(lane?.derived.gate).toEqual({
+      exit: 0,
+      coverage: { statements: 100, branches: 100, functions: 100, lines: 100 },
+    });
+  });
+});
+
 describe("parseChecks", () => {
   test("an unfinished or conclusion-less Build run is pending", () => {
     expect(
