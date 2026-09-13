@@ -1,0 +1,132 @@
+{
+  "version": 1,
+  "lane": "l11",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/report.ts",
+      "before": "    if (current !== expected) {",
+      "after": "    if (false) {",
+      "because": "The defect this lane fixes, restored: the compare never refuses, so the second of two overlapping merges writes over the first and its entry is gone with no error. This is the 187-of-200 lost-update the lane measured before the guard existed.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/report.test.ts",
+        "apps/api/server/routes/campaigns/__tests__/generate-report-conflict.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/report.ts",
+      "before": "  if (expectedRevision !== undefined) {",
+      "after": "  if (expectedRevision === undefined) {",
+      "because": "The guard inverts: a write that names no revision — every full run, every CLI run, every existing caller — is now refused whenever a report happens to be stored, and the one that names a revision is never checked. The opt-in contract both stores have is that an absent revision means unconditional.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/report.test.ts",
+        "apps/api/server/routes/campaigns/__tests__/generate-report-conflict.test.ts",
+        "apps/api/server/routes/__tests__/routes.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/report.ts",
+      "before": "      (conflict as { revision?: string }).revision = current;",
+      "after": "      (conflict as { revision?: string }).revision = expectedRevision;",
+      "because": "The refusal carries back the revision that just lost instead of the one stored now, so a caller that adopts it retries into the same refusal forever — the stuck-drawer failure L10 fixed in the pool's own commit. The fresh revision is the whole point of carrying one.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/report.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/report.ts",
+      "before": "    return hashBytes(await readFile(path));",
+      "after": "    return hashBytes(Buffer.from(\"stored\", \"utf8\"));",
+      "because": "The revision stops being the digest of the stored bytes and becomes a constant, so every write's base looks unchanged, no merge is ever refused, and the lost update this lane removes is back in full. A revision that is not the bytes is not a revision (D80).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/report.test.ts",
+        "apps/api/server/routes/campaigns/__tests__/generate-report-conflict.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/generate.post.ts",
+      "before": "      expectedRevision = (await reportRevision(outputRoot(), brief.id)) ?? null;",
+      "after": "      expectedRevision = await reportRevision(outputRoot(), brief.id);",
+      "because": "The route hands `undefined` back for a campaign with no stored report, which is the value writeReport reads as “do not check” — so a re-roll that started against no report writes unconditionally and replaces one that appeared while it ran. Absence has to be named, not defaulted.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/generate-report-conflict.test.ts",
+        "apps/api/server/lib/__tests__/report.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/report.ts",
+      "before": "  if (expectedRevision !== undefined) {",
+      "after": "  if (expectedRevision !== undefined && expectedRevision !== null) {",
+      "because": "The absent case is a hole in the guard again: `null` is not an expectation but a value that switches the check off, so the one condition this fix adds — a run that began with no report is refused when one appears — is never evaluated, and the report it never saw is overwritten.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/report.test.ts",
+        "apps/api/server/routes/campaigns/__tests__/generate-report-conflict.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/generate.post.ts",
+      "before": "  const reroll = regenerateOnly !== undefined;\n  let expectedRevision: string | null | undefined;\n  if (reroll) {\n    try {\n      expectedRevision = (await reportRevision(outputRoot(), brief.id)) ?? null;\n    } catch {\n      setResponseStatus(event, 500);\n      return { error: `Could not read the stored report for campaign \"${brief.id}\".` };\n    }\n  }\n\n  // One run per campaign at a time: a double-click or a retry after a poll blip must\n  // not start a second pipeline writing the same output paths and report. The 409\n  // carries the running job's handle (`jobId`) so the second press can adopt the run\n  // in progress and keep polling it — the pipeline really is running, and discarding\n  // it threw away a campaign that succeeded.\n  const claim = await acquireJob(brief.id);",
+      "after": "  const reroll = regenerateOnly !== undefined;\n  let expectedRevision: string | null | undefined;\n  // One run per campaign at a time: a double-click or a retry after a poll blip must\n  // not start a second pipeline writing the same output paths and report. The 409\n  // carries the running job's handle (`jobId`) so the second press can adopt the run\n  // in progress and keep polling it — the pipeline really is running, and discarding\n  // it threw away a campaign that succeeded.\n  const claim = await acquireJob(brief.id);\n  if (reroll) {\n    try {\n      expectedRevision = (await reportRevision(outputRoot(), brief.id)) ?? null;\n    } catch {\n      setResponseStatus(event, 500);\n      return { error: `Could not read the stored report for campaign \"${brief.id}\".` };\n    }\n  }\n",
+      "because": "The revision is read after `acquireJob` again, so a report nobody can read rejects the request with the job already persisted and “running”: the campaign stays claimed, every later request for it answers 409, and the run that would have cleared the claim never starts. The read has to precede the claim it can otherwise orphan.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/generate-report-conflict.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/report.ts",
+      "before": "    return hashBytes(await readFile(path));",
+      "after": "    return hashBytes(Buffer.from(await readFile(path, \"utf8\"), \"utf8\"));",
+      "because": "L10’s pool defect, in the report’s revision: the digest is taken of re-encoded text rather than the stored bytes, so a report whose bytes are not valid UTF-8 — any hand-edited one — hashes to a revision the guard’s own read disagrees with, and every merge over it is refused for a conflict that is not there.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/report.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -240,9 +240,22 @@ makes a read→merge→write atomic on one instance. What the revision buys is t
 whose read has gone stale is now *refused* (409 with the fresh revision) instead of
 silently dropping another writer's edit, which is the prerequisite for the lock ever going.
 
-```premise L11
-# The report merge is an unlocked read-modify-write; guarding it with a lock or
-# revision closes the gap.
-! grep -E -q '^[[:space:]]*((export[[:space:]]+)?(async[[:space:]]+)?function[[:space:]]+with[A-Za-z0-9_]*Lock|(await[[:space:]]+|return[[:space:]]+)?with[A-Za-z0-9_]*Lock\(|(readonly[[:space:]]+)?lock[?:])' apps/api/server/lib/report.ts && \
-! grep -E -q '^[[:space:]]*(readonly[[:space:]]+)?(revision|expectedRevision|getRevision)[?:(]|\bexpectedRevision\b' apps/api/server/lib/report.ts
-```
+**L11 — closed by this lane; no premise is stated.** `writeReport` now takes
+`{ expectedRevision }` and throws `ECONFLICT` carrying the fresh revision when the bytes a
+merge is against are no longer the bytes stored — the conditional write `writePool` and
+`rewriteBrief` already offer — and `reportRevision(root, campaignId)` hands out the digest of
+a campaign's stored report, mirroring `BriefStorePort.getRevision`. The revision is a SHA-256
+of the stored bytes, never a field on the document (D80). `POST /campaigns/generate` captures
+it when a re-roll is accepted — the same read the variation policy-hash pin comes from —
+**before it claims the job**, because a report nobody can read must not leave the claim behind
+it, and passes it through as `null` when no report is stored: `undefined` is what an
+unconditional write passes, so the absent case has to be its own value or a run that began with
+no report would overwrite one that appeared while it ran. A merge whose report moved under the
+run fails the job instead of replacing the run that moved it: two overlapping merges used to both answer 200 with one of
+the two silently gone (187 of 200 pairs, measured before the fix). A full run replaces the
+report outright and folds nothing in, so it still writes unconditionally. **D79 stands for
+reports exactly as it does for briefs and pools**: the compare and the write are not fused on
+a filesystem, so this narrows the race rather than closing it. It also says nothing about
+**L12** — the same measurement left 13 of 200 reports unreadable, because
+`report.ts:195-196` writes both files with `writeFile` and no temp-and-rename; that gap is
+untouched here. A premise for a closed lane is noise.
