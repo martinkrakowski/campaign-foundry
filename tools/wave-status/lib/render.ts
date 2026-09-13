@@ -87,7 +87,13 @@ function livenessCell(lane: LaneStatus): string {
 
 function prCell(lane: LaneStatus): string {
   const pr = lane.derived.pr;
-  return pr === undefined ? ABSENT : `#${pr.number} ${pr.state} ${pr.checks}`;
+  if (pr === undefined) return ABSENT;
+  const head = `#${pr.number} ${pr.state} ${pr.checks}`;
+  // Open PRs always state their thread situation: a count, or `?` for the
+  // one that could not be asked. Merged and closed carry no token — threads
+  // were never their question.
+  if (pr.state !== "open") return head;
+  return `${head} threads:${typeof pr.unresolvedThreads === "number" ? pr.unresolvedThreads : "?"}`;
 }
 
 function gateCell(lane: LaneStatus): string {
@@ -141,10 +147,18 @@ const COLUMNS: readonly Column[] = [
             ? YELLOW
             : pr.checks === "pass"
               ? GREEN
-              : RED;
-      // prCell is `#N state checks`; the final token carries the checks tone.
-      const splitAt = text.lastIndexOf(" ");
-      return `${withCode(state, text.slice(0, splitAt))} ${withCode(checks, text.slice(splitAt + 1))}`;
+              : pr.checks === "fail"
+                ? RED
+                : YELLOW; // unknown: could not ask — a gap that wants a look, not a failure
+      // prCell is `#N state checks[ threads:X]`. The identity and checks
+      // tokens carry the old tones; a thread token joins them — dim for the
+      // measured nothing, yellow for a count and for the `?` of a read that
+      // could not be taken.
+      const tokens = text.split(" ");
+      const head = `${withCode(state, `${tokens[0]} ${tokens[1]}`)} ${withCode(checks, String(tokens[2]))}`;
+      if (tokens[3] === undefined) return head;
+      const threads = String(tokens[3]).endsWith(":0") ? DIM : YELLOW;
+      return `${head} ${withCode(threads, String(tokens[3]))}`;
     },
   },
   {

@@ -246,6 +246,45 @@ describe("renderStatus", () => {
     expect(out).toContain("\x1b[0m"); // reset after every painted span
   });
 
+  test("open PRs carry a thread token; could-not-ask and nothing-to-ask never share a rendering", () => {
+    const out = renderStatus(
+      makeStatus([
+        makeLane("t0", { pr: { number: 1, state: "open", checks: "pass", unresolvedThreads: 0 } }),
+        makeLane("t2", { pr: { number: 2, state: "open", checks: "pass", unresolvedThreads: 3 } }),
+        makeLane("tq", { pr: { number: 3, state: "open", checks: "unknown", unresolvedThreads: "unknown" } }),
+        makeLane("tn", { pr: { number: 4, state: "open", checks: "none" } }),
+        makeLane("tm", { pr: { number: 5, state: "merged", checks: "unknown" } }),
+      ]),
+    );
+    const row = (id: string) => out.split("\n").find((line) => line.includes(`T/${id}`))!;
+    expect(row("t0")).toContain("#1 open pass threads:0");
+    expect(row("t2")).toContain("#2 open pass threads:3");
+    // The checks word and the threads word differ — a reader can tell the two
+    // gaps apart without hovering anything.
+    expect(row("tq")).toContain("#3 open unknown threads:?");
+    // A pre-S3 payload (no thread field on an open PR) renders as unmeasured,
+    // never as silence that looks like zero.
+    expect(row("tn")).toContain("#4 open none threads:?");
+    // Merged: threads were never its question. No token, not a fake zero.
+    expect(row("tm")).toContain("#5 merged unknown");
+    expect(row("tm")).not.toContain("threads:");
+  });
+
+  test("thread and unknown tokens are painted the page's warn, zero threads the page's dim", () => {
+    const out = renderStatus(
+      makeStatus([
+        makeLane("t0", { pr: { number: 1, state: "open", checks: "pass", unresolvedThreads: 0 } }),
+        makeLane("t2", { pr: { number: 2, state: "open", checks: "pass", unresolvedThreads: 3 } }),
+        makeLane("tq", { pr: { number: 3, state: "open", checks: "unknown", unresolvedThreads: "unknown" } }),
+      ]),
+      { color: true },
+    );
+    expect(out).toContain("\x1b[2mthreads:0\x1b[0m");
+    expect(out).toContain("\x1b[33mthreads:3\x1b[0m");
+    expect(out).toContain("\x1b[33munknown\x1b[0m");
+    expect(out).toContain("\x1b[33mthreads:?\x1b[0m");
+  });
+
   test("a truncated coloured line keeps its escapes whole and ends reset", () => {
     const out = renderStatus(makeStatus([makeLane("t1", { alive: true })]), {
       color: true,

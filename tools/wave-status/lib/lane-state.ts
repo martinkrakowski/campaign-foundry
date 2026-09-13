@@ -73,11 +73,29 @@ export function laneState(status: LaneStatus, nowMs: number): LaneState {
   if (derived.pr === undefined) {
     return "vanished";
   }
-  if (derived.pr.state === "open" && (derived.pr.checks === "pending" || derived.pr.checks === "none")) {
-    return "blocked";
-  }
-  if (derived.pr.state === "open" && derived.pr.checks === "pass") {
-    return "ready";
+  // S3's precedence decision for an open PR, stated once here and mirrored by
+  // the page's copy: a *measured* blocker outranks a *missing measurement*,
+  // and neither outranks the existing failed arms. An unresolved review thread
+  // is a counted fact — something is in the way, which is exactly what
+  // `blocked` asserts. `checks: "unknown"` is the opposite assertion — we
+  // could not ask — so it never lands on blocked; nor does it land on ready,
+  // which is earned only by both measurements answering affirmatively
+  // (green checks AND a counted zero threads). A gap on either axis lands on
+  // the word #351 introduced for "no verdict": unknown.
+  if (derived.pr.state === "open") {
+    // Absent means no measurement — a pre-S3 payload — and reads as unknown,
+    // never as the silence of a clean row.
+    const threads = derived.pr.unresolvedThreads ?? "unknown";
+    if (typeof threads === "number" && threads > 0) {
+      return "blocked";
+    }
+    if (derived.pr.checks === "pending" || derived.pr.checks === "none") {
+      return "blocked";
+    }
+    if (derived.pr.checks === "pass" && threads === 0) {
+      return "ready";
+    }
+    return "unknown";
   }
   if (derived.pr.state === "merged") {
     return "merged";

@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "lane": "S3",
+  "mutations": [
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "    let checks: PrChecks = \"unknown\";",
+      "after": "    let checks: PrChecks = \"none\";",
+      "because": "The exact H2 defect, re-masked: `none` means we asked and no Build check has run. Collapse the could-not-ask default back into it and an unasked or unread head reports as a measurement — the discriminating tests (paginated stream, unclaimed open, merged rows) read `none` where the page must be able to tell the two facts apart.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "  if (!isRecord(parsed) || !Array.isArray(parsed.check_runs)) return \"unknown\";",
+      "after": "  if (!isRecord(parsed) || !Array.isArray(parsed.check_runs)) return \"none\";",
+      "because": "A response that cannot be read and an empty list of runs are different facts; the old code called both `none`. Fold the unreadable shape back into `none` and the parseChecks discrimination test — *could not ask* versus *nothing has run yet* — fails, which is the whole split this lane exists to make.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "    ...(fact.unresolvedThreads === undefined\n      ? {}\n      : { unresolvedThreads: fact.unresolvedThreads }),",
+      "after": "    ...(false ? { unresolvedThreads: fact.unresolvedThreads } : {}),",
+      "because": "Drops the thread state from the observation between the corpus and the row: the counts are still collected and then thrown away, so every consumer sees the pre-S3 shape again and a PR with unresolved threads reads as needing nothing with CI green. The thread assertions on a collected row — the lane's headline defect — fail.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/lane-state.ts",
+      "before": "    if (typeof threads === \"number\" && threads > 0) {\n      return \"blocked\";\n    }",
+      "after": "    if (false as boolean) {\n      return \"blocked\";\n    }",
+      "because": "The precedence decision itself: a measured unresolved thread is a counted fact about something standing in the way, and it outranks every other open-PR arm. Remove the arm and green checks plus an open thread read `ready` — the page answers *what is waiting on me* wrongly, which is the question it exists to answer.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/lib/__tests__/lane-state.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/lane-state.ts",
+      "before": "    const threads = derived.pr.unresolvedThreads ?? \"unknown\";",
+      "after": "    const threads = derived.pr.unresolvedThreads ?? 0;",
+      "because": "An absent thread field on an open PR is a pre-S3 payload — no measurement — and defaulting it to zero lets the silence read as the counted clean row: `ready` without evidence. This is the same default-wearing-the-mask-of-a-measurement defect S2 fixed on the liveness side, applied to threads; the no-measurement-is-unknown test fails.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/lib/__tests__/lane-state.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/render.ts",
+      "before": "  return `${head} threads:${typeof pr.unresolvedThreads === \"number\" ? pr.unresolvedThreads : \"?\"}`;",
+      "after": "  return head;",
+      "because": "The terminal face must answer the same question the page does. Drop the thread token and an open PR renders identically whether two threads stand unresolved or the read could not be taken — the distinguishing rendering the brief demands disappears from the CLI.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/lib/__tests__/render.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/public/index.html",
+      "before": "          unknown: \"warn\",",
+      "after": "          unknown: \"dim\",",
+      "because": "The page's copy of the split: `dim` is the tint `none` already wears, and painting *could not ask* with the measured nothing's tone is the masking the lane exists to remove — the pill tests pin unknown to warn, distinct from every pre-S3 value.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "      `q=repo:${repo} is:pr is:open`,",
+      "after": "      `q=repo:${repo} is:pr`,",
+      "because": "The sweep would address closed PRs' threads too — a larger, slower query whose answers the row cannot even use (threads are only an open question), and the search page could fill with closed work, crowding the open PRs out of the single 100-node page. The read-only query test pins the qualifier.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "      threads.pageInfo.hasNextPage === true\n        ? \"unknown\"\n        : threads.nodes.filter(isUnresolvedThread).length,",
+      "after": "      threads.nodes.filter(isUnresolvedThread).length,",
+      "because": "A truncated thread page counted as a count is a lower bound presented as the whole answer — a zero from a page that cut off before the first unresolved thread would read *nothing to ask about* for a PR under heavy review. The truncation test fails.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "    if (!page.hasNextPage || page.endCursor === undefined) return counts;",
+      "after": "    return counts;",
+      "because": "Silently keeps the sweep to one page: open PRs past the first 100 lose their thread state, and an old wave whose repository grew past one page starts reporting unknowns that look like the query failing rather than a short walk. The cursor-continuation test fails.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    }
+  ]
+}

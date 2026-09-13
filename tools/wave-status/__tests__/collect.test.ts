@@ -133,13 +133,38 @@ const TREE: FakeTree = {
   gh: async (args) => {
     if ((args[0] === "api" && args[1].includes("pulls")) || args[0] === "pr") {
       return JSON.stringify([
-        { number: 218, state: "OPEN", headRefName: "feat/t1", headRefOid: "oid1" },
-        { number: 220, state: "OPEN", headRefName: "feat/v3", headRefOid: "oid3" },
-        { number: 221, state: "OPEN", headRefName: "main", headRefOid: "oidX" },
-        { number: 222, state: "DRAFTED", headRefName: "feat/t9", headRefOid: "oidY" },
-        { number: 223, state: "MERGED", headRefName: "feat/w9", headRefOid: "oid9" },
-        { number: 224, state: "CLOSED", headRefName: "feat/w8", headRefOid: "oid8" },
+        { number: 218, state: "OPEN", headRefName: "feat/t1", headRefOid: "oid1", repo: "m/r" },
+        { number: 220, state: "OPEN", headRefName: "feat/v3", headRefOid: "oid3", repo: "m/r" },
+        { number: 221, state: "OPEN", headRefName: "main", headRefOid: "oidX", repo: "m/r" },
+        { number: 222, state: "DRAFTED", headRefName: "feat/t9", headRefOid: "oidY", repo: "m/r" },
+        { number: 223, state: "MERGED", headRefName: "feat/w9", headRefOid: "oid9", repo: "m/r" },
+        { number: 224, state: "CLOSED", headRefName: "feat/w8", headRefOid: "oid8", repo: "m/r" },
       ]);
+    }
+    if (args[0] === "api" && args[1] === "graphql") {
+      // One read-only thread query for every open PR: 218 carries one
+      // unresolved thread, 220 has none outstanding, 221 was left out of the
+      // page on purpose — absent is the same answer as a failed read: unknown.
+      return JSON.stringify({
+        data: {
+          search: {
+            nodes: [
+              {
+                number: 218,
+                reviewThreads: {
+                  pageInfo: { hasNextPage: false },
+                  nodes: [{ isResolved: false }, { isResolved: true }],
+                },
+              },
+              {
+                number: 220,
+                reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [{ isResolved: true }] },
+              },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      });
     }
     if (args[0] === "api") {
       if (args[1].includes("oid1")) {
@@ -177,7 +202,12 @@ describe("collect", () => {
       exit: 0,
       coverage: { statements: 100, branches: 98.5, functions: 100, lines: 99.9 },
     });
-    expect(t1?.derived.pr).toEqual({ number: 218, state: "open", checks: "pending" });
+    expect(t1?.derived.pr).toEqual({
+      number: 218,
+      state: "open",
+      checks: "pending",
+      unresolvedThreads: 1,
+    });
 
     const u2 = status.waves[1]?.lanes[0];
     expect(u2?.lane).toBe("u2");
@@ -191,8 +221,14 @@ describe("collect", () => {
     expect(v3?.lane).toBe("v3");
     expect(v3?.derived.alive).toBe(false);
     expect(v3?.derived.gate).toBeUndefined();
-    // check-runs failed for oid3; the PR is still listed with checks none.
-    expect(v3?.derived.pr).toEqual({ number: 220, state: "open", checks: "none" });
+    // H2: the check-runs read failed for oid3. That is *could not ask*, not
+    // *nothing has run yet* — the two must not share a value (was: none).
+    expect(v3?.derived.pr).toEqual({
+      number: 220,
+      state: "open",
+      checks: "unknown",
+      unresolvedThreads: 0,
+    });
     expect(v3?.reported).toBeUndefined();
   });
 
@@ -772,13 +808,17 @@ describe("prFacts", () => {
     expect(facts[0]).toEqual({
       number: 1000,
       state: "open",
-      checks: "none",
+      // No repo survived the projection, so the thread query could not run,
+      // and the default check-runs stub answers "not json": both are
+      // *could not ask*, never the old `none` that meant four things.
+      checks: "unknown",
+      unresolvedThreads: "unknown",
       branchTail: "lane-0",
     });
     expect(facts[1]).toEqual({
       number: 1,
       state: "merged",
-      checks: "none",
+      checks: "unknown",
       branchTail: "oldest",
     });
   });
@@ -831,12 +871,12 @@ describe("prFacts", () => {
       ]),
     );
     expect(facts).toEqual([
-      { number: 285, state: "merged", checks: "none", branchTail: "h2-hit-testing" },
-      { number: 221, state: "closed", checks: "none", branchTail: "main" },
+      { number: 285, state: "merged", checks: "unknown", branchTail: "h2-hit-testing" },
+      { number: 221, state: "closed", checks: "unknown", branchTail: "main" },
     ]);
   });
 
-  test("open PRs carry their checks; a check-runs failure is none, not a loss", async () => {
+  test("open PRs carry their checks; a check-runs failure is unknown, not none", async () => {
     const { facts } = await prFacts(
       prListDeps(
         [
@@ -848,7 +888,243 @@ describe("prFacts", () => {
         },
       ),
     );
-    expect(facts.map((fact) => fact.checks)).toEqual(["none", "none"]);
+    // 218's check-runs read *throws*: could not ask, which is not the same
+    // fact as "no Build check has run" (none). The default that used to cover
+    // both made a failed read masquerade as a measurement.
+    expect(facts.map((fact) => fact.checks)).toEqual(["unknown", "unknown"]);
+  });
+});
+
+describe("thread state", () => {
+  function threadDeps(opts: {
+    list?: unknown;
+    threads?: (args: readonly string[], page: number) => string;
+    checkRuns?: string;
+  }): { deps: CollectDeps; calls: readonly (readonly string[])[] } {
+    const calls: string[][] = [];
+    let threadPage = 0;
+    const deps = fakeDeps({
+      gh: async (args) => {
+        calls.push([...args]);
+        if (args[0] === "api" && args[1] === "graphql") {
+          threadPage += 1;
+          if (opts.threads === undefined) throw new Error("graphql should not run");
+          return opts.threads(args, threadPage);
+        }
+        if ((args[0] === "api" && args[1].includes("pulls")) || args[0] === "pr") {
+          return JSON.stringify(opts.list ?? []);
+        }
+        return opts.checkRuns ?? '{"check_runs": []}';
+      },
+    });
+    return { deps, calls };
+  }
+  const openRow = (n: number, head = `feat/lane-${n}`) => ({
+    number: n,
+    state: "OPEN",
+    headRefName: head,
+    headRefOid: `o${n}`,
+    repo: "m/r",
+  });
+  const mergedRow = (n: number, head = `feat/lane-${n}`) => ({
+    number: n,
+    state: "MERGED",
+    headRefName: head,
+    headRefOid: `o${n}`,
+    repo: "m/r",
+  });
+  const prNode = (number: number, resolved: boolean[], truncated = false) => ({
+    number,
+    reviewThreads: {
+      pageInfo: { hasNextPage: truncated },
+      nodes: resolved.map((isResolved) => ({ isResolved })),
+    },
+  });
+  const searchPage = (nodes: readonly unknown[], endCursor: string | null = null) =>
+    JSON.stringify({
+      data: {
+        search: { nodes, pageInfo: { hasNextPage: endCursor !== null, endCursor } },
+      },
+    });
+
+  test("thread state for every open PR arrives in ONE query — never a call per PR", async () => {
+    const { deps, calls } = threadDeps({
+      list: [openRow(218), openRow(219), openRow(222), mergedRow(223)],
+      threads: () => searchPage([prNode(218, [false, true]), prNode(219, [true])]),
+    });
+    const { facts } = await prFacts(deps, {
+      lanes: new Set(["lane-218", "lane-219"]),
+      reportedPrs: new Set<number>(),
+    });
+    const threadCalls = calls.filter((args) => args[0] === "api" && args[1] === "graphql");
+    expect(threadCalls).toHaveLength(1);
+    const byNumber = new Map(facts.map((fact) => [fact.number, fact]));
+    // Claimed, answered, unresolved — the count, never the prose.
+    expect(byNumber.get(218)?.unresolvedThreads).toBe(1);
+    // Claimed, answered, nothing outstanding — a DIFFERENT value from unknown.
+    expect(byNumber.get(219)?.unresolvedThreads).toBe(0);
+    // Open but unclaimed for checks: the single thread query still answered
+    // for it — absent from the page, so honestly unknown, never silently zero.
+    expect(byNumber.get(222)?.unresolvedThreads).toBe("unknown");
+    // Merged: threads were never a question for it. No field, not a fake zero.
+    expect(byNumber.get(223)?.unresolvedThreads).toBeUndefined();
+  });
+
+  test("the thread query is a read-only graphql search over open PRs of the listed repo", async () => {
+    const { deps, calls } = threadDeps({
+      list: [openRow(218)],
+      threads: () => searchPage([prNode(218, [])]),
+    });
+    await prFacts(deps);
+    const args = calls.find((call) => call[0] === "api" && call[1] === "graphql")!;
+    const joined = args.join(" ");
+    expect(joined).toContain("repo:m/r is:pr is:open");
+    expect(joined).toContain("reviewThreads");
+    // Read-only: the query asks for nothing that mutates a thread. (`isResolved`
+    // is a field read, not the ResolveReviewThread mutation — hence the word
+    // boundary and the named mutations rather than a bare /resolve/.)
+    expect(joined).not.toMatch(
+      /\bmutation\b|resolveReviewThread|submitReview|updatePullRequest|addPullRequestReview|createReaction/i,
+    );
+  });
+
+  test("a thread query that fails leaves every open PR unknown and the facts intact", async () => {
+    const { deps } = threadDeps({
+      list: [openRow(218), mergedRow(223)],
+      threads: () => {
+        throw new Error("graphql: could not resolve host");
+      },
+    });
+    const { facts } = await prFacts(deps);
+    expect(facts.find((f) => f.number === 218)).toMatchObject({
+      checks: "none",
+      unresolvedThreads: "unknown",
+    });
+    expect(facts.find((f) => f.number === 223)?.unresolvedThreads).toBeUndefined();
+  });
+
+  test("a thread response nothing can read is unknown, not zero, and not a throw", async () => {
+    const bodies = [
+      "not json",
+      "{}",
+      "[]",
+      '{"data":null}',
+      '{"data":{"search":5}}',
+      '{"data":{"search":{}}}',
+      '{"data":{"search":{"nodes":{},"pageInfo":{}}}}',
+      '{"data":{"search":{"nodes":[],"pageInfo":null}}}',
+    ];
+    for (const body of bodies) {
+      const { deps } = threadDeps({ list: [openRow(218)], threads: () => body });
+      const { facts } = await prFacts(deps);
+      expect({ body, threads: facts[0]?.unresolvedThreads }).toEqual({
+        body,
+        threads: "unknown",
+      });
+    }
+  });
+
+  test("a PR whose thread page was truncated is unknown — a partial count is not a count", async () => {
+    const { deps } = threadDeps({
+      list: [openRow(218), openRow(219)],
+      threads: () => searchPage([prNode(218, [false], true), prNode(219, [false, false])]),
+    });
+    const { facts } = await prFacts(deps);
+    const byNumber = new Map(facts.map((f) => [f.number, f]));
+    expect(byNumber.get(218)?.unresolvedThreads).toBe("unknown");
+    expect(byNumber.get(219)?.unresolvedThreads).toBe(2);
+  });
+
+  test("a full thread page continues by cursor — still never a per-PR call", async () => {
+    const { deps, calls } = threadDeps({
+      list: [openRow(218), openRow(219)],
+      threads: (_args, page) =>
+        page === 1
+          ? searchPage([prNode(218, [false])], "cur1")
+          : searchPage([prNode(219, [true, true])]),
+    });
+    const { facts } = await prFacts(deps);
+    const byNumber = new Map(facts.map((f) => [f.number, f]));
+    expect(byNumber.get(218)?.unresolvedThreads).toBe(1);
+    expect(byNumber.get(219)?.unresolvedThreads).toBe(0);
+    const threadCalls = calls.filter((args) => args[0] === "api" && args[1] === "graphql");
+    expect(threadCalls).toHaveLength(2);
+    expect(threadCalls[1]?.join(" ")).toContain("after=cur1");
+  });
+
+  test("a claimed next page with no cursor ends the walk rather than spinning", async () => {
+    const { deps, calls } = threadDeps({
+      list: [openRow(218)],
+      threads: () =>
+        '{"data":{"search":{"nodes":[],"pageInfo":{"hasNextPage":true,"endCursor":null}}}}',
+    });
+    const { facts } = await prFacts(deps);
+    expect(facts[0]?.unresolvedThreads).toBe("unknown");
+    expect(calls.filter((args) => args[1] === "graphql")).toHaveLength(1);
+  });
+
+  test("a malformed search page marks nothing read, and every open PR stays unknown", async () => {
+    const { deps } = threadDeps({
+      list: [openRow(218)],
+      threads: () => '{"data":{"search":{"nodes":[{"number":"218","reviewThreads":{}}],"pageInfo":{}}}}',
+    });
+    const { facts } = await prFacts(deps);
+    expect(facts[0]?.unresolvedThreads).toBe("unknown");
+  });
+
+  test("garbage rows ride along with good ones: non-PR and unreadable nodes are skipped, not fatal", async () => {
+    const { deps } = threadDeps({
+      list: [openRow(218), openRow(219), openRow(222), openRow(223)],
+      threads: () =>
+        searchPage([
+          null,
+          {},
+          {
+            number: 218,
+            reviewThreads: {
+              pageInfo: { hasNextPage: false },
+              // Junk thread entries ride along; only a real isResolved
+              // false counts as unresolved.
+              nodes: [{ isResolved: false }, null, "junk"],
+            },
+          },
+          { number: 219, reviewThreads: { nodes: [{ isResolved: false }] } },
+          { number: 222, reviewThreads: null },
+          { number: 223, reviewThreads: { pageInfo: { hasNextPage: false }, nodes: "nope" } },
+        ]),
+    });
+    const { facts } = await prFacts(deps);
+    const byNumber = new Map(facts.map((f) => [f.number, f]));
+    expect(byNumber.get(218)?.unresolvedThreads).toBe(1);
+    // Shape unreadable — missing pageInfo, null threads, a non-list of
+    // threads — is no count: each stays unknown, and the good row survives.
+    expect(byNumber.get(219)?.unresolvedThreads).toBe("unknown");
+    expect(byNumber.get(222)?.unresolvedThreads).toBe("unknown");
+    expect(byNumber.get(223)?.unresolvedThreads).toBe("unknown");
+  });
+
+  test("no row carried a repo: the query cannot be built, it is not run, opens are unknown", async () => {
+    const { deps, calls } = threadDeps({
+      list: [
+        { number: 218, state: "OPEN", headRefName: "feat/t1", headRefOid: "o" },
+        { number: 220, state: "OPEN", headRefName: "feat/v3", headRefOid: "o", repo: null },
+      ],
+    });
+    const { facts } = await prFacts(deps);
+    expect(calls.some((args) => args[1] === "graphql")).toBe(false);
+    expect(facts.map((f) => f.unresolvedThreads)).toEqual(["unknown", "unknown"]);
+  });
+
+  test("a row whose repo is a number is an unreadable row, counted and skipped", async () => {
+    const corpus = await prFacts(
+      fakeDeps({
+        gh: async () =>
+          JSON.stringify([
+            { number: 218, state: "OPEN", headRefName: "feat/t1", headRefOid: "o", repo: 7 },
+          ]),
+      }),
+    );
+    expect(corpus).toEqual({ facts: [], skipped: 1 });
   });
 });
 
@@ -979,7 +1255,7 @@ describe("collect — the PR-to-lane join", () => {
       "now",
     );
     const row = status.waves[0]?.lanes.find((lane) => lane.lane === "L2a-compositor-layer-list");
-    expect(row?.derived.pr).toEqual({ number: 265, state: "merged", checks: "none" });
+    expect(row?.derived.pr).toEqual({ number: 265, state: "merged", checks: "unknown" });
   });
 
   test("a lane with no event joins by the normalised branch tail", async () => {
@@ -996,7 +1272,7 @@ describe("collect — the PR-to-lane join", () => {
     expect(status.waves[0]?.lanes[0]?.derived.pr).toEqual({
       number: 280,
       state: "merged",
-      checks: "none",
+      checks: "unknown",
     });
   });
 
@@ -1110,8 +1386,14 @@ describe("collect — event-only lanes", () => {
     expect(lane?.derived.alive).toBe(true);
     expect(lane?.derived.log).toBeUndefined();
     // The event's own pr is the join, and the head it names is claimed for
-    // checks — the branch tail matches nothing here.
-    expect(lane?.derived.pr).toEqual({ number: 350, state: "open", checks: "pass" });
+    // checks — the branch tail matches nothing here. No row carried a repo,
+    // so threads could not be asked; that is a value, not a silence.
+    expect(lane?.derived.pr).toEqual({
+      number: 350,
+      state: "open",
+      checks: "pass",
+      unresolvedThreads: "unknown",
+    });
   });
 
   test("an event-only lane gets a row; a lane with a log keeps its one row and one probe", async () => {
@@ -1245,8 +1527,15 @@ describe("parseChecks", () => {
     expect(parseChecks(JSON.stringify({ total_count: 0, check_runs: [] }))).toBe("none");
   });
 
-  test("a payload without check_runs is none", () => {
-    expect(parseChecks(JSON.stringify({}))).toBe("none");
+  test("a payload without a readable check_runs list is unknown, never a silent none", () => {
+    // The read came back but says nothing we can stand on — a different fact
+    // from "the list is empty", which is none. H2: none must mean exactly one
+    // thing: we asked, and no Build check has run.
+    expect(parseChecks(JSON.stringify({}))).toBe("unknown");
+    expect(parseChecks("[]")).toBe("unknown");
+    expect(parseChecks("1")).toBe("unknown");
+    expect(parseChecks("null")).toBe("unknown");
+    expect(parseChecks('{"check_runs": "not a list"}')).toBe("unknown");
   });
 
   test("a run without a name is ignored", () => {
@@ -1255,10 +1544,18 @@ describe("parseChecks", () => {
         JSON.stringify({ check_runs: [{ status: "completed", conclusion: "success" }] }),
       ),
     ).toBe("none");
+    // Junk run entries ride along; a named Build still reads.
+    expect(
+      parseChecks(
+        JSON.stringify({
+          check_runs: [null, "junk", { name: "Build", status: "queued", conclusion: null }],
+        }),
+      ),
+    ).toBe("pending");
   });
 
-  test("bad JSON is none, never a throw", () => {
-    expect(parseChecks("<<<")).toBe("none");
+  test("bad JSON is unknown, never a throw and never a silent none", () => {
+    expect(parseChecks("<<<")).toBe("unknown");
   });
 });
 

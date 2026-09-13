@@ -110,7 +110,9 @@ describe("the PR-to-lane join against a recording of real data", () => {
   test("the event's own pr joins a lane whose branch slug was reworded and no branch could find", async () => {
     const { lanes, fixture } = await recordedFixture();
     const row = lanes.find((lane) => lane.lane === "L2a-compositor-layer-list");
-    expect(row?.derived.pr).toEqual({ number: 265, state: "merged", checks: "none" });
+    // S3: checks the sweep never took are "unknown", not the old overloaded
+    // "none". The join — the point of this fixture — is untouched by it.
+    expect(row?.derived.pr).toEqual({ number: 265, state: "merged", checks: "unknown" });
     expect(fixture.ghPrList.map((entry) => entry.headRefName)).not.toContain(
       "feat/L2a-compositor-layer-list",
     );

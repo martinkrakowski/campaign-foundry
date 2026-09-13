@@ -27,6 +27,23 @@ export interface WaveEvent {
   };
 }
 
+/**
+ * The checks conclusion for a PR head. Since S3, `none` means exactly one
+ * thing: the read was taken and no `Build*` check has run. `unknown` is
+ * *could not ask* — a failed call, a response nothing could parse, or a head
+ * the sweep deliberately did not query (merged, closed, unclaimed). A default
+ * must never wear the mask of a measurement: those were four meanings in one
+ * value before, and a failed read rendered identically to a PR with no CI.
+ */
+export type PrChecks = "none" | "pending" | "pass" | "fail" | "unknown";
+
+/**
+ * The unresolved-review-thread signal: a count (counts and states, never
+ * prose), or `unknown` when the one thread query could not be taken or could
+ * not be read for this PR.
+ */
+export type PrThreadSignal = number | "unknown";
+
 export interface LaneObservation {
   readonly log?: {
     readonly bytes: number;
@@ -38,7 +55,15 @@ export interface LaneObservation {
   readonly pr?: {
     readonly number: number;
     readonly state: "open" | "merged" | "closed";
-    readonly checks: "none" | "pending" | "pass" | "fail";
+    readonly checks: PrChecks;
+    /**
+     * Unresolved review threads, from the single read-only thread query the
+     * sweep runs for every open PR. `prFacts` sets this on every open fact —
+     * a number, or "unknown". Absent means the PR is not open (threads were
+     * never its question) or the payload predates S3; consumers must read an
+     * open PR's absence as "unknown", never as a silent zero.
+     */
+    readonly unresolvedThreads?: PrThreadSignal;
   };
   readonly diff?: {
     readonly files: number;

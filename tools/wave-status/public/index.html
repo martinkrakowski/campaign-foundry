@@ -1665,8 +1665,21 @@
         }
         if (derived.alive) return "running";
         if (derived.pr === undefined) return "vanished";
-        if (derived.pr.state === "open" && (derived.pr.checks === "pending" || derived.pr.checks === "none")) return "blocked";
-        if (derived.pr.state === "open" && derived.pr.checks === "pass") return "ready";
+        // S3's precedence, mirrored from lib/lane-state.ts: a measured
+        // unresolved thread blocks; a checks read that could not be taken is
+        // the word for "no verdict" (unknown), never blocked — blocked asserts
+        // something is in the way, this value asserts we do not know; and
+        // ready is earned only by green checks AND a counted zero threads.
+        if (derived.pr.state === "open") {
+          const threads =
+            derived.pr.unresolvedThreads === undefined
+              ? "unknown"
+              : derived.pr.unresolvedThreads;
+          if (typeof threads === "number" && threads > 0) return "blocked";
+          if (derived.pr.checks === "pending" || derived.pr.checks === "none") return "blocked";
+          if (derived.pr.checks === "pass" && threads === 0) return "ready";
+          return "unknown";
+        }
         if (derived.pr.state === "merged") return "merged";
         // The only PR state left is `closed` — the lane's PR was shut without
         // merging, which is not a verdict this ranking owns. Say the gap rather
@@ -1799,8 +1812,21 @@
           pending: "warn",
           pass: "ok",
           fail: "bad",
+          // Could not ask: warn, not dim — a gap must not render like the
+          // measured nothing that `none` now uniquely means.
+          unknown: "warn",
         }[pr.checks];
-        return `<span class="pr-num">#${esc(pr.number)}</span> ${pill(tone, pr.state)} ${pill(checks, pr.checks)}`;
+        let html = `<span class="pr-num">#${esc(pr.number)}</span> ${pill(tone, pr.state)} ${pill(checks, pr.checks)}`;
+        // Open PRs always state their thread situation: the count of
+        // unresolved threads, or `?` for a read that could not be taken.
+        // Counts and states only — why a thread is open lives in the thread.
+        if (pr.state === "open") {
+          const threads = pr.unresolvedThreads;
+          const label =
+            typeof threads === "number" ? `threads:${threads}` : "threads:?";
+          html += ` ${pill(threads === 0 ? "dim" : "warn", label)}`;
+        }
+        return html;
       }
 
       function gateCell(lane) {

@@ -136,10 +136,90 @@ it("ready", () => {
   const s = makeStatus({
     derived: {
       alive: false,
-      pr: { number: 1, state: "open", checks: "pass" },
+      pr: { number: 1, state: "open", checks: "pass", unresolvedThreads: 0 },
     },
   });
   expect(laneState(s, now)).toBe("ready");
+});
+
+// H1: the fact that separates "CI is green" from "this can merge". A measured
+// unresolved thread blocks, whatever the checks say — ready is earned by both
+// measurements being affirmative, not by one.
+it("green checks with an unresolved review thread is blocked, not ready", () => {
+  const s = makeStatus({
+    derived: {
+      alive: false,
+      pr: { number: 1, state: "open", checks: "pass", unresolvedThreads: 2 },
+    },
+  });
+  expect(laneState(s, now)).toBe("blocked");
+});
+
+it("unresolved threads block while checks are pending too", () => {
+  const s = makeStatus({
+    derived: {
+      alive: false,
+      pr: { number: 1, state: "open", checks: "pending", unresolvedThreads: 1 },
+    },
+  });
+  expect(laneState(s, now)).toBe("blocked");
+});
+
+// S3's precedence decision, stated and pinned: a *measured* blocker outranks
+// a *missing measurement*. "Could not ask" about checks must not hide the
+// threads we did manage to count.
+it("unresolved threads outrank a checks read that could not be taken", () => {
+  const s = makeStatus({
+    derived: {
+      alive: false,
+      pr: { number: 1, state: "open", checks: "unknown", unresolvedThreads: 1 },
+    },
+  });
+  expect(laneState(s, now)).toBe("blocked");
+});
+
+// The other half of the decision: could-not-ask must NOT read as blocked.
+// blocked asserts something is in the way; this value asserts we do not know.
+// It lands on the word #351 introduced for "no verdict" — unknown.
+it("open PR whose checks could not be asked is unknown, not blocked", () => {
+  const s = makeStatus({
+    derived: {
+      alive: false,
+      pr: { number: 1, state: "open", checks: "unknown", unresolvedThreads: 0 },
+    },
+  });
+  expect(laneState(s, now)).toBe("unknown");
+});
+
+it("green checks with an unmeasured thread state is unknown, not ready", () => {
+  const s = makeStatus({
+    derived: {
+      alive: false,
+      pr: { number: 1, state: "open", checks: "pass", unresolvedThreads: "unknown" },
+    },
+  });
+  expect(laneState(s, now)).toBe("unknown");
+});
+
+// An open PR with no thread field at all is a pre-S3 observation (a cached
+// corpus, an older payload). The page and this function both read absence as
+// *no measurement* — unknown, never the ready the field's absence used to
+// imply.
+it("green checks with no thread measurement in the payload is unknown, not ready", () => {
+  const s = makeStatus({
+    derived: { alive: false, pr: { number: 1, state: "open", checks: "pass" } },
+  });
+  expect(laneState(s, now)).toBe("unknown");
+});
+
+it("checks unknown with threads unknown is unknown — two gaps do not make a verdict", () => {
+  const s = makeStatus({
+    derived: {
+      alive: false,
+      pr: { number: 1, state: "open", checks: "unknown", unresolvedThreads: "unknown" },
+    },
+  });
+  expect(laneState(s, now)).toBe("unknown");
 });
 
 it("merged", () => {
@@ -217,7 +297,9 @@ it("laneStateCounts buckets every state once each, keyed by LANE_STATES", () => 
     withLog(makeStatus({ derived: { alive: true } }), now - stallThresholdMs + 1), // running
     makeStatus({ derived: { alive: false } }), // vanished
     makeStatus({ derived: { alive: false, pr: { number: 1, state: "open", checks: "pending" } } }), // blocked
-    makeStatus({ derived: { alive: false, pr: { number: 1, state: "open", checks: "pass" } } }), // ready
+    makeStatus({
+      derived: { alive: false, pr: { number: 1, state: "open", checks: "pass", unresolvedThreads: 0 } },
+    }), // ready
     makeStatus({ derived: { alive: false, pr: { number: 1, state: "merged", checks: "pass" } } }), // merged
     makeStatus({ derived: { alive: false, pr: { number: 1, state: "closed", checks: "none" } } }), // unknown
   ];
