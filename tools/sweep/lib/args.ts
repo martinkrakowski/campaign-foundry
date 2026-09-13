@@ -32,7 +32,9 @@ export const SWEEP_USAGE =
 /** Reads the value that must follow a long option, or fails. */
 function valueAfter(argv: readonly string[], i: number, flag: string): string {
   const raw = argv[i];
-  if (raw === undefined) throw new Error(`missing value for ${flag}\n${SWEEP_USAGE}`);
+  if (raw === undefined || raw.startsWith("--")) {
+    throw new Error(`missing value for ${flag}\n${SWEEP_USAGE}`);
+  }
   return raw;
 }
 
@@ -60,6 +62,9 @@ export function parseSweepArgs(argv: readonly string[]): SweepArgs {
       }
       case "--body": {
         text = valueAfter(argv, ++i, flag);
+        if (text.trim() === "") {
+          throw new Error(`a disposition body must not be blank\n${SWEEP_USAGE}`);
+        }
         break;
       }
       case "--body-file": {

@@ -139,6 +139,104 @@ describe("sweep — the mutation carries the whole class", () => {
     await sweep(plan({ requested: ["PRRT_a"] }), true, { gh: r.gh, out: () => undefined });
     expect((r.calls[1]?.join(" ").match(/resolveReviewThread/g) ?? []).length).toBe(1);
   });
+
+  test("threads on subsequent pages are fetched and recognized", async () => {
+    const calls: string[][] = [];
+    const gh = async (args: readonly string[]): Promise<string> => {
+      calls.push([...args]);
+      if (args.some((a) => a.includes("mutation"))) {
+        return JSON.stringify({
+          data: {
+            addComment: { comment: { url: "https://gh/c" } },
+            resolve0: { thread: { isResolved: true } },
+            resolve1: { thread: { isResolved: true } },
+          },
+        });
+      }
+      if (args.includes("after=cursor_page1")) {
+        return JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                id: "PR_I_1",
+                reviewThreads: {
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                  nodes: [{ id: "PRRT_b", isResolved: false }],
+                },
+              },
+            },
+          },
+        });
+      }
+      return JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              id: "PR_I_1",
+              reviewThreads: {
+                pageInfo: { hasNextPage: true, endCursor: "cursor_page1" },
+                nodes: [{ id: "PRRT_a", isResolved: false }],
+              },
+            },
+          },
+        },
+      });
+    };
+    const result = await sweep(plan(), true, { gh, out: () => undefined });
+    expect(calls).toHaveLength(3);
+    expect(calls[1]).toContain("after=cursor_page1");
+    expect(result.resolvedThreadIds).toEqual(["PRRT_a", "PRRT_b"]);
+  });
+
+  test("a GraphQL error on the mutation refuses rather than reporting success", async () => {
+    const r = recorder(
+      threads(["PRRT_a", false], ["PRRT_b", false]),
+      JSON.stringify({ errors: [{ message: "Write permission denied" }] }),
+    );
+    await expect(sweep(plan(), true, { gh: r.gh, out: () => undefined })).rejects.toThrow(
+      /the mutation on PR #361 returned errors: Write permission denied/,
+    );
+  });
+
+  test("an empty errors array on fetch and mutation is not an error", async () => {
+    const gh = async (args: readonly string[]): Promise<string> => {
+      if (args.some((a) => a.includes("mutation"))) {
+        return JSON.stringify({
+          data: {
+            addComment: { comment: { url: "https://gh/c" } },
+            resolve0: { thread: { isResolved: true } },
+          },
+          errors: [],
+        });
+      }
+      return JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              id: "PR_I_1",
+              reviewThreads: { nodes: [{ id: "PRRT_a", isResolved: false }] },
+            },
+          },
+        },
+        errors: [],
+      });
+    };
+    const result = await sweep(plan({ requested: ["PRRT_a"] }), true, {
+      gh,
+      out: () => undefined,
+    });
+    expect(result.commentUrl).toBe("https://gh/c");
+  });
+
+  test("a mutation GraphQL error without a message refuses with unknown GraphQL error", async () => {
+    const r = recorder(
+      threads(["PRRT_a", false]),
+      JSON.stringify({ errors: [{}] }),
+    );
+    await expect(sweep(plan({ requested: ["PRRT_a"] }), true, { gh: r.gh, out: () => undefined })).rejects.toThrow(
+      /unknown GraphQL error/,
+    );
+  });
 });
 
 describe("classBody and dispositionMutation", () => {

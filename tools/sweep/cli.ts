@@ -34,6 +34,9 @@ export async function runCli(io: SweepCliIo): Promise<number> {
     const args = parseSweepArgs(rest);
     const disposition =
       "text" in args.body ? args.body.text : await io.readFile(args.body.file);
+    if (disposition.trim() === "") {
+      throw new Error(`a disposition body must not be blank\n${SWEEP_USAGE}`);
+    }
     plan = { pr: args.pr, requested: args.threadIds, disposition };
     post = args.post;
   } catch (error) {
@@ -43,11 +46,13 @@ export async function runCli(io: SweepCliIo): Promise<number> {
   try {
     const result = await sweep(plan, post, { gh: io.gh, out: io.log });
     if (!post) return 0;
-    io.log(
-      result.commentUrl === null
-        ? "the comment did not report a url; re-check the PR before trusting the resolves."
-        : `class disposed: ${result.commentUrl}`,
-    );
+    if (result.commentUrl === null) {
+      io.logError(
+        "the comment did not report a url; re-check the PR before trusting the resolves.",
+      );
+      return 1;
+    }
+    io.log(`class disposed: ${result.commentUrl}`);
     const unresolved = plan.requested.filter((id) => !result.resolvedThreadIds.includes(id));
     if (unresolved.length > 0) {
       io.logError(

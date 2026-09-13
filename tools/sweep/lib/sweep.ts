@@ -10,11 +10,15 @@ import { SweepRefusal } from "./types.js";
  * refuses if one is missing. The `id` of the pull request is fetched with
  * it because `addComment` needs the PR's node id as its subject.
  */
-export const THREADS_QUERY = `query SweepThreads($number: Int!) {
+export const THREADS_QUERY = `query SweepThreads($number: Int!, $after: String) {
   repository(owner: "martinkrakowski", name: "campaign-foundry") {
     pullRequest(number: $number) {
       id
-      reviewThreads(first: 100) {
+      reviewThreads(first: 100, after: $after) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
         nodes { id isResolved }
       }
     }
@@ -108,31 +112,47 @@ export async function sweep(
   post: boolean,
   deps: SweepDeps,
 ): Promise<SweepResult> {
-  const raw = await deps.gh([
-    "api",
-    "graphql",
-    "-f",
-    `query=${THREADS_QUERY}`,
-    // `-F`, not `-f`: gh sends `-f number=361` as the *string* "361", which
-    // GraphQL refuses for the query's `Int!` variable — every real fetch fails
-    // while a stubbed gh sails on. edges.test.ts pins the flag the call makes.
-    "-F",
-    `number=${plan.pr}`,
-  ]);
-  const reply = JSON.parse(raw) as SweepReply;
-  const errorReasons = reply.errors?.map((e) => String(e.message ?? "unknown GraphQL error"));
-  if (errorReasons !== undefined) {
-    throw new SweepRefusal(
-      `the fetch of PR #${plan.pr} returned errors: ${errorReasons.join("; ")}`,
-      errorReasons,
-    );
-  }
-  const pull = reply.data?.repository?.pullRequest;
-  const prId = pull?.id;
-  const fetched: readonly ThreadState[] = (pull?.reviewThreads?.nodes ?? []).map((n) => ({
-    id: String(n.id),
-    isResolved: n.isResolved === true,
-  }));
+  let cursor: string | null = null;
+  let prId: string | undefined;
+  const fetched: ThreadState[] = [];
+
+  do {
+    const ghArgs = [
+      "api",
+      "graphql",
+      "-f",
+      `query=${THREADS_QUERY}`,
+      // `-F`, not `-f`: gh sends `-f number=361` as the *string* "361", which
+      // GraphQL refuses for the query's `Int!` variable — every real fetch fails
+      // while a stubbed gh sails on. edges.test.ts pins the flag the call makes.
+      "-F",
+      `number=${plan.pr}`,
+    ];
+    if (cursor !== null) {
+      ghArgs.push("-f", `after=${cursor}`);
+    }
+    const raw = await deps.gh(ghArgs);
+    const reply = JSON.parse(raw) as SweepReply;
+    const errorReasons = reply.errors?.map((e) => String(e.message ?? "unknown GraphQL error"));
+    if (errorReasons !== undefined && errorReasons.length > 0) {
+      throw new SweepRefusal(
+        `the fetch of PR #${plan.pr} returned errors: ${errorReasons.join("; ")}`,
+        errorReasons,
+      );
+    }
+    const pull = reply.data?.repository?.pullRequest;
+    if (pull?.id !== undefined && prId === undefined) {
+      prId = pull.id;
+    }
+    for (const n of pull?.reviewThreads?.nodes ?? []) {
+      fetched.push({
+        id: String(n.id),
+        isResolved: n.isResolved === true,
+      });
+    }
+    const pageInfo = pull?.reviewThreads?.pageInfo;
+    cursor = pageInfo?.hasNextPage && pageInfo.endCursor ? pageInfo.endCursor : null;
+  } while (cursor !== null);
 
   const problems: string[] = [];
   const ids: string[] = [];
@@ -179,7 +199,15 @@ export async function sweep(
   args.push("-f", `subject=${prId}`, "-f", `body=${body}`);
   const written = JSON.parse(await deps.gh(args)) as {
     readonly data?: Record<string, unknown>;
+    readonly errors?: readonly { readonly message?: string }[];
   };
+  const writeErrors = written.errors?.map((e) => String(e.message ?? "unknown GraphQL error"));
+  if (writeErrors !== undefined && writeErrors.length > 0) {
+    throw new SweepRefusal(
+      `the mutation on PR #${plan.pr} returned errors: ${writeErrors.join("; ")}`,
+      writeErrors,
+    );
+  }
   const data = written.data ?? {};
   const comment = (data["addComment"] as { comment?: { url?: string } } | undefined)?.comment;
   const resolvedIds = ids.filter((_, i) => {

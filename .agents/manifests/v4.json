@@ -121,6 +121,66 @@
         "tools/sweep/__tests__/cli.test.ts"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/cli.ts",
+      "before": "    if (result.commentUrl === null) {",
+      "after": "    if (false) {",
+      "because": "A comment that failed to post must fail the command rather than reporting success: exiting 0 when the comment failed leaves the reviewer's finding marked handled on GitHub without the explanation on the timeline. Caught by the CLI test asserting exit code 1 when commentUrl is null.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/cli.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/sweep.ts",
+      "before": "  if (writeErrors !== undefined && writeErrors.length > 0) {",
+      "after": "  if (false) {",
+      "because": "Ignoring GraphQL errors on the write mutation produces silent false-success: the mutation fails on the server while the tool reports the class disposed. Caught by the mutation error test asserting a refusal.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/sweep.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/args.ts",
+      "before": "  if (raw === undefined || raw.startsWith(\"--\")) {",
+      "after": "  if (raw === undefined) {",
+      "because": "Consuming the next flag as a value (e.g. --pr --thread or --thread --body) quietly accepts malformed invocations and corrupts parsed arguments rather than halting with a missing-value error. Caught by the argument test asserting missing value for flag.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/args.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/sweep.ts",
+      "before": "    cursor = pageInfo?.hasNextPage && pageInfo.endCursor ? pageInfo.endCursor : null;",
+      "after": "    cursor = null;",
+      "because": "Truncating thread retrieval at page one silently excludes threads past the 100-thread boundary, falsely reporting open threads as nonexistent. Caught by the multi-page fetch test asserting threads on subsequent pages are accumulated and recognized.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/sweep.test.ts"
+      ],
+      "verdict": "caught"
     }
   ]
 }

@@ -110,7 +110,7 @@ describe("runCli", () => {
   });
 
   test("a comment posted without a url is called out, not trusted", async () => {
-    const { io, log } = ok({
+    const { io, err } = ok({
       argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--thread", "PRRT_b", "--body", "x", "--post"],
       gh: async (args) =>
         args.some((a) => a.includes("mutation"))
@@ -136,8 +136,17 @@ describe("runCli", () => {
               },
             }),
     });
-    expect(await runCli(io)).toBe(0);
-    expect(log.join("\n")).toContain("did not report a url");
+    expect(await runCli(io)).toBe(1);
+    expect(err.join("\n")).toContain("did not report a url");
+  });
+
+  test("a blank body-file is refused with exit 2", async () => {
+    const { io, err } = ok({
+      argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--body-file", "empty.md"],
+      readFile: async () => "   \n\t  ",
+    });
+    expect(await runCli(io)).toBe(2);
+    expect(err.join("\n")).toContain("a disposition body must not be blank");
   });
 
   test("a thread that did not come back resolved is a failed sweep", async () => {

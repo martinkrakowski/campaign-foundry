@@ -77,6 +77,22 @@ describe("parseSweepArgs", () => {
     }
   });
 
+  test("an option followed by another flag is a missing-value error, not consumed as a value", () => {
+    expect(() => parseSweepArgs(["--pr", "--thread", "PRRT_a"])).toThrow(/missing value for --pr/);
+    expect(() => parseSweepArgs(["--pr", "123", "--thread", "--body", "x"])).toThrow(
+      /missing value for --thread/,
+    );
+  });
+
+  test("an empty or whitespace-only --body is refused", () => {
+    expect(() => parseSweepArgs(["--pr", "9", "--thread", "a", "--body", ""])).toThrow(
+      /body must not be blank/,
+    );
+    expect(() => parseSweepArgs(["--pr", "9", "--thread", "a", "--body", "   \t\n"])).toThrow(
+      /body must not be blank/,
+    );
+  });
+
   test("an unknown argument is refused, with the usage line", () => {
     const message = (() => {
       try {

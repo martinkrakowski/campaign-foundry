@@ -14,6 +14,10 @@ export interface PullRequestShape {
       readonly pullRequest?: {
         readonly id?: string;
         readonly reviewThreads?: {
+          readonly pageInfo?: {
+            readonly hasNextPage?: boolean;
+            readonly endCursor?: string | null;
+          };
           readonly nodes?: readonly { readonly id: string; readonly isResolved: boolean }[];
         };
       };
