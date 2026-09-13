@@ -11,18 +11,22 @@ import { nodeCryptoPolicyHasher } from "@campaignfoundry/CampaignOrchestration/i
 import { err, ok, type Result } from "@campaignfoundry/shared";
 import { motionRatiosFor } from "./platform-zones.js";
 import { getPoolStore } from "./ports/index.js";
-import { InvalidCopyPoolError } from "./ports/pool-store.port.js";
+import { InvalidCopyPoolError, type StoredPool } from "./ports/pool-store.port.js";
 
-export { copyPoolProblem, InvalidCopyPoolError, isCopyPool } from "./ports/pool-store.port.js";
+export { copyPoolProblem, InvalidCopyPoolError, isCopyPool, type StoredPool } from "./ports/pool-store.port.js";
 
 /** Read `briefs/<briefId>/pools.json` through the pool store port; undefined when absent. */
-export async function readPool(briefId: string): Promise<CopyPool | undefined> {
+export async function readPool(briefId: string): Promise<StoredPool | undefined> {
   return getPoolStore().readPool(briefId);
 }
 
-/** Write the pool through the pool store port — an atomic replace of `briefs/<pool.briefId>/pools.json`. */
-export async function writePool(pool: CopyPool): Promise<void> {
-  await getPoolStore().writePool(pool);
+/**
+ * Write the pool through the pool store port — an atomic replace of
+ * `briefs/<pool.briefId>/pools.json`, conditional when `expectedRevision` is
+ * given: a stale one is refused with `ECONFLICT` carrying the fresh revision.
+ */
+export async function writePool(pool: CopyPool, options?: { expectedRevision?: string }): Promise<StoredPool> {
+  return getPoolStore().writePool(pool, options);
 }
 
 /** Copy `briefs/<fromBriefId>/pools.json` to `briefs/<toBriefId>/`, rewritten to name the destination. */
@@ -70,8 +74,9 @@ export async function planInputFor(brief: CampaignBrief): Promise<Result<PlanInp
   const ratios = requested === undefined ? {} : { ratios: requested };
   if (!wantsHeadlinePool(brief)) return ok({ ...ratios, ...motion });
   try {
-    const pool = await readPool(brief.id);
-    return ok({ ...ratios, headlines: pool ? approvedTexts(pool) : [], ...motion });
+    const stored = await readPool(brief.id);
+    const headlines = stored ? approvedTexts(stored.pool) : [];
+    return ok({ ...ratios, headlines, ...motion });
   } catch (error) {
     if (error instanceof InvalidCopyPoolError) return err(error);
     throw error;

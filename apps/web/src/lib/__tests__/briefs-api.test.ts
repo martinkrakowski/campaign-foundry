@@ -435,7 +435,14 @@ describe("copy pool calls", () => {
       expect(url).toBe(`${API}/campaigns/pools/camp%2Fx`);
       return json({ pool });
     });
-    expect(await getPool("camp/x")).toEqual(pool);
+    expect(await getPool("camp/x")).toEqual({ pool });
+
+    mockFetch(() => json({ pool, revision: "abc123" }));
+    // The revision rides along: it is what the next write guards itself with.
+    expect(await getPool("camp")).toEqual({ pool, revision: "abc123" });
+
+    mockFetch(() => json({ pool, revision: 42 }));
+    expect(await getPool("camp")).toEqual({ pool });
 
     mockFetch(() => json({ error: "nope" }, 404));
     expect(await getPool("camp")).toBeNull();
@@ -485,6 +492,12 @@ describe("copy pool calls", () => {
       status: 503,
       message: "OPENROUTER_API_KEY is not set",
     });
+
+    mockFetch((url) => {
+      expect(url).toBe(`${API}/campaigns/pools/copy?revision=rev-1`);
+      return json({ pool, revision: "rev-2", added: 1 }, 201);
+    });
+    expect(await generatePool(brief, 10, { revision: "rev-1" })).toEqual({ pool, revision: "rev-2", added: 1 });
   });
 
   test("patchPool sends entries and returns the updated pool", async () => {
@@ -495,7 +508,13 @@ describe("copy pool calls", () => {
       expect(JSON.parse(String(init.body))).toEqual({ entries });
       return json({ pool });
     });
-    expect(await patchPool("camp", entries)).toEqual(pool);
+    expect(await patchPool("camp", entries)).toEqual({ pool });
+
+    mockFetch((url) => {
+      expect(url).toBe(`${API}/campaigns/pools/camp%2Fx?revision=rev-1`);
+      return json({ pool, revision: "rev-2" });
+    });
+    expect(await patchPool("camp/x", entries, { revision: "rev-1" })).toEqual({ pool, revision: "rev-2" });
   });
 });
 

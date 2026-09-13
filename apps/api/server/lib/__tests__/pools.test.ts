@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,9 +43,12 @@ describe("copy pool persistence", () => {
   test("writePool then readPool round-trips JSON under briefs/<id>/pools.json", async () => {
     const { writePool, readPool } = await filesFor(dir);
     const value = pool();
-    await writePool(value);
-    expect(await readPool("camp")).toEqual(value);
-    expect(JSON.parse(readFileSync(join(dir, "briefs", "camp", "pools.json"), "utf8"))).toEqual(value);
+    const stored = await writePool(value);
+    expect((await readPool("camp"))?.pool).toEqual(value);
+    const raw = readFileSync(join(dir, "briefs", "camp", "pools.json"), "utf8");
+    expect(JSON.parse(raw)).toEqual(value);
+    expect(stored.revision).toBe(createHash("sha256").update(raw).digest("hex"));
+    expect((await readPool("camp"))?.revision).toBe(stored.revision);
   });
 
   test("readPool returns undefined when the file is missing", async () => {
@@ -76,7 +80,7 @@ describe("copy pool persistence", () => {
     const { writePool, readPool } = await filesFor(dir);
     await writePool(pool());
     await writePool(pool({ entries: [{ id: "h2", text: "Stay hydrated", status: "approved" }] }));
-    expect(await readPool("camp")).toMatchObject({ entries: [{ id: "h2" }] });
+    expect(await readPool("camp")).toMatchObject({ pool: { entries: [{ id: "h2" }] } });
     expect(readdirSync(join(dir, "briefs", "camp"))).toEqual(["pools.json"]);
   });
 
@@ -172,7 +176,7 @@ describe("copy pool persistence", () => {
       writePool(pool()),
       writePool(pool({ entries: [{ id: "h2", text: "Stay hydrated", status: "approved" }] })),
     ]);
-    expect((await readPool("camp"))?.entries).toHaveLength(1);
+    expect((await readPool("camp"))?.pool.entries).toHaveLength(1);
     expect(readdirSync(join(dir, "briefs", "camp"))).toEqual(["pools.json"]);
   });
 

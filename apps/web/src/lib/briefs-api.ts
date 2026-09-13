@@ -454,20 +454,33 @@ export interface PoolEntryPatch {
   text?: string;
 }
 
+/**
+ * A pool as the API stores it, with the revision of the bytes it was read from
+ * (API E1.0, for pools). Absent on a host that predates it.
+ */
+export interface StoredPool {
+  pool: CopyPool;
+  revision?: string;
+}
+
 /** Default suggestion batch for POST /campaigns/pools/copy (the API's own default). */
 export const POOL_SUGGESTION_COUNT = 10;
 
-function asPool(data: unknown): CopyPool {
+function asStoredPool(data: unknown): StoredPool {
   if (typeof data !== "object" || data === null) throw new BriefsApiError("Invalid response", 200);
   const pool = (data as { pool?: unknown }).pool;
   if (typeof pool !== "object" || pool === null || !Array.isArray((pool as { entries?: unknown }).entries)) {
     throw new BriefsApiError("Invalid response", 200);
   }
-  return pool as CopyPool;
+  const revision = (data as { revision?: unknown }).revision;
+  return typeof revision === "string" ? { pool: pool as CopyPool, revision } : { pool: pool as CopyPool };
 }
 
-/** The brief's copy pool; 404 (nothing generated yet) is `null`, not an error. */
-export async function getPool(briefId: string, signal?: AbortSignal): Promise<CopyPool | null> {
+/**
+ * The brief's copy pool and its revision; 404 (nothing generated yet) is `null`,
+ * not an error. The revision is what the next write guards itself with.
+ */
+export async function getPool(briefId: string, signal?: AbortSignal): Promise<StoredPool | null> {
   let res: Response;
   try {
     res = await fetch(`${API}/campaigns/pools/${encodeURIComponent(briefId)}`, { signal });
@@ -479,7 +492,7 @@ export async function getPool(briefId: string, signal?: AbortSignal): Promise<Co
   if (!res.ok) {
     throw new BriefsApiError(errorFrom(data, `Request failed (HTTP ${res.status})`), res.status);
   }
-  return asPool(data);
+  return asStoredPool(data);
 }
 
 /**
@@ -487,19 +500,35 @@ export async function getPool(briefId: string, signal?: AbortSignal): Promise<Co
  * The brief is sent inline — the model needs its products and message, and the
  * pool is stored under `brief.id` — so the wizard can generate before Save.
  * Without OPENROUTER_API_KEY the API answers 503 — surfaced as a BriefsApiError.
+ * `opts.revision` guards the merge: a stale one is a 409 carrying the fresh
+ * revision, so a concurrent edit is not silently overwritten.
  */
 export async function generatePool(
   brief: CampaignBrief,
   count = POOL_SUGGESTION_COUNT,
-): Promise<{ pool: CopyPool; added: number }> {
-  const data = await requestJson(`${API}/campaigns/pools/copy`, jsonInit("POST", { brief, count }));
+  opts: { revision?: string } = {},
+): Promise<StoredPool & { added: number }> {
+  const query = opts.revision ? `?revision=${encodeURIComponent(opts.revision)}` : "";
+  const data = await requestJson(`${API}/campaigns/pools/copy${query}`, jsonInit("POST", { brief, count }));
   const added = (data as { added?: unknown }).added;
-  return { pool: asPool(data), added: typeof added === "number" ? added : 0 };
+  return { ...asStoredPool(data), added: typeof added === "number" ? added : 0 };
 }
 
-/** Approve / reject / edit pool entries by id. */
-export async function patchPool(briefId: string, entries: readonly PoolEntryPatch[]): Promise<CopyPool> {
-  return asPool(
-    await requestJson(`${API}/campaigns/pools/${encodeURIComponent(briefId)}`, jsonInit("PATCH", { entries })),
+/**
+ * Approve / reject / edit pool entries by id. `opts.revision` guards the write:
+ * a stale one is a 409 carrying the fresh revision, so a concurrent edit is not
+ * silently overwritten.
+ */
+export async function patchPool(
+  briefId: string,
+  entries: readonly PoolEntryPatch[],
+  opts: { revision?: string } = {},
+): Promise<StoredPool> {
+  const query = opts.revision ? `?revision=${encodeURIComponent(opts.revision)}` : "";
+  return asStoredPool(
+    await requestJson(
+      `${API}/campaigns/pools/${encodeURIComponent(briefId)}${query}`,
+      jsonInit("PATCH", { entries }),
+    ),
   );
 }

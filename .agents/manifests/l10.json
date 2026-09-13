@@ -1,0 +1,143 @@
+{
+  "version": 1,
+  "lane": "l10",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/fs-pool-store.ts",
+      "before": "      if (current !== options.expectedRevision) {",
+      "after": "      if (false) {",
+      "because": "The defect this lane fixes, restored: every write succeeds whatever revision the caller read, so the second of two overlapping read-modify-write sequences overwrites the first and its edit is gone with no error. The unconditional write is exactly what the ECONFLICT guard replaces.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-pool-store.test.ts",
+        "apps/api/server/routes/campaigns/pools/__tests__/pools.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/pools/[briefId].patch.ts",
+      "before": "      if (!isErrno(error, \"ECONFLICT\")) throw error;",
+      "after": "      if (false) throw error;",
+      "because": "Every write failure becomes a 409 with the pool's current revision, so a disk error is reported to HITL as 'someone else edited this' \u2014 the route would claim a conflict it never detected. The 500-vs-409 split is what the read-only-directory test pins.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/pools/__tests__/pools.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/pools/[briefId].get.ts",
+      "before": "  return { pool: stored.pool, revision: stored.revision };",
+      "after": "  return { pool: stored.pool };",
+      "because": "GET stops handing out the revision, so no caller can ever send one and the conditional write on the port is unreachable from the web client \u2014 the revision would exist on the port and nowhere else.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/pools/__tests__/pools.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/briefs-api.ts",
+      "before": "  const query = opts.revision ? `?revision=${encodeURIComponent(opts.revision)}` : \"\";\n  return asStoredPool(",
+      "after": "  const query = \"\";\n  return asStoredPool(",
+      "because": "The client reads the revision and then never sends it back, so the server's guard never sees one: the conditional write is decorative and the lost update this lane removes survives the whole feature.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/briefs-api.test.ts",
+        "apps/web/src/components/campaign/__tests__/headline-pool-drawer.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/HeadlinePoolDrawer.tsx",
+      "before": "        if (conflict !== undefined) setRevision(conflict);",
+      "after": "        if (false) setRevision(conflict);",
+      "because": "A refused write's fresh revision is read and then dropped, so every retry re-sends the revision that just lost, is refused again, and keeps being refused: the drawer stays stuck on its load-time revision until the user reloads the page. The 409 body carries the revision precisely so the next attempt can answer it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/headline-pool-drawer.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/HeadlinePoolDrawer.tsx",
+      "before": "      if (loadGeneration.current !== generation) return false;",
+      "after": "      if (false) return false;",
+      "because": "A late write installs its revision whatever happened while it was in flight, so one that lands after a reopen \u2014 or after the reload a brief switch starts \u2014 overwrites the revision that load installed with a stale one, and the next edit is refused against bytes that are already gone.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/headline-pool-drawer.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/pools/[briefId].patch.ts",
+      "before": "        error: \"Headline pool was modified by another user.\",",
+      "after": "        error: \"Copy pool was modified by another user.\",",
+      "because": "PATCH's conflict goes back to naming the internal type in a sentence an editor reads, and stops saying the same thing as POST's: the two routes answer one condition with two different words for it, and one of them is domain jargon.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/pools/__tests__/pools.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/pools/copy.post.ts",
+      "before": "        error: \"Headline pool was modified by another user.\",",
+      "after": "        error: \"Copy pool was modified by another user.\",",
+      "because": "POST's conflict goes back to naming the internal type: the sentence an editor reads is the domain object's name rather than the 'Headline Pool' the drawer is titled, and it drifts from the wording the sibling route was given.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/pools/__tests__/pools.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-pool-store.ts",
+      "before": "    return { pool, revision: hashBytes(bytes) };",
+      "after": "    return { pool, revision: hashBytes(Buffer.from(raw, \"utf8\")) };",
+      "because": "readPool's revision goes back to being the digest of a re-encoding of the decoded text instead of the stored bytes. For a file whose bytes are not valid UTF-8 \u2014 the only file where the round-trip is not the identity \u2014 it then disagrees with the digest writePool's guard computes, and a hand-edited pool is reported as a conflict no write can clear.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-pool-store.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
