@@ -97,15 +97,6 @@ omitted this and S1 would have hit it first.
 
 ## 7. Premises
 
-```premise S2
-# Rows have exactly one source: the lane-log loop. An event-only lane therefore
-# never reaches the PR attachment or the liveness probe. S2 adds a second source
-# and a second push; until it does, there is one.
-# Probing the count rather than the loop header, because the header is a name
-# (`laneLogs`) and a rename would retire a live lane.
-test "$(grep -c 'rows.push(' tools/wave-status/lib/collect.ts)" = "1"
-```
-
 ```premise S3
 # Thread state is never requested, and the checks union still carries no value
 # for "could not ask". Either landing flips it.

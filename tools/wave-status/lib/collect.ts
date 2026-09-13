@@ -193,12 +193,17 @@ export async function collect(
       // Events are read before the lane logs because a lane's own event `pr`
       // is the preferred join key: the directory that holds a log also holds
       // the events reporting that log's PR, whatever its wave field says.
+      // Every lane an event names is also a lane of this directory — dispatch
+      // through the Agent tool writes events and no lane log at all, and a
+      // lane that reaches no row gets neither the probe nor the PR join.
       const reportedPrByLane = new Map<string, number>();
+      const eventLanes = new Set<string>();
       if (entries.includes("events.jsonl")) {
         try {
           const text = await deps.readFile(join(dir, "events.jsonl"));
           for (const event of readEvents(text).events) {
             events.push(event);
+            eventLanes.add(event.lane);
             if (event.pr !== undefined) reportedPrByLane.set(event.lane, event.pr);
           }
         } catch {
@@ -249,6 +254,26 @@ export async function collect(
           alive,
         };
         rows.push({ wave, lane, reportedPr, obs });
+      }
+
+      // The second source: lanes an event named that wrote no log. They are
+      // lanes, so they get the row's observations — the same liveness probe
+      // the log loop runs and the same PR join every row goes through. Without
+      // this push an event-only lane is merged as `{ alive: false }` with no
+      // probe behind it: a default wearing the mask of a measurement.
+      const loggedLanes = new Set(laneLogs.map((f) => f.slice(0, -".log".length)));
+      for (const lane of [...eventLanes].sort()) {
+        if (loggedLanes.has(lane)) continue;
+        let alive = false;
+        try {
+          alive = (await deps.pgrep(pgrepPattern(lane, worktrees))) > 0;
+        } catch {
+          alive = false;
+        }
+        const reportedPr = reportedPrByLane.get(lane);
+        lanes.add(lane);
+        if (reportedPr !== undefined) reportedPrs.add(reportedPr);
+        rows.push({ wave, lane, reportedPr, obs: { alive } });
       }
     }
   }
