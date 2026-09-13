@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import {
   collect,
   MAX_TAIL_KB,
-  prFacts,
   readTail,
   realDeps,
   resolveScanRoots,
@@ -144,12 +143,17 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
   /**
    * Startup, the 15 s poll, and on-demand `/api/status` refresh PR facts.
    * A watcher-triggered refresh reuses `prCache` and re-reads local state only.
+   * `collect` fetches and returns the facts itself — it is the only caller that
+   * has seen the lanes the fetch is scoped to — and hands them back here to
+   * cache for the next watcher refresh.
    */
   const collectNow = async (refreshPr: boolean): Promise<WaveStatus> => {
     const now = new Date().toISOString();
     if (options.collect !== undefined) return options.collect(now);
     if (refreshPr) {
-      prCache = await prFacts(deps);
+      return collect(deps, options.root, now, undefined, options.legacyRoots, (facts) => {
+        prCache = facts;
+      });
     }
     return collect(deps, options.root, now, prCache, options.legacyRoots);
   };

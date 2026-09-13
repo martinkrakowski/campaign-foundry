@@ -652,9 +652,74 @@ describe("prFacts", () => {
       "all",
       "--limit",
       "1000",
+      "--page",
+      "1",
       "--json",
       "number,state,headRefName,headRefOid",
     ]);
+  });
+
+  test("a full page is not the corpus: gh is asked again, a short page is the last", async () => {
+    const full = Array.from({ length: 1000 }, (_, i) => ({
+      number: 1000 - i,
+      state: "MERGED",
+      headRefName: `feat/lane-${i}`,
+      headRefOid: `o${i}`,
+    }));
+    const older = [{ number: 1, state: "MERGED", headRefName: "feat/oldest", headRefOid: "oz" }];
+    const gh = vi.fn(async (args: readonly string[]) => {
+      const page = Number(args[args.indexOf("--page") + 1] ?? "1");
+      return JSON.stringify(page === 1 ? full : page === 2 ? older : []);
+    });
+    const facts = await prFacts(fakeDeps({ gh }));
+    // 1001 PRs across two pages — the oldest lane would be lost on one page.
+    expect(facts).toHaveLength(1001);
+    expect(facts[facts.length - 1]).toEqual({
+      number: 1,
+      state: "merged",
+      checks: "none",
+      branchTail: "oldest",
+    });
+    expect(gh).toHaveBeenCalledTimes(2);
+  });
+
+  test("a check-runs fetch is scoped to the heads a lane claims, not every open PR", async () => {
+    const gh = vi.fn(async (args: readonly string[]) => {
+      if (args[0] === "pr") {
+        return JSON.stringify([
+          { number: 218, state: "OPEN", headRefName: "feat/t1", headRefOid: "exact" },
+          { number: 217, state: "OPEN", headRefName: "feat/t1-descendant", headRefOid: "desc" },
+          { number: 219, state: "OPEN", headRefName: "feat/unrelated", headRefOid: "theirs" },
+        ]);
+      }
+      return "not json";
+    });
+    const facts = await prFacts(fakeDeps({ gh }), {
+      lanes: new Set(["t1"]),
+      reportedPrs: new Set<number>(),
+    });
+    // All three stay listed; only exact/descendant lane matches cost an api call.
+    expect(facts.map((fact) => fact.number)).toEqual([218, 217, 219]);
+    const apiArgs = gh.mock.calls
+      .map((call) => call[0] as readonly string[])
+      .filter((args) => args[0] === "api")
+      .map((args) => args[1] ?? "");
+    expect(apiArgs).toHaveLength(2);
+    expect(apiArgs.join(" ")).toContain("exact");
+    expect(apiArgs.join(" ")).toContain("desc");
+  });
+
+  test("a reported pr claims its open head even when no branch matches", async () => {
+    const gh = vi.fn(async (args: readonly string[]) => {
+      if (args[0] === "pr") {
+        return JSON.stringify([
+          { number: 218, state: "OPEN", headRefName: "feat/reworded-slug", headRefOid: "mine" },
+        ]);
+      }
+      return "not json";
+    });
+    await prFacts(fakeDeps({ gh }), { lanes: new Set(["t1"]), reportedPrs: new Set([218]) });
+    expect(gh).toHaveBeenCalledTimes(2);
   });
 
   test("every PR becomes a fact with its case-folded branch tail, slash or no slash", async () => {

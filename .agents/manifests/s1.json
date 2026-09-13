@@ -28,9 +28,9 @@
     },
     {
       "file": "tools/wave-status/lib/collect.ts",
-      "before": "        \"1000\",",
-      "after": "        \"30\",",
-      "because": "gh pr list's default truncation (30, newest first) was measured on this machine at min number 331 — every pr the 21 events carry is older than the window, so an untruncated-list fetch silently un-joins all of them even though the join code is perfect. Caught by the args assertion on the gh call.",
+      "before": "for (let page = 1; ; page++) {",
+      "after": "for (let page = 1; page <= 1; page++) {",
+      "because": "One gh pr list response is a page, not the corpus: the repository passed 360 PRs in a session and will pass 1000. Cap the sweep at page one and the recorded full-page case loses the 1001st PR and its page-two call — older lanes silently un-join even though the join and the 1000 page size are perfect. Caught by the two-page pagination assertion.",
       "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
       "verdict": "caught"
     },
@@ -47,6 +47,14 @@
       "before": "fact.branchTail === wanted ? 2 :",
       "after": "fact.branchTail === wanted ? 1 :",
       "because": "An exact case-folded tail must outrank a descendant of the same lane (l5-template-editor is not l5-template-editor-2). Demote the exact score to a tie and the descendant with the higher number steals the lane.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "if (state === \"open\" && (scope === undefined || isClaimed(entry, scope))) {",
+      "after": "if (state === \"open\") {",
+      "because": "The refresh runs on every /api/status, so a check-runs call per open head stalls page load, and it grows with the repository — every unrelated open PR — not with the wave. Drop the claim gate and the sweep fetches checks for feat/unrelated too; the scoped assertion counts exactly the claimed heads and fails.",
       "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
       "verdict": "caught"
     }

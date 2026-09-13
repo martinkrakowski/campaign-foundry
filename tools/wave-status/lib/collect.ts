@@ -60,6 +60,16 @@ export interface PrFact extends NonNullable<LaneObservation["pr"]> {
   readonly branchTail: string;
 }
 
+/**
+ * The heads the wave actually names. `prFacts` fetches check-runs only for the
+ * open PRs a lane claims — the event's own `pr`, or a branch tail some lane
+ * matches — so the sweep grows with the wave, not with the repository.
+ */
+export interface PrScope {
+  readonly lanes: ReadonlySet<string>;
+  readonly reportedPrs: ReadonlySet<number>;
+}
+
 interface GhPrListEntry {
   readonly number: number;
   readonly state: string;
@@ -92,7 +102,9 @@ export function resolveScanRoots(
  *
  * `knownPrFacts`, when provided, is reused as-is: a watcher-triggered
  * refresh re-reads local state without waiting on `gh`. Omit it (or pass
- * nothing) to fetch PR facts now — startup, the slow poll, on-demand.
+ * nothing) to fetch PR facts now — startup, the slow poll, on-demand. When
+ * fetched, the facts are handed to `onFacts` so the caller can cache them for
+ * the next watcher refresh.
  */
 export async function collect(
   deps: CollectDeps,
@@ -100,17 +112,27 @@ export async function collect(
   now: string,
   knownPrFacts?: readonly PrFact[],
   legacyRoots?: readonly string[],
+  onFacts?: (facts: readonly PrFact[]) => void,
 ): Promise<WaveStatus> {
   // Gather first, order last: the wave list is decided here, the one place
   // that has seen every lane log's mtime, and it travels to the merge as an
   // explicit order. Feeds are never asked to carry it — grouping by feed is
   // how an evented old wave came to lead a live new one.
-  const rows: { readonly wave: string; readonly lane: string; readonly obs: LaneObservation }[] = [];
+  const rows: {
+    readonly wave: string;
+    readonly lane: string;
+    readonly reportedPr: number | undefined;
+    readonly obs: Omit<LaneObservation, "pr">;
+  }[] = [];
   const events: WaveEvent[] = [];
   const newestByWave = new Map<string, number>();
   const discovered = new Set<string>();
+  // The heads the wave names, gathered while scanning. `prFacts` uses them to
+  // fetch check-runs only for open PRs a lane claims, not every open head in
+  // the repository.
+  const lanes = new Set<string>();
+  const reportedPrs = new Set<number>();
 
-  const facts = knownPrFacts ?? (await prFacts(deps));
   const worktrees = await worktreeFacts(deps);
 
   const scanRoots = resolveScanRoots(root, legacyRoots);
@@ -193,16 +215,26 @@ export async function collect(
           }
         }
 
-        const pr = joinPrForLane(lane, reportedPrByLane.get(lane), facts);
-        const obs: LaneObservation = {
+        const reportedPr = reportedPrByLane.get(lane);
+        lanes.add(lane);
+        if (reportedPr !== undefined) reportedPrs.add(reportedPr);
+        const obs: Omit<LaneObservation, "pr"> = {
           ...(log !== undefined ? { log } : {}),
           ...(gateLog !== undefined ? { gateLog } : {}),
           alive,
-          ...(pr !== undefined ? { pr } : {}),
         };
-        rows.push({ wave, lane, obs });
+        rows.push({ wave, lane, reportedPr, obs });
       }
     }
+  }
+
+  // The join needs the facts, and the facts need the lanes — so fetch only now
+  // that every lane and every reported `pr` has been gathered. A watcher
+  // refresh hands the cached facts in and this call is skipped entirely.
+  let facts = knownPrFacts;
+  if (facts === undefined) {
+    facts = await prFacts(deps, { lanes, reportedPrs });
+    onFacts?.(facts);
   }
 
   // The wave list order, decided once from the newest lane-log activity in each
@@ -213,7 +245,10 @@ export async function collect(
   );
 
   const observed: Record<string, LaneObservation> = {};
-  for (const row of rows) observed[`${row.wave}/${row.lane}`] = row.obs;
+  for (const row of rows) {
+    const pr = joinPrForLane(row.lane, row.reportedPr, facts);
+    observed[`${row.wave}/${row.lane}`] = { ...row.obs, ...(pr !== undefined ? { pr } : {}) };
+  }
 
   return mergeStatus(events, observed, now, orderedWaves);
 }
@@ -252,40 +287,62 @@ export async function readTail(
   }
 }
 
+/** Page size for the PR sweep; a page under this is the last one. */
+const PR_LIST_PAGE = 1000;
+
 /**
- * One `gh pr list --state all --limit 1000` (the default limit of 30 hides
- * every merged PR, which is where most lanes land) plus check-runs for open
- * PRs, returned as facts a lane can join to. Any `gh` failure, or a
- * well-formed body of the wrong shape, yields no facts — never a throw.
+ * The PR corpus, walked page by page. One `gh pr list` response is a page, not
+ * the corpus, and the repository passes 360 PRs in a session — so `--page` is
+ * advanced until a short page marks the end, rather than pretending 1000 is the
+ * whole history and silently dropping the oldest lanes.
+ *
+ * `scope`, when provided, bounds the check-runs sweep to the open heads a lane
+ * actually claims: the event's own `pr`, or a branch tail some lane matches.
+ * An unclaimed open PR is still listed (checks none) but costs no `api` call —
+ * so a refresh grows with the wave, not with every open PR in the repository.
+ * Omit `scope` to fetch checks for every open head (the standalone behaviour).
+ * Any `gh` failure, or a well-formed body of the wrong shape, yields no facts
+ * on the first page — never a throw; a failure on a later page keeps what came
+ * before.
  */
-export async function prFacts(deps: CollectDeps): Promise<readonly PrFact[]> {
-  const facts: PrFact[] = [];
+export async function prFacts(
+  deps: CollectDeps,
+  scope?: PrScope,
+): Promise<readonly PrFact[]> {
+  const listed: GhPrListEntry[] = [];
 
-  let listed: readonly GhPrListEntry[] | undefined;
-  try {
-    listed = parsePrList(
-      await deps.gh([
-        "pr",
-        "list",
-        "--state",
-        "all",
-        "--limit",
-        "1000",
-        "--json",
-        "number,state,headRefName,headRefOid",
-      ]),
-    );
-  } catch {
-    return facts;
+  for (let page = 1; ; page++) {
+    let part: readonly GhPrListEntry[] | undefined;
+    try {
+      part = parsePrList(
+        await deps.gh([
+          "pr",
+          "list",
+          "--state",
+          "all",
+          "--limit",
+          String(PR_LIST_PAGE),
+          "--page",
+          String(page),
+          "--json",
+          "number,state,headRefName,headRefOid",
+        ]),
+      );
+    } catch {
+      break;
+    }
+    if (part === undefined) break;
+    listed.push(...part);
+    if (part.length < PR_LIST_PAGE) break;
   }
-  if (listed === undefined) return facts;
 
+  const facts: PrFact[] = [];
   for (const entry of listed) {
     const state = entry.state.toLowerCase();
     if (state !== "open" && state !== "merged" && state !== "closed") continue;
 
     let checks: "none" | "pending" | "pass" | "fail" = "none";
-    if (state === "open") {
+    if (state === "open" && (scope === undefined || isClaimed(entry, scope))) {
       try {
         checks = parseChecks(
           await deps.gh(["api", `repos/:owner/:repo/commits/${entry.headRefOid}/check-runs`]),
@@ -305,6 +362,22 @@ export async function prFacts(deps: CollectDeps): Promise<readonly PrFact[]> {
   }
 
   return facts;
+}
+
+/**
+ * Does some lane claim this open head — as its event `pr`, or a branch tail an
+ * exact/descendant lane match would reach? A superset of what the join can pick
+ * is fine: an over-broad yes only costs one check-runs call, whereas the
+ * repository's unrelated open PRs cost none.
+ */
+function isClaimed(entry: GhPrListEntry, scope: PrScope): boolean {
+  if (scope.reportedPrs.has(entry.number)) return true;
+  const tail = branchTail(entry.headRefName);
+  for (const lane of scope.lanes) {
+    const needle = lane.toLowerCase();
+    if (tail === needle || tail.startsWith(`${needle}-`)) return true;
+  }
+  return false;
 }
 
 /** `feat/l3b-layer-props` → `l3b-layer-props`; `main` → `main`. Lowercased. */
