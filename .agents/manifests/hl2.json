@@ -76,6 +76,21 @@
         "packages/shared/src/infrastructure/__tests__/brief-yaml.test.ts"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "    clickDestination: brief.clickDestination ?? \"\",",
+      "after": "    clickDestination: \"\",",
+      "because": "fromBrief must carry the brief's clickDestination into EditorState so that saving the brief does not silently delete the destination.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts"
+      ],
+      "verdict": "caught"
     }
   ]
 }

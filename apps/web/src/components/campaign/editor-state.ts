@@ -283,6 +283,11 @@ export interface EditorState {
   targetAudience: string;
   campaignMessage: string;
   localizedMessage: string;
+  /**
+   * The brief's click destination URL (HL2, HL-D3).
+   * Carried through editor state so saving never destroys it.
+   */
+  clickDestination: string;
   products: ProductDraft[];
   nextProductKey: number;
   /** The next free `TimelineBeatDraft.key`. Monotonic; never reused within a session. */
@@ -431,6 +436,7 @@ export type EditorAction =
           | "targetAudience"
           | "campaignMessage"
           | "localizedMessage"
+          | "clickDestination"
         >
       >;
     }
@@ -521,6 +527,7 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
     targetAudience: "",
     campaignMessage: "",
     localizedMessage: "",
+    clickDestination: "",
     products: [emptyProduct(1)],
     nextProductKey: 2,
     nextBeatKey: 1,
@@ -1754,10 +1761,15 @@ export function toBrief(state: EditorState): CampaignBrief {
       : undefined;
   const withCopy =
     copy !== undefined ? { ...withLocalized, copy } : withLocalized;
+  const destination = state.clickDestination.trim();
   if (state.mode === "brief") {
-    return state.treatments.length > 0
-      ? { ...withCopy, treatments: state.treatments.map(toTreatment) }
-      : withCopy;
+    const withTreatments =
+      state.treatments.length > 0
+        ? { ...withCopy, treatments: state.treatments.map(toTreatment) }
+        : withCopy;
+    return destination
+      ? { ...withTreatments, clickDestination: destination }
+      : withTreatments;
   }
   const count = parseInt(state.variation.count, 10) || 0;
   const seed = parseInt(state.variation.seed, 10);
@@ -1808,6 +1820,7 @@ export function toBrief(state: EditorState): CampaignBrief {
       axes,
     },
     ...(copy !== undefined ? { copy } : {}),
+    ...(destination ? { clickDestination: destination } : {}),
   };
 }
 
@@ -1926,6 +1939,7 @@ export function fromBrief(
     targetAudience: brief.targetAudience,
     campaignMessage: brief.campaignMessage,
     localizedMessage: brief.localizedMessage ?? "",
+    clickDestination: brief.clickDestination ?? "",
     products,
     nextProductKey,
     treatments,
@@ -2395,6 +2409,7 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     template,
     campaignName,
     briefId: str(raw.briefId, initial.briefId),
+    clickDestination: str(raw.clickDestination, initial.clickDestination),
     products,
     nextProductKey,
     treatments: list(raw.treatments, initial.treatments),
