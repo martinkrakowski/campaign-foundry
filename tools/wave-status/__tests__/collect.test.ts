@@ -1167,6 +1167,38 @@ describe("collect — event-only lanes", () => {
       "lane says implement started; the process is not alive and the log has no EXIT marker",
     ]);
   });
+
+  test("an event-only lane carries its gate log: the exit and the coverage beside the events", async () => {
+    // The gate runs whether or not the lane wrote a log, and it writes
+    // `gate-<lane>.log` into the same directory the events live in. A row
+    // built from the event feed that skips the gate lookup renders the single
+    // most important field — did the gate pass — as empty for exactly the
+    // lanes S2 exists to surface.
+    const status = await collect(
+      fakeDeps({
+        dirs: {
+          [ROOT]: ["wave-H"],
+          [`${ROOT}/wave-H`]: ["events.jsonl", "gate-h1.log", "gate-h1-2.log"],
+        },
+        files: {
+          [`${ROOT}/wave-H/events.jsonl`]:
+            '{"ts":"2026-09-12T10:00:00Z","wave":"H","lane":"h1","stage":"gate","event":"settled"}\n',
+          [`${ROOT}/wave-H/gate-h1.log`]: "GATE EXIT 1\n",
+          [`${ROOT}/wave-H/gate-h1-2.log`]:
+            "Statements   : 100% ( 100/100 )\nBranches     : 100% ( 578/578 )\nFunctions    : 100% ( 20/20 )\nLines        : 100% ( 100/100 )\nGATE EXIT 0\n",
+        },
+      }),
+      ROOT,
+      "now",
+    );
+    const lane = status.waves[0]?.lanes[0];
+    expect(lane?.lane).toBe("h1");
+    expect(lane?.derived.log).toBeUndefined();
+    expect(lane?.derived.gate).toEqual({
+      exit: 0,
+      coverage: { statements: 100, branches: 100, functions: 100, lines: 100 },
+    });
+  });
 });
 
 describe("parseChecks", () => {

@@ -4640,3 +4640,7 @@ D118) remain deferred.
 **Process misses, recorded rather than tidied away.** #269 was merged with an open review thread — the bot's diagnosis was wrong (a stray `+` that does not exist) but its conclusion was right (the table was broken by a blank line I introduced), so sweeping would have caught my own defect. Fixed in #270, then over-corrected by removing the blank line the table needs before its closing rule, caught only by comparing against the display plan.
 
 **Next.** L3b — per-layer props against D134. Not dispatched.
+
+## 2026-09-13 — S2 remediation: an event-only lane carries its gate log (#369)
+
+The second row source built `obs: { alive }` inline while the log loop read `gate-<lane>.log` — so the lanes S2 exists to surface still lost their gate exit and coverage. The observation build is now one shared function both loops call; the defect was proven red first, and the manifest carries a seventh mutation reverting the event-only row to its own inline build, replayed caught. Existing manifest entries were retargeted to the refactored text rather than dropped.
