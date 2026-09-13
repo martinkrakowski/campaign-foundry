@@ -7,6 +7,7 @@ export * from "./BackgroundSource.vo.js";
 export * from "./brief-schema-version.js";
 export * from "./brief-template.js";
 export * from "./campaign-types.js";
+export * from "./click-destination.js";
 export * from "./ComplianceResult.vo.js";
 export * from "./CopyPool.vo.js";
 export * from "./CopyTimeline.vo.js";

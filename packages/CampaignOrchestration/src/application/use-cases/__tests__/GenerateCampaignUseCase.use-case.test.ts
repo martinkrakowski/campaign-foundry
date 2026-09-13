@@ -1286,6 +1286,20 @@ describe("GenerateCampaignUseCase — motion variants", () => {
     expect(d.videoCompositor.compositeVideo).not.toHaveBeenCalled();
   });
 
+  test("an invalid clickDestination is refused during ValidateBriefIntegrity (HL2)", async () => {
+    const d = deps();
+    const result = await new GenerateCampaignUseCase(d).execute(
+      baseBrief({
+        clickDestination: "not-an-absolute-url",
+      }),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.message).toBe(
+      'Campaign brief field "clickDestination" must be an absolute URL; got "not-an-absolute-url".',
+    );
+  });
+
   test("a runnable timeline on a variation brief still passes validation", async () => {
     const d = deps({ planner: fakePlanner(fakePlan([motionVariant()])) });
     const result = await new GenerateCampaignUseCase(d).execute(

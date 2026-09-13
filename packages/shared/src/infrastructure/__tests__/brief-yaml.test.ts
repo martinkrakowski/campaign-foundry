@@ -1,6 +1,6 @@
 import { describe, test, expect } from "vitest";
 import { parse } from "yaml";
-import { dumpBrief } from "../brief-yaml.js";
+import { BRIEF_KEY_ORDER, dumpBrief } from "../brief-yaml.js";
 
 // Moved from `apps/web/src/components/campaign/__tests__/dump-brief.test.ts` (R4.3):
 // the web fork of the serialiser was deleted, so its unit tests follow the one
@@ -87,6 +87,26 @@ describe("dumpBrief", () => {
     expect(yaml).toContain("- static");
     expect(yaml).toContain("paletteShift:");
     expect(yaml).toContain("- 0.1");
+  });
+
+  test("emits clickDestination in canonical order after output (HL2)", () => {
+    expect(BRIEF_KEY_ORDER).toContain("clickDestination");
+    expect(BRIEF_KEY_ORDER.indexOf("output")).toBeLessThan(
+      BRIEF_KEY_ORDER.indexOf("clickDestination"),
+    );
+    const yaml = dumpBrief({
+      ...brief,
+      extra: "custom",
+      clickDestination: "https://example.com/landing",
+    });
+    expect(yaml.indexOf("output:")).toBeLessThan(
+      yaml.indexOf("clickDestination:"),
+    );
+    expect(yaml.indexOf("clickDestination:")).toBeLessThan(
+      yaml.indexOf("extra:"),
+    );
+    expect(yaml).toContain("clickDestination: https://example.com/landing");
+    expect(dumpBrief(parse(yaml) as object)).toBe(yaml);
   });
 
   test("skips undefined, dumps leftover keys, and handles empty / null / boolean values", () => {

@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "lane": "HL2",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/click-destination.ts",
+      "before": "    return parsed.protocol === \"http:\" || parsed.protocol === \"https:\";",
+      "after": "    return true;",
+      "because": "An ad click destination must be an http: or https: URL so ad servers can wrap and track the click. Allowing arbitrary protocols admits javascript: and data: URIs, creating an XSS vector and breaking click tracking.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/click-destination.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/click-destination.ts",
+      "before": "  if (typeof destination !== \"string\" || !isAbsoluteUrl(destination)) {",
+      "after": "  if (typeof destination === \"string\" && !isAbsoluteUrl(destination)) {",
+      "because": "A click destination must be validated as a string before URL parsing. Without the string type check, non-string values like numbers or objects bypass validation and corrupt brief serialization.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/click-destination.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/load-brief.ts",
+      "before": "  validateClickDestination(record.clickDestination);",
+      "after": "  // validateClickDestination(record.clickDestination);",
+      "because": "The brief loading boundary must invoke validateClickDestination so invalid or relative URLs are rejected when briefs are parsed.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/load-brief.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts",
+      "before": "    const destinationProblem = clickDestinationProblem(brief.clickDestination);\n    if (destinationProblem !== undefined) {\n      return err(\n        new Error(\n          `Campaign brief field \"${destinationProblem.field}\" must ${destinationProblem.must}; got ${JSON.stringify(destinationProblem.value)}.`,\n        ),\n      );\n    }",
+      "after": "    // destination check omitted",
+      "because": "The use case validates clickDestination for programmatic callers bypassing boundary parsing (defense-in-depth). Removing this check allows an unvalidated destination to run through generation.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/application/use-cases/__tests__/GenerateCampaignUseCase.use-case.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/shared/src/infrastructure/brief-yaml.ts",
+      "before": "  \"variation\",\n  \"output\",\n  \"clickDestination\",",
+      "after": "  \"variation\",\n  \"output\",",
+      "because": "clickDestination must be registered in BRIEF_KEY_ORDER so that dumpBrief serializes it in its deterministic canonical position after output rather than as an arbitrary leftover key.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/shared/src/infrastructure/__tests__/brief-yaml.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "    clickDestination: brief.clickDestination ?? \"\",",
+      "after": "    clickDestination: \"\",",
+      "because": "fromBrief must carry the brief's clickDestination into EditorState so that saving the brief does not silently delete the destination.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

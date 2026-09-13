@@ -8,6 +8,7 @@ import { type AspectRatioValue } from "../../domain/value-objects/aspect-ratios.
 import { DISPLAY_SIZE_VALUES, type DisplaySize } from "../../domain/value-objects/display-sizes.js";
 import type { MotionKind } from "../../domain/value-objects/MotionKind.vo.js";
 import { DEFAULT_TREATMENT, SAFE_ID_PATTERN } from "../../domain/value-objects/Treatment.vo.js";
+import { clickDestinationProblem } from "../../domain/value-objects/click-destination.js";
 import { styleProblem } from "../../domain/value-objects/creative-style.js";
 import { PipelineExecutionLog } from "../../domain/value-objects/PipelineExecutionLog.vo.js";
 import type { PipelineResult } from "../../domain/value-objects/PipelineResult.vo.js";
@@ -785,6 +786,18 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     // Defense-in-depth, exactly the SAFE_ID reasoning above.
     const styleProblemText = styleProblem(brief.style);
     if (styleProblemText !== undefined) return err(new Error(styleProblemText));
+    // The brief's clickDestination (HL2, HL-D3) is parse-validated at the brief
+    // boundary; enforce it here too through the SAME validator the parser calls —
+    // one function, so the two boundaries cannot drift — because a programmatic
+    // caller that bypasses parsing could hand an invalid or relative URL over.
+    const destinationProblem = clickDestinationProblem(brief.clickDestination);
+    if (destinationProblem !== undefined) {
+      return err(
+        new Error(
+          `Campaign brief field "${destinationProblem.field}" must ${destinationProblem.must}; got ${JSON.stringify(destinationProblem.value)}.`,
+        ),
+      );
+    }
     // `output.sizes` is the display family's axis (D113), parse-validated at the
     // boundary; enforce the same vocabulary here so a programmatic caller bypassing
     // parsing cannot hand the run a size the compositor would resolve to nothing.

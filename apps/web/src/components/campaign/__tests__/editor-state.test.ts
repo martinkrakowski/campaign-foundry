@@ -4421,4 +4421,87 @@ describe("display platforms (D116)", () => {
       expect(restored.schemaVersion).toBe(1);
     });
   });
+
+  describe("clickDestination in editor-state (HL2, HL-D3)", () => {
+    test("fromBrief(toBrief(x)) preserves clickDestination", () => {
+      const destination = "https://example.com/landing?utm_source=ad";
+      const stateWithDest: EditorState = {
+        ...initialEditorState(),
+        clickDestination: destination,
+      };
+      const roundTripped = fromBrief(toBrief(stateWithDest));
+      expect(roundTripped.clickDestination).toBe(destination);
+
+      const stateWithoutDest: EditorState = {
+        ...initialEditorState(),
+        clickDestination: "",
+      };
+      const roundTrippedEmpty = fromBrief(toBrief(stateWithoutDest));
+      expect(roundTrippedEmpty.clickDestination).toBe("");
+    });
+
+    test("fromBrief(toBrief(x)) preserves clickDestination in variation mode", () => {
+      const destination = "https://example.com/shop";
+      const varState: EditorState = {
+        ...initialEditorState("variation"),
+        clickDestination: destination,
+      };
+      const roundTripped = fromBrief(toBrief(varState));
+      expect(roundTripped.clickDestination).toBe(destination);
+    });
+
+    test("a loaded brief with clickDestination round-trips through toBrief", () => {
+      const destination = "https://example.com/promo";
+      const brief = savedBrief({ clickDestination: destination });
+      const state = fromBrief(brief, { file: "camp.yaml" });
+      expect(state.clickDestination).toBe(destination);
+      const emitted = toBrief(state);
+      expect(emitted.clickDestination).toBe(destination);
+      expect(isDirtySinceSave(state)).toBe(false);
+    });
+
+    test("a loaded brief without clickDestination omits the key in toBrief", () => {
+      const brief = savedBrief();
+      const state = fromBrief(brief, { file: "camp.yaml" });
+      expect(state.clickDestination).toBe("");
+      const emitted = toBrief(state);
+      expect(emitted.clickDestination).toBeUndefined();
+      expect("clickDestination" in emitted).toBe(false);
+      expect(isDirtySinceSave(state)).toBe(false);
+    });
+
+    test("patching clickDestination updates state and marks it dirty", () => {
+      const brief = savedBrief({ clickDestination: "https://example.com/original" });
+      const state = fromBrief(brief, { file: "camp.yaml" });
+      expect(isDirtySinceSave(state)).toBe(false);
+
+      const edited = editorReducer(state, {
+        type: "patch",
+        patch: { clickDestination: "https://example.com/new" },
+      });
+      expect(edited.clickDestination).toBe("https://example.com/new");
+      expect(isDirtySinceSave(edited)).toBe(true);
+      expect(toBrief(edited).clickDestination).toBe("https://example.com/new");
+    });
+
+    test("whitespace-only clickDestination is trimmed and omitted in toBrief", () => {
+      const stateWithBlank: EditorState = {
+        ...initialEditorState(),
+        clickDestination: "   ",
+      };
+      const emitted = toBrief(stateWithBlank);
+      expect(emitted.clickDestination).toBeUndefined();
+    });
+
+    test("normalizeDraftState restores stored clickDestination or defaults to empty string", () => {
+      const stored = normalizeDraftState({ clickDestination: "https://example.com/draft" });
+      expect(stored.clickDestination).toBe("https://example.com/draft");
+
+      const empty = normalizeDraftState({});
+      expect(empty.clickDestination).toBe("");
+
+      const nonString = normalizeDraftState({ clickDestination: 12345 });
+      expect(nonString.clickDestination).toBe("");
+    });
+  });
 });
