@@ -88,9 +88,27 @@ lane, turn 2 would carry turn 1's file reads and gate output and cost *more* tha
 less. **Keep agents short-lived and their context small; the orchestrator holds continuity.** The
 levers that actually move the number are rules 1, 3 and 8, not session reuse.
 
-**Why grok is out.** It exhausted a weekly quota in two days because it drifted from reviewer and
-fixer into default implementer (nine lane implementations on 09-07/08, every role at high effort,
-reviewer briefs that re-ran the full gate). Reviewer briefs now carry the diff excerpt for the
+**Why grok was out, and why it returns 2026-09-14** (owner's call, 2026-09-13). It exhausted a
+weekly quota in two days because it drifted from reviewer and fixer into default implementer (nine
+lane implementations on 09-07/08, every role at high effort, reviewer briefs that re-ran the full
+gate).
+
+**Its record was never the problem — the burn was.** 4/4 as fixer with every fix mutation-proven,
+depth leader as reviewer, and it has **twice refused an orchestrator-approved finding with the
+mechanism** rather than complying — which only two other seats have ever done.
+
+**Every cause of that burn has since been removed**, which is why this is worth retrying rather than
+assuming: fix rounds run the touched test files and never `test:cov`, because the orchestrator runs
+the gate and that run is what gates the merge; briefs quote the decisions a lane needs instead of
+pointing it at a 441-line plan; no lane opens `.agents/session-log.md`, which cost ~125 000 input
+tokens per round; and reviewer briefs carry the diff excerpt and a file list rather than the
+repository.
+
+**So it returns as an implementer on a measurement, not a hope.** Give it **two lanes**, record
+`billed in/out · cache read · wall min · rounds to green` for each, and compare against qwen and
+gemini on the same shapes before giving it a third. If two lanes cost what nine used to, the leaner
+process is doing the work and grok is cheap again. If they do not, it goes back to fixer and reviewer,
+where its record is strongest and its cost is bounded by a narrow brief. Reviewer briefs now carry the diff excerpt for the
 claim under test and a file list, and never ask a reviewer to run the full gate or the coverage
 run — the orchestrator does those. Every wave record counts runs per seat so a burn shows before
 a quota does.
@@ -472,6 +490,28 @@ Nothing else needs it. This is not a review gate on prose.
 
 Dispatch is the wrapper documented above: `cd` into the lane's own worktree, an absolute `$BRIEF`,
 an `EXIT` marker to wait on.
+
+### When a seat is rate-limited, which is not the same as unfunded
+
+The existing rule covers *unfunded or unreachable → skip the seat and record it*. A **429 is
+transient**, and treating it as an outage sends work to the reserve for a reason that would have
+cleared on its own. On 2026-09-13 that happened unrecorded: qwen hit a rate limit mid-wave, later
+lanes went to gemini, and the night ran gemini-primary against a config that says qwen-primary — so
+the trial data skewed for a reason unrelated to quality, and nobody could see it happening.
+
+**The rule:**
+
+1. **Retry the same seat once**, after a pause. A limit that just fired usually clears in minutes,
+   and the lane's worktree still holds whatever it wrote — a retry continues rather than restarts.
+2. **If it fires again, fall through to the reserve — and record the deviation** in the wave record
+   as `seat: <reserve> (primary rate-limited)`. A fallthrough nobody logged is indistinguishable from
+   a seat choice, and that is what corrupts the comparison.
+3. **Never count a rate-limited run against the seat.** It is a provider outcome, like a 5xx.
+
+**Rate limits will recur.** `qwen`, `hy4-preview` and `deepseek` share one openrouter account, so a
+limit on one is a limit on the pool — the same concentration that took three seats down when
+`opencode-go` ran dry, one layer up. `agy` and `inception` bill separately; that is what a fallthrough
+is for.
 
 ### Why qwen is primary
 
