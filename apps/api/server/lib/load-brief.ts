@@ -23,6 +23,7 @@ import {
   TONE_VALUES,
   isPaletteShift,
   isSupportedBriefSchemaVersion,
+  layerElementsProblem,
   layerEnabledProblem,
   layerPropsProblem,
   satisfiesOrderConstraints,
@@ -183,7 +184,8 @@ function validateType(value: unknown): void {
  * Structural, never lenient: checked in authoring mode too (`enforceCapabilities: false`).
  * Compatibility is a declared table, validated at the boundary (D124). A layer's own
  * props, when present, must be its kind's (D134) — same key set, every number a
- * fraction in [0, 1], the anchor a vocabulary member.
+ * fraction in [0, 1], the anchor a vocabulary member — and an `html` layer's
+ * elements, when present, must be well-formed elements (HL1).
  * Absent → defaults to the campaign type's canonical template (D120: type before template).
  */
 export function validateTemplate(
@@ -305,6 +307,21 @@ export function validateTemplate(
     if (propsProblem !== undefined) {
       throw new Error(
         `Campaign brief field "template.layers[${i}].props${propsProblem.path}" must ${propsProblem.must}; got ${JSON.stringify(propsProblem.value)}.`,
+      );
+    }
+
+    // HL1 — an `html` layer's element list, when present, must be well-formed
+    // elements of the vocabulary. Structural, never lenient (the `validateSizes`
+    // convention): the decision is the domain's `layerElementsProblem`, shared
+    // with `isBriefTemplate` so the two boundaries cannot drift — only the
+    // message shape is local.
+    const elementsProblem = layerElementsProblem(
+      layer.kind as LayerKind,
+      layer.elements,
+    );
+    if (elementsProblem !== undefined) {
+      throw new Error(
+        `Campaign brief field "template.layers[${i}].elements${elementsProblem.path}" must ${elementsProblem.must}; got ${JSON.stringify(elementsProblem.value)}.`,
       );
     }
   }

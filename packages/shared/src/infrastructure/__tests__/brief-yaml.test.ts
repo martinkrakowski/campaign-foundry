@@ -296,3 +296,81 @@ describe("dumpBrief layer and props order (L3b, D134)", () => {
     expect(dumpBrief(reparsed)).toBe(yaml);
   });
 });
+
+describe("dumpBrief element order (HL1)", () => {
+  // A layer and its elements written with keys scrambled, so the assertions
+  // below can only pass if the writer orders them.
+  const templated = {
+    ...brief,
+    template: {
+      id: "canonical-image-html",
+      version: 1,
+      creativeType: "image-html",
+      unit: "standard-web",
+      layers: [
+        { kind: "image", id: "bg" },
+        {
+          elements: [
+            {
+              text: "Buy",
+              kind: "text",
+              frame: { anchor: "top", h: 0.44, w: 0.33, y: 0.22, x: 0.11 },
+            },
+            {
+              kind: "image",
+              frame: { anchor: "middle", h: 0.2, w: 0.2, y: 0.4, x: 0.4 },
+            },
+          ],
+          props: { alpha: 0.5 },
+          enabled: false,
+          kind: "html",
+          id: "html",
+        },
+        { kind: "logo", id: "mark" },
+      ],
+    },
+  };
+
+  test("emits a layer's keys as id, kind, enabled, props, elements", () => {
+    const yaml = dumpBrief(templated);
+    expect(yaml.indexOf("id: html")).toBeLessThan(yaml.indexOf("kind: html"));
+    expect(yaml.indexOf("kind: html")).toBeLessThan(yaml.indexOf("enabled: false"));
+    expect(yaml.indexOf("enabled: false")).toBeLessThan(yaml.indexOf("props:"));
+    expect(yaml.indexOf("props:")).toBeLessThan(yaml.indexOf("elements:"));
+  });
+
+  test("emits each element's keys as kind, text, frame, and the frame's as x, y, w, h, anchor", () => {
+    const yaml = dumpBrief(templated);
+    expect(yaml.indexOf("kind: text")).toBeLessThan(yaml.indexOf("text: Buy"));
+    expect(yaml.indexOf("text: Buy")).toBeLessThan(yaml.indexOf("frame:"));
+    expect(yaml.indexOf("x: 0.11")).toBeLessThan(yaml.indexOf("y: 0.22"));
+    expect(yaml.indexOf("y: 0.22")).toBeLessThan(yaml.indexOf("w: 0.33"));
+    expect(yaml.indexOf("w: 0.33")).toBeLessThan(yaml.indexOf("h: 0.44"));
+    expect(yaml.indexOf("h: 0.44")).toBeLessThan(yaml.indexOf("anchor: top"));
+    // The second element's own frame follows, untouched.
+    expect(yaml.indexOf("anchor: top")).toBeLessThan(yaml.indexOf("anchor: middle"));
+  });
+
+  test("an html layer's elements round-trip through YAML and dump byte-identically", () => {
+    const yaml = dumpBrief(templated);
+    expect(parse(yaml)).toEqual(templated);
+    expect(dumpBrief(parse(yaml) as object)).toBe(yaml);
+  });
+
+  test("elements the order cannot name pass through untouched", () => {
+    const passthrough = {
+      ...brief,
+      template: {
+        id: "x",
+        layers: [
+          { id: "html", kind: "html", elements: "junk" },
+          { id: "html-2", kind: "html", elements: ["junk", { frame: null }] },
+        ],
+      },
+    };
+    const yaml = dumpBrief(passthrough);
+    expect(yaml).toContain("elements: junk");
+    expect(yaml).toContain("frame: null");
+    expect(parse(yaml)).toEqual(passthrough);
+  });
+});

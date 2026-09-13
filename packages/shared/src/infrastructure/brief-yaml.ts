@@ -26,8 +26,14 @@ export const BRIEF_KEY_ORDER = [
   "output",
 ] as const;
 
-/** A template layer's canonical key order (L3b, D134, D129): identity, kind, enabled, then its props. */
-const LAYER_KEY_ORDER = ["id", "kind", "enabled", "props"] as const;
+/** A template layer's canonical key order (L3b, D134, D129, HL1): identity, kind, enabled, then its props and elements. */
+const LAYER_KEY_ORDER = ["id", "kind", "enabled", "props", "elements"] as const;
+
+/** One html element's canonical key order (HL1): kind, its copy, then its frame. */
+const ELEMENT_KEY_ORDER = ["kind", "text", "frame"] as const;
+
+/** A frame's canonical key order (D130): the fractions, then the anchor. */
+const FRAME_KEY_ORDER = ["x", "y", "w", "h", "anchor"] as const;
 
 /**
  * The props' canonical key order: the order the domain's `LayerProps` union
@@ -57,12 +63,28 @@ function orderedKeys(source: Record<string, unknown>, order: readonly string[]):
   return out;
 }
 
-/** Reorder a layer's keys (id, kind, props) and, when it carries props, the props' keys in union order. */
+/** Reorder one html element's keys (kind, text, frame) and, when it carries a frame, the frame's keys. */
+function orderedElement(element: unknown): unknown {
+  if (!isPlainRecord(element)) return element;
+  const ordered = orderedKeys(element, ELEMENT_KEY_ORDER);
+  if (isPlainRecord(ordered.frame)) {
+    ordered.frame = orderedKeys(ordered.frame, FRAME_KEY_ORDER);
+  }
+  return ordered;
+}
+
+/**
+ * Reorder a layer's keys (id, kind, enabled, props, elements) and, when it
+ * carries props or elements, those keys in their own canonical order.
+ */
 function orderedLayer(layer: unknown): unknown {
   if (!isPlainRecord(layer)) return layer;
   const ordered = orderedKeys(layer, LAYER_KEY_ORDER);
   if (isPlainRecord(ordered.props)) {
     ordered.props = orderedKeys(ordered.props, PROPS_KEY_ORDER);
+  }
+  if (Array.isArray(ordered.elements)) {
+    ordered.elements = ordered.elements.map(orderedElement);
   }
   return ordered;
 }
@@ -83,9 +105,10 @@ function orderedTemplate(template: unknown): unknown {
  * unpadded form js-yaml wrote (`[static, motion]`, not `[ static, motion ]`).
  * Keys whose value is `undefined` are omitted, matching the previous js-yaml
  * dump byte for byte on the briefs this project writes. A template's layers
- * dump with the layer's own canonical order — `id`, `kind`, `props`, and the
- * props keys in the union's order (L3b, D134) — so a save serialises a
- * hand-written layer deterministically too.
+ * dump with the layer's own canonical order — `id`, `kind`, `enabled`,
+ * `props` and `elements`, with the props keys in the union's order (L3b,
+ * D134) and each element's keys and frame keys in order (HL1) — so a save
+ * serialises a hand-written layer deterministically too.
  */
 export function dumpBrief(brief: object): string {
   const source = brief as Record<string, unknown>;
