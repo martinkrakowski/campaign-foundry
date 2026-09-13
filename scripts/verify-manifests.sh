@@ -44,7 +44,48 @@ else
   BASE="origin/main"
 fi
 
-# A base that is named but unreachable is an error, not an empty diff.
+# A base can be named and still be gone: `github.event.before` on a force-pushed
+# branch points at a commit that no longer exists. That is a *stale* base, not a
+# broken checkout, and falling back to the default branch still answers "what
+# did this change touch" — so degrade, loudly, rather than failing the build for
+# a rewritten history. Anything else that breaks `git diff` is still an error:
+# reporting "no changes" because the diff failed is the fail-open case this
+# script exists to avoid.
+if ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null 2>&1; then
+  # Only a 40-hex object name is treated as "a commit that existed and was
+  # rewritten away". Anything else is a malformed base — a typo, an empty
+  # variable, a branch name nobody fetched — and guessing a fallback for it
+  # would let a broken configuration pass the gate quietly.
+  case "$BASE" in
+    *[!0-9a-f]* | "") 
+      echo "verify-manifests: base '$BASE' is not a resolvable commit — refusing to guess" >&2
+      exit 2 ;;
+  esac
+  if [ "${#BASE}" -ne 40 ]; then
+    echo "verify-manifests: base '$BASE' is not a resolvable commit — refusing to guess" >&2
+    exit 2
+  fi
+  echo "verify-manifests: base '$BASE' is unreachable (a force push rewrote it?); falling back"
+  if ! git rev-parse --verify --quiet "origin/main^{commit}" >/dev/null 2>&1; then
+    echo "verify-manifests: origin/main is unreachable too — refusing to call that no changes" >&2
+    exit 2
+  fi
+  BASE="origin/main"
+fi
+
+# A fallback that lands on HEAD itself diffs a commit against itself and finds
+# nothing — which is what happens on a force-pushed main, and is the same silent
+# skip this script exists to prevent. Step back one commit instead.
+if [ "$(git rev-parse "${BASE}^{commit}")" = "$(git rev-parse 'HEAD^{commit}')" ]; then
+  if git rev-parse --verify --quiet 'HEAD~1^{commit}' >/dev/null 2>&1; then
+    echo "verify-manifests: base resolves to HEAD; using HEAD~1 so the diff is not empty by construction"
+    BASE="HEAD~1"
+  else
+    echo "verify-manifests: base resolves to HEAD and there is no parent — refusing to call that no changes" >&2
+    exit 2
+  fi
+fi
+
 CHANGED_LIST=$(mktemp)
 trap 'rm -f "$CHANGED_LIST"' EXIT
 if ! git diff --name-only --diff-filter=d "$BASE"...HEAD -- "$MANIFEST_DIR" > "$CHANGED_LIST" 2>/dev/null; then
