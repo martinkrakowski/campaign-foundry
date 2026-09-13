@@ -1720,8 +1720,18 @@
         return counts;
       }
 
+      function laneNeedsHuman(lane, nowMs) {
+        const state = laneStateOf(lane, nowMs);
+        if (NEEDS_HUMAN.includes(state)) return true;
+        if (state === "blocked") {
+          const threads = lane.derived?.pr?.unresolvedThreads;
+          return typeof threads === "number" && threads > 0;
+        }
+        return false;
+      }
+
       function isLaneActive(lane, nowMs) {
-        return NEEDS_HUMAN.includes(laneStateOf(lane, nowMs));
+        return laneNeedsHuman(lane, nowMs);
       }
 
       // Bins floor down and a clock-ahead mtime reads as quiet now, never as a
@@ -1874,7 +1884,9 @@
       function renderSummaryBar(lanes, nowMs) {
         const counts = laneStateCountsOf(lanes, nowMs);
         let attention = 0;
-        for (const state of NEEDS_HUMAN) attention += counts[state] ?? 0;
+        for (const lane of lanes) {
+          if (laneNeedsHuman(lane, nowMs)) attention += 1;
+        }
         if (stateSummaryValue !== null) {
           stateSummaryValue.textContent = String(attention);
           stateSummaryValue.classList.toggle("hot", attention > 0);
@@ -1950,6 +1962,7 @@
         let open;
         let merged;
         let failing;
+        let checksUnknown = false;
         for (const wave of status.waves) {
           waves++;
           for (const lane of wave.lanes) {
@@ -1968,8 +1981,12 @@
             const pr = lane.derived.pr;
             if (pr !== undefined) {
               prs++;
-              if (pr.state === "open") open = (open ?? 0) + 1;
-              else if (pr.state === "merged") merged = (merged ?? 0) + 1;
+              if (pr.state === "open") {
+                open = (open ?? 0) + 1;
+                if (pr.checks === "unknown") checksUnknown = true;
+              } else if (pr.state === "merged") {
+                merged = (merged ?? 0) + 1;
+              }
               if (pr.checks === "fail") failing = (failing ?? 0) + 1;
             }
           }
@@ -1984,7 +2001,11 @@
         if (prs > 0) {
           open ??= 0;
           merged ??= 0;
-          failing ??= 0;
+          if (!checksUnknown) {
+            failing ??= 0;
+          } else {
+            failing = undefined;
+          }
         }
         return {
           lanes,

@@ -12,10 +12,9 @@ import { collect, realDeps } from "../lib/collect.js";
 import {
   laneState,
   laneStateCounts,
+  laneNeedsHuman,
   stallThresholdMs,
   LANE_STATES,
-  NEEDS_HUMAN_STATES,
-  isNeedsHumanState,
 } from "../lib/lane-state.js";
 import { readEvents } from "../lib/events.js";
 import { mergeStatus } from "../lib/merge.js";
@@ -665,6 +664,56 @@ describe("the status page", () => {
     expect(doc.querySelector('[data-metric="waves"] .value')?.textContent).toBe(
       "1",
     );
+  });
+
+  test("an unknown check count on an open PR renders —, but a measured zero renders 0", async () => {
+    const withUnknownChecks: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "T",
+          lanes: [
+            {
+              wave: "T",
+              lane: "t1",
+              derived: {
+                alive: false,
+                pr: { number: 1, state: "open", checks: "unknown" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+    const pageUnknown = await loadPage(withUnknownChecks);
+    expect(
+      pageUnknown.window.document.querySelector('[data-metric="failing"] .value')?.textContent,
+    ).toBe("—");
+
+    const withMeasuredZero: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "T",
+          lanes: [
+            {
+              wave: "T",
+              lane: "t1",
+              derived: {
+                alive: false,
+                pr: { number: 1, state: "open", checks: "pass" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+    const pageZero = await loadPage(withMeasuredZero);
+    expect(
+      pageZero.window.document.querySelector('[data-metric="failing"] .value')?.textContent,
+    ).toBe("0");
   });
 
   test("the container declares two grid rows and the log pane is hidden with no log open", async () => {
@@ -3865,16 +3914,15 @@ describe("the status page", () => {
     expect(present.length).toBeGreaterThan(0);
 
     // (c) The page-level summary bar: the needs-a-human lead and per-state chips.
-    // The lead is pinned to the module's NEEDS_HUMAN_STATES, not a list copied
-    // into this file — the same reason the row pill is pinned to `laneState`:
-    // the page holds a second copy of the set, and this is the seam between them.
+    // The lead is pinned to the module's `laneNeedsHuman` — the lane-aware
+    // predicate, not a state list copied into this file — the same reason the
+    // row pill is pinned to `laneState`: the page holds a second copy of the
+    // rule, and this is the seam between them. A thread-blocked lane must
+    // raise the total exactly as a running one does; a CI-only block must not.
     const attention =
       doc.querySelector('#state-summary [data-state="attention"] .value')
         ?.textContent ?? "";
-    const wantsHuman = NEEDS_HUMAN_STATES.reduce(
-      (sum, s) => sum + (moduleCounts[s] ?? 0),
-      0,
-    );
+    const wantsHuman = lanes.filter((lane) => laneNeedsHuman(lane, now)).length;
     expect(Number(attention)).toBe(wantsHuman);
     // The lead only turns red when there is someone to call.
     expect(
@@ -3896,13 +3944,13 @@ describe("the status page", () => {
     const now = Date.now();
     const status = stateFixture(now);
     const lanes = status.waves[0].lanes as unknown as LaneStatus[];
-    // The set the toggle keeps, derived here from the module — `isNeedsHumanState`
-    // over `laneState` — not copied from the page's inline list, so the test is
+    // The set the toggle keeps, derived here from the module — `laneNeedsHuman`
+    // over the lane — not copied from the page's inline list, so the test is
     // the seam and not an echo: a page that drops a state the module still keeps
     // (or the reverse) is caught here, exactly as a divergent word is caught by
     // the row-pill parity test.
     const activeIds = lanes
-      .filter((lane) => isNeedsHumanState(laneState(lane, now)))
+      .filter((lane) => laneNeedsHuman(lane, now))
       .map((lane) => lane.lane);
     const inactiveIds = lanes
       .map((lane) => lane.lane)

@@ -1,5 +1,6 @@
 import {
   laneState,
+  laneNeedsHuman,
   laneStateCounts,
   stallThresholdMs,
   LANE_STATES,
@@ -9,7 +10,7 @@ import {
 import type { LaneStatus } from "../types.js";
 import { it, expect } from "vitest";
 
-type PartialLaneStatus = Partial<LaneStatus> & {
+type PartialLaneStatus = Omit<Partial<LaneStatus>, "derived"> & {
   derived?: Partial<LaneStatus["derived"]>;
   disagreements?: string[];
 };
@@ -347,5 +348,80 @@ it("isNeedsHumanState names exactly the states a human is wanted for", () => {
     const wants = NEEDS_HUMAN_STATES.includes(state);
     expect(isNeedsHumanState(state)).toBe(wants);
   }
+});
+
+// Finding 1: needs-a-human is a fact about the lane, not only about its state
+// word. `blocked` cannot join NEEDS_HUMAN_STATES — a CI-only block waits on
+// the pipeline, not on a person — but a block whose cause is a *counted*
+// positive unresolved-thread count is a review somebody owes, and it is
+// exactly the thing the attention view exists to surface. The lane-aware
+// predicate reads the count; the page mirrors it, pinned by page.test.ts.
+it("laneNeedsHuman: the four needs-a-human states need a human whatever the lane carries", () => {
+  expect(laneNeedsHuman(makeStatus({ disagreements: ["a"] }), now)).toBe(true);
+  expect(laneNeedsHuman(makeStatus({ derived: { exit: 1 } }), now)).toBe(true);
+  const stalled = withLog(makeStatus({ derived: { alive: true } }), now - stallThresholdMs - 1);
+  expect(laneNeedsHuman(stalled, now)).toBe(true);
+  const running = withLog(makeStatus({ derived: { alive: true } }), now - stallThresholdMs + 1);
+  expect(laneNeedsHuman(running, now)).toBe(true);
+});
+
+it("laneNeedsHuman: blocked by a counted unresolved thread needs a human", () => {
+  const s = makeStatus({
+    derived: {
+      alive: false,
+      pr: { number: 1, state: "open", checks: "pass", unresolvedThreads: 2 },
+    },
+  });
+  expect(laneState(s, now)).toBe("blocked");
+  expect(laneNeedsHuman(s, now)).toBe(true);
+});
+
+it("laneNeedsHuman: blocked by CI alone does not need a human", () => {
+  const threadsZero = makeStatus({
+    derived: {
+      alive: false,
+      pr: { number: 1, state: "open", checks: "pending", unresolvedThreads: 0 },
+    },
+  });
+  expect(laneNeedsHuman(threadsZero, now)).toBe(false);
+  const threadsAbsent = makeStatus({
+    derived: { alive: false, pr: { number: 1, state: "open", checks: "none" } },
+  });
+  expect(laneNeedsHuman(threadsAbsent, now)).toBe(false);
+  const threadsUnknown = makeStatus({
+    derived: {
+      alive: false,
+      pr: { number: 1, state: "open", checks: "pending", unresolvedThreads: "unknown" },
+    },
+  });
+  expect(laneNeedsHuman(threadsUnknown, now)).toBe(false);
+});
+
+it("laneNeedsHuman: the quiet states never need a human, gap or no gap", () => {
+  const ready = makeStatus({
+    derived: {
+      alive: false,
+      pr: { number: 1, state: "open", checks: "pass", unresolvedThreads: 0 },
+    },
+  });
+  expect(laneNeedsHuman(ready, now)).toBe(false);
+  const merged = makeStatus({
+    derived: { alive: false, pr: { number: 1, state: "merged", checks: "pass" } },
+  });
+  expect(laneNeedsHuman(merged, now)).toBe(false);
+  // No PR at all: the `undefined` arm of the thread read must be reachable
+  // and must answer "not a person's problem", never throw.
+  expect(laneNeedsHuman(makeStatus({}), now)).toBe(false);
+  const closed = makeStatus({
+    derived: { alive: false, pr: { number: 1, state: "closed", checks: "none" } },
+  });
+  expect(laneNeedsHuman(closed, now)).toBe(false);
+  const unasked = makeStatus({
+    derived: {
+      alive: false,
+      pr: { number: 1, state: "open", checks: "unknown", unresolvedThreads: "unknown" },
+    },
+  });
+  expect(laneNeedsHuman(unasked, now)).toBe(false);
 });
 

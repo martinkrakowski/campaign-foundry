@@ -1063,6 +1063,62 @@ describe("thread state", () => {
     expect(calls.filter((args) => args[1] === "graphql")).toHaveLength(1);
   });
 
+  // Finding 3: a response that hands back the marker it was just sent has
+  // not advanced. Following it anyway issues `gh` calls forever — startup or
+  // a refresh never completes and every scheduled refresh behind it is stuck.
+  // The walk must stop, and the truncation must read as the gap it is: every
+  // open the walk never reached is "unknown", never a silent zero.
+  test("a response repeating the page marker stops the walk — bounded calls, unread opens unknown", async () => {
+    const { deps, calls } = threadDeps({
+      list: [openRow(218), openRow(219)],
+      threads: (_args, page) => {
+        // A correct walk is over after the second page answers; a third
+        // page means the loop did not stop, and this throws rather than
+        // letting a broken walk spin the runner dry.
+        if (page > 2) throw new Error("the walk did not stop at a repeated cursor");
+        return searchPage([prNode(218, [false])], "cur1");
+      },
+    });
+    const { facts } = await prFacts(deps);
+    const threadCalls = calls.filter((args) => args[0] === "api" && args[1] === "graphql");
+    expect(threadCalls).toHaveLength(2);
+    expect(threadCalls[1]?.join(" ")).toContain("after=cur1");
+    const byNumber = new Map(facts.map((f) => [f.number, f]));
+    // 218's own thread list came back complete, so its count stands; 219
+    // never arrived in any readable page — the truncation's answer, as for a
+    // truncated thread page, is unknown.
+    expect(byNumber.get(218)?.unresolvedThreads).toBe(1);
+    expect(byNumber.get(219)?.unresolvedThreads).toBe("unknown");
+  });
+
+  // Finding 4: absence of a boolean is not `false`. A `reviewThreads` page
+  // whose `hasNextPage` is missing or not a boolean never answered "this is
+  // the whole thread list", and counting it as one turns an unread thread
+  // state into a zero — which, under green checks, is `laneState` calling a
+  // lane it could not read `ready`. (The no-count-lands-on-ready half is the
+  // existing "green checks with an unmeasured thread state is unknown, not
+  // ready" test on `laneState`: unknown in, unknown out.)
+  test("a reviewThreads page without a boolean hasNextPage is unknown, never a completed zero", async () => {
+    const { deps } = threadDeps({
+      list: [openRow(218), openRow(219), openRow(222)],
+      threads: () =>
+        '{"data":{"search":{"nodes":[' +
+        '{"number":218,"reviewThreads":{"nodes":[],"pageInfo":{}}},' +
+        '{"number":219,"reviewThreads":{"nodes":[{"isResolved":true}],"pageInfo":{"hasNextPage":"no"}}},' +
+        '{"number":222,"reviewThreads":{"nodes":[{"isResolved":false}],"pageInfo":{"hasNextPage":false}}}' +
+        '],"pageInfo":{"hasNextPage":false}}}}',
+    });
+    const { facts } = await prFacts(deps);
+    const byNumber = new Map(facts.map((f) => [f.number, f]));
+    // The brief's payload: `{nodes: [], pageInfo: {}}` used to become zero
+    // threads. A missing flag and a non-boolean one are the same silence.
+    expect(byNumber.get(218)?.unresolvedThreads).toBe("unknown");
+    expect(byNumber.get(219)?.unresolvedThreads).toBe("unknown");
+    // A real boolean `false` is an answered page: the count stands, and the
+    // measured zero stays a measurement — only the gap changes sides.
+    expect(byNumber.get(222)?.unresolvedThreads).toBe(1);
+  });
+
   test("a malformed search page marks nothing read, and every open PR stays unknown", async () => {
     const { deps } = threadDeps({
       list: [openRow(218)],

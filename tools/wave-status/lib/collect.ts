@@ -551,6 +551,7 @@ async function threadCountsByPr(
     if (page === undefined) return counts;
     for (const [number, count] of page.counts) counts.set(number, count);
     if (!page.hasNextPage || page.endCursor === undefined) return counts;
+    if (page.endCursor === cursor) return counts;
     cursor = page.endCursor;
   }
 }
@@ -579,6 +580,10 @@ function parseThreadPage(json: string): ThreadPage | undefined {
     if (!isRecord(node) || typeof node.number !== "number") continue;
     const threads = node.reviewThreads;
     if (!isRecord(threads) || !Array.isArray(threads.nodes) || !isRecord(threads.pageInfo)) {
+      continue;
+    }
+    if (typeof threads.pageInfo.hasNextPage !== "boolean") {
+      counts.set(node.number, "unknown");
       continue;
     }
     counts.set(

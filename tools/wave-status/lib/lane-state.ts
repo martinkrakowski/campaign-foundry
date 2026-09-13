@@ -108,6 +108,18 @@ export function laneState(status: LaneStatus, nowMs: number): LaneState {
   return "unknown";
 }
 
+export function laneNeedsHuman(status: LaneStatus, nowMs: number): boolean {
+  const state = laneState(status, nowMs);
+  if (isNeedsHumanState(state)) {
+    return true;
+  }
+  if (state === "blocked") {
+    const threads = status.derived.pr?.unresolvedThreads;
+    return typeof threads === "number" && threads > 0;
+  }
+  return false;
+}
+
 // The rollup, from the same derivation as the rows: bucket a set of lanes by
 // the state `laneState` names for each, over `LANE_STATES` so every state
 // carries a number (a known zero, not an absent key). The per-wave header and
