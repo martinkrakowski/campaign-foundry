@@ -1181,17 +1181,48 @@
 
       checkPalette();
 
-      function laneMatches(wave, lane, nowMs) {
-        // Hide-inactive first: a lane that is not running, stalled, conflicted
-        // or failed is not a question for a human, so it leaves the view
-        // whatever the text filter says. The clock is the render's own — the
-        // same instant that paints the row's state and the header's count of it —
-        // so the row that is hidden and the state that hides it can never disagree.
-        if (hideInactive && !isLaneActive(lane, nowMs)) return false;
+      // Two controls can empty a wave, and they answer different questions: the
+      // text filter says "nothing here matches your query", the state control says
+      // "these lanes match and are not waiting for a person". The one place that
+      // reported an empty wave read only `filterText` and blamed the query for
+      // rows hide-inactive had removed — *not found* and *hidden* are different
+      // facts, and only the second has a remedy the reader can act on. So each
+      // half of the predicate stands on its own, and the empty row names the
+      // control that actually took the rows out.
+      function laneMatchesText(wave, lane) {
         if (filterText === "") return true;
         const key = `${wave.id}/${lane.lane}`.toLowerCase();
         const name = (lane.lane || "").toLowerCase();
         return name.includes(filterText) || key.includes(filterText);
+      }
+
+      function laneHiddenByInactive(lane, nowMs) {
+        // Hide-inactive: a lane that is not running, stalled, conflicted or
+        // failed is not a question for a human, so it leaves the view whatever
+        // the text filter says. The clock is the render's own — the same instant
+        // that paints the row's state and the header's count of it — so the row
+        // that is hidden and the state that hides it can never disagree.
+        return hideInactive && !isLaneActive(lane, nowMs);
+      }
+
+      const plural = (n) => `${n} ${n === 1 ? "lane" : "lanes"}`;
+
+      // The empty row's three answers, in the order the controls bite: nothing to
+      // show, nothing matched, and matched-but-hidden (which is the state
+      // control's doing, and names it so the reader can turn it off).
+      function emptyWaveMessage(query, lanes, textMatches) {
+        if (lanes.length === 0) return "No lanes in wave";
+        if (textMatches.length === 0) return `No lanes match “${esc(query)}”`;
+        if (query.trim() === "") {
+          return (
+            `No lanes need a human here — “hide inactive” is hiding ` +
+            plural(lanes.length)
+          );
+        }
+        return (
+          `${plural(textMatches.length)} matching “${esc(query)}” ` +
+          `hidden by “hide inactive”`
+        );
       }
 
       function applyFilter() {
@@ -1443,9 +1474,7 @@
       function updateHideInactiveSwitch() {
         if (!hideInactiveSwitch) return;
         hideInactiveSwitch.setAttribute("aria-checked", String(hideInactive));
-        hideInactiveSwitch.innerHTML = hideInactive
-          ? '<span class="label">show:</span> <span class="value">active</span>'
-          : '<span class="label">show:</span> <span class="value">all</span>';
+        hideInactiveSwitch.innerHTML = `<span class="label">show:</span> <span class="value">${esc(hideInactive ? "active" : "all")}</span>`;
       }
 
       if (hideInactiveSwitch) {
@@ -1967,8 +1996,11 @@
           const lanes = sortByRecent
             ? [...wave.lanes].sort(compareLanes)
             : wave.lanes;
-          const filteredLanes = lanes.filter((lane) =>
-            laneMatches(wave, lane, nowMs),
+          const textMatches = lanes.filter((lane) =>
+            laneMatchesText(wave, lane),
+          );
+          const filteredLanes = textMatches.filter(
+            (lane) => !laneHiddenByInactive(lane, nowMs),
           );
           for (const lane of filteredLanes) renderedLanes.push(lane);
           // One tbody per wave: a group of rows a <tr> could never own, and
@@ -1986,14 +2018,11 @@
               `</button></td></tr>`,
           ];
           if (filteredLanes.length === 0) {
-            let emptyMsg;
-            if (filterText !== "") {
-              emptyMsg = `No lanes match “${esc(filterInput ? filterInput.value : "")}”`;
-            } else if (lanes.length === 0) {
-              emptyMsg = "No lanes in wave";
-            } else {
-              emptyMsg = "No lanes need a human here";
-            }
+            const emptyMsg = emptyWaveMessage(
+              filterInput ? filterInput.value : "",
+              lanes,
+              textMatches,
+            );
             rowHtml.push(
               `<tr class="empty" data-wave="${esc(wave.id)}"><td colspan="8">${emptyMsg}</td></tr>`,
             );

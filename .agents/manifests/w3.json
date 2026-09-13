@@ -41,6 +41,14 @@
       "because": "The same set with the same state removed from the original instead of the copy: the module says stalled lanes no longer need a human while the page still keeps them, so the lead count and the hidden set both disagree with the reference. Two copies of one rule stay joined only if the seam is read from both sides, and the tests read it through the module.",
       "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
       "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/public/index.html",
+      "before": "        if (textMatches.length === 0) return `No lanes match “${esc(query)}”`;",
+      "after": "        if (query.trim() !== \"\") return `No lanes match “${esc(query)}”`;",
+      "because": "The empty row is the page's answer to 'where did my lanes go', and the branch it chose that answer on used to be the presence of a query rather than the absence of a match: put the test back on `query` and a search that matched only merged, ready, blocked, vanished or unknown lanes is reported as *not found* when it was found and hidden — a confidently wrong answer whose remedy (the switch that hid them) the reader is never told. Caught by the empty row's exact wording for all three cases: hidden, unmatched, and a wave with no lanes at all.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
+      "verdict": "caught"
     }
   ]
 }
