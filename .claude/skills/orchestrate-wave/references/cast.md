@@ -117,7 +117,9 @@ while ! grep -qE '^EXIT [0-9]+$' ~/.waves/wave-<id>/<lane>.log 2>/dev/null; do s
   with `curl -H "Authorization: Bearer $KEY" https://openrouter.ai/api/v1/key`; a 200 with
   `limit_remaining` means the failure is opencode-side. Back the file up, replace that one field,
   `chmod 600`.
-- **opencode: `opencode/` and `opencode-go/` are billed separately (2026-09-08).** `opencode/glm-5.3-flash` said *Insufficient balance* while `opencode-go/glm-5.3-flash` and `opencode/big-pickle` answered on the same account. Re-probe the exact provider prefix, not just the model.
+- **opencode: the provider prefixes are billed separately, and `openrouter/` is the funded one (corrected 2026-09-13).** On 2026-09-08 this note read *"`opencode-go/`, which is funded"*, because `opencode/glm-5.3-flash` answered *Insufficient balance* while `opencode-go/` answered. **That comparison never included `openrouter/`,** and a roster was built on it: three seats — including the primary implementer — went onto `opencode-go`, which then ran dry mid-wave on 2026-09-13 and took all three down at once.
+  The delegation memory had already recorded the answer: `openrouter/` was **never** broken — opencode keeps its own credential in `~/.local/share/opencode/auth.json` under `openrouter.key`, that key was stale, and the note of the day blamed the prefix and routed around it. `opencode-go` had *already* run dry once, on 2026-09-03.
+  **Probe `openrouter/` first. Re-probe the exact prefix, and do not read a comparison between two prefixes as a statement about a third.**
 - **opencode: an unfunded seat kills every model on that account** (`Insufficient balance`), the
   alternates included, and leaves nothing behind — clean worktrees, no commits. Probe before a wave.
 - **grok can take 80+ minutes and look dead**: 0 bytes written, seconds of CPU, no error, then it
@@ -445,9 +447,11 @@ threshold. The threshold still stands for a *ranking*; this is an assignment.
 
 | Seat | Model | Invocation |
 |---|---|---|
-| **Implementer (primary)** | `qwen3.8-flash` | `opencode run --auto --format json --model opencode-go/qwen3.8-flash "$(cat $BRIEF)"` |
+| **Implementer (primary)** | `qwen3.8-flash` | `opencode run --auto --format json --model openrouter/qwen/qwen3.8-flash "$(cat $BRIEF)"` |
 | **Implementer (reserve, and the critical path)** | `gemini-3.8-flash` | `agy --print "$(cat $BRIEF)" --dangerously-skip-permissions --effort high --model gemini-3.8-flash-high --print-timeout 90m --output-format json` |
 | **Stage-1 test writer** | `qwen3.8-flash` | as above — **and then stage 2 must be a different seat** |
+| *(alternate)* | `hy4-preview` | `opencode run --auto --format json --model openrouter/tencent/hy4-preview "$(cat $BRIEF)"` |
+| *(alternate)* | `deepseek-v4.1-flash` | `opencode run --auto --format json --model openrouter/deepseek/deepseek-v4.1-flash "$(cat $BRIEF)"` |
 | **Lane reviewer** | **anything except the model that wrote the code** | — |
 | **Plan reviewer** | `Agent` · `subagent_type: "Plan"` · `model: "fable"` | Owner's choice, 2026-09-09, **restored 2026-09-12**. `Plan` cannot Write or Edit, so the seat is read-only by construction rather than by instruction. |
 
@@ -546,4 +550,21 @@ missing rule leaves no trace in coverage.
 writing both the test and the code reasons its way to both, which is the shape that produces a test
 built to pass. The `git diff` gate still holds mechanically, but the value of the pass comes from the
 second seat not having authored the target. With qwen in stage 1, stage 2 is gemini.
+
+### Provider, probed 2026-09-13 after `opencode-go` ran dry
+
+| seat | id | floor | cost |
+|---|---|---|---|
+| qwen3.8-flash | `openrouter/qwen/qwen3.8-flash` | 8167 | $0.0012 |
+| hy4-preview | `openrouter/tencent/hy4-preview` | 7935 | $0.0067 |
+| deepseek-v4.1-flash | `openrouter/deepseek/deepseek-v4.1-flash` | 8060 | $0.0012 |
+
+Same models, same floors, on the funded account. qwen and deepseek are **5.6× cheaper** per boot here
+than the `opencode-go` route they were on.
+
+**What this cost, recorded because the mistake is repeatable.** Three seats on one balance is a
+concentration risk that was written down *in this file* before it fired — and it fired anyway,
+because the roster was placed on the wrong account in the first place. Two independent things went
+wrong: a stale note said `opencode-go` was funded, and nobody probed the provider the memory named.
+The hedge held: `agy`/gemini bills separately and carried the work while three seats were dark.
 
