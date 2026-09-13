@@ -244,7 +244,10 @@ that did not happen.
    yourself. Write each brief from Template A, then dispatch it as an `Agent`. **Record the
    worktree tip first** — an agent that reports success having committed nothing looks identical to
    one that did the work. Never let two lanes own the same file at the same time.
-   Emit as you go (`scripts/wave-event.sh`): `dispatch started` per lane just before its launch.
+   Emit as you go (`scripts/wave-event.sh`): `dispatch started` per lane just before its launch,
+   carrying the seat that runs it in `--detail` — `--detail '{"seat":"<implementer model>"}'` — because
+   the status page names the seat that ran each lane, and a lane whose record never names one reads
+   **unknown**. The seat is a property of the lane, so later stages need not repeat it.
    The per-lane `implement settled|failed` events **are** the completion record of a dispatch —
    `implement settled` when a lane's `EXIT` marker lands, `implement failed` on a non-zero
    marker or a lane killed without one; and `gate settled` with the gate exit and the four

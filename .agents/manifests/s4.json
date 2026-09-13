@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "lane": "S4",
+  "mutations": [
+    {
+      "file": "tools/wave-status/lib/merge.ts",
+      "before": "    if (typeof seat === \"string\" && seat !== \"\") seatByKey.set(key, seat);",
+      "after": "    if (typeof seat === \"string\" && seat !== \"\" && !seatByKey.has(key)) seatByKey.set(key, seat);",
+      "because": "The seat is a property of the lane, so the most recent event that names one must win when a lane is re-dispatched. Keep the first seat instead and a lane that fell back to a stronger model still reports the seat that first failed it — the re-dispatch test pins the value, so this cannot slip through as a silent choice.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/lib/__tests__/merge.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/public/index.html",
+      "before": "        return lane.seat === undefined\n          ? '<span class=\"dim\">unknown</span>'\n          : esc(lane.seat);",
+      "after": "        return lane.seat === undefined\n          ? \"\"\n          : esc(lane.seat);",
+      "because": "A lane whose record never named a seat has one honest answer: the word unknown. Render nothing instead and the gap reads as an empty cell — a lane the reader cannot tell from one whose seat failed to render, which is the exact failure the field was added to remove.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
+      "verdict": "caught"
+    }
+  ]
+}

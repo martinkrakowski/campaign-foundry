@@ -120,12 +120,6 @@ test "$(grep -c 'rows.push(' tools/wave-status/lib/collect.ts)" = "1"
 ! grep -rq 'reviewThreads' tools/wave-status/lib || ! grep -q '"unknown"' tools/wave-status/lib/types.ts
 ```
 
-```premise S4
-# The seat is on disk and the page never reads it. Probing the property access,
-# not the word: "seat" is house vocabulary and appears in prose everywhere.
-! grep -qE '\.seat\b' tools/wave-status/public/index.html
-```
-
 ```premise S5
 # The page cannot show premise state without wiring to the tool that computes
 # it. Probing the wiring, because "premise" as an English word is house

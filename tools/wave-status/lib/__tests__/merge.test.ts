@@ -159,6 +159,56 @@ describe("mergeStatus — shape and ordering", () => {
   });
 });
 
+describe("mergeStatus — the seat that ran a lane", () => {
+  test("a seat recorded on an earlier event survives later events that do not carry it", () => {
+    const status = mergeStatus(
+      [
+        event({ stage: "dispatch", event: "started", detail: { seat: "agy gemini-3.8-flash-high" } }),
+        event({ stage: "implement", event: "settled", ts: "2026-09-07T17:20:00Z", pr: 218 }),
+        event({ stage: "merge", event: "settled", ts: "2026-09-07T18:00:00Z", pr: 218 }),
+      ],
+      {},
+      "now",
+    );
+    const lane = status.waves[0]?.lanes[0];
+    // The latest event is still the reported one; the seat is lane-level.
+    expect(lane?.reported?.stage).toBe("merge");
+    expect(lane?.seat).toBe("agy gemini-3.8-flash-high");
+  });
+
+  test("the most recent recorded seat wins when a lane is re-dispatched", () => {
+    const status = mergeStatus(
+      [
+        event({ stage: "dispatch", event: "started", detail: { seat: "opencode/big-pickle" } }),
+        event({ stage: "implement", event: "failed", detail: { seat: "opencode-go/glm-5.3-flash" } }),
+      ],
+      {},
+      "now",
+    );
+    expect(status.waves[0]?.lanes[0]?.seat).toBe("opencode-go/glm-5.3-flash");
+  });
+
+  test("no event ever names a seat — the lane has none, it is not defaulted", () => {
+    const status = mergeStatus([event({ stage: "implement", event: "settled" })], {}, "now");
+    expect(status.waves[0]?.lanes[0]?.seat).toBeUndefined();
+    expect(status.waves[0]?.lanes[0]).not.toHaveProperty("seat");
+  });
+
+  test("a non-string or empty detail.seat is not a seat — never coerced or guessed", () => {
+    const status = mergeStatus(
+      [
+        event({ lane: "s1", detail: { seat: 7 } }),
+        event({ lane: "s2", detail: { seat: "" } }),
+        event({ lane: "s3", detail: { seat: { model: "x" } } }),
+      ],
+      {},
+      "now",
+    );
+    const seats = status.waves[0]?.lanes.map((lane) => lane.seat);
+    expect(seats).toEqual([undefined, undefined, undefined]);
+  });
+});
+
 describe("mergeStatus — disagreements are flagged, never resolved (D103)", () => {
   test("reported implement settled with no PR found", () => {
     const status = mergeStatus(

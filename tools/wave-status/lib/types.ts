@@ -67,6 +67,14 @@ export interface DerivedLane {
 export interface LaneStatus {
   readonly wave: string;
   readonly lane: string;
+  /**
+   * The seat that ran this lane, taken from any event that recorded one. A
+   * lane attribute, not a property of its latest event: `reported` is only the
+   * last line, and a lane's `implement settled`/`merge settled` do not carry
+   * the seat, so reading it off `reported.detail` loses it for every lane that
+   * finished. Absent means no event ever named one — never guessed.
+   */
+  readonly seat?: string;
   readonly reported?: {
     readonly stage: Stage;
     readonly event: EventKind;
