@@ -143,7 +143,9 @@ retired by K1's own merge.
 **Where a track lives: on the layer.** `layers[i].tracks`. A top-level `motion.tracks[]` with a
 `layer` field is the second addressing scheme **K-D4 refuses**, and D128 already makes the layer list
 the one place a layer is named. The cost is real and is accepted: `LAYER_KEY_ORDER` in
-`packages/shared/src/infrastructure/brief-yaml.ts:30` gains a fifth key, so K1's "round-trips in
+`packages/shared/src/infrastructure/brief-yaml.ts:30` gains a **sixth** key — it already carries five
+(`id`, `kind`, `enabled`, `props`, `elements`; HL1 added the last in #354), and an earlier draft of
+this amendment cited that line and miscounted it, so K1's "round-trips in
 declared key order" proof reaches `packages/shared`, and the boundary check pairs with
 `layerPropsProblem` in `brief-template.ts` rather than inventing a sibling convention. Tracks cannot
 go under `props`: `layerPropsProblem` refuses any field outside the per-kind allowlist.
@@ -171,11 +173,63 @@ sentence to write is *"precedence between a preset and an authored track is K4's
 K4 the day K1 merges. It now probes the resolver's own decision rather than the vocabulary around it.
 
 ```premise K4
-# The precedence rule between a preset's expansion and a hand-authored track is
-# what K4 decides. Probing for a resolver that reconciles the two, not for the
-# word "precedence" near the word "preset" — that phrasing is house vocabulary
-# and appears in unrelated prose, so K1's own doc comment would have retired
-# this lane the day it merged.
-! grep -rqE 'authoredWins|presetWins|reconcileTracks|trackPrecedence' packages/CampaignOrchestration/src/domain --include=*.ts
+# What K4 decides is the precedence rule between a preset's expansion and a
+# hand-authored track on the same (layer, property).
+#
+# Two earlier versions of this fence were wrong in opposite directions. The
+# first grepped "precedence" near "preset" across the domain tree including
+# comments, so K1's own doc comment would have retired K4 the day it merged.
+# The second probed four camelCase identifiers — and this repository names a
+# fixed rule in SCREAMING_SNAKE (REST_T, LAYER_PROPS, TEXT_EFFECT_REST), so
+# `TRACK_PRECEDENCE` would have shipped K4 with the fence still holding.
+#
+# A fence that cannot flip is worse than no fence: plan:verify only fails on
+# STALE, so a premise that always holds is silent, and reads as coverage.
+# Case-insensitive, and matched on the concept rather than one spelling of it.
+! grep -rqiE '(track|preset)[_-]?precedence|precedence[_-]?(rule|order)|authored[_-]?wins|preset[_-]?wins|reconcile[_-]?tracks|merge[_-]?tracks' packages/CampaignOrchestration/src/domain --include=*.ts
 ```
+
+---
+
+## K1 is not dispatchable yet — three model decisions remain
+
+The K-D6 gate is satisfied (VF1 = C5, #328). What blocks an honest stage-1 author is that three
+questions cannot be answered without contradicting something the plan already says. **A lane that has
+to guess one of these will encode the guess in a test**, which is the failure the two-stage pass
+exists to prevent.
+
+**1. Where `easeOutCubic` lives.** The only definition is `NodeCanvasCompositor.ts:498` and it is not
+exported. K-D2 puts the resolver in the domain; §1 says the default easing is "the one the codebase
+already uses" and forbids a second default; K1 says "no compositor change". All three cannot hold.
+**Decide:** move it to the domain and let the compositor import it back — it already imports from
+`@campaignfoundry/CampaignOrchestration` (`NodeCanvasCompositor.ts:26`), so the cost is one import and
+K1's "no compositor change" becomes "no compositor *behaviour* change", which is what it meant.
+
+**2. The resolver signature — there are three clocks, not two.** `t`, the copy clock, and `effectT`
+(`NodeCanvasCompositor.ts:259-263`), and the poster samples all three **independently**:
+`restT(request.motion)`, `posterCopyTAt(…)`, and `1` (`CanvasFfmpegVideoCompositor.ts:112-119`). A
+resolver of `(tracks, t) → pose` cannot render the poster. It takes a **clock set**. And during a
+crossfade `drawBeat` runs twice at one instant (`:943-945`), each with its own `local`, so the
+timeline path has a pose per **(layer, beat)** — not per layer, as §1 says.
+
+**3. Two tracks on one (layer, property).** The compositor already composes two presets there:
+`dy = riseDy + fx.dy` and `alpha = riseAlpha * fx.alpha` (`:978-979`, `:1093-1094`) — `headline-rise`
+and `rise-in` both drive copy `dy`. §1 says a track binds one layer to one property and is silent on
+two sharing one. K1's validator must **refuse or compose**, and the plan assumes this is K4's
+question. It is K3's at the latest, and K1's if the boundary is to refuse it.
+
+**Smaller, and an author can carry them once stated:** `LAYER_KEY_ORDER` gains a sixth key, not a
+fifth; neither boundary refuses an unknown layer key today, so `layerTracksProblem` is new work at
+**both** (`isLayerEntry`, `brief-template.ts:339-362`, and `validateTemplate`, `load-brief.ts:255-327`),
+shaped like `layerElementsProblem`; the round-trip proof needs a **positional** assertion, because
+`orderedKeys` appends unnamed keys at the end and the suite already documents that escape
+(`brief-yaml.test.ts:76-80`); and K-D4's "absent layer" clause is vacuous once tracks nest on the
+layer — only "disabled" remains.
+
+## Stale facts corrected
+
+- **The MP4 byte golden exists** (VG, #326). K-D3's "There is **no video byte golden**" and §2's
+  "VF2 then VF1" ordering are stale — K2's byte gate is checkable today.
+- §4's "It does not start before C1" contradicts K-D6's "VF1, not C1". K-D6 is right.
+- The header's "Verified against `main` at `ed5e2dc`" predates C5, VG and HL1.
 
