@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "lane": "X2",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
+      "before": "  image: [\"alt\"],",
+      "after": "  image: [],",
+      "because": "The image row of LAYER_PROPS is the whole mechanism the lane removes: with it empty, a kind that carries no props refuses any defined props — the empty object included — so an image layer cannot carry alt at either boundary and the defect is back exactly as it was.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
+      "before": "    if (field === \"alt\") {",
+      "after": "    if (false as boolean) {",
+      "because": "alt is the one prop that is not a fraction of the canvas, so it is the one prop the shared number check must not see. Disable its branch and every alt falls through to 'be a number in [0, 1]' — a text alternative refused because it is text.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
+      "before": "      if (typeof value !== \"string\") {",
+      "after": "      if (false as boolean) {",
+      "because": "The type check is the only thing standing between an arbitrary JSON value and a field whose consumers render it as text. Drop it and alt: 5 rides the guard into the run, where it is either stringified into an alt attribute or crashes a renderer that assumed a string.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
+      "before": "  shade: [\"alpha\"],",
+      "after": "  shade: [\"alpha\", \"alt\"],",
+      "because": "X2 adds alt where a layer can mean it, not everywhere: a shade is decoration with nothing to describe. Give shade the key and the vocabulary stops saying anything about which kinds carry an image — the drift D134's per-kind table exists to prevent.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
+      "before": "  video: [],",
+      "after": "  video: [\"alt\"],",
+      "because": "A video's text alternative is captions, not alt, and the lane deliberately leaves the kinds that carry nothing to describe with no props at all. Add the row and video stops being refused the props its own lane has not yet arrived with — the D134 mistake of shipping a vocabulary no consumer reads.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

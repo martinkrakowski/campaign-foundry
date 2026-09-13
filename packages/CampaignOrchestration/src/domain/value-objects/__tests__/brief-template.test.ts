@@ -282,19 +282,60 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
     expect(withLayer({ id: "motion", kind: "animated-text", props: { anchor: "top" } })).toBe(true);
   });
 
+  test("an image layer carries alt (X2), and the empty string is not absence", () => {
+    // The one kind whose whole content is a picture a reader may not see, and
+    // therefore the one kind that can *mean* a text alternative. "" declares
+    // the image decorative — a claim, not the absence of one — so it parses.
+    expect(withLayer({ id: "image", kind: "image", props: { alt: "Two hikers at dawn" } })).toBe(true);
+    expect(withLayer({ id: "image", kind: "image", props: { alt: "" } })).toBe(true);
+    expect(withLayer({ id: "image", kind: "image", props: {} })).toBe(true);
+    expect(layerPropsProblem("image", { alt: "" })).toBeUndefined();
+  });
+
   test("refuses props on a kind that carries none, the empty object included", () => {
-    expect(withLayer({ id: "image", kind: "image", props: { alpha: 0.5 } })).toBe(false);
-    expect(withLayer({ id: "html", kind: "html", props: { alpha: 0.5 } })).toBe(false);
+    expect(withLayer({ id: "html", kind: "html", props: { alt: "x" } })).toBe(false);
     expect(withLayer({ id: "fill", kind: "fill", props: { alpha: 0.5 } })).toBe(false);
     // The empty object names no prop, but it is still props on a kind that
     // carries none: the "must be absent" verdict is reached before any
     // entries are walked.
     expect(withLayer({ id: "video", kind: "video", props: {} })).toBe(false);
-    expect(layerPropsProblem("image", {})).toEqual({
+    expect(layerPropsProblem("video", {})).toEqual({
       path: "",
-      must: 'be absent for layer kind "image"',
+      must: 'be absent for layer kind "video"',
       value: {},
     });
+  });
+
+  test("refuses alt on a kind that cannot mean it — the vocabulary is per kind", () => {
+    // X2 adds alt to the image kind alone. A shade or an accent is decoration
+    // and a text layer's copy is already text, so alt there is a key the kind
+    // does not carry, refused exactly as any other unknown key is.
+    expect(withLayer({ id: "shade", kind: "shade", props: { alt: "x" } })).toBe(false);
+    expect(withLayer({ id: "video", kind: "video", props: { alt: "x" } })).toBe(false);
+    expect(layerPropsProblem("shade", { alt: "x" })).toEqual({
+      path: ".alt",
+      must: 'be one of "alpha" for layer kind "shade"',
+      value: "x",
+    });
+    // And the image kind's row is `alt` only: giving an image a geometry prop
+    // is refused the same way, naming the one key the kind does carry.
+    expect(layerPropsProblem("image", { alpha: 0.5 })).toEqual({
+      path: ".alpha",
+      must: 'be one of "alt" for layer kind "image"',
+      value: 0.5,
+    });
+  });
+
+  test("refuses an alt that is not a string", () => {
+    // alt is the one prop that is not a fraction, so it is the one prop the
+    // number check must not see.
+    expect(layerPropsProblem("image", { alt: 5 })).toEqual({
+      path: ".alt",
+      must: "be a string",
+      value: 5,
+    });
+    expect(withLayer({ id: "image", kind: "image", props: { alt: null } })).toBe(false);
+    expect(withLayer({ id: "image", kind: "image", props: { alt: true } })).toBe(false);
   });
 
   test("refuses another kind's props (a logo carrying accent's solidHeight)", () => {

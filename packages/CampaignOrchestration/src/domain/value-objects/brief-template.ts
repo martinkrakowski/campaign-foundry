@@ -41,9 +41,19 @@ export {
  * Every prop is optional, and absent means the value the layer resolves
  * today — from `CREATIVE_GEOMETRY`, the treatment, or the style, exactly as
  * now. The union is keyed by kind at the validation boundary: `shade` cannot
- * carry `logo`'s props, and the kinds L3 does not draw — `image`, `video`,
- * `html`, `fill` — carry no props at all (theirs arrive with the lanes that
- * draw them).
+ * carry `logo`'s props.
+ *
+ * `alt` is the one member that is not geometry (X2): the text alternative an
+ * `image` layer carries, the one kind whose whole content is a picture a
+ * reader may not be able to see. It is here and nowhere else because here is
+ * where it can be *meant* — a shade or an accent is decoration, a text layer's
+ * copy is already text, and an `html` layer's alternative belongs to the image
+ * elements inside it rather than to the container. An empty string is not
+ * absence: it declares the image decorative, which is a different claim from
+ * saying nothing about it.
+ *
+ * `video`, `html` and `fill` carry no props at all — theirs arrive with the
+ * lanes that draw them.
  */
 
 /** `shade`'s props: the contrast shade alpha, the `shadeAlpha` pair (0.7 bold / 0.4 subtle). */
@@ -69,7 +79,21 @@ export interface TextProps {
   readonly typeFloor?: number;
 }
 
-export type LayerProps = ShadeProps | AccentProps | LogoProps | TextProps;
+/**
+ * `image`'s props (X2): the text alternative the layer's picture carries.
+ * Absent means no alternative is declared; the empty string declares the image
+ * decorative, which a reader must be told rather than left to infer.
+ */
+export interface ImageProps {
+  readonly alt?: string;
+}
+
+export type LayerProps =
+  | ShadeProps
+  | AccentProps
+  | LogoProps
+  | TextProps
+  | ImageProps;
 
 /**
  * The props vocabulary per layer kind (D134), in `LayerProps`' declaration
@@ -82,7 +106,7 @@ const LAYER_PROPS: Readonly<Record<LayerKind, readonly string[]>> = {
   logo: ["width", "margin"],
   "static-text": ["anchor", "typeFloor"],
   "animated-text": ["anchor", "typeFloor"],
-  image: [],
+  image: ["alt"],
   video: [],
   html: [],
   fill: [],
@@ -129,7 +153,9 @@ export interface LayerPropsProblem {
  * `styleProblem` is shared between the domain and the parser (T5). Absent
  * props are always fine: absence is the resolved-default behaviour. A kind
  * that carries no props refuses any defined `props` — the empty object
- * included — before any entries are walked.
+ * included — before any entries are walked. `alt` is the one prop that is not
+ * a fraction: it is a string, and the empty string is admitted, because it
+ * declares a decorative image rather than naming no alternative at all.
  */
 export function layerPropsProblem(
   kind: LayerKind,
@@ -174,6 +200,12 @@ export function layerPropsProblem(
           must: `be one of ${ANCHOR_VALUES.map((anchor) => `"${anchor}"`).join(", ")}`,
           value,
         };
+      }
+      continue;
+    }
+    if (field === "alt") {
+      if (typeof value !== "string") {
+        return { path: `.${field}`, must: "be a string", value };
       }
       continue;
     }
@@ -279,8 +311,8 @@ export function satisfiesOrderConstraints(
  * position IS z-order (D128): a template whose layer order violates the creative
  * type's declared `above`/`below` constraints is not a valid template. A layer's `enabled`,
  * when present, must be a boolean (D129) — absent means enabled. A layer's `props`,
- * when present, must be a shape that layer's kind may carry (D134) — same key set,
- * every number a fraction in [0, 1], the anchor a vocabulary member — so an
+ * when present, must be a shape that layer's kind may carry (D134, X2) — same key set,
+ * every number a fraction in [0, 1], the anchor a vocabulary member, `alt` a string — so an
  * unknown key or a value out of range cannot ride the guard into the editor or
  * the run. An `html` layer's `elements`, when present, must be well-formed
  * elements of the vocabulary (HL1), so the two renderers never receive a list

@@ -565,21 +565,48 @@ describe("parseBrief", () => {
       ).toEqual({ anchor: "top" });
     });
 
-    test("props on an image layer are refused — the kind has none", () => {
+    test("an image layer's alt parses and carries verbatim (X2)", () => {
+      const parsed = parseBrief({
+        ...valid,
+        template: withProps("image", { alt: "Two hikers at dawn" }),
+      });
+      expect(
+        parsed.template.layers.find((layer) => layer.kind === "image"),
+      ).toEqual({
+        id: "image",
+        kind: "image",
+        props: { alt: "Two hikers at dawn" },
+      });
+    });
+
+    test("props on an image layer that are not alt are refused, naming the one key it carries", () => {
       expect(() =>
         parseBrief({ ...valid, template: withProps("image", { alpha: 0.5 }) }),
       ).toThrow(
-        'Campaign brief field "template.layers[0].props" must be absent for layer kind "image"; got {"alpha":0.5}.',
+        'Campaign brief field "template.layers[0].props.alpha" must be one of "alt" for layer kind "image"; got 0.5.',
       );
     });
 
-    test("an empty props object on a propless kind is refused too; on shade it is legal", () => {
+    test("an empty props object on a propless kind is refused too; on image and shade it is legal", () => {
+      // A video layer still carries no props at all, so even the empty object
+      // is refused before any entry is walked.
+      const videoBase = templateFromCanonical("short-video");
+      const videoWithProps = {
+        ...videoBase,
+        layers: videoBase.layers.map((layer) =>
+          layer.kind === "video" ? { ...layer, props: {} } : layer,
+        ),
+      };
+      expect(() =>
+        parseBrief({ ...valid, type: "short-video", template: videoWithProps }),
+      ).toThrow(
+        'Campaign brief field "template.layers[0].props" must be absent for layer kind "video"; got {}.',
+      );
+      // Image's alt and shade's props are both optional, so the empty object
+      // stays legal on each.
       expect(() =>
         parseBrief({ ...valid, template: withProps("image", {}) }),
-      ).toThrow(
-        'Campaign brief field "template.layers[0].props" must be absent for layer kind "image"; got {}.',
-      );
-      // Shade's props are all optional, so the empty object stays legal there.
+      ).not.toThrow();
       expect(() =>
         parseBrief({ ...valid, template: withProps("shade", {}) }),
       ).not.toThrow();
@@ -643,6 +670,14 @@ describe("parseBrief", () => {
       );
     });
 
+    test("an alt that is not a string is refused", () => {
+      expect(() =>
+        parseBrief({ ...valid, template: withProps("image", { alt: 5 }) }),
+      ).toThrow(
+        'Campaign brief field "template.layers[0].props.alt" must be a string; got 5.',
+      );
+    });
+
     test("the refusal holds with enforceCapabilities: false (authoring mode too)", () => {
       expect(() =>
         parseBrief(
@@ -650,7 +685,7 @@ describe("parseBrief", () => {
           { enforceCapabilities: false },
         ),
       ).toThrow(
-        'Campaign brief field "template.layers[0].props" must be absent for layer kind "image"; got {"alpha":0.5}.',
+        'Campaign brief field "template.layers[0].props.alpha" must be one of "alt" for layer kind "image"; got 0.5.',
       );
       expect(() =>
         parseBrief(
