@@ -1,0 +1,116 @@
+import { describe, expect, test } from "vitest";
+import { dispositionMutation, sweep } from "../lib/sweep.js";
+import { runCli } from "../cli.js";
+
+const ghFetch = (nodes: readonly { id: string; isResolved: boolean }[], writeResult?: string) =>
+  async (args: readonly string[]): Promise<string> => {
+    if (args.some((a) => a.includes("mutation"))) {
+      return (
+        writeResult ??
+        JSON.stringify({
+          data: {
+            addComment: { comment: { url: "https://gh/c1" } },
+            resolve0: { thread: { isResolved: true } },
+          },
+        })
+      );
+    }
+    return JSON.stringify({
+      data: { repository: { pullRequest: { id: "PR_I_1", reviewThreads: { nodes } } } },
+    });
+  };
+
+describe("sweep — refusals that keep half a class from landing", () => {
+  test("a single wrong id refuses too — the check is not batch-only", async () => {
+    await expect(
+      sweep({ pr: 361, requested: ["PRVT_x"], disposition: "x" }, true, {
+        gh: ghFetch([]),
+        out: () => undefined,
+      }),
+    ).rejects.toThrow(/not a review-thread node/);
+  });
+
+  test("a pull request whose reviewThreads field is absent reads as no threads", async () => {
+    await expect(
+      sweep({ pr: 361, requested: ["PRRT_a"], disposition: "x" }, false, {
+        gh: async () => JSON.stringify({ data: { repository: { pullRequest: { id: "PR_I_1" } } } }),
+        out: () => undefined,
+      }),
+    ).rejects.toThrow(/PRRT_a: not a review-thread node/);
+  });
+
+  test("a GraphQL error without a message is refused, not swallowed", async () => {
+    await expect(
+      sweep({ pr: 361, requested: ["PRRT_a"], disposition: "x" }, false, {
+        gh: async () => JSON.stringify({ errors: [{}] }),
+        out: () => undefined,
+      }),
+    ).rejects.toThrow(/unknown GraphQL error/);
+  });
+});
+
+describe("sweep — the post write", () => {
+  test("a write that reports no data resolves nothing, and says so", async () => {
+    const r = await sweep(
+      { pr: 361, requested: ["PRRT_a"], disposition: "x" },
+      true,
+      { gh: ghFetch([{ id: "PRRT_a", isResolved: false }], "{}"), out: () => undefined },
+    );
+    expect(r.commentUrl).toBeNull();
+    expect(r.resolvedThreadIds).toEqual([]);
+  });
+});
+
+describe("mutation shape", () => {
+  test("the head has no thread variables when there are none", () => {
+    expect(dispositionMutation(0)).not.toMatch(/\$thread\d: ID!/);
+  });
+
+  test("the fetch sends the number with `-F`: `-f` makes it a string and GraphQL refuses Int!", async () => {
+    const calls: string[][] = [];
+    await sweep({ pr: 361, requested: ["PRRT_a"], disposition: "x" }, false, {
+      gh: async (args) => {
+        calls.push([...args]);
+        return JSON.stringify({
+          data: { repository: { pullRequest: { id: "PR_I_1", reviewThreads: { nodes: [{ id: "PRRT_a", isResolved: false }] } } } },
+        });
+      },
+      out: () => undefined,
+    });
+    const fetchArgs = calls[0] ?? [];
+    const numberFlag = fetchArgs[fetchArgs.indexOf("number=361") - 1];
+    expect(numberFlag).toBe("-F");
+    expect(fetchArgs).toContain("-f"); // the query itself stays -f: it is a String
+  });
+});
+
+describe("runCli — edges", () => {
+  test("an empty argv names the missing command and exits 2", async () => {
+    const err: string[] = [];
+    const code = await runCli({
+      argv: [],
+      log: () => undefined,
+      logError: (t) => err.push(t),
+      readFile: async () => "",
+      gh: async () => "{}",
+    });
+    expect(code).toBe(2);
+    expect(err.join(" ")).toContain("'undefined' is not a command");
+  });
+
+  test("a non-Error throw from gh is reported and exits 1", async () => {
+    const err: string[] = [];
+    const code = await runCli({
+      argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--body", "x", "--post"],
+      log: () => undefined,
+      logError: (t) => err.push(t),
+      readFile: async () => "",
+      gh: async (args) => {
+        if (args.some((a) => a.includes("query="))) throw "not-an-error";
+        return "{}";
+      },
+    });
+    expect(code).toBe(1);
+    expect(err.join(" ")).toContain("not-an-error");
+  });
+});
