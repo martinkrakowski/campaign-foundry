@@ -214,7 +214,7 @@ When **several threads are the same finding** (three bots, one claim), dispose o
 **class once** — one comment naming the mechanism, every member resolved with it:
 
 ```bash
-yarn sweep threads --pr "$PR" --thread "$PRRT_ID" --thread "$PRRT_ID" … \
+yarn sweep threads --pr "$PR" --thread "$PRRT_ID_1" --thread "$PRRT_ID_2" … \
   --body-file disposition.md          # preview: prints the exact comment and ids
 yarn sweep threads … --body-file disposition.md --post   # post + resolve together
 ```

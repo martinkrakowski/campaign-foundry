@@ -68,12 +68,55 @@ describe("sweep — preview (hazard: the wrong thread is public and unrecoverabl
         resolve1: { thread: { isResolved: true } },
       },
     });
-    const r = recorder(threads(["PRRT_a", false], ["PRRT_b", false]), write);
-    const result = await sweep(plan(), true, { gh: r.gh, out: (l) => r.lines.push(l) });
-    expect(r.calls).toHaveLength(2);
+    const events: string[] = [];
+    const calls: string[][] = [];
+    const lines: string[] = [];
+    const gh = async (args: readonly string[]): Promise<string> => {
+      calls.push([...args]);
+      if (args.some((a) => a.includes("mutation"))) {
+        events.push("mutation");
+        return write;
+      }
+      events.push("fetch");
+      return threads(["PRRT_a", false], ["PRRT_b", false]);
+    };
+    const out = (l: string) => {
+      lines.push(l);
+      events.push(`out:${l}`);
+    };
+
+    const p = plan();
+    const result = await sweep(p, true, { gh, out });
+    expect(calls).toHaveLength(2);
     expect(result.commentUrl).toContain("issuecomment-1");
     expect(result.resolvedThreadIds).toEqual(["PRRT_a", "PRRT_b"]);
-    expect(r.lines.join("\n")).toContain("--post given");
+
+    // Preview order: preview lines are printed first, strictly before mutation
+    const mutationIdx = events.indexOf("mutation");
+    expect(mutationIdx).toBeGreaterThan(0);
+    const previewEvents = events.filter((e) => e.startsWith("out:"));
+    expect(previewEvents.length).toBeGreaterThan(0);
+    for (const pe of previewEvents) {
+      expect(events.indexOf(pe)).toBeLessThan(mutationIdx);
+    }
+    // Preview order: header -> open threads -> comment preview -> sign-off
+    const expectedBody = classBody(p.disposition, p.requested);
+    expect(lines).toEqual([
+      "PR #361 — class disposition, 2 thread(s)",
+      "  PRRT_a  (open)",
+      "  PRRT_b  (open)",
+      "Comment that will be posted, verbatim:",
+      "8<".padEnd(72, "-"),
+      ...expectedBody.split("\n").map((line) => `| ${line}`),
+      "8<".padEnd(72, "-"),
+      "--post given: writing now.",
+    ]);
+
+    // The body posted in the mutation is the exact body given
+    const mutationCall = calls[1];
+    const bodyArg = mutationCall.find((a) => a.startsWith("body="));
+    expect(bodyArg).toBe(`body=${expectedBody}`);
+    expect(mutationCall[mutationCall.indexOf(`body=${expectedBody}`) - 1]).toBe("-f");
   });
 });
 

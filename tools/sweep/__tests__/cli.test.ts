@@ -64,13 +64,19 @@ describe("runCli", () => {
   });
 
   test("--body-file is read and lands verbatim in the posted mutation", async () => {
-    const { io } = ok({
-      argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--thread", "PRRT_b", "--body-file", "d.md"],
+    const calls: string[][] = [];
+    const { io, log } = ok({
+      argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--thread", "PRRT_b", "--body-file", "d.md", "--post"],
+      readFile: async (p) => {
+        expect(p).toBe("d.md");
+        return "body from file on disk";
+      },
       gh: async (args) => {
+        calls.push([...args]);
         return args.some((a) => a.includes("mutation"))
           ? JSON.stringify({
               data: {
-                addComment: { comment: { url: "u" } },
+                addComment: { comment: { url: "https://gh/issuecomment-bodyfile" } },
                 resolve0: { thread: { isResolved: true } },
                 resolve1: { thread: { isResolved: true } },
               },
@@ -93,6 +99,16 @@ describe("runCli", () => {
       },
     });
     expect(await runCli(io)).toBe(0);
+    expect(calls).toHaveLength(2);
+    const mutationCall = calls[1];
+    expect(mutationCall.some((a) => a.includes("mutation"))).toBe(true);
+    expect(mutationCall).toContain("thread0=PRRT_a");
+    expect(mutationCall).toContain("thread1=PRRT_b");
+    expect(mutationCall).toContain("subject=PR_I_1");
+    expect(mutationCall).toContain(
+      "body=body from file on disk\n\nThreads disposed by this one comment (2):\n  - `PRRT_a`\n  - `PRRT_b`\n",
+    );
+    expect(log.join("\n")).toContain("class disposed: https://gh/issuecomment-bodyfile");
   });
 
   test("preview-only exits 0 and resolves nothing", async () => {
@@ -150,7 +166,7 @@ describe("runCli", () => {
   });
 
   test("a thread that did not come back resolved is a failed sweep", async () => {
-    const { io, err } = ok({
+    const { io, err, log } = ok({
       argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--thread", "PRRT_b", "--body", "x", "--post"],
       gh: async (args) =>
         args.some((a) => a.includes("mutation"))
@@ -179,6 +195,7 @@ describe("runCli", () => {
     });
     expect(await runCli(io)).toBe(1);
     expect(err.join(" ")).toContain("PRRT_b");
+    expect(log.join("\n")).not.toContain("class disposed");
   });
 
   test("a refusal exits 1 and lists every offending id", async () => {

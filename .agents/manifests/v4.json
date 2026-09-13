@@ -181,6 +181,21 @@
         "tools/sweep/__tests__/sweep.test.ts"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/cli.ts",
+      "before": "    const unresolved = plan.requested.filter((id) => !result.resolvedThreadIds.includes(id));\n    if (unresolved.length > 0) {\n      io.logError(\n        `these ids did not come back resolved: ${unresolved.join(\", \")} — re-read the PR, do not retry blindly.`,\n      );\n      return 1;\n    }\n    io.log(`class disposed: ${result.commentUrl}`);",
+      "after": "    io.log(`class disposed: ${result.commentUrl}`);\n    const unresolved = plan.requested.filter((id) => !result.resolvedThreadIds.includes(id));\n    if (unresolved.length > 0) {\n      io.logError(\n        `these ids did not come back resolved: ${unresolved.join(\", \")} — re-read the PR, do not retry blindly.`,\n      );\n      return 1;\n    }",
+      "because": "Reporting success before verifying every thread resolved presents a partial failure as a whole success: the operator sees 'class disposed' on stdout while the thread remains open. Caught by the CLI test asserting that 'class disposed' is not logged when a thread fails to resolve.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/cli.test.ts"
+      ],
+      "verdict": "caught"
     }
   ]
 }

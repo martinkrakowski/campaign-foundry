@@ -52,7 +52,6 @@ export async function runCli(io: SweepCliIo): Promise<number> {
       );
       return 1;
     }
-    io.log(`class disposed: ${result.commentUrl}`);
     const unresolved = plan.requested.filter((id) => !result.resolvedThreadIds.includes(id));
     if (unresolved.length > 0) {
       io.logError(
@@ -60,6 +59,7 @@ export async function runCli(io: SweepCliIo): Promise<number> {
       );
       return 1;
     }
+    io.log(`class disposed: ${result.commentUrl}`);
     return 0;
   } catch (error) {
     if (error instanceof SweepRefusal) {
