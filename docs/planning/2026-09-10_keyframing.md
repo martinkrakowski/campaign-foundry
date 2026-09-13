@@ -173,19 +173,26 @@ sentence to write is *"precedence between a preset and an authored track is K4's
 K4 the day K1 merges. It now probes the resolver's own decision rather than the vocabulary around it.
 
 ```premise K4
-# What K4 decides is the precedence rule between a preset's expansion and a
-# hand-authored track on the same (layer, property).
+# KNOWN-WEAK, and recorded as such rather than trusted.
 #
-# Two earlier versions of this fence were wrong in opposite directions. The
-# first grepped "precedence" near "preset" across the domain tree including
-# comments, so K1's own doc comment would have retired K4 the day it merged.
-# The second probed four camelCase identifiers — and this repository names a
-# fixed rule in SCREAMING_SNAKE (REST_T, LAYER_PROPS, TEXT_EFFECT_REST), so
-# `TRACK_PRECEDENCE` would have shipped K4 with the fence still holding.
+# K4 decides a precedence RULE between a preset's expansion and a hand-authored
+# track. A rule can be named anything, so no name probe can reliably detect it.
+# Three attempts failed in three different ways: the first matched "precedence"
+# near "preset" across the tree including comments, so K1's own doc comment would
+# have retired K4 on merge; the second probed camelCase in a repository that
+# names fixed rules in SCREAMING_SNAKE; this third one still misses plausible
+# names — PRESET_OVER_AUTHORED and TRACK_SOURCE_ORDER both leave it holding,
+# verified.
 #
-# A fence that cannot flip is worse than no fence: plan:verify only fails on
-# STALE, so a premise that always holds is silent, and reads as coverage.
-# Case-insensitive, and matched on the concept rather than one spelling of it.
+# It is kept because it can only fail SAFE: it holds until one of these names
+# appears, so it cannot retire a live lane. It cannot be relied on to notice
+# that K4 has shipped. **Retire this fence by hand when K4 merges** — the
+# completing-PR rule does not protect a fence that never flips, because
+# plan:verify only fails on STALE.
+#
+# The durable fix is not a better regex. K4 is blocked behind K1's resolver, and
+# once that exists the rule has a home: probe THAT file for a second input, not
+# the whole tree for a word.
 ! grep -rqiE '(track|preset)[_-]?precedence|precedence[_-]?(rule|order)|authored[_-]?wins|preset[_-]?wins|reconcile[_-]?tracks|merge[_-]?tracks' packages/CampaignOrchestration/src/domain --include=*.ts
 ```
 
@@ -232,4 +239,20 @@ layer — only "disabled" remains.
   "VF2 then VF1" ordering are stale — K2's byte gate is checkable today.
 - §4's "It does not start before C1" contradicts K-D6's "VF1, not C1". K-D6 is right.
 - The header's "Verified against `main` at `ed5e2dc`" predates C5, VG and HL1.
+
+## A limit of the premise mechanism, found here
+
+**A premise can only detect a lane whose output has a detectable shape.** K4's output is a *rule*,
+and a rule can be named anything — three fences failed in three different ways before this was
+obvious. The mechanism is strong for lanes that add a file, a field, a call site or a branch, and
+weak for lanes that add a decision.
+
+Two consequences worth carrying:
+
+- **A fence that cannot flip is silent.** `plan:verify` fails only on `STALE`, so a premise that
+  always holds reads as coverage and provides none. The completing-PR rule — *retire your fence in
+  the same commit* — does not protect against it, because nothing fails to remind you.
+- **Demonstrating a flip is not optional, and it is easy to demonstrate wrongly.** Two of the three
+  broken fences here were declared working on the strength of a test that did not exercise them. The
+  check is not "did I try" but "did I watch it change state, twice, in both directions".
 
