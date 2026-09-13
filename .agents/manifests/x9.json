@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "lane": "X9",
+  "mutations": [
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "      // silently drop the enabled copy that follows it.\n      if (isDisabledLayer(layer)) continue;",
+      "after": "      // silently drop the enabled copy that follows it.",
+      "because": "The still path's dispatch skip is the whole lane: remove it and a layer the operator disabled renders anyway, so the frame is no longer the frame of the template without that layer — the accepted-then-not-rendered promise D129's validation makes and this compositor used not to keep.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.enabled.test.ts",
+        "-t",
+        "still: a disabled layer renders the frame of the template without that layer"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "      if (isDisabledLayer(layer)) continue;\n      if (layer.kind === \"static-text\" || layer.kind === \"animated-text\") {\n        // A creative type's shared budget caps text-kind layers at one (D124);\n        // this guard is defensive, not load-bearing — never draws copy twice.\n        if (copyDrawn) continue;\n        copyDrawn = true;\n      }",
+      "after": "      if (layer.kind === \"static-text\" || layer.kind === \"animated-text\") {\n        // A creative type's shared budget caps text-kind layers at one (D124);\n        // this guard is defensive, not load-bearing — never draws copy twice.\n        if (copyDrawn) continue;\n        copyDrawn = true;\n      }\n      if (isDisabledLayer(layer)) continue;",
+      "because": "Ordering is the lane's sharp edge: a skip that runs AFTER the copyDrawn assignment lets a disabled copy layer consume the D124 text budget, so the enabled copy that follows it is silently dropped — the same defect this lane fixes, moved one layer down the list, invisible to any test that only asks whether copy appeared.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.enabled.test.ts",
+        "-t",
+        "still: a disabled copy layer does not consume the copy budget"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "    // would silently drop the enabled copy that follows it.\n    if (isDisabledLayer(layer)) continue;",
+      "after": "    // would silently drop the enabled copy that follows it.",
+      "because": "The sequenced path is a second dispatch loop with its own copy of the rule; a still-path-only fix would leave video frames and the poster drawing every disabled layer. Remove this skip and the motion frame of a disabled-shade template is not the frame of the template without that shade.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.enabled.test.ts",
+        "-t",
+        "timeline: a disabled layer renders the frame of the template without that layer"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "      logoLoaded && layers.some((layer) => layer.kind === \"logo\" && layer.enabled !== false);",
+      "after": "      logoLoaded && layers.some((layer) => layer.kind === \"logo\");",
+      "because": "F2 says logoApplied reports what was DRAWN, not what loaded; with the enabled check gone, a brief whose only logo layer is switched off paints no logo pixels and still credits the run with brand compliance — the compliance report making the same promise the renderer no longer breaks.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.enabled.test.ts",
+        "-t",
+        "logoApplied reports what was drawn"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

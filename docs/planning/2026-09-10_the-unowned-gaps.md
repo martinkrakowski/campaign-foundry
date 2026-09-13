@@ -205,10 +205,8 @@ as a promise the renderer never made.
 reviewing HL3 and deliberately kept out of that lane — folding it in would have turned a drawer into
 a dispatch-loop change touching every layer kind.
 
-```premise X9
-# The compositor never reads a layer's `enabled` (D129) — every layer draws.
-! grep -q 'enabled' packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts
-```
+**X9 — shipped in this PR.** Its premise was retired when it landed; `plan:verify` no
+longer tracks it.
 
 ---
 
