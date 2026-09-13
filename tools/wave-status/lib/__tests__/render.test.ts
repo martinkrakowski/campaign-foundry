@@ -108,6 +108,29 @@ describe("renderStatus", () => {
     expect(renderStatus(makeStatus([], "T"))).toBe("wave T");
   });
 
+  test("a corpus that was not read whole says so, rather than letting every PR column read as absence", () => {
+    // A bare em dash is read as "no PR". Rows that could not be parsed are a
+    // gap in the read, and the terminal face owes the same honesty the page does.
+    const gapped: WaveStatus = { ...makeStatus([makeLane("t2")]), prs: { skipped: 2 } };
+    const out = renderStatus(gapped);
+    expect(out.split("\n")).toContain(
+      "prs: 2 row(s) could not be read — a lane with no PR may be one of them",
+    );
+    expect(renderStatus(makeStatus([makeLane("t2")]))).not.toContain("could not be read");
+  });
+
+  test("a gap with no waves at all renders the gap alone, with no leading blank", () => {
+    const out = renderStatus({ generatedAt: "now", prs: { skipped: 1 }, waves: [] });
+    expect(out).toBe("prs: 1 row(s) could not be read — a lane with no PR may be one of them");
+  });
+
+  test("the gap line is cut to the width like every other line", () => {
+    const gapped: WaveStatus = { ...makeStatus([makeLane("t2")]), prs: { skipped: 2 } };
+    for (const line of renderStatus(gapped, { width: 20 }).split("\n")) {
+      expect(line.length).toBeLessThanOrEqual(20);
+    }
+  });
+
   test("a status with no waves renders nothing", () => {
     expect(renderStatus({ generatedAt: "2026-09-09T00:00:00Z", waves: [] })).toBe("");
   });

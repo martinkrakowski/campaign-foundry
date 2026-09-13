@@ -4374,6 +4374,34 @@ describe("the status page", () => {
     expect(findingsCell!.textContent).toContain("3 / 1 / 2");
   });
 
+  test("a corpus that was not read whole never renders as no PR", async () => {
+    // "no PR" is a claim about the repository. Rows that came back and could
+    // not be parsed make it a claim about the read, so the cell says which —
+    // one malformed row must never again empty the whole corpus into a column
+    // of "no PR".
+    const whole = await loadPage(statusAt());
+    expect(whole.window.document.querySelector("tr.lane td.c-pr")?.textContent).toBe("no PR");
+
+    const gapped = await loadPage({ ...statusAt(), prs: { skipped: 2 } });
+    const cell = gapped.window.document.querySelector("tr.lane td.c-pr");
+    expect(cell?.textContent).toBe("no PR read");
+    expect(cell?.querySelector("span")?.getAttribute("title")).toBe(
+      "2 PR row(s) could not be read",
+    );
+  });
+
+  test("the gap names the short read only where no PR joined; a joined PR still renders", async () => {
+    const page = await loadPage({ ...mixedStatus, prs: { skipped: 1 } });
+    const doc = page.window.document;
+    const prOf = (lane: string) =>
+      doc.querySelector(`tr.lane[data-lane="${lane}"] td.c-pr`)?.textContent ?? "";
+    // t1 and t2 joined PRs — the gap says nothing about them.
+    expect(prOf("t1")).toContain("#1");
+    expect(prOf("t2")).toContain("#2");
+    // t3 joined nothing, and the corpus has a hole: not "no PR".
+    expect(prOf("t3")).toBe("no PR read");
+  });
+
   test("the wave band exposes eyebrow, id and a derived-state rollup inside the accordion button, and aria-controls resolves to that wave's own lane rows", async () => {
     const page = await loadPage(mixedStatus);
     const doc = page.window.document;

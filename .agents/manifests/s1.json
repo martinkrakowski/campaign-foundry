@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "lane": "S1",
+  "mutations": [
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "  if (eventPr !== undefined) {",
+      "after": "  if (eventPr === undefined) {",
+      "because": "The whole lane is that the event's own pr number is the join key. Invert the preference and the lane whose branch slug was reworded (L2a-compositor-layer-list shipped as feat/l2a-layer-list) loses its PR in the recorded fixture again — the exact data C1 was measured on, which no branch rule could ever have joined.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/pr-lane-join.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "  const wanted = lane.toLowerCase();",
+      "after": "  const wanted = lane;",
+      "because": "Case was one half of the measured zero intersection (lanes are written L3b, branches lowercased). Drop the case fold and the recorded fixture collapses back toward zero: M2, W2b1-log-toolbar, H1a-tokens-selector and every other case-only join disappears.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/pr-lane-join.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "fact.branchTail.startsWith(`${wanted}-`)",
+      "after": "fact.branchTail.startsWith(wanted)",
+      "because": "The descendant rule must stop at the hyphen: a bare prefix lets lane w1 collect w1a-status-cli's PR, which is a confidently-wrong join — worse than the empty one this lane fixes, because it survives review. Caught by the sibling-prefix unit assertion.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "\"--paginate\",",
+      "after": "\"--no-paginate\",",
+      "because": "The PR corpus exceeds a single page: without --paginate, gh api returns only the first page and drops older PRs. Caught by the pagination flag assertion.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "throw new Error(\n      `could not fetch PRs:",
+      "after": "return []; throw new Error(\n      `could not fetch PRs:",
+      "because": "Swallowing a gh failure hides API errors and renders as if the repository has no PRs at all. A gh error must surface by throwing, caught by the rejection assertion.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "(score === bestScore && fact.number > best.number)",
+      "after": "(score === bestScore && fact.number < best.number)",
+      "because": "Among equal-strength candidates the newest PR must win, or the join depends on gh's return order instead of on data. Flip the tiebreak and the deterministic-old-number case returns the stale PR.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "fact.branchTail === wanted ? 2 :",
+      "after": "fact.branchTail === wanted ? 1 :",
+      "because": "An exact case-folded tail must outrank a descendant of the same lane (l5-template-editor is not l5-template-editor-2). Demote the exact score to a tie and the descendant with the higher number steals the lane.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "if (state === \"open\" && (scope === undefined || isClaimed(entry, scope))) {",
+      "after": "if (state === \"open\") {",
+      "because": "The refresh runs on every /api/status, so a check-runs call per open head stalls page load, and it grows with the repository — every unrelated open PR — not with the wave. Drop the claim gate and the sweep fetches checks for feat/unrelated too; the scoped assertion counts exactly the claimed heads and fails.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "    } else {\n      skipped += 1;\n    }",
+      "after": "    } else {\n      return { entries: [], skipped };\n    }",
+      "because": "One malformed row discarding the whole batch is the defect this lane was reopened on: the caller turns the rejected batch into an empty corpus, and a single truncated row renders as a repository with no pull requests. The row must be skipped and counted, and the rows around it kept.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "  return corpus.skipped > 0 ? { ...status, prs: { skipped: corpus.skipped } } : status;",
+      "after": "  return status;",
+      "because": "A corpus with rows missing is not one any face may read as whole. Drop the gap from the status and a lane whose PR was in an unreadable row is indistinguishable from a lane with no PR, which is the page's 'no PR' claim returning by the back door.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "  return { facts, skipped: listed.skipped };",
+      "after": "  return { facts, skipped: 0 };",
+      "because": "The count is the whole distinction between a read that came up short and a repository with no pull requests. Report zero and the gap vanishes at the seam, so the status, the page and the terminal all read the corpus as complete.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "  if (trimmed === \"\") return { entries: [], skipped: 0 };",
+      "after": "  if (trimmed === \"\") return { entries: [], skipped: 1 };",
+      "because": "Nothing to fetch is an answer, not a gap: gh replies to a repository with no pull requests with no output at all. Counting that as a skipped row makes a true 'no PRs' read as a failed read, which is the same confusion in the other direction.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/collect.ts",
+      "before": "    return JSON.parse(text);\n  } catch {\n    return undefined;\n  }",
+      "after": "    return JSON.parse(text);\n  } catch {\n    throw new Error(\"row unreadable\");\n  }",
+      "because": "An unreadable row is a gap, never a crash: this file's contract is that a read which cannot be completed shrinks the observation instead of taking the whole status down with it. Throw here and one truncated row costs the operator liveness, logs and gates as well as PRs.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/collect.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/public/index.html",
+      "before": "          return gap === undefined\n            ? '<span class=\"dim\">no PR</span>'",
+      "after": "          return gap !== undefined\n            ? '<span class=\"dim\">no PR</span>'",
+      "because": "The page's 'no PR' is a claim about the repository. With rows missing it is not a claim the page can make, and every lane of a short read would render exactly as a repository with none - the third time this lane has shown a fetch problem as an empty result.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/page.test.ts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/render.ts",
+      "before": "  if (status.prs === undefined) return body;",
+      "after": "  if (status.prs !== undefined) return body;",
+      "because": "The terminal face owes the same honesty: with rows missing every PR cell prints an em dash, and an em dash is read as absence. Say the read was short instead.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/lib/__tests__/render.test.ts"],
+      "verdict": "caught"
+    }
+  ]
+}

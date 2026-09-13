@@ -50,7 +50,48 @@ export const MAX_TAIL_KB = 1024;
 /** Prefixed families are pipeline artefacts, not lane logs. */
 const LANE_LOG_EXCLUDED = /^(install|gate|review|fix)-/;
 
-const PR_BRANCH_PREFIX = "feat/";
+/**
+ * One PR as the collector sees it: the observation's facts plus the
+ * normalised branch tail (`headRefName` minus any `feat/`-style prefix,
+ * lowercased) that the fallback join runs on. The lane's own event `pr`
+ * number is the preferred join; the tail is only a fallback.
+ */
+export interface PrFact extends NonNullable<LaneObservation["pr"]> {
+  readonly branchTail: string;
+}
+
+/**
+ * The heads the wave actually names. `prFacts` fetches check-runs only for the
+ * open PRs a lane claims — the event's own `pr`, or a branch tail some lane
+ * matches — so the sweep grows with the wave, not with the repository.
+ */
+export interface PrScope {
+  readonly lanes: ReadonlySet<string>;
+  readonly reportedPrs: ReadonlySet<number>;
+}
+
+/**
+ * What one `gh` PR listing parsed to. `skipped` counts the rows that came back
+ * but could not be read — a truncated last line, a row the projection dropped
+ * a field from. A skipped row is a gap in the corpus and is never a reason to
+ * discard the rows that did read: one malformed entry emptying the batch is
+ * the same fault as a missing page, and it looks like a repository with no
+ * pull requests at all.
+ */
+export interface PrListParse {
+  readonly entries: readonly GhPrListEntry[];
+  readonly skipped: number;
+}
+
+/**
+ * The corpus `prFacts` read: the facts it could build, and the rows it could
+ * not. The two travel together so a partial corpus can never be mistaken for a
+ * whole one downstream.
+ */
+export interface PrCorpus {
+  readonly facts: readonly PrFact[];
+  readonly skipped: number;
+}
 
 interface GhPrListEntry {
   readonly number: number;
@@ -79,30 +120,44 @@ export function resolveScanRoots(
 
 /**
  * Walk the wave log tree and build the one `WaveStatus` the server renders.
- * Every external result is data: a failing read or CLI call shrinks the
- * observation (no log, no gate, no PR) — it never throws (D103, D106).
+ * Failing reads shrink the observation (no log, no gate). A `gh` failure rejects
+ * so PR facts are never silently dropped as an empty list (which would falsely
+ * indicate no pull requests exist).
  *
- * `cachedPrByLane`, when provided, is reused as-is: a watcher-triggered
- * refresh re-reads local state without waiting on `gh`. Omit it (or pass
- * nothing) to fetch PR facts now — startup, the slow poll, on-demand.
+ * `knownCorpus`, when provided, is reused as-is — rows and gap together: a
+ * watcher-triggered refresh re-reads local state without waiting on `gh`, and
+ * the corpus it reuses is exactly as complete as the one it was read as. Omit
+ * it (or pass nothing) to fetch PR facts now — startup, the slow poll,
+ * on-demand. When fetched, the corpus is handed to `onCorpus` so the caller
+ * can cache it for the next watcher refresh.
  */
 export async function collect(
   deps: CollectDeps,
   root: string,
   now: string,
-  cachedPrByLane?: Readonly<Record<string, LaneObservation["pr"]>>,
+  knownCorpus?: PrCorpus,
   legacyRoots?: readonly string[],
+  onCorpus?: (corpus: PrCorpus) => void,
 ): Promise<WaveStatus> {
   // Gather first, order last: the wave list is decided here, the one place
   // that has seen every lane log's mtime, and it travels to the merge as an
   // explicit order. Feeds are never asked to carry it — grouping by feed is
   // how an evented old wave came to lead a live new one.
-  const rows: { readonly wave: string; readonly lane: string; readonly obs: LaneObservation }[] = [];
+  const rows: {
+    readonly wave: string;
+    readonly lane: string;
+    readonly reportedPr: number | undefined;
+    readonly obs: Omit<LaneObservation, "pr">;
+  }[] = [];
   const events: WaveEvent[] = [];
   const newestByWave = new Map<string, number>();
   const discovered = new Set<string>();
+  // The heads the wave names, gathered while scanning. `prFacts` uses them to
+  // fetch check-runs only for open PRs a lane claims, not every open head in
+  // the repository.
+  const lanes = new Set<string>();
+  const reportedPrs = new Set<number>();
 
-  const prByLane = cachedPrByLane ?? (await prFacts(deps));
   const worktrees = await worktreeFacts(deps);
 
   const scanRoots = resolveScanRoots(root, legacyRoots);
@@ -134,6 +189,22 @@ export async function collect(
       // no events yet is a dispatched wave, and that is the state an operator
       // most wants to see. Absent is the one answer that is never useful.
       discovered.add(wave);
+
+      // Events are read before the lane logs because a lane's own event `pr`
+      // is the preferred join key: the directory that holds a log also holds
+      // the events reporting that log's PR, whatever its wave field says.
+      const reportedPrByLane = new Map<string, number>();
+      if (entries.includes("events.jsonl")) {
+        try {
+          const text = await deps.readFile(join(dir, "events.jsonl"));
+          for (const event of readEvents(text).events) {
+            events.push(event);
+            if (event.pr !== undefined) reportedPrByLane.set(event.lane, event.pr);
+          }
+        } catch {
+          // W3 writes events.jsonl; absent or unreadable is "nobody reported", not an error.
+        }
+      }
 
       const laneLogs = entries
         .filter((entry) => entry.endsWith(".log") && !LANE_LOG_EXCLUDED.test(entry))
@@ -169,25 +240,28 @@ export async function collect(
           }
         }
 
-        const obs: LaneObservation = {
+        const reportedPr = reportedPrByLane.get(lane);
+        lanes.add(lane);
+        if (reportedPr !== undefined) reportedPrs.add(reportedPr);
+        const obs: Omit<LaneObservation, "pr"> = {
           ...(log !== undefined ? { log } : {}),
           ...(gateLog !== undefined ? { gateLog } : {}),
           alive,
-          ...(prByLane[lane] !== undefined ? { pr: prByLane[lane] } : {}),
         };
-        rows.push({ wave, lane, obs });
-      }
-
-      if (entries.includes("events.jsonl")) {
-        try {
-          const text = await deps.readFile(join(dir, "events.jsonl"));
-          for (const event of readEvents(text).events) events.push(event);
-        } catch {
-          // W3 writes events.jsonl; absent or unreadable is "nobody reported", not an error.
-        }
+        rows.push({ wave, lane, reportedPr, obs });
       }
     }
   }
+
+  // The join needs the facts, and the facts need the lanes — so fetch only now
+  // that every lane and every reported `pr` has been gathered. A watcher
+  // refresh hands the cached facts in and this call is skipped entirely.
+  let corpus = knownCorpus;
+  if (corpus === undefined) {
+    corpus = await prFacts(deps, { lanes, reportedPrs });
+    onCorpus?.(corpus);
+  }
+  const facts = corpus.facts;
 
   // The wave list order, decided once from the newest lane-log activity in each
   // wave, is handed to the merge as data — not implied by the order two feeds
@@ -197,9 +271,16 @@ export async function collect(
   );
 
   const observed: Record<string, LaneObservation> = {};
-  for (const row of rows) observed[`${row.wave}/${row.lane}`] = row.obs;
+  for (const row of rows) {
+    const pr = joinPrForLane(row.lane, row.reportedPr, facts);
+    observed[`${row.wave}/${row.lane}`] = { ...row.obs, ...(pr !== undefined ? { pr } : {}) };
+  }
 
-  return mergeStatus(events, observed, now, orderedWaves);
+  const status = mergeStatus(events, observed, now, orderedWaves);
+  // A corpus with rows missing is not one the page may read as complete: a
+  // lane that joined no PR may be a lane whose PR was in an unreadable row.
+  // Name the gap so no face of this tool can render it as "no PR".
+  return corpus.skipped > 0 ? { ...status, prs: { skipped: corpus.skipped } } : status;
 }
 
 /**
@@ -237,38 +318,60 @@ export async function readTail(
 }
 
 /**
- * One `gh pr list` plus check-runs for open heads, mapped to lanes by
- * branch name `feat/<lane>`. Any `gh` failure, or a well-formed body of the
- * wrong shape, yields no PRs — never a throw.
+ * Projection from REST API pull object to the GhPrListEntry shape prFacts consumes.
+ * Maps .head.ref to headRefName, .head.sha to headRefOid, and normalises merged state.
  */
-export async function prFacts(deps: CollectDeps): Promise<Record<string, LaneObservation["pr"]>> {
-  const byLane: Record<string, LaneObservation["pr"]> = {};
+export const PR_PULLS_JQ =
+  '.[] | {number: .number, state: (if .merged_at then "merged" else .state end), headRefName: .head.ref, headRefOid: .head.sha}';
 
-  let listed: readonly GhPrListEntry[] | undefined;
+/**
+ * The PR corpus, walked through the REST API. `gh api` with `--paginate`
+ * follows Link headers and streams every PR in the repository, projecting each
+ * to `{number, state, headRefName, headRefOid}` via jq.
+ *
+ * `scope`, when provided, bounds the check-runs sweep to the open heads a lane
+ * actually claims: the event's own `pr`, or a branch tail some lane matches.
+ * An unclaimed open PR is still listed (checks none) but costs no `api` call —
+ * so a refresh grows with the wave, not with every open PR in the repository.
+ * Omit `scope` to fetch checks for every open head (the standalone behaviour).
+ *
+ * Nothing here returns an unmarked empty corpus to mean "the read failed". A
+ * `gh` failure throws ("could not fetch PRs") because the fetch did not
+ * happen — an empty corpus there would be indistinguishable from a repository
+ * with no pull requests. Rows that came back but cannot be read are skipped
+ * and carried in `skipped`, so a corpus with a hole in it is never one the
+ * page may read as whole.
+ */
+export async function prFacts(deps: CollectDeps, scope?: PrScope): Promise<PrCorpus> {
+  let stdout: string;
   try {
-    listed = parsePrList(
-      await deps.gh([
-        "pr",
-        "list",
-        "--state",
-        "all",
-        "--json",
-        "number,state,headRefName,headRefOid",
-      ]),
+    stdout = await deps.gh([
+      "api",
+      "repos/{owner}/{repo}/pulls?state=all&per_page=100",
+      "--paginate",
+      "--jq",
+      PR_PULLS_JQ,
+    ]);
+  } catch (error) {
+    throw new Error(
+      `could not fetch PRs: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
-  } catch {
-    return byLane;
   }
-  if (listed === undefined) return byLane;
 
-  for (const entry of listed) {
-    if (!entry.headRefName.startsWith(PR_BRANCH_PREFIX)) continue;
-    const lane = entry.headRefName.slice(PR_BRANCH_PREFIX.length);
+  // Rows `gh` returned that nothing could read are counted here and travel
+  // with the corpus. `gh` ran — the failure to *fetch* is the throw above —
+  // so the answer is not a crash but a corpus that is not whole, which the
+  // page must render as a short read rather than as no pull requests.
+  const listed = parsePrList(stdout);
+
+  const facts: PrFact[] = [];
+  for (const entry of listed.entries) {
     const state = entry.state.toLowerCase();
     if (state !== "open" && state !== "merged" && state !== "closed") continue;
 
     let checks: "none" | "pending" | "pass" | "fail" = "none";
-    if (state === "open") {
+    if (state === "open" && (scope === undefined || isClaimed(entry, scope))) {
       try {
         checks = parseChecks(
           await deps.gh(["api", `repos/:owner/:repo/commits/${entry.headRefOid}/check-runs`]),
@@ -279,10 +382,72 @@ export async function prFacts(deps: CollectDeps): Promise<Record<string, LaneObs
       }
     }
 
-    byLane[lane] = { number: entry.number, state, checks };
+    facts.push({
+      number: entry.number,
+      state,
+      checks,
+      branchTail: branchTail(entry.headRefName),
+    });
   }
 
-  return byLane;
+  return { facts, skipped: listed.skipped };
+}
+
+/**
+ * Does some lane claim this open head — as its event `pr`, or a branch tail an
+ * exact/descendant lane match would reach? A superset of what the join can pick
+ * is fine: an over-broad yes only costs one check-runs call, whereas the
+ * repository's unrelated open PRs cost none.
+ */
+function isClaimed(entry: GhPrListEntry, scope: PrScope): boolean {
+  if (scope.reportedPrs.has(entry.number)) return true;
+  const tail = branchTail(entry.headRefName);
+  for (const lane of scope.lanes) {
+    const needle = lane.toLowerCase();
+    if (tail === needle || tail.startsWith(`${needle}-`)) return true;
+  }
+  return false;
+}
+
+/** `feat/l3b-layer-props` → `l3b-layer-props`; `main` → `main`. Lowercased. */
+function branchTail(headRefName: string): string {
+  const slash = headRefName.lastIndexOf("/");
+  return (slash === -1 ? headRefName : headRefName.slice(slash + 1)).toLowerCase();
+}
+
+/**
+ * The PR for one lane: the lane's own reported `pr` number if the events
+ * carry one and `gh` knows that PR; otherwise the best normalised branch
+ * match — an exact case-folded tail, then a `<lane>-` descendant, and among
+ * equals the newest PR. `null` is the answer when neither exists.
+ */
+export function joinPrForLane(
+  lane: string,
+  eventPr: number | undefined,
+  facts: readonly PrFact[],
+): LaneObservation["pr"] | undefined {
+  if (eventPr !== undefined) {
+    const reported = facts.find((fact) => fact.number === eventPr);
+    if (reported !== undefined) return asPr(reported);
+  }
+
+  const wanted = lane.toLowerCase();
+  let best: PrFact | undefined;
+  let bestScore = 0;
+  for (const fact of facts) {
+    const score =
+      fact.branchTail === wanted ? 2 : fact.branchTail.startsWith(`${wanted}-`) ? 1 : 0;
+    if (score === 0) continue;
+    if (best === undefined || score > bestScore || (score === bestScore && fact.number > best.number)) {
+      best = fact;
+      bestScore = score;
+    }
+  }
+  return best === undefined ? undefined : asPr(best);
+}
+
+function asPr(fact: PrFact): LaneObservation["pr"] {
+  return { number: fact.number, state: fact.state, checks: fact.checks };
 }
 
 /**
@@ -312,20 +477,43 @@ export function parseChecks(json: string): "none" | "pending" | "pass" | "fail" 
 }
 
 /**
- * `gh --json` is well-formed JSON of the wrong shape more often than it is
- * truncated: an object, a scalar, an array of partial rows. Anything other
- * than an array of `{number, state, headRefName, headRefOid}` is "no facts".
+ * Parse PR list output. Supports both a single JSON array (e.g. from test
+ * fixtures) and newline-delimited JSON (NDJSON streamed by `gh api --paginate
+ * --jq '.[] | ...'`). A row is kept when it is an entry of `{number, state,
+ * headRefName, headRefOid}`; any other row — unparseable, truncated, missing a
+ * field — is skipped and counted, never allowed to discard the batch with it.
  */
-function parsePrList(json: string): readonly GhPrListEntry[] | undefined {
-  let parsed: unknown;
+export function parsePrList(stdout: string): PrListParse {
+  const trimmed = stdout.trim();
+  if (trimmed === "") return { entries: [], skipped: 0 };
+
+  // One array is one batch; anything else is read a row per line. A failed
+  // array parse falls through the same way — a truncated array is rows.
+  const array = trimmed.startsWith("[") ? tryParseJson(trimmed) : undefined;
+  const rows: readonly unknown[] = Array.isArray(array)
+    ? array
+    : trimmed.split("\n").filter((line) => line.trim() !== "");
+
+  const entries: GhPrListEntry[] = [];
+  let skipped = 0;
+  for (const row of rows) {
+    const parsed = typeof row === "string" ? tryParseJson(row) : row;
+    if (isGhPrListEntry(parsed)) {
+      entries.push(parsed);
+    } else {
+      skipped += 1;
+    }
+  }
+  return { entries, skipped };
+}
+
+/** `undefined` for anything `JSON.parse` rejects — including the row that was cut in half. */
+function tryParseJson(text: string): unknown {
   try {
-    parsed = JSON.parse(json);
+    return JSON.parse(text);
   } catch {
     return undefined;
   }
-  if (!Array.isArray(parsed)) return undefined;
-  if (!parsed.every(isGhPrListEntry)) return undefined;
-  return parsed;
 }
 
 function isGhPrListEntry(value: unknown): value is GhPrListEntry {
