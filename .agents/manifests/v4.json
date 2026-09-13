@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "lane": "v4",
+  "mutations": [
+    {
+      "file": "tools/sweep/lib/sweep.ts",
+      "before": "    \"-F\",",
+      "after": "    \"-f\",",
+      "because": "gh sends -f number=361 as the STRING \"361\", which GraphQL refuses for the query's Int! variable: every fetch against the real gh dies while the stubbed tests sail on. This is the mutation-manifest harness's own V-D4 failure mode, reproduced inside the lane's tool, and it is why the edge test asserts the flag the call makes, not just the parsed args.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/edges.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/sweep.ts",
+      "before": "else if (found.isResolved) problems.push(`${id}: already resolved — a class member must be open`);",
+      "after": "else if (false) problems.push(`${id}: already resolved — a class member must be open`);",
+      "because": "Hazard two, restored: a thread resolved without being addressed looks handled and is not, so the sweep would resolve a member it never disposed and the refusal that sends the class back to the operator disappears. The guardrail's fetchOnly gh throws on the write the unchecked id reaches, so the refusal test fails for the right reason.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/sweep.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/sweep.ts",
+      "before": "if (found === undefined) problems.push(`${id}: not a review-thread node on PR #${plan.pr}`);",
+      "after": "if (false) problems.push(`${id}: not a review-thread node on PR #${plan.pr}`);",
+      "because": "The PRVT_-for-PRRT_ mistake — the short id names the discussion, and resolveReviewThread fails on it with an opaque error AFTER the comment posted. Without this check the wrong-thread hazard is unrecoverable and public, which is precisely what the pre-write verification exists to prevent.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/sweep.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/sweep.ts",
+      "before": "if (ids.includes(id)) problems.push(`${id}: duplicate — the class is ${ids.join(\", \")}`);",
+      "after": "if (false) problems.push(`${id}: duplicate — the class is ${ids.join(\", \")}`);",
+      "because": "A repeated id is a typo for a missing member: collapsing it silently posts a comment listing the class twice and sends resolveReviewThread the same thread twice, while the class the operator MEANT is short one open thread that now looks disposed.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/sweep.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/sweep.ts",
+      "before": "if (!post) return { commentUrl: null, resolvedThreadIds: [] };",
+      "after": "if (false) return { commentUrl: null, resolvedThreadIds: [] };",
+      "because": "The preview would write: --post stops being the sign-off on what was shown and the run without it becomes an unattended public post — the unrecoverable half of hazard one. Caught by the preview test's toHaveLength(1) on the gh calls.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/sweep.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/sweep.ts",
+      "before": "  const resolves = Array.from(\n    { length: threadCount },",
+      "after": "  const resolves = Array.from(\n    { length: 1 },",
+      "because": "The class claim the lane exists for, hollowed out: one comment posted, the first thread resolved, the rest left open while the timeline reads as if the class was disposed — worse than no tool, because it lies about coverage. Caught by the one-resolve-per-member count.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/sweep.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/sweep.ts",
+      "before": "return `${disposition.trim()}\\n\\nThreads disposed by this one comment (${ids.length}):\\n${listed}\\n`;",
+      "after": "return `${disposition.trim()}\\n`;",
+      "because": "The mechanism without the membership: a reader of any one resolved thread can no longer see which class it was disposed with, and a reader of the comment cannot see what was resolved — the disposition stops being auditable, which is what makes class disposal acceptable at all.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/sweep.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/cli.ts",
+      "before": "const unresolved = plan.requested.filter((id) => !result.resolvedThreadIds.includes(id));",
+      "after": "const unresolved: string[] = [];",
+      "because": "A resolve that did not come back is the write half of the failure the exit code exists for: exit 0 on a half-disposed class tells the operator to move on, exactly the 'looks handled' failure one level up. The CLI test asserts the 1 and the named id.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/cli.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

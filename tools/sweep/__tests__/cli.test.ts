@@ -1,0 +1,209 @@
+import { describe, expect, test } from "vitest";
+import { SWEEP_COMMAND, runCli, type SweepCliIo } from "../cli.js";
+
+const ok = (over: Partial<SweepCliIo> = {}): { io: SweepCliIo; log: string[]; err: string[] } => {
+  const log: string[] = [];
+  const err: string[] = [];
+  return {
+    log,
+    err,
+    io: {
+      argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--thread", "PRRT_b", "--body", "one class"],
+      log: (text) => log.push(text),
+      logError: (text) => err.push(text),
+      readFile: async () => "body from file",
+      gh: async (args) =>
+        args.some((a) => a.includes("mutation"))
+          ? JSON.stringify({
+              data: {
+                addComment: { comment: { url: "https://gh/issuecomment-1" } },
+                resolve0: { thread: { isResolved: true } },
+                resolve1: { thread: { isResolved: true } },
+              },
+            })
+          : JSON.stringify({
+              data: {
+                repository: {
+                  pullRequest: {
+                    id: "PR_I_1",
+                    reviewThreads: {
+                      nodes: [
+                        { id: "PRRT_a", isResolved: false },
+                        { id: "PRRT_b", isResolved: false },
+                      ],
+                    },
+                  },
+                },
+              },
+            }),
+      ...over,
+    },
+  };
+};
+
+describe("runCli", () => {
+  test("only the `threads` verb exists", async () => {
+    const { io, err } = ok({ argv: ["resolve", "--pr", "1"] });
+    expect(await runCli(io)).toBe(2);
+    expect(err.join(" ")).toContain(SWEEP_COMMAND);
+  });
+
+  test("a bad flag exits 2 with the usage, before any gh call", async () => {
+    let ghCalls = 0;
+    const base = ok();
+    const { io, err } = ok({
+      argv: ["threads", "--pr", "not-a-number", "--thread", "a", "--body", "x"],
+      gh: async (args) => {
+        ghCalls += 1;
+        return base.io.gh(args);
+      },
+    });
+    expect(await runCli(io)).toBe(2);
+    expect(ghCalls).toBe(0);
+    expect(err.join(" ")).toContain("wants a number");
+  });
+
+  test("--body-file is read and lands verbatim in the posted mutation", async () => {
+    const { io } = ok({
+      argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--thread", "PRRT_b", "--body-file", "d.md"],
+      gh: async (args) => {
+        return args.some((a) => a.includes("mutation"))
+          ? JSON.stringify({
+              data: {
+                addComment: { comment: { url: "u" } },
+                resolve0: { thread: { isResolved: true } },
+                resolve1: { thread: { isResolved: true } },
+              },
+            })
+          : JSON.stringify({
+              data: {
+                repository: {
+                  pullRequest: {
+                    id: "PR_I_1",
+                    reviewThreads: {
+                      nodes: [
+                        { id: "PRRT_a", isResolved: false },
+                        { id: "PRRT_b", isResolved: false },
+                      ],
+                    },
+                  },
+                },
+              },
+            });
+      },
+    });
+    expect(await runCli(io)).toBe(0);
+  });
+
+  test("preview-only exits 0 and resolves nothing", async () => {
+    const { io, log } = ok();
+    expect(await runCli(io)).toBe(0);
+    expect(log.join("\n")).toContain("preview only");
+  });
+
+  test("--post disposes the class and reports the comment url", async () => {
+    const { io, log } = ok({
+      argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--thread", "PRRT_b", "--body", "x", "--post"],
+    });
+    expect(await runCli(io)).toBe(0);
+    expect(log.join("\n")).toContain("class disposed: https://gh/issuecomment-1");
+  });
+
+  test("a comment posted without a url is called out, not trusted", async () => {
+    const { io, log } = ok({
+      argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--thread", "PRRT_b", "--body", "x", "--post"],
+      gh: async (args) =>
+        args.some((a) => a.includes("mutation"))
+          ? JSON.stringify({
+              data: {
+                resolve0: { thread: { isResolved: true } },
+                resolve1: { thread: { isResolved: true } },
+              },
+            })
+          : JSON.stringify({
+              data: {
+                repository: {
+                  pullRequest: {
+                    id: "PR_I_1",
+                    reviewThreads: {
+                      nodes: [
+                        { id: "PRRT_a", isResolved: false },
+                        { id: "PRRT_b", isResolved: false },
+                      ],
+                    },
+                  },
+                },
+              },
+            }),
+    });
+    expect(await runCli(io)).toBe(0);
+    expect(log.join("\n")).toContain("did not report a url");
+  });
+
+  test("a thread that did not come back resolved is a failed sweep", async () => {
+    const { io, err } = ok({
+      argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--thread", "PRRT_b", "--body", "x", "--post"],
+      gh: async (args) =>
+        args.some((a) => a.includes("mutation"))
+          ? JSON.stringify({
+              data: {
+                addComment: { comment: { url: "u" } },
+                resolve0: { thread: { isResolved: true } },
+                resolve1: { thread: { isResolved: false } },
+              },
+            })
+          : JSON.stringify({
+              data: {
+                repository: {
+                  pullRequest: {
+                    id: "PR_I_1",
+                    reviewThreads: {
+                      nodes: [
+                        { id: "PRRT_a", isResolved: false },
+                        { id: "PRRT_b", isResolved: false },
+                      ],
+                    },
+                  },
+                },
+              },
+            }),
+    });
+    expect(await runCli(io)).toBe(1);
+    expect(err.join(" ")).toContain("PRRT_b");
+  });
+
+  test("a refusal exits 1 and lists every offending id", async () => {
+    const { io, err } = ok({
+      argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--thread", "PRVT_x", "--body", "x", "--post"],
+    });
+    expect(await runCli(io)).toBe(1);
+    expect(err.join("\n")).toContain("PRVT_x: not a review-thread node");
+    expect(err.join("\n")).toContain("PRRT_a"); // the header names the class too
+  });
+
+  test("a gh failure exits 1 with its message", async () => {
+    const { io, err } = ok({
+      argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--body", "x", "--post"],
+      gh: async () => {
+        throw new Error("gh api graphql: HTTP 401");
+      },
+    });
+    expect(await runCli(io)).toBe(1);
+    expect(err.join(" ")).toContain("HTTP 401");
+  });
+
+  test("a non-Error throw while the body is read exits 2 with its message", async () => {
+    // A starved readFile throws from the plan-building block, which runCli
+    // guards with 2 — the same exit the argument parser uses, since both
+    // mean "the run never reached the PR". A non-Error thrown *by the
+    // sweep* (exit 1) is pinned in edges.test.ts.
+    const { io, err } = ok({
+      argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--body-file", "d.md"],
+      readFile: async () => {
+        throw "string failure";
+      },
+    });
+    expect(await runCli(io)).toBe(2);
+    expect(err.join(" ")).toContain("string failure");
+  });
+});

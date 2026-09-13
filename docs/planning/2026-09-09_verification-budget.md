@@ -215,32 +215,14 @@ done
 exit 1
 ```
 
-```premise V4
-# V4 is the class-disposition tool (V-D2): one script that, given a PR and a set
-# of thread ids, posts ONE class disposition and resolves the threads sharing it
-# together. Resolving a review thread has no `gh` subcommand and no REST
-# endpoint — the GraphQL `resolveReviewThread` mutation is the only way to do it
-# — so the mutation is necessary, and it is not sufficient: a mention is not an
-# implementation.
-#
-# The string is already in docs/workflows/*.md: the operator's own copy of the
-# command, run by hand. That hand process is exactly what the lane exists to
-# replace, so prose is excluded by KIND, not by directory — a runbook or a skill
-# is instructions for a human, not tooling, and counting it would close the lane
-# with the thing it was raised to abolish. The directories stay broad, because
-# the lane does not say where the tool lives; only source is read.
-#
-# The lane is two verbs in one script, so both must appear in the SAME file:
-#
-#   RESOLVE — `resolveReviewThread`;
-#   POST    — one disposition onto the PR (`gh pr comment`, or the GraphQL
-#             addComment/createComment, should it ever move there).
-#
-# A file that only resolves is a resolver: the reply cost that IS the budget
-# (F2) is unchanged. A file that only posts is a comment. Either alone leaves
-# V-D2 unbuilt; only the two together close the lane.
-for f in $(grep -rl --include='*.sh' --include='*.ts' --include='*.mjs' 'resolveReviewThread' scripts tools .claude .github 2>/dev/null); do
-  grep -qE 'gh pr comment|gh issue comment|addComment|createComment' "$f" && exit 1
-done
-exit 0
-```
+**V4 — shipped on this branch (`tools/sweep`).** `yarn sweep threads --pr <n> --thread <PRRT_id>…
+(--body | --body-file) [--post]` posts ONE class disposition — the mechanism named once, the
+member ids listed verbatim — onto the PR conversation via `addComment`, then `resolveReviewThread`
+on every member, in one GraphQL request; the exact comment and the exact ids are previewed before
+`--post` writes, and the whole run refuses if any id is not a distinct open thread on that PR.
+Whether a finding is real stays the human judgement the disposition text carries — V-D3's rule,
+and this lane's own budget rule. The hand-run `gh api graphql resolveReviewThread` loop it
+replaced lives on only as the operator's fallback copy in the Stage 4 runbook
+(`docs/workflows/delegated-implementation-pipeline.md`). Its premise fence is retired here, in
+the shape `plan:verify` accepts: deleted, not blanked and not left to exit 1 — a stale fence is
+a STALE report, not a closed lane.

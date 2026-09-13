@@ -210,6 +210,20 @@ the reason (an unavailable dependency, an inherited behaviour, a decision record
 plan). Post one **disposition comment** per PR summarising fixed vs. refuted, so the PR
 reads correctly for a human later.
 
+When **several threads are the same finding** (three bots, one claim), dispose of the
+**class once** — one comment naming the mechanism, every member resolved with it:
+
+```bash
+yarn sweep threads --pr "$PR" --thread "$PRRT_ID" --thread "$PRRT_ID" … \
+  --body-file disposition.md          # preview: prints the exact comment and ids
+yarn sweep threads … --body-file disposition.md --post   # post + resolve together
+```
+
+It refuses if any id is not a distinct open thread on that PR — a wrong id never reaches
+GitHub. Whether a finding is real is decided before you write the body, never by the tool.
+
+Threads outside any class still take a per-thread reply, then the hand-run resolve:
+
 ```bash
 gh api -X POST "repos/OWNER/REPO/pulls/$PR/comments/$COMMENT_ID/replies" -f body="…"
 gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -F id="$THREAD_ID"

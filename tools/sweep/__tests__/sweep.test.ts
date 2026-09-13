@@ -1,0 +1,158 @@
+import { describe, expect, test } from "vitest";
+import {
+  classBody,
+  dispositionMutation,
+  sweep,
+  type SweepPlan,
+} from "../lib/sweep.js";
+import { SweepRefusal } from "../lib/types.js";
+
+const threads = (
+  ...specs: readonly (readonly [string, boolean])[]
+): string =>
+  JSON.stringify({
+    data: {
+      repository: {
+        pullRequest: {
+          id: "PR_I_1",
+          reviewThreads: {
+            nodes: specs.map(([id, isResolved]) => ({ id, isResolved })),
+          },
+        },
+      },
+    },
+  });
+
+const plan = (over: Partial<SweepPlan> = {}): SweepPlan => ({
+  pr: 361,
+  requested: ["PRRT_a", "PRRT_b"],
+  disposition: "Refuted — `?? [\"static\"]` is the default family, not the support list.",
+  ...over,
+});
+
+/** Records every gh call and answers the fetch (and the write) from fixtures. */
+const recorder = (fetchResult: string, writeResult = JSON.stringify({ data: {} })) => {
+  const calls: string[][] = [];
+  return {
+    calls,
+    gh: async (args: readonly string[]): Promise<string> => {
+      calls.push([...args]);
+      return args.some((a) => a.includes("mutation")) ? writeResult : fetchResult;
+    },
+    lines: [] as string[],
+  };
+};
+
+describe("sweep — preview (hazard: the wrong thread is public and unrecoverable)", () => {
+  test("prints every id, its state, and the exact comment, and writes nothing", async () => {
+    const r = recorder(threads(["PRRT_a", false], ["PRRT_b", false]));
+    const result = await sweep(plan(), false, { gh: r.gh, out: (l) => r.lines.push(l) });
+    expect(r.calls).toHaveLength(1);
+    expect(result).toEqual({ commentUrl: null, resolvedThreadIds: [] });
+    const shown = r.lines.join("\n");
+    expect(shown).toContain("PR #361 — class disposition, 2 thread(s)");
+    expect(shown).toContain("PRRT_a  (open)");
+    expect(shown).toContain("PRRT_b  (open)");
+    // The class body lands in the preview verbatim, so what is shown is
+    // what would be posted — same string, not a summary of it.
+    expect(shown).toContain('`?? ["static"]`');
+    expect(shown).toContain("- `PRRT_a`");
+    expect(shown).toContain("preview only");
+  });
+
+  test("--post sends the mutation; the same preview is printed first", async () => {
+    const write = JSON.stringify({
+      data: {
+        addComment: { comment: { url: "https://github.com/o/r/pull/361#issuecomment-1" } },
+        resolve0: { thread: { isResolved: true } },
+        resolve1: { thread: { isResolved: true } },
+      },
+    });
+    const r = recorder(threads(["PRRT_a", false], ["PRRT_b", false]), write);
+    const result = await sweep(plan(), true, { gh: r.gh, out: (l) => r.lines.push(l) });
+    expect(r.calls).toHaveLength(2);
+    expect(result.commentUrl).toContain("issuecomment-1");
+    expect(result.resolvedThreadIds).toEqual(["PRRT_a", "PRRT_b"]);
+    expect(r.lines.join("\n")).toContain("--post given");
+  });
+});
+
+describe("sweep — the class guardrail (hazard: resolved without being addressed)", () => {
+  const fetchOnly = (result: string) => async (args: readonly string[]): Promise<string> => {
+    if (args.some((a) => a.includes("mutation"))) throw new Error("a refused sweep must never write");
+    return result;
+  };
+
+  const refusalOf = async (over: Partial<SweepPlan>, fetchResult: string): Promise<SweepRefusal> => {
+    try {
+      await sweep(plan(over), true, { gh: fetchOnly(fetchResult), out: () => undefined });
+      throw new Error("expected a refusal");
+    } catch (error) {
+      expect(error).toBeInstanceOf(SweepRefusal);
+      return error as SweepRefusal;
+    }
+  };
+
+  test("a resolved member refuses the whole class", async () => {
+    const r = await refusalOf({}, threads(["PRRT_a", false], ["PRRT_b", true]));
+    expect(r.reasons.join("\n")).toMatch(/PRRT_b: already resolved/);
+  });
+
+  test("an id that is not a thread on this PR refuses, naming it", async () => {
+    const r = await refusalOf({ requested: ["PRRT_a", "PRVT_b"] }, threads(["PRRT_a", false]));
+    expect(r.reasons.join("\n")).toMatch(/PRVT_b: not a review-thread node/);
+  });
+
+  test("duplicate ids are refused, not collapsed", async () => {
+    const r = await refusalOf({ requested: ["PRRT_a", "PRRT_a"] }, threads(["PRRT_a", false]));
+    expect(r.reasons.join("\n")).toMatch(/PRRT_a: duplicate/);
+  });
+
+  test("a GraphQL error on the fetch is a refusal carrying the message", async () => {
+    const r = await refusalOf(
+      {},
+      JSON.stringify({ errors: [{ message: "Could not resolve to a PullRequest" }] }),
+    );
+    expect(r.reasons.join("\n")).toContain("Could not resolve to a PullRequest");
+  });
+
+  test("a missing PR refuses — there is nothing to post to", async () => {
+    const r = await refusalOf({}, JSON.stringify({ data: { repository: { pullRequest: null } } }));
+    expect(r.reasons.join("\n")).toMatch(/does not exist/);
+  });
+});
+
+describe("sweep — the mutation carries the whole class", () => {
+  test("one resolveReviewThread per member, addComment once", async () => {
+    const r = recorder(threads(["PRRT_a", false], ["PRRT_b", false]));
+    await sweep(plan(), true, { gh: r.gh, out: () => undefined });
+    const write = r.calls[1]?.join(" ") ?? "";
+    expect((write.match(/resolveReviewThread/g) ?? []).length).toBe(2);
+    expect((write.match(/addComment/g) ?? []).length).toBe(1);
+    expect(write).toContain("PRRT_a");
+    expect(write).toContain("PRRT_b");
+    expect(write).toContain("PR_I_1"); // the PR node id — subject of the comment
+  });
+
+  test("a class of one posts one comment and one resolve", async () => {
+    const r = recorder(threads(["PRRT_a", false]));
+    await sweep(plan({ requested: ["PRRT_a"] }), true, { gh: r.gh, out: () => undefined });
+    expect((r.calls[1]?.join(" ").match(/resolveReviewThread/g) ?? []).length).toBe(1);
+  });
+});
+
+describe("classBody and dispositionMutation", () => {
+  test("the body names the mechanism once and lists the class verbatim", () => {
+    const body = classBody("one sentence.", ["PRRT_a", "PRRT_b"]);
+    expect(body).toContain("one sentence.");
+    expect(body).toContain("Threads disposed by this one comment (2):");
+    expect(body).toContain("- `PRRT_a`");
+    expect(body.trim().split("one sentence.").length - 1).toBe(1);
+  });
+
+  test("the mutation declares each thread variable once", () => {
+    const q = dispositionMutation(3);
+    expect(q.match(/\$thread\d: ID!/g)).toEqual(["$thread0: ID!", "$thread1: ID!", "$thread2: ID!"]);
+    expect(q).toContain("resolve2: resolveReviewThread");
+  });
+});
