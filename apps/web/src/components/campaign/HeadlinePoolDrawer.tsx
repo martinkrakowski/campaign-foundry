@@ -108,9 +108,18 @@ export function HeadlinePoolDrawer({
   const [revision, setRevision] = useState<string | undefined>();
   const currentBrief = useRef(briefId);
   currentBrief.current = briefId;
+  /**
+   * Bumped by every load this drawer starts, including the one a brief switch
+   * and a reopen begin. A write captures the count when it sets off and may only
+   * install its revision while it is unchanged: an answer that lands after a
+   * later load describes bytes that are no longer the ones stored, and adopting
+   * it would block the next edit with a revision nothing can match.
+   */
+  const loadGeneration = useRef(0);
 
   useEffect(() => {
     if (!open) return;
+    loadGeneration.current += 1;
     let cancelled = false;
     const controller = new AbortController();
     setLoading(true);
@@ -140,10 +149,15 @@ export function HeadlinePoolDrawer({
     // reducer already drops a mismatched pool, but the local error and unavailable
     // states would otherwise surface the old brief's failure in the new drawer.
     const forBrief = briefId;
+    const generation = loadGeneration.current;
     setBusy(true);
     setError(undefined);
     try {
       const stored = await change();
+      // A load that began after this write — a reopen, or the switch to another
+      // brief that reloads — has already answered "what is stored now"; this
+      // answer is about bytes that are gone, so it installs nothing at all.
+      if (loadGeneration.current !== generation) return false;
       // The write answers with the revision it produced, so the next one guards
       // against what is stored now rather than what was loaded.
       setRevision(stored.revision);
@@ -152,7 +166,14 @@ export function HeadlinePoolDrawer({
     } catch (cause) {
       if (currentBrief.current !== forBrief) return false;
       if (isBriefsApiError(cause) && cause.status === 503) setUnavailable(cause.message);
-      else setError(unknownErrorMessage(cause, "Headline pool update failed"));
+      else {
+        // A 409 carries the revision that is stored now. Adopt it: without it
+        // every retry re-sends the revision that just lost, is refused again,
+        // and the only way out for the user is a reload.
+        const conflict = isBriefsApiError(cause) && cause.status === 409 ? cause.revision : undefined;
+        if (conflict !== undefined) setRevision(conflict);
+        setError(unknownErrorMessage(cause, "Headline pool update failed"));
+      }
       return false;
     } finally {
       setBusy(false);

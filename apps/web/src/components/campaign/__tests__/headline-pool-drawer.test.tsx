@@ -236,6 +236,74 @@ describe("HeadlinePoolDrawer", () => {
     });
   });
 
+  test("a conflict's fresh revision is adopted, so the retry does not replay the one that lost", async () => {
+    const user = userEvent.setup();
+    let conflicting = true;
+    const calls = routes({
+      get: () => json({ pool: { entries: [entry("a")] }, revision: "rev-1" }),
+      patch: () =>
+        conflicting
+          ? json({ error: "Headline pool was modified by another user.", revision: "rev-2" }, 409)
+          : json({ pool: { entries: [entry("a", "approved")] }, revision: "rev-3" }),
+    });
+    open();
+    await screen.findByText("headline a");
+
+    await user.click(screen.getByLabelText("Approve a"));
+    expect(await screen.findByText(/modified by another user/)).toBeTruthy();
+
+    conflicting = false;
+    await user.click(screen.getByLabelText("Approve a"));
+    await waitFor(() => {
+      const patches = calls.filter((c) => c.method === "PATCH");
+      expect(patches).toHaveLength(2);
+      // The retry guards the revision the refusal handed back. Replaying rev-1
+      // would be refused again, and every retry after it: only a reload would
+      // ever clear the staleness the component itself introduced.
+      expect(patches[1].url).toContain("?revision=rev-2");
+    });
+  });
+
+  test("a write that lands after a newer load does not install its revision", async () => {
+    const user = userEvent.setup();
+    let answer: ((r: Response) => void) | undefined;
+    const calls = routes({
+      get: () => json({ pool: { entries: [entry("a", "rejected")] }, revision: "rev-1" }),
+      patch: () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve;
+        }),
+    });
+    // `entry()` types its status as string, which the state's CopyPool refuses.
+    const rejected = { id: "a", text: "headline a", status: "rejected" as const };
+    const props = (isOpen: boolean) => ({
+      state: state({ pool: { briefId: "camp", generatedAt: "t", model: "m", entries: [rejected] } }),
+      dispatch: vi.fn(),
+      open: isOpen,
+      onClose: () => {},
+    });
+    const { rerender } = render(<HeadlinePoolDrawer {...props(true)} />);
+    await waitFor(() => expect(calls.some((c) => c.method === "GET")).toBe(true));
+
+    await user.click(screen.getByLabelText("Approve a"));
+    await waitFor(() => expect(answer).toBeDefined());
+
+    // Reopen while the write is still in flight: its load is the newer answer
+    // to what is stored, so the write's revision is the stale one from here on.
+    rerender(<HeadlinePoolDrawer {...props(false)} />);
+    rerender(<HeadlinePoolDrawer {...props(true)} />);
+    await waitFor(() => expect(calls.filter((c) => c.method === "GET")).toHaveLength(2));
+    answer?.(json({ pool: { entries: [entry("a", "approved")] }, revision: "rev-2" }));
+
+    await waitFor(() => expect((screen.getByLabelText("Approve a") as HTMLButtonElement).disabled).toBe(false));
+    await user.click(screen.getByLabelText("Approve a"));
+    await waitFor(() => {
+      const patches = calls.filter((c) => c.method === "PATCH");
+      expect(patches).toHaveLength(2);
+      expect(patches[1].url).toContain("?revision=rev-1");
+    });
+  });
+
   test("a load that fails after the drawer closes is dropped silently", async () => {
     vi.mocked(globalThis.fetch).mockImplementation(
       () => new Promise((_, rej) => setTimeout(() => rej(new Error("too late")), 50)),
