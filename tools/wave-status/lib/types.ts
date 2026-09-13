@@ -79,8 +79,21 @@ export interface LaneStatus {
   readonly disagreements: readonly string[];
 }
 
+/**
+ * The PR corpus, when the read was not whole. `skipped` counts the rows `gh`
+ * returned that no parser could read, so a lane with no PR is a lane whose PR
+ * may be one of them — not a lane without one. Absent means the corpus was
+ * read whole: a repository with no pull requests is an empty corpus, and that
+ * is an answer. A read that failed outright never becomes a status at all —
+ * it is a rejected collection.
+ */
+export interface PrCorpusGap {
+  readonly skipped: number;
+}
+
 export interface WaveStatus {
   readonly generatedAt: string;
+  readonly prs?: PrCorpusGap;
   readonly waves: readonly {
     readonly id: string;
     readonly lanes: readonly LaneStatus[];

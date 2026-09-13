@@ -1768,9 +1768,17 @@
         return `${exit}<span class="sep"> · </span>${log.bytes.toLocaleString()} B<span class="sep"> · </span>${age}s ago`;
       }
 
-      function prCell(lane) {
+      // A lane is only "no PR" when the corpus was read whole. Rows that came
+      // back and could not be parsed are a gap in the corpus, not an absence
+      // in the repository: this lane's PR may be one of them, so say the read
+      // is short rather than claiming an answer it cannot have.
+      function prCell(lane, gap) {
         const pr = lane.derived.pr;
-        if (pr === undefined) return '<span class="dim">no PR</span>';
+        if (pr === undefined) {
+          return gap === undefined
+            ? '<span class="dim">no PR</span>'
+            : `<span class="dim" title="${esc(gap.skipped)} PR row(s) could not be read">no PR read</span>`;
+        }
         const tone =
           pr.state === "merged" ? "ok" : pr.state === "open" ? "info" : "bad";
         const checks = {
@@ -2036,7 +2044,7 @@
                   `<td class="c-stage">${stageCell(lane)}</td>` +
                   `<td class="c-live">${liveness(lane)}</td>` +
                   `<td class="c-log">${logCell(lane)}${ROW_GO}</td>` +
-                  `<td class="c-pr">${prCell(lane)}</td>` +
+                  `<td class="c-pr">${prCell(lane, status.prs)}</td>` +
                   `<td class="c-gate">${gateCell(lane)}</td>` +
                   `<td class="c-find">${findingsCell(lane)}</td>` +
                   "</tr>",

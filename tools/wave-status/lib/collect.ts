@@ -70,6 +70,29 @@ export interface PrScope {
   readonly reportedPrs: ReadonlySet<number>;
 }
 
+/**
+ * What one `gh` PR listing parsed to. `skipped` counts the rows that came back
+ * but could not be read — a truncated last line, a row the projection dropped
+ * a field from. A skipped row is a gap in the corpus and is never a reason to
+ * discard the rows that did read: one malformed entry emptying the batch is
+ * the same fault as a missing page, and it looks like a repository with no
+ * pull requests at all.
+ */
+export interface PrListParse {
+  readonly entries: readonly GhPrListEntry[];
+  readonly skipped: number;
+}
+
+/**
+ * The corpus `prFacts` read: the facts it could build, and the rows it could
+ * not. The two travel together so a partial corpus can never be mistaken for a
+ * whole one downstream.
+ */
+export interface PrCorpus {
+  readonly facts: readonly PrFact[];
+  readonly skipped: number;
+}
+
 interface GhPrListEntry {
   readonly number: number;
   readonly state: string;
@@ -101,19 +124,20 @@ export function resolveScanRoots(
  * so PR facts are never silently dropped as an empty list (which would falsely
  * indicate no pull requests exist).
  *
- * `knownPrFacts`, when provided, is reused as-is: a watcher-triggered
- * refresh re-reads local state without waiting on `gh`. Omit it (or pass
- * nothing) to fetch PR facts now — startup, the slow poll, on-demand. When
- * fetched, the facts are handed to `onFacts` so the caller can cache them for
- * the next watcher refresh.
+ * `knownCorpus`, when provided, is reused as-is — rows and gap together: a
+ * watcher-triggered refresh re-reads local state without waiting on `gh`, and
+ * the corpus it reuses is exactly as complete as the one it was read as. Omit
+ * it (or pass nothing) to fetch PR facts now — startup, the slow poll,
+ * on-demand. When fetched, the corpus is handed to `onCorpus` so the caller
+ * can cache it for the next watcher refresh.
  */
 export async function collect(
   deps: CollectDeps,
   root: string,
   now: string,
-  knownPrFacts?: readonly PrFact[],
+  knownCorpus?: PrCorpus,
   legacyRoots?: readonly string[],
-  onFacts?: (facts: readonly PrFact[]) => void,
+  onCorpus?: (corpus: PrCorpus) => void,
 ): Promise<WaveStatus> {
   // Gather first, order last: the wave list is decided here, the one place
   // that has seen every lane log's mtime, and it travels to the merge as an
@@ -232,11 +256,12 @@ export async function collect(
   // The join needs the facts, and the facts need the lanes — so fetch only now
   // that every lane and every reported `pr` has been gathered. A watcher
   // refresh hands the cached facts in and this call is skipped entirely.
-  let facts = knownPrFacts;
-  if (facts === undefined) {
-    facts = await prFacts(deps, { lanes, reportedPrs });
-    onFacts?.(facts);
+  let corpus = knownCorpus;
+  if (corpus === undefined) {
+    corpus = await prFacts(deps, { lanes, reportedPrs });
+    onCorpus?.(corpus);
   }
+  const facts = corpus.facts;
 
   // The wave list order, decided once from the newest lane-log activity in each
   // wave, is handed to the merge as data — not implied by the order two feeds
@@ -251,7 +276,11 @@ export async function collect(
     observed[`${row.wave}/${row.lane}`] = { ...row.obs, ...(pr !== undefined ? { pr } : {}) };
   }
 
-  return mergeStatus(events, observed, now, orderedWaves);
+  const status = mergeStatus(events, observed, now, orderedWaves);
+  // A corpus with rows missing is not one the page may read as complete: a
+  // lane that joined no PR may be a lane whose PR was in an unreadable row.
+  // Name the gap so no face of this tool can render it as "no PR".
+  return corpus.skipped > 0 ? { ...status, prs: { skipped: corpus.skipped } } : status;
 }
 
 /**
@@ -305,13 +334,15 @@ export const PR_PULLS_JQ =
  * An unclaimed open PR is still listed (checks none) but costs no `api` call —
  * so a refresh grows with the wave, not with every open PR in the repository.
  * Omit `scope` to fetch checks for every open head (the standalone behaviour).
- * Any `gh` failure surfaces as an error ("could not fetch PRs"), never an empty
- * list that would render as if the repository had no pull requests.
+ *
+ * Nothing here returns an unmarked empty corpus to mean "the read failed". A
+ * `gh` failure throws ("could not fetch PRs") because the fetch did not
+ * happen — an empty corpus there would be indistinguishable from a repository
+ * with no pull requests. Rows that came back but cannot be read are skipped
+ * and carried in `skipped`, so a corpus with a hole in it is never one the
+ * page may read as whole.
  */
-export async function prFacts(
-  deps: CollectDeps,
-  scope?: PrScope,
-): Promise<readonly PrFact[]> {
+export async function prFacts(deps: CollectDeps, scope?: PrScope): Promise<PrCorpus> {
   let stdout: string;
   try {
     stdout = await deps.gh([
@@ -328,11 +359,14 @@ export async function prFacts(
     );
   }
 
+  // Rows `gh` returned that nothing could read are counted here and travel
+  // with the corpus. `gh` ran — the failure to *fetch* is the throw above —
+  // so the answer is not a crash but a corpus that is not whole, which the
+  // page must render as a short read rather than as no pull requests.
   const listed = parsePrList(stdout);
-  if (listed === undefined) return [];
 
   const facts: PrFact[] = [];
-  for (const entry of listed) {
+  for (const entry of listed.entries) {
     const state = entry.state.toLowerCase();
     if (state !== "open" && state !== "merged" && state !== "closed") continue;
 
@@ -356,7 +390,7 @@ export async function prFacts(
     });
   }
 
-  return facts;
+  return { facts, skipped: listed.skipped };
 }
 
 /**
@@ -443,38 +477,43 @@ export function parseChecks(json: string): "none" | "pending" | "pass" | "fail" 
 }
 
 /**
- * Parse PR list output. Supports both a single JSON array (e.g. from test fixtures)
- * and newline-delimited JSON (NDJSON streamed by gh api --paginate --jq '.[] | ...').
- * Anything other than valid entries of `{number, state, headRefName, headRefOid}` is undefined.
+ * Parse PR list output. Supports both a single JSON array (e.g. from test
+ * fixtures) and newline-delimited JSON (NDJSON streamed by `gh api --paginate
+ * --jq '.[] | ...'`). A row is kept when it is an entry of `{number, state,
+ * headRefName, headRefOid}`; any other row — unparseable, truncated, missing a
+ * field — is skipped and counted, never allowed to discard the batch with it.
  */
-export function parsePrList(stdout: string): readonly GhPrListEntry[] | undefined {
+export function parsePrList(stdout: string): PrListParse {
   const trimmed = stdout.trim();
-  if (trimmed === "") return [];
+  if (trimmed === "") return { entries: [], skipped: 0 };
 
-  if (trimmed.startsWith("[")) {
-    try {
-      const parsed: unknown = JSON.parse(trimmed);
-      if (Array.isArray(parsed) && parsed.every(isGhPrListEntry)) {
-        return parsed;
-      }
-    } catch {
-      // Not valid JSON array; fall through to line-by-line parsing
-    }
-  }
+  // One array is one batch; anything else is read a row per line. A failed
+  // array parse falls through the same way — a truncated array is rows.
+  const array = trimmed.startsWith("[") ? tryParseJson(trimmed) : undefined;
+  const rows: readonly unknown[] = Array.isArray(array)
+    ? array
+    : trimmed.split("\n").filter((line) => line.trim() !== "");
 
-  const lines = trimmed.split("\n").filter((line) => line.trim() !== "");
   const entries: GhPrListEntry[] = [];
-  for (const line of lines) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      return undefined;
+  let skipped = 0;
+  for (const row of rows) {
+    const parsed = typeof row === "string" ? tryParseJson(row) : row;
+    if (isGhPrListEntry(parsed)) {
+      entries.push(parsed);
+    } else {
+      skipped += 1;
     }
-    if (!isGhPrListEntry(parsed)) return undefined;
-    entries.push(parsed);
   }
-  return entries;
+  return { entries, skipped };
+}
+
+/** `undefined` for anything `JSON.parse` rejects — including the row that was cut in half. */
+function tryParseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
 }
 
 function isGhPrListEntry(value: unknown): value is GhPrListEntry {

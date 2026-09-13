@@ -11,7 +11,7 @@ import {
   resolveScanRoots,
   waveIdFromDirName,
   type CollectDeps,
-  type PrFact,
+  type PrCorpus,
   type TailHandle,
 } from "./lib/collect.js";
 import type { WaveStatus } from "./lib/types.js";
@@ -138,21 +138,22 @@ export async function startServer(options: StartOptions): Promise<ServerHandle> 
   let refreshRunning = false;
   let refreshQueued = false;
   let queuedRefreshPr = false;
-  let prCache: readonly PrFact[] | undefined;
+  let prCache: PrCorpus | undefined;
 
   /**
    * Startup, the 15 s poll, and on-demand `/api/status` refresh PR facts.
    * A watcher-triggered refresh reuses `prCache` and re-reads local state only.
-   * `collect` fetches and returns the facts itself — it is the only caller that
-   * has seen the lanes the fetch is scoped to — and hands them back here to
-   * cache for the next watcher refresh.
+   * `collect` fetches and returns the corpus itself — it is the only caller that
+   * has seen the lanes the fetch is scoped to — and hands it back here to
+   * cache for the next watcher refresh, gap included: a cached corpus is
+   * exactly as complete as the read it came from.
    */
   const collectNow = async (refreshPr: boolean): Promise<WaveStatus> => {
     const now = new Date().toISOString();
     if (options.collect !== undefined) return options.collect(now);
     if (refreshPr) {
-      return collect(deps, options.root, now, undefined, options.legacyRoots, (facts) => {
-        prCache = facts;
+      return collect(deps, options.root, now, undefined, options.legacyRoots, (corpus) => {
+        prCache = corpus;
       });
     }
     return collect(deps, options.root, now, prCache, options.legacyRoots);

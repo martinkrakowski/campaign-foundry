@@ -10,6 +10,7 @@ import {
   LEGACY_WAVE_LOG_ROOT,
   LOG_TAIL_BYTES,
   parseChecks,
+  parsePrList,
   pgrepPattern,
   prFacts,
   PR_PULLS_JQ,
@@ -295,9 +296,10 @@ describe("collect", () => {
     const gh = vi.fn(async () => {
       throw new Error("gh should not run on a cached collect");
     });
-    const status = await collect(fakeDeps({ ...TREE, gh }), ROOT, "now", [
-      { number: 7, state: "open", checks: "pass", branchTail: "t1" },
-    ]);
+    const status = await collect(fakeDeps({ ...TREE, gh }), ROOT, "now", {
+      facts: [{ number: 7, state: "open", checks: "pass", branchTail: "t1" }],
+      skipped: 0,
+    });
     expect(gh).not.toHaveBeenCalled();
     expect(status.waves[0]?.lanes[0]?.derived.pr).toEqual({ number: 7, state: "open", checks: "pass" });
     expect(status.waves[1]?.lanes[0]?.derived.pr).toBeUndefined();
@@ -312,6 +314,35 @@ describe("collect", () => {
       ),
     ).rejects.toThrow("could not fetch PRs");
   });
+  test("a corpus with unreadable rows is flagged, so no face can read it as no PR", async () => {
+    // The page says "no PR" for a lane that joined nothing. With rows missing
+    // that claim is not available: the lane's PR may be one of them.
+    const gh = vi.fn(async () =>
+      [
+        JSON.stringify({ number: 7, state: "OPEN", headRefName: "feat/t1", headRefOid: "o1" }),
+        "{",
+      ].join("\n"),
+    );
+    const status = await collect(fakeDeps({ ...TREE, gh }), ROOT, "now");
+    expect(status.prs).toEqual({ skipped: 1 });
+    expect(status.waves[0]?.lanes[0]?.derived.pr?.number).toBe(7);
+  });
+
+  test("a corpus read whole carries no flag: an empty repository is an answer, not a gap", async () => {
+    const status = await collect(fakeDeps({ ...TREE, gh: async () => "[]" }), ROOT, "now");
+    expect(status.prs).toBeUndefined();
+  });
+
+  test("a cached corpus carries the gap it was read with", async () => {
+    // A watcher refresh reuses the corpus; it is exactly as complete as the
+    // read it came from, so the gap travels with it.
+    const gh = vi.fn(async () => {
+      throw new Error("gh should not run on a cached collect");
+    });
+    const status = await collect(fakeDeps({ ...TREE, gh }), ROOT, "now", { facts: [], skipped: 3 });
+    expect(status.prs).toEqual({ skipped: 3 });
+  });
+
 
   test("waves come out newest-first by their lanes' log mtimes, not in the directories' lexicographic order", async () => {
     // Directory names sort wave-10 < wave-7 < wave-8 < wave-9; the lane mtimes
@@ -415,16 +446,19 @@ describe("collect", () => {
     expect(status.waves[1]?.lanes).toEqual([]);
   });
 
-  test("malformed gh output is no PRs, not a crash", async () => {
+  test("malformed gh output is a flagged gap, not a crash and not a claim of no PRs", async () => {
+    // The page says "no PR" for a lane that joined nothing. With a row that
+    // could not be read, that claim is not available to it.
     const status = await collect(
       fakeDeps({ ...TREE, gh: async () => "not json" }),
       ROOT,
       "now",
     );
     expect(status.waves[0]?.lanes[0]?.derived.pr).toBeUndefined();
+    expect(status.prs).toEqual({ skipped: 1 });
   });
 
-  test("wrong-shape gh JSON is no PRs on every row, never a throw", async () => {
+  test("wrong-shape gh JSON never throws, and every unreadable row is counted", async () => {
     const bodies = [
       "{}",
       "null",
@@ -437,10 +471,6 @@ describe("collect", () => {
       JSON.stringify([{ number: 218, state: 1, headRefName: "feat/t1", headRefOid: "oid1" }]),
       JSON.stringify([{ number: 218, state: "OPEN", headRefName: 1, headRefOid: "oid1" }]),
       JSON.stringify([{ number: 218, state: "OPEN", headRefName: "feat/t1", headRefOid: 1 }]),
-      JSON.stringify([
-        { number: 218, state: "OPEN", headRefName: "feat/t1", headRefOid: "oid1" },
-        { number: 219 },
-      ]),
     ];
     for (const body of bodies) {
       const status = await collect(fakeDeps({ ...TREE, gh: async () => body }), ROOT, "now");
@@ -449,7 +479,24 @@ describe("collect", () => {
           expect({ body, pr: lane.derived.pr }).toEqual({ body, pr: undefined });
         }
       }
+      // A row that came back and could not be read. It never throws and never
+      // empties the corpus — it is counted, so the page knows the read was
+      // short instead of reading the empty corpus as no pull requests.
+      expect({ body, skipped: status.prs?.skipped }).toEqual({ body, skipped: 1 });
     }
+  });
+
+  test("a row that reads keeps its lane's PR with an unreadable row beside it", async () => {
+    // The defect this lane was opened on: one malformed entry used to reject
+    // the batch, and the caller turned that into an empty corpus — a single
+    // bad row rendering as a repository with no pull requests at all.
+    const body = JSON.stringify([
+      { number: 218, state: "OPEN", headRefName: "feat/t1", headRefOid: "oid1" },
+      { number: 219 },
+    ]);
+    const status = await collect(fakeDeps({ ...TREE, gh: async () => body }), ROOT, "now");
+    expect(status.waves[0]?.lanes[0]?.derived.pr?.number).toBe(218);
+    expect(status.prs).toEqual({ skipped: 1 });
   });
 
   test("a log larger than the tail is read from the end, not whole", async () => {
@@ -657,9 +704,49 @@ describe("prFacts", () => {
     await expect(prFacts(fakeDeps({ gh }))).rejects.toThrow("could not fetch PRs: network timeout");
   });
 
-  test("an empty gh response yields no facts", async () => {
-    const facts = await prFacts(fakeDeps({ gh: async () => "   " }));
-    expect(facts).toEqual([]);
+  test("an empty gh response yields no facts and no gap", async () => {
+    // Nothing to fetch is an answer: a repository with no pull requests. It is
+    // the one case an empty corpus is allowed to mean what it says.
+    const corpus = await prFacts(fakeDeps({ gh: async () => "   " }));
+    expect(corpus).toEqual({ facts: [], skipped: 0 });
+  });
+
+  test("one malformed row is skipped and counted, never allowed to empty the corpus", async () => {
+    // The fault this lane was opened on: a single unreadable row used to
+    // reject the whole batch, and the caller turned that into an empty
+    // corpus — one truncated row rendered as a repository with no PRs.
+    const rows = [
+      JSON.stringify({ number: 1000, state: "OPEN", headRefName: "feat/lane-0", headRefOid: "o0" }),
+      JSON.stringify({ number: 1001, state: "OPEN", headRefName: "feat/lane-1", headRefOid: "o1" }).slice(0, 24),
+      JSON.stringify({ number: 1002, state: "OPEN", headRefName: "feat/lane-2", headRefOid: "o2" }),
+    ];
+    const corpus = await prFacts(fakeDeps({ gh: async () => rows.join("\n") }));
+    expect(corpus.skipped).toBe(1);
+    expect(corpus.facts.map((fact) => fact.number)).toEqual([1000, 1002]);
+  });
+
+  test("a row the projection left short is skipped and counted, and its neighbours survive", async () => {
+    const corpus = await prFacts(
+      prListDeps([
+        { number: 300, state: "OPEN", headRefName: "feat/t1", headRefOid: "whole" },
+        { number: 301, state: "OPEN", headRefName: "feat/t2" },
+      ]),
+    );
+    expect(corpus.skipped).toBe(1);
+    expect(corpus.facts.map((fact) => fact.number)).toEqual([300]);
+  });
+
+  test("output that came back but read to nothing is an empty corpus with a gap, not a clean zero", async () => {
+    // `gh` answers "no pull requests" with no output at all, so rows it did
+    // return that nothing can parse are a read that came up short. The count
+    // is the difference: the page may not read this as no pull requests.
+    const corpus = await prFacts(fakeDeps({ gh: async () => "not json" }));
+    expect(corpus).toEqual({ facts: [], skipped: 1 });
+  });
+
+  test("a listing of nothing but unreadable rows counts every one of them", async () => {
+    const corpus = await prFacts(fakeDeps({ gh: async () => '["a","b"]' }));
+    expect(corpus).toEqual({ facts: [], skipped: 2 });
   });
 
   test("asks gh api for pulls with pagination and jq projection", async () => {
@@ -680,7 +767,7 @@ describe("prFacts", () => {
       JSON.stringify({ number: 1, state: "MERGED", headRefName: "feat/oldest", headRefOid: "oz" }),
     ].join("\n");
     const gh = vi.fn(async () => lines);
-    const facts = await prFacts(fakeDeps({ gh }));
+    const { facts } = await prFacts(fakeDeps({ gh }));
     expect(facts).toHaveLength(2);
     expect(facts[0]).toEqual({
       number: 1000,
@@ -707,7 +794,7 @@ describe("prFacts", () => {
       }
       return "not json";
     });
-    const facts = await prFacts(fakeDeps({ gh }), {
+    const { facts } = await prFacts(fakeDeps({ gh }), {
       lanes: new Set(["t1"]),
       reportedPrs: new Set<number>(),
     });
@@ -736,7 +823,7 @@ describe("prFacts", () => {
   });
 
   test("every PR becomes a fact with its case-folded branch tail, slash or no slash", async () => {
-    const facts = await prFacts(
+    const { facts } = await prFacts(
       prListDeps([
         { number: 285, state: "MERGED", headRefName: "fix/H2-hit-testing", headRefOid: "o1" },
         { number: 221, state: "CLOSED", headRefName: "main", headRefOid: "o2" },
@@ -750,7 +837,7 @@ describe("prFacts", () => {
   });
 
   test("open PRs carry their checks; a check-runs failure is none, not a loss", async () => {
-    const facts = await prFacts(
+    const { facts } = await prFacts(
       prListDeps(
         [
           { number: 218, state: "OPEN", headRefName: "feat/t1", headRefOid: "good" },
@@ -762,6 +849,44 @@ describe("prFacts", () => {
       ),
     );
     expect(facts.map((fact) => fact.checks)).toEqual(["none", "none"]);
+  });
+});
+
+describe("parsePrList", () => {
+  test("a truncated last row is skipped and counted, and the rows before it are kept", () => {
+    const rows = [
+      JSON.stringify({ number: 1, state: "OPEN", headRefName: "feat/a", headRefOid: "oa" }),
+      '{"number":2,"state":"OPEN"',
+    ];
+    expect(parsePrList(rows.join("\n"))).toEqual({
+      entries: [{ number: 1, state: "OPEN", headRefName: "feat/a", headRefOid: "oa" }],
+      skipped: 1,
+    });
+  });
+
+  test("a truncated array is read as rows, not discarded whole", () => {
+    const truncated = '[{"number":1,"state":"OPEN","headRefName":"feat/a","headRefOid":"oa"}';
+    expect(parsePrList(truncated)).toEqual({ entries: [], skipped: 1 });
+  });
+
+  test("blank lines are not rows, and an empty output is an empty corpus with no gap", () => {
+    const row = JSON.stringify({ number: 1, state: "OPEN", headRefName: "feat/a", headRefOid: "oa" });
+    expect(parsePrList(`\n${row}\n\n`)).toEqual({
+      entries: [{ number: 1, state: "OPEN", headRefName: "feat/a", headRefOid: "oa" }],
+      skipped: 0,
+    });
+    expect(parsePrList("")).toEqual({ entries: [], skipped: 0 });
+  });
+
+  test("a JSON array keeps the elements that read and counts the ones that do not", () => {
+    const parsed = parsePrList(
+      JSON.stringify([
+        { number: 1, state: "OPEN", headRefName: "feat/a", headRefOid: "oa" },
+        { number: 2, state: "OPEN" },
+      ]),
+    );
+    expect(parsed.skipped).toBe(1);
+    expect(parsed.entries.map((entry) => entry.number)).toEqual([1]);
   });
 });
 

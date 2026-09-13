@@ -241,8 +241,17 @@ export function renderStatus(status: WaveStatus, opts?: RenderOptions): string {
     }
     return block;
   });
-  return blocks
+  const body = blocks
     .flatMap((block, i) => (i === 0 ? block : ["", ...block]))
     .map((line) => truncate(line, width))
     .join("\n");
+
+  // The gap the page refuses to render as "no PR". Here every PR cell would
+  // otherwise read as absence — and a bare em dash is read as absence too.
+  if (status.prs === undefined) return body;
+  const gap = truncate(
+    `prs: ${status.prs.skipped} row(s) could not be read — a lane with no PR may be one of them`,
+    width,
+  );
+  return body === "" ? gap : `${body}\n\n${gap}`;
 }
