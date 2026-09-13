@@ -15,6 +15,7 @@ import {
   reportRevision,
   writeReport,
 } from "../report.js";
+import { hashBytes } from "../brief-files.js";
 
 type ReportAsset = GeneratedAsset & { brandCompliant: boolean };
 
@@ -74,6 +75,23 @@ describe("report persistence", () => {
 
     await writeReport(result([asset({ complianceScore: 0.7 })]));
     expect(await reportRevision(root, "camp")).not.toBe(first);
+  });
+
+  test("reportRevision digests the stored bytes, not a re-encoding of them", async () => {
+    mkdirSync(resolve(root, "reports"), { recursive: true });
+    // A byte no UTF-8 decoder can round-trip: read as text it is U+FFFD, and encoding
+    // that text again yields different bytes — so a revision taken from the decoded
+    // text cannot equal the digest of what is stored (the pool-store defect L10 fixed).
+    const stored = Buffer.concat([
+      Buffer.from('{"assets":[],"note":"'),
+      Buffer.from([0xff]),
+      Buffer.from('"}'),
+    ]);
+    writeFileSync(campaignReportPath(root, "camp")!, stored);
+
+    const revision = await reportRevision(root, "camp");
+    expect(revision).toBe(hashBytes(stored));
+    expect(revision).not.toBe(hashBytes(Buffer.from(stored.toString("utf8"), "utf8")));
   });
 
   test("reportRevision is undefined for an unsafe id and throws when the file cannot be read", async () => {
@@ -153,7 +171,7 @@ describe("report persistence", () => {
     expect(per.map((a) => a.productId)).not.toContain("gamma");
   });
 
-  test("a merge carrying the revision it read is accepted", async () => {
+  test("a merge carrying the revision it read is accepted, and keeps the base it merged", async () => {
     await writeReport(result([asset(), beta()]));
     const revision = await reportRevision(root, "camp");
 
@@ -161,7 +179,42 @@ describe("report persistence", () => {
       merge: true,
       expectedRevision: revision,
     });
-    expect(readAssets(path).find((a) => a.productId === "alpha")?.complianceScore).toBe(0.9);
+    const per = readAssets(path);
+    expect(per.find((a) => a.productId === "alpha")?.complianceScore).toBe(0.9);
+    // The merge base survived: an accepted write that replaced the report instead of
+    // overlaying it would land the same alpha and no beta, and this is the accepted
+    // path — the one no refusal test says anything about.
+    expect(per.map((a) => a.productId).sort()).toEqual(["alpha", "beta"]);
+  });
+
+  test("a merge that started with no report is accepted while none is stored", async () => {
+    // `null` is the absent case: the run began against no report, and nothing has
+    // appeared since, so the write goes through.
+    const path = await writeReport(result([asset()]), { merge: true, expectedRevision: null });
+    expect(readAssets(path).map((a) => a.productId)).toEqual(["alpha"]);
+  });
+
+  test("a merge that started with no report is refused when one appeared meanwhile", async () => {
+    // The run reads "nothing stored" and is still going when another run lands a
+    // report. Absence is an expectation, so this run is refused rather than
+    // overwriting a report it never saw.
+    await expect(
+      writeReport(result([asset()]), { merge: true, expectedRevision: null }),
+    ).resolves.toBe(campaignReportPath(root, "camp"));
+    const appeared = await reportRevision(root, "camp");
+
+    await expect(
+      writeReport(result([beta()]), { merge: true, expectedRevision: null }),
+    ).rejects.toMatchObject({
+      code: "ECONFLICT",
+      revision: appeared,
+      message: 'Report for campaign "camp" was modified by another run.',
+    });
+
+    // Refused means it wrote nothing: the report still holds the run that landed.
+    expect(readAssets(resolve(root, "reports", "camp.json")).map((a) => a.productId)).toEqual([
+      "alpha",
+    ]);
   });
 
   test("without expectedRevision the write is unconditional, as both stores are", async () => {

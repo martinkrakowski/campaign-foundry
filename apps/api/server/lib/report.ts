@@ -184,10 +184,16 @@ async function readPersistedAssets(path: string): Promise<ReportAsset[]> {
  * Without `expectedRevision` the write is unconditional, as both stores are: the
  * compare and the write are not fused on a filesystem (D79), so this narrows the
  * race rather than closing it.
+ *
+ * `expectedRevision` is `null` — never `undefined` — when the run started against no
+ * stored report. `reportRevision` hands back `undefined` for a missing report, and
+ * `undefined` is also how every caller says "do not check", so the absent case needs a
+ * value of its own: a run that began with no report must be refused when one appeared
+ * while it ran, not waved through as an unconditional write that replaces it.
  */
 export async function writeReport(
   result: PipelineResult,
-  { merge = false, expectedRevision }: { merge?: boolean; expectedRevision?: string } = {},
+  { merge = false, expectedRevision }: { merge?: boolean; expectedRevision?: string | null } = {},
 ): Promise<string> {
   const root = outputRoot();
   const latest = latestReportPath(root);
@@ -207,21 +213,16 @@ export async function writeReport(
     brandCompliant: a.passedCompliance && a.logoApplied,
   }));
 
-  let assets = fresh;
-  if (merge) {
-    // Merge against this campaign's own prior report (not the global latest), so a
-    // re-roll of one brief never folds in another brief's creatives. Map preserves
-    // existing order; re-keying an existing entry updates it in place, new cells append.
-    const byKey = new Map(
-      (await readPersistedAssets(base)).map((a) => [keyOf(a), a] as const),
-    );
-    for (const a of fresh) byKey.set(keyOf(a), a);
-    assets = [...byKey.values()];
-  }
-
+  // Before any of the merge's work, so a run that will be refused does no
+  // read-modify-write at all — and the base it is refused over is the one it named.
   if (expectedRevision !== undefined) {
+    // Absence is an expectation a caller can name, not a hole in the guard: a run that
+    // started against no report says `null`, which `revisionAt` reports as `undefined`.
+    // Carrying `undefined` here would mean "do not check", and a report created while
+    // that run was in flight would be overwritten by a merge that never saw it.
+    const expected = expectedRevision ?? undefined;
     const current = await revisionAt(base);
-    if (current !== expectedRevision) {
+    if (current !== expected) {
       const campaignId = result.log?.campaignId;
       const conflict = new Error(
         campaignId
@@ -232,6 +233,18 @@ export async function writeReport(
       (conflict as { revision?: string }).revision = current;
       throw conflict;
     }
+  }
+
+  let assets = fresh;
+  if (merge) {
+    // Merge against this campaign's own prior report (not the global latest), so a
+    // re-roll of one brief never folds in another brief's creatives. Map preserves
+    // existing order; re-keying an existing entry updates it in place, new cells append.
+    const byKey = new Map(
+      (await readPersistedAssets(base)).map((a) => [keyOf(a), a] as const),
+    );
+    for (const a of fresh) byKey.set(keyOf(a), a);
+    assets = [...byKey.values()];
   }
 
   const payload = JSON.stringify(

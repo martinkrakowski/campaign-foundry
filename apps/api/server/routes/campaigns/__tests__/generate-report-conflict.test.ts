@@ -1,9 +1,9 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler } from "h3";
-import { resetJobs } from "../../../lib/jobs.js";
+import { getRunningJobId, resetJobs } from "../../../lib/jobs.js";
 import { setCapabilities } from "../../../lib/capabilities.js";
 import generateHandler from "../generate.post.js";
 import jobHandler from "../jobs/[id].get.js";
@@ -136,5 +136,69 @@ describe("POST /campaigns/generate — the report merge is a conditional write",
     // Refused means it wrote nothing: the report still holds the run that landed.
     const stored = JSON.parse(readFileSync(reportPath, "utf8")) as { assets: { outputPath: string }[] };
     expect(stored.assets[0].outputPath).toBe("other/1x1.png");
+  });
+
+  test("a re-roll that started with no report is refused when one appears mid-run", async () => {
+    const reportPath = join(dir, "reports", "camp.json");
+    mkdirSync(join(dir, "reports"), { recursive: true });
+
+    // Hold this run inside the pipeline; no report exists when it was accepted, so the
+    // expectation it carries is "nothing stored" — not "do not check".
+    run.gate = new Promise<void>((resolve) => {
+      run.open = resolve;
+    });
+    const res = await call({
+      brief: brief(),
+      regenerateOnly: [{ productId: "alpha", aspectRatio: "1:1", treatment: "default" }],
+    });
+    expect(res.status).toBe(202);
+
+    // Another run's report lands meanwhile. Absence is an expectation, so this run is
+    // refused instead of merging over a base it never saw.
+    writeFileSync(
+      reportPath,
+      JSON.stringify({
+        halted: false,
+        assets: [
+          {
+            productId: "alpha",
+            aspectRatio: "1:1",
+            treatment: "default",
+            outputPath: "other/1x1.png",
+          },
+        ],
+      }),
+    );
+    run.open();
+
+    const { jobId } = (await res.json()) as { jobId: string };
+    const body = await awaitJob(jobId);
+    expect(body.status).toBe("failed");
+    expect(body.error).toBe('Report for campaign "camp" was modified by another run.');
+
+    const stored = JSON.parse(readFileSync(reportPath, "utf8")) as { assets: { outputPath: string }[] };
+    expect(stored.assets[0].outputPath).toBe("other/1x1.png");
+  });
+
+  test("a stored report nobody can read is a 500 that leaves no run claimed", async () => {
+    // A directory where the report should be: not ENOENT, so it is not "nothing
+    // stored" — `reportRevision` throws instead of handing out a revision it cannot
+    // vouch for.
+    mkdirSync(join(dir, "reports", "camp.json"), { recursive: true });
+
+    const res = await call({
+      brief: brief(),
+      regenerateOnly: [{ productId: "alpha", aspectRatio: "1:1", treatment: "default" }],
+    });
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toEqual({
+      error: 'Could not read the stored report for campaign "camp".',
+    });
+
+    // Before this fix the read happened after `acquireJob`, so the job it had just
+    // persisted stayed "running" and every later request for this campaign was turned
+    // away as already in progress — a run nobody could ever clear. Read before the
+    // claim, the failure leaves no job behind at all.
+    expect(await getRunningJobId("camp")).toBeUndefined();
   });
 });

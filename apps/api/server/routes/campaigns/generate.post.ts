@@ -65,6 +65,34 @@ export default defineEventHandler(async (event) => {
     return { error: `Unknown image model: ${imageModel}` };
   }
 
+  // A re-roll is a read-modify-write over the persisted report: it read this campaign's
+  // report when the run was accepted (the same read the policy-hash pin comes from) and
+  // overlays its cells onto it when the run lands. So it carries the revision it started
+  // from and is refused with ECONFLICT if that report moved meanwhile — a second re-roll
+  // no longer silently replaces the first. A full run replaces the report outright and
+  // folds nothing in, so it writes unconditionally.
+  //
+  // The revision is read before the job is claimed, not inside `runJob` and not after
+  // `acquireJob`: `reportRevision` rethrows everything that is not ENOENT (a report
+  // nobody can read is not "nothing stored"), and once the job is persisted that
+  // rejection leaves it recorded and "running" — a claim no later request for this
+  // campaign could ever clear. Read first, the same failure is a 500 and leaves
+  // nothing behind.
+  //
+  // `null` when no report is stored: `undefined` is what a caller that wants no check
+  // passes, so an absent report has to be its own value or a run that started with none
+  // would overwrite one that appeared while it was running.
+  const reroll = regenerateOnly !== undefined;
+  let expectedRevision: string | null | undefined;
+  if (reroll) {
+    try {
+      expectedRevision = (await reportRevision(outputRoot(), brief.id)) ?? null;
+    } catch {
+      setResponseStatus(event, 500);
+      return { error: `Could not read the stored report for campaign "${brief.id}".` };
+    }
+  }
+
   // One run per campaign at a time: a double-click or a retry after a poll blip must
   // not start a second pipeline writing the same output paths and report. The 409
   // carries the running job's handle (`jobId`) so the second press can adopt the run
@@ -79,15 +107,6 @@ export default defineEventHandler(async (event) => {
       campaignId: brief.id,
     };
   }
-
-  // A re-roll is a read-modify-write over the persisted report: it read this campaign's
-  // report when the run was accepted (the same read the policy-hash pin comes from) and
-  // overlays its cells onto it when the run lands. So it carries the revision it started
-  // from and is refused with ECONFLICT if that report moved meanwhile — a second re-roll
-  // no longer silently replaces the first. A full run replaces the report outright and
-  // folds nothing in, so it writes unconditionally.
-  const reroll = regenerateOnly !== undefined;
-  const expectedRevision = reroll ? await reportRevision(outputRoot(), brief.id) : undefined;
 
   const jobId = claim.jobId;
   runJob(jobId, async () => {
