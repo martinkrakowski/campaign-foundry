@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { PremiseResult, PremiseStatus } from "./types.js";
 
 export const ARTIFACT_FILE_NAME = "plan-verify.json";
@@ -75,6 +75,29 @@ export function buildArtifact(
 
 export function serializeArtifact(artifact: PlanVerifyArtifact): string {
   return JSON.stringify(artifact, null, 2) + "\n";
+}
+
+export interface WriteArtifactFs {
+  readonly mkdir: (path: string, options: { recursive: boolean }) => Promise<unknown>;
+  readonly writeFile: (path: string, content: string, encoding: "utf8") => Promise<void>;
+  readonly rename: (oldPath: string, newPath: string) => Promise<void>;
+}
+
+export async function writeArtifact(
+  path: string,
+  contents: string,
+  fs?: WriteArtifactFs,
+): Promise<void> {
+  const io = fs ?? {
+    mkdir: async (p, opts) => (await import("node:fs/promises")).mkdir(p, opts),
+    writeFile: async (p, c, enc) => (await import("node:fs/promises")).writeFile(p, c, enc),
+    rename: async (o, n) => (await import("node:fs/promises")).rename(o, n),
+  };
+  const dir = dirname(path);
+  await io.mkdir(dir, { recursive: true });
+  const tmp = join(dir, `.${basename(path)}.${process.pid}.${Date.now()}.tmp`);
+  await io.writeFile(tmp, contents, "utf8");
+  await io.rename(tmp, path);
 }
 
 export function errorText(thrown: unknown): string {

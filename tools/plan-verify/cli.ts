@@ -12,6 +12,7 @@ import {
   buildArtifact,
   errorText,
   serializeArtifact,
+  writeArtifact,
   type ArtifactScope,
 } from "./lib/artifact.js";
 
@@ -114,10 +115,7 @@ if (process.argv[1]) {
           });
         }),
       artifactPath: () => artifactPathFor(process.env),
-      writeArtifact: async (path, contents) => {
-        await mkdir(dirname(path), { recursive: true });
-        await writeFile(path, contents, "utf8");
-      },
+      writeArtifact: (path, contents) => writeArtifact(path, contents),
     })
       .then((code) => {
         process.exitCode = code;
