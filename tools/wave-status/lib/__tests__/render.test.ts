@@ -502,4 +502,25 @@ describe("renderStatus — backlog panel", () => {
     expect(out).toContain("feat/s5-bad");
     expect(out).toContain("2026-09-13T12:00:00.000Z[2J");
   });
+
+  test("a partial run's plan list is sanitized too, not just the premise rows", () => {
+    const status: WaveStatus = {
+      generatedAt: TS,
+      waves: [],
+      backlog: {
+        state: "recorded",
+        artifact: {
+          version: 1,
+          at: "2026-09-13T12:00:00.000Z",
+          git: { branch: "main", head: "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567" },
+          scope: { kind: "partial" as const, plans: ["docs/planning/a\x1b[2J.md"] },
+          plans: ["docs/planning/a\x1b[2J.md"],
+          premises: [],
+        },
+      },
+    };
+    const out = renderStatus(status, { color: false });
+    expect(out).not.toContain("\x1b");
+    expect(out).toContain("partial run (docs/planning/a[2J.md)");
+  });
 });
