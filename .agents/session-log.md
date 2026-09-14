@@ -5013,3 +5013,15 @@ Added `yarn sweep attribute --pr <n>`. Each github-actions thread is attributed 
 stays error-only. Tests: warning-only, function-children, hint + warning, error + warning, and a
 real `CopySection` prohibited-terms call site. Docs: HL5b marked shipped, gap 21 recorded with an
 X19 manifest (2 mutations, both caught). Full gate green, 100 % coverage.
+## X20 — timeline beat errors must reach assistive technology (lane: feat/x20-timeline-beat-aria)
+
+- Gap: `TimelineSection` beat rows bypassed `Field` — message spans had no ids, no
+  `aria-describedby`/`aria-invalid` on the text input or the weight stepper.
+- Fix: `useId`-derived id per beat message; text input described by any message and
+  `aria-invalid` on error; weight/dwell error additionally describes and invalidates the
+  stepper. Kit `Stepper` now forwards `aria-invalid` alongside its X15 `aria-describedby`.
+- Evidence keys read first: `errors["copy-timeline-beat-<i>"]` are weight/dwell, warnings
+  are text — stepper wired to the error, input to both.
+- Gate: build/typecheck/lint/lint:arch/sync:check/test:cov all exit 0; 100% on all four
+  counters. plan:verify: 12 premises hold. mutate:verify x20.json: 4/4 caught.
+
