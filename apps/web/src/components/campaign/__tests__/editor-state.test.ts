@@ -7,8 +7,10 @@ import type {
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import {
   templateFromCanonical,
+  type BriefTemplate,
   type LayerProps,
 } from "@campaignfoundry/CampaignOrchestration/brief-template";
+import { CANONICAL_TEMPLATES } from "@campaignfoundry/CampaignOrchestration/creative-templates";
 import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import { timelineProblem } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import { axisProductSize } from "../validate";
@@ -46,6 +48,8 @@ import {
   MAX_BEATS,
   MAX_WEIGHT,
   formatOcclusionNotice,
+  canonicalBrief,
+  canonicalTemplate,
   type EditorState,
   type EditorAction,
 } from "../editor-state";
@@ -4541,5 +4545,146 @@ describe("display platforms (D116)", () => {
       const nonString = normalizeDraftState({ clickDestination: 12345 });
       expect(nonString.clickDestination).toBe("");
     });
+  });
+});
+
+describe("canonical layer defaults (X16)", () => {
+  /**
+   * A materialised template with one layer patched. The rest stay the canonical
+   * objects, so a test that only spells `enabled: true` or `elements: []` onto
+   * one layer is not also rewriting the others.
+   */
+  const withLayer = (
+    template: BriefTemplate,
+    id: string,
+    patch: Record<string, unknown>,
+  ): BriefTemplate => ({
+    ...template,
+    layers: template.layers.map((layer) =>
+      layer.id === id ? { ...layer, ...patch } : layer,
+    ),
+  });
+
+  /**
+   * The canonical `image-html` template, materialised: no campaign type seeds
+   * it, so the pinned id is the library's own, spelled out rather than derived
+   * — the same fixture `editor-state.html-elements.test.ts` uses.
+   */
+  const htmlTemplate = (
+    htmlPatch: Record<string, unknown> = {},
+  ): BriefTemplate => {
+    const canonical = CANONICAL_TEMPLATES["image-html"];
+    return {
+      id: "canonical-image-html",
+      version: canonical.version,
+      creativeType: canonical.creativeType,
+      unit: canonical.unit,
+      layers: canonical.layers.map((layer) =>
+        layer.id === "html" ? { ...layer, ...htmlPatch } : layer,
+      ),
+    };
+  };
+
+  test("a loaded brief whose image layer carries enabled: true is not dirty", () => {
+    const template = withLayer(
+      templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      "image",
+      { enabled: true },
+    );
+    const state = fromBrief(savedBrief({ template }), { file: "camp.yaml" });
+    expect(isDirtySinceSave(state)).toBe(false);
+  });
+
+  test("toggling that layer off is dirty, and toggling it back on is not", () => {
+    // Image is a required kind with one instance, so the reducer refuses to
+    // switch it off (MP-D4). Shade is the layer the Template section actually
+    // offers a toggle for; loading it with the explicit default is the same
+    // round trip the image case names.
+    const template = withLayer(
+      templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      "shade",
+      { enabled: true },
+    );
+    const state = fromBrief(savedBrief({ template }), { file: "camp.yaml" });
+    expect(isDirtySinceSave(state)).toBe(false);
+    const off = reduce(state, {
+      type: "setLayerEnabled",
+      id: "shade",
+      enabled: false,
+    });
+    expect(isDirtySinceSave(off)).toBe(true);
+    const on = reduce(off, {
+      type: "setLayerEnabled",
+      id: "shade",
+      enabled: true,
+    });
+    expect(isDirtySinceSave(on)).toBe(false);
+  });
+
+  test("a loaded empty elements list is not dirty; add then remove returns clean", () => {
+    const template = htmlTemplate({ elements: [] });
+    const state = fromBrief(savedBrief({ template }), { file: "camp.yaml" });
+    expect(isDirtySinceSave(state)).toBe(false);
+    const added = reduce(state, {
+      type: "addHtmlElement",
+      layerId: "html",
+      kind: "text",
+    });
+    expect(isDirtySinceSave(added)).toBe(true);
+    const removed = reduce(added, {
+      type: "removeHtmlElement",
+      layerId: "html",
+      index: 0,
+    });
+    expect(isDirtySinceSave(removed)).toBe(false);
+  });
+
+  test("canonicalTemplate leaves enabled: false and a non-empty elements list alone", () => {
+    const off = withLayer(
+      templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      "shade",
+      { enabled: false },
+    );
+    expect(canonicalTemplate(off)).toEqual(off);
+    expect(
+      canonicalTemplate(off).layers.find((layer) => layer.id === "shade"),
+    ).toEqual({ id: "shade", kind: "shade", enabled: false });
+
+    const populated = htmlTemplate({
+      elements: [
+        {
+          kind: "text",
+          text: "Stay wild.",
+          frame: { x: 0.08, y: 0.08, w: 0.84, h: 0.18, anchor: "top" },
+        },
+      ],
+    });
+    expect(canonicalTemplate(populated)).toEqual(populated);
+    expect(
+      canonicalTemplate(populated).layers.find((layer) => layer.id === "html")
+        ?.elements,
+    ).toHaveLength(1);
+
+    // Already-canonical input keeps the same object — the load path should not
+    // copy a brief that did not need rewriting.
+    const untouched = templateFromCanonical(DEFAULT_CAMPAIGN_TYPE);
+    expect(canonicalTemplate(untouched)).toBe(untouched);
+    const brief = savedBrief();
+    expect(canonicalBrief(brief)).toBe(brief);
+  });
+
+  test("save and apply carrying a server brief with enabled: true do not leave the draft dirty", () => {
+    const loaded = fromBrief(savedBrief(), { file: "camp.yaml" });
+    const server = savedBrief({
+      template: withLayer(
+        templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        "image",
+        { enabled: true },
+      ),
+    });
+    const saved = reduce(loaded, { type: "save", saved: server });
+    expect(isDirtySinceSave(saved)).toBe(false);
+    const applied = reduce(loaded, { type: "apply", applied: server });
+    expect(isDirtySinceApply(applied)).toBe(false);
   });
 });
