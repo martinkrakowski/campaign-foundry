@@ -4725,9 +4725,11 @@ describe("canonical layer defaults (X16)", () => {
   });
 
   /**
-   * The snapshot arrived from localStorage unvalidated. canonicalBrief throws
-   * when template is null, layers is not an array, or an entry is null — and
-   * loadDraftFromStorage's catch would then discard the whole draft.
+   * The snapshot arrived from localStorage unvalidated. A template that is
+   * null, whose layers is not an array, or whose layers contain null fails
+   * isBriefTemplate. Restore must keep the draft, and discard (which hands
+   * the snapshot to fromBrief → canonicalBrief) must not throw or drop the
+   * file association.
    */
   const storedFileDraft = (
     savedSnapshot: unknown,
@@ -4783,6 +4785,74 @@ describe("canonical layer defaults (X16)", () => {
     expect(
       restored.source.kind === "file" && restored.source.savedSnapshot,
     ).toBe(snapshot);
+  });
+
+  test("canonicalBrief returns the same object for each malformed template shape", () => {
+    const nullTemplate = { ...savedBrief(), template: null } as CampaignBrief;
+    expect(canonicalBrief(nullTemplate)).toBe(nullTemplate);
+
+    const layersNotArray = {
+      ...savedBrief(),
+      template: {
+        ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        layers: "x",
+      },
+    } as CampaignBrief;
+    expect(canonicalBrief(layersNotArray)).toBe(layersNotArray);
+
+    const nullLayer = {
+      ...savedBrief(),
+      template: {
+        ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        layers: [null],
+      },
+    } as CampaignBrief;
+    expect(canonicalBrief(nullLayer)).toBe(nullLayer);
+  });
+
+  test("discard of a restored draft whose snapshot template is null keeps the file", () => {
+    const snapshot = { ...savedBrief(), template: null };
+    const restored = normalizeDraftState(storedFileDraft(snapshot));
+    expect(() => reduce(restored, { type: "discard" })).not.toThrow();
+    const discarded = reduce(restored, { type: "discard" });
+    expect(discarded.source.kind).toBe("file");
+    expect(
+      discarded.source.kind === "file" && discarded.source.file,
+    ).toBe("camp.yaml");
+  });
+
+  test("discard of a restored draft whose snapshot layers is not an array keeps the file", () => {
+    const snapshot = {
+      ...savedBrief(),
+      template: {
+        ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        layers: "x",
+      },
+    };
+    const restored = normalizeDraftState(storedFileDraft(snapshot));
+    expect(() => reduce(restored, { type: "discard" })).not.toThrow();
+    const discarded = reduce(restored, { type: "discard" });
+    expect(discarded.source.kind).toBe("file");
+    expect(
+      discarded.source.kind === "file" && discarded.source.file,
+    ).toBe("camp.yaml");
+  });
+
+  test("discard of a restored draft whose snapshot layers contain null keeps the file", () => {
+    const snapshot = {
+      ...savedBrief(),
+      template: {
+        ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        layers: [null],
+      },
+    };
+    const restored = normalizeDraftState(storedFileDraft(snapshot));
+    expect(() => reduce(restored, { type: "discard" })).not.toThrow();
+    const discarded = reduce(restored, { type: "discard" });
+    expect(discarded.source.kind).toBe("file");
+    expect(
+      discarded.source.kind === "file" && discarded.source.file,
+    ).toBe("camp.yaml");
   });
 
   test("save and apply carrying a server brief with enabled: true do not leave the draft dirty", () => {
