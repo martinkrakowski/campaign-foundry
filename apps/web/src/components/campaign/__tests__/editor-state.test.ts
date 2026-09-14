@@ -1905,6 +1905,14 @@ describe("canPlan", () => {
     expect(
       canPlan({ ...noCount, variation: { ...noCount.variation, count: "0" } }),
     ).toBe(false);
+    // X18: a draft the shared parser refuses (blank, or non-numeric) is the
+    // `undefined` arm of canPlan's parse — not a plan-enabled count of zero.
+    expect(
+      canPlan({ ...noCount, variation: { ...noCount.variation, count: "" } }),
+    ).toBe(false);
+    expect(
+      canPlan({ ...noCount, variation: { ...noCount.variation, count: "1e5" } }),
+    ).toBe(true);
   });
 });
 
