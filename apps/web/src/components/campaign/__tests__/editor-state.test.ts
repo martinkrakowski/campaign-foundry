@@ -4788,7 +4788,7 @@ describe("canonical layer defaults (X16)", () => {
   });
 
   test("canonicalBrief returns the same object for each malformed template shape", () => {
-    const nullTemplate = { ...savedBrief(), template: null } as CampaignBrief;
+    const nullTemplate = { ...savedBrief(), template: null } as unknown as CampaignBrief;
     expect(canonicalBrief(nullTemplate)).toBe(nullTemplate);
 
     const layersNotArray = {
@@ -4797,7 +4797,7 @@ describe("canonical layer defaults (X16)", () => {
         ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
         layers: "x",
       },
-    } as CampaignBrief;
+    } as unknown as CampaignBrief;
     expect(canonicalBrief(layersNotArray)).toBe(layersNotArray);
 
     const nullLayer = {
@@ -4806,7 +4806,7 @@ describe("canonical layer defaults (X16)", () => {
         ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
         layers: [null],
       },
-    } as CampaignBrief;
+    } as unknown as CampaignBrief;
     expect(canonicalBrief(nullLayer)).toBe(nullLayer);
   });
 
