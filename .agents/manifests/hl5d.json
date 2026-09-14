@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "lane": "HL5d",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/application/use-cases/PreviewCreativeFrameUseCase.use-case.ts",
+      "before": "      // The brief's template (D120/D123, C3) rides the frame exactly as it\n      // rides the run: the preview draws the brief's order, not the\n      // canonical fallback.\n      template: brief.template,",
+      "after": "      // mutated: the preview frame no longer carries the brief's template",
+      "because": "The template is the only thing that carries an html layer and its elements into the composite request. Drop it and `resolveLayerList` falls back to the image-text canonical list, so the preview draws a shade, an accent and a message the brief never asked for — the element the operator just typed is edited on screen and simply is not there. That is D45's fabrication failure wearing the preview's coat: an editor that shows a creative the run would not produce.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/preview-frame.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "function drawHtml(c: LayerDrawContext): void {\n  const { ctx, prepared, layer } = c;\n  if (layer.elements === undefined || layer.elements.length === 0) {\n    return;\n  }",
+      "after": "function drawHtml(c: LayerDrawContext): void {\n  const { ctx, prepared, layer } = c;\n  if (layer.elements !== undefined) {\n    return;\n  }\n  if (layer.elements === undefined || layer.elements.length === 0) {\n    return;\n  }",
+      "because": "HL3's drawer is the canvas half of HL-D5 and the only half the editor preview can show (HL-D7: user markup is never rendered into the operator's DOM). A drawer that returns before painting leaves the route answering 200 image/png for a cell whose element list is invisible — the preview's own promise, broken in the one place a user would look to notice. The bytes still decode, the cache key still moves; only the pixels can tell.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/preview-frame.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "      if (isDisabledLayer(layer)) continue;",
+      "after": "      // mutated: a disabled layer is no longer skipped on the still path",
+      "because": "X9's promise is that a disabled layer renders exactly what the template renders with that layer absent — the toggle the editor exposes must mean what it says on the still frame the preview draws. Remove the skip and switching an html layer off leaves its elements painted: the operator hides a layer and the preview keeps showing it, so the one control that answers \"is this in the creative\" lies.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/preview-frame.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
