@@ -220,4 +220,22 @@ describe("assembleHtml (HL4, HL-D3, HL-D6)", () => {
 
     expect(result.html).toContain('<div id="ad-container">\n      \n    </div>');
   });
+
+  test("a button element's style contains overflow: hidden (X10)", () => {
+    const result = assembleHtml({
+      elements: [
+        {
+          kind: "button",
+          text: "Click Me",
+          frame: { x: 0.1, y: 0.7, w: 0.3, h: 0.1, anchor: "middle" },
+        },
+      ],
+      canvas: { ratio: "1:1" },
+      brandColor: "#1473E6",
+    });
+
+    const buttonMatch = /<button[^>]*style="([^"]*)"/.exec(result.html);
+    expect(buttonMatch).not.toBeNull();
+    expect(buttonMatch![1]).toContain("overflow: hidden;");
+  });
 });
