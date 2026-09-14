@@ -4724,3 +4724,31 @@ head re-check dropped. The premise fence was **withdrawn, not inverted** — it 
 the logic in TypeScript it would never have flipped on its own; that reasoning is written into the plan itself.
 Gate green with 100 % on all four counters (4803 tests). Verified against the live API on #361 before pushing:
 the head-mismatch refusal and the merge-allowed answer both behave as tested.
+
+## 2026-09-14 — X13 remediation: an incomplete read is a failure, not an empty answer
+
+The second pass at the same stage, and a sharper one: `fetchAllThreads` now decides whether a merge happens,
+so every way it can return a *partial* read with *no* failure is a way to merge past an open thread. Its own doc
+comment already promised "a page that cannot be read is recorded, not treated as empty"; three defects meant it
+did not keep that promise.
+
+1. `cursor = pageInfo?.hasNextPage && pageInfo.endCursor ? … : null` — a page with no `pageInfo`, or a
+   `hasNextPage` that is not a boolean (`"yes"` is truthy, which is why truthiness is not the test), or a next
+   page with no `endCursor`, all ended the read and recorded nothing.
+2. An absent `reviewThreads` read as zero threads. `edges.test.ts` pinned that as correct; its expectation now is
+   a recorded failure, and the same test proves a refused read posts nothing even with `--post`.
+3. Nothing checked that the cursor advanced and there was no page limit — the merge script blocks on that loop.
+   Bound chosen: **200 pages** (100 threads a page = 20,000 threads, two orders of magnitude past any PR here),
+   so reaching it is a cursor that never ends, not a large PR. A repeated cursor is recorded and stops the read.
+
+Only `hasNextPage === false` now ends a read having seen the whole PR. Eight tests written red and committed as
+they were seen failing (seven gate cases, one sweep); every one has a PR whose *visible* threads are all
+resolved, so completeness is the only thing between it and a merge. The two red cases that would otherwise hang
+(repeated cursor, no bound) have stubs that stop answering, so a red run fails on an assertion instead of
+spinning. Every fixture in the sweep and CLI suites answered with a connection carrying no `pageInfo` — they had
+been encoding the defect — and now say the read was complete. Counterweight test: a page with `pageInfo` and no
+`nodes` is a complete read of zero threads, since completeness is decided by `pageInfo`.
+
+Six new manifest entries, one per guard, each mutated to the defect itself: stop, and say nothing. All ten X13
+entries replay caught. Gate green, 100 % on all four counters (4811 tests); `yarn plan:verify` — 13 premises
+hold.
