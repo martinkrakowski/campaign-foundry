@@ -158,6 +158,75 @@ describe("TimelineSection — beat rows (E5.2)", () => {
   });
 });
 
+describe("TimelineSection — beat messages reach assistive technology (X20)", () => {
+  const textInput = (position: number) => screen.getByLabelText(messages.timelineBeatTextLabel(position));
+  const weightSpinbutton = (position: number) =>
+    screen.getByRole("spinbutton", { name: messages.timelineBeatWeightLabel(position) });
+  const describedBy = (el: Element) => el.getAttribute("aria-describedby");
+
+  test("a beat error marks its text input invalid and describes it; the next beat's input carries neither", () => {
+    const error = messages.timelineBeatWeightOutOfRange(1, MAX_WEIGHT);
+    render(
+      <TimelineSection
+        state={withBeats([{ text: "One", weight: 99 }, { text: "Two", weight: 1 }])}
+        dispatch={vi.fn()}
+        errors={{ "copy-timeline-beat-0": error }}
+      />,
+    );
+    const first = textInput(1);
+    expect(first.getAttribute("aria-invalid")).toBe("true");
+    const firstDescribedBy = describedBy(first);
+    expect(firstDescribedBy).toBeTruthy();
+    expect(document.getElementById(firstDescribedBy ?? "")?.textContent).toBe(error);
+
+    const second = textInput(2);
+    expect(second.hasAttribute("aria-invalid")).toBe(false);
+    expect(second.hasAttribute("aria-describedby")).toBe(false);
+  });
+
+  test("a beat error also describes and invalidates its weight stepper", () => {
+    const error = messages.timelineBeatWeightOutOfRange(1, MAX_WEIGHT);
+    render(
+      <TimelineSection
+        state={withBeats([{ text: "One", weight: 99 }, { text: "Two", weight: 1 }])}
+        dispatch={vi.fn()}
+        errors={{ "copy-timeline-beat-0": error }}
+      />,
+    );
+    const stepper = weightSpinbutton(1);
+    const stepperDescribedBy = describedBy(stepper);
+    expect(stepperDescribedBy).toBeTruthy();
+    expect(document.getElementById(stepperDescribedBy ?? "")?.textContent).toBe(error);
+    expect(stepper.getAttribute("aria-invalid")).toBe("true");
+    expect(weightSpinbutton(2).hasAttribute("aria-describedby")).toBe(false);
+    expect(weightSpinbutton(2).hasAttribute("aria-invalid")).toBe(false);
+  });
+
+  test("a warning describes the beat's text input without marking it invalid", () => {
+    const warning = messages.prohibitedTerminology(["cure"]);
+    render(
+      <TimelineSection
+        state={withBeats([{ text: "Miracle cure", weight: 1 }])}
+        dispatch={vi.fn()}
+        warnings={{ "copy-timeline-beat-0": warning }}
+      />,
+    );
+    const input = textInput(1);
+    const inputDescribedBy = describedBy(input);
+    expect(inputDescribedBy).toBeTruthy();
+    expect(document.getElementById(inputDescribedBy ?? "")?.textContent).toBe(warning);
+    expect(input.hasAttribute("aria-invalid")).toBe(false);
+  });
+
+  test("a clean beat's input and stepper carry no description or invalidity", () => {
+    render(<TimelineSection state={withBeats([{ text: "One", weight: 1 }])} dispatch={vi.fn()} />);
+    expect(textInput(1).hasAttribute("aria-describedby")).toBe(false);
+    expect(textInput(1).hasAttribute("aria-invalid")).toBe(false);
+    expect(weightSpinbutton(1).hasAttribute("aria-describedby")).toBe(false);
+    expect(weightSpinbutton(1).hasAttribute("aria-invalid")).toBe(false);
+  });
+});
+
 describe("TimelineSection — the dwell floor (E5.2/D3)", () => {
   test("Add is disabled with a reason naming the shortest clip", () => {
     // Four beats on a 6 s clip: a fifth would give each 1.2 s exactly, and one weight-1
