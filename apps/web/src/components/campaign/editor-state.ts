@@ -995,6 +995,48 @@ function withHtmlElements(
 }
 
 /**
+ * The one canonical form a template layer's defaults take (X16, D129, HL5a):
+ * `enabled: true` restates what absence already means, and `elements: []` is
+ * the same as no list. Mapping both to absent is what `withEnabled` /
+ * `withElements` already write, so a hand-authored brief that spelled the
+ * defaults out compares equal to the draft after an off→on (or add→remove)
+ * round trip. Same object when nothing needs rewriting.
+ */
+function canonicalLayer(layer: CreativeTemplateLayer): CreativeTemplateLayer {
+  const dropEnabled = layer.enabled === true;
+  const dropElements =
+    Array.isArray(layer.elements) && layer.elements.length === 0;
+  if (!dropEnabled && !dropElements) return layer;
+  const next: Record<string, unknown> = { ...layer };
+  if (dropEnabled) delete next.enabled;
+  if (dropElements) delete next.elements;
+  return next as unknown as CreativeTemplateLayer;
+}
+
+export function canonicalTemplate(template: BriefTemplate): BriefTemplate {
+  let changed = false;
+  const layers = template.layers.map((layer) => {
+    const next = canonicalLayer(layer);
+    if (next !== layer) changed = true;
+    return next;
+  });
+  return changed ? { ...template, layers } : template;
+}
+
+export function canonicalBrief(brief: CampaignBrief): CampaignBrief {
+  // A pre-L3a brief (and a few fixtures) carries no template; absence is
+  // not a default to rewrite, so the brief is returned as it arrived.
+  if (brief.template === undefined) return brief;
+  // A stored snapshot (or any other caller) can carry a template that
+  // fails isBriefTemplate: null, a non-array layers list, a null entry.
+  // Mapping those throws. Before X16 they were held verbatim; every path
+  // through here must do the same, so discard does not lose the file.
+  if (!isBriefTemplate(brief.template)) return brief;
+  const template = canonicalTemplate(brief.template);
+  return template === brief.template ? brief : { ...brief, template };
+}
+
+/**
  * A frame patch merged into `prior` (HL5a), so the result is always a frame the
  * domain accepts: a value that is not a finite number — a NaN or an infinity a
  * hand-restored draft can carry — keeps the one it had, a finite one is clamped
@@ -1768,7 +1810,12 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // dispatch lands. Save & apply awaits the network first, so recomputing here
       // would record edits made during the request as applied when the run has the
       // pre-await brief — the same trap the `save` action carries `saved` for.
-      return { ...state, appliedSnapshot: action.applied ?? toBrief(state) };
+      // A server brief may still spell `enabled: true` / `elements: []`; store
+      // the canonical form so the dirty check compares like with like (X16).
+      return {
+        ...state,
+        appliedSnapshot: canonicalBrief(action.applied ?? toBrief(state)),
+      };
     }
     case "restore":
       // A draft persisted before the probe answered (or by an older editor) carries
@@ -1784,7 +1831,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       // itself is never replaced: `save` updates the snapshot and the source's file
       // identity/revision in place, so keystrokes typed while the request was in
       // flight survive (replacing the draft is `load`'s job, and its cost).
-      const savedSnapshot = action.saved ?? toBrief(state);
+      const savedSnapshot = canonicalBrief(action.saved ?? toBrief(state));
       const entry = action.entry;
       if (state.source.kind === "file") {
         const source = { ...state.source, savedSnapshot };
@@ -2104,13 +2151,17 @@ export function fromBrief(
   brief: CampaignBrief,
   entry?: { file: string; revision?: string },
 ): EditorState {
+  // X16: a hand-authored `enabled: true` or `elements: []` is the same as
+  // absence. Canonicalise once so the draft and the snapshot are the form
+  // `withEnabled` / `withElements` write, and a freshly loaded file is not dirty.
+  const canonical = canonicalBrief(brief);
   const tempId = generateTempId();
   const source: EditorSource = entry
     ? {
         kind: "file",
         file: entry.file,
-        loadedId: brief.id,
-        savedSnapshot: brief,
+        loadedId: canonical.id,
+        savedSnapshot: canonical,
         revision: entry.revision,
       }
     : { kind: "new", tempId };
@@ -2197,9 +2248,10 @@ export function fromBrief(
     // D112 — absent means the default; a brief that wrote the default
     // explicitly keeps its marker, the way `mode`'s own flag does below.
     type: brief.type ?? DEFAULT_CAMPAIGN_TYPE,
-    // The brief's template is held verbatim (L3a): `toBrief` writes it back so a
-    // load → save round-trip never drops or re-derives the pinned reference.
-    template: brief.template,
+    // The brief's template is held after X16 canonicalisation (L3a): `toBrief`
+    // writes it back so a load → save never drops or re-derives the pinned
+    // reference. `enabled: true` and `elements: []` are absence, not edits.
+    template: canonical.template,
     campaignName: brief.id,
     briefId: brief.id,
     targetRegion: brief.targetRegion,
@@ -2575,18 +2627,31 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
   // template keeps any layer order it was saved with.
   const rawTemplate = raw.template;
   const template: BriefTemplate = isBriefTemplate(rawTemplate)
-    ? rawTemplate
+    ? canonicalTemplate(rawTemplate)
     : templateFromCanonical(type);
   const initial = initialEditorState(mode);
   const str = (value: unknown, fallback: string): string =>
     typeof value === "string" ? value : fallback;
   const rawSource = raw.source as Partial<EditorSource> | null | undefined;
-  const source: EditorSource =
+  const resolvedSource: EditorSource =
     rawSource !== null &&
     typeof rawSource === "object" &&
     (rawSource.kind === "new" || rawSource.kind === "file")
       ? (rawSource as EditorSource)
       : initial.source;
+  // A draft persisted before X16 may still carry a raw `enabled: true` /
+  // `elements: []` snapshot. Canonicalise it so recovery does not restore a
+  // "difference" that is only the default spelled out, and so a restored
+  // draft is not dirty against its own snapshot. canonicalBrief itself
+  // leaves a template it does not recognise unchanged, so a corrupt
+  // snapshot is kept verbatim rather than throwing.
+  const source: EditorSource =
+    resolvedSource.kind === "file" && resolvedSource.savedSnapshot
+      ? {
+          ...resolvedSource,
+          savedSnapshot: canonicalBrief(resolvedSource.savedSnapshot),
+        }
+      : resolvedSource;
   const v = (
     typeof raw.variation === "object" && raw.variation !== null
       ? raw.variation

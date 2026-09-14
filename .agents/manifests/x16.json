@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "lane": "X16",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "        savedSnapshot: canonical,",
+      "after": "        savedSnapshot: brief,",
+      "because": "fromBrief must snapshot the canonical brief, not the raw one: a hand-authored enabled: true is the same as absence, and storing the raw form makes a freshly loaded file read dirty against the draft that dropped the key.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts",
+        "-t",
+        "a loaded brief whose image layer carries enabled: true is not dirty",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "  const dropElements =\n    Array.isArray(layer.elements) && layer.elements.length === 0;",
+      "after": "  const dropElements = false;",
+      "because": "An empty elements list is the absent key (HL5a). If the canonicaliser stops mapping elements: [] to absent, a loaded empty list survives in the snapshot, add-then-remove deletes the key, and a brief the user returned to its loaded state still reads dirty.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts",
+        "-t",
+        "a loaded empty elements list is not dirty; add then remove returns clean",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "  if (!isBriefTemplate(brief.template)) return brief;\n  const template = canonicalTemplate(brief.template);",
+      "after": "  const template = canonicalTemplate(brief.template);",
+      "because": "canonicalBrief is the one guard: a template that fails isBriefTemplate must be returned unchanged, so discard (and every other fromBrief caller) cannot throw on a stored null / non-array / null-entry snapshot. Removing the check reopens the throw.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts",
+        "-t",
+        "discard of a restored draft whose snapshot template is null keeps the file",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

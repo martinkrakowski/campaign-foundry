@@ -4958,3 +4958,16 @@ the Map) retargeted rather than dropped. Full gate 0 with 100 % on all four coun
     at `editor-state.ts:46`, and a `role="region"` per html layer would add landmark
     noise around controls that already carry names.
 - **Mode:** Implementer (verify first). Branch `feat/hl5d-html-preview`. **HL5d — the editor preview of the `html` layer.** The path was already complete: `PreviewCreativeFrameUseCase` passes `brief.template` into the composite request and folds it into the frame cache key, HL3's `html` entry in `LAYER_DRAWERS` draws the element list, and the web client renders the answer as `<img src={dataUrl}>` (HL-D7). **No production code changed.** Four tests in `apps/api/server/routes/campaigns/__tests__/preview-frame.test.ts` now pin it: an element draws inside its own frame and nowhere else, a copy change moves key and pixels, markup-as-copy renders `image/png` because it is drawn as text, and a disabled `html` layer renders what the template renders with it absent. One boundary fact recorded rather than changed: a brief whose only `html` layer is disabled is refused with 400 — `html` is a required kind for `image-html` and MP-D4 refuses disabling the last enabled instance — so the disabled-layer test adds a second, disabled layer alongside the enabled one. Three mutations in `.agents/manifests/hl5d.json`, all caught: drop `template` from the preview's composite request, make the `html` drawer return without drawing, remove the `enabled === false` skip from the still-frame dispatch loop. Gate green: build, typecheck, lint, lint:arch, sync:check, `test:cov --maxWorkers=2` 100 % on all four counters, `plan:verify`, `mutate:verify`.
+
+---
+
+## 2026-09-14 — X16: a toggle round trip must not leave a brief dirty
+
+- **Mode:** Implementer
+- **Changes:** `canonicalBrief` / `canonicalTemplate` drop `enabled: true` and
+  `elements: []` at load; `fromBrief`, `save`/`apply` snapshots, recovered drafts,
+  and the Generate-target comparison use that form. `valuesEqual` unchanged.
+- **Decisions:** Image is required, so the off→on dirty test toggles shade (the
+  layer the Template section actually offers). BriefEditor:367 left as a whole-state
+  compare; recovery canonicalises via `normalizeDraftState` instead.
+- **Left open:** none.

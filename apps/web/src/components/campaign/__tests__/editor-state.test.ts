@@ -7,8 +7,10 @@ import type {
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import {
   templateFromCanonical,
+  type BriefTemplate,
   type LayerProps,
 } from "@campaignfoundry/CampaignOrchestration/brief-template";
+import { CANONICAL_TEMPLATES } from "@campaignfoundry/CampaignOrchestration/creative-templates";
 import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import { timelineProblem } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import { axisProductSize } from "../validate";
@@ -46,6 +48,8 @@ import {
   MAX_BEATS,
   MAX_WEIGHT,
   formatOcclusionNotice,
+  canonicalBrief,
+  canonicalTemplate,
   type EditorState,
   type EditorAction,
 } from "../editor-state";
@@ -4541,5 +4545,328 @@ describe("display platforms (D116)", () => {
       const nonString = normalizeDraftState({ clickDestination: 12345 });
       expect(nonString.clickDestination).toBe("");
     });
+  });
+});
+
+describe("canonical layer defaults (X16)", () => {
+  /**
+   * A materialised template with one layer patched. The rest stay the canonical
+   * objects, so a test that only spells `enabled: true` or `elements: []` onto
+   * one layer is not also rewriting the others.
+   */
+  const withLayer = (
+    template: BriefTemplate,
+    id: string,
+    patch: Record<string, unknown>,
+  ): BriefTemplate => ({
+    ...template,
+    layers: template.layers.map((layer) =>
+      layer.id === id ? { ...layer, ...patch } : layer,
+    ),
+  });
+
+  /**
+   * The canonical `image-html` template, materialised: no campaign type seeds
+   * it, so the pinned id is the library's own, spelled out rather than derived
+   * — the same fixture `editor-state.html-elements.test.ts` uses.
+   */
+  const htmlTemplate = (
+    htmlPatch: Record<string, unknown> = {},
+  ): BriefTemplate => {
+    const canonical = CANONICAL_TEMPLATES["image-html"];
+    return {
+      id: "canonical-image-html",
+      version: canonical.version,
+      creativeType: canonical.creativeType,
+      unit: canonical.unit,
+      layers: canonical.layers.map((layer) =>
+        layer.id === "html" ? { ...layer, ...htmlPatch } : layer,
+      ),
+    };
+  };
+
+  test("a loaded brief whose image layer carries enabled: true is not dirty", () => {
+    const template = withLayer(
+      templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      "image",
+      { enabled: true },
+    );
+    const state = fromBrief(savedBrief({ template }), { file: "camp.yaml" });
+    expect(isDirtySinceSave(state)).toBe(false);
+  });
+
+  test("toggling that layer off is dirty, and toggling it back on is not", () => {
+    // Image is a required kind with one instance, so the reducer refuses to
+    // switch it off (MP-D4). Shade is the layer the Template section actually
+    // offers a toggle for; loading it with the explicit default is the same
+    // round trip the image case names.
+    const template = withLayer(
+      templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      "shade",
+      { enabled: true },
+    );
+    const state = fromBrief(savedBrief({ template }), { file: "camp.yaml" });
+    expect(isDirtySinceSave(state)).toBe(false);
+    const off = reduce(state, {
+      type: "setLayerEnabled",
+      id: "shade",
+      enabled: false,
+    });
+    expect(isDirtySinceSave(off)).toBe(true);
+    const on = reduce(off, {
+      type: "setLayerEnabled",
+      id: "shade",
+      enabled: true,
+    });
+    expect(isDirtySinceSave(on)).toBe(false);
+  });
+
+  test("a loaded empty elements list is not dirty; add then remove returns clean", () => {
+    const template = htmlTemplate({ elements: [] });
+    const state = fromBrief(savedBrief({ template }), { file: "camp.yaml" });
+    expect(isDirtySinceSave(state)).toBe(false);
+    const added = reduce(state, {
+      type: "addHtmlElement",
+      layerId: "html",
+      kind: "text",
+    });
+    expect(isDirtySinceSave(added)).toBe(true);
+    const removed = reduce(added, {
+      type: "removeHtmlElement",
+      layerId: "html",
+      index: 0,
+    });
+    expect(isDirtySinceSave(removed)).toBe(false);
+  });
+
+  test("canonicalTemplate leaves enabled: false and a non-empty elements list alone", () => {
+    const off = withLayer(
+      templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      "shade",
+      { enabled: false },
+    );
+    expect(canonicalTemplate(off)).toEqual(off);
+    expect(
+      canonicalTemplate(off).layers.find((layer) => layer.id === "shade"),
+    ).toEqual({ id: "shade", kind: "shade", enabled: false });
+
+    const populated = htmlTemplate({
+      elements: [
+        {
+          kind: "text",
+          text: "Stay wild.",
+          frame: { x: 0.08, y: 0.08, w: 0.84, h: 0.18, anchor: "top" },
+        },
+      ],
+    });
+    expect(canonicalTemplate(populated)).toEqual(populated);
+    expect(
+      canonicalTemplate(populated).layers.find((layer) => layer.id === "html")
+        ?.elements,
+    ).toHaveLength(1);
+
+    // Already-canonical input keeps the same object — the load path should not
+    // copy a brief that did not need rewriting.
+    const untouched = templateFromCanonical(DEFAULT_CAMPAIGN_TYPE);
+    expect(canonicalTemplate(untouched)).toBe(untouched);
+    const brief = savedBrief();
+    expect(canonicalBrief(brief)).toBe(brief);
+
+    const both = htmlTemplate({ enabled: true, elements: [] });
+    expect(
+      canonicalTemplate(both).layers.find((layer) => layer.id === "html"),
+    ).toEqual({ id: "html", kind: "html" });
+  });
+
+  test("a restored draft whose snapshot still carries enabled: true is not dirty", () => {
+    const template = withLayer(
+      templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      "image",
+      { enabled: true },
+    );
+    const rawBrief = savedBrief({ template });
+    const restored = normalizeDraftState({
+      ...fromBrief(rawBrief, { file: "camp.yaml" }),
+      template,
+      source: {
+        kind: "file",
+        file: "camp.yaml",
+        loadedId: "camp",
+        savedSnapshot: rawBrief,
+        revision: undefined,
+      },
+    });
+    expect(
+      "enabled" in restored.template.layers.find((layer) => layer.id === "image")!,
+    ).toBe(false);
+    expect(
+      restored.source.kind === "file" &&
+        restored.source.savedSnapshot !== null &&
+        !("enabled" in
+          restored.source.savedSnapshot.template.layers.find(
+            (layer) => layer.id === "image",
+          )!),
+    ).toBe(true);
+    expect(isDirtySinceSave(restored)).toBe(false);
+
+    const noSnapshot = normalizeDraftState({
+      source: {
+        kind: "file",
+        file: "camp.yaml",
+        loadedId: "camp",
+        savedSnapshot: null,
+        revision: undefined,
+      },
+    });
+    expect(noSnapshot.source.kind).toBe("file");
+    expect(
+      noSnapshot.source.kind === "file" && noSnapshot.source.savedSnapshot,
+    ).toBeNull();
+  });
+
+  /**
+   * The snapshot arrived from localStorage unvalidated. A template that is
+   * null, whose layers is not an array, or whose layers contain null fails
+   * isBriefTemplate. Restore must keep the draft, and discard (which hands
+   * the snapshot to fromBrief → canonicalBrief) must not throw or drop the
+   * file association.
+   */
+  const storedFileDraft = (
+    savedSnapshot: unknown,
+  ): Record<string, unknown> => ({
+    campaignName: "Recover me",
+    briefId: "camp",
+    source: {
+      kind: "file",
+      file: "camp.yaml",
+      loadedId: "camp",
+      savedSnapshot,
+      revision: undefined,
+    },
+  });
+
+  test("a stored draft whose snapshot template is null keeps the draft and the snapshot", () => {
+    const snapshot = { ...savedBrief(), template: null };
+    const restored = normalizeDraftState(storedFileDraft(snapshot));
+    expect(restored.campaignName).toBe("Recover me");
+    expect(restored.briefId).toBe("camp");
+    expect(
+      restored.source.kind === "file" && restored.source.savedSnapshot,
+    ).toBe(snapshot);
+  });
+
+  test("a stored draft whose snapshot layers is not an array keeps the draft and the snapshot", () => {
+    const snapshot = {
+      ...savedBrief(),
+      template: {
+        ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        layers: "x",
+      },
+    };
+    const restored = normalizeDraftState(storedFileDraft(snapshot));
+    expect(restored.campaignName).toBe("Recover me");
+    expect(restored.briefId).toBe("camp");
+    expect(
+      restored.source.kind === "file" && restored.source.savedSnapshot,
+    ).toBe(snapshot);
+  });
+
+  test("a stored draft whose snapshot layers contain null keeps the draft and the snapshot", () => {
+    const snapshot = {
+      ...savedBrief(),
+      template: {
+        ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        layers: [null],
+      },
+    };
+    const restored = normalizeDraftState(storedFileDraft(snapshot));
+    expect(restored.campaignName).toBe("Recover me");
+    expect(restored.briefId).toBe("camp");
+    expect(
+      restored.source.kind === "file" && restored.source.savedSnapshot,
+    ).toBe(snapshot);
+  });
+
+  test("canonicalBrief returns the same object for each malformed template shape", () => {
+    const nullTemplate = { ...savedBrief(), template: null } as unknown as CampaignBrief;
+    expect(canonicalBrief(nullTemplate)).toBe(nullTemplate);
+
+    const layersNotArray = {
+      ...savedBrief(),
+      template: {
+        ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        layers: "x",
+      },
+    } as unknown as CampaignBrief;
+    expect(canonicalBrief(layersNotArray)).toBe(layersNotArray);
+
+    const nullLayer = {
+      ...savedBrief(),
+      template: {
+        ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        layers: [null],
+      },
+    } as unknown as CampaignBrief;
+    expect(canonicalBrief(nullLayer)).toBe(nullLayer);
+  });
+
+  test("discard of a restored draft whose snapshot template is null keeps the file", () => {
+    const snapshot = { ...savedBrief(), template: null };
+    const restored = normalizeDraftState(storedFileDraft(snapshot));
+    expect(() => reduce(restored, { type: "discard" })).not.toThrow();
+    const discarded = reduce(restored, { type: "discard" });
+    expect(discarded.source.kind).toBe("file");
+    expect(
+      discarded.source.kind === "file" && discarded.source.file,
+    ).toBe("camp.yaml");
+  });
+
+  test("discard of a restored draft whose snapshot layers is not an array keeps the file", () => {
+    const snapshot = {
+      ...savedBrief(),
+      template: {
+        ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        layers: "x",
+      },
+    };
+    const restored = normalizeDraftState(storedFileDraft(snapshot));
+    expect(() => reduce(restored, { type: "discard" })).not.toThrow();
+    const discarded = reduce(restored, { type: "discard" });
+    expect(discarded.source.kind).toBe("file");
+    expect(
+      discarded.source.kind === "file" && discarded.source.file,
+    ).toBe("camp.yaml");
+  });
+
+  test("discard of a restored draft whose snapshot layers contain null keeps the file", () => {
+    const snapshot = {
+      ...savedBrief(),
+      template: {
+        ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        layers: [null],
+      },
+    };
+    const restored = normalizeDraftState(storedFileDraft(snapshot));
+    expect(() => reduce(restored, { type: "discard" })).not.toThrow();
+    const discarded = reduce(restored, { type: "discard" });
+    expect(discarded.source.kind).toBe("file");
+    expect(
+      discarded.source.kind === "file" && discarded.source.file,
+    ).toBe("camp.yaml");
+  });
+
+  test("save and apply carrying a server brief with enabled: true do not leave the draft dirty", () => {
+    const loaded = fromBrief(savedBrief(), { file: "camp.yaml" });
+    const server = savedBrief({
+      template: withLayer(
+        templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        "image",
+        { enabled: true },
+      ),
+    });
+    const saved = reduce(loaded, { type: "save", saved: server });
+    expect(isDirtySinceSave(saved)).toBe(false);
+    const applied = reduce(loaded, { type: "apply", applied: server });
+    expect(isDirtySinceApply(applied)).toBe(false);
   });
 });
