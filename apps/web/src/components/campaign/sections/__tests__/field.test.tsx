@@ -1,6 +1,12 @@
-import { describe, test, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, test, expect, vi, afterEach } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { Fragment } from "react";
 import { Field } from "../IdentitySection";
+import { LayoutSection } from "../LayoutSection";
+import { PolicySection } from "../PolicySection";
+import { ProductsSection } from "../ProductsSection";
+import { initialEditorState } from "../../editor-state";
+import * as messages from "../../messages";
 
 describe("Field — assistive technology describedby and invalid attributes", () => {
   test("with a hint only: aria-describedby names the hint element and resolves to hint text; aria-invalid is not set", () => {
@@ -175,4 +181,120 @@ describe("Field — assistive technology describedby and invalid attributes", ()
     expect(container.textContent).toContain("Plain");
     expect(container.textContent).toContain("Static content");
   });
+
+  test("function-children form: attributes reach the spread target and no clone happens", () => {
+    let cloneAttempted = false;
+    const DummyChild = (props: Record<string, unknown>) => {
+      if (props["data-cloned"]) cloneAttempted = true;
+      return <div data-testid="wrapper">{props.children as React.ReactNode}</div>;
+    };
+
+    render(
+      <Field label="Custom Field" hint="Helpful hint" error="Field error">
+        {(control) => (
+          <DummyChild>
+            <input data-testid="spread-target" {...control} />
+          </DummyChild>
+        )}
+      </Field>,
+    );
+
+    expect(cloneAttempted).toBe(false);
+    const wrapper = screen.getByTestId("wrapper");
+    expect(wrapper.hasAttribute("aria-describedby")).toBe(false);
+    expect(wrapper.hasAttribute("aria-invalid")).toBe(false);
+
+    const target = screen.getByTestId("spread-target");
+    const describedBy = target.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    const ids = describedBy!.split(" ");
+    expect(ids).toHaveLength(2);
+    expect(document.getElementById(ids[0]!)?.textContent).toBe("Helpful hint");
+    expect(document.getElementById(ids[1]!)?.textContent).toBe("Field error");
+    expect(target.getAttribute("aria-invalid")).toBe("true");
+  });
+
+  test("skips a Fragment child and does not pass props to it", () => {
+    render(
+      <Field label="Fragment Field" hint="Fragment hint">
+        <Fragment>
+          <input data-testid="fragment-control" />
+        </Fragment>
+      </Field>,
+    );
+
+    const control = screen.getByTestId("fragment-control");
+    expect(control.hasAttribute("aria-describedby")).toBe(false);
+  });
+
+  test("call-site test: LayoutSection with a hinted Slider and a hinted ChipGroup", () => {
+    render(<LayoutSection state={initialEditorState()} dispatch={vi.fn()} errors={{}} />);
+
+    // Hinted Slider: Size
+    const sizeSlider = screen.getByRole("slider", { name: "Size" });
+    const sliderDescribedBy = sizeSlider.getAttribute("aria-describedby");
+    expect(sliderDescribedBy).toBeTruthy();
+    const sliderHintEl = document.getElementById(sliderDescribedBy!);
+    expect(sliderHintEl).not.toBeNull();
+    expect(sliderHintEl?.textContent).toBe(
+      "A share of the canvas width, shown as pixels at the previewed ratio",
+    );
+
+    // Hinted ChipGroup: Typeface
+    const typefaceGroup = screen.getByRole("group", { name: "Typeface options" });
+    const groupDescribedBy = typefaceGroup.getAttribute("aria-describedby");
+    expect(groupDescribedBy).toBeTruthy();
+    const groupHintEl = document.getElementById(groupDescribedBy!);
+    expect(groupHintEl).not.toBeNull();
+    expect(groupHintEl?.textContent).toBe("From the faces the renderer bundles");
+  });
+
+  test("call-site test: PolicySection seed Field with an error", () => {
+    localStorage.clear();
+    render(
+      <PolicySection
+        state={{ ...initialEditorState(), mode: "variation" }}
+        dispatch={vi.fn()}
+        errors={{ seed: "Seed must be positive" }}
+      />,
+    );
+
+    const advancedBtn = screen.getByRole("button", { name: "Advanced" });
+    if (advancedBtn.getAttribute("aria-expanded") !== "true") {
+      fireEvent.click(advancedBtn);
+    }
+
+    const seedInput = screen.getByRole("spinbutton", { name: "Seed" });
+    const describedBy = seedInput.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+
+    const ids = describedBy!.split(" ");
+    expect(ids).toHaveLength(2);
+    const [hintId, errorId] = ids;
+    expect(document.getElementById(hintId!)?.textContent).toBe(
+      "Fixes the draw, so the same brief plans the same creatives",
+    );
+    expect(document.getElementById(errorId!)?.textContent).toBe("Seed must be positive");
+    expect(seedInput.getAttribute("aria-invalid")).toBe("true");
+  });
+
+  test("call-site test: ProductsSection LogoField with an error", () => {
+    render(
+      <ProductsSection
+        state={initialEditorState()}
+        dispatch={vi.fn()}
+        errors={{ "product-0-logo": "Logo is required" }}
+        onChooseFromBin={vi.fn()}
+      />,
+    );
+
+    const logoInput = screen.getByLabelText(messages.logoPathAria);
+    const describedBy = logoInput.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    const errorEl = document.getElementById(describedBy!);
+    expect(errorEl).not.toBeNull();
+    expect(errorEl?.textContent).toBe("Logo is required");
+    expect(logoInput.getAttribute("aria-invalid")).toBe("true");
+  });
 });
+

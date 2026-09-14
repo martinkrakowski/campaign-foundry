@@ -290,4 +290,19 @@ describe("the custom value is a named, gated field", () => {
     // the group's own label names the group, never the textbox inside it
     expect(screen.getByRole("textbox", { name: "Target Region — other" })).toBeTruthy();
   });
+
+  test("rendered with aria-describedby, the group element carries it", () => {
+    render(
+      <ChipGroup
+        label="Target Region"
+        options={OPTIONS}
+        value="DE"
+        onChange={vi.fn()}
+        aria-describedby="chip-hint-id"
+      />,
+    );
+    const group = screen.getByRole("group");
+    expect(group.getAttribute("aria-describedby")).toBe("chip-hint-id");
+  });
 });
+

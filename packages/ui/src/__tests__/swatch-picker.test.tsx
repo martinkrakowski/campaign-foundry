@@ -130,5 +130,12 @@ describe("SwatchPicker", () => {
     const inputReadOnly = screen.getByLabelText("Hex colour") as HTMLInputElement;
     expect(inputReadOnly.readOnly).toBe(true);
   });
+
+  test("rendered with aria-describedby, the group element carries it", () => {
+    render(<SwatchPicker value="#1473E6" onChange={vi.fn()} aria-describedby="swatch-hint-id" />);
+    const group = screen.getByRole("group");
+    expect(group.getAttribute("aria-describedby")).toBe("swatch-hint-id");
+  });
 });
+
 

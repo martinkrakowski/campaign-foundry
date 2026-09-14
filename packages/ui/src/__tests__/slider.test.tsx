@@ -52,4 +52,10 @@ describe("Slider", () => {
     expect(input.getAttribute("aria-invalid")).toBe("true");
     expect(input.disabled).toBe(true);
   });
+
+  test("rendered with aria-describedby, the range input carries it", () => {
+    const { input } = setup({ "aria-describedby": "slider-hint-id" });
+    expect(input.getAttribute("aria-describedby")).toBe("slider-hint-id");
+  });
 });
+
