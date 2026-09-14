@@ -90,6 +90,8 @@ export type PersistedAsset = {
   htmlBundlePath?: string;
   /** The required raster fallback rendition (D122) — html rows only. */
   htmlFallbackPath?: string;
+  /** The click destination URL (HL2, HL-D3). */
+  clickDestination?: string;
   durationSec?: number;
   /**
    * Planned-axis provenance, on variation rows only — `writeReport` spreads the whole
@@ -129,13 +131,18 @@ export function isPersistedAsset(a: unknown): a is PersistedAsset {
   if (hasRatio === hasSize) return false;
   if (typeof rec.treatment !== "string") return false;
   if (typeof rec.outputPath !== "string") return false;
-  // `format` is absent on classic rows, else static | motion. An unknown format is
+  // `format` is absent on classic rows, else static | motion | html. An unknown format is
   // skipped (and counted) rather than packaged as a still; a motion row without a
-  // readable mp4 path or a finite clip length can't be packaged or duration-checked.
-  if (rec.format !== undefined && rec.format !== "static" && rec.format !== "motion") return false;
+  // readable mp4 path or a finite clip length can't be packaged or duration-checked;
+  // an html row without bundle and fallback paths can't be packaged (D122).
+  if (rec.format !== undefined && rec.format !== "static" && rec.format !== "motion" && rec.format !== "html") return false;
   if (rec.format === "motion") {
     if (typeof rec.videoPath !== "string") return false;
     if (typeof rec.durationSec !== "number" || !Number.isFinite(rec.durationSec)) return false;
+  }
+  if (rec.format === "html") {
+    if (typeof rec.htmlBundlePath !== "string") return false;
+    if (typeof rec.htmlFallbackPath !== "string") return false;
   }
   if (rec.variantIndex === undefined) return true;
   return isNonNegInt(rec.variantIndex) && isNonNegInt(rec.attempt);

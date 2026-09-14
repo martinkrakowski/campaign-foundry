@@ -158,17 +158,7 @@ now live in `html-element.ts`; both layer shapes declare `elements`, and the sha
 **HL3 — shipped.** The canvas rendition (HL-D5) draws the HTML layer's element list natively in `NodeCanvasCompositor`, and the X6 boundary guard refusing `image-html` is removed so HTML campaigns produce their required raster fallback.
 
 
-```premise HL4
-# What decides HL4 is the generation path emitting format "html" and setting
-# htmlBundlePath — §2's explicit requirement, and the two fields packageHtml
-# already checks. The lane ships both, so the premise retires only when both
-# have landed. Two explicit probes, joined so either half still outstanding
-# keeps the lane live: `! grep -qE 'A|B'` negates a disjunction, and dies the
-# moment the first half lands. The field existing in the entity type does not
-# count; only writing it in the use case does, so both probes stay on the
-# generation path's own file.
-! grep -q 'format: "html"' packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts || ! grep -q 'htmlBundlePath' packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts
-```
+**HL4 — shipped in this PR.** Server-side markup assembler produces the HTML creative unit from the layer element list, wires `clickTag` variable declaration per HL-D3, enforces weight budget against `profile.maxBytes` per HL-D6, and the generation path emits `format: "html"` with both `htmlBundlePath` and `htmlFallbackPath` populated and verified during platform packaging.
 
 ```premise HL5
 # The tooling lane's deciding facts are the element palette and the live

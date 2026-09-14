@@ -121,6 +121,46 @@ describe("GenerateCampaignUseCase — validation", () => {
     expect(d.compositor.compositeAsset).toHaveBeenCalled();
   });
 
+  test("an image-html brief emits format: 'html' and sets BOTH htmlBundlePath and htmlFallbackPath (HL4)", async () => {
+    const d = deps();
+    const template: BriefTemplate = {
+      ...CANONICAL_TEMPLATES["image-html"],
+      id: "canonical-image-html",
+      layers: [
+        { id: "image", kind: "image" },
+        {
+          id: "html",
+          kind: "html",
+          elements: [
+            { kind: "button", text: "Buy Now", frame: { x: 0.1, y: 0.8, w: 0.3, h: 0.1, anchor: "middle" } },
+          ],
+        },
+        { id: "logo", kind: "logo" },
+      ],
+    };
+    const result = await new GenerateCampaignUseCase(d).execute(
+      baseBrief({
+        template,
+        clickDestination: "https://example.com/landing",
+      }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.assets.length).toBeGreaterThan(0);
+    for (const asset of result.value.assets) {
+      expect(asset.format).toBe("html");
+      expect(typeof asset.htmlBundlePath).toBe("string");
+      expect(typeof asset.htmlFallbackPath).toBe("string");
+      expect(asset.htmlBundlePath).toContain("index.html");
+      expect(asset.htmlFallbackPath).toContain("fallback.png");
+      expect(asset.clickDestination).toBe("https://example.com/landing");
+    }
+    const exporter = d.exporter as RecordingExporter;
+    // Bundle and fallback must be saved
+    expect(exporter.saved.some((s) => s.path.endsWith("index.html"))).toBe(true);
+    expect(exporter.saved.some((s) => s.path.endsWith("fallback.png"))).toBe(true);
+  });
+
   test("all creative types (image-text, image-html, video) pass brief validation", async () => {
     const d = deps();
     const imageTextResult = await new GenerateCampaignUseCase(d).execute(
@@ -660,6 +700,59 @@ describe("GenerateCampaignUseCase — variation", () => {
     expect(motionD.videoCompositor.compositeVideo).toHaveBeenCalledWith(
       expect.objectContaining({ template }),
     );
+  });
+
+  test("variation renders image-html unit with format html, fallback and bundle paths (HL4)", async () => {
+    const template: BriefTemplate = {
+      ...CANONICAL_TEMPLATES["image-html"],
+      id: "canonical-image-html",
+      layers: [
+        { id: "image", kind: "image" },
+        {
+          id: "html",
+          kind: "html",
+          elements: [
+            { kind: "button", text: "Buy Now", frame: { x: 0.1, y: 0.8, w: 0.3, h: 0.1, anchor: "middle" } },
+          ],
+        },
+        { id: "logo", kind: "logo" },
+      ],
+    };
+    const variationD = deps({ planner: fakePlanner(fakePlan([fakeVariant()])) });
+    const result = await new GenerateCampaignUseCase(variationD).execute(
+      variationBrief({
+        template,
+        clickDestination: "https://example.com/landing",
+      }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.assets[0].format).toBe("html");
+    expect(result.value.assets[0].htmlBundlePath).toContain("index.html");
+    expect(result.value.assets[0].htmlFallbackPath).toContain("fallback.png");
+    expect(result.value.assets[0].clickDestination).toBe("https://example.com/landing");
+    const exporter = variationD.exporter as RecordingExporter;
+    expect(exporter.saved.some((s) => s.path.endsWith("index.html"))).toBe(true);
+    expect(exporter.saved.some((s) => s.path.endsWith("fallback.png"))).toBe(true);
+  });
+
+  test("variation renders image-html unit with canonical template and no clickDestination", async () => {
+    const variationD = deps({ planner: fakePlanner(fakePlan([fakeVariant()])) });
+    const result = await new GenerateCampaignUseCase(variationD).execute(
+      variationBrief({
+        template: {
+          id: "canonical-image-html",
+          version: CANONICAL_TEMPLATES["image-html"].version,
+          creativeType: "image-html",
+          unit: CANONICAL_TEMPLATES["image-html"].unit,
+          layers: CANONICAL_TEMPLATES["image-html"].layers,
+        },
+      }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.assets[0].format).toBe("html");
+    expect(result.value.assets[0].clickDestination).toBeUndefined();
   });
 
   test("legal-gates every distinct pooled headline and halts like a prohibited campaign message", async () => {
