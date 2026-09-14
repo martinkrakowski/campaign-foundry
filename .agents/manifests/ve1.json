@@ -108,7 +108,7 @@
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
       "before": "    if (!isPristine(state)) {\n      draftDivergedRef.current = true;\n      saveDraftToStorage(state);\n      return;\n    }\n    if (draftDivergedRef.current) purgeDraftFromStorage(state);",
       "after": "    if (isPristine(state)) {\n      purgeDraftFromStorage(state);\n      return;\n    }\n    saveDraftToStorage(state);",
-      "because": "Purge on EVERY pristine render, not only the return to pristine: the first render is always pristine, so on a named route the mount commits wipe the stored draft while the recovery effect is still waiting on the route's load — the reload finds nothing and the user's unsaved work is destroyed by the fix that was meant to protect it.",
+      "because": "Purge on EVERY pristine render, not only on a return to pristine: mount starts pristine and the capabilities answer re-renders pristine again, so a stored draft whose visible content matches the blank editor is eaten before and after the restore flow reads it — with no diverging state to trigger the write-back that would hide this for a draft with visible edits. The reload finds nothing because the purge that was meant to clean up after undo ran on the very render that came to recover.",
       "command": [
         "yarn",
         "vitest",

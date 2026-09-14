@@ -4356,24 +4356,25 @@ describe("VE1 — undo and redo in the editor", () => {
   });
 
   test("a draft stored before mount is still offered for restore on mount", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    const first = renderWithRun(<Editor id="camp" />);
-    await waitFor(() => expect(nameField().value).toBe("camp"));
-    await user.type(screen.getByLabelText("Headline"), " edited");
-    await waitFor(() => {
-      const draft = JSON.parse(localStorage.getItem("cf:draft:camp") ?? "null");
-      expect(draft?.state?.campaignMessage).toBe("Hi edited");
-    });
-    first.unmount();
-
-    // The reload: mount starts pristine, so a purge that fires on the initial
-    // pristine render would delete the stored draft before the restore flow reads
-    // it — the reload would come back for nothing.
-    renderWithRun(<Editor id="camp" />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("Hi edited"),
-    );
+    routes({});
+    // A legacy-shaped draft: its visible content matches the pristine editor and it
+    // carries the host verdict it saved with, so the restore it is offered lands
+    // back on a pristine state — and the capabilities answer arriving a moment later
+    // re-renders pristine again. A purge keyed on pristine ALONE fires on both, with
+    // no diverging edit to undo and no re-save to bring the draft back: the mount
+    // eats the very draft the mount came for. The return-to-pristine purge must
+    // know this render is the START, not a RETURN.
+    saveDraftToStorage({ ...initialEditorState(), capabilities: { motion: true } });
+    renderWithRun(<NewEditor />);
+    await waitFor(() => expect(nameField().value).toBe(""));
+    // Let the capabilities answer land and its (still-pristine) render flush.
+    await new Promise((r) => setTimeout(r, 50));
+    // Still there — and still the draft that was stored, not a rewrite of it: the
+    // mount read it and left it alone until something diverges.
+    const stored = JSON.parse(localStorage.getItem("cf:draft:new") ?? "null") as {
+      state: { capabilities: unknown };
+    } | null;
+    expect(stored?.state.capabilities).toEqual({ motion: true });
   });
 
   test("⌘Z inside an open dialog does not edit the draft behind it", async () => {
