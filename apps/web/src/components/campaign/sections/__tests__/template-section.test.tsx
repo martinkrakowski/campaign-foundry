@@ -144,7 +144,14 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
   test("removing a layer removes exactly it, and the order of the rest is unchanged", async () => {
     const user = userEvent.setup();
     render(<Harness initial={state()} />);
-    await user.click(list().getByRole("button", { name: "shade" }));
+    // The remove control, named by its description: the row carries a toggle
+    // with the same accessible name (D18), so the id alone is ambiguous here.
+    await user.click(
+      list().getByRole("button", {
+        name: "shade",
+        description: messages.templateRemoveDescription("Shade"),
+      }),
+    );
     const rows = screen.getAllByRole("listitem");
     expect(rows).toHaveLength(4);
     expect(within(rows[0]).queryByText("Shade")).toBeNull();
@@ -170,7 +177,14 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
     render(
       <TemplateSection state={duplicated} dispatch={vi.fn()} errors={{}} />,
     );
-    expect(list().getAllByRole("button", { name: "shade" })).toHaveLength(2);
+    // One remove control per row — scoped by description, since each row's
+    // toggle carries the same raw id as its name.
+    expect(
+      list().getAllByRole("button", {
+        name: "shade",
+        description: messages.templateRemoveDescription("Shade"),
+      }),
+    ).toHaveLength(2);
   });
 
   test("removing one of two layers sharing an id removes exactly it, the duplicate stays (L5)", () => {
@@ -251,7 +265,10 @@ describe("TemplateSection — the layer list (L5, D124)", () => {
 
   test("each control names itself by its raw id; the display words live in the description", () => {
     render(<TemplateSection state={state()} dispatch={vi.fn()} errors={{}} />);
-    const remove = list().getByRole("button", { name: "shade" });
+    const remove = list().getByRole("button", {
+      name: "shade",
+      description: messages.templateRemoveDescription("Shade"),
+    });
     expect(
       document.getElementById(remove.getAttribute("aria-describedby") ?? "")
         ?.textContent,
@@ -668,7 +685,10 @@ describe("TemplateSection — the layer toggle (L9, D129, MP-D3, MP-D4)", () => 
 
   test("the toggle names itself by its raw id; the display words live in the description", () => {
     render(<TemplateSection state={state()} dispatch={vi.fn()} errors={{}} />);
-    const toggle = list().getByRole("button", { name: "shade" });
+    const toggle = list().getByRole("button", {
+      name: "shade",
+      description: messages.templateDisableDescription("Shade"),
+    });
     expect(
       document.getElementById(toggle.getAttribute("aria-describedby") ?? "")
         ?.textContent,

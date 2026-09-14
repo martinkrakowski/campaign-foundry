@@ -10,7 +10,12 @@ import {
 import {
   CREATIVE_TYPE_RULES,
   type CreativeType,
+  type OcclusionFinding,
 } from "@campaignfoundry/CampaignOrchestration/creative-types";
+// The domain's own delta, imported for the enabled-subset wrapper below and
+// re-exported unchanged at the foot of this file.
+import { findOcclusionDelta } from "@campaignfoundry/CampaignOrchestration/creative-types";
+import type { CreativeTemplateLayer } from "@campaignfoundry/CampaignOrchestration/creative-templates";
 import { satisfiesOrderConstraints } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import type { LayerKind } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 import type { EditorState } from "./editor-state";
@@ -188,6 +193,26 @@ export function addableKinds(state: EditorState): readonly LayerKind[] {
 }
 
 /**
+ * The one rule a remove and a switch-off share (D129, MP-D4): taking this layer
+ * out of the enabled set must leave at least one enabled instance of every kind
+ * the creative type requires. A layer that is already off contributes nothing to
+ * the enabled count either way — which is why removing it changes no count (and
+ * so stays allowed) while switching it off is not an offer at all.
+ */
+function leavesARequiredKind(
+  rules: (typeof CREATIVE_TYPE_RULES)[CreativeType],
+  layer: CreativeTemplateLayer,
+  enabledCounts: Map<string, number>,
+): boolean {
+  if (!rules.required.includes(layer.kind)) return true;
+  // `as number`: `enabledCounts` is built from this same list, so every layer's kind
+  // is present — the lookup cannot miss.
+  const enabled = enabledCounts.get(layer.kind) as number;
+  const remaining = layer.enabled !== false ? enabled - 1 : enabled;
+  return remaining >= 1;
+}
+
+/**
  * Which layers of the pinned template the editor may remove (D124), derived from
  * the same table: a layer is removable when its kind is not required — or when
  * removing it would still leave at least one enabled instance of that kind (D129,
@@ -198,18 +223,58 @@ export function addableKinds(state: EditorState): readonly LayerKind[] {
 export function removableLayerIds(state: EditorState): readonly string[] {
   const rules = CREATIVE_TYPE_RULES[state.template.creativeType];
   const enabledCounts = countEnabledKinds(state.template.layers);
-  return (
-    state.template.layers
-      // `as number`: `enabledCounts` is built from this same list, so every layer's kind
-      // is present — the lookup cannot miss.
-      .filter((layer) => {
-        if (!rules.required.includes(layer.kind)) return true;
-        const enabled = enabledCounts.get(layer.kind) as number;
-        const remaining = layer.enabled !== false ? enabled - 1 : enabled;
-        return remaining >= 1;
-      })
-      .map((layer) => layer.id)
-  );
+  return state.template.layers
+    .filter((layer) => leavesARequiredKind(rules, layer, enabledCounts))
+    .map((layer) => layer.id);
+}
+
+/**
+ * Which layers the editor may switch OFF (D129, MP-D4) — the same rule
+ * `removableLayerIds` applies to a remove, through the same helper, so the two
+ * cannot drift: the last enabled instance of a required kind is not offered, and
+ * a layer that is already off has nothing to switch off.
+ */
+export function disableableLayerIds(state: EditorState): readonly string[] {
+  const rules = CREATIVE_TYPE_RULES[state.template.creativeType];
+  const enabledCounts = countEnabledKinds(state.template.layers);
+  return state.template.layers
+    .filter(
+      (layer) =>
+        layer.enabled !== false &&
+        leavesARequiredKind(rules, layer, enabledCounts),
+    )
+    .map((layer) => layer.id);
+}
+
+/**
+ * Which layers carry a toggle at all (D129): every layer that may be switched
+ * off, plus every disabled layer — switching one back on can only add to the
+ * enabled set, so it is never refused. Template order, so the UI can walk the
+ * list it renders.
+ */
+export function toggleableLayerIds(state: EditorState): readonly string[] {
+  const disableable = disableableLayerIds(state);
+  return state.template.layers
+    .filter(
+      (layer) => layer.enabled === false || disableable.includes(layer.id),
+    )
+    .map((layer) => layer.id);
+}
+
+/**
+ * The occlusion delta over the layers that draw (MP-D3): a disabled layer
+ * occludes nothing, so it is dropped from both sides before the domain's own
+ * delta runs. Order constraints still see the whole array — a disabled layer
+ * keeps its slot — and the finding the domain returns names kinds only, so
+ * nothing downstream can tell which side was filtered.
+ */
+export function findOcclusionDeltaOverEnabled(
+  before: readonly CreativeTemplateLayer[],
+  after: readonly CreativeTemplateLayer[],
+): OcclusionFinding | null {
+  const draws = (layers: readonly CreativeTemplateLayer[]) =>
+    layers.filter((layer) => layer.enabled !== false);
+  return findOcclusionDelta(draws(before), draws(after));
 }
 
 export type MoveDirection = "up" | "down";

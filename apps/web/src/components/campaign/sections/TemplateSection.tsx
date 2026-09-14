@@ -7,6 +7,7 @@ import {
   addableKinds,
   canMoveLayer,
   removableLayerIds,
+  toggleableLayerIds,
 } from "@/components/campaign/derive";
 import { layerKindDisplayName } from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
@@ -28,6 +29,12 @@ import { SectionShell, type SectionProps } from "./IdentitySection";
  * props — per-layer prop editing is out of scope — so an add dispatches the kind
  * alone, and the id is the reducer's derivation.
  *
+ * Switching a layer off (L9, D129): each layer that may be switched carries a
+ * toggle, derived by `toggleableLayerIds` from the same table — the last enabled
+ * instance of a required kind has NO control, never a disabled one (§1.5), and a
+ * disabled layer keeps its slot and its move controls: it still governs order, it
+ * simply draws nothing (MP-D3).
+ *
  * The kit's naming contract (D18, as `PlatformCard` pins it): every control's
  * accessible name is its raw id — the kind id on an add control, the layer id
  * on a remove or move control — and the display words live in the description, wired
@@ -45,11 +52,14 @@ export function TemplateSection({ state, dispatch }: SectionProps) {
     `${uid}-move-up-${layerId}-${index}`;
   const removeDescId = (layerId: string, index: number) =>
     `${uid}-remove-${layerId}-${index}`;
+  const toggleDescId = (layerId: string, index: number) =>
+    `${uid}-toggle-${layerId}-${index}`;
   const listLabelId = `${uid}-list-label`;
 
   // Both offers, consumed — never reimplemented (D124).
   const addable = addableKinds(state);
   const removable = removableLayerIds(state);
+  const toggleable = toggleableLayerIds(state);
   // The required kinds, as display names: a layer with no remove control is
   // one the boundary would refuse to strip — every template the editor can
   // hold carries each required kind exactly once (a second presence would be
@@ -70,6 +80,8 @@ export function TemplateSection({ state, dispatch }: SectionProps) {
       <ol aria-labelledby={listLabelId} className="space-y-2">
         {state.template.layers.map((layer, index) => {
           const layerRemovable = removable.includes(layer.id);
+          const layerOff = layer.enabled === false;
+          const layerToggleable = toggleable.includes(layer.id);
           const mayMoveDown = canMoveLayer(state, index, "down");
           const mayMoveUp = canMoveLayer(state, index, "up");
           return (
@@ -86,6 +98,35 @@ export function TemplateSection({ state, dispatch }: SectionProps) {
                 </span>
               </span>
               <span className="flex shrink-0 items-center gap-1">
+                {layerToggleable ? (
+                  <span className="flex shrink-0 items-center">
+                    <span
+                      id={toggleDescId(layer.id, index)}
+                      className="sr-only"
+                    >
+                      {layerOff
+                        ? messages.templateEnableDescription(
+                            layerKindDisplayName(layer.kind),
+                          )
+                        : messages.templateDisableDescription(
+                            layerKindDisplayName(layer.kind),
+                          )}
+                    </span>
+                    <IconButton
+                      label={layer.id}
+                      aria-describedby={toggleDescId(layer.id, index)}
+                      onClick={() =>
+                        dispatch({
+                          type: "setLayerEnabled",
+                          id: layer.id,
+                          enabled: layerOff,
+                        })
+                      }
+                    >
+                      {layerOff ? "○" : "◉"}
+                    </IconButton>
+                  </span>
+                ) : null}
                 {mayMoveDown ? (
                   <span className="flex shrink-0 items-center">
                     <span
