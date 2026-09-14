@@ -1152,6 +1152,21 @@ export function templateMoveDownDescription(name: string): string {
 }
 
 /**
+ * A layer toggle's description while the layer draws (L9, D129) — the same
+ * contract as the other row controls: the accessible name is the raw layer id
+ * and the words live here. "Hide" is what the toggle does to the picture: the
+ * layer stays in the brief, in its slot, and simply stops drawing.
+ */
+export function templateDisableDescription(name: string): string {
+  return `Hide ${name}`;
+}
+
+/** The same toggle once the layer is off: the words say it comes back. */
+export function templateEnableDescription(name: string): string {
+  return `Show ${name}`;
+}
+
+/**
  * Advisory note when a layer reposition creates an occlusion (D135, D136).
  * Names both layers and describes what happens in the quiet-note idiom.
  * Formatters receive display labels (D18): "Shade", "Static text", etc.

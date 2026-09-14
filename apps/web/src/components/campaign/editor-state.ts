@@ -18,6 +18,9 @@ import {
   templateFromCanonical,
   type BriefTemplate,
 } from "@campaignfoundry/CampaignOrchestration/brief-template";
+// The layer's shape, from the same module the canonical templates are declared
+// in: the toggle writes the field, so it writes that module's type.
+import type { CreativeTemplateLayer } from "@campaignfoundry/CampaignOrchestration/creative-templates";
 import {
   BRIEF_SCHEMA_VERSION,
   isSupportedBriefSchemaVersion,
@@ -82,8 +85,9 @@ import {
 } from "@campaignfoundry/Distribution/platform-profiles";
 import {
   addableKinds,
+  disableableLayerIds,
   findLegalInsertionIndex,
-  findOcclusionDelta,
+  findOcclusionDeltaOverEnabled,
   platformsToFormats,
   platformsToRatios,
   platformsToSizes,
@@ -455,6 +459,10 @@ export type EditorAction =
   // layer's position, every other layer untouched. An out-of-range end is a
   // no-op, the way `removeLayer`'s unremovable id is.
   | { type: "moveLayer"; from: number; to: number }
+  // Whether a layer draws (L9, D129): `enabled` absent means enabled, so
+  // switching a layer off writes `enabled: false` and switching it back on
+  // removes the field — the canonical form every template already carries.
+  | { type: "setLayerEnabled"; id: string; enabled: boolean }
   | { type: "addBeat"; text?: string }
   | { type: "removeBeat"; index: number }
   | { type: "moveBeat"; from: number; to: number }
@@ -844,6 +852,28 @@ export function formatOcclusionNotice(
   );
 }
 
+/**
+ * A layer with `enabled` set to `value`, in the one canonical form (D129): a layer
+ * that draws carries no `enabled` key at all, so switching a layer off writes
+ * `enabled: false` and switching it back on removes the field. An off→on round
+ * trip therefore returns the layer to the shape it was loaded with — byte for byte
+ * the shape every canonical template already carries — and a brief never grows a
+ * key that only restates what absence says.
+ */
+function withEnabled(
+  layer: CreativeTemplateLayer,
+  value: boolean,
+): CreativeTemplateLayer {
+  if (!value) return { ...layer, enabled: false };
+  // Removing the one optional key a copy of a readonly layer can drop: the
+  // double cast is the type system's blind spot around `delete` on a record,
+  // not a widening — the result is the same layer minus a field that was
+  // optional to begin with.
+  const next: Record<string, unknown> = { ...layer };
+  delete next.enabled;
+  return next as unknown as CreativeTemplateLayer;
+}
+
 function reduceEditor(state: EditorState, action: EditorAction): EditorState {
   switch (action.type) {
     case "setMode": {
@@ -1013,7 +1043,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       return {
         ...state,
         occlusionNotice: formatOcclusionNotice(
-          findOcclusionDelta(state.template.layers, nextLayers),
+          findOcclusionDeltaOverEnabled(state.template.layers, nextLayers),
         ),
         template: {
           ...state.template,
@@ -1041,7 +1071,7 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       return {
         ...state,
         occlusionNotice: formatOcclusionNotice(
-          findOcclusionDelta(state.template.layers, nextLayers),
+          findOcclusionDeltaOverEnabled(state.template.layers, nextLayers),
         ),
         template: {
           ...state.template,
@@ -1068,11 +1098,44 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
       return {
         ...state,
         occlusionNotice: formatOcclusionNotice(
-          findOcclusionDelta(state.template.layers, layers),
+          findOcclusionDeltaOverEnabled(state.template.layers, layers),
         ),
         template: {
           ...state.template,
           layers,
+        },
+      };
+    }
+    case "setLayerEnabled": {
+      // D129, MP-D4 — the same offer discipline a remove and an add hold: a layer
+      // the Template section could not offer (the last enabled instance of a
+      // required kind) is refused here, so the draft can never hold a template the
+      // boundary refuses for carrying a required kind with nothing enabled.
+      const index = state.template.layers.findIndex(
+        (layer) => layer.id === action.id,
+      );
+      if (index === -1) return state;
+      // Already in the state asked for: no edit, so no history entry either.
+      // (Two rows sharing an id — a draft restored before the storage guard —
+      // are served by the first match, exactly as `removeLayer` serves them.)
+      const layer = state.template.layers[index]!;
+      if ((layer.enabled !== false) === action.enabled) return state;
+      if (!action.enabled && !disableableLayerIds(state).includes(action.id)) {
+        return state;
+      }
+      const nextLayers = state.template.layers.map((existing, i) =>
+        i === index ? withEnabled(existing, action.enabled) : existing,
+      );
+      return {
+        ...state,
+        // MP-D3: the notice is computed over the layers that draw, so switching an
+        // occluding layer off clears it and switching it back on raises it again.
+        occlusionNotice: formatOcclusionNotice(
+          findOcclusionDeltaOverEnabled(state.template.layers, nextLayers),
+        ),
+        template: {
+          ...state.template,
+          layers: nextLayers,
         },
       };
     }
