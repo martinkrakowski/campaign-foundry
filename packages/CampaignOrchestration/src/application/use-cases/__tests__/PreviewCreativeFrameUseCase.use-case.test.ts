@@ -422,13 +422,14 @@ describe("PreviewCreativeFrameUseCase — the scrub cell (VE-D5/VE-D6)", () => {
     ["motion and atSec, no durationSec", { motion: "ken-burns-in", atSec: 2 }],
     ["durationSec and atSec, no motion", { durationSec: 6, atSec: 2 }],
   ])("rejects a cell carrying %s — the three fields travel together or not at all", async (_label, over) => {
-    const d = deps({ videoCompositor: fakeVideoCompositor() });
+    const videoCompositor = fakeVideoCompositor();
+    const d = deps({ videoCompositor });
     const result = await new PreviewCreativeFrameUseCase(d).execute(baseBrief(), cell(over));
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error.message).toMatch(/motion, durationSec and atSec together/);
     expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
     expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
-    expect(d.videoCompositor.compositeFrame).not.toHaveBeenCalled();
+    expect(videoCompositor.compositeFrame).not.toHaveBeenCalled();
   });
 
   test("rejects a motion kind outside the vocabulary, before any port is called", async () => {
