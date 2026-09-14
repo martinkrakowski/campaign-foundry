@@ -256,8 +256,10 @@ describe("runCli", () => {
   });
 
   test("`gate` exits 1 and lists every reason when the condition is unmet", async () => {
+    // The one unresolved thread is resolved here so the gate reaches the head
+    // read: a refusal is reported the same way whichever condition failed, and
+    // this one is the head the operator cannot see without being told.
     const { io, err, log } = okGate({
-      argv: ["gate", "--pr", "361", "--sha", "abc1234"],
       gh: async (args) =>
         args[0] === "pr"
           ? "deadbeef\n"
@@ -266,7 +268,7 @@ describe("runCli", () => {
                 repository: {
                   pullRequest: {
                     id: "PR_I_1",
-                    reviewThreads: { nodes: [{ id: "PRRT_a", isResolved: false }] },
+                    reviewThreads: { nodes: [{ id: "PRRT_a", isResolved: true }] },
                   },
                 },
               },
@@ -274,7 +276,7 @@ describe("runCli", () => {
     });
     expect(await runCli(io)).toBe(1);
     expect(err.join("\n")).toContain("refusing to merge PR #361");
-    expect(err.join("\n")).toContain("PRRT_a");
+    expect(err.join("\n")).toContain("head moved");
     expect(err.join("\n")).toContain("deadbeef");
     expect(log.join("\n")).not.toContain("merge condition met");
   });

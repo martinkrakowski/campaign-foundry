@@ -1,4 +1,4 @@
-import type { PullRequestShape, ThreadState } from "./types.js";
+import type { PullRequestShape, ReviewThread, ThreadState } from "./types.js";
 import { SweepRefusal } from "./types.js";
 
 /**
@@ -9,6 +9,11 @@ import { SweepRefusal } from "./types.js";
  * So the tool verifies every id against this response before it writes, and
  * refuses if one is missing. The `id` of the pull request is fetched with
  * it because `addComment` needs the PR's node id as its subject.
+ *
+ * The first comment of each thread rides along (`mergeGate` names an open
+ * thread by its author and an excerpt), so the merge condition and the sweep
+ * read the same connection with one request — a second query over the same
+ * pages would be a second parser to keep in step.
  */
 export const THREADS_QUERY = `query SweepThreads($number: Int!, $after: String) {
   repository(owner: "martinkrakowski", name: "campaign-foundry") {
@@ -19,11 +24,113 @@ export const THREADS_QUERY = `query SweepThreads($number: Int!, $after: String) 
           hasNextPage
           endCursor
         }
-        nodes { id isResolved }
+        nodes {
+          id
+          isResolved
+          comments(first: 1) { nodes { author { login } body } }
+        }
       }
     }
   }
 }`;
+
+/** How much of a first comment the refusal quotes before it truncates. */
+const EXCERPT_CHARS = 80;
+
+function excerptOf(body: string): string {
+  const flat = body.replace(/\s+/g, " ").trim();
+  return flat.length <= EXCERPT_CHARS ? flat : `${flat.slice(0, EXCERPT_CHARS)}…`;
+}
+
+function failureText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Everything one paginated read of a PR's threads produced, including what went wrong. */
+export interface ThreadsFetch {
+  /** Absent when no page carried a readable pull request — see {@link fetchAllThreads}. */
+  readonly prId?: string;
+  readonly threads: readonly ReviewThread[];
+  /**
+   * Why a page could not be read. Non-empty means the threads below are a
+   * PARTIAL answer, and a caller that decides anything from them is guessing.
+   */
+  readonly failures: readonly string[];
+}
+
+/**
+ * Every thread of the PR, across every page, plus every reason a page could
+ * not be read.
+ *
+ * One fetch, one parser, both callers: `sweep`, and `mergeGate`. A page is 100
+ * threads, and a PR past 100 is judged on all of them or not at all — a read
+ * that stopped at the first page would call a PR with an open thread on page
+ * two clean, which is the exact shape of the gap this exists to close.
+ *
+ * A page that cannot be read is recorded, not treated as empty: without its
+ * `pageInfo` there is no knowing whether more pages follow, so the read stops
+ * and hands back what it has with a reason. Deciding "no threads" from a
+ * partial read is the failure this function's shape makes impossible.
+ */
+export async function fetchAllThreads(
+  pr: number,
+  gh: (args: readonly string[]) => Promise<string>,
+): Promise<ThreadsFetch> {
+  let cursor: string | null = null;
+  let prId: string | undefined;
+  const threads: ReviewThread[] = [];
+  const failures: string[] = [];
+
+  do {
+    const ghArgs = [
+      "api",
+      "graphql",
+      "-f",
+      `query=${THREADS_QUERY}`,
+      // `-F`, not `-f`: gh sends `-f number=361` as the *string* "361", which
+      // GraphQL refuses for the query's `Int!` variable — every real fetch fails
+      // while a stubbed gh sails on. edges.test.ts pins the flag the call makes.
+      "-F",
+      `number=${pr}`,
+    ];
+    if (cursor !== null) {
+      ghArgs.push("-f", `after=${cursor}`);
+    }
+    let reply: SweepReply;
+    try {
+      reply = JSON.parse(await gh(ghArgs)) as SweepReply;
+    } catch (error) {
+      failures.push(failureText(error));
+      break;
+    }
+    const errorReasons = reply.errors?.map((e) => String(e.message ?? "unknown GraphQL error"));
+    if (errorReasons !== undefined && errorReasons.length > 0) {
+      failures.push(...errorReasons);
+      break;
+    }
+    const pull = reply.data?.repository?.pullRequest;
+    if (pull?.id !== undefined && prId === undefined) {
+      prId = pull.id;
+    }
+    for (const n of pull?.reviewThreads?.nodes ?? []) {
+      const first = n.comments?.nodes?.[0];
+      threads.push({
+        id: String(n.id),
+        isResolved: n.isResolved === true,
+        author: first?.author?.login ?? "unknown",
+        excerpt: excerptOf(first?.body ?? ""),
+      });
+    }
+    const pageInfo = pull?.reviewThreads?.pageInfo;
+    cursor = pageInfo?.hasNextPage && pageInfo.endCursor ? pageInfo.endCursor : null;
+  } while (cursor !== null);
+
+  return {
+    ...(prId !== undefined ? { prId } : {}),
+    threads,
+    failures,
+  };
+}
 
 /**
  * The disposition itself: ONE class comment on the PR conversation
@@ -112,47 +219,15 @@ export async function sweep(
   post: boolean,
   deps: SweepDeps,
 ): Promise<SweepResult> {
-  let cursor: string | null = null;
-  let prId: string | undefined;
-  const fetched: ThreadState[] = [];
-
-  do {
-    const ghArgs = [
-      "api",
-      "graphql",
-      "-f",
-      `query=${THREADS_QUERY}`,
-      // `-F`, not `-f`: gh sends `-f number=361` as the *string* "361", which
-      // GraphQL refuses for the query's `Int!` variable — every real fetch fails
-      // while a stubbed gh sails on. edges.test.ts pins the flag the call makes.
-      "-F",
-      `number=${plan.pr}`,
-    ];
-    if (cursor !== null) {
-      ghArgs.push("-f", `after=${cursor}`);
-    }
-    const raw = await deps.gh(ghArgs);
-    const reply = JSON.parse(raw) as SweepReply;
-    const errorReasons = reply.errors?.map((e) => String(e.message ?? "unknown GraphQL error"));
-    if (errorReasons !== undefined && errorReasons.length > 0) {
-      throw new SweepRefusal(
-        `the fetch of PR #${plan.pr} returned errors: ${errorReasons.join("; ")}`,
-        errorReasons,
-      );
-    }
-    const pull = reply.data?.repository?.pullRequest;
-    if (pull?.id !== undefined && prId === undefined) {
-      prId = pull.id;
-    }
-    for (const n of pull?.reviewThreads?.nodes ?? []) {
-      fetched.push({
-        id: String(n.id),
-        isResolved: n.isResolved === true,
-      });
-    }
-    const pageInfo = pull?.reviewThreads?.pageInfo;
-    cursor = pageInfo?.hasNextPage && pageInfo.endCursor ? pageInfo.endCursor : null;
-  } while (cursor !== null);
+  const fetch = await fetchAllThreads(plan.pr, deps.gh);
+  if (fetch.failures.length > 0) {
+    throw new SweepRefusal(
+      `the fetch of PR #${plan.pr} returned errors: ${fetch.failures.join("; ")}`,
+      fetch.failures,
+    );
+  }
+  const prId = fetch.prId;
+  const fetched: readonly ThreadState[] = fetch.threads;
 
   const problems: string[] = [];
   const ids: string[] = [];

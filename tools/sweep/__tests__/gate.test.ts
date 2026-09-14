@@ -171,6 +171,6 @@ describe("mergeGate — the head the checks were verified on", () => {
     const s = stub(() => page([node("PRRT_a", true)]), "");
     const decision = await mergeGate(plan, { gh: s.gh });
     expect(decision.kind).toBe("refuse");
-    expect(reasonsOf(decision).join("\n")).toMatch(/empty/);
+    expect(reasonsOf(decision).join("\n")).toMatch(/no head/);
   });
 });
