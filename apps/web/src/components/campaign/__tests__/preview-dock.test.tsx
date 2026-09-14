@@ -1,5 +1,7 @@
 import { describe, test, expect, vi } from "vitest";
 import { render, fireEvent, act } from "@testing-library/react";
+import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { PREVIEW_FRAME_DEBOUNCE_MS } from "@/lib/preview-frame";
 import { PreviewDock, PreviewPicture, derivePreviewRatio, derivePreviewSpec } from "../PreviewDock";
 import * as messages from "../messages";
 
@@ -258,6 +260,86 @@ describe("PreviewDock — scrub control (VE-D5, VE-D6)", () => {
     fireEvent.pointerUp(slider);
     fireEvent.change(slider, { target: { value: "4" } });
     fireEvent.keyUp(slider);
+  });
+
+  test("committing near the end and shortening clip duration clamps atSec to durationSec without falling back", async () => {
+    vi.useFakeTimers();
+    let lastPostedCell: Record<string, unknown> | undefined;
+    vi.mocked(globalThis.fetch).mockImplementation(async (_url, init) => {
+      const body = JSON.parse((init?.body as string) ?? "{}");
+      lastPostedCell = body.cell;
+      if (
+        body.cell?.durationSec !== undefined &&
+        body.cell?.atSec !== undefined &&
+        body.cell.atSec > body.cell.durationSec
+      ) {
+        return new Response(JSON.stringify({ error: "atSec exceeds durationSec" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(new Uint8Array([137, 80, 78, 71, 1, 2, 3, 4]), {
+        status: 200,
+        headers: { "content-type": "image/png", "x-preview-frame-cache-key": "k".repeat(64) },
+      });
+    });
+
+    const briefWithDuration = (durationSec: number) =>
+      ({
+        id: "camp",
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "Hello",
+        products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "a.png" }],
+        variation: { count: 2, axes: { duration: [durationSec] } },
+      }) as unknown as CampaignBrief;
+
+    const { container, rerender } = render(
+      <PreviewDock
+        {...showcase}
+        motion="ken-burns-in"
+        brief={briefWithDuration(10)}
+      />,
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
+    });
+
+    const slider = container.querySelector('input[type="range"]') as HTMLInputElement;
+    expect(slider).not.toBeNull();
+
+    // Commit a position near the end (9 on a 10s clip)
+    fireEvent.change(slider, { target: { value: "9" } });
+    fireEvent.pointerUp(slider);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
+    });
+
+    expect(lastPostedCell?.atSec).toBe(9);
+    expect(container.querySelector("img")).not.toBeNull();
+
+    // Re-render with a shorter duration (5s)
+    rerender(
+      <PreviewDock
+        {...showcase}
+        motion="ken-burns-in"
+        brief={briefWithDuration(5)}
+      />,
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREVIEW_FRAME_DEBOUNCE_MS);
+    });
+
+    // Assert the cell's atSec never exceeds durationSec and the preview is not the fallback
+    expect(lastPostedCell?.atSec).toBeLessThanOrEqual(5);
+    expect(lastPostedCell?.atSec).toBe(5);
+    expect(container.querySelector("img")).not.toBeNull();
+    expect(container.querySelector("svg")).toBeNull();
+
+    vi.useRealTimers();
   });
 });
 
