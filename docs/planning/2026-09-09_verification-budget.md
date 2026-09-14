@@ -348,3 +348,10 @@ none; API is `apps/api/**`; Architecture is `packages/*/src/**` plus web TS):
 
 **V3 stays open.** Its fence stays. What changed is that the case against UI Review is now numerical
 rather than anecdotal, and the one question left is sample size.
+
+**V3 recording — shipped in this PR.** `yarn sweep attribute --pr <n>` attributes each
+`github-actions` review thread to a PR-Agent workflow by matching the thread's suggestion text
+(the span between `**Suggestion:**` and the trailing `[label, importance: n]`, whitespace-normalised)
+against that workflow's decoded job log. Exactly one matching workflow → attributed; none or several
+→ `unattributed`, never a guess. A thread fetch or log read that fails exits 1 (fail closed, like
+`gate`). The `premise V3` fence stays: V3's disable/keep decision still needs a recorded wave.
