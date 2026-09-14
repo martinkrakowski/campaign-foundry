@@ -175,16 +175,25 @@ It passes alone (62 tests in that file) and passes on a second full run (250 fil
 full suite cleanly, and X7's change was to `listen`, not to `close`. X7 fixed one instance; the file
 has another.
 
-**One hypothesis is already refuted.** The obvious candidate — `server.close()` waiting out a
-keep-alive socket — does not apply: `close()` already calls `server.closeAllConnections()` inside
-the same promise, after ending every SSE client. The mechanism is still unknown.
+**The mechanism, found.** `close()` ran its shutdown synchronously *through* the `fs.watch` handles it
+had armed on the wave **directories**. On macOS a directory watch is FSEvents-backed, and a
+`FSWatcher.close()` flushes the watcher's pending event batch inside the native call — synchronously,
+on the awaited path. Measured with a backlogged `fseventsd` (ten concurrent suites hammering the temp
+dir, which is what a full run plus another lane's gate looks like): closing 96 directory watchers took
+**28–41 s**, and the test's own `close()` — two watchers, armed milliseconds after the fixture wrote
+its files — was measured at **2.8–9.3 s**. The same watchers, armed on the lane *files* (kqueue-backed
+on macOS), close in **0 ms**. The keep-alive socket hypothesis was right to be refuted: every phase
+of `close()` except the watcher loop is 0–1 ms even under load. This is the second load-sensitive
+flake in the file, and unlike X7 it is not a wrong assertion — it is a shutdown path whose cost the
+platform does not bound.
 
-**No premise yet — diagnosis comes first.** `plan:verify` does not track X8, deliberately: a premise
-asserts the shape of a fix, and writing one now would pin a guess. The lane's first job is to
-reproduce the hang deterministically — the second shutdown path at `server.ts:276`, which calls
-`server.close()` with no `closeAllConnections()`, is where to start looking, as is whether an
-in-flight `void syncWatchers()` outlives the close. **Only once the mechanism is named does X8 get a
-premise and a fix.**
+**X8 — shipped in this PR.** The watchers are armed on lane artefacts (`*.log`, `events.jsonl`) under
+each wave directory, never on the directories; listings go through the existing `deps.readdir` seam;
+both shutdown paths share one synchronous `shutdown()` that refuses to arm anything after the close.
+The cost of the narrower scope is named: a lane log created after startup is armed by the next poll
+tick, not the instant it appears. Four new tests pin the contract (file scope, poll-tick discovery,
+a listing that survives its own close, and a `close()` that closes every watcher it armed and starts
+no collection afterwards), and seven mutations replay as caught in `.agents/manifests/x8.json`.
 
 **The rule X7 established still governs**: find the mechanism before changing the test. A suite that
 fails at random teaches its readers that red means *try again*.
