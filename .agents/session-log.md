@@ -4924,3 +4924,36 @@ the Map) retargeted rather than dropped. Full gate 0 with 100 % on all four coun
   - No preview of the markup in the app (HL-D7) — that is HL5d, through the canvas rendition.
   - `derive.ts` was left untouched: nothing the editor offers needed a derivation from
     `CREATIVE_TYPE_RULES`, and an element kind is never at a cap.
+
+---
+
+## 2026-09-14 — HL5a follow-up: typing a frame value, undo runs, frame labels
+
+- **Mode:** Implementer
+- **Changes:**
+  - `sections/HtmlElementsEditor.tsx`: the four frame inputs became one
+    `FrameNumberInput` carrying a local draft string; a number reaches the reducer
+    only when the draft parses to a finite one, and blur drops the draft.
+  - `editor-history.ts`: `coalesceKeyOf` gained `setHtmlElementText` and
+    `setHtmlElementFrame` keys (layer + index, and the frame patch's sorted fields).
+  - `messages.ts`: `htmlElementFrameLabel` names the field in words
+    (horizontal/vertical position, width, height) from a `Record` keyed by
+    `Exclude<keyof Frame, "anchor">`; `FrameNumberField` is exported.
+  - `.agents/manifests/hl5a.json`: two mutations added (commit the raw number again;
+    drop the element-copy coalescing case) — five now, all replay caught.
+- **Decisions:**
+  - The draft lives in the input, not in `EditorState`: it is a property of a box
+    being typed into, and it must never reach persistence or the dirty diff.
+  - The frame typing test reads the stored frame from a readout beside the editor,
+    not from the box — a value the box shows and the draft never committed would
+    otherwise pass.
+  - `FrameNumberField` is derived from the domain's own `Frame` (a type-only import
+    of the leaf) so a new frame field breaks the words lookup at compile time.
+- **Left open:**
+  - happy-dom's number input keeps `"0."` as its value where a browser reports `""`
+    for a bad-input field, so the "0.25 cannot be typed" symptom is not reproducible
+    in this environment — the emptied-field and clamped-value symptoms are, and the
+    draft fixes all three. A browser-level check was not added.
+  - PR-Agent's two other findings were refuted: `ANCHOR_VALUES` is already imported
+    at `editor-state.ts:46`, and a `role="region"` per html layer would add landmark
+    noise around controls that already carry names.
