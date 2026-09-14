@@ -373,3 +373,28 @@ and `aria-invalid`) or a function `(control) => ReactNode` for wrapper call site
 onto their real control directly without cloning. Kit components (`Slider`, `Stepper`, `ChipGroup`,
 `SwatchPicker`, and `LogoField`) accept `aria-describedby` and place it on their accessible element,
 and `aria-invalid` stays single-sourced at call sites.
+
+---
+
+## 19. A toggle round trip leaves an explicit `enabled: true` brief dirty (X16)
+
+**Evidence.** `withEnabled` (`apps/web/src/components/campaign/editor-state.ts`, M3 #395) writes the canonical form
+D129 names: switching a layer off writes `enabled: false`, and switching it back on **deletes the key**. The boundary
+accepts any boolean, so a hand-authored brief may carry `enabled: true`. Toggling such a layer off and on returns
+a template without the key, and `isDirtySinceSave` compares by value (`valuesEqual`), where `{ enabled: true }` and
+`{}` differ. Found by Qodo on #395 and deferred there as narrow.
+
+**Consequence.** The editor reports unsaved changes for a draft the user returned to its loaded state, and a save
+rewrites the file without the key. Undo is unaffected (history restores the exact prior state). The editor itself never
+writes `enabled: true`, so only hand-authored files reach it. HL5a's `withElements` adopts the same "empty is absent"
+canonical form for an `html` layer's `elements`, so a loaded `elements: []` has the same round-trip shape.
+
+**Fix shape, when it is worth one.** Either normalise at load — `load` canonicalises `enabled: true` and
+`elements: []` to absent, and the saved snapshot is taken from the normalised template, so dirty-state compares like
+with like — or have the value comparison treat those defaults as absent. Normalising at load keeps `valuesEqual`
+generic, and it is the recommended shape.
+
+```premise X16
+# Loading a brief does not canonicalise an explicit `enabled: true` to absent.
+! grep -qE 'enabled === true|canonicalLayer|normali[sz]eLayer' apps/web/src/components/campaign/editor-state.ts
+```
