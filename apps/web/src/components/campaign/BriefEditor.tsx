@@ -482,9 +482,21 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
 
   // Auto-save, but only for a draft that has actually diverged from a pristine editor.
   // Writing unconditionally would recreate the key that Save and Discard just purged.
+  // VE1 adds the return half: a draft that UNDO steps back to pristine holds nothing
+  // to recover, and a stale copy would come back on reload with no history left to
+  // undo it — so the key is purged. The flag is what distinguishes that RETURN from
+  // the START: the first render is always pristine, and the recovery effect above may
+  // still be waiting on the route's load before it reads storage. Purging there would
+  // delete the draft the reload came for; only a draft that has diverged in THIS
+  // session may purge.
+  const draftDivergedRef = useRef(false);
   useEffect(() => {
-    if (isPristine(state)) return;
-    saveDraftToStorage(state);
+    if (!isPristine(state)) {
+      draftDivergedRef.current = true;
+      saveDraftToStorage(state);
+      return;
+    }
+    if (draftDivergedRef.current) purgeDraftFromStorage(state);
   }, [state]);
 
   // W1 — the create dialog's seed (D65/D66). The editor consumes it on mount on the

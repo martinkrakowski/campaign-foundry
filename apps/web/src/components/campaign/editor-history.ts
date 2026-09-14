@@ -33,9 +33,6 @@ const SERVER_ANSWER_TYPES = [
 /** Actions that replace the draft wholesale: a new baseline, so history is moot. */
 const BASELINE_TYPES = ["load", "discard", "restore"] as const;
 
-type ServerAnswerType = (typeof SERVER_ANSWER_TYPES)[number];
-type BaselineType = (typeof BASELINE_TYPES)[number];
-
 function phaseOf(
   action: EditorAction,
 ): "baseline" | "server" | "edit" {
@@ -143,7 +140,7 @@ function historyReducer(history: HistoryState, msg: HistoryMsg): HistoryState {
   }
   const present = editorReducer(history.present, action);
   if (present === history.present) return history;
-  if ((action.type as ServerAnswerType | BaselineType) && phase === "server") {
+  if (phase === "server") {
     // A server answer updates the present in place: no entry, and the redo
     // branch is not invalidated either — nothing about it was edited.
     return { ...history, present };
@@ -197,7 +194,9 @@ export function useEditorHistory(initial: EditorState): EditorHistory {
  * can flip. Ignored while the keystroke lands inside a native text field: the
  * field has its own undo and owns the chord there (the same `isTypingTarget`
  * the step walk defers to). An empty stack is a no-op inside the reducer, so
- * the shortcut needs no guard of its own.
+ * the shortcut needs no guard of its own. An open modal dialog owns the keyboard
+ * the same way a field does: a chord landing inside `[role="dialog"]` /
+ * `[aria-modal="true"]` is left to the dialog.
  */
 export function useHistoryKeys(
   history: Pick<EditorHistory, "undo" | "redo">,
@@ -211,6 +210,13 @@ export function useHistoryKeys(
       if (event.altKey) return;
       if (event.key.toLowerCase() !== "z") return;
       if (isTypingTarget(event.target)) return;
+      // An open modal owns the keyboard: focus sits on one of the dialog's own
+      // controls (a button, its fields), and ⌘Z there must not reach through the
+      // scrim and undo the draft underneath. The shared dialog shell marks itself
+      // `role="dialog"` with `aria-modal="true"` — either is the modal's word for
+      // "open here", so the guard accepts both. A non-Element target (a window-
+      // level dispatch) has no dialog ancestor and is not filtered.
+      if (event.target instanceof Element && event.target.closest('[role="dialog"], [aria-modal="true"]')) return;
       event.preventDefault();
       if (event.shiftKey) {
         actions.current.redo();
