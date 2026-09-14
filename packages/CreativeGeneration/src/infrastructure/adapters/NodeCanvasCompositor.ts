@@ -1157,6 +1157,11 @@ function drawHtml(c: LayerDrawContext): void {
       case "button": {
         const radius = Math.min(8, boxH / 2, boxW / 2);
         ctx.save();
+        // Clip to the rounded shape the button is filled with: the markup's
+        // `border-radius` + `overflow: hidden` clips its label to that shape too.
+        ctx.beginPath();
+        ctx.roundRect(boxX, boxY, boxW, boxH, radius);
+        ctx.clip();
         ctx.fillStyle = prepared.brandColor;
         ctx.beginPath();
         ctx.roundRect(boxX, boxY, boxW, boxH, radius);
@@ -1176,6 +1181,9 @@ function drawHtml(c: LayerDrawContext): void {
       }
       case "text": {
         ctx.save();
+        ctx.beginPath();
+        ctx.rect(boxX, boxY, boxW, boxH);
+        ctx.clip();
         ctx.fillStyle = "#ffffff";
         ctx.textAlign = prepared.style.align;
         ctx.textBaseline = "alphabetic";

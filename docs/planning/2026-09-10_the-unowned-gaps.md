@@ -223,10 +223,8 @@ raster fallback and the markup cannot be asserted until HL4 writes the markup â€
 worse than an overflowing label is two renderers each clipping differently. **The lane that can test
 this is HL4's successor, not HL3.**
 
-```premise X10
-# drawHtml paints labels with no clipping; nothing in the compositor clips.
-! grep -q '\.clip()' packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts
-```
+**X10 â€” shipped in this PR.** Its premise was retired when it landed; `plan:verify` no
+longer tracks it.
 
 ---
 
