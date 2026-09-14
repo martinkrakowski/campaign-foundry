@@ -82,7 +82,7 @@
     },
     {
       "file": "tools/wave-status/lib/render.ts",
-      "before": "  const scopeDesc =\n    artifact.scope.kind === \"partial\"\n      ? `partial run (${artifact.plans.join(\", \")})`\n      : `full run`;",
+      "before": "  const scopeDesc =\n    artifact.scope.kind === \"partial\"\n      ? `partial run (${artifact.plans.map(sanitize).join(\", \")})`\n      : `full run`;",
       "after": "  const scopeDesc = `full run`;",
       "because": "The terminal renderer must explicitly distinguish a partial verification run from a complete one; masking a partial run as full conceals untracked plans from the CLI output. The render test checks that partial runs display the targeted plans in their heading.",
       "command": [
