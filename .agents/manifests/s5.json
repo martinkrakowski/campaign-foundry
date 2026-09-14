@@ -118,6 +118,32 @@
         "tools/wave-status/lib/__tests__/backlog.test.ts"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/backlog.ts",
+      "before": "import { parseArtifact, type PlanVerifyArtifact } from \"../../plan-verify/lib/artifact.js\";",
+      "after": "import { parseArtifact, type PlanVerifyArtifact } from \"../../plan-verify/lib/artifact.js\";\nimport { execFile } from \"node:child_process\";\nexecFile(\"sh\", [\"-c\", \"true\"], () => {});",
+      "because": "D106/S5: the status server must never run a shell. The server test that injected a throwing executor could not catch this — the server has no executor seam and server.test.ts mocks node:child_process — so the charter is checked against the source: every subprocess must be one of pgrep, gh, git.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/__tests__/charter.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/backlog.ts",
+      "before": "import { parseArtifact, type PlanVerifyArtifact } from \"../../plan-verify/lib/artifact.js\";",
+      "after": "import { parseArtifact, type PlanVerifyArtifact } from \"../../plan-verify/lib/artifact.js\";\nimport { verifyPremises } from \"../../plan-verify/lib/verify.js\";\nvoid verifyPremises;",
+      "because": "S5 owner decision: wave-status imports the artifact's type and path from plan-verify and nothing that executes premises. Importing the verifier is the natural way a live-execution panel would creep back in.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/__tests__/charter.test.ts"
+      ],
+      "verdict": "caught"
     }
   ]
 }
