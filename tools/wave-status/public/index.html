@@ -1992,14 +1992,12 @@
         }
 
         const artifact = backlog.artifact;
-        const isPartial = artifact.scope && artifact.scope.kind === "partial";
+        const isPartial = artifact.scope.kind === "partial";
         const scopeLabel = isPartial
-          ? `partial run (${(artifact.scope.plans || []).length} plans)`
-          : `full run (${(artifact.plans || []).length} plans)`;
-        const headSha = artifact.git && artifact.git.head
-          ? (artifact.git.head.length > 8 ? artifact.git.head.slice(0, 8) : artifact.git.head)
-          : "unknown";
-        const branch = artifact.git ? artifact.git.branch : "unknown";
+          ? `partial run (${artifact.scope.plans.length} plans)`
+          : `full run (${artifact.plans.length} plans)`;
+        const headSha = artifact.git.head.slice(0, 8);
+        const branch = artifact.git.branch;
 
         provEl.innerHTML =
           `<span class="backlog-scope ${isPartial ? "warn" : "ok"}">${esc(scopeLabel)}</span>` +
@@ -2008,7 +2006,7 @@
           `<span class="sep">·</span>` +
           `<span class="backlog-git">${esc(branch)}@${esc(headSha)}</span>`;
 
-        if (!artifact.premises || artifact.premises.length === 0) {
+        if (artifact.premises.length === 0) {
           bodyEl.innerHTML = '<div class="backlog-empty">no premises</div>';
           return;
         }
