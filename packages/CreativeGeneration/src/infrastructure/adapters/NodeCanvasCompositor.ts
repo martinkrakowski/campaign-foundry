@@ -23,6 +23,9 @@ import {
   type CreativeTemplateLayer,
   type CreativeType,
   type LayerKind,
+  type AccentProps,
+  type LogoProps,
+  type TextProps,
 } from "@campaignfoundry/CampaignOrchestration";
 import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import { hexToRgb, wrapText } from "./canvas-util.js";
@@ -32,6 +35,40 @@ import { resolveAssetPath } from "../safe-path.js";
 // Re-export so A2's compositor tests keep importing from this module; the
 // functions live in the domain (lint:arch — the editor must not reach here).
 export { scaleBasis, widthTermBasis };
+
+/**
+ * The one geometry merge (C4, R-D3): `CREATIVE_GEOMETRY` is the default and a
+ * layer's `props` is the override — every reader of one of the four live
+ * quantities calls this and never the constant directly. An absent prop is
+ * `undefined`, so the default stands and a props-free template renders the
+ * exact bytes it rendered before the merge; a present prop is already a
+ * fraction validated into `[0, 1]` at both boundaries (D134), comparable to the
+ * constant it overrides.
+ *
+ * Only these four quantities route through here: `accent`'s `solidHeight` and
+ * `fadeHeight`, `logo`'s `width` and `margin`, and the text layers'
+ * `typeFloor`. `anchor` (text) and `alpha` (shade) are deliberately NOT merged:
+ * each shadows a variation axis — the anchor axis and the tone axis — and which
+ * of the prop or the axis wins is an open owner decision, so both still read
+ * their axis exactly as they do today (C4 reduced scope).
+ *
+ * Two different call sites, same merge: `paintAccent` reads `c.layer.props`
+ * straight off the dispatched {@link LayerDrawContext} — `maxOf.accent === 1`
+ * (D124) means it is the only enabled accent layer a template can carry, so
+ * "the layer this drawer was dispatched for" and "the enabled accent layer"
+ * are the same layer. `logo`'s width/margin and the text layers' `typeFloor`
+ * are resolved once in `prepare` instead, for two different reasons: the logo
+ * block (position, scale) is computed once and reused by every draw/frame
+ * (`maxOf.logo === 1` makes "find the enabled logo layer" safe the same way),
+ * and `headlineTypeFloor` specifically MUST be resolved in `prepare` because
+ * `fitText` also runs there — on the throwaway measure context building
+ * `logoAnchorLayout`, and again per beat in `resolveBeatLayouts` — neither of
+ * which carries a `LayerDrawContext` to read `c.layer` from.
+ */
+function mergeGeometry(defaultFraction: number, override: number | undefined): number {
+  return override ?? defaultFraction;
+}
+
 
 /**
  * Everything {@link NodeCanvasCompositor.draw} needs to blit a still (or a later
@@ -58,6 +95,14 @@ interface PreparedCreative {
    * and only the text block moves.
    */
   readonly anchor: AnchorKind;
+  /**
+   * The autofit floor as a fraction of the starting type size (C4, R-D3): the
+   * `CREATIVE_GEOMETRY` default, overridden by the text layer's `typeFloor`
+   * prop when it carries one. Resolved once in `prepare` (the text-kind budget
+   * is one) and read by `fitText` through `LayoutSource`, so no reader touches
+   * the floor constant directly. Absent prop → the constant → today's bytes.
+   */
+  readonly headlineTypeFloor: number;
   readonly shadeAlpha: number;
   readonly fontWeight: string;
   readonly fontFamily: string;
@@ -398,6 +443,21 @@ export class NodeCanvasCompositor implements CompositorPort {
     // below can be derived from what the draw will actually paint.
     const layers = resolveLayerList(request.template, request.creativeType);
 
+    // The autofit floor merge (C4, R-D3): the enabled text layer's `typeFloor`
+    // prop over the `CREATIVE_GEOMETRY` default, resolved once because the
+    // text-kind budget is one (D124) and `fitText` reads it off `LayoutSource`.
+    // `anchor` is NOT merged here even though it rides the same props object —
+    // it shadows the anchor axis, an open owner decision (see `mergeGeometry`).
+    const textProps = (layers.find(
+      (layer) =>
+        (layer.kind === "static-text" || layer.kind === "animated-text") &&
+        layer.enabled !== false,
+    )?.props ?? {}) as TextProps;
+    const headlineTypeFloor = mergeGeometry(
+      CREATIVE_GEOMETRY.headlineTypeFloorFraction,
+      textProps.typeFloor,
+    );
+
     // Whether the logo applies is a brand-compliance signal the use case records
     // on the asset. The path is brief-supplied (untrusted), so it's resolved
     // through resolveAssetPath.
@@ -407,10 +467,20 @@ export class NodeCanvasCompositor implements CompositorPort {
     if (logoPath) {
       try {
         const image = await loadImage(await readFile(logoPath));
-        const target = scaleBasis(canvas, width, height) * CREATIVE_GEOMETRY.logoWidthFraction;
+        // The block's own geometry merge (C4, R-D3): the enabled `logo` layer's
+        // width/margin props over the `CREATIVE_GEOMETRY` default. Absent → the
+        // constant → the pre-merge bytes (the goldens pin them).
+        const logoProps = (layers.find(
+          (layer) => layer.kind === "logo" && layer.enabled !== false,
+        )?.props ?? {}) as LogoProps;
+        const target =
+          scaleBasis(canvas, width, height) *
+          mergeGeometry(CREATIVE_GEOMETRY.logoWidthFraction, logoProps.width);
         const scale = target / image.width;
         const logoH = image.height * scale;
-        const margin = widthTermBasis(canvas, width, height) * CREATIVE_GEOMETRY.logoMarginFraction;
+        const margin =
+          widthTermBasis(canvas, width, height) *
+          mergeGeometry(CREATIVE_GEOMETRY.logoMarginFraction, logoProps.margin);
         // Inset offset lives here so every still — and later every motion frame —
         // reuses the same logo geometry (`t` does not move the logo). Same additive
         // form as the pre-inset anchors so a no-op clamp stays bit-identical.
@@ -452,6 +522,7 @@ export class NodeCanvasCompositor implements CompositorPort {
       height,
       top,
       anchor,
+      headlineTypeFloor,
       shadeAlpha,
       fontWeight: style.fontWeight,
       fontFamily: style.fontFamily,
@@ -649,7 +720,7 @@ interface HeadlineLayout {
  */
 type LayoutSource = Pick<
   PreparedCreative,
-  "canvas" | "width" | "height" | "top" | "anchor" | "fontWeight" | "fontFamily" | "style" | "insets"
+  "canvas" | "width" | "height" | "top" | "anchor" | "headlineTypeFloor" | "fontWeight" | "fontFamily" | "style" | "insets"
 >;
 
 /**
@@ -696,7 +767,7 @@ function headlineTextX(p: LayoutSource, centerX: number): number {
  */
 function fitText(ctx: SKRSContext2D, p: LayoutSource, text: string): HeadlineLayout {
   const originalFontSize = Math.round(scaleBasis(p.canvas, p.width, p.height) * p.style.sizeScale);
-  const floor = Math.round(originalFontSize * CREATIVE_GEOMETRY.headlineTypeFloorFraction);
+  const floor = Math.round(originalFontSize * p.headlineTypeFloor);
 
   let fontSize = originalFontSize;
   let attempt = layoutAt(ctx, p, text, fontSize);
@@ -1057,15 +1128,22 @@ function paintShade(c: LayerDrawContext): void {
  * edge plus a soft fade into the image; the fade's extent is scaled by the
  * motion `wipe`. Solid stays opaque in every tone, and this band — not the
  * logo — is what guarantees the brand-density compliance floor. The band
- * heights read `CREATIVE_GEOMETRY` (the legacy body's literals mirrored these
- * exact values; the goldens pin the bytes).
+ * heights are the accent layer's own geometry merge (C4, R-D3): `c.layer` is
+ * the entry this drawer was dispatched for (see {@link drawLayer}), and
+ * `maxOf.accent === 1` (D124) means it is the only enabled accent layer a
+ * template can carry — so reading its `props` here needs no list-hunting the
+ * way `logo`/`typeFloor` do in `prepare`. Absent → the constant → the
+ * pre-merge bytes (the goldens pin them).
  */
 function paintAccent(c: LayerDrawContext): void {
-  const { ctx, prepared, motion, eased } = c;
+  const { ctx, prepared, motion, eased, layer } = c;
   const { width, height, top } = prepared;
   const [ar, ag, ab] = hexToRgb(prepared.brandColor);
-  const solidH = height * CREATIVE_GEOMETRY.accentSolidHeightFraction;
-  const fadeH = height * CREATIVE_GEOMETRY.accentFadeHeightFraction;
+  const accentProps = (layer.props ?? {}) as AccentProps;
+  const solidH =
+    height * mergeGeometry(CREATIVE_GEOMETRY.accentSolidHeightFraction, accentProps.solidHeight);
+  const fadeH =
+    height * mergeGeometry(CREATIVE_GEOMETRY.accentFadeHeightFraction, accentProps.fadeHeight);
   const wipe = motion === "accent-wipe" ? eased : 1;
   ctx.fillStyle = `rgb(${ar}, ${ag}, ${ab})`;
   if (top) {

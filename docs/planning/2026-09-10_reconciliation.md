@@ -198,6 +198,29 @@ template's `accepts` / `required` sets** — so a brief whose template omits a t
 campaign copy the compositor will draw. It belongs with **M2**, where the boundary is already being
 extended.
 
+## 4d. What C4 actually produced
+
+**C4 shipped for four of D134's props**: `accent.solidHeight`, `accent.fadeHeight`, `logo.width`,
+`logo.margin`, and the text layers' `typeFloor`. One `mergeGeometry` function is the single seam —
+`CREATIVE_GEOMETRY` the default, a layer's `props` the override — and every one of these five
+quantities now reads it instead of the constant directly. All-absent props still render byte-identical
+(the goldens pin it) and a per-layer mutation manifest (`.agents/manifests/c4.json`) proves each merge
+point is live: reverting any one of the five back to the constant fails its direction test.
+
+**`anchor` (text) and `alpha` (shade) are deliberately out of scope, not forgotten.** Both shadow a
+variation axis — `anchor` the T4 anchor axis, `alpha` the tone-derived shade axis — and which of the
+prop or the axis wins when both are present is an owner decision this lane does not make. Both still
+read exactly their axis, unchanged; `LAYER_PROPS` continues to validate them at the boundary, but
+nothing in the compositor consumes them yet. Un-deferring either is a new, small lane once the owner
+picks a side.
+
+**One committed test needed a fixture fix, not a rewrite.** The red-checkpoint commit's `typeFloor`
+direction test asserted a comparison its own 400×400 fixture could never produce: at that canvas size
+the autofit loop's first attempt already fit vertically, so the floor was never reached regardless of
+its value — true before the merge landed and would have stayed true after it, for any implementation.
+Fixed by squeezing the fixture's `pixelSize.height` so the loop actually runs to the floor; the
+assertion itself was untouched.
+
 ## 5. Gaps this review found that no plan owned
 
 1. **The port wiring.** The templates plan assigns no lane to putting `template` on `CompositeRequest`. Now **C3**.
