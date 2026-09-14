@@ -40,7 +40,7 @@ export function suggestionOf(body: string): string | null {
   if (at < 0) return null;
   const rest = body.slice(at + marker.length);
   const trail = rest.match(SUGGESTION_TRAIL);
-  if (trail === null || trail.index === undefined) return null;
+  if (trail === null) return null;
   const normalised = normaliseWs(rest.slice(0, trail.index));
   return normalised === "" ? null : normalised;
 }
