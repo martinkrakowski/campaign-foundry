@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "lane": "HL5a",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "    next[field] = Math.min(1, Math.max(0, value));",
+      "after": "    next[field] = value;",
+      "because": "A frame is a fraction of the canvas in [0, 1] (D130), and the domain refuses anything else at both boundaries. Without the clamp a frame of 4 or -0.5 is written into the draft, the saved brief then fails validateTemplate, and the failure surfaces at packaging — far from the number input the user actually touched.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.html-elements.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "  if (elements.length > 0) return { ...layer, elements };",
+      "after": "  return { ...layer, elements };",
+      "because": "Removing the last element must delete the elements key, not leave an empty list: an add-then-remove would otherwise produce a template a loaded brief never carried, and a brief the user returned to its own starting point would still save as dirty (the round-trip lesson from M3's review).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.html-elements.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "      if (edit.elements[action.index]!.kind === \"image\") return state;",
+      "after": "      // mutated: copy on an image element is no longer refused",
+      "because": "The domain's field table names no text for the image kind, so an image element carrying copy is refused by validateTemplate. Without the guard the editor writes a key the boundary rejects — the one defect the invariant test exists to catch, because the element looks fine on screen and fails at Save.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.html-elements.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/sections/HtmlElementsEditor.tsx",
+      "before": "          if (raw.trim() === \"\") return;\n          const parsed = Number(raw);\n          if (!Number.isFinite(parsed)) return;\n          onCommit(parsed);",
+      "after": "          onCommit(Number(raw));",
+      "because": "The string in a frame box and the number in the draft are not the same thing. Committing `Number(e.target.value)` on every keystroke turns an emptied field into `Number(\"\") === 0` — a zero the user never typed, written to the frame the moment they cleared it to start again — and hands the reducer a NaN as soon as the box holds a half-typed value. Only a draft that parses to a finite number may leave the box.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/sections/__tests__/html-elements-editor.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-history.ts",
+      "before": "    case \"setHtmlElementText\":\n      return `setHtmlElementText:${action.layerId}:${action.index}`;",
+      "after": "    // mutated: a run of copy typed into one element is no longer coalesced",
+      "because": "Undo is measured in what the user did, not in keystrokes: without a coalescing key the element's copy costs one undo per character, so stepping back over a sentence takes as many presses as it has letters — and ⌘Z becomes a way to lose a word one letter at a time. The beat's copy has had the same key since VE1; an element's copy is the same edit.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-history.test.tsx"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

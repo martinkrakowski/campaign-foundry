@@ -4885,3 +4885,75 @@ the Map) retargeted rather than dropped. Full gate 0 with 100 % on all four coun
   - `yarn build`, `yarn typecheck`, `yarn lint`, `yarn lint:arch`: all 0.
 
 
+## 2026-09-14 — HL5a: element editing for the `html` layer
+
+- **Mode:** Implementer
+- **Changes:**
+  - `packages/CampaignOrchestration/package.json`: one `./html-element` subpath export, mirroring
+    `./click-destination` (the leaf, so the barrel's node:fs hitchhikers stay out of the bundle).
+  - `editor-state.ts`: five actions — `addHtmlElement`, `removeHtmlElement`, `moveHtmlElement`,
+    `setHtmlElementText`, `setHtmlElementFrame` — each addressing the layer by `layerId`;
+    `htmlElementEdit` (the one guard: layer present, kind `html`, index in range), `withElements`
+    (canonical form), `newHtmlElement` (per-kind default frame, catalog copy), `clampedFrame`;
+    `isBeatIndex`/`isLayerIndex` now delegate to one `isListIndex`.
+  - `sections/HtmlElementsEditor.tsx` (new): the add offer, and per element a kind label, a copy
+    input, four frame inputs (`min 0 max 1 step 0.01`), an anchor select, and move/remove.
+  - `sections/TemplateSection.tsx`: renders it inside the row of each layer of kind `html`.
+  - `messages.ts`: the element catalogue (append-only). `messages.test.ts` covers the new
+    formatters, including an unknown kind reading as itself.
+  - `docs/planning/2026-09-10_the-html-layer.md`: HL5a shipped in §2 and a §5 paragraph; the
+    premise renamed `HL5` → `HL5c` and narrowed to `maxBytes|weight.?meter|budget.?meter`.
+  - `.agents/manifests/hl5a.json`: three mutations, all replay caught.
+- **Decisions:**
+  - Elements ride inside the html layer's own `<li>` rather than as a second list item: the list
+    stays one row per layer, and "beneath" is literal.
+  - Up is toward the start of the list (`to: index - 1`), the arrow's own meaning, so the first
+    element has no up and the last no down — the opposite of the layer list, where array position
+    is z-order and index 0 is the bottom.
+  - `setHtmlElementFrame` returns the same state object when the patch is what the frame already
+    holds, so a no-op edit is not a history entry (the `setLayerEnabled` rule).
+  - The copy input reads `element.text` with no `?? ""`: the domain marks `text` required on the
+    two kinds that reach it, and the fallback was a branch no test could take.
+- **Tests written red first:** 23 reducer tests (happy paths, every no-op shape by identity,
+  clamp and non-finite refusal, image refuses copy, last-remove deletes the key and round-trips
+  `valuesEqual`, and the invariant over a scripted sequence of all five actions), 18 component
+  tests (offers only on `html` layers, absent move controls at the ends, every input and control
+  named, and `<img src=x onerror=…>` staying an input value with no `img[src="x"]` in the DOM),
+  and one undo test. Full gate 0 with 100 % on all four counters (4 889 tests); `plan:verify` 0.
+- **Left open:**
+  - No preview of the markup in the app (HL-D7) — that is HL5d, through the canvas rendition.
+  - `derive.ts` was left untouched: nothing the editor offers needed a derivation from
+    `CREATIVE_TYPE_RULES`, and an element kind is never at a cap.
+
+---
+
+## 2026-09-14 — HL5a follow-up: typing a frame value, undo runs, frame labels
+
+- **Mode:** Implementer
+- **Changes:**
+  - `sections/HtmlElementsEditor.tsx`: the four frame inputs became one
+    `FrameNumberInput` carrying a local draft string; a number reaches the reducer
+    only when the draft parses to a finite one, and blur drops the draft.
+  - `editor-history.ts`: `coalesceKeyOf` gained `setHtmlElementText` and
+    `setHtmlElementFrame` keys (layer + index, and the frame patch's sorted fields).
+  - `messages.ts`: `htmlElementFrameLabel` names the field in words
+    (horizontal/vertical position, width, height) from a `Record` keyed by
+    `Exclude<keyof Frame, "anchor">`; `FrameNumberField` is exported.
+  - `.agents/manifests/hl5a.json`: two mutations added (commit the raw number again;
+    drop the element-copy coalescing case) — five now, all replay caught.
+- **Decisions:**
+  - The draft lives in the input, not in `EditorState`: it is a property of a box
+    being typed into, and it must never reach persistence or the dirty diff.
+  - The frame typing test reads the stored frame from a readout beside the editor,
+    not from the box — a value the box shows and the draft never committed would
+    otherwise pass.
+  - `FrameNumberField` is derived from the domain's own `Frame` (a type-only import
+    of the leaf) so a new frame field breaks the words lookup at compile time.
+- **Left open:**
+  - happy-dom's number input keeps `"0."` as its value where a browser reports `""`
+    for a bad-input field, so the "0.25 cannot be typed" symptom is not reproducible
+    in this environment — the emptied-field and clamped-value symptoms are, and the
+    draft fixes all three. A browser-level check was not added.
+  - PR-Agent's two other findings were refuted: `ANCHOR_VALUES` is already imported
+    at `editor-state.ts:46`, and a `role="region"` per html layer would add landmark
+    noise around controls that already carry names.

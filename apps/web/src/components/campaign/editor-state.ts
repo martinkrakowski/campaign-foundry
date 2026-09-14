@@ -18,6 +18,15 @@ import {
   templateFromCanonical,
   type BriefTemplate,
 } from "@campaignfoundry/CampaignOrchestration/brief-template";
+// The html layer's element vocabulary (HL1): the kinds an element may be, the
+// frame it positions itself with, and the leaf's own values — never restated
+// here, for the same reason every other domain value above is imported.
+import {
+  HTML_ELEMENT_KINDS,
+  type Frame,
+  type HtmlElement,
+  type HtmlElementKind,
+} from "@campaignfoundry/CampaignOrchestration/html-element";
 // The layer's shape, from the same module the canonical templates are declared
 // in: the toggle writes the field, so it writes that module's type.
 import type { CreativeTemplateLayer } from "@campaignfoundry/CampaignOrchestration/creative-templates";
@@ -65,6 +74,7 @@ import {
 export {
   DEFAULT_DURATION_SEC,
   HEADLINE_POOL_REF,
+  HTML_ELEMENT_KINDS,
   MAX_DURATION_SEC,
   MIN_DURATION_SEC,
   MOTION_KINDS,
@@ -72,6 +82,7 @@ export {
   MAX_WEIGHT,
   MIN_DWELL_SEC,
 };
+export type { Frame, HtmlElement, HtmlElementKind };
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import {
   DISPLAY_SIZE_VALUES,
@@ -463,6 +474,21 @@ export type EditorAction =
   // switching a layer off writes `enabled: false` and switching it back on
   // removes the field — the canonical form every template already carries.
   | { type: "setLayerEnabled"; id: string; enabled: boolean }
+  // The `html` layer's elements (HL5a, HL-D1): the second vocabulary, nested
+  // inside the first, so every action names the layer it edits and the index
+  // inside that layer's list. Each one is a no-op — the SAME state object — when
+  // the layer is absent, is not of kind `html`, or the index is outside the
+  // list, exactly as `removeLayer` and `moveLayer` refuse.
+  | { type: "addHtmlElement"; layerId: string; kind: HtmlElementKind }
+  | { type: "removeHtmlElement"; layerId: string; index: number }
+  | { type: "moveHtmlElement"; layerId: string; from: number; to: number }
+  | { type: "setHtmlElementText"; layerId: string; index: number; text: string }
+  | {
+      type: "setHtmlElementFrame";
+      layerId: string;
+      index: number;
+      patch: Partial<Frame>;
+    }
   | { type: "addBeat"; text?: string }
   | { type: "removeBeat"; index: number }
   | { type: "moveBeat"; from: number; to: number }
@@ -820,14 +846,19 @@ export function addBeatBlockedBy(state: EditorState): AddBeatBlock | undefined {
   };
 }
 
+/** A usable 0-based index into a list of `count` entries: an integer inside it. */
+function isListIndex(index: number, count: number): boolean {
+  return Number.isInteger(index) && index >= 0 && index < count;
+}
+
 /** A usable 0-based beat index: an integer inside the current list. */
 function isBeatIndex(index: number, beatCount: number): boolean {
-  return Number.isInteger(index) && index >= 0 && index < beatCount;
+  return isListIndex(index, beatCount);
 }
 
 /** A usable 0-based layer index: an integer inside the current list. */
 function isLayerIndex(index: number, layerCount: number): boolean {
-  return Number.isInteger(index) && index >= 0 && index < layerCount;
+  return isListIndex(index, layerCount);
 }
 
 /**
@@ -872,6 +903,119 @@ function withEnabled(
   const next: Record<string, unknown> = { ...layer };
   delete next.enabled;
   return next as unknown as CreativeTemplateLayer;
+}
+
+/**
+ * Where a new element sits (HL5a), per kind: fractions of the canvas (D130), so
+ * the element the editor adds is one both renderers can already place. Keyed by
+ * the kind vocabulary, so a fourth kind is a compile error rather than a frame
+ * nobody chose.
+ */
+const NEW_ELEMENT_FRAMES: Readonly<Record<HtmlElementKind, Frame>> = {
+  text: { x: 0.08, y: 0.08, w: 0.84, h: 0.18, anchor: "top" },
+  button: { x: 0.35, y: 0.74, w: 0.3, h: 0.12, anchor: "bottom" },
+  image: { x: 0.08, y: 0.16, w: 0.84, h: 0.56, anchor: "middle" },
+};
+
+/** A frame's own fields, in declaration order — the equality an edit asks first. */
+const FRAME_FIELDS = ["x", "y", "w", "h", "anchor"] as const;
+/** The numeric ones: the fields a frame patch clamps. */
+const FRAME_NUMBER_FIELDS = ["x", "y", "w", "h"] as const;
+
+/**
+ * A new element (HL5a): the kind, the frame its kind starts at, and — for the
+ * kinds that carry copy — the copy the catalog hands out. An `image` element
+ * gets no `text` key at all, because the domain's field table refuses copy on
+ * it: an element the boundary rejects is not a default, it is a defect.
+ */
+function newHtmlElement(kind: HtmlElementKind): HtmlElement {
+  const frame = { ...NEW_ELEMENT_FRAMES[kind] };
+  return kind === "image"
+    ? { kind, frame }
+    : { kind, text: messages.htmlElementDefaultCopy(kind), frame };
+}
+
+/**
+ * The `html` layer's element list, with the index an element action needs to
+ * put it back — or undefined when the action must be a no-op: no layer by that
+ * id, a layer of another kind (only `html` carries elements, HL-D1), or an
+ * index outside the list.
+ */
+interface HtmlElementEdit {
+  readonly layerIndex: number;
+  readonly elements: readonly HtmlElement[];
+}
+
+function htmlElementEdit(
+  state: EditorState,
+  layerId: string,
+  index?: number,
+): HtmlElementEdit | undefined {
+  const layerIndex = state.template.layers.findIndex(
+    (layer) => layer.id === layerId,
+  );
+  if (layerIndex === -1) return undefined;
+  const layer = state.template.layers[layerIndex]!;
+  if (layer.kind !== "html") return undefined;
+  const elements = layer.elements ?? [];
+  if (index !== undefined && !isListIndex(index, elements.length))
+    return undefined;
+  return { layerIndex, elements };
+}
+
+/**
+ * The layer carrying `elements`, in the one canonical form (HL5a): an empty
+ * list IS the absent key, so removing the last element returns the layer — and
+ * with it the template — to the shape it was loaded with, and an add-then-remove
+ * is `valuesEqual` (the round-trip lesson from M3's review). The `elements: []`
+ * a naive splice leaves behind is a brief that reads as dirty for a change the
+ * user undid.
+ */
+function withElements(
+  layer: CreativeTemplateLayer,
+  elements: readonly HtmlElement[],
+): CreativeTemplateLayer {
+  if (elements.length > 0) return { ...layer, elements };
+  // The double cast is the type system's blind spot around `delete` on a
+  // record, the same one `withEnabled` names: the result is the same layer
+  // minus a field that was optional to begin with.
+  const next: Record<string, unknown> = { ...layer };
+  delete next.elements;
+  return next as unknown as CreativeTemplateLayer;
+}
+
+function withHtmlElements(
+  state: EditorState,
+  edit: HtmlElementEdit,
+  elements: readonly HtmlElement[],
+): EditorState {
+  const layers = [...state.template.layers];
+  layers[edit.layerIndex] = withElements(layers[edit.layerIndex]!, elements);
+  return { ...state, template: { ...state.template, layers } };
+}
+
+/**
+ * A frame patch merged into `prior` (HL5a), so the result is always a frame the
+ * domain accepts: a value that is not a finite number — a NaN or an infinity a
+ * hand-restored draft can carry — keeps the one it had, a finite one is clamped
+ * into [0, 1], and an `anchor` outside `ANCHOR_VALUES` is refused the same way.
+ * The editor never produces an element the boundary refuses.
+ */
+function clampedFrame(patch: Partial<Frame>, prior: Frame): Frame {
+  const next: Record<string, unknown> = { ...prior };
+  for (const field of FRAME_NUMBER_FIELDS) {
+    const value = patch[field];
+    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    next[field] = Math.min(1, Math.max(0, value));
+  }
+  const anchor = patch.anchor;
+  if (
+    anchor !== undefined &&
+    (ANCHOR_VALUES as readonly string[]).includes(anchor)
+  ) {
+    next.anchor = anchor;
+  }
+  return next as unknown as Frame;
 }
 
 function reduceEditor(state: EditorState, action: EditorAction): EditorState {
@@ -1138,6 +1282,66 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
           layers: nextLayers,
         },
       };
+    }
+    case "addHtmlElement": {
+      const edit = htmlElementEdit(state, action.layerId);
+      if (edit === undefined) return state;
+      return withHtmlElements(state, edit, [
+        ...edit.elements,
+        newHtmlElement(action.kind),
+      ]);
+    }
+    case "removeHtmlElement": {
+      const edit = htmlElementEdit(state, action.layerId, action.index);
+      if (edit === undefined) return state;
+      return withHtmlElements(
+        state,
+        edit,
+        edit.elements.filter((_, index) => index !== action.index),
+      );
+    }
+    case "moveHtmlElement": {
+      const edit = htmlElementEdit(state, action.layerId, action.from);
+      if (edit === undefined) return state;
+      // Both ends, both bounds, and integrality — the `moveLayer` rule: an
+      // element moved onto its own index says nothing, and one moved past the
+      // end would splice it somewhere no caller asked for.
+      if (action.from === action.to) return state;
+      if (!isListIndex(action.to, edit.elements.length)) return state;
+      const elements = [...edit.elements];
+      const [moved] = elements.splice(action.from, 1);
+      elements.splice(action.to, 0, moved);
+      return withHtmlElements(state, edit, elements);
+    }
+    case "setHtmlElementText": {
+      const edit = htmlElementEdit(state, action.layerId, action.index);
+      if (edit === undefined) return state;
+      // An `image` element carries no copy — the domain's field table refuses
+      // it — so there is no text to set and nothing to write.
+      if (edit.elements[action.index]!.kind === "image") return state;
+      return withHtmlElements(
+        state,
+        edit,
+        edit.elements.map((element, index) =>
+          index === action.index ? { ...element, text: action.text } : element,
+        ),
+      );
+    }
+    case "setHtmlElementFrame": {
+      const edit = htmlElementEdit(state, action.layerId, action.index);
+      if (edit === undefined) return state;
+      const element = edit.elements[action.index]!;
+      const frame = clampedFrame(action.patch, element.frame);
+      // Already the frame asked for: no edit, so no history entry either.
+      if (FRAME_FIELDS.every((field) => frame[field] === element.frame[field]))
+        return state;
+      return withHtmlElements(
+        state,
+        edit,
+        edit.elements.map((existing, index) =>
+          index === action.index ? { ...existing, frame } : existing,
+        ),
+      );
     }
     case "addBeat":
       // The domain caps a sequence at MAX_BEATS and the parser refuses more, so the editor

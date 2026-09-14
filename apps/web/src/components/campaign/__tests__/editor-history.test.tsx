@@ -1,12 +1,15 @@
 import { describe, test, expect, vi, afterEach } from "vitest";
 import { renderHook, act, fireEvent } from "@testing-library/react";
 import type { CopyPool } from "@campaignfoundry/CampaignOrchestration";
+import { CANONICAL_TEMPLATES } from "@campaignfoundry/CampaignOrchestration/creative-templates";
+import type { HtmlElement } from "@campaignfoundry/CampaignOrchestration/html-element";
 import {
   initialEditorState,
   blankBrief,
   type EditorAction,
   type EditorState,
 } from "../editor-state";
+import * as messages from "../messages";
 import { useEditorHistory, useHistoryKeys, type EditorHistory } from "../editor-history";
 
 /**
@@ -47,6 +50,27 @@ const draftFields = (state: EditorState) =>
   );
 
 const render = () => renderHook(() => useEditorHistory(initialEditorState()));
+
+// The canonical `image-html` template's own layer list: image, html, logo. No
+// campaign type seeds it, so the pinned id is spelled out.
+const HTML_CANONICAL = CANONICAL_TEMPLATES["image-html"];
+const renderHtml = () =>
+  renderHook(() =>
+    useEditorHistory({
+      ...initialEditorState(),
+      template: {
+        id: "canonical-image-html",
+        version: HTML_CANONICAL.version,
+        creativeType: HTML_CANONICAL.creativeType,
+        unit: HTML_CANONICAL.unit,
+        layers: HTML_CANONICAL.layers,
+      },
+    }),
+  );
+
+/** The html layer's elements, as the draft holds them. */
+const htmlElements = (state: EditorState): readonly HtmlElement[] =>
+  state.template.layers.find((layer) => layer.id === "html")?.elements ?? [];
 
 const send = (
   hook: ReturnType<typeof render>,
@@ -241,6 +265,37 @@ describe("useEditorHistory — the layer toggle is an ordinary undoable edit (L9
   });
 });
 
+describe("useEditorHistory — an html element edit is an ordinary undoable edit (HL5a, VE1)", () => {
+  test("undo after adding an element restores the template the add replaced, exactly", () => {
+    const hook = renderHtml();
+    const before = hook.result.current.state.template;
+    send(hook, { type: "addHtmlElement", layerId: "html", kind: "text" });
+    expect(
+      hook.result.current.state.template.layers.find(
+        (layer) => layer.id === "html",
+      )?.elements,
+    ).toHaveLength(1);
+    act(() => hook.result.current.undo());
+    // `toStrictEqual`, so an `elements: undefined` the add might have left
+    // behind would fail here — undo restores the layer objects, not their shape.
+    expect(hook.result.current.state.template).toStrictEqual(before);
+    act(() => hook.result.current.redo());
+    expect(
+      hook.result.current.state.template.layers.find(
+        (layer) => layer.id === "html",
+      )?.elements,
+    ).toHaveLength(1);
+  });
+
+  test("a refused element edit leaves nothing to undo", () => {
+    const hook = renderHtml();
+    // A layer that is not of kind `html` carries no elements, so the action is
+    // a no-op — an edit that never happened is not an undo step.
+    send(hook, { type: "addHtmlElement", layerId: "logo", kind: "text" });
+    expect(hook.result.current.canUndo).toBe(false);
+  });
+});
+
 describe("useEditorHistory — coalescing", () => {
   test("typing a word is one undo step (patch)", () => {
     const hook = render();
@@ -328,6 +383,80 @@ describe("useEditorHistory — coalescing", () => {
     );
     act(() => hook.result.current.undo());
     expect(hook.result.current.state.variation.seed).toBe("");
+  });
+
+  test("typing a run into one element's copy is one undo step (HL5a)", () => {
+    const hook = renderHtml();
+    send(hook, { type: "addHtmlElement", layerId: "html", kind: "text" });
+    const before = htmlElements(hook.result.current.state)[0]!.text;
+    expect(before).toBe(messages.htmlElementDefaultCopy("text"));
+    send(
+      hook,
+      { type: "setHtmlElementText", layerId: "html", index: 0, text: "O" },
+      { type: "setHtmlElementText", layerId: "html", index: 0, text: "Op" },
+      { type: "setHtmlElementText", layerId: "html", index: 0, text: "Open" },
+    );
+    act(() => hook.result.current.undo());
+    // The whole run reverts — three keystrokes are not three undo steps.
+    expect(htmlElements(hook.result.current.state)[0]!.text).toBe(before);
+    // The add was its own entry and stands: the element is still there.
+    expect(htmlElements(hook.result.current.state)).toHaveLength(1);
+    expect(hook.result.current.canUndo).toBe(true);
+  });
+
+  test("editing another element's copy starts a new entry, and the first run is still one step", () => {
+    const hook = renderHtml();
+    send(
+      hook,
+      { type: "addHtmlElement", layerId: "html", kind: "text" },
+      { type: "addHtmlElement", layerId: "html", kind: "text" },
+    );
+    const copyBefore = htmlElements(hook.result.current.state).map(
+      (element) => element.text,
+    );
+    send(
+      hook,
+      { type: "setHtmlElementText", layerId: "html", index: 0, text: "A" },
+      { type: "setHtmlElementText", layerId: "html", index: 0, text: "AB" },
+      { type: "setHtmlElementText", layerId: "html", index: 1, text: "X" },
+    );
+    act(() => hook.result.current.undo());
+    // The second element's run reverts; the first element's stands whole.
+    expect(htmlElements(hook.result.current.state)[1]!.text).toBe(
+      copyBefore[1],
+    );
+    expect(htmlElements(hook.result.current.state)[0]!.text).toBe("AB");
+    act(() => hook.result.current.undo());
+    // One more step and the FIRST run reverts too — "AB", not "A".
+    expect(htmlElements(hook.result.current.state)[0]!.text).toBe(
+      copyBefore[0],
+    );
+  });
+
+  test("consecutive frame edits to one field coalesce; another field starts a new entry", () => {
+    const hook = renderHtml();
+    send(hook, { type: "addHtmlElement", layerId: "html", kind: "text" });
+    const frameBefore = htmlElements(hook.result.current.state)[0]!.frame;
+    send(
+      hook,
+      { type: "setHtmlElementFrame", layerId: "html", index: 0, patch: { x: 0.2 } },
+      { type: "setHtmlElementFrame", layerId: "html", index: 0, patch: { x: 0.25 } },
+    );
+    act(() => hook.result.current.undo());
+    expect(htmlElements(hook.result.current.state)[0]!.frame.x).toBe(
+      frameBefore.x,
+    );
+    send(
+      hook,
+      { type: "setHtmlElementFrame", layerId: "html", index: 0, patch: { x: 0.3 } },
+      { type: "setHtmlElementFrame", layerId: "html", index: 0, patch: { y: 0.4 } },
+    );
+    act(() => hook.result.current.undo());
+    // Only the `y` edit reverts: a different field is a different run.
+    expect(htmlElements(hook.result.current.state)[0]!.frame.y).toBe(
+      frameBefore.y,
+    );
+    expect(htmlElements(hook.result.current.state)[0]!.frame.x).toBe(0.3);
   });
 });
 

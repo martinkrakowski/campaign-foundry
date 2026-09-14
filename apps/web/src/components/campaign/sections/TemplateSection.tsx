@@ -11,6 +11,7 @@ import {
 } from "@/components/campaign/derive";
 import { layerKindDisplayName } from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
+import { HtmlElementsEditor } from "./HtmlElementsEditor";
 import { SectionShell, type SectionProps } from "./IdentitySection";
 
 /**
@@ -87,17 +88,18 @@ export function TemplateSection({ state, dispatch }: SectionProps) {
           return (
             <li
               key={layer.id}
-              className="flex items-center justify-between gap-3 rounded-md border border-border bg-surface-2 px-3 py-2"
+              className="space-y-2 rounded-md border border-border bg-surface-2 px-3 py-2"
             >
-              <span className="min-w-0">
-                <span className="block text-[13px] text-text-primary">
-                  {layerKindDisplayName(layer.kind)}
+              <span className="flex items-center justify-between gap-3">
+                <span className="min-w-0">
+                  <span className="block text-[13px] text-text-primary">
+                    {layerKindDisplayName(layer.kind)}
+                  </span>
+                  <span className="block font-mono text-[11px] text-text-muted">
+                    {layer.id}
+                  </span>
                 </span>
-                <span className="block font-mono text-[11px] text-text-muted">
-                  {layer.id}
-                </span>
-              </span>
-              <span className="flex shrink-0 items-center gap-1">
+                <span className="flex shrink-0 items-center gap-1">
                 {layerToggleable ? (
                   <span className="flex shrink-0 items-center">
                     <span
@@ -198,7 +200,18 @@ export function TemplateSection({ state, dispatch }: SectionProps) {
                     </IconButton>
                   </span>
                 ) : null}
+                </span>
               </span>
+              {/* The html layer's own vocabulary (HL5a, HL-D1): elements are
+                  not layers, so this rides beneath the one layer that carries
+                  them rather than in a section of its own. */}
+              {layer.kind === "html" ? (
+                <HtmlElementsEditor
+                  layerId={layer.id}
+                  elements={layer.elements ?? []}
+                  dispatch={dispatch}
+                />
+              ) : null}
             </li>
           );
         })}

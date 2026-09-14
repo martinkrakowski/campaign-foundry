@@ -119,7 +119,7 @@ beyond the brief's family, and any third-party script. Each breaks either the fa
 
 | Slice | Scope | State |
 |---|---|---|
-| **HL5a** | Element editing: add, remove and reorder `text` / `button` / `image` elements in the `html` layer; edit text and frame. | Ready. |
+| **HL5a** | Element editing: add, remove and reorder `text` / `button` / `image` elements in the `html` layer; edit text and frame. | **Shipped.** |
 | **HL5b** | The click-destination input. `editor-state.ts` already carries `clickDestination` with its patch and validation; no editor section renders it. | Ready — smallest slice. |
 | **HL5c** | The live weight meter reading `profile.maxBytes` (HL-D6). | **Blocked on X14** — no platform profile declares `html`, so there is no budget to read. |
 | **HL5d** | Editor preview of the `html` layer through the canvas rendition, satisfying HL-D7 without putting user content in the app DOM. | Ready once HL5a exists; verify first whether the existing preview path already draws the layer. |
@@ -170,11 +170,15 @@ now live in `html-element.ts`; both layer shapes declare `elements`, and the sha
 
 **HL4 — shipped in this PR.** Server-side markup assembler produces the HTML creative unit from the layer element list, wires `clickTag` variable declaration per HL-D3, enforces weight budget against `profile.maxBytes` per HL-D6, and the generation path emits `format: "html"` with both `htmlBundlePath` and `htmlFallbackPath` populated and verified during platform packaging.
 
-```premise HL5
-# The tooling lane's deciding facts are the element palette and the live
-# weight meter reading profile.maxBytes (HL-D6). maxBytes is enforced in
-# Distribution today and reaches neither apps/web nor packages/ui; no element
-# tooling exists either. When the drawer ships, the number it must display
-# crosses into the web surface and this flips.
-! grep -rqiE "maxBytes|weight.?meter|budget.?meter|addelement|element.?kind" apps/web/src packages/ui/src
+**HL5a — shipped in this PR.** Element editing: five reducer actions address an `html` layer by id — add, remove, move, set text, set frame — and the editor beneath each `html` layer offers the three kinds with per-element copy, frame and anchor controls. Every action is a no-op when the layer is not `html` or the index is out of range; an `image` element never carries copy; a frame value is clamped into `[0, 1]`, so after any sequence of these actions every layer still satisfies `layerElementsProblem` — the editor never produces what the boundary refuses. Removing the last element deletes the `elements` key, so an add-then-remove is `valuesEqual` to the template that was loaded. User text reaches the DOM only as an input's value (HL-D7): no preview of the markup is rendered into the app, which is what leaves HL5d — the canvas rendition — as the way to see one.
+
+```premise HL5c
+# What is still open of the tooling lane is the live weight meter reading
+# profile.maxBytes (HL-D6): maxBytes is enforced in Distribution today and
+# reaches neither apps/web nor packages/ui. The element palette the same
+# premise used to probe for shipped with HL5a, so narrowing it to the number
+# the meter must display is what keeps this fence honest about the gap that
+# remains. When the meter ships, that number crosses into the web surface and
+# this flips.
+! grep -rqiE "maxBytes|weight.?meter|budget.?meter" apps/web/src packages/ui/src
 ```
