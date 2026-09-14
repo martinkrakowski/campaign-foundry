@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "X19",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/sections/IdentitySection.tsx",
+      "before": "  else if (warning) describedByIds.push(warningId);",
+      "after": "  // mutated: warning id dropped from the describedby list",
+      "because": "A Field warning must be named by aria-describedby so assistive technology announces it; dropping the id leaves the prohibited-terms warning visual-only.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/sections/__tests__/field.test.tsx",
+        "-t",
+        "with a warning only"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/sections/IdentitySection.tsx",
+      "before": "  const invalid = error ? \"true\" : undefined;",
+      "after": "  const invalid = error || warning ? \"true\" : undefined;",
+      "because": "aria-invalid must stay error-only; treating a warning as invalid tells assistive technology a valid field is broken.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/sections/__tests__/field.test.tsx",
+        "-t",
+        "with a warning only"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
