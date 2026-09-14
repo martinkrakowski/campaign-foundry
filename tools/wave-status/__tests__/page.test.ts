@@ -5222,4 +5222,26 @@ describe("the status page — backlog panel (S5)", () => {
     expect(panel!.textContent).toContain("T9");
     expect(panel!.textContent).toContain("timed-out");
   });
+
+  test("an errored premise renders with the warning tone, not info", async () => {
+    const status: WaveStatus = {
+      ...statusAt(),
+      backlog: {
+        state: "recorded",
+        artifact: {
+          ...recordedArtifact,
+          premises: [
+            { lane: "E1", plan: "docs/planning/e.md", status: "error" as const, reason: "spawn sh ENOENT" },
+          ],
+        },
+      },
+    };
+    const page = await loadPage(status);
+    const item = page.window.document.querySelector(".backlog-item-error");
+    expect(item).not.toBeNull();
+    const pill = item!.querySelector(".pill");
+    expect(pill).not.toBeNull();
+    expect(pill!.classList.contains("warn")).toBe(true);
+    expect(pill!.classList.contains("info")).toBe(false);
+  });
 });
