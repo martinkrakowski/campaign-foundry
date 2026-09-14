@@ -507,6 +507,11 @@ the trial data skewed for a reason unrelated to quality, and nobody could see it
    as `seat: <reserve> (primary rate-limited)`. A fallthrough nobody logged is indistinguishable from
    a seat choice, and that is what corrupts the comparison.
 3. **Never count a rate-limited run against the seat.** It is a provider outcome, like a 5xx.
+4. **Do not run two lanes on the same rate-limited provider at once.** On 2026-09-13 all six upstream
+   429s on `openrouter/qwen/qwen3.8-flash` struck while two qwen lanes were running concurrently (in
+   two of those pairs the other lane survived), and the two runs with qwen beside an `agy` gemini lane
+   finished without one. Put concurrent lanes on different providers. Avoiding the 429 is cheaper than
+   any retry, however well the lanes checkpoint.
 
 **Rate limits will recur.** `qwen`, `hy4-preview` and `deepseek` share one openrouter account, so a
 limit on one is a limit on the pool — the same concentration that took three seats down when
