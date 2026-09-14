@@ -4708,3 +4708,19 @@ the fix is one line — present must be a string, absent stays valid — placed 
 One mutation (the check removed) replays caught; the X12 premise fence is retired in the gaps plan.
 Full gate green on the committed tree: build, typecheck, lint, lint:arch, `sync:check` (total ops 0),
 `test:cov` **4784 passed | 4 skipped — 100 % on all four counters**.
+
+## 2026-09-14 — X13: the merge script enforces the condition it implements
+
+`SKILL.md` stage 5 has required zero unresolved review threads on the final head since 2026-09-14, but
+`scripts/merge-prs.sh` never asked: it waited for check registration and CI, then merged by PR number. The
+decision now lives in TypeScript (`tools/sweep`, `yarn sweep gate --pr <n> --sha <sha>`) because it has to be
+tested and the runners have no zsh — the script is only its caller, and it settles for the review bots
+(`REVIEW_SETTLE_SECONDS`, default 120) before asking. `fetchAllThreads` is one paginated read of the one
+`THREADS_QUERY`, shared with the sweep (which is why the query now carries each thread's first comment: the
+gate names an open thread by author and excerpt); a page that cannot be read is "could not decide" and
+refuses, never a silent zero. Tests written red first and committed as seen failing. Four mutations replayed
+caught: read only the first page, an unreadable page read as no threads, threads fetched then ignored, and the
+head re-check dropped. The premise fence was **withdrawn, not inverted** — it greps `merge-prs.sh`, and with
+the logic in TypeScript it would never have flipped on its own; that reasoning is written into the plan itself.
+Gate green with 100 % on all four counters (4803 tests). Verified against the live API on #361 before pushing:
+the head-mismatch refusal and the merge-allowed answer both behave as tested.
