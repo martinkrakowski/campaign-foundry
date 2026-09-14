@@ -263,11 +263,11 @@ that did not happen.
    2026-09-13 provider failures (one 522, six 429s) killed seven lane runs. The two that had written
    nothing to disk lost the whole run; every other one resumed from what it had committed — or, once,
    from uncommitted files that happened to survive in the worktree, which is luck, not a method.
-   **This is a scoped exception to `.agents/testing.md` ("a red suite blocks the commit"), pending the
-   owner's confirmation:** it covers only *local, unpushed* checkpoint commits on a lane branch inside
-   its worktree. A lane branch is never pushed red, and PRs squash-merge, so no red commit reaches
-   `origin` or `main`. If the owner does not confirm it, the fallback is to write the failing tests to
-   disk early and snapshot the worktree from outside, never committing red.
+   **This is a scoped exception to `.agents/testing.md` ("a red suite blocks the commit"), confirmed by
+   the owner on 2026-09-14,** and it covers checkpoint commits on a lane's own branch only. The branch is
+   pushed only when the gate passes on its head, so no pushed head and no CI run is red; the red
+   checkpoints do travel to the lane branch on `origin` as history, and never reach `main`, because PRs
+   squash-merge. Do not rewrite history to hide them — that is the destructive step checkpoints prevent.
    The per-lane `implement settled|failed` events **are** the completion record of a dispatch —
    `implement settled` when a lane's `EXIT` marker lands, `implement failed` on a non-zero
    marker or a lane killed without one; and `gate settled` with the gate exit and the four

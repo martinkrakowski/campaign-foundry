@@ -39,3 +39,17 @@
 
 Run the suite (`yarn test`). A red suite blocks the commit — diagnose, do not
 skip or delete the failing test to make it pass.
+
+**One scoped exception (owner, 2026-09-14):** a delegated lane may commit its
+failing tests on its own lane branch as a checkpoint, so a provider failure
+mid-run cannot lose the work. What the exception does and does not allow:
+
+- The branch is **pushed only once the full gate passes on its head**, and CI
+  builds that head — so no pushed head, and no CI run, is ever red.
+- The red checkpoint commits **are** part of the branch's history, so they do
+  reach the lane branch on `origin` when it is pushed. They never reach `main`:
+  PRs squash-merge.
+- History is not rewritten to hide them: squashing checkpoints before a push is a
+  destructive step, and losing work is what checkpoints exist to prevent.
+
+The rule above still governs every commit outside a delegated lane's own branch.
