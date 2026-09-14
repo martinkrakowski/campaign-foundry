@@ -1,4 +1,4 @@
-import type { Premise, PremiseResult, VerifyDeps } from "./types.js";
+import type { Premise, PremiseResult, PremiseStatus, VerifyDeps } from "./types.js";
 
 export const EXIT_ALL_HOLD = 0;
 export const EXIT_STALE_FOUND = 1;
