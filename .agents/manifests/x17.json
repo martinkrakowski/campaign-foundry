@@ -22,8 +22,8 @@
     },
     {
       "file": "apps/web/src/components/campaign/editor-state.ts",
-      "before": "          ...emptyProduct(i + 1, p.primaryColor),\n          ...p,\n          id: p.id ?? \"\",\n          name: p.name ?? \"\",\n          primaryColor: p.primaryColor ?? \"\",\n          logoPath: p.logoPath ?? \"\",\n          inputAsset: p.inputAsset ?? \"\",\n          idTouched: true,",
-      "after": "          ...emptyProduct(i + 1, p.primaryColor),\n          ...p,\n          idTouched: true,",
+      "before": "          return {\n            ...emptyProduct(i + 1, product.primaryColor),\n            ...product,\n            id: product.id ?? \"\",\n            name: product.name ?? \"\",\n            primaryColor: product.primaryColor ?? \"\",\n            logoPath: product.logoPath ?? \"\",\n            inputAsset: product.inputAsset ?? \"\",\n            idTouched: true,\n          };",
+      "after": "          return {\n            ...emptyProduct(i + 1, product.primaryColor),\n            ...product,\n            idTouched: true,\n          };",
       "because": "Spreading the product over emptyProduct lets name: null overwrite the default. Without the per-field ?? \"\", validateProducts throws on product.name.trim() instead of reporting the product-name error.",
       "command": [
         "yarn",
@@ -52,6 +52,42 @@
         "apps/web/src/components/campaign/__tests__/editor-state.test.ts",
         "-t",
         "a freshly opened brief with a null scalar is not dirty",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "  if (Array.isArray(brief.products)) {\n    const products = brief.products.map(canonicalProduct);\n    if (products.some((product, i) => product !== brief.products[i])) {\n      next.products = products;\n      changed = true;\n    }\n  }",
+      "after": "  const products = brief.products.map(canonicalProduct);\n  if (products.some((product, i) => product !== brief.products[i])) {\n    next.products = products;\n    changed = true;\n  }",
+      "because": "canonicalNullScalars runs on the unvalidated stored snapshot in normalizeDraftState. Without the Array.isArray guard a stored products: null throws, the draft cannot be recovered, and loadDraftFromStorage discards the whole file.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts",
+        "-t",
+        "a stored draft whose snapshot products is null keeps the draft and the snapshot",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "    (next.inputAsset == null ||\n      (typeof next.inputAsset === \"string\" && next.inputAsset.trim() === \"\"))",
+      "after": "    next.inputAsset == null",
+      "because": "toProduct writes inputAsset only when its trimmed value is non-empty, so canonicalProduct must drop null, \"\" and a blank string alike. Keeping an empty-string key makes a file carrying inputAsset: \"\" open dirty against its own snapshot.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts",
+        "-t",
+        "a freshly opened brief with an empty-string product inputAsset is not dirty",
         "--maxWorkers=2"
       ],
       "verdict": "caught"
