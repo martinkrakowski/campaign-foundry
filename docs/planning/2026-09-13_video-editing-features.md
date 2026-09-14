@@ -1,7 +1,7 @@
 # Video Editing Features — Architecture & Development Plan
 
 **Date:** 2026-09-13
-**Status:** Proposed. Phase A is dispatchable; Phases B and C wait on the open questions in §8.
+**Status:** Proposed; revised after plan review (§2a). Phase A is dispatchable; Phases B and C wait on the open questions in §8.
 **Scope:** Which ideas from a reference video editor fit Campaign Foundry, and how each is built on
 the existing server-side compositor instead of beside it.
 **Related:** `2026-09-10_keyframing.md` (K1–K5), `2026-09-10_finishing-video.md`,
@@ -23,8 +23,8 @@ at `1f85d04`.
 | **VE-D2** | **The compositor stays the only renderer.** Every capability here extends the server path; nothing renders in the browser and nothing exports client-side. | A browser player is a second renderer, and the preview must be a real compositor frame (D52). Client export would also skip the server-side legal gate and packaging (H1). |
 | **VE-D3** | **A brief that uses none of the new inputs renders byte-identically.** | D10's guarantee and the pinned MP4 golden (`CanvasFfmpegVideoCompositor.ts`, `-fflags +bitexact`) extend to every lane: no audio, no scenes, no footage ⇒ the existing golden holds unchanged. **A moved hash is a finding, never a re-record.** |
 | **VE-D4** | **Captions ship with speech, not before it.** | Every line of copy is already burned into the frame. Without audio a caption track repeats on-screen text, and a player that overlays captions shows it twice (M2). Captions belong to voiceover (VE4). |
-| **VE-D5** | **Scrubbing is a new control, user-driven, never autoplaying, and it leaves `ScrubBar` alone.** The preview request gains an optional `atSec`. | `ScrubBar` is a decorative option icon in the create dialog, frozen by D88 — "nothing here animates, ever" (`packages/ui/src/scrub-bar.tsx`). It is not a player (M3). A control the user drags is not a looping animation, so D88 is respected, and it lives in the editor's preview dock, not the dialog tiles. |
-| **VE-D6** | **A scrub frame is the encoded frame, exactly.** | The frame at `atSec` is drawn by the same `NodeCanvasCompositor.draw` call, with the same pose, copy and effect clocks, that produces frame `i = round(atSec / durationSec × (frames − 1))` of the video, where `frames = round(durationSec × fps)` and frame `i` is drawn at pose time `i / (frames − 1)` (`CanvasFfmpegVideoCompositor.ts:93,316`). Fidelity is a byte comparison, not a visual judgement. |
+| **VE-D5** | **Scrubbing is a new control, user-driven, never autoplaying, and it leaves `ScrubBar` alone.** The preview cell gains `motion`, `durationSec` and `atSec` **together**; the control is absent when the brief renders no motion. The scrub position is local component state and **never an editor action**. | `ScrubBar` is a decorative option icon in the create dialog, frozen by D88 — "nothing here animates, ever" (`packages/ui/src/scrub-bar.tsx`). It is not a player (M3). A dragged control is not a looping animation, so D88 holds. `atSec` alone determines nothing: `prepare` resolves beats from `durationSec` and the timeline, and `draw` needs the motion kind, while a variation brief can list several of each (R1). Keeping the position out of `EditorState` keeps it out of undo history and out of VE1's file (R7). |
+| **VE-D6** | **A scrub frame is the encoded frame, exactly — and it is a *motion* frame, not today's still.** | Encoded frame `i` is `NodeCanvasCompositor.draw(ctx, prepared, i / (frames − 1), request.motion)` with the copy and effect clocks **omitted** (`CanvasFfmpegVideoCompositor.ts:316`), where `frames = round(durationSec × fps)` (`:93`). The poster and the editor's still both pass `effectT = 1` and are **not** comparable (R3). For `atSec`, `i = round(atSec / durationSec × (frames − 1))`. Fidelity is a byte comparison against the raw RGBA the encoder receives, not a visual judgement. |
 | **VE-D7** | **Keyframes are the keyframing plan's.** | K1–K5 already specify tracks on the layer (K-D1–K-D6). This plan points at them and adds no fourth motion system. |
 
 ---
@@ -35,11 +35,11 @@ at `1f85d04`.
 |---|---|---|
 | Video output | One still background with a pose clock (ken-burns / headline-rise / accent-wipe), a sequence of copy beats, logo, encoded to MP4 at 30 fps. | `MotionKind.vo.ts:7` (`MOTION_FPS = 30`); `CanvasFfmpegVideoCompositor.ts` |
 | Audio | **None.** ffmpeg takes one input, raw RGBA on stdin; no audio codec flags. | ffmpeg args in `CanvasFfmpegVideoCompositor.ts`: `-f rawvideo … -i - … -c:v libx264 …`; `-c:a` absent |
-| Copy timeline | Up to 8 beats with integer **weights**, `cut`/`fade`, a key beat for the poster. Absolute times come from `resolveTimeline(t, durationSec)`. | `CopyTimeline.vo.ts:22,34-45,91` |
-| Poster / single frame | The adapter already draws one frame at chosen clocks without encoding (the poster), and samples frames at arbitrary `t` for the brand-colour check. | `CanvasFfmpegVideoCompositor.ts` poster block (`NodeCanvasCompositor.draw(ctx, prepared, restT(…), …)`) and `sampledFrames` |
-| Editor preview | A still PNG from the real compositor, fed by the procedural background so no credits are spent (D52). The request carries `{ productId, canvas, layout, tone, anchor? }` — **no time**. | `preview-frame.post.ts:22-40`; `PreviewCreativeFrameUseCase.use-case.ts:24-31` |
-| Editor state | `useReducer(editorReducer, …)` over an `EditorAction` union with a `restore` action for drafts. **No undo or redo.** | `editor-state.ts:425,498,2531`; `BriefEditor.tsx:179` |
-| Uploads | `.png`/`.jpg`/`.jpeg` only, under `MAX_ASSET_BYTES`. | `assets.post.ts:16-17,34` |
+| Copy timeline | Up to 8 beats with integer **weights**, `cut`/`fade`, a key beat for the poster. `resolveTimeline` returns **normalised** `t`-windows; `durationSec` only bounds the fade width. | `CopyTimeline.vo.ts:22,34-45,85-110` |
+| Poster / single frame | The poster draws one frame without encoding, but with `effectT = 1`; the per-frame clock math lives in the private `writeFrames`, and `compositeVideo` always spawns ffmpeg. There is **no public single-frame seam**. | `CanvasFfmpegVideoCompositor.ts:91-120,307-320` |
+| Editor preview | A still PNG through `CompositorPort.compositeAsset` — `draw(ctx, prepared, 1, undefined, undefined, 1)`, no motion, no timeline — fed by the procedural background so no credits are spent (D52). The cell carries `{ productId, canvas, layout, tone, anchor? }`: **no time, motion or duration**, and the use case never reaches the video adapter. | `PreviewCreativeFrameUseCase.use-case.ts:24-32,70-77`; `NodeCanvasCompositor.ts:498-506`; `preview-frame.post.ts:22-50` |
+| Editor state | `useReducer(editorReducer, …)` over a 43-variant `EditorAction` union. `EditorState` holds draft fields **and** server answers: `source` (revision, saved snapshot), `pool`, `appliedSnapshot`, `capabilities`. `BriefEditor` persists the whole state to localStorage and diffs it against a stored draft. **No undo or redo.** Presentation and rail-view toggles are component state, not actions. | `editor-state.ts:257-263,407,421-422,425-503,2531`; `BriefEditor.tsx:101-139,179,361,481` |
+| Uploads | `.png`/`.jpg`/`.jpeg` only, 2 MiB, PNG magic-checked. | `apps/api/server/lib/asset-files.ts:10,12,14` (`ASSET_NAME_PATTERN`, `MAX_ASSET_BYTES`, `PNG_MAGIC`) |
 | Video input | **None, by decision.** "It does not add video decoding… `videoPath` is output only." | `2026-09-10_finishing-video.md:104-105` |
 | Packaging | Copies the mp4 and poster; never re-renders (D11). Motion profiles cap duration at 60–600 s. | `PackageForPlatformUseCase.use-case.ts` motion branch; `PlatformProfile.vo.ts:135-162` |
 
@@ -61,6 +61,23 @@ content reaching an ad passes the same legal gate copy already passes. Templates
 | **M3** | Medium | **Correction to this plan's first draft: "make the scrubber move."** `ScrubBar` is an icon frozen by D88, not a player control. → VE-D5. |
 | **L1** | Low | The vendor's `llms.txt` advertises an npm package, `@react-video-editor/core`, that returns 404 on npm. Its marketing is not a source for this plan. |
 
+
+### 2a. Plan review (2026-09-13) — every point verified against `main`, every one accepted
+
+| ID | Sev | Finding | Resolution |
+|---|---|---|---|
+| **R1** | Blocking | `atSec` alone does not determine a frame: beats resolve from `durationSec` + timeline and `draw` needs the motion kind, none of which the cell carries. | VE-D5: `motion`, `durationSec`, `atSec` together. |
+| **R2** | Blocking | The preview use case depends on `CompositorPort` only and never reaches the video adapter; the per-frame math is private and `compositeVideo` always spawns ffmpeg. | VE2 tasks 1–2: a `compositeFrame` seam and a `videoCompositor` dependency. |
+| **R3** | Blocking | Encoded frames omit the copy and effect clocks, the poster and still pass `effectT = 1`, and the existing fake spawn discards stdin — the equality criterion had no seam and would copy the wrong call. | VE-D6 states the exact call; VE2 acceptance captures stdin. |
+| **R4** | Blocking | VE1 excluded "presentation and rail view" actions that do not exist; that criterion could not fail. | VE1 task 2 names the real exclusion set. |
+| **R5** | Should | `load` and `discard` also replace the draft, and `save`/`apply` write server revisions into state; a naive undo would revert a revision and turn the next save into a conflict. | VE1 tasks 3–4. |
+| **R6** | Should | `BriefEditor` persists and diffs the whole state; a `{past, present, future}` shape would leak history into localStorage and back through `restore`. | VE1 task 1: history lives in a hook, never in `EditorState`. |
+| **R7** | Should | VE2 named the SVG twin (`CreativePreview.tsx`); the real files are `lib/preview-frame.ts`, `PreviewFrame.tsx`, `PreviewDock.tsx`. VE1 ∥ VE2 holds only if the scrub position never enters `editor-state.ts`. | VE2 task 6; VE-D5; §6. |
+| **R8** | Should | The frame fingerprint is pinned by a test; new fields must use the existing conditional spread, and hash the frame index rather than raw `atSec`. | VE2 task 4. |
+| **R9** | Should | Upload rules live in `asset-files.ts`, not `assets.post.ts`. | §1; VE3 task 2. |
+| **R10** | Should | Premises VE3, VE5, VE6 could be tripped or missed by unrelated text. | §12 sharpened. |
+| **R11** | Nit | `resolveTimeline` returns normalised windows, not absolute times. | §1. |
+
 ---
 
 ## 3. Phase A — no owner decision needed
@@ -69,29 +86,43 @@ content reaching an ad passes the same legal gate copy already passes. Templates
 
 | # | Task | File(s) |
 |---|---|---|
-| 1 | Wrap `editorReducer` in a history reducer: past / present / future, with a bounded depth. | `apps/web/src/components/campaign/editor-state.ts` (or a sibling `editor-history.ts`) |
-| 2 | Decide which actions are undoable. View-only actions (presentation, rail view) must not create history entries. | same |
-| 3 | Coalesce consecutive text edits to one field into a single history entry. | same |
-| 4 | `restore` replaces the baseline and clears both stacks — undo must never step back across a restored draft. | same |
-| 5 | Keyboard shortcuts (⌘Z / ⇧⌘Z, Ctrl on other platforms), ignored while focus is in a native text input that has its own undo. | `apps/web/src/components/campaign/BriefEditor.tsx` |
+| 1 | A `useEditorHistory` hook wrapping `editorReducer` (the exported, clamping reducer at `editor-state.ts:2531`), returning the present `EditorState` plus `undo`/`redo`/`canUndo`/`canRedo`. **History lives in the hook and never enters `EditorState`**, so localStorage persistence and the stored-draft diff see exactly what they see today. | new `apps/web/src/components/campaign/editor-history.ts`; `BriefEditor.tsx:179` |
+| 2 | Undoable = draft edits. **Not undoable** (server answers and persistence): `setCapabilities`, `loadPool`, `load`, `apply`, `save`, `restore`, `discard`. `setPool` writes `variation.headline`, so it edits the draft — decide, and state the decision. | `editor-history.ts` |
+| 3 | Undo restores **draft fields only** and carries forward the current `source` (revision and saved snapshot), `pool`, `appliedSnapshot` and `capabilities`, so undo never reverts a server revision. | `editor-history.ts` |
+| 4 | `load`, `discard` and `restore` each replace the baseline and clear both stacks. | `editor-history.ts` |
+| 5 | Consecutive edits to the same text field coalesce into one history entry. | `editor-history.ts` |
+| 6 | ⌘Z / ⇧⌘Z (Ctrl elsewhere), ignored while focus is in a native text input that has its own undo. | `BriefEditor.tsx` |
 
-**Acceptance.** Undo after any undoable action returns exactly the prior `EditorState`; redo re-applies
-it; a new action clears redo; typing a word is one undo step; undo immediately after `restore` does
-nothing; view-only toggles never appear in history.
+**Acceptance.** After an undoable action, undo yields a state whose draft fields equal the prior draft
+**and** whose `source`, `pool`, `appliedSnapshot` and `capabilities` equal the *current* ones; a `save`
+landing between an edit and its undo leaves `source.revision` unchanged by the undo; `canUndo` is
+false after `load`, `discard` and `restore`; the object handed to `saveDraftToStorage` has exactly
+`EditorState`'s keys; typing a word is one undo step.
 
 ### VE2 — Scrub the preview
 
 | # | Task | File(s) |
 |---|---|---|
-| 1 | Add optional `atSec` to the preview cell, validated within `[0, durationSec]`; absent keeps today's still exactly. | `PreviewCreativeFrameUseCase.use-case.ts`, `apps/api/server/routes/campaigns/preview-frame.post.ts` |
-| 2 | Include `atSec` in the frame fingerprint so the cache never serves one moment for another. | `PreviewCreativeFrameUseCase.use-case.ts` |
-| 3 | Map `atSec` to frame `i = round(atSec / durationSec × (frames − 1))` and draw it with the same clocks `encodeFrames` uses for that frame — reuse, do not re-derive. | `packages/CreativeGeneration/src/infrastructure/adapters/CanvasFfmpegVideoCompositor.ts`, `VideoCompositorPort.ts` |
-| 4 | A range control in the editor's preview dock that requests frames on release, with in-flight requests superseded. **Never autoplay.** | `apps/web/src/components/campaign/CreativePreview.tsx` (or a new control beside it) |
-| 5 | Keep the procedural generator wiring — scrubbing must spend no credits. | preview route wiring |
+| 1 | Factor the per-frame clock math out of the private `writeFrames` into one function both paths call, and add `VideoCompositorPort.compositeFrame(request, atSec)` that draws frame `i` **without** spawning ffmpeg or requiring `ffmpegPath`. | `CanvasFfmpegVideoCompositor.ts:91-105,307-320`; `packages/CampaignOrchestration/src/application/ports/out/VideoCompositorPort.ts` |
+| 2 | `PreviewCreativeFrameDeps` gains `videoCompositor`. A cell with `atSec` renders through it with `fps = MOTION_FPS` and `timeline = brief.copy.timeline`; a cell without it takes today's still path unchanged. | `PreviewCreativeFrameUseCase.use-case.ts:70-77` |
+| 3 | Validate the cell: `motion ∈ MOTION_KINDS`, `durationSec ∈ [MIN_DURATION_SEC, MAX_DURATION_SEC]`, `atSec ∈ [0, durationSec]` — all three present, or none. | `PreviewCreativeFrameUseCase.use-case.ts`; `apps/api/server/routes/campaigns/preview-frame.post.ts` |
+| 4 | Fingerprint the new fields with the existing conditional spread (`:104-116`) so a cell without them hashes exactly as today; hash frame index `i`, `motion`, `durationSec` and the timeline, not raw `atSec`. | `PreviewCreativeFrameUseCase.use-case.ts` |
+| 5 | Wire `new CanvasFfmpegVideoCompositor({ fontFamily: process.env.MESSAGE_FONT })` into the route beside the still compositor; the procedural generator wiring is untouched. | `apps/api/server/routes/campaigns/preview-frame.post.ts` |
+| 6 | Web: add the fields to `usePreviewFrame`'s dependency list or nothing refetches; build the cell in `PreviewFrame.tsx`; a range control in `PreviewDock.tsx` whose position is **local state, never dispatched**, requesting on release with in-flight requests superseded; absent when the brief renders no motion; never autoplays. | `apps/web/src/lib/preview-frame.ts:84-94`; `PreviewFrame.tsx`; `PreviewDock.tsx` |
 
-**Acceptance.** For a fixed brief, the scrub PNG at `atSec` decodes to the same RGBA as frame `i` fed to the encoder (VE-D6), including at `atSec = 0` and
-`atSec = durationSec` (the last frame, not one past it); a request without `atSec` returns today's bytes; the
-existing "no other generator is reachable" test still passes; `ScrubBar` is unchanged.
+**Acceptance.**
+- **Byte equality (VE-D6).** A capturing fake spawn records the encoder's stdin; slice frame `i` at
+  offset `i × w × h × 4`; assert every alpha byte in the slice is `255` (Skia surfaces are
+  premultiplied, so a PNG round-trip is lossless only when opaque); decode the `compositeFrame` PNG to
+  RGBA and compare. Checked at `atSec = 0`, a mid value, and `atSec = durationSec` (frame
+  `frames − 1`, not one past it).
+- **Named mutation:** `i / (frames − 1)` → `i / frames` in the shared clock function must fail it.
+- A cell without the new fields returns today's bytes, and the pinned cache-key test is unchanged.
+- The "no generator other than the procedural one is reachable" test
+  (`apps/api/server/routes/campaigns/__tests__/preview-frame.test.ts:126`) still passes.
+- Scrubbing dispatches no `EditorAction`.
+
+VE2 must not edit `editor-state.ts` or `BriefEditor.tsx`; those are VE1's.
 
 ---
 
@@ -102,7 +133,7 @@ existing "no other generator is reachable" test still passes; `ScrubBar` is unch
 | # | Task | File(s) |
 |---|---|---|
 | 1 | A brief-level audio reference to an uploaded asset, with the rights record VE-Q1 decides. | `CampaignBrief.ts`, `load-brief.ts` |
-| 2 | Accept audio uploads (format list and byte cap decided in the lane). | `apps/api/server/routes/campaigns/assets.post.ts` |
+| 2 | Accept audio uploads (format list and byte cap decided in the lane). | `apps/api/server/lib/asset-files.ts` (`ASSET_NAME_PATTERN`, `MAX_ASSET_BYTES`, magic checks) |
 | 3 | Second ffmpeg input; encode AAC; cut to `durationSec`; short fade-out; keep bit-exact flags. | `CanvasFfmpegVideoCompositor.ts` |
 | 4 | Refuse a brief whose audio lacks the required rights record, at the boundary. | `load-brief.ts`, compliance checker |
 | 5 | A second golden for the audio case; the silent golden must not move. | adapter golden tests |
@@ -162,8 +193,9 @@ Phase A (independent)          Phase B                          Phase C
 Keyframes: see 2026-09-10_keyframing.md (K1 blocked on its own questions)
 ```
 
-VE1 and VE2 touch disjoint files and can run in parallel. VE3 and VE5 both edit
-`CanvasFfmpegVideoCompositor.ts` and must not run concurrently.
+VE1 and VE2 run in parallel **only** because VE2 keeps the scrub position out of `EditorState` and edits neither
+`editor-state.ts` nor `BriefEditor.tsx`. VE2, VE3 and VE5 all edit `CanvasFfmpegVideoCompositor.ts` and must not
+run concurrently with each other.
 
 ---
 
@@ -198,8 +230,9 @@ VE1 and VE2 touch disjoint files and can run in parallel. VE3 and VE5 both edit
   reproducible, but VE3 must demonstrate it with a golden before relying on it.
 - **Scrub request volume.** Dragging can issue many requests; superseding in-flight requests and the
   existing frame cache keep it bounded, and VE2's acceptance includes the cache fingerprint.
-- **Undo and async results.** Preview frames and generation results are not editor state; history must
-  cover edits only, or undo will appear to "revert" a render.
+- **Undo and server state.** `EditorState` carries server answers — the saved revision, the copy pool, the
+  applied snapshot, capabilities. Undo that reverted them would make the next conditional save conflict; VE1
+  carries them forward (R5).
 
 ## 10. What this plan refuses
 
@@ -225,31 +258,31 @@ Each open lane states the gap that makes it necessary as a script that exits 0 *
 still open**. `yarn plan:verify` runs them.
 
 ```premise VE1
-# The editor has no undo or redo action.
-! grep -rqE '"(undo|redo)"' apps/web/src/components/campaign
+# No undo history exists for the editor.
+! grep -rqs 'useEditorHistory' apps/web/src/components/campaign
 ```
 
 ```premise VE2
-# The preview request carries no time: it can only render the still.
-! grep -q 'atSec' packages/CampaignOrchestration/src/application/use-cases/PreviewCreativeFrameUseCase.use-case.ts
+# The video adapter has no single-frame seam, so the preview cannot show a moment of the motion.
+! grep -qs 'compositeFrame' packages/CampaignOrchestration/src/application/ports/out/VideoCompositorPort.ts
 ```
 
 ```premise VE3
-# The encoder takes one raw-video input and no audio codec.
-! grep -qF -- '"-c:a"' packages/CreativeGeneration/src/infrastructure/adapters/CanvasFfmpegVideoCompositor.ts
+# No audio codec in the encoder, or no audio extension accepted for upload — either keeps the lane open.
+! grep -qE -- '"-c:a"|"-acodec"' packages/CreativeGeneration/src/infrastructure/adapters/CanvasFfmpegVideoCompositor.ts || ! grep -qE '\b(mp3|m4a|wav|aac)\b' apps/api/server/lib/asset-files.ts
 ```
 
 ```premise VE4
 # No caption sidecar is written or packaged anywhere.
-! grep -rqi 'webvtt' packages/CampaignOrchestration/src packages/Distribution/src apps/api/server
+! grep -rqiE 'webvtt|\.vtt\b' packages/CampaignOrchestration/src packages/Distribution/src apps/api/server
 ```
 
 ```premise VE5
-# A copy beat carries text and weight only — no per-beat background.
-! grep -q 'background' packages/CampaignOrchestration/src/domain/value-objects/CopyTimeline.vo.ts
+# A copy beat carries text and weight only — no per-beat background field.
+! grep -qE 'background\??:' packages/CampaignOrchestration/src/domain/value-objects/CopyTimeline.vo.ts
 ```
 
 ```premise VE6
-# Nothing probes or decodes an input video.
-! grep -rqiE 'ffprobe|inputVideo' packages/CreativeGeneration/src packages/CampaignOrchestration/src apps/api/server
+# No video extension is accepted for upload, so no footage can enter.
+! grep -qE '\b(mp4|mov|webm)\b' apps/api/server/lib/asset-files.ts
 ```
