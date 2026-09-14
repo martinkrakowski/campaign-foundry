@@ -4644,3 +4644,7 @@ D118) remain deferred.
 ## 2026-09-13 — S2 remediation: an event-only lane carries its gate log (#369)
 
 The second row source built `obs: { alive }` inline while the log loop read `gate-<lane>.log` — so the lanes S2 exists to surface still lost their gate exit and coverage. The observation build is now one shared function both loops call; the defect was proven red first, and the manifest carries a seventh mutation reverting the event-only row to its own inline build, replayed caught. Existing manifest entries were retargeted to the refactored text rather than dropped.
+
+## 2026-09-13 — S3: review threads, and could-not-ask split from none
+
+`checks: "none"` meant four facts; an unresolved review thread read as needing nothing under green CI. One read-only GraphQL search per sweep now counts every open PR's unresolved threads — one query, never a call per PR, counts and states only — and the checks union gained `unknown`. The lane brief corrected the plan mid-flight: #351's `unknown` lives in the *lane state* union, not the *checks* union; the word is reused, the types are not conflated. Precedence decision, pinned by test: a measured thread blocker outranks a missing measurement; could-not-ask is never `blocked` (that word asserts something stands in the way) and never `ready` (earned by both measurements answering affirmatively); gaps land on `unknown`. 28 tests proven red first; 10 mutations replayed caught; plan fence retired in the diff.

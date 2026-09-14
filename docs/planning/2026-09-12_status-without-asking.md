@@ -97,11 +97,7 @@ omitted this and S1 would have hit it first.
 
 ## 7. Premises
 
-```premise S3
-# Thread state is never requested, and the checks union still carries no value
-# for "could not ask". Either landing flips it.
-! grep -rq 'reviewThreads' tools/wave-status/lib || ! grep -q '"unknown"' tools/wave-status/lib/types.ts
-```
+**S3 — shipped in this PR.**
 
 ```premise S5
 # The page cannot show premise state without wiring to the tool that computes

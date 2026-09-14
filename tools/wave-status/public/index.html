@@ -1665,8 +1665,21 @@
         }
         if (derived.alive) return "running";
         if (derived.pr === undefined) return "vanished";
-        if (derived.pr.state === "open" && (derived.pr.checks === "pending" || derived.pr.checks === "none")) return "blocked";
-        if (derived.pr.state === "open" && derived.pr.checks === "pass") return "ready";
+        // S3's precedence, mirrored from lib/lane-state.ts: a measured
+        // unresolved thread blocks; a checks read that could not be taken is
+        // the word for "no verdict" (unknown), never blocked — blocked asserts
+        // something is in the way, this value asserts we do not know; and
+        // ready is earned only by green checks AND a counted zero threads.
+        if (derived.pr.state === "open") {
+          const threads =
+            derived.pr.unresolvedThreads === undefined
+              ? "unknown"
+              : derived.pr.unresolvedThreads;
+          if (typeof threads === "number" && threads > 0) return "blocked";
+          if (derived.pr.checks === "pending" || derived.pr.checks === "none") return "blocked";
+          if (derived.pr.checks === "pass" && threads === 0) return "ready";
+          return "unknown";
+        }
         if (derived.pr.state === "merged") return "merged";
         // The only PR state left is `closed` — the lane's PR was shut without
         // merging, which is not a verdict this ranking owns. Say the gap rather
@@ -1707,8 +1720,18 @@
         return counts;
       }
 
+      function laneNeedsHuman(lane, nowMs) {
+        const state = laneStateOf(lane, nowMs);
+        if (NEEDS_HUMAN.includes(state)) return true;
+        if (state === "blocked") {
+          const threads = lane.derived?.pr?.unresolvedThreads;
+          return typeof threads === "number" && threads > 0;
+        }
+        return false;
+      }
+
       function isLaneActive(lane, nowMs) {
-        return NEEDS_HUMAN.includes(laneStateOf(lane, nowMs));
+        return laneNeedsHuman(lane, nowMs);
       }
 
       // Bins floor down and a clock-ahead mtime reads as quiet now, never as a
@@ -1799,8 +1822,21 @@
           pending: "warn",
           pass: "ok",
           fail: "bad",
+          // Could not ask: warn, not dim — a gap must not render like the
+          // measured nothing that `none` now uniquely means.
+          unknown: "warn",
         }[pr.checks];
-        return `<span class="pr-num">#${esc(pr.number)}</span> ${pill(tone, pr.state)} ${pill(checks, pr.checks)}`;
+        let html = `<span class="pr-num">#${esc(pr.number)}</span> ${pill(tone, pr.state)} ${pill(checks, pr.checks)}`;
+        // Open PRs always state their thread situation: the count of
+        // unresolved threads, or `?` for a read that could not be taken.
+        // Counts and states only — why a thread is open lives in the thread.
+        if (pr.state === "open") {
+          const threads = pr.unresolvedThreads;
+          const label =
+            typeof threads === "number" ? `threads:${threads}` : "threads:?";
+          html += ` ${pill(threads === 0 ? "dim" : "warn", label)}`;
+        }
+        return html;
       }
 
       function gateCell(lane) {
@@ -1848,7 +1884,9 @@
       function renderSummaryBar(lanes, nowMs) {
         const counts = laneStateCountsOf(lanes, nowMs);
         let attention = 0;
-        for (const state of NEEDS_HUMAN) attention += counts[state] ?? 0;
+        for (const lane of lanes) {
+          if (laneNeedsHuman(lane, nowMs)) attention += 1;
+        }
         if (stateSummaryValue !== null) {
           stateSummaryValue.textContent = String(attention);
           stateSummaryValue.classList.toggle("hot", attention > 0);
@@ -1924,6 +1962,7 @@
         let open;
         let merged;
         let failing;
+        let checksUnknown = false;
         for (const wave of status.waves) {
           waves++;
           for (const lane of wave.lanes) {
@@ -1942,8 +1981,12 @@
             const pr = lane.derived.pr;
             if (pr !== undefined) {
               prs++;
-              if (pr.state === "open") open = (open ?? 0) + 1;
-              else if (pr.state === "merged") merged = (merged ?? 0) + 1;
+              if (pr.state === "open") {
+                open = (open ?? 0) + 1;
+                if (pr.checks === "unknown") checksUnknown = true;
+              } else if (pr.state === "merged") {
+                merged = (merged ?? 0) + 1;
+              }
               if (pr.checks === "fail") failing = (failing ?? 0) + 1;
             }
           }
@@ -1958,7 +2001,11 @@
         if (prs > 0) {
           open ??= 0;
           merged ??= 0;
-          failing ??= 0;
+          if (!checksUnknown) {
+            failing ??= 0;
+          } else {
+            failing = undefined;
+          }
         }
         return {
           lanes,

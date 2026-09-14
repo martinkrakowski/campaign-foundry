@@ -12,10 +12,9 @@ import { collect, realDeps } from "../lib/collect.js";
 import {
   laneState,
   laneStateCounts,
+  laneNeedsHuman,
   stallThresholdMs,
   LANE_STATES,
-  NEEDS_HUMAN_STATES,
-  isNeedsHumanState,
 } from "../lib/lane-state.js";
 import { readEvents } from "../lib/events.js";
 import { mergeStatus } from "../lib/merge.js";
@@ -141,7 +140,7 @@ const mixedStatus: WaveStatus = {
           reported: { stage: "remediate", event: "settled", ts: "now" },
           derived: {
             alive: true,
-            pr: { number: 1, state: "open", checks: "pass" },
+            pr: { number: 1, state: "open", checks: "pass", unresolvedThreads: 0 },
           },
           disagreements: [],
         },
@@ -220,8 +219,27 @@ const stateFixture = (now: number): WaveStatus => {
           lane("vanished", { alive: false, exit: 0 }),
           lane("blocked", { alive: false, pr: { number: 5, state: "open", checks: "pending" } }),
           lane("unstarted", { alive: false, pr: { number: 11, state: "open", checks: "none" } }),
-          lane("ready", { alive: false, pr: { number: 6, state: "open", checks: "pass" } }),
+          lane("ready", {
+            alive: false,
+            pr: { number: 6, state: "open", checks: "pass", unresolvedThreads: 0 },
+          }),
           lane("merged", { alive: false, pr: { number: 7, state: "merged", checks: "pass" } }),
+          // The two facts S3 puts on the page, and the gap between them:
+          // a measured unresolved thread under green CI blocks; a read that
+          // could not be taken names itself as unknown — never blocked,
+          // because blocked asserts something is in the way.
+          lane("review-blocked", {
+            alive: false,
+            pr: { number: 8, state: "open", checks: "pass", unresolvedThreads: 2 },
+          }),
+          lane("unasked", {
+            alive: false,
+            pr: { number: 9, state: "open", checks: "unknown", unresolvedThreads: 0 },
+          }),
+          lane("threads-unread", {
+            alive: false,
+            pr: { number: 10, state: "open", checks: "pass", unresolvedThreads: "unknown" },
+          }),
         ],
       },
     ],
@@ -245,6 +263,9 @@ const EXPECTED_STATE_PILLS: ReadonlyArray<readonly [string, string, string]> = [
   ["unstarted", "blocked", "warn"],
   ["ready", "ready", "ok"],
   ["merged", "merged", "dim"],
+  ["review-blocked", "blocked", "warn"],
+  ["unasked", "unknown", "dim"],
+  ["threads-unread", "unknown", "dim"],
 ];
 
 // name, label, value — counts for mixedStatus above.
@@ -643,6 +664,56 @@ describe("the status page", () => {
     expect(doc.querySelector('[data-metric="waves"] .value')?.textContent).toBe(
       "1",
     );
+  });
+
+  test("an unknown check count on an open PR renders —, but a measured zero renders 0", async () => {
+    const withUnknownChecks: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "T",
+          lanes: [
+            {
+              wave: "T",
+              lane: "t1",
+              derived: {
+                alive: false,
+                pr: { number: 1, state: "open", checks: "unknown" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+    const pageUnknown = await loadPage(withUnknownChecks);
+    expect(
+      pageUnknown.window.document.querySelector('[data-metric="failing"] .value')?.textContent,
+    ).toBe("—");
+
+    const withMeasuredZero: WaveStatus = {
+      generatedAt: "now",
+      waves: [
+        {
+          id: "T",
+          lanes: [
+            {
+              wave: "T",
+              lane: "t1",
+              derived: {
+                alive: false,
+                pr: { number: 1, state: "open", checks: "pass" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    } as WaveStatus;
+    const pageZero = await loadPage(withMeasuredZero);
+    expect(
+      pageZero.window.document.querySelector('[data-metric="failing"] .value')?.textContent,
+    ).toBe("0");
   });
 
   test("the container declares two grid rows and the log pane is hidden with no log open", async () => {
@@ -3730,15 +3801,37 @@ describe("the status page", () => {
       pending: true,
       pass: true,
       fail: true,
+      // Added with S3: *could not ask*. The enumeration is compile-pinned to
+      // the union — a member added or removed on either side fails here.
+      unknown: true,
     } satisfies Record<PermittedPr["checks"], true>) as PermittedPr["checks"][];
+    // The thread axis is driven too: measured-zero, measured-positive,
+    // explicitly-unmeasurable, and absent (a pre-S3 payload). Absent must read
+    // as unmeasured on an open PR, never as the silence of a clean row.
+    const prThreads: ReadonlyArray<readonly [string, number | "unknown" | undefined]> = [
+      ["absent", undefined],
+      ["zero", 0],
+      ["two", 2],
+      ["unread", "unknown"],
+    ];
     for (const state of prStates) {
       for (const checks of prChecks) {
-        lanes.push({
-          wave: "S",
-          lane: `pr-${state}-${checks}`,
-          derived: { alive: false, pr: { number: 9, state, checks } },
-          disagreements: [],
-        });
+        for (const [threadTag, threads] of prThreads) {
+          lanes.push({
+            wave: "S",
+            lane: `pr-${state}-${checks}-${threadTag}`,
+            derived: {
+              alive: false,
+              pr: {
+                number: 9,
+                state,
+                checks,
+                ...(threads === undefined ? {} : { unresolvedThreads: threads }),
+              },
+            },
+            disagreements: [],
+          });
+        }
       }
     }
     const status = {
@@ -3821,16 +3914,15 @@ describe("the status page", () => {
     expect(present.length).toBeGreaterThan(0);
 
     // (c) The page-level summary bar: the needs-a-human lead and per-state chips.
-    // The lead is pinned to the module's NEEDS_HUMAN_STATES, not a list copied
-    // into this file — the same reason the row pill is pinned to `laneState`:
-    // the page holds a second copy of the set, and this is the seam between them.
+    // The lead is pinned to the module's `laneNeedsHuman` — the lane-aware
+    // predicate, not a state list copied into this file — the same reason the
+    // row pill is pinned to `laneState`: the page holds a second copy of the
+    // rule, and this is the seam between them. A thread-blocked lane must
+    // raise the total exactly as a running one does; a CI-only block must not.
     const attention =
       doc.querySelector('#state-summary [data-state="attention"] .value')
         ?.textContent ?? "";
-    const wantsHuman = NEEDS_HUMAN_STATES.reduce(
-      (sum, s) => sum + (moduleCounts[s] ?? 0),
-      0,
-    );
+    const wantsHuman = lanes.filter((lane) => laneNeedsHuman(lane, now)).length;
     expect(Number(attention)).toBe(wantsHuman);
     // The lead only turns red when there is someone to call.
     expect(
@@ -3852,13 +3944,13 @@ describe("the status page", () => {
     const now = Date.now();
     const status = stateFixture(now);
     const lanes = status.waves[0].lanes as unknown as LaneStatus[];
-    // The set the toggle keeps, derived here from the module — `isNeedsHumanState`
-    // over `laneState` — not copied from the page's inline list, so the test is
+    // The set the toggle keeps, derived here from the module — `laneNeedsHuman`
+    // over the lane — not copied from the page's inline list, so the test is
     // the seam and not an echo: a page that drops a state the module still keeps
     // (or the reverse) is caught here, exactly as a divergent word is caught by
     // the row-pill parity test.
     const activeIds = lanes
-      .filter((lane) => isNeedsHumanState(laneState(lane, now)))
+      .filter((lane) => laneNeedsHuman(lane, now))
       .map((lane) => lane.lane);
     const inactiveIds = lanes
       .map((lane) => lane.lane)
@@ -3922,7 +4014,7 @@ describe("the status page", () => {
         {
           id: "D",
           lanes: [
-            { wave: "D", lane: "ready", derived: { alive: false, pr: { number: 1, state: "open", checks: "pass" } }, disagreements: [] },
+            { wave: "D", lane: "ready", derived: { alive: false, pr: { number: 1, state: "open", checks: "pass", unresolvedThreads: 0 } }, disagreements: [] },
             { wave: "D", lane: "merged", derived: { alive: false, pr: { number: 2, state: "merged", checks: "pass" } }, disagreements: [] },
           ],
         },
@@ -3964,7 +4056,7 @@ describe("the status page", () => {
           id: "V",
           lanes: [
             { wave: "V", lane: "v-live", derived: { alive: true }, disagreements: [] },
-            { wave: "V", lane: "v-ready", derived: { alive: false, pr: { number: 20, state: "open", checks: "pass" } }, disagreements: [] },
+            { wave: "V", lane: "v-ready", derived: { alive: false, pr: { number: 20, state: "open", checks: "pass", unresolvedThreads: 0 } }, disagreements: [] },
           ],
         },
         {
@@ -4079,7 +4171,10 @@ describe("the status page", () => {
       "hide-inactive",
     ) as unknown as HTMLElement;
     expect(toggle.getAttribute("aria-checked")).toBe("false");
-    expect(page.window.document.querySelectorAll("tr.lane").length).toBe(11);
+    // One lane per state the derivation can name, plus the three S3 lanes:
+    // a measured thread blocker, a checks read that could not be taken, and
+    // an unreadable thread state.
+    expect(page.window.document.querySelectorAll("tr.lane").length).toBe(14);
   });
 
   test("a lane whose PR state the derivation cannot name renders as unknown, not as a guess", async () => {
@@ -4122,9 +4217,9 @@ describe("the status page", () => {
     // The module answers in the same word — and nothing about the row's
     // oddity takes the rest of the table down.
     expect(
-      laneState(closedStatus.waves[0].lanes[11], now),
+      laneState(closedStatus.waves[0].lanes[14], now),
     ).toBe("unknown");
-    expect(doc.querySelectorAll("tr.lane").length).toBe(12);
+    expect(doc.querySelectorAll("tr.lane").length).toBe(15);
   });
 
 
@@ -4233,6 +4328,24 @@ describe("the status page", () => {
               },
               disagreements: [],
             },
+            {
+              wave: "P",
+              lane: "p6",
+              derived: {
+                alive: true,
+                pr: { number: 6, state: "open", checks: "unknown" },
+              },
+              disagreements: [],
+            },
+            {
+              wave: "P",
+              lane: "p7",
+              derived: {
+                alive: false,
+                pr: { number: 7, state: "open", checks: "pass", unresolvedThreads: 2 },
+              },
+              disagreements: [],
+            },
           ],
         },
       ],
@@ -4259,6 +4372,17 @@ describe("the status page", () => {
     expectTone("stalled", "warn");
     expectTone("pending", "warn");
     expectTone("none", "dim");
+    // S3: the two new renderings, each distinct from every value that existed
+    // before. *Could not ask* is warn — it wants a look — and *nothing to ask
+    // about* keeps its dim `none`; a thread count is a word, not prose.
+    expectTone("unknown", "warn");
+    expectTone("threads:?", "warn");
+    expectTone("threads:2", "warn");
+    // Counts and states only: nothing in the rendered thread cell can carry
+    // review prose, because the observation itself carries no prose to render.
+    const p7pr = doc.querySelector('tr.lane[data-lane="p7"] td.c-pr');
+    expect(p7pr?.textContent).toContain("threads:2");
+    expect(p7pr?.textContent).not.toMatch(/[A-Za-z]{20,}/);
 
     // Every pill's accessible name is the state word itself, never colour
     // alone.

@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { readEvents } from "./events.js";
 import { mergeStatus } from "./merge.js";
-import type { LaneObservation, WaveEvent, WaveStatus } from "./types.js";
+import type { LaneObservation, PrChecks, WaveEvent, WaveStatus } from "./types.js";
 
 /**
  * A readable file opened for a ranged tail. `FileHandle` satisfies this;
@@ -98,6 +98,13 @@ interface GhPrListEntry {
   readonly state: string;
   readonly headRefName: string;
   readonly headRefOid: string;
+  /**
+   * The full `owner/name` of the repository the listing came from, carried by
+   * every real pull object. Optional because older recorded corpora predate
+   * the projection: a corpus without it cannot address the thread query, and
+   * its open PRs carry "unknown" threads rather than a silent zero.
+   */
+  readonly repo?: string | null;
 }
 
 export function waveIdFromDirName(name: string): string {
@@ -358,10 +365,12 @@ export async function readTail(
 
 /**
  * Projection from REST API pull object to the GhPrListEntry shape prFacts consumes.
- * Maps .head.ref to headRefName, .head.sha to headRefOid, and normalises merged state.
+ * Maps .head.ref to headRefName, .head.sha to headRefOid, normalises merged state,
+ * and carries the base repository's full name — the thread query addresses a repo
+ * by name, and this way the sweep never pays a call just to learn its own.
  */
 export const PR_PULLS_JQ =
-  '.[] | {number: .number, state: (if .merged_at then "merged" else .state end), headRefName: .head.ref, headRefOid: .head.sha}';
+  '.[] | {number: .number, state: (if .merged_at then "merged" else .state end), headRefName: .head.ref, headRefOid: .head.sha, repo: .base.repo.full_name}';
 
 /**
  * The PR corpus, walked through the REST API. `gh api` with `--paginate`
@@ -404,20 +413,28 @@ export async function prFacts(deps: CollectDeps, scope?: PrScope): Promise<PrCor
   // page must render as a short read rather than as no pull requests.
   const listed = parsePrList(stdout);
 
+  // One read-only thread query for every open PR — never a call per PR. Its
+  // counts land on the open facts; anything it could not reach is "unknown".
+  const threadCounts = await threadCountsByPr(deps, listed.entries);
+
   const facts: PrFact[] = [];
   for (const entry of listed.entries) {
     const state = entry.state.toLowerCase();
     if (state !== "open" && state !== "merged" && state !== "closed") continue;
 
-    let checks: "none" | "pending" | "pass" | "fail" = "none";
+    // The initial value is the honest one: nothing has been asked yet, so
+    // this is "could not ask", not "no checks have run". `none` is earned
+    // only by a read that came back and found no Build runs.
+    let checks: PrChecks = "unknown";
     if (state === "open" && (scope === undefined || isClaimed(entry, scope))) {
       try {
         checks = parseChecks(
           await deps.gh(["api", `repos/:owner/:repo/commits/${entry.headRefOid}/check-runs`]),
         );
       } catch {
-        // Transient check-runs failure: keep the PR, surface checks as none.
-        checks = "none";
+        // Transient check-runs failure: keep the PR, and say the read failed
+        // rather than letting the default masquerade as a measurement.
+        checks = "unknown";
       }
     }
 
@@ -425,6 +442,9 @@ export async function prFacts(deps: CollectDeps, scope?: PrScope): Promise<PrCor
       number: entry.number,
       state,
       checks,
+      ...(state === "open"
+        ? { unresolvedThreads: threadCounts.get(entry.number) ?? "unknown" }
+        : {}),
       branchTail: branchTail(entry.headRefName),
     });
   }
@@ -452,6 +472,138 @@ function isClaimed(entry: GhPrListEntry, scope: PrScope): boolean {
 function branchTail(headRefName: string): string {
   const slash = headRefName.lastIndexOf("/");
   return (slash === -1 ? headRefName : headRefName.slice(slash + 1)).toLowerCase();
+}
+
+/**
+ * The read-only GraphQL search that counts the unresolved review threads of
+ * every open PR in the repository in ONE query — never a call per PR, and
+ * never the prose of a thread: counts and states only, because why a thread
+ * is open lives in the thread. `first: 100` per page, continued by cursor,
+ * which is the same pagination the PR listing already performs; a per-head
+ * call would double the sweep and is refused outright by the plan.
+ */
+const PR_THREADS_QUERY = `query($q: String!, $after: String) {
+  search(query: $q, type: ISSUE, first: 100, after: $after) {
+    nodes {
+      ... on PullRequest {
+        number
+        reviewThreads(first: 100) {
+          pageInfo { hasNextPage }
+          nodes { isResolved }
+        }
+      }
+    }
+    pageInfo { hasNextPage endCursor }
+  }
+}`;
+
+/** Narrow an unknown JSON value to an object (arrays included: their missing keys just miss). */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * One map of PR number to unresolved-thread count for the whole sweep:
+ * `number` when the single query answered it, `"unknown"` when the answer
+ * was truncated or unreadable, and absent from the map — which downstream
+ * reads as "unknown" too — when the query could not run at all. A gh failure
+ * never rejects: the PR facts stand without threads; a thread read that
+ * could not be taken is a value, not a crash.
+ */
+async function threadCountsByPr(
+  deps: CollectDeps,
+  entries: readonly GhPrListEntry[],
+): Promise<ReadonlyMap<number, number | "unknown">> {
+  const counts = new Map<number, number | "unknown">();
+  if (!entries.some((entry) => entry.state.toLowerCase() === "open")) return counts;
+  // The thread query addresses a repository by name. The listing carries it
+  // on every real row; a corpus whose rows all lost the field cannot address
+  // the query — so it is not run, and its opens honestly read "unknown".
+  let repo: string | undefined;
+  for (const entry of entries) {
+    if (typeof entry.repo === "string") {
+      repo = entry.repo;
+      break;
+    }
+  }
+  if (repo === undefined) return counts;
+  let cursor: string | undefined;
+  for (;;) {
+    const args = [
+      "api",
+      "graphql",
+      "-f",
+      `query=${PR_THREADS_QUERY}`,
+      "-f",
+      `q=repo:${repo} is:pr is:open`,
+    ];
+    if (cursor !== undefined) args.push("-f", `after=${cursor}`);
+    let stdout: string;
+    try {
+      stdout = await deps.gh(args);
+    } catch {
+      // A page that did not arrive adds no counts. What is already in hand
+      // stands — the walk stops, and every open PR missing from the map is
+      // "unknown" downstream, never a silent zero.
+      return counts;
+    }
+    const page = parseThreadPage(stdout);
+    if (page === undefined) return counts;
+    for (const [number, count] of page.counts) counts.set(number, count);
+    if (!page.hasNextPage || page.endCursor === undefined) return counts;
+    if (page.endCursor === cursor) return counts;
+    cursor = page.endCursor;
+  }
+}
+
+interface ThreadPage {
+  readonly counts: ReadonlyMap<number, number | "unknown">;
+  readonly hasNextPage: boolean;
+  readonly endCursor?: string;
+}
+
+/** `undefined` for a response whose shape nothing can stand on. */
+function parseThreadPage(json: string): ThreadPage | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed) || !isRecord(parsed.data)) return undefined;
+  const search = parsed.data.search;
+  if (!isRecord(search) || !Array.isArray(search.nodes) || !isRecord(search.pageInfo)) {
+    return undefined;
+  }
+  const counts = new Map<number, number | "unknown">();
+  for (const node of search.nodes) {
+    if (!isRecord(node) || typeof node.number !== "number") continue;
+    const threads = node.reviewThreads;
+    if (!isRecord(threads) || !Array.isArray(threads.nodes) || !isRecord(threads.pageInfo)) {
+      continue;
+    }
+    if (typeof threads.pageInfo.hasNextPage !== "boolean") {
+      counts.set(node.number, "unknown");
+      continue;
+    }
+    counts.set(
+      node.number,
+      threads.pageInfo.hasNextPage === true
+        ? "unknown"
+        : threads.nodes.filter(isUnresolvedThread).length,
+    );
+  }
+  return {
+    counts,
+    hasNextPage: search.pageInfo.hasNextPage === true,
+    ...(typeof search.pageInfo.endCursor === "string"
+      ? { endCursor: search.pageInfo.endCursor }
+      : {}),
+  };
+}
+
+function isUnresolvedThread(thread: unknown): boolean {
+  return isRecord(thread) && thread.isResolved === false;
 }
 
 /**
@@ -486,32 +638,47 @@ export function joinPrForLane(
 }
 
 function asPr(fact: PrFact): LaneObservation["pr"] {
-  return { number: fact.number, state: fact.state, checks: fact.checks };
+  return {
+    number: fact.number,
+    state: fact.state,
+    checks: fact.checks,
+    ...(fact.unresolvedThreads === undefined
+      ? {}
+      : { unresolvedThreads: fact.unresolvedThreads }),
+  };
 }
 
 /**
- * Check conclusions keyed on the runs this pipeline cares about — the ones
- * named `Build`. No Build runs → none; any unfinished → pending; any failed →
- * fail; otherwise pass. Bad JSON is "none", never a throw.
+ * The check conclusions keyed on the runs this pipeline cares about — the
+ * ones named `Build`. No Build runs → none (we asked, and nothing has run);
+ * any unfinished → pending; any failed → fail; otherwise pass. A response
+ * that cannot be read is unknown — *could not ask*, never a silent none:
+ * bad JSON used to wear the same word as an empty list. Never a throw.
  */
-export function parseChecks(json: string): "none" | "pending" | "pass" | "fail" {
-  let builds: readonly { readonly name?: string; readonly status?: string; readonly conclusion?: string | null }[];
+export function parseChecks(json: string): PrChecks {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(json) as {
-      readonly check_runs?: readonly {
-        readonly name?: string;
-        readonly status?: string;
-        readonly conclusion?: string | null;
-      }[];
-    };
-    builds = (parsed.check_runs ?? []).filter((run) => /^Build/.test(run.name ?? ""));
+    parsed = JSON.parse(json);
   } catch {
-    return "none";
+    return "unknown";
   }
-
+  if (!isRecord(parsed) || !Array.isArray(parsed.check_runs)) return "unknown";
+  const builds = parsed.check_runs.filter(
+    (run) => isRecord(run) && typeof run.name === "string" && /^Build/.test(run.name),
+  );
   if (builds.length === 0) return "none";
-  if (builds.some((run) => run.status !== "completed" || run.conclusion === null)) return "pending";
-  if (builds.some((run) => run.conclusion !== "success")) return "fail";
+  if (
+    builds.some(
+      (run) =>
+        (run as { readonly status?: unknown }).status !== "completed" ||
+        (run as { readonly conclusion?: unknown }).conclusion === null,
+    )
+  ) {
+    return "pending";
+  }
+  if (builds.some((run) => (run as { readonly conclusion?: unknown }).conclusion !== "success")) {
+    return "fail";
+  }
   return "pass";
 }
 
@@ -562,7 +729,11 @@ function isGhPrListEntry(value: unknown): value is GhPrListEntry {
     typeof rec.number === "number" &&
     typeof rec.state === "string" &&
     typeof rec.headRefName === "string" &&
-    typeof rec.headRefOid === "string"
+    typeof rec.headRefOid === "string" &&
+    // The repo the thread query needs: absent or null reads as "no repo on
+    // this row" (older corpora, or a projection that lost it). Any other
+    // type is a row nothing can stand on.
+    (rec.repo === undefined || rec.repo === null || typeof rec.repo === "string")
   );
 }
 
