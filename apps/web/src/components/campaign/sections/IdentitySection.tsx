@@ -10,8 +10,10 @@ import {
   Children,
   isValidElement,
   cloneElement,
+  Fragment,
   type Dispatch,
 } from "react";
+
 import { Input, ChipGroup, WorldMap, REGION_FOOTPRINTS, MAP_WIDTH, MAP_HEIGHT } from "@/components/ui";
 import type { EditorState, EditorAction } from "@/components/campaign/editor-state";
 import type { FieldErrors } from "@/components/campaign/validate";
@@ -93,6 +95,11 @@ export function SectionShell({
   );
 }
 
+export type FieldControlProps = {
+  "aria-describedby"?: string;
+  "aria-invalid"?: "true";
+};
+
 export function Field({
   label,
   error,
@@ -106,7 +113,7 @@ export function Field({
   error?: string;
   warning?: string;
   hint?: string;
-  children: React.ReactNode;
+  children: React.ReactNode | ((control: FieldControlProps) => React.ReactNode);
   fieldKey?: string;
   as?: "label" | "div";
 }) {
@@ -120,20 +127,29 @@ export function Field({
   const describedBy = describedByIds.length > 0 ? describedByIds.join(" ") : undefined;
   const invalid = error ? "true" : undefined;
 
-  let attached = false;
-  const enhancedChildren = Children.map(children, (child) => {
-    if (!attached && isValidElement(child)) {
-      attached = true;
-      const childProps = child.props as Record<string, unknown>;
-      const existingDescribedBy = childProps["aria-describedby"] as string | undefined;
-      const mergedDescribedBy = [existingDescribedBy, describedBy].filter(Boolean).join(" ") || undefined;
-      return cloneElement(child, {
-        ...(mergedDescribedBy ? { "aria-describedby": mergedDescribedBy } : {}),
-        ...(invalid ? { "aria-invalid": invalid } : {}),
-      } as Record<string, unknown>);
-    }
-    return child;
-  });
+  let renderedChildren: React.ReactNode;
+  if (typeof children === "function") {
+    renderedChildren = children({
+      ...(describedBy ? { "aria-describedby": describedBy } : {}),
+      ...(invalid ? { "aria-invalid": "true" as const } : {}),
+    });
+
+  } else {
+    let attached = false;
+    renderedChildren = Children.map(children, (child) => {
+      if (!attached && isValidElement(child) && child.type !== Fragment) {
+        attached = true;
+        const childProps = child.props as Record<string, unknown>;
+        const existingDescribedBy = childProps["aria-describedby"] as string | undefined;
+        const mergedDescribedBy = [existingDescribedBy, describedBy].filter(Boolean).join(" ") || undefined;
+        return cloneElement(child, {
+          ...(mergedDescribedBy ? { "aria-describedby": mergedDescribedBy } : {}),
+          ...(invalid ? { "aria-invalid": invalid } : {}),
+        } as Record<string, unknown>);
+      }
+      return child;
+    });
+  }
 
   const derivedKey = fieldKey ?? keyForLabel(label);
   const Wrapper = as;
@@ -141,7 +157,7 @@ export function Field({
     <div data-field-key={derivedKey}>
       <Wrapper className="block">
         <span className="mb-1.5 block text-[11px] text-text-muted">{label}</span>
-        {enhancedChildren}
+        {renderedChildren}
       </Wrapper>
       {hint ? (
         <span id={hintId} className="mt-1 block text-[11px] text-text-muted">
@@ -158,6 +174,7 @@ export function Field({
     </div>
   );
 }
+
 
 export function IdentitySection({
   state,
@@ -267,40 +284,38 @@ export function IdentitySection({
           </div>
         </Field>
         <Field fieldKey="targetRegion" label={messages.targetRegionLabel} error={errors.targetRegion} as="div">
-          {/* F4/D94 — the map and the chips are two views of one value, both bound
-           * to `targetRegion`. The wiring is M2's, carried over from the dialog:
-           * the SVG is aria-hidden and adds no focusable element, so the chips
-           * stay the accessible and keyboard control, and a free-text region
-           * (Other…) paints no footprint. The compact form (the 320 px sidebar)
-           * renders the chips alone — a 960×500 map cannot go there. */}
-          <div className={compact ? undefined : "space-y-2"}>
-            {!compact ? (
-              <>
-                {mapReady ? (
-                  worldMap
-                ) : (
-                  <div
-                    aria-hidden="true"
-                    className="w-full"
-                    style={{ aspectRatio: `${MAP_WIDTH} / ${MAP_HEIGHT}` }}
-                  />
-                )}
-                <p className="text-[12px] text-text-muted">{messages.worldMapRegionHint}</p>
-              </>
-            ) : null}
-            <ChipGroup
-              label={messages.targetRegionLabel}
-              otherInputLabel={messages.targetRegionOtherInputLabel}
-              options={REGION_OPTIONS}
-              value={state.targetRegion}
-              onChange={(value) => dispatch({ type: "patch", patch: { targetRegion: value } })}
-              allowOther
-              otherLabel={messages.targetRegionOther}
-              otherPlaceholder={messages.targetRegionOtherPlaceholder}
-              invalid={Boolean(errors.targetRegion)}
-            />
-          </div>
+          {(control) => (
+            <div className={compact ? undefined : "space-y-2"}>
+              {!compact ? (
+                <>
+                  {mapReady ? (
+                    worldMap
+                  ) : (
+                    <div
+                      aria-hidden="true"
+                      className="w-full"
+                      style={{ aspectRatio: `${MAP_WIDTH} / ${MAP_HEIGHT}` }}
+                    />
+                  )}
+                  <p className="text-[12px] text-text-muted">{messages.worldMapRegionHint}</p>
+                </>
+              ) : null}
+              <ChipGroup
+                {...control}
+                label={messages.targetRegionLabel}
+                otherInputLabel={messages.targetRegionOtherInputLabel}
+                options={REGION_OPTIONS}
+                value={state.targetRegion}
+                onChange={(value) => dispatch({ type: "patch", patch: { targetRegion: value } })}
+                allowOther
+                otherLabel={messages.targetRegionOther}
+                otherPlaceholder={messages.targetRegionOtherPlaceholder}
+                invalid={Boolean(errors.targetRegion)}
+              />
+            </div>
+          )}
         </Field>
+
       </div>
       <Field fieldKey="targetAudience" label={messages.targetAudienceLabel} error={errors.targetAudience}>
         <Input

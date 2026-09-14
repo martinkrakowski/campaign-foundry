@@ -367,7 +367,9 @@ the hint and error elements that are present, and set `aria-invalid` while an er
 `as="label"` and `as="div"` wrappers and for the controls passed as children.
 
 **X15 — shipped in this PR.** Its premise was retired when it landed; `plan:verify` no
-longer tracks it. `Field` assigns stable `useId` ids to hint and error elements, clones
-its first control child to attach `aria-describedby` (whichever are present, in hint-then-error
-order) and `aria-invalid="true"` while an error is displayed, and leaves additional sibling
-children unbroken.
+longer tracks it. `Field` assigns stable `useId` ids to hint and error elements, accepts
+either element children (cloning the first valid non-Fragment child to attach `aria-describedby`
+and `aria-invalid`) or a function `(control) => ReactNode` for wrapper call sites to spread
+onto their real control directly without cloning. Kit components (`Slider`, `Stepper`, `ChipGroup`,
+`SwatchPicker`, and `LogoField`) accept `aria-describedby` and place it on their accessible element,
+and `aria-invalid` stays single-sourced at call sites.

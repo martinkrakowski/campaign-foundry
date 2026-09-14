@@ -37,6 +37,7 @@ export function TreatmentsSection({ state, dispatch, errors }: { state: EditorSt
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field fieldKey={`treatment-${index}-layout`} label="Layout" error={errors[`treatment-${index}-layout`]}>
               <select
+                aria-invalid={errors[`treatment-${index}-layout`] ? "true" : undefined}
                 value={treatment.layout}
                 onChange={(e) =>
                   dispatch({ type: "setTreatment", index, patch: { layout: e.target.value } })
@@ -50,6 +51,7 @@ export function TreatmentsSection({ state, dispatch, errors }: { state: EditorSt
             </Field>
             <Field fieldKey={`treatment-${index}-tone`} label="Tone" error={errors[`treatment-${index}-tone`]}>
               <select
+                aria-invalid={errors[`treatment-${index}-tone`] ? "true" : undefined}
                 value={treatment.tone}
                 onChange={(e) =>
                   dispatch({ type: "setTreatment", index, patch: { tone: e.target.value } })
@@ -62,6 +64,7 @@ export function TreatmentsSection({ state, dispatch, errors }: { state: EditorSt
               </select>
             </Field>
           </div>
+
           <Button variant="ghost" size="sm" onClick={() => dispatch({ type: "removeTreatment", index })}>
             Remove
           </Button>

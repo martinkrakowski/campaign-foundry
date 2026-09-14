@@ -383,33 +383,37 @@ export function PolicySection({ state, dispatch, errors, compact = false }: { st
             />
           </Field>
           <Field label="Seed" error={errors.seed} hint="Fixes the draw, so the same brief plans the same creatives">
-            <div className="flex items-center gap-2">
-              <Input
-                type="number"
-                placeholder="Auto"
-                // the Field label wraps both this input and the Pick button, so it names
-                // neither on its own — the input carries its own name.
-                aria-label="Seed"
-                value={state.variation.seed}
-                invalid={Boolean(errors.seed)}
-                onChange={(e) => dispatch({ type: "setVariation", field: "seed", value: e.target.value })}
-              />
-              <Button
-                variant="secondary"
-                size="sm"
-                aria-label={state.variation.seed.trim() === "" ? "Pick a seed" : "Clear the seed"}
-                onClick={() =>
-                  dispatch({
-                    type: "setVariation",
-                    field: "seed",
-                    value: state.variation.seed.trim() === "" ? String(Math.floor(Math.random() * 0xffffffff)) : "",
-                  })
-                }
-              >
-                {state.variation.seed.trim() === "" ? "Pick" : "Clear"}
-              </Button>
-            </div>
+            {(control) => (
+              <div className="flex items-center gap-2">
+                <Input
+                  {...control}
+                  type="number"
+                  placeholder="Auto"
+                  // the Field label wraps both this input and the Pick button, so it names
+                  // neither on its own — the input carries its own name.
+                  aria-label="Seed"
+                  value={state.variation.seed}
+                  invalid={Boolean(errors.seed)}
+                  onChange={(e) => dispatch({ type: "setVariation", field: "seed", value: e.target.value })}
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  aria-label={state.variation.seed.trim() === "" ? "Pick a seed" : "Clear the seed"}
+                  onClick={() =>
+                    dispatch({
+                      type: "setVariation",
+                      field: "seed",
+                      value: state.variation.seed.trim() === "" ? String(Math.floor(Math.random() * 0xffffffff)) : "",
+                    })
+                  }
+                >
+                  {state.variation.seed.trim() === "" ? "Pick" : "Clear"}
+                </Button>
+              </div>
+            )}
           </Field>
+
         <div className={compact ? "space-y-4" : "grid grid-cols-1 gap-4 sm:grid-cols-2"}>
           <Field
             label="Coverage per product"

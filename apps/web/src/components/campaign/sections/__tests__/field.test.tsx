@@ -9,7 +9,12 @@ import { initialEditorState } from "../../editor-state";
 import * as messages from "../../messages";
 
 describe("Field — assistive technology describedby and invalid attributes", () => {
+  afterEach(() => {
+    localStorage.clear();
+  });
+
   test("with a hint only: aria-describedby names the hint element and resolves to hint text; aria-invalid is not set", () => {
+
     render(
       <Field label="Campaign Name" hint="Choose a memorable name">
         <input data-testid="control" />

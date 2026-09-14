@@ -31,6 +31,7 @@ export interface LogoFieldProps {
   readonly invalid?: boolean;
   readonly disabled?: boolean;
   readonly readOnly?: boolean;
+  readonly "aria-describedby"?: string;
 }
 
 /**
@@ -53,6 +54,7 @@ export function LogoField({
   invalid = false,
   disabled = false,
   readOnly = false,
+  "aria-describedby": ariaDescribedBy,
 }: LogoFieldProps): ReactNode {
   const instanceId = useId();
   const inputId = `logo-upload-input-${instanceId}`;
@@ -95,6 +97,7 @@ export function LogoField({
       <input
         type="text"
         aria-label={messages.logoPathAria}
+        aria-describedby={ariaDescribedBy}
         className="sr-only"
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -106,6 +109,7 @@ export function LogoField({
         readOnly={readOnly}
         tabIndex={-1}
       />
+
 
       {hasLogo ? (
         <div
