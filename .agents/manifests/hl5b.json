@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "lane": "HL5b",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/sections/OutputSection.tsx",
+      "before": "            onChange={(e) => dispatch({ type: \"patch\", patch: { clickDestination: e.target.value } })}",
+      "after": "            onChange={() => {}}",
+      "because": "The destination input must dispatch a patch carrying what the operator typed, or the serialised brief never carries the click destination (HL-D3).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/sections/__tests__/output-section.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/sections/OutputSection.tsx",
+      "before": "          error={destinationProblem ? messages.clickDestinationProblem(destinationProblem) : undefined}",
+      "after": "          error={undefined}",
+      "because": "An invalid destination must show the domain's problem inline; dropping it leaves the field silently wrong until generation (HL-D3).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/sections/__tests__/output-section.test.tsx"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
