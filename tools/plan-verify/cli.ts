@@ -32,17 +32,6 @@ export interface PlanVerifyIo {
 export const PLAN_DIR = "docs/planning";
 
 export async function runCli(io: PlanVerifyIo): Promise<number> {
-  const isSubset = io.argv.length > 0;
-  const plans = isSubset
-    ? [...io.argv]
-    : (await io.listPlanDir()).filter((n) => n.endsWith(".md")).sort().map((n) => `${PLAN_DIR}/${n}`);
-  const premises: Premise[] = [];
-  for (const plan of plans) {
-    premises.push(...parsePremises(plan, await io.readFile(plan)));
-  }
-  const results = await verifyPremises(premises, io.deps);
-  io.log(formatReport(results));
-
   let branch = PROVENANCE_UNKNOWN;
   let head = PROVENANCE_UNKNOWN;
   try {
@@ -57,6 +46,17 @@ export async function runCli(io: PlanVerifyIo): Promise<number> {
   } catch {
     // unknown
   }
+
+  const isSubset = io.argv.length > 0;
+  const plans = isSubset
+    ? [...io.argv]
+    : (await io.listPlanDir()).filter((n) => n.endsWith(".md")).sort().map((n) => `${PLAN_DIR}/${n}`);
+  const premises: Premise[] = [];
+  for (const plan of plans) {
+    premises.push(...parsePremises(plan, await io.readFile(plan)));
+  }
+  const results = await verifyPremises(premises, io.deps);
+  io.log(formatReport(results));
 
   const scope: ArtifactScope = isSubset ? { kind: "partial", plans } : { kind: "full" };
   const artifact = buildArtifact(results, {
