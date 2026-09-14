@@ -40,9 +40,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/editor-state.ts",
-      "before": "          savedSnapshot: isBriefTemplate(resolvedSource.savedSnapshot.template)\n            ? canonicalBrief(resolvedSource.savedSnapshot)\n            : resolvedSource.savedSnapshot,",
-      "after": "          savedSnapshot: canonicalBrief(resolvedSource.savedSnapshot),",
-      "because": "A stored snapshot arrives from localStorage unvalidated. Canonicalising it without the isBriefTemplate gate throws on a null template (or a non-array / null-entry layers list), and loadDraftFromStorage's catch discards the whole recoverable draft.",
+      "before": "  if (!isBriefTemplate(brief.template)) return brief;\n  const template = canonicalTemplate(brief.template);",
+      "after": "  const template = canonicalTemplate(brief.template);",
+      "because": "canonicalBrief is the one guard: a template that fails isBriefTemplate must be returned unchanged, so discard (and every other fromBrief caller) cannot throw on a stored null / non-array / null-entry snapshot. Removing the check reopens the throw.",
       "command": [
         "yarn",
         "vitest",
@@ -51,7 +51,7 @@
         "web",
         "apps/web/src/components/campaign/__tests__/editor-state.test.ts",
         "-t",
-        "a stored draft whose snapshot template is null keeps the draft and the snapshot",
+        "discard of a restored draft whose snapshot template is null keeps the file",
         "--maxWorkers=2"
       ],
       "verdict": "caught"
