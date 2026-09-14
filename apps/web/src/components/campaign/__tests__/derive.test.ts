@@ -27,7 +27,10 @@ import {
   platformsToRatios,
   platformsToSizes,
   clampPolicy,
+  disableableLayerIds,
+  findOcclusionDeltaOverEnabled,
   removableLayerIds,
+  toggleableLayerIds,
   OCCLUSION_TABLE,
   checkPairOcclusion,
   checkRepositionOcclusion,
@@ -290,6 +293,100 @@ describe("derive.ts", () => {
       expect(removableLayerIds(videoState)).not.toContain("animated-text");
       expect(removableLayerIds(videoState)).toContain("logo");
       expect(removableLayerIds(videoState)).toContain("shade");
+    });
+  });
+
+  describe("the layer toggle (L9, D129, MP-D4)", () => {
+    const stateWithLayers = (
+      layers: readonly { id: string; kind: LayerKind; enabled?: boolean }[],
+    ) => {
+      const state = initialEditorState();
+      return { ...state, template: { ...state.template, layers } };
+    };
+
+    test("disableableLayerIds holds every optional layer and no required kind present once", () => {
+      // Canonical image-text: image and static-text are required, each present
+      // once — switching either off would leave the type without an enabled
+      // instance of it, which the boundary refuses (MP-D4).
+      const disableable = disableableLayerIds(initialEditorState());
+      expect(disableable).not.toContain("image");
+      expect(disableable).not.toContain("static-text");
+      expect(disableable).toContain("shade");
+      expect(disableable).toContain("accent");
+      expect(disableable).toContain("logo");
+    });
+
+    test("disableableLayerIds offers both instances of a required kind present twice enabled", () => {
+      const state = initialEditorState();
+      const doubled = [
+        ...state.template.layers,
+        { id: "image-2", kind: "image" as const },
+      ];
+      const disableable = disableableLayerIds(stateWithLayers(doubled));
+      expect(disableable).toContain("image");
+      expect(disableable).toContain("image-2");
+    });
+
+    test("disableableLayerIds omits the last enabled instance of a required kind, and never offers a layer already off", () => {
+      const state = initialEditorState();
+      const withDisabled = [
+        ...state.template.layers,
+        { id: "image-disabled", kind: "image" as const, enabled: false },
+      ];
+      const disableable = disableableLayerIds(stateWithLayers(withDisabled));
+      // One enabled instance left: switching it off strips the type of a kind it
+      // requires, so the offer is absent — never present-and-disabled (§1.5).
+      expect(disableable).not.toContain("image");
+      // A layer that is already off cannot be switched off a second time.
+      expect(disableable).not.toContain("image-disabled");
+    });
+
+    test("toggleableLayerIds adds every disabled layer to the disableable set", () => {
+      const state = initialEditorState();
+      const withDisabled = [
+        ...state.template.layers,
+        { id: "image-disabled", kind: "image" as const, enabled: false },
+      ];
+      const toggleable = toggleableLayerIds(stateWithLayers(withDisabled));
+      // The disabled instance carries a toggle — to switch it back on.
+      expect(toggleable).toContain("image-disabled");
+      // The last enabled required instance carries none at all.
+      expect(toggleable).not.toContain("image");
+      // An optional layer carries one either way.
+      expect(toggleable).toContain("shade");
+    });
+
+    test("toggleableLayerIds is exactly the disableable set on a template holding no disabled layer", () => {
+      const state = initialEditorState();
+      expect(toggleableLayerIds(state)).toEqual(disableableLayerIds(state));
+    });
+
+    test("findOcclusionDeltaOverEnabled ignores a disabled layer: it occludes nothing (MP-D3)", () => {
+      const image = { id: "image", kind: "image" as const };
+      const text = { id: "static-text", kind: "static-text" as const };
+      const shade = { id: "shade", kind: "shade" as const };
+      // Enabled, the shade sits above the headline and mutes it.
+      expect(
+        findOcclusionDeltaOverEnabled([image, text], [image, shade, text]),
+      ).toEqual({
+        above: "shade",
+        below: "static-text",
+        behavior: "attenuating",
+      });
+      // Disabled, it draws nothing — the same pair is no finding at all.
+      expect(
+        findOcclusionDeltaOverEnabled(
+          [image, text],
+          [image, { ...shade, enabled: false }, text],
+        ),
+      ).toBeNull();
+      // And a disabled layer below the change is not occluded either.
+      expect(
+        findOcclusionDeltaOverEnabled(
+          [image, { ...shade, enabled: false }],
+          [image, { ...shade, enabled: false }, text],
+        ),
+      ).toBeNull();
     });
 
     // Protects D121: CREATIVE_TYPE_RULES is the single source of what a creative
