@@ -23,6 +23,7 @@ export interface PremiseResult {
   readonly status: PremiseStatus;
   readonly exitCode: number;
   readonly output: string;
+  readonly reason?: string;
 }
 
 export interface VerifyDeps {

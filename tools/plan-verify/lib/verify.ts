@@ -17,13 +17,27 @@ export async function verifyPremises(
 ): Promise<readonly PremiseResult[]> {
   const results: PremiseResult[] = [];
   for (const premise of premises) {
-    const { exitCode, output, timedOut } = await deps.execute(premise.script);
-    results.push({
-      premise,
-      status: timedOut === true ? "timed-out" : exitCode === 0 ? "holds" : "stale",
-      exitCode,
-      output,
-    });
+    try {
+      const { exitCode, output, timedOut } = await deps.execute(premise.script);
+      const status: PremiseStatus = timedOut === true ? "timed-out" : exitCode === 0 ? "holds" : "stale";
+      const trimmed = output.trim();
+      results.push({
+        premise,
+        status,
+        exitCode,
+        output,
+        ...(status !== "holds" && trimmed !== "" ? { reason: trimmed } : {}),
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? (err.message || "Error") : String(err);
+      results.push({
+        premise,
+        status: "stale",
+        exitCode: 1,
+        output: message,
+        reason: message,
+      });
+    }
   }
   return results;
 }
