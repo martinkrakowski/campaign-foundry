@@ -120,10 +120,12 @@ export function Field({
   const id = useId();
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
+  const warningId = `${id}-warning`;
 
   const describedByIds: string[] = [];
   if (hint) describedByIds.push(hintId);
   if (error) describedByIds.push(errorId);
+  else if (warning) describedByIds.push(warningId);
   const describedBy = describedByIds.length > 0 ? describedByIds.join(" ") : undefined;
   const invalid = error ? "true" : undefined;
 
@@ -169,7 +171,9 @@ export function Field({
           {error}
         </span>
       ) : warning ? (
-        <span className="mt-1 block text-[11px] text-warning">{warning}</span>
+        <span id={warningId} className="mt-1 block text-[11px] text-warning">
+          {warning}
+        </span>
       ) : null}
     </div>
   );
