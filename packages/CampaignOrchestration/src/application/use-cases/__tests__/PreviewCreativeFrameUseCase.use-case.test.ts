@@ -18,7 +18,6 @@ import type { Product } from "../../../domain/entities/Product.js";
 import { fakeCompositor, fakeImageGenerator, fakeVideoCompositor } from "./_fakes.js";
 import { MOTION_FPS } from "../../../domain/value-objects/MotionKind.vo.js";
 import type { CopyTimeline } from "../../../domain/value-objects/CopyTimeline.vo.js";
-import type { VideoCompositeRequest } from "../../ports/out/VideoCompositorPort.js";
 
 /** The same sha256 the composition root injects — real hashing, real keys. */
 const sha256 = (input: string | Uint8Array): string =>
