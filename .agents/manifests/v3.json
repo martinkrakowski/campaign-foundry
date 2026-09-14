@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "lane": "v3",
+  "mutations": [
+    {
+      "file": "tools/sweep/lib/attribute.ts",
+      "before": "    const workflow: Attribution = matched.length === 1 ? matched[0] : \"unattributed\";",
+      "after": "    const workflow: Attribution = matched.length >= 1 ? matched[0] : \"unattributed\";",
+      "because": "V3's split is worthless if a thread that appears in two workflows is pinned on the first one that happened to match. Taking matches[0] on length >= 1 turns an unattributed collision into a false UI (or API) count, which is exactly the guess the fail-closed rule exists to refuse. Caught by the two-logs test asserting unattributed, not UI.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/attribute.test.ts",
+        "-t",
+        "text present in two logs is unattributed, never the first match"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/attribute.ts",
+      "before": "export function decodeRunLog(raw: string): string {\n  return unescapeJsonEscapes(raw);\n}",
+      "after": "export function decodeRunLog(raw: string): string {\n  return raw;\n}",
+      "because": "The job log stores the model's response JSON-escaped (\\n, \\\", \\u2011). Matching the thread's plain suggestion against the raw log misses every quote, every newline, and the non-breaking hyphen PR-Agent actually writes, so a real API thread looks unattributed. Caught by the escape test, whose log is the escaped form of the thread text.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/attribute.test.ts",
+        "-t",
+        "JSON escapes"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/attribute.ts",
+      "before": "  if (parsed.length === RUN_LIST_LIMIT) {\n    throw new Error(\n      `run list for ${workflow} was truncated at ${String(RUN_LIST_LIMIT)} — older runs were not searched`,\n    );\n  }",
+      "after": "  // mutated: a truncated run list is no longer refused",
+      "because": "A list that returns exactly the limit is incomplete: older runs are unsearched. Treating it as complete can hide a second workflow's match and turn a true ambiguity into a false single attribution. The refusal must stay. Caught by the at-limit test, which names the workflow and exits 1.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/attribute.test.ts",
+        "-t",
+        "a run list of exactly the limit exits 1, naming the workflow"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/attribute.ts",
+      "before": "    if (!commitShas.has(headSha)) continue;",
+      "after": "    // mutated: a foreign headSha is no longer ignored",
+      "because": "Runs selected by branch name alone pull in an older PR that reused the head-branch name. That older log can supply a match the current PR's runs do not, and a missing current-PR log then looks like a single attribution. Caught by the foreign-headSha test: the thread that matched only the other PR's run is unattributed.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/attribute.test.ts",
+        "-t",
+        "a run whose headSha is not among the PR's commits is ignored"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
