@@ -495,13 +495,11 @@ describe("renderStatus — backlog panel", () => {
       backlog: { state: "recorded", artifact: maliciousArtifact },
     };
     const out = renderStatus(status, { color: false });
-    expect(out).not.toContain("\x1b[2J");
+    expect(out).not.toContain("\x1b");
     expect(out).not.toContain("\x07");
-    expect(out).not.toContain("\x1b[31m");
-    expect(out).not.toContain("\x1b[1A");
     expect(out).not.toContain("\x00");
-    expect(out).toContain("W1 (docs/plan.md): stale — gap closed exploit");
+    expect(out).toContain("W1[1A (docs/plan.md): stale — gap closed[31m exploit");
     expect(out).toContain("feat/s5-bad");
-    expect(out).toContain("2026-09-13T12:00:00.000Z");
+    expect(out).toContain("2026-09-13T12:00:00.000Z[2J");
   });
 });

@@ -309,15 +309,15 @@ function renderBacklog(backlog: NonNullable<WaveStatus["backlog"]>, color: boole
     artifact.scope.kind === "partial"
       ? `partial run (${artifact.plans.join(", ")})`
       : `full run`;
-  const headSha = artifact.git.head.slice(0, 8);
+  const headSha = sanitize(artifact.git.head).slice(0, 8);
   const lines: string[] = [
-    `backlog (${scopeDesc}) — ${artifact.at} [${artifact.git.branch}@${headSha}]`,
+    `backlog (${scopeDesc}) — ${sanitize(artifact.at)} [${sanitize(artifact.git.branch)}@${headSha}]`,
   ];
   if (artifact.premises.length === 0) {
     lines.push(`${ROW_INDENT}(no premises)`);
   } else {
     for (const p of artifact.premises) {
-      const reasonText = p.reason !== undefined && p.reason !== "" ? ` — ${p.reason}` : "";
+      const reasonText = p.reason !== undefined && p.reason !== "" ? ` — ${sanitize(p.reason)}` : "";
       const statusText = color
         ? p.status === "holds"
           ? withCode(CYAN, p.status)
@@ -325,7 +325,7 @@ function renderBacklog(backlog: NonNullable<WaveStatus["backlog"]>, color: boole
             ? withCode(RED, p.status)
             : withCode(YELLOW, p.status)
         : p.status;
-      lines.push(`${ROW_INDENT}${p.lane} (${p.plan}): ${statusText}${reasonText}`);
+      lines.push(`${ROW_INDENT}${sanitize(p.lane)} (${sanitize(p.plan)}): ${statusText}${reasonText}`);
     }
   }
   return lines;
