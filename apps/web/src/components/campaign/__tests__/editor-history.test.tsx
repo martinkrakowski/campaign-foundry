@@ -36,7 +36,7 @@ const SERVER_KEYS: readonly (keyof EditorState)[] = [
 ];
 
 const pick = (state: EditorState, keys: readonly string[]): Record<string, unknown> =>
-  Object.fromEntries(keys.map((key) => [key, (state as Record<string, unknown>)[key]]));
+  Object.fromEntries(keys.map((key) => [key, (state as unknown as Record<string, unknown>)[key]]));
 
 const serverFields = (state: EditorState) => pick(state, SERVER_KEYS);
 
