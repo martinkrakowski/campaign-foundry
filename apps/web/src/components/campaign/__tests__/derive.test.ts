@@ -365,28 +365,29 @@ describe("derive.ts", () => {
       const image = { id: "image", kind: "image" as const };
       const text = { id: "static-text", kind: "static-text" as const };
       const shade = { id: "shade", kind: "shade" as const };
+      const off = { ...shade, enabled: false };
       // Enabled, the shade sits above the headline and mutes it.
       expect(
-        findOcclusionDeltaOverEnabled([image, text], [image, shade, text]),
+        findOcclusionDeltaOverEnabled([image, shade, text], [image, text, shade]),
       ).toEqual({
         above: "shade",
         below: "static-text",
         behavior: "attenuating",
       });
-      // Disabled, it draws nothing — the same pair is no finding at all.
+      // Disabled, it draws nothing — the same move is no finding at all.
       expect(
-        findOcclusionDeltaOverEnabled(
-          [image, text],
-          [image, { ...shade, enabled: false }, text],
-        ),
+        findOcclusionDeltaOverEnabled([image, off, text], [image, text, off]),
       ).toBeNull();
-      // And a disabled layer below the change is not occluded either.
+      // And the layer a disabled one would have occluded is left out of the
+      // comparison entirely: no pair involving it can be a new finding.
       expect(
-        findOcclusionDeltaOverEnabled(
-          [image, { ...shade, enabled: false }],
-          [image, { ...shade, enabled: false }, text],
-        ),
+        findOcclusionDeltaOverEnabled([], [image, off, text]),
       ).toBeNull();
+      expect(findOcclusionDeltaOverEnabled([], [image, text, shade])).toEqual({
+        above: "shade",
+        below: "static-text",
+        behavior: "attenuating",
+      });
     });
 
     // Protects D121: CREATIVE_TYPE_RULES is the single source of what a creative
