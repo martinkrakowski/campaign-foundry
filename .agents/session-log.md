@@ -4698,3 +4698,13 @@ Lanes launched directly with a checkpoint-commit rule lost minutes, not runs. Bo
 **Deferred.** Video Phases B–C wait on VE-Q1..Q4 (music rights, voiceover source, scene budget, footage
 decoding). K2–K5 wait on the three K1 model decisions. Open lanes: HL5, X8 (diagnosis first), X10, X12, V3 (a
 sweep-time per-workflow record), X1 (a deliberate quiet window).
+
+## 2026-09-14 — X12: a persisted row's click destination is checked, not believed
+
+`isPersistedAsset` is a type predicate, so a row it admits is believed; it verified the html bundle and
+fallback paths but never `clickDestination`, which `PackageForPlatformUseCase` reads to decide whether a
+bundle carries a `clickTag`. The refusal test came first and failed red (`clickDestination: 42` admitted);
+the fix is one line — present must be a string, absent stays valid — placed with the other field checks.
+One mutation (the check removed) replays caught; the X12 premise fence is retired in the gaps plan.
+Full gate green on the committed tree: build, typecheck, lint, lint:arch, `sync:check` (total ops 0),
+`test:cov` **4784 passed | 4 skipped — 100 % on all four counters**.
