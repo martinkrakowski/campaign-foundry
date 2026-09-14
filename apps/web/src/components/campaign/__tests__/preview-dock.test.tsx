@@ -212,7 +212,7 @@ describe("PreviewDock — scrub control (VE-D5, VE-D6)", () => {
     );
     const slider = container.querySelector('input[type="range"]');
     expect(slider).not.toBeNull();
-    expect(slider?.getAttribute("aria-label")).toMatch(/scrub|preview/i);
+    expect(slider?.getAttribute("aria-label")).toBe(messages.previewScrubLabel);
     expect(slider?.getAttribute("min")).toBe("0");
     expect(Number(slider?.getAttribute("max"))).toBeGreaterThan(0);
   });

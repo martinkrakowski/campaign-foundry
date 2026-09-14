@@ -178,6 +178,8 @@ export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
   const [scrubSec, setScrubSec] = useState(0);
   const [committedSec, setCommittedSec] = useState(0);
   const hasMotion = props.motion !== undefined;
+  const clampedScrubSec = Math.min(Math.max(0, scrubSec), Math.max(0, durationSec));
+  const clampedCommittedSec = Math.min(Math.max(0, committedSec), Math.max(0, durationSec));
 
   const handleCommit = (e: SyntheticEvent<HTMLInputElement>) => {
     setCommittedSec(Number(e.currentTarget.value));
@@ -196,7 +198,7 @@ export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
         headline={props.headline}
         motion={props.motion}
         durationSec={hasMotion ? durationSec : undefined}
-        atSec={hasMotion ? committedSec : undefined}
+        atSec={hasMotion ? clampedCommittedSec : undefined}
         spec={spec}
         className="block h-auto w-full"
       />
@@ -204,11 +206,11 @@ export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
         <div className="flex items-center gap-2 px-1">
           <input
             type="range"
-            aria-label="Scrub preview"
+            aria-label={messages.previewScrubLabel}
             min={0}
             max={durationSec}
             step="any"
-            value={scrubSec}
+            value={clampedScrubSec}
             onChange={(e) => {
               const val = Number(e.target.value);
               setScrubSec(val);

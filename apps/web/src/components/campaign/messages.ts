@@ -1183,3 +1183,7 @@ export function reviewTemplateLayers(count: number): string {
 /** The Template step's subtitle. */
 export const stepSubtitleTemplate =
   "Choose what every creative is made of — add or remove layers.";
+
+/** Accessible name for the video preview's scrub range control (VE-D5). */
+export const previewScrubLabel = "Scrub preview";
+
