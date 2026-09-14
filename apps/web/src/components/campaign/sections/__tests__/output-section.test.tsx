@@ -11,6 +11,7 @@ import {
   type EditorState,
 } from "../../editor-state";
 import * as messages from "../../messages";
+import { validateOutput } from "../../validate";
 import { clickDestinationProblem } from "@campaignfoundry/CampaignOrchestration/click-destination";
 
 const state = (over: Partial<EditorState> = {}): EditorState => ({
@@ -21,16 +22,18 @@ const state = (over: Partial<EditorState> = {}): EditorState => ({
 /**
  * The section is controlled. The serialisation claim cannot be observed through
  * a bare `vi.fn()`, so the dispatch runs the real reducer and rerenders — the
- * same harness the Identity section's two-direction claims use.
+ * same harness the Identity section's two-direction claims use. The errors come
+ * from `validateOutput`, the structural result Save itself consults, so the inline
+ * message is pinned to the same decision the save refusal is.
  */
 const renderWithReducer = (initial: EditorState) => {
   let current = initial;
   const dispatch = vi.fn((action: EditorAction) => {
     current = editorReducer(current, action);
-    rerender(<OutputSection state={current} dispatch={dispatch} errors={{}} />);
+    rerender(<OutputSection state={current} dispatch={dispatch} errors={validateOutput(current)} />);
   });
   const { rerender, container } = render(
-    <OutputSection state={current} dispatch={dispatch} errors={{}} />,
+    <OutputSection state={current} dispatch={dispatch} errors={validateOutput(current)} />,
   );
   return { dispatch, container, getState: () => current };
 };
@@ -59,8 +62,9 @@ describe("OutputSection — the click destination (HL5b, HL-D3)", () => {
     const problem = clickDestinationProblem("not-a-url");
     expect(problem).toBeDefined();
     // The sentence is the one voice; the decision is the domain's, never a
-    // second URL check in the web app.
-    expect(screen.getByText(messages.clickDestinationProblem(problem!))).toBeTruthy();
+    // second URL check in the web app. The section reads the same structural
+    // result Save consults, so the two can never disagree.
+    expect(screen.getByText(messages.clickDestinationInvalid(problem!))).toBeTruthy();
   });
 
   test("an empty field is valid and emits no clickDestination", () => {
