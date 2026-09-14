@@ -16,7 +16,8 @@
 #   2. Push the refreshed branch.
 #   3. Wait for CI on the new head — poll until checks are REGISTERED, then watch
 #      (`gh pr checks --watch --fail-fast`). A fixed sleep races the forge; see #206.
-#   4. Settle for the review bots, then ask the merge condition of `yarn sweep gate`:
+#   4. Wait a bounded settle period for review bots (a wait, not proof any bot ran),
+#      then ask the merge condition of `yarn sweep gate`:
 #      zero unresolved review threads on the final head, and a head unchanged since
 #      its check-runs were read. Both are decided in TypeScript (tools/sweep).
 #   5. Squash-merge.
@@ -202,8 +203,17 @@ for spec in "$@"; do
   # Give the review bots a bounded window to post on THIS head. A check-run
   # conclusion says nothing about a bot that has not run yet, and the whole
   # point of the merge condition is the finding that lands after CI is green.
+  # This is a wait, not a proof: only bots that re-run on push (Qodo,
+  # CodeRabbit) can post on a refreshed head at all — the PR-Agent workflows
+  # trigger on opened/reopened/ready_for_review only — and nothing here checks
+  # that any bot actually ran. What IS enforced is below: zero unresolved
+  # threads, and a head unchanged since its checks were read.
+  # nounset and pipefail are on but errexit is not, so a bad duration must be
+  # refused here: `sleep` failing would otherwise skip the wait silently.
+  [[ "$REVIEW_SETTLE_SECONDS" == <-> ]] \
+    || die "REVIEW_SETTLE_SECONDS must be a whole number of seconds (got '$REVIEW_SETTLE_SECONDS')"
   echo "settling ${REVIEW_SETTLE_SECONDS}s for review bots on $head_sha …"
-  sleep "$REVIEW_SETTLE_SECONDS"
+  sleep "$REVIEW_SETTLE_SECONDS" || die "the review-bot settle wait failed — not merging #$pr"
 
   # The merge condition itself, decided in TypeScript (`tools/sweep`, `yarn sweep gate`):
   # zero unresolved review threads on every page, and a head that is still the

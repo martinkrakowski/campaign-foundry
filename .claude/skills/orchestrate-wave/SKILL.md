@@ -294,13 +294,19 @@ that did not happen.
    every check-run conclusion is success, skipped or neutral (read conclusions, not the rollup line —
    `neutral` is what informational checks report); the review bots have had time to post on that head;
    and **zero review threads are unresolved**. **`scripts/merge-prs.sh` enforces this**: once the
-   required check has concluded green on the head it pushed, it settles for the review bots
-   (`REVIEW_SETTLE_SECONDS`, default 120), then refuses to merge while any review thread is unresolved
+   required check has concluded green on the head it pushed, it waits a bounded settle period for the
+   review bots (`REVIEW_SETTLE_SECONDS`, default 120, refused unless a whole number), then refuses to merge
+   while any review thread is unresolved
    — naming each open thread's first-comment author and an excerpt — and re-reads the PR's head
    immediately before `gh pr merge`, refusing if it is no longer the SHA whose checks were read. The
    decision itself lives in TypeScript (`tools/sweep`, `yarn sweep gate --pr <n> --sha <sha>`), because
    it has to be tested and the runners have no zsh; the script is only its caller. A page of threads
    that could not be read is "could not decide" and refuses — never a silent zero (X13).
+   **The settle period is a wait, not a proof that the bots reviewed the final head.** Only bots that
+   re-run on push (Qodo, CodeRabbit) can post on a refreshed head; the PR-Agent workflows trigger on
+   `opened`/`reopened`/`ready_for_review` only, and nothing checks that any bot ran. The script enforces
+   two things — no unresolved threads and an unchanged head — and a PR whose final head deserves a bot's
+   eyes still needs you to confirm the bot posted on it.
    On 2026-09-13 a merge gated on CI alone raced the bots — nothing was missed that time, but only by
    luck — and the full condition later held back a PR whose final-head review found a real defect
    the gate could not see.
