@@ -169,6 +169,49 @@ describe("assembleHtml (HL4, HL-D3, HL-D6)", () => {
     expect(result.html).toContain("justify-content: flex-end;");
   });
 
+  test("a clickDestination containing </script> cannot break out of the script element (HL-D7)", () => {
+    const destination = "https://example.com/</script><script>alert(1)</script>";
+    const result = assembleHtml({
+      elements: sampleElements,
+      canvas: { ratio: "1:1" },
+      brandColor: "#1473E6",
+      clickDestination: destination,
+    });
+
+    // Exactly one script element: the crafted value cannot close the
+    // declaration and append executable markup.
+    expect((result.html.match(/<script/g) ?? []).length).toBe(1);
+    expect((result.html.match(/<\/script>/g) ?? []).length).toBe(1);
+    // `<`/`>` survive only as \uXXXX escapes — no literal HTML syntax in the JS string.
+    expect(result.html).toContain("\\u003C/script\\u003E");
+    // The value stays a correct JS string: decoding the literal yields the original destination.
+    const declaration = /var clickTag = (".*");/.exec(result.html);
+    expect(declaration).not.toBeNull();
+    expect(JSON.parse(declaration![1] as string)).toBe(destination);
+  });
+
+  test("a brandColor that is not the documented 6-digit hex shape is refused (HL-D7)", () => {
+    expect(() =>
+      assembleHtml({
+        elements: sampleElements,
+        canvas: { ratio: "1:1" },
+        brandColor: '#fff" autofocus onfocus="alert(1)',
+      }),
+    ).toThrowError(/brandColor/);
+  });
+
+  test("a valid brandColor renders unchanged in the button style attribute", () => {
+    const result = assembleHtml({
+      elements: [
+        { kind: "button", text: "Go", frame: { x: 0, y: 0, w: 1, h: 1, anchor: "middle" } },
+      ],
+      canvas: { ratio: "1:1" },
+      brandColor: "#1473E6",
+    });
+
+    expect(result.html).toContain("background-color: #1473E6;");
+  });
+
   test("handles empty elements options", () => {
     const result = assembleHtml({
       canvas: { ratio: "1:1" },

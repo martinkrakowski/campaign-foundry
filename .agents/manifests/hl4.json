@@ -4,7 +4,7 @@
   "mutations": [
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts",
-      "before": "  if (clickDestination !== undefined) {\n    headScripts.push(\n      `<script>var ${CLICK_TAG_VARIABLE} = ${JSON.stringify(clickDestination)};</script>`,\n    );\n  }",
+      "before": "  if (clickDestination !== undefined) {\n    headScripts.push(\n      `<script>var ${CLICK_TAG_VARIABLE} = ${escapeScriptJson(JSON.stringify(clickDestination))};</script>`,\n    );\n  }",
       "after": "  // clickTag script omitted",
       "because": "assembleHtml must emit a var clickTag declaration in the head scripts when clickDestination is present (HL-D3) so ad servers can wire and track click navigation.",
       "command": [
@@ -74,6 +74,36 @@
         "--project",
         "node",
         "packages/CampaignOrchestration/src/application/use-cases/__tests__/GenerateCampaignUseCase.use-case.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts",
+      "before": "      `<script>var ${CLICK_TAG_VARIABLE} = ${escapeScriptJson(JSON.stringify(clickDestination))};</script>`,",
+      "after": "      `<script>var ${CLICK_TAG_VARIABLE} = ${JSON.stringify(clickDestination)};</script>`,",
+      "because": "assembleHtml must escape <, > and & as \\uXXXX inside the clickTag script declaration: JSON.stringify does not stop a crafted destination containing </script> from closing the element and appending executable markup (HL-D7).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/markup-assembler.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/markup-assembler.ts",
+      "before": "function safeBrandColor(brandColor: string): string {\n  if (!BRAND_COLOR_PATTERN.test(brandColor)) {\n    throw new Error(\n      `assembleHtml: brandColor must be a 6-digit hex colour like \"#1473E6\", got ${JSON.stringify(brandColor)}`,\n    );\n  }\n  return escapeHtml(brandColor);\n}",
+      "after": "function safeBrandColor(brandColor: string): string {\n  return brandColor;\n}",
+      "because": "assembleHtml must refuse a brandColor that is not the documented 6-digit hex shape and escape the value for the quoted style attribute: a verbatim interpolation lets a crafted colour close the attribute and attach its own handler, e.g. autofocus onfocus, which runs when the ad loads (HL-D7).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/markup-assembler.test.ts"
       ],
       "verdict": "caught"
     }

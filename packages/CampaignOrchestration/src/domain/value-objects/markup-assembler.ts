@@ -13,7 +13,11 @@
  *    is provided; refused over budget with an error naming both the budget and the overage.
  * 3. Element vocabulary (HL-D2): Expresses `button`, `text`, and `image` elements
  *    matching the canvas rendition geometry and styling.
- * 4. Content safety (HL-D7): All user-authored strings are HTML-escaped to prevent XSS.
+ * 4. Content safety (HL-D7): Every interpolation is escaped for its context —
+ *    HTML text and quoted attributes are HTML-escaped, the clickTag script
+ *    declaration uses `\uXXXX` escapes (entities would corrupt the JS string),
+ *    and the brand colour is additionally refused unless it is the documented
+ *    6-digit hex shape.
  */
 
 import { resolveCanvas, scaleBasis, type CanvasSpec } from "./aspect-ratios.js";
@@ -21,7 +25,7 @@ import { CLICK_TAG_VARIABLE } from "./click-destination.js";
 import { DEFAULT_STYLE, resolveStyle, type Style } from "./creative-style.js";
 import type { HtmlElement } from "./html-element.js";
 
-/** HTML-escape user-authored strings to prevent injection (HL-D7). */
+/** HTML-escape user-authored strings for the HTML text / quoted-attribute contexts (HL-D7). */
 export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -29,6 +33,44 @@ export function escapeHtml(value: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+/**
+ * Escape the output of `JSON.stringify` for the **JS string-in-`<script>`** context (HL-D7).
+ *
+ * HTML-escaping is the wrong tool here: entities inside a JS string literal would
+ * corrupt the value. The parser instead ends a script element at the first literal
+ * `</script>` (or begins a comment at `<!--`) regardless of JS string context, so a
+ * crafted destination could close the declaration and append executable markup.
+ * `\uXXXX` escapes keep the JS value byte-exact while making HTML syntax impossible
+ * to appear literally. None of the replacements introduces `&`, `<` or `>`, so the
+ * order is safe.
+ */
+function escapeScriptJson(json: string): string {
+  return json
+    .replace(/</g, "\\u003C")
+    .replace(/>/g, "\\u003E")
+    .replace(/&/g, "\\u0026");
+}
+
+/** The documented brand colour shape: a 6-digit hex colour, e.g. `#1473E6`. */
+const BRAND_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
+
+/**
+ * Gate the brand colour by **shape** and escape it for the **quoted style-attribute**
+ * context (HL-D7). A verbatim `background-color: ${brandColor}` lets a value carrying
+ * a quote close the attribute and attach its own handler (e.g. `autofocus onfocus=…`),
+ * which runs when the ad loads. The shape refusal is the layer escaping alone cannot
+ * be: inside a style attribute even an escaped value may still chain CSS declarations
+ * with `;`. Every legitimate caller already passes hex; anything else is a defect.
+ */
+function safeBrandColor(brandColor: string): string {
+  if (!BRAND_COLOR_PATTERN.test(brandColor)) {
+    throw new Error(
+      `assembleHtml: brandColor must be a 6-digit hex colour like "#1473E6", got ${JSON.stringify(brandColor)}`,
+    );
+  }
+  return escapeHtml(brandColor);
 }
 
 export interface AssembleHtmlOptions {
@@ -56,7 +98,7 @@ export function assembleHtml(options: AssembleHtmlOptions): AssembledHtml {
   const { width, height } = resolveCanvas(options.canvas);
   const resolvedStyle = resolveStyle(options.style, "bold", DEFAULT_STYLE.fontFamily);
   const elements = options.elements ?? [];
-  const brandColor = options.brandColor;
+  const brandColor = safeBrandColor(options.brandColor);
   const clickDestination = options.clickDestination;
   const profile = options.profile;
   const fallbackImageSrc = options.fallbackImageSrc ?? "fallback.png";
@@ -64,7 +106,7 @@ export function assembleHtml(options: AssembleHtmlOptions): AssembledHtml {
   const headScripts: string[] = [];
   if (clickDestination !== undefined) {
     headScripts.push(
-      `<script>var ${CLICK_TAG_VARIABLE} = ${JSON.stringify(clickDestination)};</script>`,
+      `<script>var ${CLICK_TAG_VARIABLE} = ${escapeScriptJson(JSON.stringify(clickDestination))};</script>`,
     );
   }
 
