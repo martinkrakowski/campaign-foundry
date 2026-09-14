@@ -998,6 +998,88 @@ describe("fromBrief", () => {
     expect(state.localizedMessage).toBe("");
   });
 
+  test("a freshly opened brief with a null scalar is not dirty", () => {
+    const state = fromBrief(
+      savedBrief({ targetAudience: null as unknown as string }),
+      { file: "camp.yaml" },
+    );
+    expect(isDirtySinceSave(state)).toBe(false);
+  });
+
+  test("a freshly opened brief with a null localizedMessage is not dirty", () => {
+    const state = fromBrief(
+      savedBrief({ localizedMessage: null as unknown as string }),
+      { file: "camp.yaml" },
+    );
+    expect(isDirtySinceSave(state)).toBe(false);
+  });
+
+  test("a freshly opened brief with a null product name is not dirty", () => {
+    const brief = savedBrief();
+    const state = fromBrief(
+      {
+        ...brief,
+        products: [{ ...brief.products[0], name: null as unknown as string }],
+      },
+      { file: "camp.yaml" },
+    );
+    expect(isDirtySinceSave(state)).toBe(false);
+  });
+
+  test("a freshly opened brief with a null product inputAsset is not dirty", () => {
+    const brief = savedBrief();
+    const state = fromBrief(
+      {
+        ...brief,
+        products: [
+          { ...brief.products[0], inputAsset: null as unknown as string },
+        ],
+      },
+      { file: "camp.yaml" },
+    );
+    expect(isDirtySinceSave(state)).toBe(false);
+  });
+
+  test("a freshly opened brief with an empty-string product inputAsset is not dirty", () => {
+    const brief = savedBrief();
+    const state = fromBrief(
+      {
+        ...brief,
+        products: [{ ...brief.products[0], inputAsset: "" }],
+      },
+      { file: "camp.yaml" },
+    );
+    expect(isDirtySinceSave(state)).toBe(false);
+  });
+
+  test("a freshly opened brief with a blank product inputAsset is not dirty", () => {
+    const brief = savedBrief();
+    const state = fromBrief(
+      {
+        ...brief,
+        products: [{ ...brief.products[0], inputAsset: "   " }],
+      },
+      { file: "camp.yaml" },
+    );
+    expect(isDirtySinceSave(state)).toBe(false);
+  });
+
+  test("a loaded product inputAsset is kept and the brief is not dirty", () => {
+    const brief = savedBrief();
+    const state = fromBrief(
+      {
+        ...brief,
+        products: [
+          { ...brief.products[0], inputAsset: "assets/inputs/bg.png" },
+        ],
+      },
+      { file: "camp.yaml" },
+    );
+    expect(state.products[0].inputAsset).toBe("assets/inputs/bg.png");
+    expect(toBrief(state).products[0].inputAsset).toBe("assets/inputs/bg.png");
+    expect(isDirtySinceSave(state)).toBe(false);
+  });
+
   test("treatments, mode, output and localizedMessage are carried through when present", () => {
     const state = fromBrief(
       savedBrief({
@@ -4808,6 +4890,105 @@ describe("canonical layer defaults (X16)", () => {
       },
     } as unknown as CampaignBrief;
     expect(canonicalBrief(nullLayer)).toBe(nullLayer);
+  });
+
+  /**
+   * X17 — the same total-function duty applies below the template: the
+   * snapshot's `products` list reaches canonicalNullScalars unvalidated, and
+   * an unconditional `.map` threw on a stored `null`, a bare string, or a
+   * `[null]` entry, so loadDraftFromStorage discarded the whole draft. A
+   * malformed products shape is held verbatim, exactly like a malformed
+   * template.
+   */
+  test("a stored draft whose snapshot products is null keeps the draft and the snapshot", () => {
+    const snapshot = { ...savedBrief(), products: null };
+    const restored = normalizeDraftState(storedFileDraft(snapshot));
+    expect(restored.campaignName).toBe("Recover me");
+    expect(restored.briefId).toBe("camp");
+    expect(
+      restored.source.kind === "file" && restored.source.savedSnapshot,
+    ).toBe(snapshot);
+  });
+
+  test("a stored draft whose snapshot products is not an array keeps the draft and the snapshot", () => {
+    const snapshot = { ...savedBrief(), products: "x" };
+    const restored = normalizeDraftState(storedFileDraft(snapshot));
+    expect(restored.campaignName).toBe("Recover me");
+    expect(restored.briefId).toBe("camp");
+    expect(
+      restored.source.kind === "file" && restored.source.savedSnapshot,
+    ).toBe(snapshot);
+  });
+
+  test("a stored draft whose snapshot products contain null keeps the draft and the snapshot", () => {
+    const snapshot = { ...savedBrief(), products: [null] };
+    const restored = normalizeDraftState(storedFileDraft(snapshot));
+    expect(restored.campaignName).toBe("Recover me");
+    expect(restored.briefId).toBe("camp");
+    expect(
+      restored.source.kind === "file" && restored.source.savedSnapshot,
+    ).toBe(snapshot);
+  });
+
+  test("a stored draft whose snapshot is not an object keeps the draft and the snapshot", () => {
+    const restored = normalizeDraftState(storedFileDraft("x"));
+    expect(restored.campaignName).toBe("Recover me");
+    expect(restored.briefId).toBe("camp");
+    expect(
+      restored.source.kind === "file" && restored.source.savedSnapshot,
+    ).toBe("x");
+  });
+
+  test("canonicalBrief returns the same object for each malformed products shape", () => {
+    const productsNull = { ...savedBrief(), products: null } as unknown as CampaignBrief;
+    expect(canonicalBrief(productsNull)).toBe(productsNull);
+
+    const productsNotArray = {
+      ...savedBrief(),
+      products: "x",
+    } as unknown as CampaignBrief;
+    expect(canonicalBrief(productsNotArray)).toBe(productsNotArray);
+
+    const nullProduct = {
+      ...savedBrief(),
+      products: [null],
+    } as unknown as CampaignBrief;
+    expect(canonicalBrief(nullProduct)).toBe(nullProduct);
+
+    const notAnObject = "x" as unknown as CampaignBrief;
+    expect(canonicalBrief(notAnObject)).toBe(notAnObject);
+  });
+
+  test("discard of a restored draft whose snapshot products is null keeps the file", () => {
+    const snapshot = { ...savedBrief(), products: null };
+    const restored = normalizeDraftState(storedFileDraft(snapshot));
+    expect(() => reduce(restored, { type: "discard" })).not.toThrow();
+    const discarded = reduce(restored, { type: "discard" });
+    expect(discarded.source.kind).toBe("file");
+    expect(
+      discarded.source.kind === "file" && discarded.source.file,
+    ).toBe("camp.yaml");
+  });
+
+  test("discard of a restored draft whose snapshot products contain null keeps the file", () => {
+    const snapshot = { ...savedBrief(), products: [null] };
+    const restored = normalizeDraftState(storedFileDraft(snapshot));
+    expect(() => reduce(restored, { type: "discard" })).not.toThrow();
+    const discarded = reduce(restored, { type: "discard" });
+    expect(discarded.source.kind).toBe("file");
+    expect(
+      discarded.source.kind === "file" && discarded.source.file,
+    ).toBe("camp.yaml");
+  });
+
+  test("discard of a restored draft whose snapshot is not an object keeps the file", () => {
+    const restored = normalizeDraftState(storedFileDraft("x"));
+    expect(() => reduce(restored, { type: "discard" })).not.toThrow();
+    const discarded = reduce(restored, { type: "discard" });
+    expect(discarded.source.kind).toBe("file");
+    expect(
+      discarded.source.kind === "file" && discarded.source.file,
+    ).toBe("camp.yaml");
   });
 
   test("discard of a restored draft whose snapshot template is null keeps the file", () => {

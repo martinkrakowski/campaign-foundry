@@ -1023,17 +1023,101 @@ export function canonicalTemplate(template: BriefTemplate): BriefTemplate {
   return changed ? { ...template, layers } : template;
 }
 
+/**
+ * `toBrief` always writes these as strings, empty included. A YAML empty
+ * scalar is null at the boundary (D68); mapping it to "" is the form the
+ * draft holds, so a freshly opened file is not dirty.
+ */
+const REQUIRED_BRIEF_STRINGS = [
+  "targetRegion",
+  "targetAudience",
+  "campaignMessage",
+] as const;
+
+/**
+ * `toBrief` omits these when empty. Null is absence: drop the key so the
+ * snapshot matches a save of the coalesced draft.
+ */
+const OMITTED_BRIEF_STRINGS = [
+  "localizedMessage",
+  "clickDestination",
+] as const;
+
+const REQUIRED_PRODUCT_STRINGS = [
+  "id",
+  "name",
+  "primaryColor",
+  "logoPath",
+] as const;
+
+function canonicalProduct(product: Product): Product {
+  // A stored snapshot's products array can hold anything: a null entry from a
+  // hand-edited file is held verbatim, the way a malformed template is, so
+  // recovery never throws and never loses the draft.
+  if (product === null || typeof product !== "object") return product;
+  let changed = false;
+  const next: Record<string, unknown> = { ...product };
+  for (const key of REQUIRED_PRODUCT_STRINGS) {
+    if (next[key] == null) {
+      next[key] = "";
+      changed = true;
+    }
+  }
+  // `toProduct` writes inputAsset only when its trimmed value is non-empty,
+  // so null, "" and a blank string all spell absence and drop the key.
+  if (
+    "inputAsset" in next &&
+    (next.inputAsset == null ||
+      (typeof next.inputAsset === "string" && next.inputAsset.trim() === ""))
+  ) {
+    delete next.inputAsset;
+    changed = true;
+  }
+  return changed ? (next as unknown as Product) : product;
+}
+
+function canonicalNullScalars(brief: CampaignBrief): CampaignBrief {
+  // The same totality one level up: a snapshot that is not an object (a bare
+  // string from a corrupt localStorage entry) is returned unchanged.
+  if (brief === null || typeof brief !== "object") return brief;
+  let changed = false;
+  const next: Record<string, unknown> = { ...brief };
+  for (const key of REQUIRED_BRIEF_STRINGS) {
+    if (next[key] == null) {
+      next[key] = "";
+      changed = true;
+    }
+  }
+  for (const key of OMITTED_BRIEF_STRINGS) {
+    if (key in next && next[key] == null) {
+      delete next[key];
+      changed = true;
+    }
+  }
+  if (Array.isArray(brief.products)) {
+    const products = brief.products.map(canonicalProduct);
+    if (products.some((product, i) => product !== brief.products[i])) {
+      next.products = products;
+      changed = true;
+    }
+  }
+  return changed ? (next as unknown as CampaignBrief) : brief;
+}
+
 export function canonicalBrief(brief: CampaignBrief): CampaignBrief {
   // A pre-L3a brief (and a few fixtures) carries no template; absence is
-  // not a default to rewrite, so the brief is returned as it arrived.
-  if (brief.template === undefined) return brief;
+  // not a default to rewrite. Null scalars still collapse, so a template-less
+  // snapshot with `targetAudience: null` is not dirty against the draft.
+  if (brief.template === undefined) return canonicalNullScalars(brief);
   // A stored snapshot (or any other caller) can carry a template that
   // fails isBriefTemplate: null, a non-array layers list, a null entry.
   // Mapping those throws. Before X16 they were held verbatim; every path
   // through here must do the same, so discard does not lose the file.
-  if (!isBriefTemplate(brief.template)) return brief;
+  if (!isBriefTemplate(brief.template)) return canonicalNullScalars(brief);
   const template = canonicalTemplate(brief.template);
-  return template === brief.template ? brief : { ...brief, template };
+  const withTemplate =
+    template === brief.template ? brief : { ...brief, template };
+  return canonicalNullScalars(withTemplate);
 }
 
 /**
@@ -2152,8 +2236,10 @@ export function fromBrief(
   entry?: { file: string; revision?: string },
 ): EditorState {
   // X16: a hand-authored `enabled: true` or `elements: []` is the same as
-  // absence. Canonicalise once so the draft and the snapshot are the form
-  // `withEnabled` / `withElements` write, and a freshly loaded file is not dirty.
+  // absence. X17: a YAML empty scalar is null at the boundary (D68); the
+  // snapshot maps those to the form `toBrief` writes (`""` or omitted), so
+  // a freshly loaded file is not dirty. Canonicalise once so the draft and
+  // the snapshot share that form.
   const canonical = canonicalBrief(brief);
   const tempId = generateTempId();
   const source: EditorSource = entry
@@ -2165,16 +2251,29 @@ export function fromBrief(
         revision: entry.revision,
       }
     : { kind: "new", tempId };
+  // A stored snapshot reaches discard unvalidated: `products` can be absent,
+  // null, or a non-array, and an entry can be null. `list` proves an array,
+  // and an unusable entry is treated as an empty object, so recovery and
+  // discard never dereference what they cannot read.
+  const rawProducts = list<Product>(brief.products, []);
   const products =
-    brief.products.length > 0
-      ? brief.products.map((p, i) => ({
-          ...emptyProduct(i + 1, p.primaryColor),
-          ...p,
-          idTouched: true,
-        }))
+    rawProducts.length > 0
+      ? rawProducts.map((p, i) => {
+          const product =
+            p !== null && typeof p === "object" ? p : ({} as Product);
+          return {
+            ...emptyProduct(i + 1, product.primaryColor),
+            ...product,
+            id: product.id ?? "",
+            name: product.name ?? "",
+            primaryColor: product.primaryColor ?? "",
+            logoPath: product.logoPath ?? "",
+            inputAsset: product.inputAsset ?? "",
+            idTouched: true,
+          };
+        })
       : [emptyProduct(1)];
-  const nextProductKey =
-    brief.products.length > 0 ? brief.products.length + 1 : 2;
+  const nextProductKey = rawProducts.length > 0 ? rawProducts.length + 1 : 2;
   const treatments =
     brief.treatments?.map((t) => ({
       id: t.id,
@@ -2254,9 +2353,9 @@ export function fromBrief(
     template: canonical.template,
     campaignName: brief.id,
     briefId: brief.id,
-    targetRegion: brief.targetRegion,
-    targetAudience: brief.targetAudience,
-    campaignMessage: brief.campaignMessage,
+    targetRegion: brief.targetRegion ?? "",
+    targetAudience: brief.targetAudience ?? "",
+    campaignMessage: brief.campaignMessage ?? "",
     localizedMessage: brief.localizedMessage ?? "",
     clickDestination: brief.clickDestination ?? "",
     products,
