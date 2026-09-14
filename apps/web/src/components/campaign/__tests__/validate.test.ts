@@ -338,6 +338,22 @@ describe("null scalars from a listed brief do not crash the editor (X17)", () =>
     expect(errors["product-0-name"]).toBe(messages.productName);
   });
 
+  test("a product with a null id is a product-id error, not a throw", () => {
+    const brief = toBrief(valid());
+    const errors = validateProducts(
+      listed({ products: [{ ...brief.products[0], id: null }] }),
+    );
+    expect(errors["product-0-id"]).toBe(messages.productId);
+  });
+
+  test("a product with a null primaryColor is a product-color error, not a throw", () => {
+    const brief = toBrief(valid());
+    const errors = validateProducts(
+      listed({ products: [{ ...brief.products[0], primaryColor: null }] }),
+    );
+    expect(errors["product-0-color"]).toBe(messages.productColor);
+  });
+
   test("a product with a null logoPath is a product-logo error, not a throw", () => {
     const brief = toBrief(valid());
     const errors = validateProducts(
