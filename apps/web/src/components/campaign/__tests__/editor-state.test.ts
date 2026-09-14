@@ -4699,6 +4699,14 @@ describe("canonical layer defaults (X16)", () => {
     expect(
       "enabled" in restored.template.layers.find((layer) => layer.id === "image")!,
     ).toBe(false);
+    expect(
+      restored.source.kind === "file" &&
+        restored.source.savedSnapshot !== null &&
+        !("enabled" in
+          restored.source.savedSnapshot.template.layers.find(
+            (layer) => layer.id === "image",
+          )!),
+    ).toBe(true);
     expect(isDirtySinceSave(restored)).toBe(false);
 
     const noSnapshot = normalizeDraftState({
@@ -4714,6 +4722,67 @@ describe("canonical layer defaults (X16)", () => {
     expect(
       noSnapshot.source.kind === "file" && noSnapshot.source.savedSnapshot,
     ).toBeNull();
+  });
+
+  /**
+   * The snapshot arrived from localStorage unvalidated. canonicalBrief throws
+   * when template is null, layers is not an array, or an entry is null — and
+   * loadDraftFromStorage's catch would then discard the whole draft.
+   */
+  const storedFileDraft = (
+    savedSnapshot: unknown,
+  ): Record<string, unknown> => ({
+    campaignName: "Recover me",
+    briefId: "camp",
+    source: {
+      kind: "file",
+      file: "camp.yaml",
+      loadedId: "camp",
+      savedSnapshot,
+      revision: undefined,
+    },
+  });
+
+  test("a stored draft whose snapshot template is null keeps the draft and the snapshot", () => {
+    const snapshot = { ...savedBrief(), template: null };
+    const restored = normalizeDraftState(storedFileDraft(snapshot));
+    expect(restored.campaignName).toBe("Recover me");
+    expect(restored.briefId).toBe("camp");
+    expect(
+      restored.source.kind === "file" && restored.source.savedSnapshot,
+    ).toBe(snapshot);
+  });
+
+  test("a stored draft whose snapshot layers is not an array keeps the draft and the snapshot", () => {
+    const snapshot = {
+      ...savedBrief(),
+      template: {
+        ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        layers: "x",
+      },
+    };
+    const restored = normalizeDraftState(storedFileDraft(snapshot));
+    expect(restored.campaignName).toBe("Recover me");
+    expect(restored.briefId).toBe("camp");
+    expect(
+      restored.source.kind === "file" && restored.source.savedSnapshot,
+    ).toBe(snapshot);
+  });
+
+  test("a stored draft whose snapshot layers contain null keeps the draft and the snapshot", () => {
+    const snapshot = {
+      ...savedBrief(),
+      template: {
+        ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        layers: [null],
+      },
+    };
+    const restored = normalizeDraftState(storedFileDraft(snapshot));
+    expect(restored.campaignName).toBe("Recover me");
+    expect(restored.briefId).toBe("camp");
+    expect(
+      restored.source.kind === "file" && restored.source.savedSnapshot,
+    ).toBe(snapshot);
   });
 
   test("save and apply carrying a server brief with enabled: true do not leave the draft dirty", () => {
