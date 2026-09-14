@@ -459,8 +459,11 @@ describe("derive.ts", () => {
           expect(isBriefTemplate(next.template)).toBe(true);
         }
 
-        // 3. Driven over partial states, e.g. image-text with image and logo
-        // (the motivating case where shade directly-above image):
+        // 3. Driven over partial states, e.g. image-text missing its optional
+        // middle layers (the motivating case where shade directly-above image):
+        // X11 made the guard mirror the API's required-kind rule, so the
+        // partial base must itself be a valid template — offers from an
+        // already-invalid base prove nothing about agreement.
         if (creativeType === "image-text") {
           const imageLogoState: EditorState = {
             ...state,
@@ -468,6 +471,7 @@ describe("derive.ts", () => {
               ...state.template,
               layers: [
                 { id: "image", kind: "image" },
+                { id: "static-text", kind: "static-text" },
                 { id: "logo", kind: "logo" },
               ],
             },
@@ -488,7 +492,8 @@ describe("derive.ts", () => {
           });
           expect(withShade.template.layers[0].kind).toBe("image");
           expect(withShade.template.layers[1].kind).toBe("shade");
-          expect(withShade.template.layers[2].kind).toBe("logo");
+          expect(withShade.template.layers[2].kind).toBe("static-text");
+          expect(withShade.template.layers[3].kind).toBe("logo");
         }
       }
     });

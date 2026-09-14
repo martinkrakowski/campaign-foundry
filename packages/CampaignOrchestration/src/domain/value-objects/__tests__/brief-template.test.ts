@@ -1,6 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { CAMPAIGN_TYPES, CAMPAIGN_TYPE_PRESETS } from "../campaign-types.js";
 import { CANONICAL_TEMPLATES } from "../creative-templates.js";
+import type { CreativeType } from "../creative-types.js";
 import type { LayerKind } from "../layer-kinds.js";
 import {
   isBriefTemplate,
@@ -208,14 +209,30 @@ describe("isBriefTemplate (L3a)", () => {
 });
 
 describe("isBriefTemplate layer props (L3b, D134)", () => {
-  const withLayer = (layer: unknown): boolean =>
-    isBriefTemplate({
-      id: "canonical-image-text",
+  /**
+   * X11 tightened the guard: a template must carry its type's required kinds
+   * and only its type's accepted kinds, so the layer under test REPLACES the
+   * canonical layer of its kind on a full template of the given type (or joins
+   * the list when that canonical carries no such kind) — the props decision
+   * under test stays the only thing that can refuse the template.
+   */
+  const withLayer = (
+    layer: unknown,
+    creativeType: CreativeType = "image-text",
+  ): boolean => {
+    const kind = (layer as { kind?: unknown } | null)?.kind;
+    const canonical = CANONICAL_TEMPLATES[creativeType].layers;
+    return isBriefTemplate({
+      id: CANONICAL_TEMPLATES[creativeType].id,
       version: 1,
-      creativeType: "image-text",
+      creativeType,
       unit: "standard-web",
-      layers: [layer],
+      layers:
+        typeof kind === "string" && canonical.some((l) => l.kind === kind)
+          ? canonical.map((l) => (l.kind === kind ? layer : l))
+          : [...canonical, layer],
     });
+  };
 
   test("a template whose layers carry no props parses exactly as before", () => {
     expect(isBriefTemplate(templateFromCanonical("social-post"))).toBe(true);
@@ -248,14 +265,18 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
   });
 
   test("refuses duplicate layer ids, the rule the API already applies (L5)", () => {
-    const layer = { id: "shade", kind: "shade" as const };
+    // X11 made the rest of the template load-bearing, so the duplicates ride a
+    // full canonical list: uniqueness is the only rule each draft can fail.
+    // An extra layer wearing the bottom image's id — no cap or budget for
+    // `image`, order still obeyed — is refused for the id alone.
+    const canonical = CANONICAL_TEMPLATES["image-text"].layers;
     expect(
       isBriefTemplate({
         id: "canonical-image-text",
         version: 1,
         creativeType: "image-text",
         unit: "standard-web",
-        layers: [layer, { ...layer }],
+        layers: [{ id: "image", kind: "image" }, ...canonical],
       }),
     ).toBe(false);
     // The ids clash even when the kinds differ — the id is the row's identity,
@@ -266,7 +287,9 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
         version: 1,
         creativeType: "image-text",
         unit: "standard-web",
-        layers: [layer, { id: "shade", kind: "logo" }],
+        layers: canonical.map((l) =>
+          l.kind === "accent" ? { id: "image", kind: "accent" } : l,
+        ),
       }),
     ).toBe(false);
   });
@@ -279,7 +302,10 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
     expect(withLayer({ id: "accent", kind: "accent", props: { solidHeight: 0.05, fadeHeight: 0 } })).toBe(true);
     expect(withLayer({ id: "logo", kind: "logo", props: { width: 0, margin: 1 } })).toBe(true);
     expect(withLayer({ id: "text", kind: "static-text", props: { anchor: "middle", typeFloor: 0.4 } })).toBe(true);
-    expect(withLayer({ id: "motion", kind: "animated-text", props: { anchor: "top" } })).toBe(true);
+    // animated-text shares image-text's text budget with static-text (D124),
+    // so the video type's canonical carries it: the kind's own props against
+    // a template that may hold it.
+    expect(withLayer({ id: "motion", kind: "animated-text", props: { anchor: "top" } }, "video")).toBe(true);
   });
 
   test("an image layer carries alt (X2), and the empty string is not absence", () => {
@@ -293,12 +319,14 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
   });
 
   test("refuses props on a kind that carries none, the empty object included", () => {
-    expect(withLayer({ id: "html", kind: "html", props: { alt: "x" } })).toBe(false);
+    // Each layer under test sits on a type that accepts its kind, so the props
+    // verdict — not X11's `accepts` mirror — is what refuses it.
+    expect(withLayer({ id: "html", kind: "html", props: { alt: "x" } }, "image-html")).toBe(false);
     expect(withLayer({ id: "fill", kind: "fill", props: { alpha: 0.5 } })).toBe(false);
     // The empty object names no prop, but it is still props on a kind that
     // carries none: the "must be absent" verdict is reached before any
     // entries are walked.
-    expect(withLayer({ id: "video", kind: "video", props: {} })).toBe(false);
+    expect(withLayer({ id: "video", kind: "video", props: {} }, "video")).toBe(false);
     expect(layerPropsProblem("video", {})).toEqual({
       path: "",
       must: 'be absent for layer kind "video"',
@@ -311,7 +339,7 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
     // and a text layer's copy is already text, so alt there is a key the kind
     // does not carry, refused exactly as any other unknown key is.
     expect(withLayer({ id: "shade", kind: "shade", props: { alt: "x" } })).toBe(false);
-    expect(withLayer({ id: "video", kind: "video", props: { alt: "x" } })).toBe(false);
+    expect(withLayer({ id: "video", kind: "video", props: { alt: "x" } }, "video")).toBe(false);
     expect(layerPropsProblem("shade", { alt: "x" })).toEqual({
       path: ".alt",
       must: 'be one of "alpha" for layer kind "shade"',
@@ -389,14 +417,22 @@ describe("isBriefTemplate layer props (L3b, D134)", () => {
 });
 
 describe("isBriefTemplate layer enabled (D129)", () => {
-  const withLayer = (layer: unknown): boolean =>
-    isBriefTemplate({
+  // Same shape as the props helper above (X11): the layer under test replaces
+  // its canonical counterpart, so `enabled` is the only thing that can refuse.
+  const withLayer = (layer: unknown): boolean => {
+    const kind = (layer as { kind?: unknown } | null)?.kind;
+    const canonical = CANONICAL_TEMPLATES["image-text"].layers;
+    return isBriefTemplate({
       id: "canonical-image-text",
       version: 1,
       creativeType: "image-text",
       unit: "standard-web",
-      layers: [layer],
+      layers:
+        typeof kind === "string" && canonical.some((l) => l.kind === kind)
+          ? canonical.map((l) => (l.kind === kind ? layer : l))
+          : [...canonical, layer],
     });
+  };
 
   test("accepts a layer without enabled (absent means enabled)", () => {
     expect(withLayer({ id: "image", kind: "image" })).toBe(true);
@@ -493,6 +529,204 @@ describe("isBriefTemplate layer elements (HL1)", () => {
   test("refuses a text or button element with no copy", () => {
     expect(withElements([{ kind: "text", frame }])).toBe(false);
     expect(withElements([{ kind: "button", frame }])).toBe(false);
+  });
+});
+
+describe("isBriefTemplate mirrors the API's table rules (X11)", () => {
+  /** A well-formed template object for the type, with `layers` swapped in. */
+  const asTemplate = (
+    creativeType: "image-text" | "image-html" | "video",
+    layers: readonly unknown[],
+  ) => ({
+    id: CANONICAL_TEMPLATES[creativeType].id,
+    version: 1,
+    creativeType,
+    unit: "standard-web",
+    layers,
+  });
+
+  const imageText = CANONICAL_TEMPLATES["image-text"];
+  const video = CANONICAL_TEMPLATES["video"];
+
+  test("refuses a template whose only instance of a required kind is disabled (D129, MP-D4)", () => {
+    // The exact case X9's review found: the API refuses it, the editor guard
+    // must not. `image` is required for image-text; switch its only instance
+    // off and the creative has no picture to draw.
+    expect(
+      isBriefTemplate(
+        asTemplate(
+          "image-text",
+          imageText.layers.map((l) =>
+            l.kind === "image" ? { ...l, enabled: false } : l,
+          ),
+        ),
+      ),
+    ).toBe(false);
+    // And for video, disabling the only animated-text leaves no required kind.
+    expect(
+      isBriefTemplate(
+        asTemplate(
+          "video",
+          video.layers.map((l) =>
+            l.kind === "animated-text" ? { ...l, enabled: false } : l,
+          ),
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  test("refuses a template missing a required kind entirely (X11)", () => {
+    // The wider half of the gap: never about `enabled` at all — a draft with
+    // the required layer deleted has always passed this guard while the API
+    // refused it.
+    expect(
+      isBriefTemplate(
+        asTemplate(
+          "image-text",
+          imageText.layers.filter((l) => l.kind !== "static-text"),
+        ),
+      ),
+    ).toBe(false);
+    expect(
+      isBriefTemplate(
+        asTemplate(
+          "video",
+          video.layers.filter((l) => l.kind !== "video"),
+        ),
+      ),
+    ).toBe(false);
+    expect(
+      isBriefTemplate(
+        asTemplate(
+          "image-html",
+          CANONICAL_TEMPLATES["image-html"].layers.filter(
+            (l) => l.kind !== "html",
+          ),
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  test("accepts a required kind with one disabled and one enabled instance", () => {
+    // "At least one enabled instance", not "every instance enabled": an extra
+    // switched-off image under the live one is legal (and counts against no
+    // budget — `image` is unbounded for image-text).
+    expect(
+      isBriefTemplate(
+        asTemplate("image-text", [
+          { id: "image-off", kind: "image", enabled: false },
+          ...imageText.layers,
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test("absent enabled counts as enabled (D129)", () => {
+    // The canonical library carries no `enabled` key at all; a guard that
+    // demanded `enabled === true` would refuse every real template.
+    expect(
+      isBriefTemplate(
+        asTemplate(
+          "image-text",
+          imageText.layers.map((l) => ({ id: l.id, kind: l.kind })),
+        ),
+      ),
+    ).toBe(true);
+    expect(isBriefTemplate(asTemplate("video", video.layers))).toBe(true);
+  });
+
+  test("refuses more layers of a kind than the type's per-kind cap (D124)", () => {
+    // The API's budget rule, same shape as the required-kind gap: a draft the
+    // API refuses must not pass the guard. `image-text` caps `logo` at 1; the
+    // appended logo breaks no other rule (order: both images below it).
+    expect(
+      isBriefTemplate(
+        asTemplate("image-text", [
+          ...imageText.layers,
+          { id: "logo-2", kind: "logo" },
+        ]),
+      ),
+    ).toBe(false);
+    // Video caps `shade` at 1 and declares no order constraints, so the cap
+    // alone is what refuses this draft.
+    expect(
+      isBriefTemplate(
+        asTemplate("video", [...video.layers, { id: "shade-2", kind: "shade" }]),
+      ),
+    ).toBe(false);
+  });
+
+  test("counts disabled layers against caps and budgets, like the API (MP-D5)", () => {
+    // The API's kindCounts is presence-based: a switched-off layer still draws
+    // a slot in the compositor's budget. A guard that counted only enabled
+    // layers would let a draft with two logos (one off) through where the API
+    // refuses it.
+    expect(
+      isBriefTemplate(
+        asTemplate("image-text", [
+          ...imageText.layers,
+          { id: "logo-2", kind: "logo", enabled: false },
+        ]),
+      ),
+    ).toBe(false);
+  });
+
+  test("refuses kinds that share a budget beyond their shared max (D124)", () => {
+    // image-text: static-text and animated-text TOGETHER cap at 1 — one of
+    // each is an overdraw the API refuses and the compositor cannot draw.
+    expect(
+      isBriefTemplate(
+        asTemplate("image-text", [
+          ...imageText.layers.slice(0, 4),
+          { id: "motion", kind: "animated-text" },
+          imageText.layers[4]!,
+        ]),
+      ),
+    ).toBe(false);
+  });
+
+  test("refuses a kind the creative type does not accept (D124)", () => {
+    // `video` is a vocabulary member the global layer check admits, but not a
+    // kind image-text may hold — the API checks `accepts`, the guard must too.
+    expect(
+      isBriefTemplate(
+        asTemplate("image-text", [
+          { id: "vid", kind: "video" },
+          ...imageText.layers,
+        ]),
+      ),
+    ).toBe(false);
+  });
+
+  test("refuses an empty layers array, like the API's non-empty rule", () => {
+    expect(isBriefTemplate(asTemplate("video", []))).toBe(false);
+  });
+
+  test("refuses an id that does not match its creative type's canonical template (D124)", () => {
+    // The API pairs the two checks (`validateTemplate`'s canonical-match);
+    // each field legal on its own is not enough — the id pins the type.
+    expect(
+      isBriefTemplate({
+        id: "canonical-video",
+        version: 1,
+        creativeType: "image-text",
+        unit: "standard-web",
+        layers: imageText.layers,
+      }),
+    ).toBe(false);
+  });
+
+  test("refuses a layer with an empty-string id, like the API's non-empty rule", () => {
+    expect(
+      isBriefTemplate(
+        asTemplate(
+          "image-text",
+          imageText.layers.map((l) =>
+            l.kind === "logo" ? { id: "", kind: "logo" } : l,
+          ),
+        ),
+      ),
+    ).toBe(false);
   });
 });
 

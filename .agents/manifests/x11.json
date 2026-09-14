@@ -1,0 +1,142 @@
+{
+  "version": 1,
+  "lane": "X11",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
+      "before": "  return rules.required.every((kind) => enabledKinds.has(kind));",
+      "after": "  return true;",
+      "because": "The required-kind mirror is the whole lane: drop it and the editor guard accepts a draft with a required kind deleted — the exact X11 gap — while the API refuses the same persisted template, so the incomplete creative reaches the compositor and renders blank.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts",
+        "-t",
+        "missing a required kind"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
+      "before": "    if (layer.enabled !== false) {\n      enabledKinds.add(layer.kind);\n    }",
+      "after": "    enabledKinds.add(layer.kind);",
+      "because": "Required means at least one ENABLED instance (D129/MP-D4), not one PRESENT instance. Count presence and the only disabled required layer satisfies the guard — the review finding that surfaced X11: the boundary waves through a draft the API refuses and the compositor renders without its required layer.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts",
+        "-t",
+        "only instance of a required kind is disabled"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
+      "before": "    if (layer.enabled !== false) {\n      enabledKinds.add(layer.kind);\n    }",
+      "after": "    if (layer.enabled === true) {\n      enabledKinds.add(layer.kind);\n    }",
+      "because": "The other way to get enabled semantics wrong: require enabled === true and absent stops meaning enabled (D129), so every canonical template — none of whose layers carry the key — is refused and the editor falls back on every restore. The guard-side regression test for the absent-means-enabled rule.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts",
+        "-t",
+        "absent enabled counts as enabled"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
+      "before": "  for (const kind of rules.accepts) {\n    const max = rules.maxOf[kind];\n    if (max === undefined) continue;\n    if ((counts.get(kind) ?? 0) > max) return false;\n  }\n  for (const budget of rules.sharedBudgets) {",
+      "after": "  for (const budget of rules.sharedBudgets) {",
+      "because": "The per-kind budget is the audit's named divergence — the API's `at most N layer(s) of kind …` rule — and a guard that skips it admits a two-logo draft the API refuses, letting the compositor draw one logo where the author asked for two.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts",
+        "-t",
+        "per-kind cap"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
+      "before": "  for (const budget of rules.sharedBudgets) {\n    const used = budget.kinds.reduce(\n      (sum, kind) => sum + (counts.get(kind) ?? 0),\n      0,\n    );\n    if (used > budget.max) return false;\n  }\n  return rules.required",
+      "after": "  return rules.required",
+      "because": "Shared budgets are the other half of D124's declared cardinality: without them a static-text beside an animated-text passes the guard where the API refuses, and the compositor draws one headline block where the draft names two.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts",
+        "-t",
+        "share a budget"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
+      "before": "    if (!(rules.accepts as readonly string[]).includes(layer.kind)) {\n      return false;\n    }\n    counts.set(",
+      "after": "    counts.set(",
+      "because": "The guard checked kind against the global LAYER_KINDS while the API checks the type's accepts — the same shape of drift: a `video` layer inside an image-text template rides the guard in and the boundary table says the type cannot hold it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts",
+        "-t",
+        "does not accept"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
+      "before": "  const creativeType = raw.creativeType as CreativeType;\n  if (CANONICAL_TEMPLATES[creativeType].id !== raw.id) return false;",
+      "after": "  const creativeType = raw.creativeType as CreativeType;",
+      "because": "The API pins the id to the type's canonical template (D124); without the match check the guard admits `canonical-video` naming `image-text` — each field legal alone, a draft the API refuses together.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts",
+        "-t",
+        "does not match its creative type"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
+      "before": "    typeof rec.id !== \"string\" ||\n    rec.id.length === 0 ||",
+      "after": "    typeof rec.id !== \"string\" ||",
+      "because": "The API refuses a zero-length layer id; a guard that accepts one lets an unnamed row through — the id is the row's identity for remove and move, and the boundary above already said it must be non-empty.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/domain/value-objects/__tests__/brief-template.test.ts",
+        "-t",
+        "empty-string id"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

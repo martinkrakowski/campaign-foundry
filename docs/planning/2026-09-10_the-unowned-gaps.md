@@ -265,10 +265,10 @@ validator, in a different package.
 instance of each required kind, absence of `enabled` meaning enabled. Whether a restored draft that
 fails should fall back to the canonical template is the lane's to decide and to state.
 
-```premise X11
-# isBriefTemplate does not enforce required kinds at all — the API does.
-! grep -q 'required' packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts
-```
+**X11 — shipped in this PR.** Its premise was retired when it landed; `plan:verify` no
+longer tracks it. The guard now mirrors every table rule the API applies — `accepts`, `maxOf`,
+`sharedBudgets` and required-with-`enabled` — and a restored draft that fails falls back to the
+canonical template.
 
 ---
 
