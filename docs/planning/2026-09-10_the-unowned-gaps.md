@@ -310,10 +310,15 @@ the rule exists to prevent.
 while `reviewThreads` has any unresolved node; name the open threads in the refusal. Test it against a
 recorded GraphQL answer, as the wave-status tooling tests `gh`.
 
-```premise X13
-# merge-prs.sh never looks at review threads before merging.
-! grep -qE 'isResolved|reviewThreads' scripts/merge-prs.sh
-```
+**X13 — shipped in this PR.** Its premise was retired when it landed; `plan:verify` no
+longer tracks it. The condition is decided by `yarn sweep gate --pr <n> --sha <sha>`
+(`tools/sweep`, tested against recorded GraphQL answers through the same injected `gh`
+seam), and `scripts/merge-prs.sh` is only its caller: it settles for the bots, refuses
+while a thread is open — each one named by author and excerpt — and re-reads the head
+immediately before `gh pr merge`. A page of threads that cannot be read is
+"could not decide" and refuses, never a silent zero. The premise is gone rather than
+inverted because it greps `merge-prs.sh`, and with the logic in TypeScript that grep
+would never have flipped on its own.
 
 ---
 

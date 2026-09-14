@@ -1,0 +1,176 @@
+{
+  "version": 1,
+  "lane": "X13",
+  "mutations": [
+    {
+      "file": "tools/sweep/lib/sweep.ts",
+      "before": "  } while (cursor !== null);",
+      "after": "  } while (false);",
+      "because": "A page is 100 threads. Stopping after the first one judges a PR on its first hundred and calls the rest clean — an open finding on page two is invisible, which is the shape of the gap X13 records: the merge condition holding on a PR it was never fully asked about. The gate reads two pages precisely so this mutation has somewhere to hide.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/gate.test.ts",
+        "-t",
+        "one unresolved thread on the second page is refused and named"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/gate.ts",
+      "before": "  if (fetched.failures.length > 0) {",
+      "after": "  if (false) {",
+      "because": "An unreadable page must be 'could not decide', never 'no threads': a partial read that merges is a guess dressed as a verdict, and it fails silently — the one outcome a gate must not have. This is the mutation that turns the tool from a check into a rubber stamp, and it is why the refusal says 'could not decide' rather than reporting a count.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/gate.test.ts",
+        "-t",
+        "a GraphQL error on the second page refuses as could-not-decide"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/gate.ts",
+      "before": "  const open = fetched.threads.filter((t) => !t.isResolved);",
+      "after": "  const open = fetched.threads.filter(() => false);",
+      "because": "The other way to lose the threads: read every page and then ignore what they said. A gate that never sees an open thread merges straight through a review that is still waiting for an answer, which is the exact regression the wave's merge discipline exists to prevent.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/gate.test.ts",
+        "-t",
+        "one unresolved thread on the second page is refused and named"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/gate.ts",
+      "before": "  if (head !== plan.head) {",
+      "after": "  if (false) {",
+      "because": "The head re-check is the half of the condition the script already half-had: it verified checks on a SHA and merged by PR number. Drop the comparison and a push landing after the check read rides in on another commit's green — the race that held #381 together by luck alone. The operator is told both SHAs so the failure names what moved.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/gate.test.ts",
+        "-t",
+        "a head that moved is refused, naming both SHAs"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/sweep.ts",
+      "before": "      failures.push(\n        `page ${pages} of PR #${pr} carried no usable pageInfo — whether another page follows is unknown, so the read stopped`,\n      );\n      break;",
+      "after": "      break;",
+      "because": "A page with no `pageInfo` — or with one this read cannot understand — ends the read with nothing recorded, and a PR whose first hundred threads are all resolved is then reported as clean while page two is still unread. This mutation keeps the stop and drops the recording, which is exactly the defect: the read still halts, it just claims to have finished.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/gate.test.ts",
+        "-t",
+        "a page with no pageInfo refuses as could-not-decide"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/sweep.ts",
+      "before": "    if (pageInfo === undefined || typeof pageInfo.hasNextPage !== \"boolean\") {",
+      "after": "    if (pageInfo === undefined) {",
+      "because": "Dropping only the `typeof` half leaves a truthiness test by omission: `hasNextPage: \"yes\"` is not `undefined`, so the read accepts it, asks the next page with a cursor that came from a flag nobody understood, and reports the PR as fully read. A string is not a boolean, and an answer the gate cannot read is not an answer it may act on.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/gate.test.ts",
+        "-t",
+        "a page whose hasNextPage is not a boolean refuses as could-not-decide"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/sweep.ts",
+      "before": "      failures.push(\n        `page ${pages} of PR #${pr} reported another page with no endCursor — the next page cannot be asked for`,\n      );\n      break;",
+      "after": "      break;",
+      "because": "`hasNextPage: true` with no `endCursor` says 'there is more' and then withholds the only thing that can fetch it. The old one-liner read that as 'no more pages' and stopped; the PR was then judged on what happened to be on page one. Stopping is right, saying nothing about it is not.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/gate.test.ts",
+        "-t",
+        "a page that reports another page but no endCursor refuses as could-not-decide"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/sweep.ts",
+      "before": "      failures.push(\n        `page ${pages} of PR #${pr} carried no reviewThreads — the threads past page ${pages - 1} are unknown, not absent`,\n      );\n      break;",
+      "after": "      break;",
+      "because": "An absent `reviewThreads` is not an empty connection — it is a read that measured nothing — and `edges.test.ts` used to pin that confusion as correct behaviour. Silently stopping here is how a PR with an open thread is reported as having none, which is the one outcome the merge gate exists to prevent.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/gate.test.ts",
+        "-t",
+        "a pull request whose reviewThreads is absent refuses as could-not-decide"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/sweep.ts",
+      "before": "      failures.push(\n        `page ${pages} of PR #${pr} handed back cursor ${next}, which this read had already sent — it is looping, not paginating`,\n      );\n      break;",
+      "after": "      break;",
+      "because": "A cursor the read has already sent means the API is looping, and the merge script blocks on this loop — an operator would see a hang and kill it, or worse, a read that stops whenever it likes. Nothing about the PR is known at that point, so the read must say so instead of presenting the pages it happens to have as the whole answer.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/gate.test.ts",
+        "-t",
+        "a cursor the read has already sent refuses as could-not-decide"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/sweep.ts",
+      "before": "      failures.push(\n        `PR #${pr} is still asking for page ${pages + 1} after ${MAX_PAGES} pages — a bounded read is not a complete one`,\n      );\n      break;",
+      "after": "      break;",
+      "because": "200 pages is 20,000 threads — two orders of magnitude past any PR here — so reaching it is a runaway read, not a big one. Stopping at the bound without recording it hands back twenty thousand possibly-stale threads as a complete answer; the bound only buys anything if the read admits it stopped there.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/gate.test.ts",
+        "-t",
+        "a read still paginating at the page bound refuses as could-not-decide"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

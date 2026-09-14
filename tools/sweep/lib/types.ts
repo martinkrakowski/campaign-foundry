@@ -7,6 +7,18 @@ export interface ThreadState {
   readonly isResolved: boolean;
 }
 
+/**
+ * A thread as fetched, named by the first comment — `mergeGate` refuses an
+ * unresolved one by author and excerpt, because an id alone tells the operator
+ * nothing about which finding is still open.
+ */
+export interface ReviewThread extends ThreadState {
+  /** Login of the first comment's author, or "unknown" when the API omits one. */
+  readonly author: string;
+  /** The first comment's body, flattened and shortened enough to recognise. */
+  readonly excerpt: string;
+}
+
 /** The pull request shape the fetch response is expected to carry. */
 export interface PullRequestShape {
   readonly data?: {
@@ -18,7 +30,16 @@ export interface PullRequestShape {
             readonly hasNextPage?: boolean;
             readonly endCursor?: string | null;
           };
-          readonly nodes?: readonly { readonly id: string; readonly isResolved: boolean }[];
+          readonly nodes?: readonly {
+            readonly id: string;
+            readonly isResolved: boolean;
+            readonly comments?: {
+              readonly nodes?: readonly {
+                readonly author?: { readonly login?: string } | null;
+                readonly body?: string;
+              }[];
+            };
+          }[];
         };
       };
     };

@@ -16,7 +16,14 @@ const ghFetch = (nodes: readonly { id: string; isResolved: boolean }[], writeRes
       );
     }
     return JSON.stringify({
-      data: { repository: { pullRequest: { id: "PR_I_1", reviewThreads: { nodes } } } },
+      data: {
+        repository: {
+          pullRequest: {
+            id: "PR_I_1",
+            reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes },
+          },
+        },
+      },
     });
   };
 
@@ -30,13 +37,25 @@ describe("sweep — refusals that keep half a class from landing", () => {
     ).rejects.toThrow(/not a review-thread node/);
   });
 
-  test("a pull request whose reviewThreads field is absent reads as no threads", async () => {
+  test("a pull request whose reviewThreads field is absent is a failed read, not an empty one", async () => {
+    // Changed 2026-09-14, and the change is the point: this used to assert that
+    // an absent connection reads as "no threads", which is how a PR with an open
+    // thread was reported as having none. `fetchAllThreads` now decides whether
+    // a merge happens, so a read that measured nothing must be recorded, not
+    // reported as an empty answer — and the sweep refuses the whole run on it
+    // rather than reporting one id as wrong. A refused read posts nothing,
+    // which is what the `--post` below is here to prove.
+    const calls: string[][] = [];
     await expect(
-      sweep({ pr: 361, requested: ["PRRT_a"], disposition: "x" }, false, {
-        gh: async () => JSON.stringify({ data: { repository: { pullRequest: { id: "PR_I_1" } } } }),
+      sweep({ pr: 361, requested: ["PRRT_a"], disposition: "x" }, true, {
+        gh: async (args) => {
+          calls.push([...args]);
+          return JSON.stringify({ data: { repository: { pullRequest: { id: "PR_I_1" } } } });
+        },
         out: () => undefined,
       }),
-    ).rejects.toThrow(/PRRT_a: not a review-thread node/);
+    ).rejects.toThrow(/returned errors: .*reviewThreads/);
+    expect(calls.filter((c) => c.some((a) => a.includes("mutation")))).toEqual([]);
   });
 
   test("a GraphQL error without a message is refused, not swallowed", async () => {
@@ -72,7 +91,17 @@ describe("mutation shape", () => {
       gh: async (args) => {
         calls.push([...args]);
         return JSON.stringify({
-          data: { repository: { pullRequest: { id: "PR_I_1", reviewThreads: { nodes: [{ id: "PRRT_a", isResolved: false }] } } } },
+          data: {
+            repository: {
+              pullRequest: {
+                id: "PR_I_1",
+                reviewThreads: {
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                  nodes: [{ id: "PRRT_a", isResolved: false }],
+                },
+              },
+            },
+          },
         });
       },
       out: () => undefined,
@@ -96,6 +125,39 @@ describe("runCli — edges", () => {
     });
     expect(code).toBe(2);
     expect(err.join(" ")).toContain("'undefined' is not a command");
+  });
+
+  test("a non-Error throw from the WRITE is reported and exits 1", async () => {
+    // The fetch is wrapped — an unreadable page is a refusal now — so the
+    // catch-all in runCli is reached through the mutation, which is not: a
+    // string thrown there must still be named, not swallowed by the exit code.
+    const err: string[] = [];
+    const code = await runCli({
+      argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--body", "x", "--post"],
+      log: () => undefined,
+      logError: (t) => err.push(t),
+      readFile: async () => "",
+      gh: async (args) => {
+        // Both calls carry `query=` — the fetch's value is the query, the
+        // write's is the mutation — so the write is the one named "mutation".
+        if (args.some((a) => a.includes("mutation"))) throw "write-failed-as-a-string";
+        return JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                id: "PR_I_1",
+                reviewThreads: {
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                  nodes: [{ id: "PRRT_a", isResolved: false }],
+                },
+              },
+            },
+          },
+        });
+      },
+    });
+    expect(code).toBe(1);
+    expect(err.join(" ")).toContain("write-failed-as-a-string");
   });
 
   test("a non-Error throw from gh is reported and exits 1", async () => {

@@ -1,9 +1,11 @@
 import { pathToFileURL } from "node:url";
-import { SWEEP_USAGE, parseSweepArgs } from "./lib/args.js";
-import { sweep, type SweepPlan } from "./lib/sweep.js";
+import { SWEEP_USAGE, parseGateArgs, parseSweepArgs } from "./lib/args.js";
+import { mergeGate, type MergeGatePlan } from "./lib/gate.js";
+import { sweep, errorText, type SweepPlan } from "./lib/sweep.js";
 import { SweepRefusal } from "./lib/types.js";
 
 export const SWEEP_COMMAND = "threads";
+export const GATE_COMMAND = "gate";
 
 export interface SweepCliIo {
   readonly argv: readonly string[];
@@ -14,15 +16,52 @@ export interface SweepCliIo {
 }
 
 /**
+ * `sweep gate --pr <n> --sha <sha>`
+ *
+ * Exit codes: 0 every merge condition was decided in favour of the merge;
+ * 1 a condition is unmet (an unresolved thread, a head that moved) or could
+ * not be decided — a refusal, with every reason listed; 2 the command line
+ * itself is wrong.
+ *
+ * 1 never merges anything: the caller owns `gh pr merge`, and this is the last
+ * thing it asks before running it.
+ */
+async function runGate(rest: readonly string[], io: SweepCliIo): Promise<number> {
+  let plan: MergeGatePlan;
+  try {
+    plan = parseGateArgs(rest);
+  } catch (error) {
+    io.logError(errorText(error));
+    return 2;
+  }
+  const decision = await mergeGate(plan, { gh: io.gh });
+  if (decision.kind === "refuse") {
+    io.logError(
+      `refusing to merge PR #${plan.pr} — ${decision.reasons.length} reason(s), nothing was merged:`,
+    );
+    for (const reason of decision.reasons) io.logError(`  ${reason}`);
+    return 1;
+  }
+  io.log(`PR #${plan.pr}: merge condition met — ${decision.summary}`);
+  return 0;
+}
+
+/**
  * `sweep threads --pr … --thread … (--body … | --body-file …) [--post]`
  *
  * Exit codes: 0 the class was disposed (or previewed); 1 the sweep refused
  * (ids not verbatim open threads on the PR) or failed; 2 the command line
  * itself is wrong. A refusal exits 1 with every offending id listed — it is
  * a finding about the ids, not a crash.
+ *
+ * `sweep gate` is the other verb: the merge condition, answered from the same
+ * threads query.
  */
 export async function runCli(io: SweepCliIo): Promise<number> {
   const [command, ...rest] = io.argv;
+  if (command === GATE_COMMAND) {
+    return runGate(rest, io);
+  }
   if (command !== SWEEP_COMMAND) {
     io.logError(`sweep: '${String(command)}' is not a command.`);
     io.logError(SWEEP_USAGE);
@@ -67,7 +106,7 @@ export async function runCli(io: SweepCliIo): Promise<number> {
       for (const reason of error.reasons) io.logError(`  ${reason}`);
       return 1;
     }
-    io.logError(error instanceof Error ? error.message : String(error));
+    io.logError(errorText(error));
     return 1;
   }
 }

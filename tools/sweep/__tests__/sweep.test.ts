@@ -7,6 +7,11 @@ import {
 } from "../lib/sweep.js";
 import { SweepRefusal } from "../lib/types.js";
 
+/**
+ * One complete page: `pageInfo` says there is no other one. A fixture that
+ * omits it is a page the read cannot place — and a read that cannot place a
+ * page is a failure now, not an empty answer.
+ */
 const threads = (
   ...specs: readonly (readonly [string, boolean])[]
 ): string =>
@@ -16,6 +21,7 @@ const threads = (
         pullRequest: {
           id: "PR_I_1",
           reviewThreads: {
+            pageInfo: { hasNextPage: false, endCursor: null },
             nodes: specs.map(([id, isResolved]) => ({ id, isResolved })),
           },
         },
@@ -257,7 +263,10 @@ describe("sweep — the mutation carries the whole class", () => {
           repository: {
             pullRequest: {
               id: "PR_I_1",
-              reviewThreads: { nodes: [{ id: "PRRT_a", isResolved: false }] },
+              reviewThreads: {
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: [{ id: "PRRT_a", isResolved: false }],
+              },
             },
           },
         },

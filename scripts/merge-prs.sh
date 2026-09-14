@@ -16,7 +16,11 @@
 #   2. Push the refreshed branch.
 #   3. Wait for CI on the new head — poll until checks are REGISTERED, then watch
 #      (`gh pr checks --watch --fail-fast`). A fixed sleep races the forge; see #206.
-#   4. Squash-merge.
+#   4. Wait a bounded settle period for review bots (a wait, not proof any bot ran),
+#      then ask the merge condition of `yarn sweep gate`:
+#      zero unresolved review threads on the final head, and a head unchanged since
+#      its check-runs were read. Both are decided in TypeScript (tools/sweep).
+#   5. Squash-merge.
 # Then remove the worktrees and delete the merged branches, and fast-forward main.
 #
 # When the worktree field is empty a temporary worktree is created for the refresh and
@@ -41,6 +45,10 @@ MAIN=${MAIN_BRANCH:-main}
 # The check whose conclusion gates a merge (regex over check-run names). A run that
 # registers instantly — a review bot — must never satisfy the wait on its own.
 REQUIRED_CHECK=${REQUIRED_CHECK:-'^Build'}
+# How long the review bots get to post on the refreshed head before the merge
+# condition is asked about. Bounded: a bot that has not run yet is invisible to
+# a check-run read, so this waits, but a wave must not be able to stall here.
+REVIEW_SETTLE_SECONDS=${REVIEW_SETTLE_SECONDS:-120}
 APPEND_ONLY=${APPEND_ONLY:-'^(\.agents/session-log\.md|CHANGELOG\.md|packages/[^/]+/src/application/ports/out/index\.ts|apps/web/src/components/ui/index\.ts|apps/web/src/components/campaign/messages\.ts)$'}
 
 KEEP_BOTH='
@@ -191,6 +199,32 @@ for spec in "$@"; do
   bad=$(printf '%s' "$runs" | python3 -c 'import json,sys;r=json.load(sys.stdin);print(",".join(x["n"] for x in r if x["c"] not in ("success","neutral","skipped")))')
   [ -z "$bad" ] || { echo "CHECKS FAILED for #$pr: $bad"; gh pr checks "$pr"; exit 1 }
   echo "checks green on $head_sha"; gh pr checks "$pr" 2>&1 | tail -3
+
+  # Give the review bots a bounded window to post on THIS head. A check-run
+  # conclusion says nothing about a bot that has not run yet, and the whole
+  # point of the merge condition is the finding that lands after CI is green.
+  # This is a wait, not a proof: only bots that re-run on push (Qodo,
+  # CodeRabbit) can post on a refreshed head at all — the PR-Agent workflows
+  # trigger on opened/reopened/ready_for_review only — and nothing here checks
+  # that any bot actually ran. What IS enforced is below: zero unresolved
+  # threads, and a head unchanged since its checks were read.
+  # nounset and pipefail are on but errexit is not, so a bad duration must be
+  # refused here: `sleep` failing would otherwise skip the wait silently.
+  [[ "$REVIEW_SETTLE_SECONDS" == <-> ]] \
+    || die "REVIEW_SETTLE_SECONDS must be a whole number of seconds (got '$REVIEW_SETTLE_SECONDS')"
+  echo "settling ${REVIEW_SETTLE_SECONDS}s for review bots on $head_sha …"
+  sleep "$REVIEW_SETTLE_SECONDS" || die "the review-bot settle wait failed — not merging #$pr"
+
+  # The merge condition itself, decided in TypeScript (`tools/sweep`, `yarn sweep gate`):
+  # zero unresolved review threads on every page, and a head that is still the
+  # SHA whose check-runs were just read. Why not here: the runners have no zsh,
+  # so a condition written in this file is one the gate can never test — which
+  # is how a script ends up enforcing less than the stage it implements (X13).
+  # 0 = merge, 1 = refused (every reason printed, including the offending
+  # thread's author), 2 = the call itself was wrong. Only 0 merges.
+  yarn sweep gate --pr "$pr" --sha "$head_sha" \
+    || die "merge condition unmet for #$pr — not merging"
+
   gh pr merge "$pr" --squash || die "squash-merge failed for #$pr"
   echo "merged #$pr"
 done
