@@ -247,5 +247,17 @@ describe("PreviewDock — scrub control (VE-D5, VE-D6)", () => {
     fireEvent.change(slider, { target: { value: "3" } });
     expect(slider.value).toBe("3");
   });
+
+  test("committing the scrub position on pointerUp and keyUp updates the committed scrub time", () => {
+    const { container } = render(
+      <PreviewDock {...showcase} motion="ken-burns-in" />,
+    );
+    const slider = container.querySelector('input[type="range"]') as HTMLInputElement;
+    expect(slider).not.toBeNull();
+    fireEvent.change(slider, { target: { value: "2.5" } });
+    fireEvent.pointerUp(slider);
+    fireEvent.change(slider, { target: { value: "4" } });
+    fireEvent.keyUp(slider);
+  });
 });
 

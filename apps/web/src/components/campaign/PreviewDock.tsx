@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode, type SyntheticEvent } from "react";
 import type { AspectRatioValue, CanvasSpec } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
@@ -179,8 +179,8 @@ export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
   const [committedSec, setCommittedSec] = useState(0);
   const hasMotion = props.motion !== undefined;
 
-  const handleCommit = (val: number) => {
-    setCommittedSec(val);
+  const handleCommit = (e: SyntheticEvent<HTMLInputElement>) => {
+    setCommittedSec(Number(e.currentTarget.value));
   };
 
   return (
@@ -213,11 +213,8 @@ export function PreviewDock(props: PreviewShowcaseProps): ReactNode {
               const val = Number(e.target.value);
               setScrubSec(val);
             }}
-            onPointerUp={(e) => handleCommit(Number(e.currentTarget.value))}
-            onMouseUp={(e) => handleCommit(Number(e.currentTarget.value))}
-            onTouchEnd={(e) => handleCommit(Number(e.currentTarget.value))}
-            onKeyUp={(e) => handleCommit(Number(e.currentTarget.value))}
-            onBlur={(e) => handleCommit(Number(e.currentTarget.value))}
+            onPointerUp={handleCommit}
+            onKeyUp={handleCommit}
             className="h-1.5 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-surface-2 accent-brand-primary"
           />
         </div>
