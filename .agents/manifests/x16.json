@@ -37,6 +37,24 @@
         "--maxWorkers=2"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/editor-state.ts",
+      "before": "          savedSnapshot: isBriefTemplate(resolvedSource.savedSnapshot.template)\n            ? canonicalBrief(resolvedSource.savedSnapshot)\n            : resolvedSource.savedSnapshot,",
+      "after": "          savedSnapshot: canonicalBrief(resolvedSource.savedSnapshot),",
+      "because": "A stored snapshot arrives from localStorage unvalidated. Canonicalising it without the isBriefTemplate gate throws on a null template (or a non-array / null-entry layers list), and loadDraftFromStorage's catch discards the whole recoverable draft.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/editor-state.test.ts",
+        "-t",
+        "a stored draft whose snapshot template is null keeps the draft and the snapshot",
+        "--maxWorkers=2"
+      ],
+      "verdict": "caught"
     }
   ]
 }
