@@ -349,3 +349,24 @@ constant.
 # No platform profile declares the html format.
 ! grep -qE 'formats: \[[^]]*"html"' packages/Distribution/src/domain/value-objects/PlatformProfile.vo.ts
 ```
+
+---
+
+## 18. Field hints and errors are invisible to assistive technology (X15)
+
+**Evidence.** The shared `Field` component (`apps/web/src/components/campaign/sections/IdentitySection.tsx`)
+renders a field's label, its control, an optional `hint` and an optional `error` — the hint and the error as
+plain sibling `<span>`s. It sets no `aria-describedby` linking them to the control and no `aria-invalid` on it.
+`Field` is used **34** times across the brief editor's sections, **17** of them with a `hint` or an `error`.
+
+**Consequence.** A screen-reader user focusing a field hears its label but not its guidance, and an invalid
+field announces nothing about why. Found by Qodo on HL5b (#390), which used the existing component as-is.
+
+**Fix shape, once for every field.** Give `Field` an id (`useId`), attach `aria-describedby` to the control naming
+the hint and error elements that are present, and set `aria-invalid` while an error shows. It must work for both
+`as="label"` and `as="div"` wrappers and for the controls passed as children.
+
+```premise X15
+# The shared Field component never links its hint or error to its control.
+! awk '/^export function Field\(/,/^}$/' apps/web/src/components/campaign/sections/IdentitySection.tsx | grep -q 'aria-describedby'
+```
