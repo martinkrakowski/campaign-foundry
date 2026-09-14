@@ -1187,3 +1187,21 @@ export const stepSubtitleTemplate =
 /** Accessible name for the video preview's scrub range control (VE-D5). */
 export const previewScrubLabel = "Scrub preview";
 
+/* ── The click destination (HL5b, HL-D3) ─────────────────────────────────── */
+
+/** The destination input's label. */
+export const clickDestinationLabel = "Click destination";
+/** The helper line under the input: optional, and what it does. */
+export const clickDestinationHelp =
+  "Where the ad goes when someone clicks it — leave blank for no destination.";
+/** The input's example, so the absolute-URL shape is visible before the error is. */
+export const clickDestinationPlaceholder = "https://example.com/landing";
+/**
+ * `clickDestination` — the domain's problem, in the editor's voice (D2). The
+ * `must` clause is the domain's own (`clickDestinationProblem`); the web app
+ * never writes a second URL check, so the two cannot disagree.
+ */
+export function clickDestinationProblem(problem: { readonly must: string }): string {
+  return `That is not a destination we can use — it must ${problem.must}.`;
+}
+
